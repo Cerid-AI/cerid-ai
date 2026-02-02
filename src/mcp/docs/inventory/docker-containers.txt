@@ -1,0 +1,11 @@
+NAMES                 STATUS                      PORTS
+ai-companion-mcp      Up 52 minutes (healthy)     0.0.0.0:8888->8888/tcp, [::]:8888->8888/tcp
+ai-companion-redis    Up 52 minutes               0.0.0.0:6380->6379/tcp, [::]:6380->6379/tcp
+ai-companion-neo4j    Up 52 minutes               0.0.0.0:7474->7474/tcp, [::]:7474->7474/tcp, 0.0.0.0:7687->7687/tcp, [::]:7687->7687/tcp
+ai-companion-chroma   Up 52 minutes (healthy)     0.0.0.0:8001->8000/tcp, [::]:8001->8000/tcp
+LibreChat             Up 52 minutes (unhealthy)   0.0.0.0:3080->3080/tcp, [::]:3080->3080/tcp
+rag_api               Up 52 minutes (unhealthy)   0.0.0.0:8000->8000/tcp, [::]:8000->8000/tcp
+vectordb              Up 52 minutes (healthy)     5432/tcp
+chat-mongodb          Up 52 minutes (healthy)     27017/tcp
+chat-meilisearch      Up 52 minutes (healthy)     7700/tcp
+bifrost               Up 52 minutes (healthy)     0.0.0.0:8080->8080/tcp, [::]:8080->8080/tcp

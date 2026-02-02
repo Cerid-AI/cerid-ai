@@ -1,0 +1,26 @@
+services:
+  bifrost:
+    image: maximhq/bifrost:latest
+    container_name: bifrost
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - OPENROUTER_API_KEY=REDACTED_API_KEY
+      - APP_HOST=0.0.0.0
+      - APP_PORT=8080
+      - LOG_LEVEL=info
+    networks:
+      - llm-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/api/providers"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  llm-network:
+    external: true

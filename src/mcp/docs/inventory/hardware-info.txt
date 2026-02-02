@@ -1,0 +1,22 @@
+Hardware:
+
+    Hardware Overview:
+
+      Model Name: Mac Pro
+      Model Identifier: MacPro7,1
+      Enclosure: Tower
+      Processor Name: 16-Core Intel Xeon W
+      Processor Speed: 3.2 GHz
+      Number of Processors: 1
+      Total Number of Cores: 16
+      L2 Cache (per Core): 1 MB
+      L3 Cache: 22 MB
+      Hyper-Threading Technology: Enabled
+      Memory: 160 GB
+      System Firmware Version: 2094.80.5.0.0 (iBridge: 23.16.13113.5.3,0)
+      OS Loader Version: 583~4753
+      Serial Number (system): F5KZV0XVK7GF
+      Hardware UUID: BD64FAA7-CE0A-543B-91F8-D20200E3B5E1
+      Provisioning UDID: BD64FAA7-CE0A-543B-91F8-D20200E3B5E1
+      Activation Lock Status: Enabled
+

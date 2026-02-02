@@ -1,0 +1,99 @@
+[32m  "mcpServers": {[39m
+[32m    "ai-companion": {[39m
+[32m      "type": "sse",[39m
+[32m      "url": "http://ai-companion-mcp:8888/mcp/sse"[39m
+[32m    }[39m
+[32m  },[39m
+[32m  "endpoints": {[39m
+[32m    "custom": [[39m
+[32m      {[39m
+[32m        "name": "Bifrost Gateway",[39m
+[32m        "apiKey": "not-needed",[39m
+[32m        "baseURL": "http://bifrost:8080/v1",[39m
+[32m        "models": {[39m
+[32m          "default": [[39m
+[32m            "openrouter/anthropic/claude-opus-4.5",[39m
+[32m            "openrouter/anthropic/claude-sonnet-4.5",[39m
+[32m            "openrouter/anthropic/claude-haiku-4.5",[39m
+[32m            "openrouter/anthropic/claude-sonnet-4",[39m
+[32m            "openrouter/anthropic/claude-opus-4",[39m
+[32m            "openrouter/x-ai/grok-4-fast",[39m
+[32m            "openrouter/x-ai/grok-4.1-fast",[39m
+[32m            "openrouter/x-ai/grok-code-fast-1",[39m
+[32m            "openrouter/x-ai/grok-3",[39m
+[32m            "openrouter/x-ai/grok-3-mini",[39m
+[32m            "openrouter/openai/gpt-5.2",[39m
+[32m            "openrouter/openai/gpt-5.1",[39m
+[32m            "openrouter/openai/gpt-4o",[39m
+[32m            "openrouter/openai/gpt-4o-mini",[39m
+[32m            "openrouter/openai/o1",[39m
+[32m            "openrouter/openai/o1-mini",[39m
+[32m            "openrouter/google/gemini-3-pro-preview",[39m
+[32m            "openrouter/google/gemini-3-flash-preview",[39m
+[32m            "openrouter/google/gemini-2.5-pro",[39m
+[32m            "openrouter/google/gemini-2.5-flash",[39m
+[32m            "openrouter/google/gemini-2.5-flash-lite",[39m
+[32m            "openrouter/deepseek/deepseek-v3.2",[39m
+[32m            "openrouter/deepseek/deepseek-chat",[39m
+[32m            "openrouter/deepseek/deepseek-r1",[39m
+[32m            "openrouter/meta-llama/llama-3.3-70b-instruct",[39m
+[32m            "openrouter/x-ai/grok-4-fast:free",[39m
+[32m            "openrouter/google/gemini-2.0-flash-exp:free",[39m
+[32m            "openrouter/xiaomi/mimo-v2-flash:free"[39m
+[32m          ],[39m
+[32m          "fetch": false[39m
+[32m        },[39m
+[32m        "titleConvo": true,[39m
+[32m        "titleModel": "openrouter/openai/gpt-4o-mini",[39m
+[32m        "modelDisplayLabel": "Bifrost",[39m
+[32m        "dropParams": [[39m
+[32m          "user"[39m
+[32m        ][39m
+[32m      }[39m
+[32m    ],[39m
+[32m    "openAI": {[39m
+[32m      "disabled": true[39m
+[32m    },[39m
+[32m    "anthropic": {[39m
+[32m      "disabled": true[39m
+[32m    },[39m
+[32m    "google": {[39m
+[32m      "disabled": true[39m
+[32m    },[39m
+[32m    "assistants": {[39m
+[32m      "disabled": true[39m
+[32m    }[39m
+[32m  }[39m
+[32m}[39m
+2026-02-01 21:35:23 [32minfo[39m: [32m[39m
+[32mOutdated Config version: 1.2.1[39m
+[32mLatest version: 1.3.3[39m
+
+[32m      Check out the Config changelogs for the latest options and features added.[39m
+
+[32m      https://www.librechat.ai/changelog[39m
+
+[32m[39m
+2026-02-01 21:35:23 [32minfo[39m: [32mRAG API is running and reachable at http://rag_api:8000.[39m
+2026-02-01 21:35:23 [32minfo[39m: [32mServer listening on all interfaces at port 3080. Use http://localhost:3080 to access it[39m
+2026-02-01 21:35:23 [32minfo[39m: [32m[MCPServersRegistry] Creating new instance[39m
+2026-02-01 21:35:23 [32minfo[39m: [32m[MCP][ai-companion] Creating SSE transport: http://ai-companion-mcp:8888/mcp/sse[39m
+2026-02-01 21:35:23 [32minfo[39m: [32m[MCP][ai-companion] SSE transport closed[39m
+2026-02-01 21:35:23 [32minfo[39m: [32m[MCP][ai-companion] -------------------------------------------------┐[39m
+2026-02-01 21:35:23 [32minfo[39m: [32m[MCP][ai-companion] URL: http://ai-companion-mcp:8888/mcp/sse[39m
+2026-02-01 21:35:23 [32minfo[39m: [32m[MCP][ai-companion] OAuth Required: false[39m
+2026-02-01 21:35:23 [32minfo[39m: [32m[MCP][ai-companion] Capabilities: {"tools":{"listChanged":false}}[39m
+2026-02-01 21:35:23 [32minfo[39m: [32m[MCP][ai-companion] Tools: pkb_query, pkb_ingest, pkb_health, pkb_collections[39m
+2026-02-01 21:35:23 [32minfo[39m: [32m[MCP][ai-companion] Server Instructions: undefined[39m
+2026-02-01 21:35:23 [32minfo[39m: [32m[MCP][ai-companion] Initialized in: 93ms[39m
+2026-02-01 21:35:23 [32minfo[39m: [32m[MCP][ai-companion] -------------------------------------------------┘[39m
+2026-02-01 21:35:23 [32minfo[39m: [32m[MCP] Initialized with 1 configured server and 4 tools.[39m
+2026-02-01 21:35:23 [32minfo[39m: [32mOAuth reconnect manager initialized successfully.[39m
+2026-02-01 21:35:23 [32minfo[39m: [32m[StreamServices] Created in-memory stream services[39m
+2026-02-01 21:35:23 [32minfo[39m: [32m[GenerationJobManager] Configured with in-memory stores[39m
+2026-02-01 21:38:59 [32minfo[39m: [32m[Login] [Login successful] [Username: cashmoneymail@mac.com] [Request-IP: 192.168.65.1][39m
+2026-02-01 21:38:59 [31merror[39m: [31mFailed to load service key from file: /app/api/data/auth.json ENOENT: no such file or directory, stat '/app/api/data/auth.json'[39m
+2026-02-01 21:38:59 [32minfo[39m: [32m[MCP][ai-companion] Creating SSE transport: http://ai-companion-mcp:8888/mcp/sse[39m
+2026-02-01 21:38:59 [31merror[39m: [31mFailed to fetch models from openAI API The server responded with status 401: Request failed with status code 401[39m
+2026-02-01 21:38:59 [31merror[39m: [31mFailed to fetch models from openAI API The server responded with status 401: Request failed with status code 401[39m
+2026-02-01 21:38:59 [31merror[39m: [31mFailed to fetch models from openAI API The server responded with status 401: Request failed with status code 401[39m

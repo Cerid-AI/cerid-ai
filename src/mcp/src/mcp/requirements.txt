@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+chromadb
+neo4j
+redis
+requests
+python-multipart
+numpy<2
+pydantic
+mcp
