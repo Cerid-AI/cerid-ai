@@ -1,0 +1,34 @@
+# Secrets & keys
+.env
+*.key
+OPENROUTER_API_KEY*
+OPENAI_API_KEY*
+
+# Runtime data & volumes
+data/
+uploads/
+logs/
+meili_data*
+pgdata*
+neo4j/
+chroma/
+redis/
+artifacts/
+
+# Python / build
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+env/
+venv/
+.venv/
+
+# macOS / temp
+.DS_Store
+*.swp
+*~
+Thumbs.db
+
+# Symlinks to runtime
+stacks/librechat/runtime/
