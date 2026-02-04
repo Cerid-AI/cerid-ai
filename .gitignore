@@ -32,3 +32,12 @@ Thumbs.db
 
 # Symlinks to runtime
 stacks/librechat/runtime/
+
+# MongoDB runtime data
+stacks/librechat/data-node/
+**/data-node/
+
+# Runtime logs
+**/*.log
+**/diagnostic.data/
+**/journal/
