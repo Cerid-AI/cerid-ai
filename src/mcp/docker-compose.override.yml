@@ -1,16 +1,7 @@
 services:
   mcp-server:
-    depends_on:
-      chromadb:
-        condition: service_started
-      neo4j:
-        condition: service_started
-      redis:
-        condition: service_started
-
-  chromadb:
     healthcheck:
-      test: ["CMD-SHELL", "exit 0"]
+      test: ["CMD", "curl", "-f", "http://localhost:8888/health"]
       interval: 30s
-      timeout: 5s
-      retries: 1
+      timeout: 10s
+      retries: 5

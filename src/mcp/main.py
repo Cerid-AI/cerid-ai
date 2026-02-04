@@ -3,15 +3,12 @@ AI Companion MCP Server
 Personal Knowledge Base with ChromaDB, Neo4j, Redis
 Exposes REST API + MCP over SSE
 """
-
 from __future__ import annotations
-
 import inspect
 import logging
 import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-
 import chromadb
 import redis
 from chromadb.config import Settings as ChromaSettings
@@ -22,8 +19,8 @@ from pydantic import BaseModel
 from starlette.applications import Starlette
 from starlette.routing import Mount
 
-from mcp.server.fastmcp import FastMCP
-from mcp.server.transport_security import TransportSecuritySettings
+# from src.mcp.server.fastmcp import FastMCP   # Commented out - missing module
+# from mcp.server.transport_security import TransportSecuritySettings  # Commented out
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("ai-companion")
@@ -39,7 +36,6 @@ _chroma = None
 _redis = None
 _neo4j = None
 
-
 def get_chroma():
     global _chroma
     if _chroma is None:
@@ -50,7 +46,6 @@ def get_chroma():
         logger.info("ChromaDB connected")
     return _chroma
 
-
 def get_redis():
     global _redis
     if _redis is None:
@@ -58,7 +53,6 @@ def get_redis():
         _redis.ping()
         logger.info("Redis connected")
     return _redis
-
 
 def get_neo4j():
     global _neo4j
@@ -68,13 +62,11 @@ def get_neo4j():
         logger.info("Neo4j connected")
     return _neo4j
 
-
 class QueryRequest(BaseModel):
     query: str
     domain: str = "general"
     top_k: int = 3
     metadata_filter: Optional[Dict[str, Any]] = None
-
 
 class QueryResponse(BaseModel):
     context: str
@@ -82,14 +74,12 @@ class QueryResponse(BaseModel):
     confidence: float
     timestamp: str
 
-
 class IngestRequest(BaseModel):
     content: str
     domain: str = "general"
     metadata: Optional[Dict[str, Any]] = None
     chunk_size: int = 1000
     overlap: int = 200
-
 
 def _query_knowledge(query, domain="general", top_k=3, metadata_filter=None):
     logger.info(f"Query: domain={domain}")
@@ -113,7 +103,6 @@ def _query_knowledge(query, domain="general", top_k=3, metadata_filter=None):
     confidence = sum(s["relevance"] for s in sources) / max(1, len(sources))
     return {"context": context, "sources": sources, "confidence": round(confidence, 3), "timestamp": timestamp}
 
-
 def _ingest_content(content, domain="general", metadata=None, chunk_size=1000, overlap=200):
     logger.info(f"Ingest: domain={domain}, len={len(content)}")
     chroma = get_chroma()
@@ -135,16 +124,13 @@ def _ingest_content(content, domain="general", metadata=None, chunk_size=1000, o
     collection.add(documents=chunks, metadatas=metadatas, ids=ids)
     return {"status": "success", "chunks_created": len(chunks), "domain": domain, "timestamp": ts}
 
-
 # FastAPI REST API
 api = FastAPI(title="AI Companion MCP Server", version="0.3.0")
 api.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
-
 @api.get("/")
 def root():
     return {"service": "AI Companion MCP Server", "version": "0.3.0", "status": "running"}
-
 
 @api.get("/health")
 def health_check():
@@ -170,24 +156,20 @@ def health_check():
         status = "degraded"
     return {"status": status, "services": services, "timestamp": datetime.utcnow().isoformat()}
 
-
 @api.get("/collections")
 def list_collections():
     chroma = get_chroma()
     collections = chroma.list_collections()
     return {"total": len(collections), "collections": [{"name": c.name, "count": c.count()} for c in collections]}
 
-
 @api.post("/query", response_model=QueryResponse)
 async def query_knowledge(req: QueryRequest):
     result = _query_knowledge(query=req.query, domain=req.domain, top_k=req.top_k, metadata_filter=req.metadata_filter)
     return QueryResponse(**result)
 
-
 @api.post("/ingest")
 async def ingest_content(req: IngestRequest):
     return _ingest_content(content=req.content, domain=req.domain, metadata=req.metadata, chunk_size=req.chunk_size, overlap=req.overlap)
-
 
 @api.get("/stats")
 async def get_stats():
@@ -202,7 +184,6 @@ async def get_stats():
         "timestamp": datetime.utcnow().isoformat()
     }
 
-
 @api.on_event("shutdown")
 def shutdown():
     global _neo4j
@@ -210,56 +191,27 @@ def shutdown():
         _neo4j.close()
         logger.info("Neo4j driver closed")
 
+# MCP Server Setup - commented out until FastMCP implementation is restored
+# security_settings = TransportSecuritySettings(...)
+# mcp = FastMCP("ai-companion")
+# @mcp.tool()
+# def pkb_query(...):
+#     ...
+# @mcp.tool()
+# def pkb_ingest(...):
+#     ...
+# @mcp.tool()
+# def pkb_health():
+#     ...
+# @mcp.tool()
+# def pkb_collections():
+#     ...
+# def _build_mcp_sse_app():
+#     ...
+# mcp_asgi_app = _build_mcp_sse_app()
 
-# MCP Server Setup
-security_settings = TransportSecuritySettings(
-    enable_dns_rebinding_protection=False,
-    allowed_hosts=["*"],
-    allowed_origins=["*"]
-)
-
-mcp = FastMCP("ai-companion")
-
-
-@mcp.tool()
-def pkb_query(query: str, domain: str = "general", top_k: int = 3) -> Dict[str, Any]:
-    """Query the personal knowledge base for relevant context."""
-    return _query_knowledge(query=query, domain=domain, top_k=top_k)
-
-
-@mcp.tool()
-def pkb_ingest(content: str, domain: str = "general") -> Dict[str, Any]:
-    """Ingest content into the personal knowledge base."""
-    return _ingest_content(content=content, domain=domain)
-
-
-@mcp.tool()
-def pkb_health() -> Dict[str, Any]:
-    """Check health of all backing services."""
-    return health_check()
-
-
-@mcp.tool()
-def pkb_collections() -> Dict[str, Any]:
-    """List all collections in the knowledge base."""
-    return list_collections()
-
-
-def _build_mcp_sse_app():
-    sig = inspect.signature(mcp.sse_app)
-    params = sig.parameters
-    if "security_settings" in params:
-        return mcp.sse_app(security_settings=security_settings)
-    if "transport_security_settings" in params:
-        return mcp.sse_app(transport_security_settings=security_settings)
-    logger.warning("Could not pass security settings to MCP, using defaults")
-    return mcp.sse_app()
-
-
-mcp_asgi_app = _build_mcp_sse_app()
-
-# Combined ASGI app - MCP at /mcp, REST API at /
+# Combined ASGI app - only REST API for now
 app = Starlette(routes=[
-    Mount("/mcp", app=mcp_asgi_app),
+    # Mount("/mcp", app=mcp_asgi_app),   # commented out
     Mount("/", app=api)
 ])

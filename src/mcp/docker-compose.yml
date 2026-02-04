@@ -1,65 +1,15 @@
-version: '3.8'
-
 services:
-  chromadb:
-    image: chromadb/chroma:latest
-    container_name: ai-companion-chroma
-    ports:
-      - "8001:8000"
-    volumes:
-      - ./data/chroma:/chroma/chroma
-    environment:
-      - ANONYMIZED_TELEMETRY=false
-      - ALLOW_RESET=true
-      - IS_PERSISTENT=true
-    networks:
-      - llm-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  neo4j:
-    image: neo4j:latest
-    container_name: ai-companion-neo4j
-    ports:
-      - "7474:7474"
-      - "7687:7687"
-    volumes:
-      - ./data/neo4j:/data
-      - ./data/neo4j-logs:/logs
-    environment:
-      - NEO4J_AUTH=neo4j/REDACTED_PASSWORD
-      - NEO4J_PLUGINS=["apoc"]
-      - NEO4J_dbms_memory_heap_max__size=1G
-      - NEO4J_dbms_memory_pagecache_size=512M
-    networks:
-      - llm-network
-    restart: unless-stopped
-
-  redis:
-    image: redis:alpine
-    container_name: ai-companion-redis
-    ports:
-      - "6380:6379"
-    volumes:
-      - ./data/redis:/data
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
-    networks:
-      - llm-network
-    restart: unless-stopped
-
   mcp-server:
-    build: ./src/mcp
     container_name: ai-companion-mcp
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "8888:8888"
     volumes:
-      - ./src/mcp:/app
-      - ./data/uploads:/app/uploads
-      - ./logs:/app/logs
+      - ./data:/app/data
+      - ./main.py:/app/main.py
+      - .:/app
     environment:
       - CHROMA_URL=http://ai-companion-chroma:8000
       - NEO4J_URI=bolt://ai-companion-neo4j:7687
@@ -67,13 +17,6 @@ services:
       - NEO4J_PASSWORD=REDACTED_PASSWORD
       - REDIS_URL=redis://ai-companion-redis:6379
       - PORT=8888
-    depends_on:
-      chromadb:
-        condition: service_healthy
-      neo4j:
-        condition: service_started
-      redis:
-        condition: service_started
     networks:
       - llm-network
     restart: unless-stopped

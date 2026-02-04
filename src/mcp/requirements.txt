@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+httpx
+httpx-sse
+neo4j
+redis
+chromadb
+pydantic
+python-dotenv
