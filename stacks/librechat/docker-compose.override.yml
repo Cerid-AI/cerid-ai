@@ -1,29 +1,29 @@
 services:
   api:
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3080/api/auth/version"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3080"]
       interval: 30s
       timeout: 10s
-      retries: 5           # increased from original 3
-      start_period: 90s    # increased from original 40s
+      retries: 5
+      start_period: 90s
 
     depends_on:
       rag_api:
-        condition: service_started   # more lenient
+        condition: service_started
       mongodb:
         condition: service_started
 
   rag_api:
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
       interval: 30s
       timeout: 10s
-      retries: 8           # increased from original 5
-      start_period: 120s   # increased from original 60s
+      retries: 8
+      start_period: 120s
 
   meilisearch:
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:7700/health || wget --no-verbose --tries=1 --spider http://localhost:7700/health"]
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:7700/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
