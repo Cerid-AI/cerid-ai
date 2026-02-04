@@ -5,7 +5,8 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./data:/app/data
+      - /Users/sunrunner/cerid-ai/stacks/bifrost/data/config.json:/app/data/config.json
+      - /Users/sunrunner/cerid-ai/stacks/bifrost/data:/app/data
     environment:
       - OPENROUTER_API_KEY=REDACTED_API_KEY
       - APP_HOST=0.0.0.0
