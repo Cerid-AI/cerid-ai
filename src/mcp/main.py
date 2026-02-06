@@ -11,13 +11,12 @@ from datetime import datetime
 from typing import Any, Dict
 import json
 import asyncio
-
 import chromadb
 import redis
 from chromadb.config import Settings as ChromaSettings
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, Response
+from fastapi.responses import StreamingResponse
 from neo4j import GraphDatabase
 from pydantic import BaseModel
 
@@ -25,9 +24,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(level
 logger = logging.getLogger("ai-companion")
 
 # ============================================================
-# MCP TOOLS
+# MCP TOOLS - Full schemas
 # ============================================================
-
 MCP_TOOLS = [
     {
         "name": "pkb_query",
@@ -69,7 +67,6 @@ MCP_TOOLS = [
 # ============================================================
 # DATABASE CONNECTIONS
 # ============================================================
-
 CHROMA_URL = os.getenv("CHROMA_URL", "http://ai-companion-chroma:8000")
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://ai-companion-neo4j:7687")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
@@ -79,7 +76,6 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://ai-companion-redis:6379")
 _chroma = None
 _redis = None
 _neo4j = None
-
 
 def get_chroma():
     global _chroma
@@ -91,7 +87,6 @@ def get_chroma():
         logger.info("ChromaDB connected")
     return _chroma
 
-
 def get_redis():
     global _redis
     if _redis is None:
@@ -100,7 +95,6 @@ def get_redis():
         logger.info("Redis connected")
     return _redis
 
-
 def get_neo4j():
     global _neo4j
     if _neo4j is None:
@@ -108,7 +102,6 @@ def get_neo4j():
         _neo4j.verify_connectivity()
         logger.info("Neo4j connected")
     return _neo4j
-
 
 def _query_knowledge(query: str, domain: str = "general", top_k: int = 3) -> Dict:
     chroma = get_chroma()
@@ -122,7 +115,6 @@ def _query_knowledge(query: str, domain: str = "general", top_k: int = 3) -> Dic
     context = "\n\n".join(results["documents"][0])
     return {"context": context, "sources": sources, "confidence": 0.8, "timestamp": timestamp}
 
-
 def _ingest_content(content: str, domain: str = "general") -> Dict:
     chroma = get_chroma()
     collection_name = f"domain_{domain.replace(' ', '_').lower()}"
@@ -130,7 +122,6 @@ def _ingest_content(content: str, domain: str = "general") -> Dict:
     doc_id = str(uuid.uuid4())
     collection.add(ids=[doc_id], documents=[content], metadatas=[{"domain": domain}])
     return {"status": "success", "id": doc_id, "domain": domain, "timestamp": datetime.utcnow().isoformat()}
-
 
 def _health_check() -> Dict:
     status = {"chromadb": "unknown", "redis": "unknown", "neo4j": "unknown"}
@@ -151,12 +142,10 @@ def _health_check() -> Dict:
         status["neo4j"] = "error"
     return {"status": "healthy" if all(v == "connected" for v in status.values()) else "degraded", "services": status}
 
-
 def _list_collections() -> Dict:
     chroma = get_chroma()
     collections = chroma.list_collections()
     return {"total": len(collections), "collections": [c.name for c in collections]}
-
 
 def execute_tool(name: str, arguments: Dict) -> Any:
     if name == "pkb_query":
@@ -168,7 +157,6 @@ def execute_tool(name: str, arguments: Dict) -> Any:
     elif name == "pkb_collections":
         return _list_collections()
     raise ValueError(f"Unknown tool: {name}")
-
 
 def build_response(msg_id, method: str, params: dict) -> dict:
     """Build JSON-RPC response for a method"""
@@ -200,80 +188,69 @@ def build_response(msg_id, method: str, params: dict) -> dict:
                 "result": {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
             }
         except Exception as e:
-            return {"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32603, "message": str(e)}}
+            logger.error(f"Tool call error {tool_name}: {e}")
+            return {"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32000, "message": str(e)}}
     elif method == "ping":
         return {"jsonrpc": "2.0", "id": msg_id, "result": {}}
     else:
         return {"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32601, "message": f"Unknown: {method}"}}
 
-
 # ============================================================
 # FASTAPI APP
 # ============================================================
-
 app = FastAPI(title="AI Companion MCP Server", version="0.7.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 # Session message queues for SSE responses
 _sessions: Dict[str, asyncio.Queue] = {}
 
-
 @app.get("/")
 def root():
     return {"service": "AI Companion MCP Server", "version": "0.7.0", "status": "running"}
-
 
 @app.get("/health")
 def health_check():
     return _health_check()
 
-
 @app.get("/collections")
 def list_collections():
     return _list_collections()
-
 
 class QueryRequest(BaseModel):
     query: str
     domain: str = "general"
     top_k: int = 3
 
+@app.post("/query")
+async def query_knowledge(req: QueryRequest):
+    return _query_knowledge(req.query, req.domain, req.top_k)
 
 class IngestRequest(BaseModel):
     content: str
     domain: str = "general"
 
-
-@app.post("/query")
-async def query_knowledge(req: QueryRequest):
-    return _query_knowledge(req.query, req.domain, req.top_k)
-
-
 @app.post("/ingest")
 async def ingest_content(req: IngestRequest):
     return _ingest_content(req.content, req.domain)
 
-
 @app.get("/stats")
 async def get_stats():
     return _list_collections()
-
 
 @app.on_event("shutdown")
 def shutdown():
     global _neo4j
     if _neo4j:
         _neo4j.close()
-
+    _sessions.clear()
+    logger.info("MCP sessions cleared on shutdown")
 
 # ============================================================
 # MCP SSE TRANSPORT - Responses via SSE stream
 # ============================================================
-
 @app.head("/mcp/sse")
 async def mcp_sse_head():
     return Response(status_code=200, headers={"Content-Type": "text/event-stream"})
-
 
 @app.get("/mcp/sse")
 async def mcp_sse_endpoint(request: Request):
@@ -281,77 +258,89 @@ async def mcp_sse_endpoint(request: Request):
     session_id = str(uuid.uuid4())
     queue: asyncio.Queue = asyncio.Queue()
     _sessions[session_id] = queue
-    
+
     logger.info(f"[MCP] SSE opened: {session_id}")
-    
+
     async def event_stream():
         try:
             # First: send endpoint event with session ID in URL
             endpoint_url = f"http://ai-companion-mcp:8888/mcp/messages?sessionId={session_id}"
             yield f"event: endpoint\ndata: {endpoint_url}\n\n"
             logger.info(f"[MCP] Sent endpoint: {endpoint_url}")
-            
-            # Stream responses from queue
+
+            count = 0
             while True:
                 if await request.is_disconnected():
                     break
-                
+
+                # Keep-alive ping every ~24s (every 3 heartbeats)
+                if count % 3 == 0:
+                    ping = {"jsonrpc": "2.0", "method": "ping", "params": {}, "id": f"server-ping-{count}"}
+                    await queue.put(ping)
+                    logger.info(f"[MCP] Sent keep-alive ping: {session_id}")
+
                 try:
-                    # Wait for messages with timeout for keepalive
-                    msg = await asyncio.wait_for(queue.get(), timeout=25.0)
+                    msg = await asyncio.wait_for(queue.get(), timeout=8.0)
                     data = json.dumps(msg)
                     yield f"event: message\ndata: {data}\n\n"
                     logger.info(f"[MCP] Sent via SSE: {msg.get('id', 'notification')}")
                 except asyncio.TimeoutError:
                     yield ": keepalive\n\n"
+
+                count += 1
+
         finally:
             _sessions.pop(session_id, None)
             logger.info(f"[MCP] SSE closed: {session_id}")
-    
+
     return StreamingResponse(event_stream(), media_type="text/event-stream", headers={
-        "Cache-Control": "no-cache",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
         "Connection": "keep-alive",
         "X-Accel-Buffering": "no",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Accept, Cache-Control, Content-Type",
+        "Transfer-Encoding": "chunked"
     })
-
 
 @app.post("/mcp/sse")
 async def mcp_sse_post(request: Request):
-    """Handle probes to /mcp/sse"""
+    """Handle probes and JSON-RPC to /mcp/sse"""
     return Response(status_code=200, content="", media_type="text/plain")
-
 
 @app.post("/mcp/messages")
 async def mcp_messages(request: Request):
     """Receive JSON-RPC, send response via SSE stream"""
     session_id = request.query_params.get("sessionId")
-    
+
     try:
         body = await request.body()
         body_text = body.decode('utf-8').strip()
-        
+
         if not body_text or body_text == '{}':
             return Response(status_code=202)
-        
+
         msg = json.loads(body_text)
     except Exception as e:
         logger.error(f"[MCP] Parse error: {e}")
         return Response(status_code=400, content=str(e))
-    
+
     method = msg.get("method", "")
     params = msg.get("params", {})
     msg_id = msg.get("id")
-    
+
     logger.info(f"[MCP] Received: {method} (id={msg_id}, session={session_id})")
-    
+
     # Notifications don't need response
     if method in ("initialized", "notifications/initialized"):
         logger.info("[MCP] Client initialized")
         return Response(status_code=202)
-    
+
     # Build response
     response = build_response(msg_id, method, params)
-    
+
     # Send via SSE if we have the session
     if session_id and session_id in _sessions:
         await _sessions[session_id].put(response)

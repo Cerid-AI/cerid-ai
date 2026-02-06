@@ -1,9 +1,22 @@
 version: "1.2.1"
 
+interface:
+  mcpServers:
+    use: true       # Required: grants permission to use configured MCP servers
+    create: true    # Optional: allow UI creation of new servers (useful for testing)
+    share: false    # Keep false for security (no sharing)
+    public: false   # Keep false (no public visibility)
+
 mcpServers:
   ai-companion:
     type: sse
     url: "http://ai-companion-mcp:8888/mcp/sse"
+    timeout: 600000
+    initTimeout: 180000
+    maxReconnects: 20
+    reconnectDelay: 3000
+    keepAlive: true
+    keepAliveInterval: 30000
 
 endpoints:
   custom:
