@@ -27,7 +27,7 @@ services:
       - ./images:/app/client/public/images
       - ./uploads:/app/uploads
       - ./logs:/app/logs
-      - /Users/sunrunner/cerid-ai/librechat.yaml:/app/librechat.yaml:ro
+      - ./librechat.yaml:/app/librechat.yaml:ro
       - ~/Dropbox/AI-Artifacts:/app/artifacts:ro  # Re-added for PKB artifacts
     healthcheck:  # Ensure API healthy
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:${PORT:-3080}/api/auth/version"]

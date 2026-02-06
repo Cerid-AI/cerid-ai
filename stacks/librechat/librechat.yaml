@@ -1,0 +1,22 @@
+version: "1.2.1"
+
+mcpServers:
+  ai-companion:
+    type: sse
+    url: "http://ai-companion-mcp:8888/mcp/sse"
+
+endpoints:
+  custom:
+    - name: "Bifrost Gateway"
+      apiKey: "not-needed"
+      baseURL: "http://bifrost:8080/v1"
+      models:
+        default:
+          - "openrouter/anthropic/claude-sonnet-4"
+          - "openrouter/openai/gpt-4o"
+          - "openrouter/x-ai/grok-4-fast"
+      titleConvo: true
+      titleModel: "openrouter/openai/gpt-4o-mini"
+      modelDisplayLabel: "Bifrost"
+      dropParams:
+        - "user"

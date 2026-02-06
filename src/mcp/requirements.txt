@@ -7,3 +7,11 @@ redis
 chromadb
 pydantic
 python-dotenv
+langgraph
+langchain-core
+spacy
+pandas
+pypdf2
+openpyxl
+sentence-transformers
+tiktoken
