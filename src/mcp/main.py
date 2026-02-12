@@ -1,27 +1,41 @@
 """
-AI Companion MCP Server - MCP SSE Transport
+AI Companion MCP Server - MCP SSE Transport + Ingestion Pipeline
 Responses go through SSE stream, not HTTP response body
 """
 
 from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
 import logging
 import os
 import uuid
 from datetime import datetime
-from typing import Any, Dict
-import json
-import asyncio
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
 import chromadb
 import redis
 from chromadb.config import Settings as ChromaSettings
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from neo4j import GraphDatabase
 from pydantic import BaseModel
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+import config
+from utils import cache, graph
+from utils.chunker import chunk_text, count_tokens
+from utils.metadata import ai_categorize, extract_metadata
+from utils.parsers import parse_file
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
 logger = logging.getLogger("ai-companion")
+
 
 # ============================================================
 # MCP TOOLS - Full schemas
@@ -34,74 +48,114 @@ MCP_TOOLS = [
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "Search query"},
-                "domain": {"type": "string", "description": "Knowledge domain", "default": "general"},
-                "top_k": {"type": "integer", "description": "Number of results", "default": 3}
+                "domain": {
+                    "type": "string",
+                    "description": f"Knowledge domain ({', '.join(config.DOMAINS)})",
+                    "default": "general",
+                },
+                "top_k": {"type": "integer", "description": "Number of results", "default": 3},
             },
-            "required": ["query"]
-        }
+            "required": ["query"],
+        },
     },
     {
         "name": "pkb_ingest",
-        "description": "Ingest content into the knowledge base",
+        "description": "Ingest text content into the knowledge base",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "content": {"type": "string", "description": "Content to ingest"},
-                "domain": {"type": "string", "description": "Knowledge domain", "default": "general"}
+                "domain": {
+                    "type": "string",
+                    "description": f"Knowledge domain ({', '.join(config.DOMAINS)})",
+                    "default": "general",
+                },
             },
-            "required": ["content"]
-        }
+            "required": ["content"],
+        },
+    },
+    {
+        "name": "pkb_ingest_file",
+        "description": "Ingest a file from the archive into the knowledge base with metadata extraction",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to file (e.g. /archive/coding/script.py)",
+                },
+                "domain": {
+                    "type": "string",
+                    "description": f"Knowledge domain ({', '.join(config.DOMAINS)}). Empty for auto-detect.",
+                    "default": "",
+                },
+                "categorize_mode": {
+                    "type": "string",
+                    "description": "Categorization tier: manual, smart, or pro",
+                    "default": "",
+                },
+            },
+            "required": ["file_path"],
+        },
     },
     {
         "name": "pkb_health",
         "description": "Check knowledge base service health",
-        "inputSchema": {"type": "object", "properties": {}}
+        "inputSchema": {"type": "object", "properties": {}},
     },
     {
         "name": "pkb_collections",
         "description": "List available knowledge base collections",
-        "inputSchema": {"type": "object", "properties": {}}
-    }
+        "inputSchema": {"type": "object", "properties": {}},
+    },
 ]
 
-# ============================================================
-# DATABASE CONNECTIONS
-# ============================================================
-CHROMA_URL = os.getenv("CHROMA_URL", "http://ai-companion-chroma:8000")
-NEO4J_URI = os.getenv("NEO4J_URI", "bolt://ai-companion-neo4j:7687")
-NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "REDACTED_PASSWORD")
-REDIS_URL = os.getenv("REDIS_URL", "redis://ai-companion-redis:6379")
 
+# ============================================================
+# DATABASE CONNECTIONS (using config.py)
+# ============================================================
 _chroma = None
 _redis = None
 _neo4j = None
 
+
 def get_chroma():
     global _chroma
     if _chroma is None:
-        host = CHROMA_URL.replace("http://", "").split(":")[0]
-        port = int(CHROMA_URL.split(":")[-1])
-        _chroma = chromadb.HttpClient(host=host, port=port, settings=ChromaSettings(anonymized_telemetry=False))
+        host = config.CHROMA_URL.replace("http://", "").split(":")[0]
+        port = int(config.CHROMA_URL.split(":")[-1])
+        _chroma = chromadb.HttpClient(
+            host=host, port=port, settings=ChromaSettings(anonymized_telemetry=False)
+        )
         _chroma.heartbeat()
         logger.info("ChromaDB connected")
     return _chroma
 
+
 def get_redis():
     global _redis
     if _redis is None:
-        _redis = redis.from_url(REDIS_URL, decode_responses=True, socket_connect_timeout=5)
+        _redis = redis.from_url(config.REDIS_URL, decode_responses=True, socket_connect_timeout=5)
         _redis.ping()
         logger.info("Redis connected")
     return _redis
 
+
 def get_neo4j():
     global _neo4j
     if _neo4j is None:
-        _neo4j = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+        _neo4j = GraphDatabase.driver(
+            config.NEO4J_URI, auth=(config.NEO4J_USER, config.NEO4J_PASSWORD)
+        )
         _neo4j.verify_connectivity()
         logger.info("Neo4j connected")
     return _neo4j
+
+
+# ============================================================
+# TOOL IMPLEMENTATIONS
+# ============================================================
+
 
 def _query_knowledge(query: str, domain: str = "general", top_k: int = 3) -> Dict:
     chroma = get_chroma()
@@ -115,50 +169,290 @@ def _query_knowledge(query: str, domain: str = "general", top_k: int = 3) -> Dic
     context = "\n\n".join(results["documents"][0])
     return {"context": context, "sources": sources, "confidence": 0.8, "timestamp": timestamp}
 
-def _ingest_content(content: str, domain: str = "general") -> Dict:
+
+def _content_hash(content: str) -> str:
+    """Generate a SHA-256 hash of text content for deduplication."""
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _check_duplicate(content_hash: str, domain: str) -> Optional[Dict]:
+    """Check if content with this hash already exists in Neo4j."""
+    try:
+        driver = get_neo4j()
+        with driver.session() as session:
+            result = session.run(
+                "MATCH (a:Artifact {content_hash: $hash})-[:BELONGS_TO]->(d:Domain) "
+                "RETURN a.id AS id, a.filename AS filename, d.name AS domain",
+                hash=content_hash,
+            )
+            record = result.single()
+            if record:
+                return {
+                    "id": record["id"],
+                    "filename": record["filename"],
+                    "domain": record["domain"],
+                }
+    except Exception as e:
+        logger.warning(f"Dedup check failed (proceeding with ingest): {e}")
+    return None
+
+
+def _ingest_content(
+    content: str,
+    domain: str = "general",
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Dict:
     chroma = get_chroma()
     collection_name = f"domain_{domain.replace(' ', '_').lower()}"
     collection = chroma.get_or_create_collection(name=collection_name)
-    doc_id = str(uuid.uuid4())
-    collection.add(ids=[doc_id], documents=[content], metadatas=[{"domain": domain}])
-    return {"status": "success", "id": doc_id, "domain": domain, "timestamp": datetime.utcnow().isoformat()}
+
+    artifact_id = str(uuid.uuid4())
+    content_hash = _content_hash(content)
+
+    # Deduplication check
+    existing = _check_duplicate(content_hash, domain)
+    if existing:
+        logger.info(
+            f"Duplicate detected: '{metadata.get('filename', '?')}' matches "
+            f"existing artifact {existing['id']} ('{existing['filename']}' in {existing['domain']})"
+        )
+        return {
+            "status": "duplicate",
+            "artifact_id": existing["id"],
+            "domain": existing["domain"],
+            "chunks": 0,
+            "timestamp": datetime.utcnow().isoformat(),
+            "duplicate_of": existing["filename"],
+        }
+
+    # Chunk content
+    chunks = chunk_text(content, max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP)
+
+    base_meta = {"domain": domain, "artifact_id": artifact_id}
+    if metadata:
+        base_meta.update(metadata)
+
+    # Batch ChromaDB write (single call instead of per-chunk loop)
+    chunk_ids = [f"{artifact_id}_chunk_{i}" for i in range(len(chunks))]
+    chunk_metadatas = [{**base_meta, "chunk_index": i} for i in range(len(chunks))]
+    collection.add(ids=chunk_ids, documents=chunks, metadatas=chunk_metadatas)
+
+    # Neo4j artifact tracking (with content hash for deduplication)
+    try:
+        driver = get_neo4j()
+        graph.create_artifact(
+            driver,
+            artifact_id=artifact_id,
+            filename=base_meta.get("filename", "text_input"),
+            domain=domain,
+            keywords_json=base_meta.get("keywords", "[]"),
+            summary=base_meta.get("summary", content[:200]),
+            chunk_count=len(chunks),
+            chunk_ids_json=json.dumps(chunk_ids),
+            content_hash=content_hash,
+        )
+    except Exception as e:
+        logger.error(f"Neo4j artifact creation failed: {e}")
+
+    # Redis audit log
+    try:
+        cache.log_event(
+            get_redis(),
+            event_type="ingest",
+            artifact_id=artifact_id,
+            domain=domain,
+            filename=base_meta.get("filename", "text_input"),
+        )
+    except Exception as e:
+        logger.error(f"Redis log failed: {e}")
+
+    return {
+        "status": "success",
+        "artifact_id": artifact_id,
+        "domain": domain,
+        "chunks": len(chunks),
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+async def _ingest_file(
+    file_path: str,
+    domain: str = "",
+    tags: str = "",
+    categorize_mode: str = "",
+) -> Dict:
+    """Parse a file, extract metadata, optionally AI-categorize, chunk, and store."""
+    filename = Path(file_path).name
+
+    # Parse file to text (parse_file handles existence check + empty file detection)
+    parsed = parse_file(file_path)
+    text = parsed["text"]
+
+    # Extract core metadata (local, no API)
+    meta = extract_metadata(text, filename, domain or config.DEFAULT_DOMAIN)
+
+    # Determine categorization
+    mode = categorize_mode or (
+        "manual" if domain and domain in config.DOMAINS else config.CATEGORIZE_MODE
+    )
+
+    if mode != "manual" and not domain:
+        ai_result = await ai_categorize(text, filename, mode)
+        if ai_result.get("suggested_domain"):
+            domain = ai_result["suggested_domain"]
+            meta["ai_categorized"] = "true"
+            meta["categorize_mode"] = mode
+        if ai_result.get("keywords"):
+            meta["keywords"] = json.dumps(ai_result["keywords"])
+        if ai_result.get("summary"):
+            meta["summary"] = ai_result["summary"]
+
+    # Final domain fallback
+    if not domain or domain not in config.DOMAINS:
+        domain = config.DEFAULT_DOMAIN
+    meta["domain"] = domain
+
+    # Add tags
+    if tags:
+        meta["tags"] = tags
+
+    # Add file-specific metadata
+    meta["file_type"] = parsed.get("file_type", "")
+    if parsed.get("page_count") is not None:
+        meta["page_count"] = parsed["page_count"]
+
+    # Ingest via shared path (chunks, Neo4j, Redis)
+    result = _ingest_content(text, domain, metadata=meta)
+    result["filename"] = filename
+    result["categorize_mode"] = mode
+    result["metadata"] = {
+        k: v for k, v in meta.items()
+        if k in ("filename", "domain", "keywords", "summary", "tags", "file_type", "estimated_tokens")
+    }
+    return result
+
+
+def _recategorize(artifact_id: str, new_domain: str, tags: str = "") -> Dict:
+    """Move an artifact's chunks to a new domain collection."""
+    if new_domain not in config.DOMAINS:
+        raise ValueError(f"Invalid domain: {new_domain}. Valid: {config.DOMAINS}")
+
+    driver = get_neo4j()
+    chroma = get_chroma()
+
+    # Get artifact from Neo4j
+    artifact = graph.get_artifact(driver, artifact_id)
+    if not artifact:
+        raise ValueError(f"Artifact not found: {artifact_id}")
+
+    old_domain = artifact["domain"]
+    if old_domain == new_domain:
+        raise ValueError(f"Artifact already in domain '{new_domain}'")
+
+    chunk_ids = json.loads(artifact.get("chunk_ids", "[]"))
+    if not chunk_ids:
+        raise ValueError(f"No chunk IDs found for artifact {artifact_id}")
+
+    # Fetch chunks from source collection
+    source_collection = chroma.get_or_create_collection(
+        name=f"domain_{old_domain.replace(' ', '_').lower()}"
+    )
+    fetched = source_collection.get(ids=chunk_ids, include=["documents", "metadatas"])
+
+    if not fetched["ids"]:
+        raise ValueError(f"No chunks found in ChromaDB for artifact {artifact_id}")
+
+    # Add to destination collection with updated metadata
+    dest_collection = chroma.get_or_create_collection(
+        name=f"domain_{new_domain.replace(' ', '_').lower()}"
+    )
+    updated_metadatas = []
+    for meta in fetched["metadatas"]:
+        meta = dict(meta)
+        meta["domain"] = new_domain
+        meta["recategorized_at"] = datetime.utcnow().isoformat()
+        if tags:
+            meta["tags"] = tags
+        updated_metadatas.append(meta)
+
+    dest_collection.add(
+        ids=fetched["ids"],
+        documents=fetched["documents"],
+        metadatas=updated_metadatas,
+    )
+
+    # Delete from source
+    source_collection.delete(ids=chunk_ids)
+
+    # Update Neo4j
+    domains = graph.recategorize_artifact(driver, artifact_id, new_domain)
+
+    # Redis audit
+    try:
+        cache.log_event(
+            get_redis(),
+            event_type="recategorize",
+            artifact_id=artifact_id,
+            domain=new_domain,
+            filename=artifact.get("filename", ""),
+            extra={"old_domain": old_domain},
+        )
+    except Exception as e:
+        logger.error(f"Redis log failed: {e}")
+
+    return {
+        "status": "success",
+        "artifact_id": artifact_id,
+        "old_domain": domains["old_domain"],
+        "new_domain": domains["new_domain"],
+        "chunks_moved": len(chunk_ids),
+    }
+
 
 def _health_check() -> Dict:
     status = {"chromadb": "unknown", "redis": "unknown", "neo4j": "unknown"}
     try:
         get_chroma()
         status["chromadb"] = "connected"
-    except:
+    except Exception:
         status["chromadb"] = "error"
     try:
         get_redis()
         status["redis"] = "connected"
-    except:
+    except Exception:
         status["redis"] = "error"
     try:
         get_neo4j()
         status["neo4j"] = "connected"
-    except:
+    except Exception:
         status["neo4j"] = "error"
-    return {"status": "healthy" if all(v == "connected" for v in status.values()) else "degraded", "services": status}
+    return {
+        "status": "healthy" if all(v == "connected" for v in status.values()) else "degraded",
+        "services": status,
+    }
+
 
 def _list_collections() -> Dict:
     chroma = get_chroma()
     collections = chroma.list_collections()
     return {"total": len(collections), "collections": [c.name for c in collections]}
 
-def execute_tool(name: str, arguments: Dict) -> Any:
+
+async def execute_tool(name: str, arguments: Dict) -> Any:
     if name == "pkb_query":
         return _query_knowledge(**arguments)
     elif name == "pkb_ingest":
-        return _ingest_content(**arguments)
+        return _ingest_content(arguments.get("content", ""), arguments.get("domain", "general"))
+    elif name == "pkb_ingest_file":
+        return await _ingest_file(**arguments)
     elif name == "pkb_health":
         return _health_check()
     elif name == "pkb_collections":
         return _list_collections()
     raise ValueError(f"Unknown tool: {name}")
 
-def build_response(msg_id, method: str, params: dict) -> dict:
+
+async def build_response(msg_id, method: str, params: dict) -> dict:
     """Build JSON-RPC response for a method"""
     if method == "initialize":
         client_version = params.get("protocolVersion", "2024-11-05")
@@ -168,24 +462,20 @@ def build_response(msg_id, method: str, params: dict) -> dict:
             "result": {
                 "protocolVersion": client_version,
                 "capabilities": {"tools": {"listChanged": True}},
-                "serverInfo": {"name": "cerid-ai-companion", "version": "0.7.0"}
-            }
+                "serverInfo": {"name": "cerid-ai-companion", "version": "1.0.0"},
+            },
         }
     elif method == "tools/list":
-        return {
-            "jsonrpc": "2.0",
-            "id": msg_id,
-            "result": {"tools": MCP_TOOLS}
-        }
+        return {"jsonrpc": "2.0", "id": msg_id, "result": {"tools": MCP_TOOLS}}
     elif method == "tools/call":
         tool_name = params.get("name")
         tool_args = params.get("arguments", {})
         try:
-            result = execute_tool(tool_name, tool_args)
+            result = await execute_tool(tool_name, tool_args)
             return {
                 "jsonrpc": "2.0",
                 "id": msg_id,
-                "result": {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
+                "result": {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]},
             }
         except Exception as e:
             logger.error(f"Tool call error {tool_name}: {e}")
@@ -193,49 +483,43 @@ def build_response(msg_id, method: str, params: dict) -> dict:
     elif method == "ping":
         return {"jsonrpc": "2.0", "id": msg_id, "result": {}}
     else:
-        return {"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32601, "message": f"Unknown: {method}"}}
+        return {
+            "jsonrpc": "2.0",
+            "id": msg_id,
+            "error": {"code": -32601, "message": f"Unknown: {method}"},
+        }
+
 
 # ============================================================
 # FASTAPI APP
 # ============================================================
-app = FastAPI(title="AI Companion MCP Server", version="0.7.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app = FastAPI(title="AI Companion MCP Server", version="1.0.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Session message queues for SSE responses
 _sessions: Dict[str, asyncio.Queue] = {}
 
-@app.get("/")
-def root():
-    return {"service": "AI Companion MCP Server", "version": "0.7.0", "status": "running"}
 
-@app.get("/health")
-def health_check():
-    return _health_check()
+# ============================================================
+# STARTUP / SHUTDOWN
+# ============================================================
 
-@app.get("/collections")
-def list_collections():
-    return _list_collections()
 
-class QueryRequest(BaseModel):
-    query: str
-    domain: str = "general"
-    top_k: int = 3
+@app.on_event("startup")
+def startup():
+    """Initialize Neo4j schema on startup."""
+    try:
+        driver = get_neo4j()
+        graph.init_schema(driver)
+    except Exception as e:
+        logger.warning(f"Neo4j schema init failed (will retry on first use): {e}")
 
-@app.post("/query")
-async def query_knowledge(req: QueryRequest):
-    return _query_knowledge(req.query, req.domain, req.top_k)
-
-class IngestRequest(BaseModel):
-    content: str
-    domain: str = "general"
-
-@app.post("/ingest")
-async def ingest_content(req: IngestRequest):
-    return _ingest_content(req.content, req.domain)
-
-@app.get("/stats")
-async def get_stats():
-    return _list_collections()
 
 @app.on_event("shutdown")
 def shutdown():
@@ -245,12 +529,136 @@ def shutdown():
     _sessions.clear()
     logger.info("MCP sessions cleared on shutdown")
 
+
+# ============================================================
+# REST ENDPOINTS
+# ============================================================
+
+
+@app.get("/")
+def root():
+    return {"service": "AI Companion MCP Server", "version": "1.0.0", "status": "running"}
+
+
+@app.get("/health")
+def health_check():
+    return _health_check()
+
+
+@app.get("/collections")
+def list_collections():
+    return _list_collections()
+
+
+@app.get("/stats")
+async def get_stats():
+    return _list_collections()
+
+
+class QueryRequest(BaseModel):
+    query: str
+    domain: str = "general"
+    top_k: int = 3
+
+
+@app.post("/query")
+async def query_knowledge(req: QueryRequest):
+    return _query_knowledge(req.query, req.domain, req.top_k)
+
+
+class IngestRequest(BaseModel):
+    content: str
+    domain: str = "general"
+
+
+@app.post("/ingest")
+async def ingest_content(req: IngestRequest):
+    return _ingest_content(req.content, req.domain)
+
+
+# ============================================================
+# PHASE 1: FILE INGESTION ENDPOINTS
+# ============================================================
+
+
+class IngestFileRequest(BaseModel):
+    file_path: str
+    domain: str = ""
+    tags: str = ""
+    categorize_mode: str = ""
+
+
+@app.post("/ingest_file")
+async def ingest_file(req: IngestFileRequest):
+    """Ingest a file with parsing, metadata extraction, and optional AI categorization."""
+    try:
+        result = await _ingest_file(
+            file_path=req.file_path,
+            domain=req.domain,
+            tags=req.tags,
+            categorize_mode=req.categorize_mode,
+        )
+        return result
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Ingest file error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class RecategorizeRequest(BaseModel):
+    artifact_id: str
+    new_domain: str
+    tags: str = ""
+
+
+@app.post("/recategorize")
+async def recategorize(req: RecategorizeRequest):
+    """Move an artifact to a different domain (moves chunks between ChromaDB collections)."""
+    try:
+        return _recategorize(req.artifact_id, req.new_domain, req.tags)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Recategorize error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/artifacts")
+async def list_artifacts(
+    domain: Optional[str] = Query(None, description="Filter by domain"),
+    limit: int = Query(50, ge=1, le=500),
+):
+    """List ingested artifacts from Neo4j."""
+    try:
+        driver = get_neo4j()
+        return graph.list_artifacts(driver, domain=domain, limit=limit)
+    except Exception as e:
+        logger.error(f"List artifacts error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/ingest_log")
+async def ingest_log(limit: int = Query(50, ge=1, le=500)):
+    """View recent ingest/recategorize events from Redis audit trail."""
+    try:
+        return cache.get_log(get_redis(), limit=limit)
+    except Exception as e:
+        logger.error(f"Ingest log error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ============================================================
 # MCP SSE TRANSPORT - Responses via SSE stream
 # ============================================================
+
+
 @app.head("/mcp/sse")
 async def mcp_sse_head():
     return Response(status_code=200, headers={"Content-Type": "text/event-stream"})
+
 
 @app.get("/mcp/sse")
 async def mcp_sse_endpoint(request: Request):
@@ -263,7 +671,6 @@ async def mcp_sse_endpoint(request: Request):
 
     async def event_stream():
         try:
-            # First: send endpoint event with session ID in URL
             endpoint_url = f"http://ai-companion-mcp:8888/mcp/messages?sessionId={session_id}"
             yield f"event: endpoint\ndata: {endpoint_url}\n\n"
             logger.info(f"[MCP] Sent endpoint: {endpoint_url}")
@@ -273,11 +680,15 @@ async def mcp_sse_endpoint(request: Request):
                 if await request.is_disconnected():
                     break
 
-                # Keep-alive ping every ~24s (every 3 heartbeats)
                 if count % 3 == 0:
-                    ping = {"jsonrpc": "2.0", "method": "ping", "params": {}, "id": f"server-ping-{count}"}
+                    ping = {
+                        "jsonrpc": "2.0",
+                        "method": "ping",
+                        "params": {},
+                        "id": f"server-ping-{count}",
+                    }
                     await queue.put(ping)
-                    logger.info(f"[MCP] Sent keep-alive ping: {session_id}")
+                    logger.debug(f"[MCP] Sent keep-alive ping: {session_id}")
 
                 try:
                     msg = await asyncio.wait_for(queue.get(), timeout=8.0)
@@ -293,22 +704,28 @@ async def mcp_sse_endpoint(request: Request):
             _sessions.pop(session_id, None)
             logger.info(f"[MCP] SSE closed: {session_id}")
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream", headers={
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-        "Pragma": "no-cache",
-        "Expires": "0",
-        "Connection": "keep-alive",
-        "X-Accel-Buffering": "no",
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Accept, Cache-Control, Content-Type",
-        "Transfer-Encoding": "chunked"
-    })
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Accept, Cache-Control, Content-Type",
+            "Transfer-Encoding": "chunked",
+        },
+    )
+
 
 @app.post("/mcp/sse")
 async def mcp_sse_post(request: Request):
     """Handle probes and JSON-RPC to /mcp/sse"""
     return Response(status_code=200, content="", media_type="text/plain")
+
 
 @app.post("/mcp/messages")
 async def mcp_messages(request: Request):
@@ -317,9 +734,9 @@ async def mcp_messages(request: Request):
 
     try:
         body = await request.body()
-        body_text = body.decode('utf-8').strip()
+        body_text = body.decode("utf-8").strip()
 
-        if not body_text or body_text == '{}':
+        if not body_text or body_text == "{}":
             return Response(status_code=202)
 
         msg = json.loads(body_text)
@@ -333,24 +750,20 @@ async def mcp_messages(request: Request):
 
     logger.info(f"[MCP] Received: {method} (id={msg_id}, session={session_id})")
 
-    # Notifications don't need response
     if method in ("initialized", "notifications/initialized"):
         logger.info("[MCP] Client initialized")
         return Response(status_code=202)
 
-    # Build response
-    response = build_response(msg_id, method, params)
+    response = await build_response(msg_id, method, params)
 
-    # Send via SSE if we have the session
     if session_id and session_id in _sessions:
         await _sessions[session_id].put(response)
         logger.info(f"[MCP] Queued response for SSE: {method}")
         return Response(status_code=202)
     else:
-        # Fallback: return directly (for testing)
         logger.warning(f"[MCP] No session, returning directly: {method}")
         return Response(
             status_code=200,
             content=json.dumps(response),
-            media_type="application/json"
+            media_type="application/json",
         )

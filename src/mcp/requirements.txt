@@ -1,17 +1,31 @@
-fastapi
-uvicorn
-httpx
+# Core framework
+fastapi>=0.100
+uvicorn[standard]
+pydantic>=2.0
+
+# HTTP client
+httpx>=0.24
 httpx-sse
-neo4j
-redis
-chromadb
-pydantic
-python-dotenv
+
+# Databases
+chromadb>=0.4
+neo4j>=5.0
+redis>=4.0
+
+# AI / NLP
+spacy>=3.5
+tiktoken
+sentence-transformers
 langgraph
 langchain-core
-spacy
-pandas
-pypdf2
-openpyxl
-sentence-transformers
-tiktoken
+
+# File parsing
+pypdf>=3.0
+python-docx
+openpyxl>=3.1
+pandas>=2.0
+
+# Utilities
+python-dotenv
+python-multipart
+numpy<2

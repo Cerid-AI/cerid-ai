@@ -41,3 +41,12 @@ stacks/librechat/data-node/
 **/*.log
 **/diagnostic.data/
 **/journal/
+
+# User documents - never commit
+*.pdf
+*.docx
+*.xlsx
+*.csv
+archive/
+cerid-archive/
+inbox/

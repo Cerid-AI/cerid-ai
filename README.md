@@ -2,22 +2,28 @@
 
 **Self-Hosted Personal AI Knowledge Companion**
 
-A privacy-first, local-first workspace that unifies multi-domain knowledge bases (code, finance, projects, personal artifacts) into a context-aware LLM interface with RAG-powered retrieval and intelligent agents.
+A privacy-first, local-first workspace that unifies multi-domain knowledge bases (code, finance, projects, personal artifacts) into a context-aware LLM interface with RAG-powered retrieval, file ingestion, and intelligent agents.
 
-[![Status](https://img.shields.io/badge/Status-Phase%200%20Complete-green)]()
+[![Status](https://img.shields.io/badge/Status-Phase%201%20Complete-blue)]()
 [![License](https://img.shields.io/badge/License-Private-red)]()
 
 ---
 
 ## Overview
 
-Cerid AI provides a unified interface for interacting with multiple LLM providers while maintaining complete control over your personal knowledge. Key capabilities:
+Cerid AI provides a unified interface for interacting with multiple LLM providers while maintaining complete control over your personal knowledge. All data stays local; only LLM API calls go external.
+
+**Key Capabilities:**
 
 - **Multi-Provider LLM Access** via Bifrost gateway (Claude, GPT, Grok, Gemini, DeepSeek, Llama)
-- **RAG-Powered Context Injection** for token-efficient knowledge retrieval
-- **Local Vector & Graph Storage** (ChromaDB, Neo4j, Redis, PostgreSQL/pgvector)
-- **Privacy-First Architecture** - all data stays local, only LLM API calls go external
-- **MCP Server Integration** for extensible tool capabilities
+- **File-Based Ingestion Pipeline** with document parsing (PDF, DOCX, XLSX, CSV, 30+ text formats), metadata extraction, and AI categorization
+- **RAG-Powered Context Injection** for token-efficient knowledge retrieval (2-4k tokens/query)
+- **Local Vector & Graph Storage** (ChromaDB, Neo4j, Redis)
+- **MCP SSE Protocol** for tool integration with LibreChat UI
+- **Three-Tier AI Categorization** (manual, smart, pro) for flexible ingestion workflows
+- **Artifact Tracking & Recategorization** with full audit trail
+- **File Deduplication** via SHA-256 content hashing
+- **Privacy-First Architecture** — all data local, encrypted storage planned
 
 ---
 
@@ -25,37 +31,48 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                         USER BROWSER                                 │
+│                         USER BROWSER                                │
 │                     http://localhost:3080                            │
-└─────────────────────────────────┬───────────────────────────────────┘
-                                  │
-┌─────────────────────────────────▼───────────────────────────────────┐
+└─────────────────────────────┬───────────────────────────────────────┘
+                              │
+┌─────────────────────────────▼───────────────────────────────────────┐
 │                        LibreChat (UI)                                │
 │                 Container: LibreChat | Port: 3080                    │
 │           Chat Interface + MCP Client + RAG Integration              │
 └──────────┬──────────────────────────────────────┬───────────────────┘
            │                                      │
-           │ LLM Requests                         │ MCP Tools / RAG
+           │ LLM Requests                         │ MCP Tools (SSE)
            ▼                                      ▼
 ┌──────────────────────────┐    ┌─────────────────────────────────────┐
 │    Bifrost Gateway       │    │      AI Companion MCP Server        │
-│  Container: bifrost      │    │   Container: ai-companion-mcp       │
+│  Container: bifrost      │◄───│   Container: ai-companion-mcp       │
 │  Port: 8080              │    │   Port: 8888                        │
-│  Routes to OpenRouter    │    │   REST API: /health /query /ingest  │
-└──────────┬───────────────┘    └──────────┬──────────────────────────┘
-           │                               │
-           ▼                    ┌──────────┼──────────┐
-┌──────────────────────────┐    │          │          │
-│      OpenRouter API      │    ▼          ▼          ▼
-│ (Claude, GPT, Gemini,    │  ChromaDB   Neo4j     Redis
-│  Grok, DeepSeek, etc.)   │  :8001     :7474     :6380
-└──────────────────────────┘
+│  Routes to OpenRouter    │    │                                     │
+└──────────┬───────────────┘    │   REST:  /health /query /ingest     │
+           │                    │          /ingest_file /recategorize  │
+           ▼                    │          /artifacts /ingest_log      │
+┌──────────────────────────┐    │   SSE:   /mcp/sse /mcp/messages     │
+│      OpenRouter API      │    │   Tools: pkb_query, pkb_ingest,     │
+│ (Claude, GPT, Gemini,    │    │          pkb_ingest_file, pkb_health│
+│  Grok, DeepSeek, etc.)   │    │          pkb_collections            │
+└──────────────────────────┘    └──────────┬──────────────────────────┘
+                                           │
+                                ┌──────────┼──────────┐
+                                │          │          │
+                                ▼          ▼          ▼
+                             ChromaDB    Neo4j      Redis
+                             :8001      :7474      :6380
+                             (vectors)  (graph)    (audit)
+
+Host Processes (outside Docker):
+├── watch_ingest.py  → Monitors ~/cerid-archive/, POSTs to :8888
+└── ingest_cli.py    → Batch CLI tool, POSTs to :8888
 
 Supporting Services:
-├── MongoDB (chat-mongodb)      - LibreChat data storage
-├── Meilisearch (chat-meilisearch) - Search indexing  
-├── VectorDB (vectordb)         - PostgreSQL + pgvector for RAG
-└── RAG API (rag_api)           - Document processing
+├── MongoDB (chat-mongodb)         - LibreChat data storage (27017)
+├── Meilisearch (chat-meilisearch) - Search indexing (7700)
+├── VectorDB (vectordb)            - PostgreSQL + pgvector for RAG (5432)
+└── RAG API (rag_api)              - Document processing (8000)
 ```
 
 ---
@@ -66,7 +83,7 @@ Supporting Services:
 
 - Docker & Docker Compose v2+
 - OpenRouter API key ([get one here](https://openrouter.ai/keys))
-- macOS, Linux, or Windows with WSL2
+- macOS or Linux
 
 ### 1. Clone & Configure
 
@@ -79,7 +96,13 @@ cp stacks/librechat/.env.example stacks/librechat/.env
 # Edit .env and add your OPENROUTER_API_KEY
 ```
 
-### 2. Start Services
+### 2. Create Archive Folders
+
+```bash
+mkdir -p ~/cerid-archive/{coding,finance,projects,personal,general,inbox}
+```
+
+### 3. Start Services
 
 ```bash
 # Create shared network (first time only)
@@ -90,19 +113,112 @@ docker network create llm-network
 
 # Or manually:
 cd stacks/bifrost && docker compose up -d
-cd ../librechat && docker compose up -d
 cd ../../src/mcp && docker compose up -d
+cd ../../stacks/librechat && docker compose up -d
 ```
 
-### 3. Access
+### 4. Verify
+
+```bash
+curl -s http://localhost:8888/health | python3 -m json.tool
+```
+
+### 5. Access
 
 | Service | URL | Purpose |
 |---------|-----|---------|
 | LibreChat | http://localhost:3080 | Main chat interface |
 | MCP API | http://localhost:8888 | Knowledge base API |
-| MCP Docs | http://localhost:8888/docs | Swagger API docs |
+| API Docs | http://localhost:8888/docs | Swagger/OpenAPI docs |
 | Bifrost | http://localhost:8080 | LLM gateway dashboard |
 | Neo4j Browser | http://localhost:7474 | Graph database UI |
+
+---
+
+## File Ingestion
+
+Cerid AI ingests files from `~/cerid-archive/` into a searchable knowledge base with metadata extraction, optional AI categorization, and full artifact tracking.
+
+### Archive Folder Structure
+
+```
+~/cerid-archive/
+├── coding/      → domain="coding"   (auto-detected, no AI call)
+├── finance/     → domain="finance"  (auto-detected)
+├── projects/    → domain="projects" (auto-detected)
+├── personal/    → domain="personal" (auto-detected)
+├── general/     → domain="general"  (auto-detected)
+└── inbox/       → AI categorization triggered (smart or pro tier)
+```
+
+### Supported File Types
+
+**Documents:** PDF, DOCX, XLSX, CSV
+**Text/Markup:** TXT, MD, RST, LOG, HTML, HTM, XML
+**Code:** PY, JS, TS, JSX, TSX, Java, Go, Rust, Ruby, C/C++, C#, SQL, R, Swift, Kotlin, Shell
+**Config/Data:** JSON, YAML, YML, TOML, INI, CFG
+
+### Three Ways to Ingest
+
+**1. Folder Watcher** (auto-ingest on file drop):
+```bash
+python src/mcp/scripts/watch_ingest.py [--mode smart|pro|manual]
+```
+
+**2. CLI Batch Ingest** (process existing directories):
+```bash
+python src/mcp/scripts/ingest_cli.py --dir ~/cerid-archive/ [--mode smart] [--domain coding] [--dry-run]
+```
+
+**3. REST API** (programmatic):
+```bash
+curl -X POST http://localhost:8888/ingest_file \
+  -H "Content-Type: application/json" \
+  -d '{"file_path": "/archive/coding/script.py", "domain": "coding"}'
+```
+
+### AI Categorization Tiers
+
+| Mode | Model | Cost | When Used |
+|------|-------|------|-----------|
+| `manual` | None | Free | File in a known domain folder |
+| `smart` | Llama 3.1 8B (via Bifrost) | Free | Default for inbox/unknown |
+| `pro` | Claude Sonnet (via Bifrost) | Paid | Explicit request |
+
+AI calls are token-efficient: only the first ~1,500 characters (~400 tokens) are sent for classification.
+
+### Recategorize Artifacts
+
+```bash
+# List artifacts in a domain
+curl http://localhost:8888/artifacts?domain=coding
+
+# Move to another domain
+curl -X POST http://localhost:8888/recategorize \
+  -H "Content-Type: application/json" \
+  -d '{"artifact_id": "...", "new_domain": "projects"}'
+
+# View audit trail
+curl http://localhost:8888/ingest_log?limit=10
+```
+
+---
+
+## REST API
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/health` | Service health check (ChromaDB, Neo4j, Redis) |
+| GET | `/collections` | List ChromaDB collections |
+| GET | `/artifacts` | List ingested artifacts (filter by domain) |
+| GET | `/ingest_log` | Redis audit trail |
+| POST | `/query` | Query knowledge base by domain |
+| POST | `/ingest` | Ingest raw text content |
+| POST | `/ingest_file` | Parse + ingest file with metadata |
+| POST | `/recategorize` | Move artifact between domains |
+
+**MCP SSE:** `/mcp/sse` (SSE stream) + `/mcp/messages` (JSON-RPC 2.0)
+**MCP Tools:** `pkb_query`, `pkb_ingest`, `pkb_ingest_file`, `pkb_health`, `pkb_collections`
 
 ---
 
@@ -110,166 +226,91 @@ cd ../../src/mcp && docker compose up -d
 
 ```
 cerid-ai/
-├── README.md
+├── README.md                            # This file
+├── CLAUDE.md                            # Developer guide for AI sessions
 ├── .gitignore
-├── librechat.yaml              # LibreChat configuration
-├── artifacts -> ~/Dropbox/AI-Artifacts  # Symlink to artifacts
-├── data -> src/mcp/data        # Symlink to persistent data
+├── artifacts -> ~/Dropbox/AI-Artifacts  # Symlink to artifacts storage
+├── data -> src/mcp/data                 # Symlink to persistent data
 │
-├── docs/                       # Documentation
-├── scripts/                    # Utility scripts
-│   └── start-cerid.sh          # Stack startup script
+├── docs/
+│   └── CERID_AI_PROJECT_REFERENCE.md    # Detailed technical reference
 │
-├── src/
-│   └── mcp/                    # MCP Server
-│       ├── main.py             # FastAPI server (REST endpoints)
-│       ├── requirements.txt
-│       ├── Dockerfile
-│       ├── docker-compose.yml
-│       └── data/               # Persistent storage
-│           ├── chroma/         # Vector embeddings
-│           ├── neo4j/          # Graph database
-│           ├── redis/          # Cache
-│           └── uploads/        # Uploaded files
+├── scripts/
+│   └── start-cerid.sh                   # Stack startup script
+│
+├── src/mcp/                             # MCP Server (main application)
+│   ├── main.py                          # FastAPI server (769 lines)
+│   ├── config.py                        # Central configuration
+│   ├── utils/
+│   │   ├── parsers.py                   # Extensible file parser registry
+│   │   ├── metadata.py                  # Metadata extraction + AI categorization
+│   │   ├── chunker.py                   # Token-based text chunking
+│   │   ├── graph.py                     # Neo4j artifact CRUD
+│   │   └── cache.py                     # Redis audit logging
+│   ├── scripts/
+│   │   ├── watch_ingest.py              # Watchdog folder watcher (host process)
+│   │   └── ingest_cli.py                # Batch CLI ingest tool
+│   ├── Dockerfile
+│   ├── docker-compose.yml
+│   └── requirements.txt
 │
 └── stacks/
-    ├── bifrost/                # LLM Gateway
-    │   ├── docker-compose.yml
-    │   └── data/config.json
-    │
-    ├── librechat/              # Chat UI + RAG
-    │   ├── docker-compose.yml
-    │   ├── docker-compose.override.yml
-    │   ├── librechat.yaml
-    │   └── .env
-    │
-    └── librechat-runtime/      # LibreChat source (for reference)
+    ├── bifrost/                          # LLM Gateway
+    └── librechat/                        # Chat UI + RAG
 ```
 
 ---
 
 ## Configuration
 
-### Environment Variables
+### Key Files
 
-**stacks/librechat/.env:**
-```bash
-OPENROUTER_API_KEY=sk-or-v1-xxxxx    # Required
-OPENAI_API_KEY=sk-or-v1-xxxxx        # Same key, used by RAG API
-```
+| File | Purpose |
+|------|---------|
+| `src/mcp/config.py` | Domains, file extensions, AI tiers, DB URLs |
+| `stacks/librechat/.env` | API keys (OPENROUTER_API_KEY) |
+| `stacks/bifrost/data/config.json` | LLM routing, provider config |
+| `stacks/librechat/librechat.yaml` | MCP servers, endpoints, model list |
 
-### LibreChat Models
+### Adding a New Domain
 
-Edit `stacks/librechat/librechat.yaml` to customize available models:
+1. Edit `src/mcp/config.py` → add to `DOMAINS` list
+2. Create folder: `mkdir ~/cerid-archive/<new_domain>`
+3. Rebuild: `cd src/mcp && docker compose up -d --build`
 
-```yaml
-endpoints:
-  custom:
-    - name: "Bifrost Gateway"
-      baseURL: "http://bifrost:8080/v1"
-      models:
-        default:
-          - "openrouter/anthropic/claude-sonnet-4"
-          - "openrouter/openai/gpt-4o"
-          # Add more models as needed
-```
+### Adding a New File Type
 
-### MCP Server
-
-Edit `librechat.yaml` MCP section:
-
-```yaml
-mcpServers:
-  ai-companion:
-    type: sse
-    url: "http://ai-companion-mcp:8888/mcp/sse"
-```
-
-> **Note:** MCP SSE endpoint is planned for Phase 1. Currently, use REST API directly.
-
----
-
-## MCP REST API
-
-### Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/health` | Service health check |
-| GET | `/collections` | List ChromaDB collections |
-| GET | `/stats` | Database statistics |
-| POST | `/query` | Query knowledge base |
-| POST | `/ingest` | Ingest content |
-
-### Query Knowledge Base
-
-```bash
-curl -X POST http://localhost:8888/query \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "search terms",
-    "domain": "general",
-    "top_k": 3
-  }'
-```
-
-### Ingest Content
-
-```bash
-curl -X POST http://localhost:8888/ingest \
-  -H "Content-Type: application/json" \
-  -d '{
-    "content": "Your knowledge content here",
-    "domain": "general"
-  }'
-```
-
----
-
-## Service Ports
-
-| Port | Service | Purpose |
-|------|---------|---------|
-| 3080 | LibreChat | Chat UI |
-| 8080 | Bifrost | LLM Gateway |
-| 8888 | MCP Server | Knowledge Base API |
-| 8000 | RAG API | Document Processing |
-| 8001 | ChromaDB | Vector Store |
-| 7474 | Neo4j HTTP | Graph DB Browser |
-| 7687 | Neo4j Bolt | Graph DB Protocol |
-| 6380 | Redis | Cache |
+1. Add extension to `SUPPORTED_EXTENSIONS` in `config.py`
+2. Register parser function in `utils/parsers.py` with `@register_parser([".ext"])`
 
 ---
 
 ## Operations
 
-### Start All Services
+### Start / Stop
 
 ```bash
+# Start
 ./scripts/start-cerid.sh
-```
 
-### Stop All Services
-
-```bash
+# Stop
 cd ~/cerid-ai/stacks/librechat && docker compose down
 cd ~/cerid-ai/src/mcp && docker compose down
 cd ~/cerid-ai/stacks/bifrost && docker compose down
 ```
 
+### Rebuild MCP After Code Changes
+
+```bash
+cd ~/cerid-ai/src/mcp && docker compose up -d --build
+```
+
 ### View Logs
 
 ```bash
-docker logs LibreChat --tail 50 -f
 docker logs ai-companion-mcp --tail 50 -f
+docker logs LibreChat --tail 50 -f
 docker logs bifrost --tail 50 -f
-```
-
-### Check Health
-
-```bash
-docker ps --format "table {{.Names}}\t{{.Status}}"
-curl -s http://localhost:8888/health | jq
 ```
 
 ### Backup
@@ -277,86 +318,79 @@ curl -s http://localhost:8888/health | jq
 ```bash
 tar czf cerid-backup-$(date +%Y%m%d).tar.gz \
   ~/cerid-ai/src/mcp/data \
-  ~/cerid-ai/stacks/librechat/.env
+  ~/cerid-ai/stacks/librechat/.env \
+  ~/cerid-ai/stacks/bifrost/data
 ```
 
 ---
 
-## Credentials
+## Service Ports
 
-| Service | Username | Password |
-|---------|----------|----------|
-| Neo4j | neo4j | REDACTED_PASSWORD |
-| VectorDB | myuser | mypassword |
-| LibreChat | (your account) | (your password) |
-
----
-
-## Troubleshooting
-
-### Container shows "unhealthy"
-
-Check if the service actually responds:
-```bash
-curl -s http://localhost:8888/health  # MCP
-curl -s http://localhost:3080         # LibreChat
-curl -s http://localhost:8000/health  # RAG API
-```
-
-If it responds, the healthcheck config may need adjustment.
-
-### LibreChat can't reach MCP/Bifrost
-
-Verify network connectivity:
-```bash
-docker exec LibreChat wget -q -O - http://ai-companion-mcp:8888/health
-docker exec LibreChat wget -q -O - http://bifrost:8080/api/providers
-```
-
-### MCP SSE 404 Error
-
-Expected - SSE endpoint not yet implemented. REST API works:
-```bash
-curl -s http://localhost:8888/query -X POST \
-  -H "Content-Type: application/json" \
-  -d '{"query": "test", "domain": "general"}'
-```
-
-### MongoDB Case Sensitivity
-
-Ensure `MONGO_URI` uses exact case: `mongodb://chat-mongodb:27017/LibreChat`
+| Port | Service | Container | Purpose |
+|------|---------|-----------|---------|
+| 3080 | LibreChat | LibreChat | Chat UI |
+| 8080 | Bifrost | bifrost | LLM Gateway |
+| 8888 | MCP Server | ai-companion-mcp | Knowledge Base API |
+| 8000 | RAG API | rag_api | Document Processing |
+| 8001 | ChromaDB | ai-companion-chroma | Vector Store |
+| 7474 | Neo4j HTTP | ai-companion-neo4j | Graph DB Browser |
+| 7687 | Neo4j Bolt | ai-companion-neo4j | Graph DB Protocol |
+| 6380 | Redis | ai-companion-redis | Cache + Audit |
+| 5432 | PostgreSQL | vectordb | RAG Vector Store |
+| 27017 | MongoDB | chat-mongodb | LibreChat Data |
+| 7700 | Meilisearch | chat-meilisearch | Search Index |
 
 ---
 
 ## Development Roadmap
 
-### ✅ Phase 0: Infrastructure (Complete)
-- [x] Docker stacks deployed and healthy
-- [x] LibreChat + Bifrost + MCP integration
-- [x] Network connectivity verified
-- [x] Git repo consolidated
+### Phase 0: Infrastructure ✅
 
-### 🔄 Phase 1: Core Ingestion (Next)
-- [ ] Implement Triage Agent (LangGraph)
-- [ ] Add `/triage` endpoint
-- [ ] Multi-format parsing (PDF, XLSX, code)
-- [ ] MCP SSE endpoint for LibreChat tools
+- [x] 10 Docker containers deployed and healthy on `llm-network`
+- [x] LibreChat + Bifrost + MCP integration working
+- [x] MCP SSE transport — tools discoverable from LibreChat UI
+- [x] ChromaDB, Neo4j, Redis connected and operational
 
-### 📋 Phase 2: RAG & Agents
-- [ ] Query Agent with ChromaDB + Neo4j
-- [ ] Rectification Agent for conflict resolution
-- [ ] Audit Agent for hallucination detection
-- [ ] Maintenance Agent for scheduled syncs
+### Phase 1: Core Ingestion ✅
 
-### 📋 Phase 3: GUI & Features
-- [ ] Streamlit dashboard
-- [ ] Obsidian integration
-- [ ] Token/cost projections
+- [x] File parsing for PDF, DOCX, XLSX, CSV, HTML, and 30+ text/code formats
+- [x] Extensible parser registry with decorator pattern
+- [x] HTML tag stripping (script/style/noscript excluded)
+- [x] DOCX table extraction alongside paragraph text
+- [x] Binary file detection (null byte check)
+- [x] Metadata extraction (spaCy NER keywords, token counting, summaries)
+- [x] Three-tier AI categorization (manual/smart/pro) via Bifrost
+- [x] Token-aware chunking (512 tokens, 20% overlap, batch ChromaDB writes)
+- [x] SHA-256 content deduplication via Neo4j
+- [x] Neo4j artifact tracking with content_hash index
+- [x] Redis audit logging for all ingest/recategorize events
+- [x] Recategorization workflow (cross-collection chunk migration)
+- [x] REST endpoints + MCP tool for file ingestion
+- [x] Folder watcher with file stability detection
+- [x] CLI batch ingest with dry-run and domain override
+- [x] HTTPException error handling across all endpoints
 
-### 📋 Phase 4: Production
-- [ ] Redis caching optimization
-- [ ] LUKS encryption
-- [ ] Comprehensive documentation
+### Phase 2: Enhanced Search & Agent Workflows (Next)
+
+- [ ] Multi-domain search across collections
+- [ ] Query Agent (LangGraph) with cross-domain context assembly
+- [ ] Triage Agent wrapping ingestion pipeline
+- [ ] Rectification Agent for conflict detection
+- [ ] Audit Agent for hallucination checks
+- [ ] MCP tool expansion (pkb_search, pkb_artifacts, pkb_recategorize)
+
+### Phase 3: GUI & Advanced Features
+
+- [ ] Streamlit dashboard (ingestion pane, artifact browser, audit pane)
+- [ ] Obsidian vault integration
+- [ ] Feedback loop for LLM output capture
+
+### Phase 4: Optimization & Production
+
+- [ ] Redis query caching
+- [ ] LUKS encryption for data at rest
+- [ ] Performance benchmarking
+- [ ] Cron-based maintenance automation
 
 ---
 
@@ -374,7 +408,5 @@ Ensure `MONGO_URI` uses exact case: `mongodb://chat-mongodb:27017/LibreChat`
 Private repository. All rights reserved.
 
 ---
-
-## Contact
 
 **Owner:** Justin (@sunrunnerfire)
