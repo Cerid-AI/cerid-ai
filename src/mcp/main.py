@@ -161,13 +161,61 @@ def _query_knowledge(query: str, domain: str = "general", top_k: int = 3) -> Dic
     chroma = get_chroma()
     collection_name = f"domain_{domain.replace(' ', '_').lower()}"
     collection = chroma.get_or_create_collection(name=collection_name)
-    results = collection.query(query_texts=[query], n_results=top_k)
+    results = collection.query(
+        query_texts=[query],
+        n_results=top_k,
+        include=["documents", "distances", "metadatas"],
+    )
     timestamp = datetime.utcnow().isoformat()
     if not results.get("documents") or not results["documents"][0]:
         return {"context": "", "sources": [], "confidence": 0.0, "timestamp": timestamp}
-    sources = [{"content": doc[:200], "relevance": 0.8} for doc in results["documents"][0]]
-    context = "\n\n".join(results["documents"][0])
-    return {"context": context, "sources": sources, "confidence": 0.8, "timestamp": timestamp}
+
+    docs = results["documents"][0]
+    distances = results.get("distances", [[]])[0]
+    metadatas = results.get("metadatas", [[]])[0]
+
+    # Build sources with real relevance scores and attribution
+    sources = []
+    for i, doc in enumerate(docs):
+        # ChromaDB distance: lower = more similar. Convert to 0-1 relevance.
+        # Cosine distance ranges 0-2; typical useful range 0-1.
+        dist = distances[i] if i < len(distances) else 1.0
+        relevance = max(0.0, min(1.0, 1.0 - dist))
+
+        meta = metadatas[i] if i < len(metadatas) else {}
+        sources.append({
+            "content": doc[:200],
+            "relevance": round(relevance, 3),
+            "artifact_id": meta.get("artifact_id", ""),
+            "filename": meta.get("filename", ""),
+            "domain": meta.get("domain", domain),
+            "chunk_index": meta.get("chunk_index", 0),
+        })
+
+    # Token budget: cap context at ~3500 tokens (~14000 chars)
+    TOKEN_BUDGET_CHARS = 14000
+    context_parts = []
+    char_count = 0
+    for doc in docs:
+        if char_count + len(doc) > TOKEN_BUDGET_CHARS:
+            remaining = TOKEN_BUDGET_CHARS - char_count
+            if remaining > 200:
+                context_parts.append(doc[:remaining] + "\n[...truncated for token budget...]")
+            break
+        context_parts.append(doc)
+        char_count += len(doc)
+
+    context = "\n\n".join(context_parts)
+
+    # Overall confidence: average relevance of returned sources
+    avg_relevance = sum(s["relevance"] for s in sources) / len(sources) if sources else 0.0
+
+    return {
+        "context": context,
+        "sources": sources,
+        "confidence": round(avg_relevance, 3),
+        "timestamp": timestamp,
+    }
 
 
 def _content_hash(content: str) -> str:
@@ -212,8 +260,9 @@ def _ingest_content(
     # Deduplication check
     existing = _check_duplicate(content_hash, domain)
     if existing:
+        fname = (metadata or {}).get("filename", "?")
         logger.info(
-            f"Duplicate detected: '{metadata.get('filename', '?')}' matches "
+            f"Duplicate detected: '{fname}' matches "
             f"existing artifact {existing['id']} ('{existing['filename']}' in {existing['domain']})"
         )
         return {
@@ -252,6 +301,23 @@ def _ingest_content(
             content_hash=content_hash,
         )
     except Exception as e:
+        err_msg = str(e).lower()
+        if "constraint" in err_msg and "content_hash" in err_msg:
+            # Concurrent duplicate: another request wrote the same content_hash
+            # Clean up the chunks we just wrote to ChromaDB
+            logger.info(f"Concurrent duplicate detected via constraint: {base_meta.get('filename', '?')}")
+            try:
+                collection.delete(ids=chunk_ids)
+            except Exception:
+                pass
+            return {
+                "status": "duplicate",
+                "artifact_id": artifact_id,
+                "domain": domain,
+                "chunks": 0,
+                "timestamp": datetime.utcnow().isoformat(),
+                "duplicate_of": "(concurrent)",
+            }
         logger.error(f"Neo4j artifact creation failed: {e}")
 
     # Redis audit log

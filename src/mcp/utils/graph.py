@@ -30,9 +30,14 @@ def init_schema(driver) -> None:
             "CREATE CONSTRAINT domain_name IF NOT EXISTS "
             "FOR (d:Domain) REQUIRE d.name IS UNIQUE"
         )
+        # Drop the old index if it exists (being replaced by unique constraint)
+        try:
+            session.run("DROP INDEX artifact_content_hash IF EXISTS")
+        except Exception:
+            pass  # index may not exist
         session.run(
-            "CREATE INDEX artifact_content_hash IF NOT EXISTS "
-            "FOR (a:Artifact) ON (a.content_hash)"
+            "CREATE CONSTRAINT artifact_content_hash_unique IF NOT EXISTS "
+            "FOR (a:Artifact) REQUIRE a.content_hash IS UNIQUE"
         )
         for domain in config.DOMAINS:
             session.run("MERGE (:Domain {name: $name})", name=domain)

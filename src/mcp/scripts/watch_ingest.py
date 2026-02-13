@@ -37,8 +37,11 @@ MCP_URL = os.getenv("MCP_URL", "http://localhost:8888")
 _recent: dict[str, float] = {}
 DEBOUNCE_SECONDS = 2.0
 # File stability: wait for file size to stop changing before ingesting
-STABILITY_CHECKS = 3
-STABILITY_INTERVAL = 1.0  # seconds between size checks
+STABILITY_CHECKS = 5
+STABILITY_INTERVAL = 2.0  # seconds between size checks (max wait ~30s)
+# Retry: failed files get one retry after this delay
+RETRY_DELAY = 30.0
+_retry_queue: list[tuple[str, str, float]] = []  # (host_path, mode, retry_after)
 
 
 def _log(level: str, msg: str):
@@ -115,9 +118,33 @@ def _wait_for_stable(file_path: str) -> bool:
             stable_count = 0
         prev_size = size
         time.sleep(STABILITY_INTERVAL)
-    _log("WARN", f"  File did not stabilize after {STABILITY_CHECKS * 3}s: {Path(file_path).name}")
+    _log("WARN", f"  File did not stabilize after {STABILITY_CHECKS * STABILITY_INTERVAL * 3:.0f}s: {Path(file_path).name}")
     # Still return True to attempt ingestion — the server will report parse errors
     return True
+
+
+def _schedule_retry(host_path: str, mode: str):
+    """Schedule a failed file for one retry after RETRY_DELAY seconds."""
+    # Don't schedule if already in retry queue
+    for path, _, _ in _retry_queue:
+        if path == host_path:
+            return
+    retry_at = time.time() + RETRY_DELAY
+    _retry_queue.append((host_path, mode, retry_at))
+    _log("WARN", f"  Scheduled retry in {RETRY_DELAY:.0f}s: {Path(host_path).name}")
+
+
+def _process_retries():
+    """Process any pending retries that are due. Called from the main loop."""
+    now = time.time()
+    due = [(p, m) for p, m, t in _retry_queue if now >= t]
+    # Remove due items from queue
+    _retry_queue[:] = [(p, m, t) for p, m, t in _retry_queue if now < t]
+    for host_path, mode in due:
+        _log("INFO", f"Retrying: {Path(host_path).name}")
+        # Reset debounce so file can be reprocessed
+        _recent.pop(host_path, None)
+        ingest_file(host_path, mode)
 
 
 def ingest_file(host_path: str, default_mode: str):
@@ -149,14 +176,21 @@ def ingest_file(host_path: str, default_mode: str):
         )
         if resp.status_code == 200:
             data = resp.json()
-            assigned_domain = data.get("domain", "?")
-            chunks = data.get("chunks", 0)
-            cat_mode = data.get("categorize_mode", mode)
-            _log("INFO", f"  ✓ {filename} → {assigned_domain} ({chunks} chunks, {cat_mode})")
+            status = data.get("status", "success")
+            if status == "duplicate":
+                dup_of = data.get("duplicate_of", "?")
+                _log("INFO", f"  ⊘ {filename}: duplicate of '{dup_of}' (skipped)")
+            else:
+                assigned_domain = data.get("domain", "?")
+                chunks = data.get("chunks", 0)
+                cat_mode = data.get("categorize_mode", mode)
+                _log("INFO", f"  ✓ {filename} → {assigned_domain} ({chunks} chunks, {cat_mode})")
         else:
             _log("ERROR", f"  ✗ {filename}: HTTP {resp.status_code} - {resp.text[:200]}")
+            _schedule_retry(host_path, default_mode)
     except requests.RequestException as e:
         _log("ERROR", f"  ✗ {filename}: {e}")
+        _schedule_retry(host_path, default_mode)
 
 
 def main():
@@ -213,6 +247,7 @@ def main():
     try:
         while True:
             time.sleep(1)
+            _process_retries()
     except KeyboardInterrupt:
         observer.stop()
         _log("INFO", "Watcher stopped")
