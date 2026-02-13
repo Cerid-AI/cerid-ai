@@ -4,7 +4,7 @@
 
 Cerid AI is a self-hosted, privacy-first Personal AI Knowledge Companion. It unifies multi-domain knowledge bases (code, finance, projects, artifacts) into a context-aware LLM interface with RAG-powered retrieval and intelligent agents. All data stays local; only LLM API calls go external.
 
-**Status:** Phase 0 (Infrastructure) complete. Phase 1 (Core Ingestion) implemented and hardened.
+**Status:** Phase 0 (Infrastructure) complete. Phase 1 (Core Ingestion) + Phase 1.5 (Bulk Hardening) implemented.
 
 ## Architecture
 
@@ -111,16 +111,16 @@ MCP tools: `pkb_query`, `pkb_ingest`, `pkb_ingest_file`, `pkb_health`, `pkb_coll
 
 AI calls are token-efficient: only first ~1500 chars sent for classification. Response format enforced as JSON.
 
-**Supported file types:** PDF, DOCX (with tables), XLSX, CSV, HTML (tag-stripped), 30+ text/code/config formats. Binary files auto-detected and rejected.
+**Supported file types:** PDF (structure-aware via pdfplumber — tables extracted as Markdown), DOCX (with tables), XLSX, CSV, HTML (tag-stripped), 30+ text/code/config formats. Binary files auto-detected and rejected.
 
 **Watcher (host process):**
 ```bash
 python src/mcp/scripts/watch_ingest.py [--mode smart|pro|manual]
 ```
 
-**CLI batch ingest:**
+**CLI batch ingest (concurrent):**
 ```bash
-python src/mcp/scripts/ingest_cli.py --dir ~/cerid-archive/ [--mode smart] [--domain coding]
+python src/mcp/scripts/ingest_cli.py --dir ~/cerid-archive/ [--mode smart] [--domain coding] [--workers 4]
 ```
 
 **Archive folder structure:**
@@ -175,7 +175,7 @@ curl http://localhost:8888/ingest_log?limit=10
 
 ### Extensibility
 
-- **Parsers:** Registry pattern in `utils/parsers.py`. Add Docling later via `@register_parser`.
+- **Parsers:** Registry pattern in `utils/parsers.py`. PDF uses pdfplumber (structure-aware). Add Docling later for OCR via `@register_parser`.
 - **Domains:** Add to `config.DOMAINS` list. Neo4j nodes auto-created.
 - **File types:** Add to `config.SUPPORTED_EXTENSIONS` + register parser.
 
@@ -189,13 +189,15 @@ curl http://localhost:8888/ingest_log?limit=10
 - ChromaDB metadata values are strings/ints only (lists stored as JSON strings)
 - Error responses use `HTTPException` (returns `{"detail": "..."}`)
 - Neo4j Cypher: use explicit RETURN clauses, not map projections (breaks with Python string ops)
-- Deduplication: SHA-256 of parsed text checked against Neo4j `content_hash` index before ingest
+- Deduplication: SHA-256 of parsed text, atomic via Neo4j UNIQUE CONSTRAINT on `content_hash`
 - Batch ChromaDB writes: single `collection.add()` call per ingest, not per-chunk
+- PDF parsing: pdfplumber extracts tables as Markdown, non-table text extracted separately to avoid duplication
 - Host: Mac Pro (16-Core Xeon W, 160GB RAM), macOS
 
 ## Roadmap
 
 - **Phase 1 (Complete):** File ingestion, metadata extraction, AI categorization, deduplication, watcher, CLI, production hardening
+- **Phase 1.5 (Complete):** Bulk ingest hardening — concurrent CLI (ThreadPoolExecutor), watcher retry queue, atomic dedup (UNIQUE CONSTRAINT), query improvements (real relevance scores, source attribution, token budget), pdfplumber for structured PDF table extraction
 - **Phase 2:** Query Agent, Rectification Agent, Audit Agent, Maintenance Agent
 - **Phase 3:** Streamlit dashboard, Obsidian integration
 - **Phase 4:** Redis caching optimization, LUKS encryption, production hardening

@@ -67,29 +67,87 @@ _MAX_TEXT_CHARS = 2_000_000  # ~2MB of text
 
 @register_parser([".pdf"])
 def parse_pdf(file_path: str) -> Dict[str, Any]:
-    try:
-        from pypdf import PdfReader
-    except ImportError:
-        from PyPDF2 import PdfReader
+    """
+    Parse PDFs using pdfplumber for structure-aware extraction.
+
+    Preserves table layouts as Markdown-style tables, maintaining the spatial
+    relationship between labels and values (critical for tax forms, financial
+    statements, and any document with structured grids).
+
+    Falls back to raw text extraction for pages without tables.
+    """
+    import pdfplumber
 
     try:
-        reader = PdfReader(file_path)
+        pdf = pdfplumber.open(file_path)
     except Exception as e:
         raise ValueError(
             f"Failed to read PDF '{Path(file_path).name}': {e}. "
             f"File may be corrupted, password-protected, or not a valid PDF."
         ) from e
 
-    page_count = len(reader.pages)
+    page_count = len(pdf.pages)
     pages = []
-    for i, page in enumerate(reader.pages):
+    table_count = 0
+
+    for i, page in enumerate(pdf.pages):
         try:
-            text = page.extract_text()
-            if text:
-                pages.append(text)
+            page_parts = []
+
+            # Extract tables first — they contain structured data that
+            # plain text extraction would jumble
+            tables = page.find_tables()
+            if tables:
+                # Get bounding boxes of all tables so we can exclude them
+                # from plain text extraction (avoids duplicate content)
+                table_bboxes = [t.bbox for t in tables]
+
+                for table in tables:
+                    table_count += 1
+                    rows = table.extract()
+                    if rows:
+                        # Format as Markdown table for structure preservation
+                        md_rows = []
+                        for row in rows:
+                            cells = [
+                                (cell or "").strip().replace("\n", " ")
+                                for cell in row
+                            ]
+                            md_rows.append("| " + " | ".join(cells) + " |")
+                        # Add header separator after first row
+                        if len(md_rows) > 1:
+                            col_count = len(rows[0]) if rows[0] else 1
+                            md_rows.insert(1, "| " + " | ".join(["---"] * col_count) + " |")
+                        page_parts.append("\n".join(md_rows))
+
+                # Extract non-table text by cropping around table regions
+                # This prevents duplicating content that's already in tables
+                try:
+                    filtered = page
+                    for bbox in table_bboxes:
+                        # Crop out each table region from the page
+                        # pdfplumber bbox: (x0, top, x1, bottom)
+                        filtered = filtered.outside_bounding_box(bbox)
+                    plain_text = filtered.extract_text()
+                except Exception:
+                    # If cropping fails, fall back to full page text
+                    # (may duplicate some table content — acceptable)
+                    plain_text = page.extract_text()
+
+                if plain_text and plain_text.strip():
+                    page_parts.insert(0, plain_text.strip())
+            else:
+                # No tables on this page — standard text extraction
+                plain_text = page.extract_text()
+                if plain_text and plain_text.strip():
+                    page_parts.append(plain_text.strip())
+
+            if page_parts:
+                pages.append("\n\n".join(page_parts))
         except Exception as e:
             logger.warning(f"PDF page {i+1}/{page_count} failed to extract: {e}")
 
+    pdf.close()
     text = "\n\n".join(pages)
 
     # Detect image-only PDFs (pages exist but no text extracted)
@@ -100,10 +158,17 @@ def parse_pdf(file_path: str) -> Dict[str, Any]:
             f"OCR support (e.g. Docling) is needed to process this file."
         )
 
+    if table_count:
+        logger.info(
+            f"PDF '{Path(file_path).name}': {page_count} pages, "
+            f"{table_count} tables extracted as Markdown"
+        )
+
     return {
         "text": text[:_MAX_TEXT_CHARS],
         "file_type": "pdf",
         "page_count": page_count,
+        "table_count": table_count,
     }
 
 

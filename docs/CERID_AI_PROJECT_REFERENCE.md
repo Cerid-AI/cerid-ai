@@ -1,8 +1,8 @@
 # Cerid AI - Project Plan & Technical Reference
 
-**Document Version:** 3.1
-**Date:** February 11, 2026
-**Status:** Phase 1 Complete - Core Ingestion Pipeline Hardened & Production-Ready
+**Document Version:** 3.2
+**Date:** February 12, 2026
+**Status:** Phase 1.5 Complete - Bulk Ingest Hardening & Structure-Aware PDF Parsing
 **Repository:** https://github.com/sunrunnerfire/cerid-ai (private)
 **Owner:** Justin (@sunrunnerfire)
 
@@ -82,6 +82,7 @@ Cerid AI is a **self-hosted Personal AI Knowledge Companion** — a privacy-firs
 |-------|-------|--------|
 | Phase 0 | Infrastructure & Baseline | ✅ Complete |
 | Phase 1 | Core Ingestion Pipeline | ✅ Complete |
+| Phase 1.5 | Bulk Ingest Hardening | ✅ Complete |
 | Phase 2 | Enhanced Search & Agent Workflows | 🔄 Next |
 | Phase 3 | GUI & Advanced Features | Planned |
 | Phase 4 | Optimization & Documentation | Planned |
@@ -134,6 +135,23 @@ Cerid AI is a **self-hosted Personal AI Knowledge Companion** — a privacy-firs
 - [x] SSE keepalive logging downgraded from INFO to DEBUG (reduced log noise)
 - [x] spaCy `en_core_web_sm` model downloaded in Dockerfile (NER always active)
 - [x] pypdf replaced deprecated pypdf2, version pins on all dependencies
+
+**Bulk Ingest Hardening (Phase 1.5):**
+- [x] CLI concurrent ingestion via ThreadPoolExecutor (`--workers` flag, default 4)
+- [x] Thread-safe progress output with per-request delay (0.3s)
+- [x] Rich summary: elapsed time, files/hr, domain breakdown, failures by type
+- [x] Watcher retry queue: failed files retry once after 30s delay
+- [x] Watcher stability window extended (5 checks x 2s = ~30s max for large files)
+- [x] Distinct duplicate logging (⊘ symbol) in watcher output
+- [x] Atomic deduplication: Neo4j UNIQUE CONSTRAINT on content_hash (replaces INDEX)
+- [x] Concurrent duplicate handling: ConstraintError catch + ChromaDB chunk cleanup
+- [x] Query: real relevance scores from ChromaDB distances (not hardcoded 0.8)
+- [x] Query: source attribution (artifact_id, filename, domain, chunk_index)
+- [x] Query: 14,000-char token budget cap (~3,500 tokens) with truncation
+- [x] Query: overall confidence = average relevance of returned sources
+- [x] PDF parser upgraded: pypdf → pdfplumber for structure-aware extraction
+- [x] PDF tables extracted as Markdown (header separators, column alignment preserved)
+- [x] Non-table text extracted separately via bounding box exclusion (no duplication)
 
 ### Verified Functionality
 
@@ -475,7 +493,7 @@ User files and database volumes never enter the git repo:
 ```cypher
 CREATE CONSTRAINT artifact_id IF NOT EXISTS FOR (a:Artifact) REQUIRE a.id IS UNIQUE;
 CREATE CONSTRAINT domain_name IF NOT EXISTS FOR (d:Domain) REQUIRE d.name IS UNIQUE;
-CREATE INDEX artifact_content_hash IF NOT EXISTS FOR (a:Artifact) ON (a.content_hash);
+CREATE CONSTRAINT artifact_content_hash_unique IF NOT EXISTS FOR (a:Artifact) REQUIRE a.content_hash IS UNIQUE;
 -- Domain nodes seeded from config.DOMAINS list
 ```
 
@@ -595,7 +613,7 @@ Extensible file parser using a decorator-based registry pattern. Adding a new pa
 
 | Extension | Parser | Library | Features |
 |-----------|--------|---------|----------|
-| `.pdf` | `parse_pdf` | pypdf | Per-page extraction, image-only detection, corruption handling |
+| `.pdf` | `parse_pdf` | pdfplumber | Structure-aware: tables → Markdown, non-table text via bbox exclusion, image-only detection |
 | `.docx` | `parse_docx` | python-docx | Paragraphs + table extraction |
 | `.xlsx` | `parse_xlsx` | openpyxl | Multi-sheet, access-after-close safe |
 | `.csv` | `parse_csv` | pandas | UTF-8/latin-1 fallback, 5k row cap |
@@ -649,7 +667,7 @@ Token efficiency: Only sends first 1,500 characters (~400 tokens) of document te
 All Neo4j operations are isolated in `graph.py`. Main.py never runs Cypher directly.
 
 **Functions:**
-- `init_schema(driver)` — constraints, content_hash index, seed Domain nodes (called on startup)
+- `init_schema(driver)` — constraints (including UNIQUE on content_hash), seed Domain nodes (called on startup)
 - `create_artifact(...)` — creates Artifact node + BELONGS_TO relationship (includes content_hash)
 - `get_artifact(driver, artifact_id)` — fetch single artifact
 - `list_artifacts(driver, domain, limit)` — list with optional domain filter
@@ -687,8 +705,10 @@ Runs on the **host** (not in Docker). Monitors `~/cerid-archive/` for new files.
 **Path Translation:** Host path `~/cerid-archive/finance/tax.pdf` → Container path `/archive/finance/tax.pdf`
 
 **Features:**
-- File stability detection (polls file size 3 times at 1s intervals before ingesting)
+- File stability detection (polls file size 5 times at 2s intervals, ~30s max wait for large files)
 - Debounce (2s) with automatic cleanup of stale entries (>60s)
+- Retry queue: failed files get one automatic retry after 30s
+- Distinct duplicate logging (⊘ symbol vs ✓ for success, ✗ for error)
 - Handles `on_created`, `on_modified`, and `on_moved` events
 - Colored terminal logging (green=success, yellow=warn, red=error)
 - Skips hidden files and unsupported extensions
@@ -700,19 +720,21 @@ python src/mcp/scripts/watch_ingest.py [--mode smart|pro|manual] [--folder ~/cer
 
 ### 6.9 CLI Batch Ingest (`scripts/ingest_cli.py`)
 
-Batch ingestion tool for processing existing files.
+Concurrent batch ingestion tool for processing existing files.
 
 **Features:**
+- Concurrent ingestion via ThreadPoolExecutor (`--workers` flag, default 4)
+- Thread-safe progress output with per-request delay (0.3s)
 - Recursive directory walking
 - `--domain` flag to force domain for all files
 - `--mode` flag for categorization tier
 - `--dry-run` to preview without ingesting
 - Skips `legacy-*` directories and hidden files
-- Summary report with domain breakdown
+- Rich summary: elapsed time, files/hr, domain breakdown, failures grouped by type
 
 **Usage:**
 ```bash
-python src/mcp/scripts/ingest_cli.py --dir ~/cerid-archive/ [--mode smart] [--domain coding] [--dry-run]
+python src/mcp/scripts/ingest_cli.py --dir ~/cerid-archive/ [--mode smart] [--domain coding] [--workers 4] [--dry-run]
 ```
 
 ### 6.10 Central Configuration (`config.py`)
@@ -858,7 +880,7 @@ langgraph
 langchain-core
 
 # File parsing
-pypdf>=3.0
+pdfplumber>=0.10
 python-docx
 openpyxl>=3.1
 pandas>=2.0
@@ -932,8 +954,8 @@ python src/mcp/scripts/watch_ingest.py --mode smart
 # Dry run first
 python src/mcp/scripts/ingest_cli.py --dir ~/cerid-archive/ --dry-run
 
-# Then ingest
-python src/mcp/scripts/ingest_cli.py --dir ~/cerid-archive/ --mode smart
+# Then ingest (concurrent, 4 workers by default)
+python src/mcp/scripts/ingest_cli.py --dir ~/cerid-archive/ --mode smart --workers 4
 ```
 
 ### 8.8 API Usage
@@ -1084,6 +1106,7 @@ docker exec ai-companion-mcp python -m spacy download en_core_web_sm
 |-------|-------|--------|
 | Phase 0 | Infrastructure & Baseline | ✅ Complete |
 | Phase 1 | Core Ingestion Pipeline | ✅ Complete |
+| Phase 1.5 | Bulk Ingest Hardening | ✅ Complete |
 | Phase 2 | Enhanced Search & Agent Workflows | 🔄 Next |
 | Phase 3 | GUI & Advanced Features | Planned |
 | Phase 4 | Optimization & Documentation | Planned |
@@ -1122,6 +1145,14 @@ docker exec ai-companion-mcp python -m spacy download en_core_web_sm
 - [x] Error handling (PDF corruption, CSV encoding, XLSX access-after-close)
 - [x] HTTPException responses, AI JSON response format, reduced log noise
 - [x] spaCy model in Dockerfile, pypdf version upgrade, dependency version pins
+
+### Phase 1.5: Bulk Ingest Hardening (Complete ✅)
+
+- [x] CLI concurrent ingestion (ThreadPoolExecutor, --workers flag)
+- [x] Watcher retry queue (30s delay) and extended stability window (5x2s)
+- [x] Atomic deduplication via Neo4j UNIQUE CONSTRAINT on content_hash
+- [x] Query improvements: real relevance scores, source attribution, 14k-char token budget
+- [x] PDF parser upgrade: pypdf → pdfplumber (tables → Markdown, bbox exclusion for non-table text)
 
 ### Phase 2: Enhanced Search & Agent Workflows (Next 🔄)
 
@@ -1304,5 +1335,5 @@ docker exec ai-companion-mcp python -m spacy download en_core_web_sm
 
 ---
 
-*Document updated: February 11, 2026*
-*Phase 1 implementation complete and hardened. Phase 2 planning in progress.*
+*Document updated: February 12, 2026*
+*Phase 1.5 complete: bulk ingest hardening + pdfplumber for structured PDFs. Phase 2 next.*

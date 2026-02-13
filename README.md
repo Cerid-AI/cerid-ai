@@ -4,7 +4,7 @@
 
 A privacy-first, local-first workspace that unifies multi-domain knowledge bases (code, finance, projects, personal artifacts) into a context-aware LLM interface with RAG-powered retrieval, file ingestion, and intelligent agents.
 
-[![Status](https://img.shields.io/badge/Status-Phase%201%20Complete-blue)]()
+[![Status](https://img.shields.io/badge/Status-Phase%201.5%20Complete-blue)]()
 [![License](https://img.shields.io/badge/License-Private-red)]()
 
 ---
@@ -16,7 +16,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 **Key Capabilities:**
 
 - **Multi-Provider LLM Access** via Bifrost gateway (Claude, GPT, Grok, Gemini, DeepSeek, Llama)
-- **File-Based Ingestion Pipeline** with document parsing (PDF, DOCX, XLSX, CSV, 30+ text formats), metadata extraction, and AI categorization
+- **File-Based Ingestion Pipeline** with structure-aware document parsing (PDF tables as Markdown via pdfplumber, DOCX, XLSX, CSV, 30+ text formats), metadata extraction, and AI categorization
 - **RAG-Powered Context Injection** for token-efficient knowledge retrieval (2-4k tokens/query)
 - **Local Vector & Graph Storage** (ChromaDB, Neo4j, Redis)
 - **MCP SSE Protocol** for tool integration with LibreChat UI
@@ -165,9 +165,9 @@ Cerid AI ingests files from `~/cerid-archive/` into a searchable knowledge base 
 python src/mcp/scripts/watch_ingest.py [--mode smart|pro|manual]
 ```
 
-**2. CLI Batch Ingest** (process existing directories):
+**2. CLI Batch Ingest** (concurrent, process existing directories):
 ```bash
-python src/mcp/scripts/ingest_cli.py --dir ~/cerid-archive/ [--mode smart] [--domain coding] [--dry-run]
+python src/mcp/scripts/ingest_cli.py --dir ~/cerid-archive/ [--mode smart] [--domain coding] [--workers 4] [--dry-run]
 ```
 
 **3. REST API** (programmatic):
@@ -369,6 +369,14 @@ tar czf cerid-backup-$(date +%Y%m%d).tar.gz \
 - [x] Folder watcher with file stability detection
 - [x] CLI batch ingest with dry-run and domain override
 - [x] HTTPException error handling across all endpoints
+
+### Phase 1.5: Bulk Ingest Hardening ✅
+
+- [x] Structure-aware PDF parsing via pdfplumber (tables → Markdown, bbox exclusion)
+- [x] Concurrent CLI ingestion (ThreadPoolExecutor, --workers flag)
+- [x] Watcher retry queue (30s) and extended stability window (30s)
+- [x] Atomic deduplication via Neo4j UNIQUE CONSTRAINT on content_hash
+- [x] Query: real relevance scores, source attribution, 14k-char token budget
 
 ### Phase 2: Enhanced Search & Agent Workflows (Next)
 
