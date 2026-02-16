@@ -4,7 +4,7 @@
 
 A privacy-first, local-first workspace that unifies multi-domain knowledge bases (code, finance, projects, personal artifacts) into a context-aware LLM interface with RAG-powered retrieval, file ingestion, and intelligent agents.
 
-[![Status](https://img.shields.io/badge/Status-Phase%201.5%20Complete-blue)]()
+[![Status](https://img.shields.io/badge/Status-Phase%202%20Query%20Agent%20Complete-blue)]()
 [![License](https://img.shields.io/badge/License-Private-red)]()
 
 ---
@@ -17,6 +17,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 
 - **Multi-Provider LLM Access** via Bifrost gateway (Claude, GPT, Grok, Gemini, DeepSeek, Llama)
 - **File-Based Ingestion Pipeline** with structure-aware document parsing (PDF tables as Markdown via pdfplumber, DOCX, XLSX, CSV, 30+ text formats), metadata extraction, and AI categorization
+- **Multi-Domain Query Agent** with intelligent context assembly, deduplication, and cross-collection search
 - **RAG-Powered Context Injection** for token-efficient knowledge retrieval (2-4k tokens/query)
 - **Local Vector & Graph Storage** (ChromaDB, Neo4j, Redis)
 - **MCP SSE Protocol** for tool integration with LibreChat UI

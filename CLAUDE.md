@@ -4,7 +4,7 @@
 
 Cerid AI is a self-hosted, privacy-first Personal AI Knowledge Companion. It unifies multi-domain knowledge bases (code, finance, projects, artifacts) into a context-aware LLM interface with RAG-powered retrieval and intelligent agents. All data stays local; only LLM API calls go external.
 
-**Status:** Phase 0 (Infrastructure) complete. Phase 1 (Core Ingestion) + Phase 1.5 (Bulk Hardening) implemented.
+**Status:** Phase 0 (Infrastructure) complete. Phase 1 (Core Ingestion) + Phase 1.5 (Bulk Hardening) implemented. **Phase 2 (Query Agent) implemented.**
 
 ## Architecture
 
@@ -56,7 +56,9 @@ Bifrost classifies intent (coding/research/simple/general) and routes to the app
 │   ├── scripts/
 │   │   ├── watch_ingest.py           # Watchdog folder watcher (host process)
 │   │   └── ingest_cli.py             # Batch CLI ingest tool
-│   ├── agents/triage.py              # (Planned) LangGraph triage agent
+│   ├── agents/
+│   │   ├── query_agent.py            # Multi-domain query with reranking (Phase 2)
+│   │   └── triage.py                 # (Planned) LangGraph triage agent
 │   ├── Dockerfile
 │   ├── docker-compose.yml
 │   └── requirements.txt
@@ -94,11 +96,14 @@ cd src/mcp && docker compose up -d
 - `GET /artifacts` — List ingested artifacts (filter by domain)
 - `GET /ingest_log` — View audit trail from Redis
 
+**Agent endpoints (Phase 2):**
+- `POST /agent/query` — Multi-domain query with intelligent reranking and context assembly
+
 **MCP protocol:**
 - `GET /mcp/sse` — SSE stream (MCP protocol, JSON-RPC 2.0)
 - `POST /mcp/messages?sessionId=X` — JSON-RPC handler
 
-MCP tools: `pkb_query`, `pkb_ingest`, `pkb_ingest_file`, `pkb_health`, `pkb_collections`
+MCP tools: `pkb_query`, `pkb_ingest`, `pkb_ingest_file`, `pkb_health`, `pkb_collections`, `pkb_agent_query`
 
 ### Ingestion Pipeline
 
@@ -194,10 +199,84 @@ curl http://localhost:8888/ingest_log?limit=10
 - PDF parsing: pdfplumber extracts tables as Markdown, non-table text extracted separately to avoid duplication
 - Host: Mac Pro (16-Core Xeon W, 160GB RAM), macOS
 
+## Phase 2: Query Agent
+
+The Query Agent provides enhanced multi-domain search capabilities with intelligent context assembly.
+
+### Features
+
+- **Multi-domain retrieval:** Query all 5 ChromaDB collections in parallel (coding, finance, projects, personal, general)
+- **Domain filtering:** Optionally specify which domains to search
+- **Deduplication:** Removes duplicate chunks by (artifact_id + chunk_index), keeping highest relevance
+- **Token budget enforcement:** Respects 14k character limit for context assembly
+- **Source attribution:** Returns filename, domain, chunk_index, and relevance scores
+- **Confidence scoring:** Average relevance of included sources
+
+### Usage
+
+**REST API:**
+
+```bash
+# Query all domains
+curl -X POST http://localhost:8888/agent/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "tax deductions", "top_k": 5}'
+
+# Query specific domains
+curl -X POST http://localhost:8888/agent/query \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "solar power systems",
+    "domains": ["general", "projects"],
+    "top_k": 3
+  }'
+```
+
+**MCP Tool (in LibreChat):**
+
+Use the `pkb_agent_query` tool with natural language:
+- "Search for tax information across all my documents"
+- "Find information about solar power in my general and projects domains"
+
+**Response Format:**
+
+```json
+{
+  "context": "assembled context string...",
+  "sources": [
+    {
+      "content": "preview (200 chars)...",
+      "relevance": 0.1744,
+      "artifact_id": "uuid",
+      "filename": "Cabin Project Overview.docx",
+      "domain": "general",
+      "chunk_index": 0
+    }
+  ],
+  "confidence": 0.0436,
+  "domains_searched": ["general", "projects"],
+  "total_results": 4,
+  "token_budget_used": 1250
+}
+```
+
+### Implementation Details
+
+**File:** `src/mcp/agents/query_agent.py`
+
+**Key Functions:**
+- `multi_domain_query()` — Parallel ChromaDB queries across domains
+- `deduplicate_results()` — Remove duplicate chunks
+- `rerank_results()` — Sort by relevance (placeholder for LLM-based reranking)
+- `assemble_context()` — Build context within token budget
+- `agent_query()` — Main orchestration function
+
+**Dependencies:** LangGraph >=0.2.0, langchain-core, langchain-openai, langchain-community
+
 ## Roadmap
 
 - **Phase 1 (Complete):** File ingestion, metadata extraction, AI categorization, deduplication, watcher, CLI, production hardening
 - **Phase 1.5 (Complete):** Bulk ingest hardening — concurrent CLI (ThreadPoolExecutor), watcher retry queue, atomic dedup (UNIQUE CONSTRAINT), query improvements (real relevance scores, source attribution, token budget), pdfplumber for structured PDF table extraction
-- **Phase 2:** Query Agent, Rectification Agent, Audit Agent, Maintenance Agent
+- **Phase 2 (In Progress):** Query Agent (complete), Triage Agent (planned), Rectification Agent (planned), Audit Agent (planned)
 - **Phase 3:** Streamlit dashboard, Obsidian integration
 - **Phase 4:** Redis caching optimization, LUKS encryption, production hardening

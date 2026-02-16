@@ -108,6 +108,32 @@ MCP_TOOLS = [
         "description": "List available knowledge base collections",
         "inputSchema": {"type": "object", "properties": {}},
     },
+    {
+        "name": "pkb_agent_query",
+        "description": "Multi-domain knowledge base search with intelligent reranking and context assembly",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Natural language search query"},
+                "domains": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": f"List of domains to search ({', '.join(config.DOMAINS)}). Empty for all domains.",
+                },
+                "top_k": {
+                    "type": "integer",
+                    "description": "Number of results per domain",
+                    "default": 10,
+                },
+                "use_reranking": {
+                    "type": "boolean",
+                    "description": "Enable intelligent reranking",
+                    "default": True,
+                },
+            },
+            "required": ["query"],
+        },
+    },
 ]
 
 
@@ -515,6 +541,16 @@ async def execute_tool(name: str, arguments: Dict) -> Any:
         return _health_check()
     elif name == "pkb_collections":
         return _list_collections()
+    elif name == "pkb_agent_query":
+        from agents.query_agent import agent_query
+        return await agent_query(
+            query=arguments.get("query", ""),
+            domains=arguments.get("domains"),
+            top_k=arguments.get("top_k", 10),
+            use_reranking=arguments.get("use_reranking", True),
+            chroma_client=get_chroma(),
+            redis_client=get_redis()
+        )
     raise ValueError(f"Unknown tool: {name}")
 
 
@@ -689,6 +725,65 @@ async def recategorize(req: RecategorizeRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Recategorize error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
+# PHASE 2: AGENT QUERY ENDPOINT
+# ============================================================
+
+
+class AgentQueryRequest(BaseModel):
+    query: str
+    domains: Optional[List[str]] = None
+    top_k: int = 10
+    use_reranking: bool = True
+
+
+@app.post("/agent/query")
+async def agent_query_endpoint(req: AgentQueryRequest):
+    """
+    Enhanced multi-domain query using Query Agent.
+
+    Provides:
+    - Multi-domain parallel retrieval across ChromaDB collections
+    - Deduplication by artifact_id + chunk_index
+    - Intelligent reranking (future: LLM-powered)
+    - Token budget enforcement (14k char limit)
+    - Source attribution with confidence scoring
+
+    Args:
+        query: Natural language search query
+        domains: Optional list of domains to search (default: all domains)
+        top_k: Number of results per domain (default: 10)
+        use_reranking: Enable intelligent reranking (default: true)
+
+    Returns:
+        {
+            "context": "assembled context string...",
+            "sources": [{filename, domain, relevance, ...}, ...],
+            "confidence": 0.85,
+            "domains_searched": ["coding", "finance"],
+            "total_results": 42,
+            "token_budget_used": 12500
+        }
+    """
+    try:
+        from agents.query_agent import agent_query
+
+        result = await agent_query(
+            query=req.query,
+            domains=req.domains,
+            top_k=req.top_k,
+            use_reranking=req.use_reranking,
+            chroma_client=get_chroma(),
+            redis_client=get_redis()
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Agent query error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

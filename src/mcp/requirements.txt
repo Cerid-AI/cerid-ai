@@ -16,8 +16,10 @@ redis>=4.0
 spacy>=3.5
 tiktoken
 sentence-transformers
-langgraph
-langchain-core
+langgraph>=0.2.0
+langchain-core>=0.3.0
+langchain-openai>=0.2.0
+langchain-community>=0.3.0
 
 # File parsing
 pdfplumber>=0.10
