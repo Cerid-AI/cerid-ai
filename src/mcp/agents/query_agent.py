@@ -166,7 +166,10 @@ async def rerank_results(
     use_llm: bool = True
 ) -> List[Dict[str, Any]]:
     """
-    Rerank results using LLM-based relevance scoring.
+    Rerank results using LLM-based relevance scoring via Bifrost.
+
+    Sends the top candidates to a free LLM model for intelligent relevance
+    scoring. Falls back to cosine-similarity sorting if the LLM call fails.
 
     Args:
         results: List of query results
@@ -177,14 +180,87 @@ async def rerank_results(
         Reranked list (sorted by relevance descending)
     """
     if not use_llm or len(results) == 0:
-        # Simple sort by relevance score
         return sorted(results, key=lambda x: x["relevance"], reverse=True)
 
-    # TODO: Implement LLM-based reranking via Bifrost
-    # For now, just sort by existing relevance scores
-    # Future enhancement: Send top N results to LLM for intelligent reranking
+    # Pre-sort by embedding relevance first
+    results = sorted(results, key=lambda x: x["relevance"], reverse=True)
 
-    return sorted(results, key=lambda x: x["relevance"], reverse=True)
+    # Only rerank the top candidates (token-efficient)
+    MAX_RERANK = 15
+    candidates = results[:MAX_RERANK]
+    remainder = results[MAX_RERANK:]
+
+    if len(candidates) <= 1:
+        return results
+
+    # Build a compact prompt for the LLM
+    snippets = []
+    for i, r in enumerate(candidates):
+        preview = r["content"][:200].replace("\n", " ").strip()
+        snippets.append(f"[{i}] ({r['domain']}/{r['filename']}) {preview}")
+
+    prompt = (
+        f"Given the query: \"{query}\"\n\n"
+        f"Rank these document snippets by relevance to the query. "
+        f"Return ONLY a JSON array of indices in order of most to least relevant.\n\n"
+        + "\n".join(snippets)
+        + f"\n\nRespond with ONLY a JSON array like [2, 0, 5, 1, ...] containing all indices 0-{len(candidates)-1}."
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{BIFROST_URL}/chat/completions",
+                json={
+                    "model": "meta-llama/llama-3.1-8b-instruct:free",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.0,
+                    "max_tokens": 200,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        content = data["choices"][0]["message"]["content"].strip()
+        # Extract JSON array from response (handle markdown fences)
+        if content.startswith("```"):
+            content = content.split("\n", 1)[-1]
+        if content.endswith("```"):
+            content = content.rsplit("```", 1)[0]
+        content = content.strip()
+
+        import json
+        ranking = json.loads(content)
+
+        if not isinstance(ranking, list):
+            raise ValueError("Expected a list of indices")
+
+        # Validate and apply ranking
+        valid_indices = set(range(len(candidates)))
+        seen = set()
+        reranked = []
+        for idx in ranking:
+            if isinstance(idx, int) and idx in valid_indices and idx not in seen:
+                seen.add(idx)
+                reranked.append(candidates[idx])
+
+        # Append any candidates not mentioned in the ranking
+        for i, r in enumerate(candidates):
+            if i not in seen:
+                reranked.append(r)
+
+        # Update relevance scores to reflect LLM ranking order
+        for rank_pos, result in enumerate(reranked):
+            # Blend: 60% LLM rank score + 40% original embedding score
+            llm_score = 1.0 - (rank_pos / len(reranked))
+            original_score = result["relevance"]
+            result["relevance"] = round(0.6 * llm_score + 0.4 * original_score, 4)
+
+        return reranked + remainder
+
+    except Exception as e:
+        print(f"LLM reranking failed, falling back to embedding sort: {e}")
+        return sorted(results, key=lambda x: x["relevance"], reverse=True)
 
 
 # ---------------------------------------------------------------------------

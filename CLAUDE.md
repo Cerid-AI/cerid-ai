@@ -4,7 +4,7 @@
 
 Cerid AI is a self-hosted, privacy-first Personal AI Knowledge Companion. It unifies multi-domain knowledge bases (code, finance, projects, artifacts) into a context-aware LLM interface with RAG-powered retrieval and intelligent agents. All data stays local; only LLM API calls go external.
 
-**Status:** Phase 0 (Infrastructure) complete. Phase 1 (Core Ingestion) + Phase 1.5 (Bulk Hardening) implemented. **Phase 2 (Query Agent) implemented.**
+**Status:** Phase 0 (Infrastructure) complete. Phase 1 (Core Ingestion) + Phase 1.5 (Bulk Hardening) implemented. **Phase 2 (Agents) largely complete** — Query, Triage, Rectification agents deployed; LLM reranking and full MCP tool suite operational.
 
 ## Architecture
 
@@ -57,8 +57,9 @@ Bifrost classifies intent (coding/research/simple/general) and routes to the app
 │   │   ├── watch_ingest.py           # Watchdog folder watcher (host process)
 │   │   └── ingest_cli.py             # Batch CLI ingest tool
 │   ├── agents/
-│   │   ├── query_agent.py            # Multi-domain query with reranking (Phase 2)
-│   │   └── triage.py                 # (Planned) LangGraph triage agent
+│   │   ├── query_agent.py            # Multi-domain query with LLM reranking (Phase 2)
+│   │   ├── triage.py                 # LangGraph triage agent for intelligent ingestion routing
+│   │   └── rectify.py                # Knowledge base health checks and conflict resolution
 │   ├── Dockerfile
 │   ├── docker-compose.yml
 │   └── requirements.txt
@@ -97,13 +98,26 @@ cd src/mcp && docker compose up -d
 - `GET /ingest_log` — View audit trail from Redis
 
 **Agent endpoints (Phase 2):**
-- `POST /agent/query` — Multi-domain query with intelligent reranking and context assembly
+- `POST /agent/query` — Multi-domain query with LLM reranking and context assembly
+- `POST /agent/triage` — LangGraph-powered file triage (validate → parse → categorize → chunk)
+- `POST /agent/triage/batch` — Batch triage with per-file error recovery
+- `POST /agent/rectify` — Knowledge base health checks (duplicates, stale, orphans, distribution)
 
 **MCP protocol:**
 - `GET /mcp/sse` — SSE stream (MCP protocol, JSON-RPC 2.0)
 - `POST /mcp/messages?sessionId=X` — JSON-RPC handler
 
-MCP tools: `pkb_query`, `pkb_ingest`, `pkb_ingest_file`, `pkb_health`, `pkb_collections`, `pkb_agent_query`
+MCP tools (10 total):
+- `pkb_query` — Single-domain query
+- `pkb_ingest` — Ingest raw text
+- `pkb_ingest_file` — Ingest a file with parsing and metadata
+- `pkb_health` — Service health check
+- `pkb_collections` — List ChromaDB collections
+- `pkb_agent_query` — Multi-domain query with LLM reranking
+- `pkb_artifacts` — List/filter ingested artifacts
+- `pkb_recategorize` — Move artifact between domains
+- `pkb_triage` — LangGraph-powered file triage
+- `pkb_rectify` — Knowledge base health checks and auto-fix
 
 ### Ingestion Pipeline
 
@@ -199,84 +213,93 @@ curl http://localhost:8888/ingest_log?limit=10
 - PDF parsing: pdfplumber extracts tables as Markdown, non-table text extracted separately to avoid duplication
 - Host: Mac Pro (16-Core Xeon W, 160GB RAM), macOS
 
-## Phase 2: Query Agent
+## Phase 2: Agent Workflows
 
-The Query Agent provides enhanced multi-domain search capabilities with intelligent context assembly.
+### Query Agent (`agents/query_agent.py`)
 
-### Features
+Multi-domain search with LLM-powered reranking and intelligent context assembly.
 
-- **Multi-domain retrieval:** Query all 5 ChromaDB collections in parallel (coding, finance, projects, personal, general)
-- **Domain filtering:** Optionally specify which domains to search
-- **Deduplication:** Removes duplicate chunks by (artifact_id + chunk_index), keeping highest relevance
-- **Token budget enforcement:** Respects 14k character limit for context assembly
-- **Source attribution:** Returns filename, domain, chunk_index, and relevance scores
-- **Confidence scoring:** Average relevance of included sources
+**Features:**
+- Parallel retrieval across all 5 ChromaDB collections
+- Deduplication by (artifact_id + chunk_index), keeping highest relevance
+- LLM reranking via Bifrost (Llama 3.1 free tier) — blends 60% LLM rank + 40% embedding score
+- Token budget enforcement (14k character limit)
+- Source attribution with confidence scoring
 
-### Usage
-
-**REST API:**
-
+**Usage:**
 ```bash
-# Query all domains
 curl -X POST http://localhost:8888/agent/query \
   -H "Content-Type: application/json" \
-  -d '{"query": "tax deductions", "top_k": 5}'
-
-# Query specific domains
-curl -X POST http://localhost:8888/agent/query \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "solar power systems",
-    "domains": ["general", "projects"],
-    "top_k": 3
-  }'
+  -d '{"query": "tax deductions", "domains": ["finance", "general"], "top_k": 5}'
 ```
-
-**MCP Tool (in LibreChat):**
-
-Use the `pkb_agent_query` tool with natural language:
-- "Search for tax information across all my documents"
-- "Find information about solar power in my general and projects domains"
-
-**Response Format:**
-
-```json
-{
-  "context": "assembled context string...",
-  "sources": [
-    {
-      "content": "preview (200 chars)...",
-      "relevance": 0.1744,
-      "artifact_id": "uuid",
-      "filename": "Cabin Project Overview.docx",
-      "domain": "general",
-      "chunk_index": 0
-    }
-  ],
-  "confidence": 0.0436,
-  "domains_searched": ["general", "projects"],
-  "total_results": 4,
-  "token_budget_used": 1250
-}
-```
-
-### Implementation Details
-
-**File:** `src/mcp/agents/query_agent.py`
 
 **Key Functions:**
 - `multi_domain_query()` — Parallel ChromaDB queries across domains
 - `deduplicate_results()` — Remove duplicate chunks
-- `rerank_results()` — Sort by relevance (placeholder for LLM-based reranking)
+- `rerank_results()` — LLM-based relevance reranking via Bifrost (falls back to embedding sort)
 - `assemble_context()` — Build context within token budget
 - `agent_query()` — Main orchestration function
 
-**Dependencies:** LangGraph >=0.2.0, langchain-core, langchain-openai, langchain-community
+### Triage Agent (`agents/triage.py`)
+
+LangGraph-orchestrated file ingestion pipeline with conditional routing.
+
+**Graph flow:** validate → parse → route_categorization → [categorize?] → extract_metadata → chunk → END
+
+**Features:**
+- Conditional AI categorization (skips for known domains, triggers for inbox)
+- Structured data detection (PDFs with tables, XLSX, CSV flagged as `is_structured`)
+- Per-node error handling — failures route to `error_end` without crashing the pipeline
+- Batch processing via `triage_batch()` — one failure doesn't stop the batch
+
+**Usage:**
+```bash
+# Single file triage
+curl -X POST http://localhost:8888/agent/triage \
+  -H "Content-Type: application/json" \
+  -d '{"file_path": "/archive/inbox/report.pdf"}'
+
+# Batch triage
+curl -X POST http://localhost:8888/agent/triage/batch \
+  -H "Content-Type: application/json" \
+  -d '{"files": [{"file_path": "/archive/inbox/a.pdf"}, {"file_path": "/archive/coding/b.py"}]}'
+```
+
+### Rectification Agent (`agents/rectify.py`)
+
+Knowledge base health monitoring and conflict resolution.
+
+**Checks:**
+- **duplicates** — Artifacts sharing the same content_hash across domains
+- **stale** — Artifacts not updated in N days (default: 90)
+- **orphans** — ChromaDB chunks without matching Neo4j artifact records
+- **distribution** — Per-domain artifact/chunk counts and imbalance detection
+
+**Auto-fix capabilities:**
+- Resolve duplicates (keep oldest, remove rest + clean ChromaDB chunks)
+- Clean orphaned chunks from ChromaDB
+
+**Usage:**
+```bash
+# Run all checks (read-only)
+curl -X POST http://localhost:8888/agent/rectify \
+  -H "Content-Type: application/json" \
+  -d '{}'
+
+# Auto-fix duplicates and orphans
+curl -X POST http://localhost:8888/agent/rectify \
+  -H "Content-Type: application/json" \
+  -d '{"auto_fix": true, "stale_days": 60}'
+```
+
+### Dependencies
+
+LangGraph >=0.2.0, langchain-core, langchain-openai, langchain-community
 
 ## Roadmap
 
 - **Phase 1 (Complete):** File ingestion, metadata extraction, AI categorization, deduplication, watcher, CLI, production hardening
 - **Phase 1.5 (Complete):** Bulk ingest hardening — concurrent CLI (ThreadPoolExecutor), watcher retry queue, atomic dedup (UNIQUE CONSTRAINT), query improvements (real relevance scores, source attribution, token budget), pdfplumber for structured PDF table extraction
-- **Phase 2 (In Progress):** Query Agent (complete), Triage Agent (planned), Rectification Agent (planned), Audit Agent (planned)
+- **Phase 2 (Largely Complete):** Query Agent + LLM reranking, Triage Agent (LangGraph), Rectification Agent, MCP tool expansion (10 tools). **Remaining:** Audit Agent, Maintenance Agent
 - **Phase 3:** Streamlit dashboard, Obsidian integration
 - **Phase 4:** Redis caching optimization, LUKS encryption, production hardening

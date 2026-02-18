@@ -134,6 +134,96 @@ MCP_TOOLS = [
             "required": ["query"],
         },
     },
+    {
+        "name": "pkb_artifacts",
+        "description": "List ingested artifacts in the knowledge base, optionally filtered by domain",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "domain": {
+                    "type": "string",
+                    "description": f"Filter by domain ({', '.join(config.DOMAINS)}). Empty for all.",
+                    "default": "",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of artifacts to return",
+                    "default": 50,
+                },
+            },
+        },
+    },
+    {
+        "name": "pkb_recategorize",
+        "description": "Move an artifact from one domain to another in the knowledge base",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "artifact_id": {
+                    "type": "string",
+                    "description": "UUID of the artifact to move",
+                },
+                "new_domain": {
+                    "type": "string",
+                    "description": f"Target domain ({', '.join(config.DOMAINS)})",
+                },
+                "tags": {
+                    "type": "string",
+                    "description": "Optional tags to apply after recategorization",
+                    "default": "",
+                },
+            },
+            "required": ["artifact_id", "new_domain"],
+        },
+    },
+    {
+        "name": "pkb_triage",
+        "description": "Triage a file through the intelligent ingestion pipeline with LangGraph routing",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to file (e.g. /archive/inbox/report.pdf)",
+                },
+                "domain": {
+                    "type": "string",
+                    "description": f"Target domain ({', '.join(config.DOMAINS)}). Empty for auto-detect.",
+                    "default": "",
+                },
+                "categorize_mode": {
+                    "type": "string",
+                    "description": "Categorization tier: manual, smart, or pro",
+                    "default": "",
+                },
+            },
+            "required": ["file_path"],
+        },
+    },
+    {
+        "name": "pkb_rectify",
+        "description": "Run knowledge base health checks: find duplicates, stale artifacts, orphaned chunks, and domain distribution",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "checks": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Checks to run: duplicates, stale, orphans, distribution. Empty for all.",
+                },
+                "auto_fix": {
+                    "type": "boolean",
+                    "description": "Automatically resolve duplicates and clean orphans",
+                    "default": False,
+                },
+                "stale_days": {
+                    "type": "integer",
+                    "description": "Days threshold for stale artifact detection",
+                    "default": 90,
+                },
+            },
+        },
+    },
 ]
 
 
@@ -551,6 +641,46 @@ async def execute_tool(name: str, arguments: Dict) -> Any:
             chroma_client=get_chroma(),
             redis_client=get_redis()
         )
+    elif name == "pkb_artifacts":
+        domain = arguments.get("domain", "") or None
+        limit = arguments.get("limit", 50)
+        driver = get_neo4j()
+        return graph.list_artifacts(driver, domain=domain, limit=limit)
+    elif name == "pkb_recategorize":
+        return _recategorize(
+            artifact_id=arguments["artifact_id"],
+            new_domain=arguments["new_domain"],
+            tags=arguments.get("tags", ""),
+        )
+    elif name == "pkb_triage":
+        from agents.triage import triage_file
+        triage_result = await triage_file(
+            file_path=arguments.get("file_path", ""),
+            domain=arguments.get("domain", ""),
+            categorize_mode=arguments.get("categorize_mode", ""),
+        )
+        if triage_result.get("status") == "error":
+            return {"status": "error", "error": triage_result.get("error", "Unknown error")}
+        # Triage prepared the data; now write to DBs
+        result = _ingest_content(
+            triage_result["parsed_text"],
+            triage_result["domain"],
+            metadata=triage_result["metadata"],
+        )
+        result["filename"] = triage_result["filename"]
+        result["categorize_mode"] = triage_result.get("categorize_mode", "")
+        result["triage_status"] = triage_result["status"]
+        return result
+    elif name == "pkb_rectify":
+        from agents.rectify import rectify
+        return await rectify(
+            neo4j_driver=get_neo4j(),
+            chroma_client=get_chroma(),
+            redis_client=get_redis(),
+            checks=arguments.get("checks"),
+            auto_fix=arguments.get("auto_fix", False),
+            stale_days=arguments.get("stale_days", 90),
+        )
     raise ValueError(f"Unknown tool: {name}")
 
 
@@ -784,6 +914,155 @@ async def agent_query_endpoint(req: AgentQueryRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Agent query error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
+# PHASE 2: TRIAGE ENDPOINT
+# ============================================================
+
+
+class TriageFileRequest(BaseModel):
+    file_path: str
+    domain: str = ""
+    categorize_mode: str = ""
+    tags: str = ""
+
+
+@app.post("/agent/triage")
+async def triage_file_endpoint(req: TriageFileRequest):
+    """
+    Triage a file through the LangGraph ingestion pipeline.
+
+    Runs the file through validation, parsing, categorization routing,
+    metadata extraction, and chunking. Then writes to ChromaDB + Neo4j + Redis.
+    """
+    try:
+        from agents.triage import triage_file
+
+        triage_result = await triage_file(
+            file_path=req.file_path,
+            domain=req.domain,
+            categorize_mode=req.categorize_mode,
+            tags=req.tags,
+        )
+
+        if triage_result.get("status") == "error":
+            raise HTTPException(status_code=400, detail=triage_result.get("error", "Triage failed"))
+
+        # Write prepared data to databases
+        result = _ingest_content(
+            triage_result["parsed_text"],
+            triage_result["domain"],
+            metadata=triage_result["metadata"],
+        )
+        result["filename"] = triage_result["filename"]
+        result["categorize_mode"] = triage_result.get("categorize_mode", "")
+        result["triage_status"] = triage_result["status"]
+        result["is_structured"] = triage_result.get("is_structured", False)
+        return result
+
+    except HTTPException:
+        raise
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Triage error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class RectifyRequest(BaseModel):
+    checks: Optional[List[str]] = None
+    auto_fix: bool = False
+    stale_days: int = 90
+
+
+@app.post("/agent/rectify")
+async def rectify_endpoint(req: RectifyRequest):
+    """
+    Run knowledge base health checks and optional auto-fix.
+
+    Checks: duplicates, stale, orphans, distribution.
+    """
+    try:
+        from agents.rectify import rectify
+
+        result = await rectify(
+            neo4j_driver=get_neo4j(),
+            chroma_client=get_chroma(),
+            redis_client=get_redis(),
+            checks=req.checks,
+            auto_fix=req.auto_fix,
+            stale_days=req.stale_days,
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Rectify error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class TriageBatchRequest(BaseModel):
+    files: List[Dict[str, str]]
+    default_mode: str = ""
+
+
+@app.post("/agent/triage/batch")
+async def triage_batch_endpoint(req: TriageBatchRequest):
+    """
+    Triage a batch of files. Each file is processed independently.
+    Failures don't stop the batch.
+    """
+    try:
+        from agents.triage import triage_batch
+
+        triage_results = await triage_batch(
+            files=req.files,
+            default_mode=req.default_mode,
+        )
+
+        # Write successful triages to databases
+        final_results = []
+        for triage_result in triage_results:
+            if triage_result.get("status") == "error":
+                final_results.append({
+                    "filename": triage_result.get("filename", ""),
+                    "status": "error",
+                    "error": triage_result.get("error", ""),
+                })
+                continue
+
+            try:
+                result = _ingest_content(
+                    triage_result["parsed_text"],
+                    triage_result["domain"],
+                    metadata=triage_result["metadata"],
+                )
+                result["filename"] = triage_result["filename"]
+                result["triage_status"] = triage_result["status"]
+                final_results.append(result)
+            except Exception as e:
+                final_results.append({
+                    "filename": triage_result.get("filename", ""),
+                    "status": "error",
+                    "error": str(e),
+                })
+
+        succeeded = sum(1 for r in final_results if r.get("status") == "success")
+        failed = sum(1 for r in final_results if r.get("status") == "error")
+        duplicates = sum(1 for r in final_results if r.get("status") == "duplicate")
+
+        return {
+            "total": len(final_results),
+            "succeeded": succeeded,
+            "failed": failed,
+            "duplicates": duplicates,
+            "results": final_results,
+        }
+
+    except Exception as e:
+        logger.error(f"Batch triage error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
