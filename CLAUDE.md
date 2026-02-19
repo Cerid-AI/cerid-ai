@@ -4,7 +4,7 @@
 
 Cerid AI is a self-hosted, privacy-first Personal AI Knowledge Companion. It unifies multi-domain knowledge bases (code, finance, projects, artifacts) into a context-aware LLM interface with RAG-powered retrieval and intelligent agents. All data stays local; only LLM API calls go external.
 
-**Status:** Phase 0–2 complete. **Phase 2 (Agents) fully deployed** — Query, Triage, Rectification, Audit, and Maintenance agents operational; LLM reranking and 12 MCP tools live.
+**Status:** Phase 0–2 complete, **Phase 3 (Dashboard) deployed**. All 5 agents operational (Query, Triage, Rectification, Audit, Maintenance); 12 MCP tools; Streamlit dashboard at port 8501.
 
 ## Architecture
 
@@ -24,6 +24,7 @@ Microservices architecture with Docker Compose orchestration on a shared `llm-ne
 | PostgreSQL+pgvector | 5432 | via `stacks/librechat/` | RAG vector storage |
 | Meilisearch | 7700 | via `stacks/librechat/` | Full-text search |
 | RAG API | 8000 | via `stacks/librechat/` | Document processing |
+| Dashboard | 8501 | `src/gui/` | Streamlit admin UI |
 
 ### Key Data Flow
 
@@ -64,6 +65,10 @@ Bifrost classifies intent (coding/research/simple/general) and routes to the app
 │   │   └── maintenance.py            # System health, stale cleanup, collection analysis
 │   ├── Dockerfile
 │   ├── docker-compose.yml
+│   └── requirements.txt
+├── src/gui/
+│   ├── app.py                        # Streamlit dashboard (5 panes)
+│   ├── Dockerfile
 │   └── requirements.txt
 ├── stacks/
 │   ├── bifrost/                      # LLM Gateway
@@ -342,10 +347,25 @@ curl -X POST http://localhost:8888/agent/maintain \
 
 LangGraph >=0.2.0, langchain-core, langchain-openai, langchain-community
 
+## Phase 3: Streamlit Dashboard
+
+Admin and monitoring UI at `http://localhost:8501` (container: `ai-companion-dashboard`).
+
+**Panes:**
+- **Overview** — System health, domain distribution charts, collection listing
+- **Artifacts** — Browse/filter artifacts by domain, recategorize from UI
+- **Query** — Interactive multi-domain search with result visualization
+- **Audit** — Activity timeline, ingestion stats, cost estimates, query patterns
+- **Maintenance** — Health checks, stale detection, collection analysis, orphan cleanup
+
+**Stack:** Streamlit + Plotly + Pandas, communicates with MCP server REST API.
+
+**Start:** `cd src/mcp && docker compose up -d` (dashboard service included via `depends_on: mcp-server`)
+
 ## Roadmap
 
 - **Phase 1 (Complete):** File ingestion, metadata extraction, AI categorization, deduplication, watcher, CLI, production hardening
 - **Phase 1.5 (Complete):** Bulk ingest hardening — concurrent CLI (ThreadPoolExecutor), watcher retry queue, atomic dedup (UNIQUE CONSTRAINT), query improvements (real relevance scores, source attribution, token budget), pdfplumber for structured PDF table extraction
 - **Phase 2 (Complete):** Query Agent + LLM reranking, Triage Agent (LangGraph), Rectification Agent, Audit Agent, Maintenance Agent, MCP tool expansion (12 tools)
-- **Phase 3:** Streamlit dashboard, Obsidian integration
+- **Phase 3 (Complete):** Streamlit dashboard with 5 panes (Overview, Artifacts, Query, Audit, Maintenance). **Remaining:** Obsidian integration
 - **Phase 4:** Redis caching optimization, LUKS encryption, production hardening
