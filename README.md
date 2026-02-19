@@ -4,7 +4,7 @@
 
 A privacy-first, local-first workspace that unifies multi-domain knowledge bases (code, finance, projects, personal artifacts) into a context-aware LLM interface with RAG-powered retrieval, file ingestion, and intelligent agents.
 
-[![Status](https://img.shields.io/badge/Status-Phase%202%20Query%20Agent%20Complete-blue)]()
+[![Status](https://img.shields.io/badge/Status-Phase%203%20Dashboard%20Complete-blue)]()
 [![License](https://img.shields.io/badge/License-Private-red)]()
 
 ---
@@ -16,15 +16,18 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 **Key Capabilities:**
 
 - **Multi-Provider LLM Access** via Bifrost gateway (Claude, GPT, Grok, Gemini, DeepSeek, Llama)
-- **File-Based Ingestion Pipeline** with structure-aware document parsing (PDF tables as Markdown via pdfplumber, DOCX, XLSX, CSV, 30+ text formats), metadata extraction, and AI categorization
-- **Multi-Domain Query Agent** with intelligent context assembly, deduplication, and cross-collection search
-- **RAG-Powered Context Injection** for token-efficient knowledge retrieval (2-4k tokens/query)
+- **5 Intelligent Agents** — Query (LLM reranking), Triage (LangGraph), Rectification, Audit, Maintenance
+- **12 MCP Tools** for knowledge base operations from LibreChat chat UI
+- **Streamlit Admin Dashboard** with 5 panes (Overview, Artifacts, Query, Audit, Maintenance)
+- **File-Based Ingestion Pipeline** with structure-aware parsing (PDF tables as Markdown via pdfplumber, DOCX, XLSX, CSV, 30+ formats)
+- **Multi-Domain Query Agent** with parallel retrieval, LLM reranking, and token budget enforcement
+- **RAG-Powered Context Injection** for token-efficient knowledge retrieval (14k char budget)
 - **Local Vector & Graph Storage** (ChromaDB, Neo4j, Redis)
 - **MCP SSE Protocol** for tool integration with LibreChat UI
-- **Three-Tier AI Categorization** (manual, smart, pro) for flexible ingestion workflows
-- **Artifact Tracking & Recategorization** with full audit trail
-- **File Deduplication** via SHA-256 content hashing
-- **Privacy-First Architecture** — all data local, encrypted storage planned
+- **Three-Tier AI Categorization** (manual, smart, pro) via Bifrost
+- **Obsidian Vault Integration** — auto-sync vault notes into knowledge base
+- **File Deduplication** via SHA-256 content hashing with atomic Neo4j constraints
+- **Privacy-First Architecture** — all data local, only LLM API calls go external
 
 ---
 
@@ -50,13 +53,14 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 │  Port: 8080              │    │   Port: 8888                        │
 │  Routes to OpenRouter    │    │                                     │
 └──────────┬───────────────┘    │   REST:  /health /query /ingest     │
-           │                    │          /ingest_file /recategorize  │
-           ▼                    │          /artifacts /ingest_log      │
-┌──────────────────────────┐    │   SSE:   /mcp/sse /mcp/messages     │
-│      OpenRouter API      │    │   Tools: pkb_query, pkb_ingest,     │
-│ (Claude, GPT, Gemini,    │    │          pkb_ingest_file, pkb_health│
-│  Grok, DeepSeek, etc.)   │    │          pkb_collections            │
-└──────────────────────────┘    └──────────┬──────────────────────────┘
+           │                    │          /agent/query /agent/triage  │
+           ▼                    │          /agent/rectify /agent/audit │
+┌──────────────────────────┐    │          /agent/maintain             │
+│      OpenRouter API      │    │   SSE:   /mcp/sse /mcp/messages     │
+│ (Claude, GPT, Gemini,    │    │   Tools: 12 MCP tools (pkb_*)       │
+│  Grok, DeepSeek, etc.)   │    │   Agents: Query, Triage, Rectify,  │
+└──────────────────────────┘    │           Audit, Maintenance        │
+                                └──────────┬──────────────────────────┘
                                            │
                                 ┌──────────┼──────────┐
                                 │          │          │
@@ -129,6 +133,7 @@ curl -s http://localhost:8888/health | python3 -m json.tool
 | Service | URL | Purpose |
 |---------|-----|---------|
 | LibreChat | http://localhost:3080 | Main chat interface |
+| Dashboard | http://localhost:8501 | Streamlit admin UI |
 | MCP API | http://localhost:8888 | Knowledge base API |
 | API Docs | http://localhost:8888/docs | Swagger/OpenAPI docs |
 | Bifrost | http://localhost:8080 | LLM gateway dashboard |
@@ -217,9 +222,16 @@ curl http://localhost:8888/ingest_log?limit=10
 | POST | `/ingest` | Ingest raw text content |
 | POST | `/ingest_file` | Parse + ingest file with metadata |
 | POST | `/recategorize` | Move artifact between domains |
+| POST | `/agent/query` | Multi-domain query with LLM reranking |
+| POST | `/agent/triage` | LangGraph-powered file triage |
+| POST | `/agent/triage/batch` | Batch triage with per-file error recovery |
+| POST | `/agent/rectify` | Knowledge base health checks + auto-fix |
+| POST | `/agent/audit` | Activity, ingestion, cost, query reports |
+| POST | `/agent/maintain` | System health, stale detection, cleanup |
 
 **MCP SSE:** `/mcp/sse` (SSE stream) + `/mcp/messages` (JSON-RPC 2.0)
-**MCP Tools:** `pkb_query`, `pkb_ingest`, `pkb_ingest_file`, `pkb_health`, `pkb_collections`
+
+**MCP Tools (12):** `pkb_query`, `pkb_ingest`, `pkb_ingest_file`, `pkb_health`, `pkb_collections`, `pkb_agent_query`, `pkb_artifacts`, `pkb_recategorize`, `pkb_triage`, `pkb_rectify`, `pkb_audit`, `pkb_maintain`
 
 ---
 
@@ -240,8 +252,14 @@ cerid-ai/
 │   └── start-cerid.sh                   # Stack startup script
 │
 ├── src/mcp/                             # MCP Server (main application)
-│   ├── main.py                          # FastAPI server (769 lines)
+│   ├── main.py                          # FastAPI server (REST + SSE + agents)
 │   ├── config.py                        # Central configuration
+│   ├── agents/
+│   │   ├── query_agent.py               # Multi-domain query + LLM reranking
+│   │   ├── triage.py                    # LangGraph triage agent
+│   │   ├── rectify.py                   # Knowledge base health + conflict resolution
+│   │   ├── audit.py                     # Usage analytics + cost estimation
+│   │   └── maintenance.py               # System health + automated cleanup
 │   ├── utils/
 │   │   ├── parsers.py                   # Extensible file parser registry
 │   │   ├── metadata.py                  # Metadata extraction + AI categorization
@@ -250,9 +268,15 @@ cerid-ai/
 │   │   └── cache.py                     # Redis audit logging
 │   ├── scripts/
 │   │   ├── watch_ingest.py              # Watchdog folder watcher (host process)
+│   │   ├── watch_obsidian.py            # Obsidian vault watcher (host process)
 │   │   └── ingest_cli.py                # Batch CLI ingest tool
 │   ├── Dockerfile
 │   ├── docker-compose.yml
+│   └── requirements.txt
+│
+├── src/gui/                             # Streamlit Admin Dashboard
+│   ├── app.py                           # Dashboard (5 panes)
+│   ├── Dockerfile
 │   └── requirements.txt
 │
 └── stacks/
@@ -332,6 +356,7 @@ tar czf cerid-backup-$(date +%Y%m%d).tar.gz \
 | 3080 | LibreChat | LibreChat | Chat UI |
 | 8080 | Bifrost | bifrost | LLM Gateway |
 | 8888 | MCP Server | ai-companion-mcp | Knowledge Base API |
+| 8501 | Dashboard | ai-companion-dashboard | Streamlit Admin UI |
 | 8000 | RAG API | rag_api | Document Processing |
 | 8001 | ChromaDB | ai-companion-chroma | Vector Store |
 | 7474 | Neo4j HTTP | ai-companion-neo4j | Graph DB Browser |
@@ -379,19 +404,20 @@ tar czf cerid-backup-$(date +%Y%m%d).tar.gz \
 - [x] Atomic deduplication via Neo4j UNIQUE CONSTRAINT on content_hash
 - [x] Query: real relevance scores, source attribution, 14k-char token budget
 
-### Phase 2: Enhanced Search & Agent Workflows (Next)
+### Phase 2: Enhanced Search & Agent Workflows ✅
 
-- [ ] Multi-domain search across collections
-- [ ] Query Agent (LangGraph) with cross-domain context assembly
-- [ ] Triage Agent wrapping ingestion pipeline
-- [ ] Rectification Agent for conflict detection
-- [ ] Audit Agent for hallucination checks
-- [ ] MCP tool expansion (pkb_search, pkb_artifacts, pkb_recategorize)
+- [x] Multi-domain search across collections with parallel retrieval
+- [x] Query Agent with LLM reranking (Llama 3.1 free tier) and token budget enforcement
+- [x] Triage Agent (LangGraph) wrapping ingestion pipeline with conditional routing
+- [x] Rectification Agent for duplicate/stale/orphan detection + auto-fix
+- [x] Audit Agent for activity tracking, cost estimation, query patterns
+- [x] Maintenance Agent for system health, stale cleanup, collection analysis
+- [x] MCP tool expansion — 12 tools total (pkb_query, pkb_agent_query, pkb_triage, pkb_rectify, pkb_audit, pkb_maintain, etc.)
 
-### Phase 3: GUI & Advanced Features
+### Phase 3: Dashboard & Integrations ✅
 
-- [ ] Streamlit dashboard (ingestion pane, artifact browser, audit pane)
-- [ ] Obsidian vault integration
+- [x] Streamlit admin dashboard with 5 panes (Overview, Artifacts, Query, Audit, Maintenance)
+- [x] Obsidian vault watcher (auto-sync vault notes into knowledge base)
 - [ ] Feedback loop for LLM output capture
 
 ### Phase 4: Optimization & Production

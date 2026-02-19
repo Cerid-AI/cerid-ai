@@ -56,6 +56,7 @@ Bifrost classifies intent (coding/research/simple/general) and routes to the app
 │   │   └── cache.py                  # Redis audit logging
 │   ├── scripts/
 │   │   ├── watch_ingest.py           # Watchdog folder watcher (host process)
+│   │   ├── watch_obsidian.py         # Obsidian vault watcher (host process)
 │   │   └── ingest_cli.py             # Batch CLI ingest tool
 │   ├── agents/
 │   │   ├── query_agent.py            # Multi-domain query with LLM reranking (Phase 2)
@@ -152,6 +153,12 @@ python src/mcp/scripts/watch_ingest.py [--mode smart|pro|manual]
 ```bash
 python src/mcp/scripts/ingest_cli.py --dir ~/cerid-archive/ [--mode smart] [--domain coding] [--workers 4]
 ```
+
+**Obsidian vault watcher (host process):**
+```bash
+python src/mcp/scripts/watch_obsidian.py --vault ~/Obsidian/MyVault [--domain personal] [--mode smart]
+```
+Monitors `.md` files only. Uses `/ingest` (text endpoint) since the vault isn't Docker-mounted. Higher debounce (5s) for Obsidian auto-save. Skips `.obsidian/`, `.trash/`, and files <10 bytes.
 
 **Archive folder structure:**
 ```
@@ -367,5 +374,5 @@ Admin and monitoring UI at `http://localhost:8501` (container: `ai-companion-das
 - **Phase 1 (Complete):** File ingestion, metadata extraction, AI categorization, deduplication, watcher, CLI, production hardening
 - **Phase 1.5 (Complete):** Bulk ingest hardening — concurrent CLI (ThreadPoolExecutor), watcher retry queue, atomic dedup (UNIQUE CONSTRAINT), query improvements (real relevance scores, source attribution, token budget), pdfplumber for structured PDF table extraction
 - **Phase 2 (Complete):** Query Agent + LLM reranking, Triage Agent (LangGraph), Rectification Agent, Audit Agent, Maintenance Agent, MCP tool expansion (12 tools)
-- **Phase 3 (Complete):** Streamlit dashboard with 5 panes (Overview, Artifacts, Query, Audit, Maintenance). **Remaining:** Obsidian integration
+- **Phase 3 (Complete):** Streamlit dashboard with 5 panes (Overview, Artifacts, Query, Audit, Maintenance). Obsidian vault watcher for auto-sync into knowledge base.
 - **Phase 4:** Redis caching optimization, LUKS encryption, production hardening
