@@ -224,6 +224,49 @@ MCP_TOOLS = [
             },
         },
     },
+    {
+        "name": "pkb_audit",
+        "description": "Generate audit reports: activity summary, ingestion stats, cost estimates, and query patterns",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "reports": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Reports to generate: activity, ingestion, costs, queries. Empty for all.",
+                },
+                "hours": {
+                    "type": "integer",
+                    "description": "Time window in hours for activity report",
+                    "default": 24,
+                },
+            },
+        },
+    },
+    {
+        "name": "pkb_maintain",
+        "description": "Run maintenance routines: system health check, stale artifact detection, collection analysis, orphan cleanup",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "actions": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Actions to run: health, stale, collections, orphans. Empty for all.",
+                },
+                "stale_days": {
+                    "type": "integer",
+                    "description": "Days threshold for stale artifact detection",
+                    "default": 90,
+                },
+                "auto_purge": {
+                    "type": "boolean",
+                    "description": "Automatically purge stale artifacts and orphaned chunks",
+                    "default": False,
+                },
+            },
+        },
+    },
 ]
 
 
@@ -681,6 +724,23 @@ async def execute_tool(name: str, arguments: Dict) -> Any:
             auto_fix=arguments.get("auto_fix", False),
             stale_days=arguments.get("stale_days", 90),
         )
+    elif name == "pkb_audit":
+        from agents.audit import audit
+        return await audit(
+            redis_client=get_redis(),
+            reports=arguments.get("reports"),
+            hours=arguments.get("hours", 24),
+        )
+    elif name == "pkb_maintain":
+        from agents.maintenance import maintain
+        return await maintain(
+            neo4j_driver=get_neo4j(),
+            chroma_client=get_chroma(),
+            redis_client=get_redis(),
+            actions=arguments.get("actions"),
+            stale_days=arguments.get("stale_days", 90),
+            auto_purge=arguments.get("auto_purge", False),
+        )
     raise ValueError(f"Unknown tool: {name}")
 
 
@@ -1000,6 +1060,58 @@ async def rectify_endpoint(req: RectifyRequest):
         return result
     except Exception as e:
         logger.error(f"Rectify error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class AuditRequest(BaseModel):
+    reports: Optional[List[str]] = None
+    hours: int = 24
+
+
+@app.post("/agent/audit")
+async def audit_endpoint(req: AuditRequest):
+    """
+    Generate audit reports: activity summary, ingestion stats, costs, query patterns.
+    """
+    try:
+        from agents.audit import audit
+
+        result = await audit(
+            redis_client=get_redis(),
+            reports=req.reports,
+            hours=req.hours,
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Audit error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class MaintenanceRequest(BaseModel):
+    actions: Optional[List[str]] = None
+    stale_days: int = 90
+    auto_purge: bool = False
+
+
+@app.post("/agent/maintain")
+async def maintain_endpoint(req: MaintenanceRequest):
+    """
+    Run maintenance routines: health check, stale detection, collection analysis, orphan cleanup.
+    """
+    try:
+        from agents.maintenance import maintain
+
+        result = await maintain(
+            neo4j_driver=get_neo4j(),
+            chroma_client=get_chroma(),
+            redis_client=get_redis(),
+            actions=req.actions,
+            stale_days=req.stale_days,
+            auto_purge=req.auto_purge,
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Maintenance error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

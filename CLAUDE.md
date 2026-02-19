@@ -4,7 +4,7 @@
 
 Cerid AI is a self-hosted, privacy-first Personal AI Knowledge Companion. It unifies multi-domain knowledge bases (code, finance, projects, artifacts) into a context-aware LLM interface with RAG-powered retrieval and intelligent agents. All data stays local; only LLM API calls go external.
 
-**Status:** Phase 0 (Infrastructure) complete. Phase 1 (Core Ingestion) + Phase 1.5 (Bulk Hardening) implemented. **Phase 2 (Agents) largely complete** — Query, Triage, Rectification agents deployed; LLM reranking and full MCP tool suite operational.
+**Status:** Phase 0–2 complete. **Phase 2 (Agents) fully deployed** — Query, Triage, Rectification, Audit, and Maintenance agents operational; LLM reranking and 12 MCP tools live.
 
 ## Architecture
 
@@ -59,7 +59,9 @@ Bifrost classifies intent (coding/research/simple/general) and routes to the app
 │   ├── agents/
 │   │   ├── query_agent.py            # Multi-domain query with LLM reranking (Phase 2)
 │   │   ├── triage.py                 # LangGraph triage agent for intelligent ingestion routing
-│   │   └── rectify.py                # Knowledge base health checks and conflict resolution
+│   │   ├── rectify.py                # Knowledge base health checks and conflict resolution
+│   │   ├── audit.py                  # Operation tracking, cost estimation, usage analytics
+│   │   └── maintenance.py            # System health, stale cleanup, collection analysis
 │   ├── Dockerfile
 │   ├── docker-compose.yml
 │   └── requirements.txt
@@ -102,12 +104,14 @@ cd src/mcp && docker compose up -d
 - `POST /agent/triage` — LangGraph-powered file triage (validate → parse → categorize → chunk)
 - `POST /agent/triage/batch` — Batch triage with per-file error recovery
 - `POST /agent/rectify` — Knowledge base health checks (duplicates, stale, orphans, distribution)
+- `POST /agent/audit` — Audit reports (activity, ingestion stats, costs, query patterns)
+- `POST /agent/maintain` — Maintenance routines (health, stale detection, collection analysis, orphan cleanup)
 
 **MCP protocol:**
 - `GET /mcp/sse` — SSE stream (MCP protocol, JSON-RPC 2.0)
 - `POST /mcp/messages?sessionId=X` — JSON-RPC handler
 
-MCP tools (10 total):
+MCP tools (12 total):
 - `pkb_query` — Single-domain query
 - `pkb_ingest` — Ingest raw text
 - `pkb_ingest_file` — Ingest a file with parsing and metadata
@@ -118,6 +122,8 @@ MCP tools (10 total):
 - `pkb_recategorize` — Move artifact between domains
 - `pkb_triage` — LangGraph-powered file triage
 - `pkb_rectify` — Knowledge base health checks and auto-fix
+- `pkb_audit` — Audit reports (activity, ingestion, costs, queries)
+- `pkb_maintain` — Maintenance routines (health, stale, collections, orphans)
 
 ### Ingestion Pipeline
 
@@ -292,6 +298,46 @@ curl -X POST http://localhost:8888/agent/rectify \
   -d '{"auto_fix": true, "stale_days": 60}'
 ```
 
+### Audit Agent (`agents/audit.py`)
+
+Operation tracking, cost estimation, and usage analytics from the Redis audit trail.
+
+**Reports:**
+- **activity** — Event counts, domain breakdown, hourly timeline, recent failures
+- **ingestion** — File type distribution, duplicate rate, avg chunks per file
+- **costs** — Token usage estimates by tier (smart/pro/rerank), USD cost projections
+- **queries** — Most-queried domains, average results per query
+
+**Usage:**
+```bash
+curl -X POST http://localhost:8888/agent/audit \
+  -H "Content-Type: application/json" \
+  -d '{"reports": ["activity", "costs"], "hours": 48}'
+```
+
+### Maintenance Agent (`agents/maintenance.py`)
+
+Comprehensive system health checks and automated cleanup.
+
+**Actions:**
+- **health** — Full connectivity check (ChromaDB, Neo4j, Redis, Bifrost) + data counts
+- **stale** — Detect artifacts older than N days with optional auto-purge
+- **collections** — Collection size analysis, missing/extra collection detection
+- **orphans** — Find and optionally clean orphaned ChromaDB chunks
+
+**Usage:**
+```bash
+# Read-only health check
+curl -X POST http://localhost:8888/agent/maintain \
+  -H "Content-Type: application/json" \
+  -d '{"actions": ["health", "collections"]}'
+
+# Auto-purge stale + orphans
+curl -X POST http://localhost:8888/agent/maintain \
+  -H "Content-Type: application/json" \
+  -d '{"auto_purge": true, "stale_days": 60}'
+```
+
 ### Dependencies
 
 LangGraph >=0.2.0, langchain-core, langchain-openai, langchain-community
@@ -300,6 +346,6 @@ LangGraph >=0.2.0, langchain-core, langchain-openai, langchain-community
 
 - **Phase 1 (Complete):** File ingestion, metadata extraction, AI categorization, deduplication, watcher, CLI, production hardening
 - **Phase 1.5 (Complete):** Bulk ingest hardening — concurrent CLI (ThreadPoolExecutor), watcher retry queue, atomic dedup (UNIQUE CONSTRAINT), query improvements (real relevance scores, source attribution, token budget), pdfplumber for structured PDF table extraction
-- **Phase 2 (Largely Complete):** Query Agent + LLM reranking, Triage Agent (LangGraph), Rectification Agent, MCP tool expansion (10 tools). **Remaining:** Audit Agent, Maintenance Agent
+- **Phase 2 (Complete):** Query Agent + LLM reranking, Triage Agent (LangGraph), Rectification Agent, Audit Agent, Maintenance Agent, MCP tool expansion (12 tools)
 - **Phase 3:** Streamlit dashboard, Obsidian integration
 - **Phase 4:** Redis caching optimization, LUKS encryption, production hardening
