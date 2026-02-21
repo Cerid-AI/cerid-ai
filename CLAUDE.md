@@ -1,5 +1,10 @@
 # CLAUDE.md - Cerid AI
 
+> **Extends:** `~/Develop/CLAUDE.md` — all global workflow orchestration, core principles, and task
+> management rules apply here. This file adds only project-specific context.
+
+---
+
 ## Project Overview
 
 Cerid AI is a self-hosted, privacy-first Personal AI Knowledge Companion. It unifies multi-domain knowledge bases (code, finance, projects, artifacts) into a context-aware LLM interface with RAG-powered retrieval and intelligent agents. All data stays local; only LLM API calls go external.
