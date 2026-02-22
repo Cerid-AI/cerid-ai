@@ -1,8 +1,8 @@
 # Cerid AI - Project Plan & Technical Reference
 
-**Document Version:** 4.0
-**Date:** February 21, 2026
-**Status:** Phases 0-3 Complete — Phase 4 Active (see `docs/PHASE4_PLAN.md`)
+**Document Version:** 5.0
+**Date:** February 22, 2026
+**Status:** Phases 0–5 Complete
 **Repository:** https://github.com/sunrunnerfire/cerid-ai (private)
 **Owner:** Justin (@sunrunnerfire)
 
@@ -46,13 +46,18 @@ Cerid AI is a **self-hosted Personal AI Knowledge Companion** — a privacy-firs
 
 ### Key Capabilities
 
-- **Multi-Provider LLM Access** via Bifrost gateway (Claude, GPT, Grok, Gemini, DeepSeek)
-- **File-Based Ingestion Pipeline** with document parsing, metadata extraction, and AI categorization
-- **RAG-Powered Context Injection** for token-efficient knowledge retrieval (2-4k tokens/query)
+- **Multi-Provider LLM Access** via Bifrost gateway (Claude, GPT, Grok, Gemini, DeepSeek, Llama)
+- **5 Intelligent Agents** — Query (LLM reranking), Triage (LangGraph), Rectification, Audit, Maintenance
+- **12 MCP Tools** for knowledge base operations from LibreChat chat UI
+- **Hybrid BM25+Vector Search** with knowledge graph traversal and cross-domain connections
+- **Streamlit Admin Dashboard** with 5 panes (Overview, Artifacts, Query, Audit, Maintenance)
+- **File-Based Ingestion Pipeline** with structure-aware parsing (PDF tables via pdfplumber, DOCX, XLSX, CSV, 30+ formats)
+- **RAG-Powered Context Injection** for token-efficient knowledge retrieval (14k char budget)
+- **Multi-Machine Sync** via Dropbox — JSONL export/import with auto-import on startup
+- **Scheduled Maintenance** via APScheduler with proactive knowledge surfacing
 - **Local Vector & Graph Storage** (ChromaDB, Neo4j, Redis)
 - **MCP SSE Protocol** for tool integration with LibreChat UI
 - **Three-Tier AI Categorization** (manual, smart, pro) for flexible ingestion workflows
-- **Recategorization Workflow** for moving artifacts between domains with full audit trail
 - **Privacy-First Architecture** — all data local, only LLM API calls external
 
 ### Core Principles
@@ -85,7 +90,9 @@ Cerid AI is a **self-hosted Personal AI Knowledge Companion** — a privacy-firs
 | Phase 1.5 | Bulk Ingest Hardening | ✅ Complete |
 | Phase 2 | Enhanced Search & Agent Workflows | ✅ Complete |
 | Phase 3 | GUI & Dashboard | ✅ Complete |
-| Phase 4 | Smarter Retrieval, Automation & Polish | 🔄 Active — see `docs/PHASE4_PLAN.md` |
+| Phase 4 | Smarter Retrieval, Automation & Polish | ✅ Complete |
+| Phase 5 | Multi-Machine Dev & Sync | ✅ Complete |
+| Phase 6 | Production Hardening | 📋 Planned |
 
 ### Phase 0 Deliverables (Complete ✅)
 
@@ -153,6 +160,36 @@ Cerid AI is a **self-hosted Personal AI Knowledge Companion** — a privacy-firs
 - [x] PDF tables extracted as Markdown (header separators, column alignment preserved)
 - [x] Non-table text extracted separately via bounding box exclusion (no duplication)
 
+### Phase 2 Deliverables (Complete ✅)
+
+- [x] Multi-domain search across all 5 ChromaDB collections with parallel retrieval
+- [x] Query Agent with LLM reranking via Bifrost (60% LLM rank + 40% embedding score)
+- [x] Triage Agent (LangGraph) — validate → parse → route → categorize → chunk
+- [x] Rectification Agent — duplicate/stale/orphan detection with auto-fix
+- [x] Audit Agent — activity tracking, cost estimation, query patterns
+- [x] Maintenance Agent — system health, stale cleanup, collection analysis
+- [x] MCP tool expansion: 5 → 12 tools
+
+### Phase 3 Deliverables (Complete ✅)
+
+- [x] Streamlit admin dashboard (5 panes: Overview, Artifacts, Query, Audit, Maintenance)
+- [x] Obsidian vault watcher (`watch_obsidian.py`)
+
+### Phase 4 Deliverables (Complete ✅)
+
+- [x] **4A:** Modular refactor — main.py split into 7 FastAPI routers (`routers/`)
+- [x] **4B:** Hybrid BM25+vector search (`utils/bm25.py`), knowledge graph traversal, cross-domain connections, temporal awareness
+- [x] **4C:** APScheduler background jobs, proactive knowledge surfacing, smart ingestion, event-driven webhooks
+- [x] **4D:** 36 pytest tests, GitHub Actions CI, security cleanup, centralized encrypted `.env`, Apache 2.0 license
+
+### Phase 5 Deliverables (Complete ✅)
+
+- [x] Infrastructure compose: `stacks/infrastructure/docker-compose.yml` (Neo4j, ChromaDB, Redis)
+- [x] 4-step startup script, environment validation (`scripts/validate-env.sh`)
+- [x] Knowledge base sync CLI (`scripts/cerid-sync.py` — export/import/status)
+- [x] Auto-import on startup (`src/mcp/sync_check.py`) for empty databases
+- [x] Secrets management: age encryption (`env-lock.sh`, `env-unlock.sh`)
+
 ### Verified Functionality
 
 ```bash
@@ -170,7 +207,8 @@ curl http://localhost:8888/collections               # Per-domain collections
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| Docker Infrastructure | ✅ Healthy | All 10 containers running |
+| Docker Infrastructure | ✅ Healthy | All 13 containers running |
+| Dashboard | ✅ Healthy | Port 8501, Streamlit admin UI |
 | LibreChat UI | ✅ Healthy | Port 3080, MCP tools connected |
 | Bifrost Gateway | ✅ Healthy | Port 8080, OpenRouter connected |
 | MCP Server | ✅ Healthy | Port 8888, REST + SSE + Ingestion |
@@ -444,6 +482,13 @@ User files and database volumes never enter the git repo:
 | POST | `/recategorize` | Move artifact between domains | ✅ Phase 1 |
 | GET | `/artifacts` | List artifacts (filter by domain) | ✅ Phase 1 |
 | GET | `/ingest_log` | Redis audit trail | ✅ Phase 1 |
+| POST | `/agent/query` | Multi-domain query with LLM reranking | ✅ Phase 2 |
+| POST | `/agent/triage` | LangGraph file triage | ✅ Phase 2 |
+| POST | `/agent/triage/batch` | Batch triage with error recovery | ✅ Phase 2 |
+| POST | `/agent/rectify` | KB health checks + auto-fix | ✅ Phase 2 |
+| POST | `/agent/audit` | Audit reports | ✅ Phase 2 |
+| POST | `/agent/maintain` | Maintenance routines | ✅ Phase 2 |
+| POST | `/digest` | Daily knowledge digest | ✅ Phase 4C |
 
 **MCP SSE Endpoints:**
 
@@ -463,6 +508,13 @@ User files and database volumes never enter the git repo:
 | `pkb_ingest_file` | Ingest file with parsing | `file_path`, `domain`, `categorize_mode` |
 | `pkb_health` | Check service health | (none) |
 | `pkb_collections` | List collections | (none) |
+| `pkb_agent_query` | Multi-domain query with LLM reranking | `query`, `domains`, `top_k` |
+| `pkb_artifacts` | List/filter artifacts | `domain`, `limit` |
+| `pkb_recategorize` | Move artifact between domains | `artifact_id`, `new_domain` |
+| `pkb_triage` | LangGraph file triage | `file_path` |
+| `pkb_rectify` | KB health checks + auto-fix | `auto_fix`, `stale_days` |
+| `pkb_audit` | Audit reports | `reports`, `hours` |
+| `pkb_maintain` | Maintenance routines | `actions`, `auto_purge` |
 
 ### 5.4 Storage Services
 
@@ -771,10 +823,19 @@ Single source of truth for all configurable values. No hardcoded domains, extens
 
 ### 7.1 Environment Variables
 
-**stacks/librechat/.env:**
+**Root `.env`** (encrypted as `.env.age` with age):
 ```bash
 OPENROUTER_API_KEY=sk-or-v1-xxxxx    # Required - OpenRouter API key
 OPENAI_API_KEY=sk-or-v1-xxxxx        # Same key - used by RAG API for embeddings
+NEO4J_PASSWORD=...                    # Neo4j database password
+# Plus other service credentials
+```
+
+**Secrets management:**
+```bash
+./scripts/env-lock.sh     # Encrypt .env → .env.age
+./scripts/env-unlock.sh   # Decrypt .env.age → .env
+# Age key: ~/.config/cerid/age-key.txt (installed from dotfiles repo)
 ```
 
 ### 7.2 LibreChat Configuration
@@ -898,14 +959,17 @@ numpy<2
 ### 8.1 Start All Services
 
 ```bash
-# Using start script (recommended)
-~/cerid-ai/scripts/start-cerid.sh
+# Using start script (recommended — 4-step automated startup)
+./scripts/start-cerid.sh
+# [1/4] Infrastructure (Neo4j, ChromaDB, Redis)
+# [2/4] Bifrost
+# [3/4] MCP + Dashboard
+# [4/4] LibreChat
 
-# Or manually:
-docker network create llm-network 2>/dev/null || true
-cd ~/cerid-ai/stacks/bifrost && docker compose up -d
-cd ~/cerid-ai/src/mcp && docker compose up -d
-cd ~/cerid-ai/stacks/librechat && docker compose up -d
+# Validate environment
+./scripts/validate-env.sh          # full (14 checks)
+./scripts/validate-env.sh --quick  # containers only
+./scripts/validate-env.sh --fix    # auto-start missing
 ```
 
 ### 8.2 Stop All Services
@@ -914,6 +978,7 @@ cd ~/cerid-ai/stacks/librechat && docker compose up -d
 cd ~/cerid-ai/stacks/librechat && docker compose down
 cd ~/cerid-ai/src/mcp && docker compose down
 cd ~/cerid-ai/stacks/bifrost && docker compose down
+cd ~/cerid-ai/stacks/infrastructure && docker compose down
 ```
 
 ### 8.3 Check Status
@@ -1012,10 +1077,20 @@ curl -X POST http://localhost:8080/v1/chat/completions \
 
 ### 8.10 Backup
 
+Preferred method — knowledge base sync CLI:
+```bash
+python3 scripts/cerid-sync.py export          # dump to ~/Dropbox/cerid-sync/
+python3 scripts/cerid-sync.py import          # merge from sync dir
+python3 scripts/cerid-sync.py import --force  # overwrite local
+python3 scripts/cerid-sync.py status          # compare local vs sync
+```
+
+Manual backup:
 ```bash
 tar czf cerid-backup-$(date +%Y%m%d).tar.gz \
   ~/cerid-ai/src/mcp/data \
-  ~/cerid-ai/stacks/librechat/.env \
+  ~/cerid-ai/stacks/infrastructure/data \
+  ~/cerid-ai/.env \
   ~/cerid-ai/stacks/bifrost/data
 ```
 
@@ -1109,7 +1184,9 @@ docker exec ai-companion-mcp python -m spacy download en_core_web_sm
 | Phase 1.5 | Bulk Ingest Hardening | ✅ Complete |
 | Phase 2 | Enhanced Search & Agent Workflows | ✅ Complete |
 | Phase 3 | GUI & Dashboard | ✅ Complete |
-| Phase 4 | Smarter Retrieval, Automation & Polish | 🔄 Active — see `docs/PHASE4_PLAN.md` |
+| Phase 4 | Smarter Retrieval, Automation & Polish | ✅ Complete |
+| Phase 5 | Multi-Machine Dev & Sync | ✅ Complete |
+| Phase 6 | Production Hardening | 📋 Planned |
 
 ### Phase 0: Infrastructure (Complete ✅)
 
@@ -1154,90 +1231,43 @@ docker exec ai-companion-mcp python -m spacy download en_core_web_sm
 - [x] Query improvements: real relevance scores, source attribution, 14k-char token budget
 - [x] PDF parser upgrade: pypdf → pdfplumber (tables → Markdown, bbox exclusion for non-table text)
 
-### Phase 2: Enhanced Search & Agent Workflows (Next 🔄)
+### Phase 2: Enhanced Search & Agent Workflows (Complete ✅)
 
-**Goals:** Context-aware search, query refinement, and foundational agent patterns.
+- [x] Multi-domain search across all 5 ChromaDB collections with parallel retrieval
+- [x] Query Agent with LLM reranking (Llama 3.1 free tier, 60% LLM + 40% embedding blend)
+- [x] Triage Agent (LangGraph) — validate → parse → route → categorize → chunk, with batch mode
+- [x] Rectification Agent — duplicate/stale/orphan detection with auto-fix
+- [x] Audit Agent — activity tracking, cost estimation, query patterns from Redis audit trail
+- [x] Maintenance Agent — system health, stale cleanup, collection analysis, orphan detection
+- [x] MCP tool expansion: 5 → 12 tools (pkb_agent_query, pkb_triage, pkb_rectify, pkb_audit, pkb_maintain, pkb_artifacts, pkb_recategorize)
 
-**Planned Tasks:**
+### Phase 3: Dashboard & Integrations (Complete ✅)
 
-1. **Enhanced Query Capabilities**
-   - Multi-domain search (query across multiple collections simultaneously)
-   - Relevance scoring improvements (beyond default ChromaDB cosine similarity)
-   - Query result ranking with confidence scores
-   - Context assembly with token budget management (<4k tokens)
+- [x] Streamlit admin dashboard with 5 panes (Overview, Artifacts, Query, Audit, Maintenance)
+- [x] Obsidian vault watcher (`watch_obsidian.py`) — monitors `.md` files, 5s debounce
 
-2. **Query Agent** (`src/mcp/agents/query.py`)
-   - LangGraph-based agent for intelligent query routing
-   - ChromaDB similarity search + Neo4j relationship traversal
-   - Cross-domain context assembly
-   - Ranked suggestions with previews
+### Phase 4: Smarter Retrieval, Automation & Polish (Complete ✅)
 
-3. **Triage Agent Enhancement** (`src/mcp/agents/triage.py`)
-   - LangGraph graph wrapping the existing ingestion pipeline
-   - Conditional routing based on file type and content
-   - Batch processing with error recovery
-   - Integration with existing parser registry
+See `docs/PHASE4_PLAN.md` for full implementation details.
 
-4. **Rectification Agent** (`src/mcp/agents/rectify.py`)
-   - Neo4j queries for outdated or conflicting data
-   - Conflict detection between related artifacts
-   - Auto-update graph relationships
-   - Confidence scoring with AI fallback
+- [x] **4A:** Modular refactor — split main.py into 7 FastAPI routers (`routers/`)
+- [x] **4B:** Hybrid BM25+vector search, knowledge graph traversal (RELATES_TO, DEPENDS_ON, SUPERSEDES, REFERENCES), cross-domain connections, temporal awareness (recency boost with 30-day half-life)
+- [x] **4C:** APScheduler background jobs (daily rectification, 6-hourly health, weekly stale), proactive knowledge surfacing, smart ingestion, event-driven webhooks
+- [x] **4D:** 36 pytest tests, GitHub Actions CI (ruff + pytest + Docker build), security cleanup, centralized encrypted `.env`, Apache 2.0 license, CONTRIBUTING.md
 
-5. **Audit Agent** (`src/mcp/agents/audit.py`)
-   - Post-response similarity check (hallucination detection)
-   - Flag generation with confidence scores
-   - RSS monitoring (feedparser) for external events
+### Phase 5: Multi-Machine Dev & Sync (Complete ✅)
 
-6. **Maintenance Agent** (`src/mcp/agents/maintenance.py`)
-   - Scheduled execution for periodic tasks
-   - Git repo sync and diff-indexing
-   - Stale artifact detection and cleanup
+- [x] Infrastructure compose: `stacks/infrastructure/docker-compose.yml` (Neo4j 5-community, ChromaDB 0.5.23, Redis 7-alpine)
+- [x] 4-step startup script, environment validation (`scripts/validate-env.sh` with --quick, --fix flags)
+- [x] Knowledge base sync CLI (`scripts/cerid-sync.py` — export/import/status via JSONL)
+- [x] Auto-import on startup for empty databases (`src/mcp/sync_check.py`)
+- [x] Secrets management: age encryption (`env-lock.sh`, `env-unlock.sh`)
 
-7. **MCP Tool Expansion**
-   - `pkb_search` — multi-domain semantic search
-   - `pkb_artifacts` — list/filter artifacts from chat
-   - `pkb_recategorize` — recategorize from chat
+### Phase 6: Production Hardening (Planned 📋)
 
-8. **LibreChat Integration Enhancement**
-   - YAML prompts with `{{mcp_context}}` placeholder
-   - Parameter presets (factual: temp=0.1)
-   - Memory integration via MCP tools
-
-### Phase 3: GUI & Advanced Features
-
-**Goals:** Unified dashboard for oversight and advanced workflows.
-
-**Planned Tasks:**
-
-1. **Streamlit Dashboard** (`src/gui/app.py`)
-   - Ingestion Pane (file upload, triage preview)
-   - Context Pane (search results, selections)
-   - Artifact Browser (list, filter, recategorize)
-   - Token/Cost Pane (metrics, usage tracking)
-   - Audit Pane (flags, resolve buttons)
-
-2. **Obsidian Integration**
-   - File watcher for Obsidian vault
-   - Webhook to ingestion pipeline on changes
-   - Vault sync configuration
-
-3. **Feedback Loop**
-   - LLM output capture
-   - Artifact extraction (code blocks, tables)
-   - Auto-ingest pipeline for generated content
-
-### Phase 4: Smarter Retrieval, Workflow Automation & Showcase Polish
-
-**Goals:** Enhance cerid-ai as a personal power tool and showcase piece. Add intelligent retrieval, workflow automation, and engineering polish. Lay framework for open repo and commercial viability.
-
-**Full plan with sub-phase specs, model assignments, and handoff protocol:** See `docs/PHASE4_PLAN.md`
-
-**Summary:**
-- **4A:** Modular refactor — split main.py into FastAPI routers
-- **4B:** Smarter retrieval — hybrid search (vector + BM25), knowledge graph traversal, cross-domain connections, temporal awareness
-- **4C:** Workflow automation — scheduled maintenance (APScheduler), proactive knowledge surfacing, smart ingestion pipeline, event-driven webhooks
-- **4D:** Showcase polish — pytest, GitHub Actions CI/CD, security cleanup (.env migration), open-source readiness (Apache 2.0, CONTRIBUTING.md)
+- [ ] Redis query caching
+- [ ] Encryption at rest
+- [ ] Production hardening
 
 ---
 
@@ -1268,7 +1298,7 @@ docker exec ai-companion-mcp python -m spacy download en_core_web_sm
 |--------|--------|---------|
 | Monthly Tokens (AI categorization) | <20k | ~400 per file |
 | Memory Usage | <4GB total | Monitoring |
-| Container Count | 10 | ✅ 10 |
+| Container Count | 13 | ✅ 13 |
 
 ---
 
@@ -1279,6 +1309,7 @@ docker exec ai-companion-mcp python -m spacy download en_core_web_sm
 | 3080 | LibreChat | LibreChat | Chat UI |
 | 8080 | Bifrost | bifrost | LLM Gateway |
 | 8888 | MCP Server | ai-companion-mcp | Knowledge Base API |
+| 8501 | Dashboard | ai-companion-dashboard | Streamlit Admin UI |
 | 8000 | RAG API | rag_api | Document Processing |
 | 8001 | ChromaDB | ai-companion-chroma | Vector Store |
 | 7474 | Neo4j HTTP | ai-companion-neo4j | Graph DB Browser |
@@ -1312,14 +1343,24 @@ docker exec ai-companion-mcp python -m spacy download en_core_web_sm
 | CLI Ingest | `~/cerid-ai/src/mcp/scripts/ingest_cli.py` |
 | MCP Docker Compose | `~/cerid-ai/src/mcp/docker-compose.yml` |
 | LibreChat Config | `~/cerid-ai/stacks/librechat/librechat.yaml` |
-| LibreChat Env | `~/cerid-ai/stacks/librechat/.env` |
+| Root Env | `~/cerid-ai/.env` (encrypted as `.env.age`) |
 | Bifrost Config | `~/cerid-ai/stacks/bifrost/data/config.json` |
 | Start Script | `~/cerid-ai/scripts/start-cerid.sh` |
+| Validation | `~/cerid-ai/scripts/validate-env.sh` |
+| Sync CLI | `~/cerid-ai/scripts/cerid-sync.py` |
+| Routers | `~/cerid-ai/src/mcp/routers/` |
+| BM25 Search | `~/cerid-ai/src/mcp/utils/bm25.py` |
+| Scheduler | `~/cerid-ai/src/mcp/scheduler.py` |
+| Sync Library | `~/cerid-ai/src/mcp/cerid_sync_lib.py` |
+| Dashboard | `~/cerid-ai/src/gui/app.py` |
+| Obsidian Watcher | `~/cerid-ai/src/mcp/scripts/watch_obsidian.py` |
+| Infrastructure | `~/cerid-ai/stacks/infrastructure/docker-compose.yml` |
+| Infrastructure Data | `~/cerid-ai/stacks/infrastructure/data/` |
 | Persistent Data | `~/cerid-ai/src/mcp/data/` |
 | User Archive | `~/cerid-archive/` |
 | Project Reference | `~/cerid-ai/docs/CERID_AI_PROJECT_REFERENCE.md` |
 
 ---
 
-*Document updated: February 21, 2026*
-*Phases 0-3 complete. Phase 4 active — see `docs/PHASE4_PLAN.md` for implementation plan.*
+*Document updated: February 22, 2026*
+*Phases 0–5 complete. Phase 6 planned.*
