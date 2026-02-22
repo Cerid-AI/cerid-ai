@@ -1,7 +1,18 @@
+import { AppLayout } from "@/components/layout/app-layout"
+import type { Pane } from "@/components/layout/sidebar"
+
+function PanePlaceholder({ pane }: { pane: Pane }) {
+  return (
+    <div className="flex h-full items-center justify-center text-muted-foreground">
+      <p className="text-lg">{pane.charAt(0).toUpperCase() + pane.slice(1)} — coming soon</p>
+    </div>
+  )
+}
+
 export default function App() {
   return (
-    <div className="flex h-screen items-center justify-center bg-background text-foreground">
-      <p className="text-lg text-muted-foreground">Cerid AI — loading...</p>
-    </div>
+    <AppLayout>
+      {(activePane) => <PanePlaceholder pane={activePane} />}
+    </AppLayout>
   )
 }
