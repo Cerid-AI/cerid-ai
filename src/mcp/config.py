@@ -139,3 +139,9 @@ WEBHOOK_ENDPOINTS = [
 # ---------------------------------------------------------------------------
 REDIS_INGEST_LOG = "ingest:log"
 REDIS_LOG_MAX = 10_000
+
+# ---------------------------------------------------------------------------
+# Sync (Phase 5B)
+# ---------------------------------------------------------------------------
+SYNC_DIR = os.path.expanduser(os.getenv("CERID_SYNC_DIR", "~/Dropbox/cerid-sync"))
+MACHINE_ID = os.getenv("CERID_MACHINE_ID", os.uname().nodename.split(".")[0])

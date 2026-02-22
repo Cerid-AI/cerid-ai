@@ -29,6 +29,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Neo4j schema init failed (will retry on first use): {e}")
 
+    # Auto-import from sync directory if DB is empty (Phase 5B)
+    try:
+        from sync_check import auto_import_if_empty
+        auto_import_if_empty()
+    except Exception as e:
+        logger.warning(f"Sync auto-import check failed: {e}")
+
     # Start scheduled maintenance engine (Phase 4C.1)
     try:
         start_scheduler()
