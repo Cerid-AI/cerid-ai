@@ -73,7 +73,7 @@ WATCH_FOLDER = os.getenv("WATCH_FOLDER", os.path.expanduser("~/cerid-archive")) 
 CHROMA_URL = os.getenv("CHROMA_URL", "http://ai-companion-chroma:8000")
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://ai-companion-neo4j:7687")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "REDACTED_PASSWORD")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "")
 REDIS_URL = os.getenv("REDIS_URL", "redis://ai-companion-redis:6379")
 
 # ---------------------------------------------------------------------------

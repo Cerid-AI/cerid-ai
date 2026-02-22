@@ -4,6 +4,17 @@
 OPENROUTER_API_KEY*
 OPENAI_API_KEY*
 
+# Environment dumps & inventory
+src/mcp/docs/inventory/
+
+# SQLite databases
+*.db
+*.db-shm
+*.db-wal
+*.db.backup
+*.db.latest
+*.db.new
+
 # Runtime data & volumes
 data/
 uploads/
