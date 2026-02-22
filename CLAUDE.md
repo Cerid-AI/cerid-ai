@@ -9,7 +9,7 @@
 
 Cerid AI is a self-hosted, privacy-first Personal AI Knowledge Companion. It unifies multi-domain knowledge bases (code, finance, projects, artifacts) into a context-aware LLM interface with RAG-powered retrieval and intelligent agents. All data stays local; only LLM API calls go external.
 
-**Status:** Phase 0–2 complete, **Phase 3 (Dashboard) deployed**. All 5 agents operational (Query, Triage, Rectification, Audit, Maintenance); 12 MCP tools; Streamlit dashboard at port 8501.
+**Status:** Phase 0–4 complete. **Phase 5 (Multi-Machine Sync) planned** — see `docs/plans/2026-02-22-multi-machine-sync-plan.md`. All 5 agents operational; 12 MCP tools; Streamlit dashboard at port 8501; hybrid BM25+vector search; scheduled maintenance; CI/CD pipeline.
 
 ## Architecture
 
@@ -22,9 +22,9 @@ Microservices architecture with Docker Compose orchestration on a shared `llm-ne
 | LibreChat (UI) | 3080 | `stacks/librechat/` | Node.js/React |
 | MCP Server (API) | 8888 | `src/mcp/` | FastAPI / Python 3.11 |
 | Bifrost (LLM Gateway) | 8080 | `stacks/bifrost/` | Semantic intent routing |
-| ChromaDB (Vectors) | 8001 | via `src/mcp/docker-compose.yml` | Vector DB |
-| Neo4j (Graph) | 7474/7687 | via `src/mcp/docker-compose.yml` | Graph DB |
-| Redis (Cache) | 6379 | via `src/mcp/docker-compose.yml` | Cache + audit log |
+| ChromaDB (Vectors) | 8001 | **NOT YET IN COMPOSE** — see Phase 5 plan | Vector DB |
+| Neo4j (Graph) | 7474/7687 | **NOT YET IN COMPOSE** — see Phase 5 plan | Graph DB |
+| Redis (Cache) | 6379 | **NOT YET IN COMPOSE** — see Phase 5 plan | Cache + audit log |
 | MongoDB (Chat) | 27017 | via `stacks/librechat/` | LibreChat persistence |
 | PostgreSQL+pgvector | 5432 | via `stacks/librechat/` | RAG vector storage |
 | Meilisearch | 7700 | via `stacks/librechat/` | Full-text search |
@@ -85,16 +85,29 @@ Bifrost classifies intent (coding/research/simple/general) and routes to the app
 
 ## Development
 
+### Secrets Management
+
+Single `.env` file at repo root, encrypted with `age`. The decryption key lives outside the repo at `~/.config/cerid/age-key.txt`.
+
+```bash
+# Decrypt secrets (first time on a new machine)
+./scripts/env-unlock.sh
+
+# Re-encrypt after editing .env
+./scripts/env-lock.sh
+```
+
+**On a new machine:** Install `age` (`brew install age`), copy the key file from the primary machine, then run `env-unlock.sh`. The `.env.age` file travels with the repo; the key does not.
+
 ### Starting the Stack
 
 ```bash
-./scripts/start-cerid.sh
-# Or manually:
-docker network create llm-network  # first time only
-cd stacks/bifrost && docker compose up -d
-cd stacks/librechat && docker compose up -d
-cd src/mcp && docker compose up -d
+./scripts/start-cerid.sh   # auto-decrypts .env if needed
 ```
+
+> **WARNING:** Neo4j, ChromaDB, and Redis are NOT defined in any docker-compose file yet.
+> They must exist as standalone containers or be started manually. Phase 5 will fix this
+> by adding `stacks/infrastructure/docker-compose.yml`. See `docs/plans/2026-02-22-multi-machine-sync-plan.md`.
 
 ### MCP Server API (src/mcp/main.py)
 
@@ -196,8 +209,8 @@ curl -X POST http://localhost:8888/recategorize \
 
 ### Configuration
 
+- `.env` (repo root) — All secrets. Encrypted as `.env.age`. Never committed in plaintext.
 - `src/mcp/config.py` — Domains, extensions, categorization tiers, DB URLs
-- `stacks/librechat/.env` — API keys (OPENROUTER_API_KEY). Not committed.
 - `stacks/bifrost/config.yaml` — Intent classification, model routing, budget
 - `stacks/librechat/librechat.yaml` — MCP servers, endpoints, model list
 
@@ -225,7 +238,7 @@ curl http://localhost:8888/ingest_log?limit=10
 
 - Docker services use container-name-based discovery on `llm-network`
 - MCP protocol uses SSE transport with session-based message queuing
-- Secrets go in `.env` files, never committed
+- Secrets go in root `.env`, encrypted as `.env.age` via `age`. Key at `~/.config/cerid/age-key.txt`
 - User files (`~/cerid-archive/`) mounted read-only, never in git repo
 - Symlinks used for `artifacts/` and `data/` — don't break them
 - ChromaDB metadata values are strings/ints only (lists stored as JSON strings)
@@ -380,8 +393,11 @@ Admin and monitoring UI at `http://localhost:8501` (container: `ai-companion-das
 - **Phase 1.5 (Complete):** Bulk ingest hardening — concurrent CLI (ThreadPoolExecutor), watcher retry queue, atomic dedup (UNIQUE CONSTRAINT), query improvements (real relevance scores, source attribution, token budget), pdfplumber for structured PDF table extraction
 - **Phase 2 (Complete):** Query Agent + LLM reranking, Triage Agent (LangGraph), Rectification Agent, Audit Agent, Maintenance Agent, MCP tool expansion (12 tools)
 - **Phase 3 (Complete):** Streamlit dashboard with 5 panes (Overview, Artifacts, Query, Audit, Maintenance). Obsidian vault watcher for auto-sync into knowledge base.
-- **Phase 4 (Active):** See `docs/PHASE4_PLAN.md` for full plan with sub-phase specs, model assignments, and handoff protocol.
-  - **4A:** Modular refactor — split main.py into FastAPI routers (Sonnet)
-  - **4B:** Smarter retrieval — hybrid search, knowledge graph traversal, cross-domain connections, temporal awareness (Sonnet/Opus)
-  - **4C:** Workflow automation — scheduled maintenance, proactive knowledge surfacing, smart ingestion, webhooks (Sonnet/Opus)
-  - **4D:** Showcase polish — tests, CI/CD, security cleanup, open-source readiness (Sonnet)
+- **Phase 4 (Complete):** See `docs/PHASE4_PLAN.md` for details.
+  - **4A:** Modular refactor — split main.py into FastAPI routers
+  - **4B:** Smarter retrieval — hybrid BM25+vector search, knowledge graph traversal, cross-domain connections, temporal awareness
+  - **4C:** Workflow automation — scheduled maintenance (APScheduler), proactive knowledge surfacing, smart ingestion, webhooks
+  - **4D:** Engineering polish — 36 tests passing, GitHub Actions CI, security cleanup (secrets scrubbed from history), centralized encrypted `.env`
+- **Phase 5 (Planned):** Multi-machine dev environment & knowledge sync. See `docs/plans/2026-02-22-multi-machine-sync-plan.md`.
+  - **5A:** Infrastructure — docker-compose for Neo4j/ChromaDB/Redis, validate-env.sh, startup script update
+  - **5B:** Knowledge sync — export/import via database APIs, Dropbox/iCloud sync directory, auto-import on startup
