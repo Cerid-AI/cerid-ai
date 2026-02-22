@@ -9,7 +9,7 @@
 
 Cerid AI is a self-hosted, privacy-first Personal AI Knowledge Companion. It unifies multi-domain knowledge bases (code, finance, projects, artifacts) into a context-aware LLM interface with RAG-powered retrieval and intelligent agents. All data stays local; only LLM API calls go external.
 
-**Status:** Phase 0–4 complete. **Phase 5 (Multi-Machine Sync) planned** — see `docs/plans/2026-02-22-multi-machine-sync-plan.md`. All 5 agents operational; 12 MCP tools; Streamlit dashboard at port 8501; hybrid BM25+vector search; scheduled maintenance; CI/CD pipeline.
+**Status:** Phase 0–5 complete. All 5 agents operational; 12 MCP tools; Streamlit dashboard at port 8501; hybrid BM25+vector search; scheduled maintenance; CI/CD pipeline; multi-machine sync via Dropbox.
 
 ## Architecture
 
@@ -22,9 +22,9 @@ Microservices architecture with Docker Compose orchestration on a shared `llm-ne
 | LibreChat (UI) | 3080 | `stacks/librechat/` | Node.js/React |
 | MCP Server (API) | 8888 | `src/mcp/` | FastAPI / Python 3.11 |
 | Bifrost (LLM Gateway) | 8080 | `stacks/bifrost/` | Semantic intent routing |
-| ChromaDB (Vectors) | 8001 | **NOT YET IN COMPOSE** — see Phase 5 plan | Vector DB |
-| Neo4j (Graph) | 7474/7687 | **NOT YET IN COMPOSE** — see Phase 5 plan | Graph DB |
-| Redis (Cache) | 6379 | **NOT YET IN COMPOSE** — see Phase 5 plan | Cache + audit log |
+| ChromaDB (Vectors) | 8001 | `stacks/infrastructure/` | Vector DB |
+| Neo4j (Graph) | 7474/7687 | `stacks/infrastructure/` | Graph DB |
+| Redis (Cache) | 6379 | `stacks/infrastructure/` | Cache + audit log |
 | MongoDB (Chat) | 27017 | via `stacks/librechat/` | LibreChat persistence |
 | PostgreSQL+pgvector | 5432 | via `stacks/librechat/` | RAG vector storage |
 | Meilisearch | 7700 | via `stacks/librechat/` | Full-text search |
@@ -48,35 +48,54 @@ Bifrost classifies intent (coding/research/simple/general) and routes to the app
 ```
 ├── README.md                         # Project overview and quick start
 ├── CLAUDE.md                         # This file — developer guide for AI sessions
-├── scripts/start-cerid.sh            # One-command stack startup
+├── .env.age                          # Encrypted secrets (age)
+├── .env.example                      # Template for .env
+├── scripts/
+│   ├── start-cerid.sh                # One-command 4-step stack startup
+│   ├── validate-env.sh               # Pre-flight environment validation
+│   ├── cerid-sync.py                 # Knowledge base sync CLI (export/import/status)
+│   ├── env-lock.sh                   # Encrypt .env → .env.age
+│   └── env-unlock.sh                 # Decrypt .env.age → .env
 ├── docs/CERID_AI_PROJECT_REFERENCE.md # Detailed technical reference
 ├── src/mcp/
-│   ├── main.py                       # FastAPI MCP server (REST + SSE + ingestion)
-│   ├── config.py                     # Central configuration (domains, tiers, URLs)
+│   ├── main.py                       # FastAPI MCP server entry point
+│   ├── config.py                     # Central configuration (domains, tiers, URLs, sync)
+│   ├── cerid_sync_lib.py             # Sync export/import library (JSONL)
+│   ├── sync_check.py                 # Auto-import on startup if DB empty
+│   ├── scheduler.py                  # APScheduler maintenance engine
+│   ├── deps.py                       # Dependency injection (DB singletons)
+│   ├── routers/                      # FastAPI routers (Phase 4A split)
+│   │   ├── health.py, query.py, ingestion.py, artifacts.py
+│   │   ├── agents.py, digest.py, mcp_sse.py
+│   │   └── __init__.py
 │   ├── utils/
 │   │   ├── parsers.py                # Extensible file parser registry
 │   │   ├── metadata.py               # Metadata extraction + AI categorization
 │   │   ├── chunker.py                # Token-based text chunking
 │   │   ├── graph.py                  # Neo4j artifact CRUD
+│   │   ├── bm25.py                   # BM25 keyword search index
 │   │   └── cache.py                  # Redis audit logging
 │   ├── scripts/
 │   │   ├── watch_ingest.py           # Watchdog folder watcher (host process)
 │   │   ├── watch_obsidian.py         # Obsidian vault watcher (host process)
 │   │   └── ingest_cli.py             # Batch CLI ingest tool
 │   ├── agents/
-│   │   ├── query_agent.py            # Multi-domain query with LLM reranking (Phase 2)
-│   │   ├── triage.py                 # LangGraph triage agent for intelligent ingestion routing
-│   │   ├── rectify.py                # Knowledge base health checks and conflict resolution
-│   │   ├── audit.py                  # Operation tracking, cost estimation, usage analytics
-│   │   └── maintenance.py            # System health, stale cleanup, collection analysis
+│   │   ├── query_agent.py            # Multi-domain query with LLM reranking
+│   │   ├── triage.py                 # LangGraph triage agent
+│   │   ├── rectify.py                # Knowledge base health checks
+│   │   ├── audit.py                  # Operation tracking, cost estimation
+│   │   └── maintenance.py            # System health, stale cleanup
 │   ├── Dockerfile
-│   ├── docker-compose.yml
+│   ├── docker-compose.yml            # MCP server + Dashboard
 │   └── requirements.txt
 ├── src/gui/
 │   ├── app.py                        # Streamlit dashboard (5 panes)
 │   ├── Dockerfile
 │   └── requirements.txt
 ├── stacks/
+│   ├── infrastructure/               # Neo4j, ChromaDB, Redis (Phase 5)
+│   │   ├── docker-compose.yml
+│   │   └── data/                     # Persistent DB data (.gitignored)
 │   ├── bifrost/                      # LLM Gateway
 │   └── librechat/                    # Chat UI
 ├── artifacts/ → ~/Dropbox/AI-Artifacts (symlink)
@@ -97,17 +116,34 @@ Single `.env` file at repo root, encrypted with `age`. The decryption key lives 
 ./scripts/env-lock.sh
 ```
 
-**On a new machine:** Install `age` (`brew install age`), run `bash ~/dotfiles/install.sh` (installs the key from the private dotfiles repo), then run `env-unlock.sh`. The `.env.age` file travels with the cerid repo; the key travels with dotfiles.
+**Second-machine bootstrap:**
+```bash
+git clone git@github.com:sunrunnerfire/dotfiles.git ~/dotfiles
+cd ~/dotfiles && bash install.sh          # age key + global CLAUDE.md
+brew install age
+git clone git@github.com:sunrunnerfire/cerid-ai.git ~/cerid-ai
+cd ~/cerid-ai && ./scripts/env-unlock.sh  # decrypt .env
+ln -s ~/Dropbox/cerid-archive ~/cerid-archive
+./scripts/start-cerid.sh                  # auto-imports KB from Dropbox sync
+./scripts/validate-env.sh
+```
 
 ### Starting the Stack
 
 ```bash
-./scripts/start-cerid.sh   # auto-decrypts .env if needed
+./scripts/start-cerid.sh   # auto-decrypts .env if needed, starts all 4 service groups
 ```
 
-> **WARNING:** Neo4j, ChromaDB, and Redis are NOT defined in any docker-compose file yet.
-> They must exist as standalone containers or be started manually. Phase 5 will fix this
-> by adding `stacks/infrastructure/docker-compose.yml`. See `docs/plans/2026-02-22-multi-machine-sync-plan.md`.
+Startup order: `[1/4]` Infrastructure (Neo4j, ChromaDB, Redis) → `[2/4]` Bifrost → `[3/4]` MCP + Dashboard → `[4/4]` LibreChat.
+
+### Environment Validation
+
+Run before starting work to verify the stack is ready:
+```bash
+./scripts/validate-env.sh          # full validation (14 checks)
+./scripts/validate-env.sh --quick  # containers only (Docker + health checks)
+./scripts/validate-env.sh --fix    # auto-start missing infrastructure
+```
 
 ### MCP Server API (src/mcp/main.py)
 
@@ -228,6 +264,36 @@ curl http://localhost:8888/artifacts
 curl http://localhost:8888/ingest_log?limit=10
 ```
 
+### Knowledge Base Sync
+
+Multi-machine sync via Dropbox using JSONL exports. Raw files live at `~/cerid-archive/` (symlinked to `~/Dropbox/cerid-archive`). Database snapshots sync via `~/Dropbox/cerid-sync/`.
+
+```bash
+# Export local KB to sync directory
+python3 scripts/cerid-sync.py export
+
+# Import from sync directory (non-destructive merge)
+python3 scripts/cerid-sync.py import
+
+# Force-overwrite local data from sync
+python3 scripts/cerid-sync.py import --force
+
+# Compare local vs sync snapshot
+python3 scripts/cerid-sync.py status
+```
+
+**Auto-import on startup:** When MCP starts with an empty Neo4j database and a valid `manifest.json` in the sync directory, it automatically imports all data. This enables zero-config bootstrap on a new machine.
+
+**Sync directory structure:**
+```
+~/Dropbox/cerid-sync/
+├── manifest.json           # Timestamps, counts, checksums
+├── neo4j/                  # artifacts.jsonl, domains.jsonl, relationships.jsonl
+├── chroma/                 # domain_*.jsonl (with embeddings)
+├── bm25/                   # BM25 corpus files
+└── redis/                  # audit_log.jsonl
+```
+
 ### Extensibility
 
 - **Parsers:** Registry pattern in `utils/parsers.py`. PDF uses pdfplumber (structure-aware). Add Docling later for OCR via `@register_parser`.
@@ -236,12 +302,15 @@ curl http://localhost:8888/ingest_log?limit=10
 
 ## Conventions
 
+- **Session start:** Run `./scripts/validate-env.sh --quick` at the beginning of every session
 - Docker services use container-name-based discovery on `llm-network`
 - MCP protocol uses SSE transport with session-based message queuing
 - Secrets go in root `.env`, encrypted as `.env.age` via `age`. Key at `~/.config/cerid/age-key.txt`
-- User files (`~/cerid-archive/`) mounted read-only, never in git repo
+- User files (`~/cerid-archive/`) mounted read-only, never in git repo. Symlinked to `~/Dropbox/cerid-archive` for multi-machine sync
 - Symlinks used for `artifacts/` and `data/` — don't break them
+- Infrastructure DB data at `stacks/infrastructure/data/` (.gitignored)
 - ChromaDB metadata values are strings/ints only (lists stored as JSON strings)
+- ChromaDB client version must match server (currently `>=0.5,<0.6`)
 - Error responses use `HTTPException` (returns `{"detail": "..."}`)
 - Neo4j Cypher: use explicit RETURN clauses, not map projections (breaks with Python string ops)
 - Deduplication: SHA-256 of parsed text, atomic via Neo4j UNIQUE CONSTRAINT on `content_hash`
@@ -398,6 +467,7 @@ Admin and monitoring UI at `http://localhost:8501` (container: `ai-companion-das
   - **4B:** Smarter retrieval — hybrid BM25+vector search, knowledge graph traversal, cross-domain connections, temporal awareness
   - **4C:** Workflow automation — scheduled maintenance (APScheduler), proactive knowledge surfacing, smart ingestion, webhooks
   - **4D:** Engineering polish — 36 tests passing, GitHub Actions CI, security cleanup (secrets scrubbed from history), centralized encrypted `.env`
-- **Phase 5 (Planned):** Multi-machine dev environment & knowledge sync. See `docs/plans/2026-02-22-multi-machine-sync-plan.md`.
-  - **5A:** Infrastructure — docker-compose for Neo4j/ChromaDB/Redis, validate-env.sh, startup script update
-  - **5B:** Knowledge sync — export/import via database APIs, Dropbox/iCloud sync directory, auto-import on startup
+- **Phase 5 (Complete):** Multi-machine dev environment & knowledge sync.
+  - **5A:** Infrastructure compose for Neo4j/ChromaDB/Redis (`stacks/infrastructure/`), 4-step startup script, environment validation
+  - **5B:** Knowledge base sync via JSONL — export/import CLI, auto-import on startup, Dropbox-based sync directory
+- **Phase 6:** Redis caching optimization, LUKS encryption, production hardening
