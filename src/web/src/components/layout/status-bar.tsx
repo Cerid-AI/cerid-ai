@@ -3,14 +3,14 @@ import { fetchHealth } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 export function StatusBar() {
-  const { data: health, isError } = useQuery({
+  const { data: health, isError, isLoading } = useQuery({
     queryKey: ["health"],
     queryFn: fetchHealth,
     refetchInterval: 15_000,
     retry: 1,
   })
 
-  const status = isError ? "error" : health?.status ?? "unknown"
+  const status = isLoading ? "loading" : isError ? "error" : health?.status ?? "unknown"
 
   return (
     <div className="flex h-8 items-center gap-4 border-t bg-muted/40 px-4 text-xs text-muted-foreground">
@@ -20,6 +20,7 @@ export function StatusBar() {
             "h-2 w-2 rounded-full",
             status === "healthy" && "bg-green-500",
             status === "degraded" && "bg-yellow-500",
+            status === "loading" && "bg-muted-foreground/50",
             (status === "error" || status === "unknown") && "bg-red-500"
           )}
         />
@@ -27,7 +28,8 @@ export function StatusBar() {
           {status === "healthy" && "All systems operational"}
           {status === "degraded" && "Some services degraded"}
           {status === "error" && "Connection error"}
-          {status === "unknown" && "Checking..."}
+          {status === "loading" && "Checking..."}
+          {status === "unknown" && "Unknown status"}
         </span>
       </div>
 
