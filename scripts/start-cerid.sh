@@ -1,20 +1,35 @@
 #!/bin/bash
 # Cerid AI - Startup Script
 
+set -euo pipefail
+CERID_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ENV_FILE="$CERID_ROOT/.env"
+
 echo "=== Starting Cerid AI Stack ==="
+
+# Auto-decrypt .env if missing but .env.age exists
+if [ ! -f "$ENV_FILE" ] && [ -f "$CERID_ROOT/.env.age" ]; then
+    echo "[env] Decrypting secrets..."
+    "$CERID_ROOT/scripts/env-unlock.sh"
+fi
+
+if [ ! -f "$ENV_FILE" ]; then
+    echo "Error: $ENV_FILE not found. Copy .env.example → .env and fill in values."
+    exit 1
+fi
 
 # Ensure network exists
 docker network create llm-network 2>/dev/null || true
 
-# Start in dependency order
+# Start in dependency order — all stacks read .env from repo root
 echo "[1/3] Starting Bifrost (LLM Gateway)..."
-cd ~/cerid-ai/stacks/bifrost && docker compose up -d
+docker compose -f "$CERID_ROOT/stacks/bifrost/docker-compose.yml" --env-file "$ENV_FILE" up -d
 
 echo "[2/3] Starting MCP Services..."
-cd ~/cerid-ai/src/mcp && docker compose up -d
+docker compose -f "$CERID_ROOT/src/mcp/docker-compose.yml" --env-file "$ENV_FILE" up -d
 
 echo "[3/3] Starting LibreChat..."
-cd ~/cerid-ai/stacks/librechat && docker compose up -d
+docker compose -f "$CERID_ROOT/stacks/librechat/docker-compose.yml" --env-file "$ENV_FILE" up -d
 
 echo ""
 echo "Waiting 30s for services to initialize..."

@@ -12,7 +12,7 @@ services:
       - .:/app
       - ~/cerid-archive:/archive:ro
     env_file:
-      - .env
+      - ../../.env
     environment:
       - CHROMA_URL=http://ai-companion-chroma:8000
       - NEO4J_URI=bolt://ai-companion-neo4j:7687

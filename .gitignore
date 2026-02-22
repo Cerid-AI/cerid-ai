@@ -1,5 +1,7 @@
 # Secrets & keys
 .env
+!.env.age
+!.env.example
 *.key
 OPENROUTER_API_KEY*
 OPENAI_API_KEY*
