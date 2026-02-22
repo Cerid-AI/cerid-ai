@@ -27,6 +27,12 @@ python-docx
 openpyxl>=3.1
 pandas>=2.0
 
+# Search
+rank_bm25>=0.2.2
+
+# Scheduling
+apscheduler>=3.10,<4
+
 # Utilities
 python-dotenv
 python-multipart

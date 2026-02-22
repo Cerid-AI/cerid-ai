@@ -1,6 +1,7 @@
 """Ingestion endpoints and core ingest service functions."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -21,6 +22,9 @@ from utils.parsers import parse_file
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion")
+
+# Concurrency limiter for ingestion (Phase 4C.3)
+_ingest_semaphore = asyncio.Semaphore(3)
 
 
 # ── Private helpers ────────────────────────────────────────────────────────────
@@ -48,6 +52,64 @@ def _check_duplicate(content_hash: str, domain: str) -> Optional[Dict]:
     except Exception as e:
         logger.warning(f"Dedup check failed (proceeding with ingest): {e}")
     return None
+
+
+def _reingest_artifact(
+    prev: Dict, content: str, domain: str, metadata: Optional[Dict], content_hash: str
+) -> Dict:
+    """Update an existing artifact with new content. Preserves relationships."""
+    chroma = get_chroma()
+    collection_name = f"domain_{domain.replace(' ', '_').lower()}"
+    collection = chroma.get_or_create_collection(name=collection_name)
+    artifact_id = prev["id"]
+
+    # Delete old chunks from ChromaDB
+    old_chunk_ids = json.loads(prev.get("chunk_ids", "[]") or "[]")
+    if old_chunk_ids:
+        try:
+            collection.delete(ids=old_chunk_ids)
+        except Exception as e:
+            logger.warning(f"Failed to delete old chunks during re-ingest: {e}")
+
+    # Create new chunks
+    chunks = chunk_text(content, max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP)
+    base_meta = {"domain": domain, "artifact_id": artifact_id, "ingested_at": datetime.utcnow().isoformat()}
+    if metadata:
+        base_meta.update(metadata)
+
+    chunk_ids = [f"{artifact_id}_chunk_{i}" for i in range(len(chunks))]
+    chunk_metadatas = [{**base_meta, "chunk_index": i} for i in range(len(chunks))]
+    collection.add(ids=chunk_ids, documents=chunks, metadatas=chunk_metadatas)
+
+    # BM25 index
+    try:
+        from utils.bm25 import index_chunks
+        index_chunks(domain, chunk_ids, chunks)
+    except Exception:
+        pass
+
+    # Update Neo4j artifact (preserves relationships)
+    try:
+        graph.update_artifact(
+            get_neo4j(),
+            artifact_id=artifact_id,
+            keywords_json=base_meta.get("keywords", "[]"),
+            summary=base_meta.get("summary", content[:200]),
+            chunk_count=len(chunks),
+            chunk_ids_json=json.dumps(chunk_ids),
+            content_hash=content_hash,
+        )
+    except Exception as e:
+        logger.error(f"Failed to update artifact in Neo4j during re-ingest: {e}")
+
+    logger.info(f"Re-ingested artifact {artifact_id[:8]} ({base_meta.get('filename', '?')})")
+    return {
+        "status": "updated",
+        "artifact_id": artifact_id,
+        "domain": domain,
+        "chunks": len(chunks),
+        "timestamp": datetime.utcnow().isoformat(),
+    }
 
 
 # ── Public service functions ───────────────────────────────────────────────────
@@ -81,8 +143,19 @@ def ingest_content(
             "duplicate_of": existing["filename"],
         }
 
+    # Re-ingestion check: same filename, different content (Phase 4C.3)
+    fname = (metadata or {}).get("filename", "text_input")
+    if fname != "text_input":
+        try:
+            prev = graph.find_artifact_by_filename(get_neo4j(), fname, domain)
+            if prev and prev["content_hash"] != content_hash:
+                return _reingest_artifact(prev, content, domain, metadata, content_hash)
+        except Exception as e:
+            logger.warning(f"Re-ingest check failed (proceeding as new): {e}")
+
     chunks = chunk_text(content, max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP)
-    base_meta = {"domain": domain, "artifact_id": artifact_id}
+    ingested_at = datetime.utcnow().isoformat()
+    base_meta = {"domain": domain, "artifact_id": artifact_id, "ingested_at": ingested_at}
     if metadata:
         base_meta.update(metadata)
 
@@ -90,6 +163,14 @@ def ingest_content(
     chunk_metadatas = [{**base_meta, "chunk_index": i} for i in range(len(chunks))]
     collection.add(ids=chunk_ids, documents=chunks, metadatas=chunk_metadatas)
 
+    # Index for BM25 hybrid search (Phase 4B.1)
+    try:
+        from utils.bm25 import index_chunks
+        index_chunks(domain, chunk_ids, chunks)
+    except Exception as e:
+        logger.warning(f"BM25 indexing failed (non-blocking): {e}")
+
+    artifact_created = False
     try:
         driver = get_neo4j()
         graph.create_artifact(
@@ -103,6 +184,7 @@ def ingest_content(
             chunk_ids_json=json.dumps(chunk_ids),
             content_hash=content_hash,
         )
+        artifact_created = True
     except Exception as e:
         err_msg = str(e).lower()
         if "constraint" in err_msg and "content_hash" in err_msg:
@@ -132,11 +214,53 @@ def ingest_content(
     except Exception as e:
         logger.error(f"Redis log failed: {e}")
 
+    # Discover and create relationships with existing artifacts (Phase 4B.2)
+    relationships_created = 0
+    if artifact_created:
+        try:
+            relationships_created = graph.discover_relationships(
+                driver=get_neo4j(),
+                artifact_id=artifact_id,
+                filename=base_meta.get("filename", "text_input"),
+                domain=domain,
+                keywords_json=base_meta.get("keywords", "[]"),
+                content=content[:5000],  # limit content scan for performance
+            )
+        except Exception as e:
+            logger.warning(f"Relationship discovery failed (non-blocking): {e}")
+
+    # Fire webhook notification (Phase 4C.4)
+    try:
+        import asyncio
+        from utils.webhooks import notify_ingestion_complete
+        asyncio.get_event_loop().create_task(
+            notify_ingestion_complete(artifact_id, domain, base_meta.get("filename", "text_input"), len(chunks))
+        )
+    except Exception:
+        pass
+
+    # Surface related artifacts in response (Phase 4C.2)
+    related = []
+    if relationships_created > 0:
+        try:
+            found = graph.find_related_artifacts(
+                get_neo4j(), artifact_ids=[artifact_id], depth=1, max_results=5,
+            )
+            related = [
+                {"id": r["id"], "filename": r["filename"], "domain": r["domain"],
+                 "relationship_type": r.get("relationship_type", "")}
+                for r in found
+            ]
+        except Exception:
+            pass
+
     return {
         "status": "success",
         "artifact_id": artifact_id,
         "domain": domain,
         "chunks": len(chunks),
+        "relationships_created": relationships_created,
+        "related": related,
         "timestamp": datetime.utcnow().isoformat(),
     }
 
@@ -201,18 +325,20 @@ class IngestFileRequest(BaseModel):
 
 @router.post("/ingest")
 async def ingest_endpoint(req: IngestRequest):
-    return ingest_content(req.content, req.domain)
+    async with _ingest_semaphore:
+        return ingest_content(req.content, req.domain)
 
 
 @router.post("/ingest_file")
 async def ingest_file_endpoint(req: IngestFileRequest):
     try:
-        return await ingest_file(
-            file_path=req.file_path,
-            domain=req.domain,
-            tags=req.tags,
-            categorize_mode=req.categorize_mode,
-        )
+        async with _ingest_semaphore:
+            return await ingest_file(
+                file_path=req.file_path,
+                domain=req.domain,
+                tags=req.tags,
+                categorize_mode=req.categorize_mode,
+            )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:

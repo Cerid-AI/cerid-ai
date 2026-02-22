@@ -100,7 +100,7 @@ src/mcp/
 ---
 
 ### 4B.2: Knowledge Graph Traversal
-- [ ] **Complete**
+- [x] **Complete**
 - **Model:** Opus
 - **Depends on:** 4A
 

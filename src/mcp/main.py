@@ -10,7 +10,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from deps import close_neo4j, get_neo4j
-from routers import agents, artifacts, health, ingestion, mcp_sse, query
+from routers import agents, artifacts, digest, health, ingestion, mcp_sse, query
+from scheduler import start_scheduler, stop_scheduler
 from utils import graph
 
 logging.basicConfig(
@@ -28,9 +29,16 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Neo4j schema init failed (will retry on first use): {e}")
 
+    # Start scheduled maintenance engine (Phase 4C.1)
+    try:
+        start_scheduler()
+    except Exception as e:
+        logger.warning(f"Scheduler start failed (server runs without it): {e}")
+
     yield
 
-    # Shutdown: close DB driver, clear MCP sessions
+    # Shutdown: stop scheduler, close DB driver, clear MCP sessions
+    stop_scheduler()
     close_neo4j()
     mcp_sse.clear_sessions()
 
@@ -49,11 +57,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(health.router)
-app.include_router(query.router)
-app.include_router(ingestion.router)
-app.include_router(artifacts.router)
-app.include_router(agents.router)
+# Register routers at root (backward compatibility) and /api/v1/ prefix
+_api_routers = [
+    health.router,
+    query.router,
+    ingestion.router,
+    artifacts.router,
+    agents.router,
+    digest.router,
+]
+for r in _api_routers:
+    app.include_router(r)
+    app.include_router(r, prefix="/api/v1")
+
+# MCP transport stays at root only (not versioned)
 app.include_router(mcp_sse.router)
 
 

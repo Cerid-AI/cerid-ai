@@ -32,12 +32,35 @@ def query_knowledge(query: str, domain: str = "general", top_k: int = 3) -> Dict
     docs = results["documents"][0]
     distances = results.get("distances", [[]])[0]
     metadatas = results.get("metadatas", [[]])[0]
+    chunk_ids = results.get("ids", [[]])[0]
+
+    # BM25 hybrid scoring (Phase 4B.1)
+    bm25_scores: dict = {}
+    try:
+        from utils import bm25 as bm25_mod
+        if bm25_mod.is_available():
+            bm25_hits = bm25_mod.search_bm25(domain, query, top_k=top_k)
+            if bm25_hits:
+                bm25_scores = dict(bm25_hits)
+    except Exception:
+        pass
 
     sources = []
     for i, doc in enumerate(docs):
         dist = distances[i] if i < len(distances) else 1.0
-        relevance = max(0.0, min(1.0, 1.0 - dist))
+        vector_score = max(0.0, min(1.0, 1.0 - dist))
         meta = metadatas[i] if i < len(metadatas) else {}
+        cid = chunk_ids[i] if i < len(chunk_ids) else ""
+
+        if bm25_scores:
+            kw_score = bm25_scores.get(cid, 0.0)
+            relevance = (
+                config.HYBRID_VECTOR_WEIGHT * vector_score
+                + config.HYBRID_KEYWORD_WEIGHT * kw_score
+            )
+        else:
+            relevance = vector_score
+
         sources.append({
             "content": doc[:200],
             "relevance": round(relevance, 3),

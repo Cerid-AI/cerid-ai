@@ -11,14 +11,16 @@ services:
       - ./main.py:/app/main.py
       - .:/app
       - ~/cerid-archive:/archive:ro
+    env_file:
+      - .env
     environment:
       - CHROMA_URL=http://ai-companion-chroma:8000
       - NEO4J_URI=bolt://ai-companion-neo4j:7687
       - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=REDACTED_PASSWORD
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
       - REDIS_URL=redis://ai-companion-redis:6379
       - PORT=8888
-      - CATEGORIZE_MODE=smart
+      - CATEGORIZE_MODE=${CATEGORIZE_MODE:-smart}
       - BIFROST_URL=http://bifrost:8080/v1
       - ARCHIVE_PATH=/archive
     networks:

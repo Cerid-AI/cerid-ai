@@ -260,6 +260,25 @@ MCP_TOOLS = [
             },
         },
     },
+    {
+        "name": "pkb_digest",
+        "description": "Get a summary of recent knowledge base activity: new artifacts, connections, and health status",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "hours": {
+                    "type": "integer",
+                    "description": "Lookback window in hours (default 24, max 168)",
+                    "default": 24,
+                },
+            },
+        },
+    },
+    {
+        "name": "pkb_scheduler_status",
+        "description": "Get the status of scheduled maintenance jobs",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
 ]
 
 
@@ -285,6 +304,7 @@ async def execute_tool(name: str, arguments: Dict) -> Any:
             use_reranking=arguments.get("use_reranking", True),
             chroma_client=get_chroma(),
             redis_client=get_redis(),
+            neo4j_driver=get_neo4j(),
         )
     elif name == "pkb_artifacts":
         domain = arguments.get("domain", "") or None
@@ -342,6 +362,12 @@ async def execute_tool(name: str, arguments: Dict) -> Any:
             stale_days=arguments.get("stale_days", 90),
             auto_purge=arguments.get("auto_purge", False),
         )
+    elif name == "pkb_digest":
+        from routers.digest import digest_endpoint
+        return await digest_endpoint(hours=arguments.get("hours", 24))
+    elif name == "pkb_scheduler_status":
+        from scheduler import get_job_status
+        return get_job_status()
     raise ValueError(f"Unknown tool: {name}")
 
 

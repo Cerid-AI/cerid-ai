@@ -61,6 +61,7 @@ async def agent_query_endpoint(req: AgentQueryRequest):
             use_reranking=req.use_reranking,
             chroma_client=get_chroma(),
             redis_client=get_redis(),
+            neo4j_driver=get_neo4j(),
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

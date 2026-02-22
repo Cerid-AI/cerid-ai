@@ -10,6 +10,8 @@ Provides enhanced query capabilities:
 """
 
 import asyncio
+import json
+import logging
 from typing import List, Dict, Optional, Any
 from collections import defaultdict
 
@@ -17,8 +19,33 @@ import chromadb
 from chromadb.config import Settings
 import httpx
 
+import config
 from config import DOMAINS, BIFROST_URL, CHROMA_URL
 from utils.cache import log_event
+
+logger = logging.getLogger("ai-companion.query_agent")
+
+
+# ---------------------------------------------------------------------------
+# Cross-domain affinity (Phase 4B.3)
+# ---------------------------------------------------------------------------
+
+def _get_adjacent_domains(requested: List[str]) -> Dict[str, float]:
+    """
+    Return non-requested domains with their max affinity score.
+    Uses config.DOMAIN_AFFINITY for explicit pairs, falls back to
+    config.CROSS_DOMAIN_DEFAULT_AFFINITY for unlisted pairs.
+    """
+    requested_set = set(requested)
+    adjacent: Dict[str, float] = {}
+    for req in requested:
+        explicit = config.DOMAIN_AFFINITY.get(req, {})
+        for other in DOMAINS:
+            if other in requested_set:
+                continue
+            weight = explicit.get(other, config.CROSS_DOMAIN_DEFAULT_AFFINITY)
+            adjacent[other] = max(adjacent.get(other, 0.0), weight)
+    return adjacent
 
 
 # ---------------------------------------------------------------------------
@@ -73,26 +100,25 @@ async def multi_domain_query(
 
     # Query each domain collection in parallel
     async def query_domain(domain: str) -> List[Dict[str, Any]]:
-        """Query a single domain collection."""
+        """Query a single domain collection (vector + BM25 hybrid)."""
         try:
             collection_name = f"domain_{domain}"
             collection = chroma_client.get_collection(name=collection_name)
 
-            # Execute query
+            # Vector search
             results = collection.query(
                 query_texts=[query],
                 n_results=top_k,
                 include=["documents", "metadatas", "distances"]
             )
 
-            # Format results
+            # Format vector results
             formatted = []
+            seen_ids: set = set()
             if results["ids"] and results["ids"][0]:
                 for i, chunk_id in enumerate(results["ids"][0]):
-                    # Calculate relevance score (1.0 - cosine_distance, clamped 0-1)
                     distance = results["distances"][0][i] if results["distances"] else 1.0
                     relevance = max(0.0, min(1.0, 1.0 - distance))
-
                     metadata = results["metadatas"][0][i] if results["metadatas"] else {}
 
                     formatted.append({
@@ -103,14 +129,61 @@ async def multi_domain_query(
                         "domain": domain,
                         "chunk_index": metadata.get("chunk_index", 0),
                         "collection": collection_name,
-                        "chunk_id": chunk_id
+                        "chunk_id": chunk_id,
+                        "ingested_at": metadata.get("ingested_at", ""),
                     })
+                    seen_ids.add(chunk_id)
+
+            # BM25 hybrid scoring (Phase 4B.1)
+            from utils import bm25 as bm25_mod
+            if bm25_mod.is_available():
+                bm25_hits = bm25_mod.search_bm25(domain, query, top_k=top_k)
+                if bm25_hits:
+                    bm25_map = dict(bm25_hits)
+
+                    # Combine scores for vector + keyword matches
+                    for entry in formatted:
+                        kw_score = bm25_map.pop(entry["chunk_id"], 0.0)
+                        vector_score = entry["relevance"]
+                        entry["relevance"] = round(
+                            config.HYBRID_VECTOR_WEIGHT * vector_score
+                            + config.HYBRID_KEYWORD_WEIGHT * kw_score,
+                            4,
+                        )
+
+                    # Fetch BM25-only results (keyword hits not in vector results)
+                    if bm25_map:
+                        try:
+                            bm25_only_ids = list(bm25_map.keys())
+                            fetched = collection.get(
+                                ids=bm25_only_ids,
+                                include=["documents", "metadatas"],
+                            )
+                            for j, cid in enumerate(fetched["ids"]):
+                                if cid in seen_ids:
+                                    continue
+                                meta = fetched["metadatas"][j] if fetched["metadatas"] else {}
+                                formatted.append({
+                                    "content": fetched["documents"][j],
+                                    "relevance": round(
+                                        config.HYBRID_KEYWORD_WEIGHT * bm25_map[cid], 4
+                                    ),
+                                    "artifact_id": meta.get("artifact_id", ""),
+                                    "filename": meta.get("filename", ""),
+                                    "domain": domain,
+                                    "chunk_index": meta.get("chunk_index", 0),
+                                    "collection": collection_name,
+                                    "chunk_id": cid,
+                                    "ingested_at": meta.get("ingested_at", ""),
+                                })
+                                seen_ids.add(cid)
+                        except Exception as e:
+                            logger.debug(f"BM25-only fetch failed for {domain}: {e}")
 
             return formatted
 
         except Exception as e:
-            # Log error but don't fail entire query
-            print(f"Error querying domain {domain}: {e}")
+            logger.warning(f"Error querying domain {domain}: {e}")
             return []
 
     # Query all domains concurrently
@@ -154,6 +227,132 @@ def deduplicate_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         deduplicated.append(best)
 
     return deduplicated
+
+
+# ---------------------------------------------------------------------------
+# Graph-enhanced retrieval (Phase 4B.2)
+# ---------------------------------------------------------------------------
+
+async def graph_expand_results(
+    results: List[Dict[str, Any]],
+    query: str,
+    chroma_client: Optional[chromadb.HttpClient] = None,
+    neo4j_driver: Optional[Any] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Expand search results using knowledge graph traversal.
+
+    After vector search finds initial hits, this function:
+    1. Extracts unique artifact IDs from the results
+    2. Traverses the Neo4j graph to find related artifacts
+    3. Fetches chunks for related artifacts from ChromaDB
+    4. Merges them into the result set with a reduced score
+
+    Args:
+        results: Initial vector search results
+        query: Original query (for re-scoring related chunks)
+        chroma_client: ChromaDB client
+        neo4j_driver: Neo4j driver
+
+    Returns:
+        Extended results list with graph-sourced entries appended
+    """
+    if neo4j_driver is None or not results:
+        return results
+
+    from utils.graph import find_related_artifacts
+
+    # Extract unique artifact IDs from initial results
+    initial_ids = list({r["artifact_id"] for r in results if r.get("artifact_id")})
+    if not initial_ids:
+        return results
+
+    # Find related artifacts via graph traversal
+    try:
+        related = find_related_artifacts(
+            neo4j_driver,
+            artifact_ids=initial_ids,
+            depth=config.GRAPH_TRAVERSAL_DEPTH,
+            max_results=config.GRAPH_MAX_RELATED,
+        )
+    except Exception as e:
+        logger.warning(f"Graph traversal failed (continuing without): {e}")
+        return results
+
+    if not related:
+        return results
+
+    # Connect to ChromaDB if needed
+    if chroma_client is None:
+        chroma_client = chromadb.HttpClient(
+            host=CHROMA_URL.replace("http://", "").split(":")[0],
+            port=int(CHROMA_URL.split(":")[-1]),
+        )
+
+    # Fetch chunks for related artifacts and score them
+    existing_ids = {r.get("chunk_id") for r in results}
+    graph_results: List[Dict[str, Any]] = []
+
+    for rel_artifact in related:
+        try:
+            chunk_ids_json = rel_artifact.get("chunk_ids", "[]")
+            chunk_ids = json.loads(chunk_ids_json) if chunk_ids_json else []
+            if not chunk_ids:
+                continue
+
+            domain = rel_artifact["domain"]
+            collection_name = f"domain_{domain}"
+            collection = chroma_client.get_collection(name=collection_name)
+
+            # Query the collection for this artifact's chunks using the original query
+            # This re-scores the related chunks against the actual query
+            fetched = collection.query(
+                query_texts=[query],
+                n_results=min(3, len(chunk_ids)),  # limit chunks per related artifact
+                where={"artifact_id": rel_artifact["id"]},
+                include=["documents", "metadatas", "distances"],
+            )
+
+            if not fetched["ids"] or not fetched["ids"][0]:
+                continue
+
+            for i, chunk_id in enumerate(fetched["ids"][0]):
+                if chunk_id in existing_ids:
+                    continue
+
+                distance = fetched["distances"][0][i] if fetched["distances"] else 1.0
+                raw_relevance = max(0.0, min(1.0, 1.0 - distance))
+                # Apply graph score factor — related content scores lower than direct hits
+                depth_penalty = 1.0 / (1.0 + rel_artifact.get("relationship_depth", 1))
+                relevance = round(
+                    raw_relevance * config.GRAPH_RELATED_SCORE_FACTOR * depth_penalty, 4
+                )
+
+                metadata = fetched["metadatas"][0][i] if fetched["metadatas"] else {}
+
+                graph_results.append({
+                    "content": fetched["documents"][0][i],
+                    "relevance": relevance,
+                    "artifact_id": rel_artifact["id"],
+                    "filename": rel_artifact["filename"],
+                    "domain": domain,
+                    "chunk_index": metadata.get("chunk_index", 0),
+                    "collection": collection_name,
+                    "chunk_id": chunk_id,
+                    "graph_source": True,
+                    "relationship_type": rel_artifact.get("relationship_type", ""),
+                    "relationship_reason": rel_artifact.get("relationship_reason", ""),
+                })
+                existing_ids.add(chunk_id)
+
+        except Exception as e:
+            logger.debug(f"Failed to fetch chunks for related artifact {rel_artifact['id'][:8]}: {e}")
+            continue
+
+    if graph_results:
+        logger.info(f"Graph expansion added {len(graph_results)} related chunk(s)")
+
+    return results + graph_results
 
 
 # ---------------------------------------------------------------------------
@@ -318,7 +517,8 @@ async def agent_query(
     top_k: int = 10,
     use_reranking: bool = True,
     chroma_client: Optional[chromadb.HttpClient] = None,
-    redis_client: Optional[Any] = None
+    redis_client: Optional[Any] = None,
+    neo4j_driver: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
     Execute multi-domain query with intelligent context assembly.
@@ -330,6 +530,7 @@ async def agent_query(
         use_reranking: Enable LLM-based reranking
         chroma_client: Existing ChromaDB client
         redis_client: Existing Redis client for audit logging
+        neo4j_driver: Neo4j driver for graph-enhanced retrieval
 
     Returns:
         {
@@ -339,7 +540,8 @@ async def agent_query(
             "domains_searched": ["coding", "finance"],
             "total_results": 42,
             "token_budget_used": 12500,
-            "results": [{...}, ...]  # Full result list
+            "graph_results": 3,
+            "results": [{...}, ...]
         }
     """
     # Step 1: Multi-domain retrieval
@@ -347,28 +549,78 @@ async def agent_query(
         query=query,
         domains=domains,
         top_k=top_k,
-        chroma_client=chroma_client
+        chroma_client=chroma_client,
     )
+
+    # Step 1b: Cross-domain connections (Phase 4B.3)
+    # When specific domains are requested, also search adjacent domains at reduced weight
+    if domains and set(domains) != set(DOMAINS):
+        adjacent = _get_adjacent_domains(domains)
+        if adjacent:
+            cross_results = await multi_domain_query(
+                query=query,
+                domains=list(adjacent.keys()),
+                top_k=max(3, top_k // 2),
+                chroma_client=chroma_client,
+            )
+            for r in cross_results:
+                r["relevance"] = round(
+                    r["relevance"] * adjacent.get(r["domain"], config.CROSS_DOMAIN_DEFAULT_AFFINITY),
+                    4,
+                )
+                r["cross_domain"] = True
+            results.extend(cross_results)
 
     # Step 2: Deduplication
     results = deduplicate_results(results)
 
-    # Step 3: Reranking
+    # Step 3: Graph-enhanced retrieval (Phase 4B.2)
+    graph_count_before = len(results)
+    results = await graph_expand_results(
+        results=results,
+        query=query,
+        chroma_client=chroma_client,
+        neo4j_driver=neo4j_driver,
+    )
+    graph_results_added = len(results) - graph_count_before
+
+    # Step 4: Temporal awareness (Phase 4B.4)
+    from utils.temporal import parse_temporal_intent, recency_score, is_within_window
+    temporal_days = parse_temporal_intent(query)
+
+    # Apply time filter if temporal intent detected
+    if temporal_days is not None:
+        results = [
+            r for r in results
+            if is_within_window(
+                r.get("ingested_at", ""),
+                temporal_days,
+            )
+        ]
+
+    # Apply recency boost to all results
+    for r in results:
+        ingested = r.get("ingested_at", "")
+        if ingested:
+            boost = recency_score(ingested) * config.TEMPORAL_RECENCY_WEIGHT
+            r["relevance"] = round(r["relevance"] + boost, 4)
+
+    # Step 5: Reranking (includes both direct and graph-sourced results)
     results = await rerank_results(
         results=results,
         query=query,
-        use_llm=use_reranking
+        use_llm=use_reranking,
     )
 
-    # Step 4: Assemble context
+    # Step 6: Assemble context
     context, sources, char_count = assemble_context(results, max_chars=14000)
 
-    # Step 5: Calculate confidence (average relevance of included sources)
+    # Step 7: Calculate confidence (average relevance of included sources)
     confidence = 0.0
     if sources:
         confidence = sum(s["relevance"] for s in sources) / len(sources)
 
-    # Step 6: Log query (optional)
+    # Step 8: Log query (optional)
     if redis_client:
         try:
             log_event(
@@ -377,10 +629,14 @@ async def agent_query(
                 artifact_id="",
                 domain=",".join(domains) if domains else "all",
                 filename="",
-                extra={"query": query, "results": len(results)}
+                extra={
+                    "query": query,
+                    "results": len(results),
+                    "graph_results": graph_results_added,
+                },
             )
         except Exception as e:
-            print(f"Failed to log query: {e}")
+            logger.warning(f"Failed to log query: {e}")
 
     # Return structured response
     return {
@@ -390,5 +646,6 @@ async def agent_query(
         "domains_searched": domains if domains else DOMAINS,
         "total_results": len(results),
         "token_budget_used": char_count,
-        "results": results  # Full result list for debugging
+        "graph_results": graph_results_added,
+        "results": results,
     }
