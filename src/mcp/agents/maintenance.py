@@ -387,7 +387,7 @@ async def maintain(
 
     # Orphan check (delegates to rectify)
     if "orphans" in actions:
-        from agents.rectify import find_orphaned_chunks, cleanup_orphaned_chunks
+        from agents.rectify import cleanup_orphaned_chunks, find_orphaned_chunks
         orphans = find_orphaned_chunks(neo4j_driver, chroma_client)
         total_orphans = sum(len(v) for v in orphans.values())
         report["orphans"] = {

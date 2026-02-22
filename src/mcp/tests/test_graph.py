@@ -1,9 +1,7 @@
 """Tests for graph utilities (Phase 4B.2)."""
 
-import json
-from unittest.mock import MagicMock, patch
 
-from utils.graph import _parse_keywords, _extract_references
+from utils.graph import _extract_references, _parse_keywords
 
 
 class TestParseKeywords:

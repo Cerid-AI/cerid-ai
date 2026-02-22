@@ -17,7 +17,6 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 import chromadb
-import httpx
 
 import config
 from utils.cache import log_event

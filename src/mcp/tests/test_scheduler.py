@@ -1,18 +1,18 @@
 """Tests for scheduled maintenance engine (Phase 4C.1)."""
 
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
-# Mock heavy dependencies before importing scheduler
+# Mock heavy dependencies before importing scheduler — must happen before import
 sys.modules.setdefault("chromadb", MagicMock())
 sys.modules.setdefault("chromadb.config", MagicMock())
 sys.modules.setdefault("redis", MagicMock())
 sys.modules.setdefault("neo4j", MagicMock())
 sys.modules.setdefault("deps", MagicMock())
 
-from scheduler import get_job_status, start_scheduler, stop_scheduler
+from scheduler import get_job_status, start_scheduler, stop_scheduler  # noqa: E402
 
 
 class TestSchedulerJobStatus:
@@ -26,7 +26,7 @@ class TestSchedulerJobStatus:
     @pytest.mark.asyncio
     async def test_start_and_status(self):
         """Scheduler should report running with configured jobs."""
-        sched = start_scheduler()
+        start_scheduler()
         try:
             status = get_job_status()
             assert status["status"] == "running"

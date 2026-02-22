@@ -11,13 +11,11 @@ Provides:
 
 from __future__ import annotations
 
-import json
 import logging
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-import config
 from utils.cache import get_log
 
 logger = logging.getLogger("ai-companion.audit")

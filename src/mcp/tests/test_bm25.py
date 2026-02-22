@@ -1,7 +1,5 @@
 """Tests for BM25 hybrid search index (Phase 4B.1)."""
 
-import tempfile
-from pathlib import Path
 
 import pytest
 

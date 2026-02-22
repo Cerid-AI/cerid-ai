@@ -232,6 +232,7 @@ def ingest_content(
     # Fire webhook notification (Phase 4C.4)
     try:
         import asyncio
+
         from utils.webhooks import notify_ingestion_complete
         asyncio.get_event_loop().create_task(
             notify_ingestion_complete(artifact_id, domain, base_meta.get("filename", "text_input"), len(chunks))

@@ -17,12 +17,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from langgraph.graph import StateGraph, END
+from langgraph.graph import END, StateGraph
 
 import config
-from utils.parsers import parse_file, PARSER_REGISTRY
-from utils.metadata import extract_metadata, ai_categorize
 from utils.chunker import chunk_text
+from utils.metadata import ai_categorize, extract_metadata
+from utils.parsers import PARSER_REGISTRY, parse_file
 
 logger = logging.getLogger("ai-companion.triage")
 

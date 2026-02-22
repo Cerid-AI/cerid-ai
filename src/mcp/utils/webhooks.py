@@ -7,10 +7,9 @@ Events: ingestion.complete, health.warning, digest.ready, rectify.findings
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 import httpx
 

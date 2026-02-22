@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta
 
-from utils.temporal import parse_temporal_intent, recency_score, is_within_window
+from utils.temporal import is_within_window, parse_temporal_intent, recency_score
 
 
 class TestParseTemporalIntent:

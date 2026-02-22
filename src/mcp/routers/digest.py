@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Dict
+from typing import Dict
 
 from fastapi import APIRouter, Query
 

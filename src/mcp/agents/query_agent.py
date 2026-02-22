@@ -12,15 +12,14 @@ Provides enhanced query capabilities:
 import asyncio
 import json
 import logging
-from typing import List, Dict, Optional, Any
 from collections import defaultdict
+from typing import Any, Dict, List, Optional
 
 import chromadb
-from chromadb.config import Settings
 import httpx
 
 import config
-from config import DOMAINS, BIFROST_URL, CHROMA_URL
+from config import BIFROST_URL, CHROMA_URL, DOMAINS
 from utils.cache import log_event
 
 logger = logging.getLogger("ai-companion.query_agent")
@@ -585,7 +584,7 @@ async def agent_query(
     graph_results_added = len(results) - graph_count_before
 
     # Step 4: Temporal awareness (Phase 4B.4)
-    from utils.temporal import parse_temporal_intent, recency_score, is_within_window
+    from utils.temporal import is_within_window, parse_temporal_intent, recency_score
     temporal_days = parse_temporal_intent(query)
 
     # Apply time filter if temporal intent detected
