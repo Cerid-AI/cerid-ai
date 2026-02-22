@@ -26,6 +26,7 @@ pgdata*
 neo4j/
 chroma/
 redis/
+stacks/infrastructure/data/
 artifacts/
 
 # Python / build
