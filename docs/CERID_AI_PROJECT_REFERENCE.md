@@ -1,8 +1,8 @@
 # Cerid AI - Project Plan & Technical Reference
 
-**Document Version:** 3.2
-**Date:** February 12, 2026
-**Status:** Phase 1.5 Complete - Bulk Ingest Hardening & Structure-Aware PDF Parsing
+**Document Version:** 4.0
+**Date:** February 21, 2026
+**Status:** Phases 0-3 Complete — Phase 4 Active (see `docs/PHASE4_PLAN.md`)
 **Repository:** https://github.com/sunrunnerfire/cerid-ai (private)
 **Owner:** Justin (@sunrunnerfire)
 
@@ -83,9 +83,9 @@ Cerid AI is a **self-hosted Personal AI Knowledge Companion** — a privacy-firs
 | Phase 0 | Infrastructure & Baseline | ✅ Complete |
 | Phase 1 | Core Ingestion Pipeline | ✅ Complete |
 | Phase 1.5 | Bulk Ingest Hardening | ✅ Complete |
-| Phase 2 | Enhanced Search & Agent Workflows | 🔄 Next |
-| Phase 3 | GUI & Advanced Features | Planned |
-| Phase 4 | Optimization & Documentation | Planned |
+| Phase 2 | Enhanced Search & Agent Workflows | ✅ Complete |
+| Phase 3 | GUI & Dashboard | ✅ Complete |
+| Phase 4 | Smarter Retrieval, Automation & Polish | 🔄 Active — see `docs/PHASE4_PLAN.md` |
 
 ### Phase 0 Deliverables (Complete ✅)
 
@@ -1107,9 +1107,9 @@ docker exec ai-companion-mcp python -m spacy download en_core_web_sm
 | Phase 0 | Infrastructure & Baseline | ✅ Complete |
 | Phase 1 | Core Ingestion Pipeline | ✅ Complete |
 | Phase 1.5 | Bulk Ingest Hardening | ✅ Complete |
-| Phase 2 | Enhanced Search & Agent Workflows | 🔄 Next |
-| Phase 3 | GUI & Advanced Features | Planned |
-| Phase 4 | Optimization & Documentation | Planned |
+| Phase 2 | Enhanced Search & Agent Workflows | ✅ Complete |
+| Phase 3 | GUI & Dashboard | ✅ Complete |
+| Phase 4 | Smarter Retrieval, Automation & Polish | 🔄 Active — see `docs/PHASE4_PLAN.md` |
 
 ### Phase 0: Infrastructure (Complete ✅)
 
@@ -1227,31 +1227,17 @@ docker exec ai-companion-mcp python -m spacy download en_core_web_sm
    - Artifact extraction (code blocks, tables)
    - Auto-ingest pipeline for generated content
 
-### Phase 4: Optimization & Documentation
+### Phase 4: Smarter Retrieval, Workflow Automation & Showcase Polish
 
-**Goals:** Production-ready system.
+**Goals:** Enhance cerid-ai as a personal power tool and showcase piece. Add intelligent retrieval, workflow automation, and engineering polish. Lay framework for open repo and commercial viability.
 
-**Planned Tasks:**
+**Full plan with sub-phase specs, model assignments, and handoff protocol:** See `docs/PHASE4_PLAN.md`
 
-1. **Performance Optimization**
-   - Redis caching for query results and embeddings
-   - Benchmark with locust.io (target <200ms query latency)
-   - Batch embedding generation
-
-2. **Cron Automation**
-   - Weekly maintenance agent runs
-   - Daily audit checks
-   - RSS feed updates
-
-3. **Security Hardening**
-   - LUKS encryption for data directory
-   - Docker secrets for API keys
-   - Network isolation review
-
-4. **Documentation**
-   - API documentation (FastAPI /docs)
-   - User guide
-   - Deployment guide
+**Summary:**
+- **4A:** Modular refactor — split main.py into FastAPI routers
+- **4B:** Smarter retrieval — hybrid search (vector + BM25), knowledge graph traversal, cross-domain connections, temporal awareness
+- **4C:** Workflow automation — scheduled maintenance (APScheduler), proactive knowledge surfacing, smart ingestion pipeline, event-driven webhooks
+- **4D:** Showcase polish — pytest, GitHub Actions CI/CD, security cleanup (.env migration), open-source readiness (Apache 2.0, CONTRIBUTING.md)
 
 ---
 
@@ -1335,5 +1321,5 @@ docker exec ai-companion-mcp python -m spacy download en_core_web_sm
 
 ---
 
-*Document updated: February 12, 2026*
-*Phase 1.5 complete: bulk ingest hardening + pdfplumber for structured PDFs. Phase 2 next.*
+*Document updated: February 21, 2026*
+*Phases 0-3 complete. Phase 4 active — see `docs/PHASE4_PLAN.md` for implementation plan.*

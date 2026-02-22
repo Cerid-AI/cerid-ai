@@ -380,4 +380,8 @@ Admin and monitoring UI at `http://localhost:8501` (container: `ai-companion-das
 - **Phase 1.5 (Complete):** Bulk ingest hardening — concurrent CLI (ThreadPoolExecutor), watcher retry queue, atomic dedup (UNIQUE CONSTRAINT), query improvements (real relevance scores, source attribution, token budget), pdfplumber for structured PDF table extraction
 - **Phase 2 (Complete):** Query Agent + LLM reranking, Triage Agent (LangGraph), Rectification Agent, Audit Agent, Maintenance Agent, MCP tool expansion (12 tools)
 - **Phase 3 (Complete):** Streamlit dashboard with 5 panes (Overview, Artifacts, Query, Audit, Maintenance). Obsidian vault watcher for auto-sync into knowledge base.
-- **Phase 4:** Redis caching optimization, LUKS encryption, production hardening
+- **Phase 4 (Active):** See `docs/PHASE4_PLAN.md` for full plan with sub-phase specs, model assignments, and handoff protocol.
+  - **4A:** Modular refactor — split main.py into FastAPI routers (Sonnet)
+  - **4B:** Smarter retrieval — hybrid search, knowledge graph traversal, cross-domain connections, temporal awareness (Sonnet/Opus)
+  - **4C:** Workflow automation — scheduled maintenance, proactive knowledge surfacing, smart ingestion, webhooks (Sonnet/Opus)
+  - **4D:** Showcase polish — tests, CI/CD, security cleanup, open-source readiness (Sonnet)
