@@ -9,7 +9,7 @@
 
 Cerid AI is a self-hosted, privacy-first Personal AI Knowledge Companion. It unifies multi-domain knowledge bases (code, finance, projects, artifacts) into a context-aware LLM interface with RAG-powered retrieval and intelligent agents. All data stays local; only LLM API calls go external.
 
-**Status:** Phase 0–5 complete. All 5 agents operational; 12 MCP tools; Streamlit dashboard at port 8501; hybrid BM25+vector search; scheduled maintenance; CI/CD pipeline; multi-machine sync via Dropbox.
+**Status:** Phase 6 in progress (6A: React GUI foundation). Phases 0–5 complete. All 5 agents operational; 12 MCP tools; hybrid BM25+vector search; scheduled maintenance; CI/CD pipeline; multi-machine sync via Dropbox. React GUI replacing Streamlit dashboard as primary UI.
 
 ## Architecture
 
@@ -29,19 +29,22 @@ Microservices architecture with Docker Compose orchestration on a shared `llm-ne
 | PostgreSQL+pgvector | 5432 | via `stacks/librechat/` | RAG vector storage |
 | Meilisearch | 7700 | via `stacks/librechat/` | Full-text search |
 | RAG API | 8000 | via `stacks/librechat/` | Document processing |
-| Dashboard | 8501 | `src/gui/` | Streamlit admin UI |
+| Dashboard (legacy) | 8501 | `src/gui/` | Streamlit admin UI |
+| React GUI | 3000 | `src/web/` | React 19 + Vite + nginx |
 
 ### Key Data Flow
 
 ```
-User → LibreChat (3080) → Bifrost (8080) → OpenRouter → LLM Provider
-                        → MCP Server (8888/SSE) → ChromaDB/Neo4j (RAG context)
+User → React GUI (3000) → Bifrost (8080) → OpenRouter → LLM Provider
+                        → MCP Server (8888) → ChromaDB/Neo4j (RAG context)
+
+Legacy: User → LibreChat (3080) → Bifrost (8080) → OpenRouter → LLM Provider
 
 File Ingestion:
 ~/cerid-archive/ → Watcher → POST /ingest_file → Parse → Dedup → Chunk → ChromaDB + Neo4j + Redis
 ```
 
-Bifrost classifies intent (coding/research/simple/general) and routes to the appropriate model.
+React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly (CORS `*`). Bifrost classifies intent (coding/research/simple/general) and routes to the appropriate model.
 
 ## Directory Structure
 
@@ -86,12 +89,21 @@ Bifrost classifies intent (coding/research/simple/general) and routes to the app
 │   │   ├── audit.py                  # Operation tracking, cost estimation
 │   │   └── maintenance.py            # System health, stale cleanup
 │   ├── Dockerfile
-│   ├── docker-compose.yml            # MCP server + Dashboard
+│   ├── docker-compose.yml            # MCP server + Dashboard + React GUI
 │   └── requirements.txt
 ├── src/gui/
-│   ├── app.py                        # Streamlit dashboard (5 panes)
+│   ├── app.py                        # Streamlit dashboard (5 panes) — legacy
 │   ├── Dockerfile
 │   └── requirements.txt
+├── src/web/                            # React GUI (Phase 6)
+│   ├── package.json                   # React 19, Vite 7, Tailwind v4, shadcn/ui
+│   ├── vite.config.ts                 # Tailwind plugin, @/ alias, Bifrost proxy
+│   ├── Dockerfile                     # Multi-stage: Node build → nginx:alpine
+│   ├── nginx.conf                     # SPA fallback + Bifrost reverse proxy
+│   └── src/
+│       ├── lib/types.ts, api.ts       # Types, health client, SSE streaming
+│       ├── hooks/                     # use-theme, use-chat, use-conversations
+│       └── components/layout/, chat/  # Sidebar, status bar, chat panel
 ├── stacks/
 │   ├── infrastructure/               # Neo4j, ChromaDB, Redis (Phase 5)
 │   │   ├── docker-compose.yml
@@ -317,6 +329,7 @@ python3 scripts/cerid-sync.py status
 - Batch ChromaDB writes: single `collection.add()` call per ingest, not per-chunk
 - PDF parsing: pdfplumber extracts tables as Markdown, non-table text extracted separately to avoid duplication
 - Host: Mac Pro (16-Core Xeon W, 160GB RAM), macOS
+- **React GUI (`src/web/`):** Tailwind CSS v4 (uses `@tailwindcss/vite` plugin — no `tailwind.config.ts`); shadcn/ui New York style, Zinc base color; path alias `@/*` → `./src/*`; Bifrost CORS handled via Vite dev proxy (`/api/bifrost` → `localhost:8080`) and nginx proxy in Docker; `VITE_MCP_URL` and `VITE_BIFROST_URL` are build-time env vars
 
 ## Phase 2: Agent Workflows
 
@@ -470,4 +483,8 @@ Admin and monitoring UI at `http://localhost:8501` (container: `ai-companion-das
 - **Phase 5 (Complete):** Multi-machine dev environment & knowledge sync.
   - **5A:** Infrastructure compose for Neo4j/ChromaDB/Redis (`stacks/infrastructure/`), 4-step startup script, environment validation
   - **5B:** Knowledge base sync via JSONL — export/import CLI, auto-import on startup, Dropbox-based sync directory
-- **Phase 6:** Redis caching optimization, LUKS encryption, production hardening
+- **Phase 6 (In Progress):** React GUI + Production Hardening. See `docs/plans/2026-02-22-phase6-gui-design.md`.
+  - **6A (In Progress):** Foundation + Chat — React 19 scaffold, sidebar nav, streaming chat via Bifrost, health status bar, Docker/nginx deployment at port 3000
+  - **6B:** Knowledge Context Pane — resizable split-pane with auto KB query, artifact cards, domain filters
+  - **6C:** Monitoring + Audit Panes — health cards, charts, ingestion timeline, cost breakdown
+  - **6D:** Backend Hardening — Redis query caching, API key auth, LLM feedback loop, rate limiting
