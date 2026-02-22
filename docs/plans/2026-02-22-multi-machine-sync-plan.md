@@ -162,7 +162,7 @@ The next session will run on the **pre-Phase 4 machine** which likely has:
 **First steps on the other machine:**
 1. `git pull` to get Phase 4 changes
 2. Install `age`: `brew install age`
-3. Copy `~/.config/cerid/age-key.txt` from primary machine (or generate new key and re-encrypt)
+3. `cd ~/dotfiles && git pull && bash install.sh` (installs the age key from private dotfiles repo)
 4. Run `./scripts/env-unlock.sh` to decrypt `.env`
 5. Stop and remove legacy containers that conflict with new infrastructure compose
 6. Begin Phase A implementation

@@ -97,7 +97,7 @@ Single `.env` file at repo root, encrypted with `age`. The decryption key lives 
 ./scripts/env-lock.sh
 ```
 
-**On a new machine:** Install `age` (`brew install age`), copy the key file from the primary machine, then run `env-unlock.sh`. The `.env.age` file travels with the repo; the key does not.
+**On a new machine:** Install `age` (`brew install age`), run `bash ~/dotfiles/install.sh` (installs the key from the private dotfiles repo), then run `env-unlock.sh`. The `.env.age` file travels with the cerid repo; the key travels with dotfiles.
 
 ### Starting the Stack
 
