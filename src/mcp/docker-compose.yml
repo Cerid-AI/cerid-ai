@@ -53,6 +53,20 @@ services:
       retries: 3
       start_period: 30s
 
+  cerid-web:
+    build:
+      context: ../web
+      dockerfile: Dockerfile
+    container_name: cerid-web
+    ports:
+      - "3000:80"
+    networks:
+      - llm-network
+    restart: unless-stopped
+    depends_on:
+      mcp-server:
+        condition: service_healthy
+
 networks:
   llm-network:
     external: true
