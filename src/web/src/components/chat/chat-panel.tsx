@@ -30,7 +30,7 @@ export function ChatPanel() {
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const [selectedModel, setSelectedModel] = useState(MODELS[0].id)
-  const [showHistory, setShowHistory] = useState(true)
+  const [showHistory, setShowHistory] = useState(() => window.innerWidth >= 1024)
   const model = active?.model ?? selectedModel
 
   // Auto-scroll on new messages
