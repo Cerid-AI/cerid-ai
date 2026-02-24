@@ -1,0 +1,40 @@
+# Large generated/vendored files — skip indexing
+src/web/node_modules/
+src/web/dist/
+src/web/package-lock.json
+
+# Runtime data volumes (gitignored but may exist locally)
+stacks/infrastructure/data/
+stacks/librechat/data-node/
+data/
+logs/
+
+# Binary/media files Claude can't meaningfully read
+*.pdf
+*.docx
+*.xlsx
+*.csv
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.ico
+*.woff
+*.woff2
+*.ttf
+*.eot
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Encrypted secrets (age binary, not useful to read)
+.env.age
+
+# User archive content (symlinked, large)
+artifacts/
+cerid-archive/
+archive/
+
+# macOS metadata
+.DS_Store
