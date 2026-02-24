@@ -322,30 +322,79 @@ class IngestFileRequest(BaseModel):
     categorize_mode: str = ""
 
 
+class FeedbackIngestRequest(BaseModel):
+    user_message: str
+    assistant_response: str
+    model: str = ""
+    conversation_id: str = ""
+
+
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
 @router.post("/ingest")
 async def ingest_endpoint(req: IngestRequest):
     async with _ingest_semaphore:
-        return ingest_content(req.content, req.domain)
+        result = ingest_content(req.content, req.domain)
+    try:
+        from utils.query_cache import invalidate_all
+        invalidate_all()
+    except Exception:
+        pass
+    return result
 
 
 @router.post("/ingest_file")
 async def ingest_file_endpoint(req: IngestFileRequest):
     try:
         async with _ingest_semaphore:
-            return await ingest_file(
+            result = await ingest_file(
                 file_path=req.file_path,
                 domain=req.domain,
                 tags=req.tags,
                 categorize_mode=req.categorize_mode,
             )
+        try:
+            from utils.query_cache import invalidate_all
+            invalidate_all()
+        except Exception:
+            pass
+        return result
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Ingest file error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/ingest/feedback")
+async def ingest_feedback_endpoint(req: FeedbackIngestRequest):
+    """Ingest a chat turn into the conversations domain for the feedback loop."""
+    try:
+        convo_prefix = req.conversation_id[:8] if req.conversation_id else "unknown"
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        filename = f"chat_{convo_prefix}_{timestamp}"
+        content = (
+            f"User: {req.user_message}\n\n"
+            f"Assistant ({req.model}): {req.assistant_response}"
+        )
+        metadata = {
+            "filename": filename,
+            "conversation_id": req.conversation_id,
+            "model": req.model,
+            "summary": req.user_message[:200],
+        }
+        async with _ingest_semaphore:
+            result = ingest_content(content, "conversations", metadata=metadata)
+        try:
+            from utils.query_cache import invalidate_all
+            invalidate_all()
+        except Exception:
+            pass
+        return result
+    except Exception as e:
+        logger.error(f"Feedback ingest error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

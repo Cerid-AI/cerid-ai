@@ -101,4 +101,11 @@ class QueryRequest(BaseModel):
 
 @router.post("/query")
 async def query_endpoint(req: QueryRequest):
-    return query_knowledge(req.query, req.domain, req.top_k)
+    from utils.query_cache import get_cached, set_cached
+
+    cached = get_cached(req.query, req.domain, req.top_k)
+    if cached:
+        return cached
+    result = query_knowledge(req.query, req.domain, req.top_k)
+    set_cached(req.query, req.domain, req.top_k, result)
+    return result

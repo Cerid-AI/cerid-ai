@@ -4,12 +4,15 @@ AI Companion MCP Server - MCP SSE Transport + Ingestion Pipeline
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from deps import close_neo4j, get_neo4j
+from middleware.auth import APIKeyMiddleware
+from middleware.rate_limit import RateLimitMiddleware
 from routers import agents, artifacts, digest, health, ingestion, mcp_sse, query
 from scheduler import start_scheduler, stop_scheduler
 from utils import graph
@@ -56,13 +59,21 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Middleware stack (LIFO in Starlette — last added runs first)
+# 1. CORS (added first, runs last — wraps response headers)
+_cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "*").split(",") if o.strip()]
+_wildcard = _cors_origins == ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=not _wildcard,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# 2. Rate limiting (added second)
+app.add_middleware(RateLimitMiddleware)
+# 3. API key auth (added third, runs first — rejects unauthenticated before rate check)
+app.add_middleware(APIKeyMiddleware)
 
 # Register routers at root (backward compatibility) and /api/v1/ prefix
 _api_routers = [

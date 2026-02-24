@@ -12,7 +12,7 @@ import os
 # ---------------------------------------------------------------------------
 # Domains
 # ---------------------------------------------------------------------------
-DOMAINS = ["coding", "finance", "projects", "personal", "general"]
+DOMAINS = ["coding", "finance", "projects", "personal", "general", "conversations"]
 DEFAULT_DOMAIN = "general"
 INBOX_DOMAIN = "inbox"  # files here trigger AI categorization
 

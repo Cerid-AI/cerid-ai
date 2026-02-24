@@ -23,6 +23,8 @@ services:
       - CATEGORIZE_MODE=${CATEGORIZE_MODE:-smart}
       - BIFROST_URL=http://bifrost:8080/v1
       - ARCHIVE_PATH=/archive
+      - CERID_API_KEY=${CERID_API_KEY:-}
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
     networks:
       - llm-network
     restart: unless-stopped

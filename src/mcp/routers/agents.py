@@ -53,8 +53,15 @@ class MaintenanceRequest(BaseModel):
 @router.post("/agent/query")
 async def agent_query_endpoint(req: AgentQueryRequest):
     try:
+        from utils.query_cache import get_cached, set_cached
+
+        domain_key = f"{','.join(sorted(req.domains)) if req.domains else 'all'}|rerank={req.use_reranking}"
+        cached = get_cached(req.query, domain_key, req.top_k)
+        if cached:
+            return cached
+
         from agents.query_agent import agent_query
-        return await agent_query(
+        result = await agent_query(
             query=req.query,
             domains=req.domains,
             top_k=req.top_k,
@@ -63,6 +70,8 @@ async def agent_query_endpoint(req: AgentQueryRequest):
             redis_client=get_redis(),
             neo4j_driver=get_neo4j(),
         )
+        set_cached(req.query, domain_key, req.top_k, result)
+        return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

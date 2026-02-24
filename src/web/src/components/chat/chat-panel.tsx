@@ -1,15 +1,22 @@
-import { useRef, useEffect, useCallback, useState } from "react"
+import { useRef, useEffect, useCallback, useState, useMemo } from "react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
-import { Plus, PanelLeftClose, PanelLeft } from "lucide-react"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Plus, PanelLeftClose, PanelLeft, Database, Rss, LayoutDashboard } from "lucide-react"
 import { MessageBubble } from "./message-bubble"
 import { ChatInput } from "./chat-input"
 import { ModelSelect } from "./model-select"
 import { ConversationList } from "./conversation-list"
+import { SplitPane } from "@/components/layout/split-pane"
+import { KBContextPanel } from "@/components/kb/kb-context-panel"
+import { ChatDashboard } from "./chat-dashboard"
 import { useChat } from "@/hooks/use-chat"
 import { useConversations } from "@/hooks/use-conversations"
+import { useKBContext } from "@/hooks/use-kb-context"
+import { useSettings } from "@/hooks/use-settings"
 import type { ChatMessage } from "@/lib/types"
 import { MODELS } from "@/lib/types"
+import { cn } from "@/lib/utils"
 
 export function ChatPanel() {
   const {
@@ -20,23 +27,45 @@ export function ChatPanel() {
     create,
     addMessage,
     updateLastMessage,
+    updateModel,
     remove,
   } = useConversations()
+
+  const { feedbackLoop, toggleFeedbackLoop, showDashboard, toggleDashboard } = useSettings()
 
   const { send, stop, isStreaming } = useChat({
     onMessageStart: (convoId, msg) => addMessage(convoId, msg),
     onMessageUpdate: (convoId, content) => updateLastMessage(convoId, content),
+    feedbackEnabled: feedbackLoop,
   })
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const [selectedModel, setSelectedModel] = useState(MODELS[0].id)
   const [showHistory, setShowHistory] = useState(() => window.innerWidth >= 1024)
-  const model = active?.model ?? selectedModel
+  const [showKB, setShowKB] = useState(() => window.innerWidth >= 1024)
+
+  // Sync model selector when switching conversations
+  useEffect(() => {
+    if (active?.model) setSelectedModel(active.model)
+  }, [activeId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Extract the latest user message for auto-KB-query
+  const latestUserMessage = useMemo(() => {
+    if (!active?.messages) return ""
+    const userMsgs = active.messages.filter((m) => m.role === "user")
+    return userMsgs.length > 0 ? userMsgs[userMsgs.length - 1].content : ""
+  }, [active?.messages])
+
+  const kbContext = useKBContext(latestUserMessage)
+  const { injectedContext, clearInjected } = kbContext
 
   // Auto-scroll on new messages
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    const viewport = scrollRef.current?.querySelector<HTMLDivElement>(
+      "[data-radix-scroll-area-viewport]",
+    )
+    if (viewport) {
+      viewport.scrollTop = viewport.scrollHeight
     }
   }, [active?.messages])
 
@@ -44,7 +73,7 @@ export function ChatPanel() {
     (content: string) => {
       let convoId = activeId
       if (!convoId) {
-        convoId = create(model)
+        convoId = create(selectedModel)
       }
 
       const userMsg: ChatMessage = {
@@ -55,20 +84,130 @@ export function ChatPanel() {
       }
       addMessage(convoId, userMsg)
 
-      const allMessages = [...(active?.messages ?? []), userMsg]
-      send(convoId, allMessages, model)
+      // Build messages, prepending injected KB context as system message
+      const allMessages: Pick<ChatMessage, "role" | "content">[] = []
+      if (injectedContext.length > 0) {
+        const contextParts = injectedContext.map(
+          (r) => `--- Source: ${r.filename} (${r.domain}) ---\n${r.content}`,
+        )
+        allMessages.push({
+          role: "system",
+          content: `The user's knowledge base contains the following relevant context. Use it to inform your response:\n\n${contextParts.join("\n\n")}`,
+        })
+        clearInjected()
+      }
+
+      allMessages.push(...(active?.messages ?? []), userMsg)
+      send(convoId, allMessages, selectedModel)
     },
-    [activeId, active, model, addMessage, create, send]
+    [activeId, active, selectedModel, addMessage, create, send, injectedContext, clearInjected],
   )
 
   const handleModelChange = useCallback(
     (newModel: string) => {
       setSelectedModel(newModel)
-      if (!activeId) {
-        create(newModel)
+      if (activeId) {
+        updateModel(activeId, newModel)
       }
     },
-    [activeId, create]
+    [activeId, updateModel],
+  )
+
+  const chatArea = (
+    <div className="flex h-full flex-col">
+      {/* Toolbar */}
+      <div className="flex items-center gap-2 border-b px-4 py-2">
+        {!showHistory && (
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowHistory(true)}>
+            <PanelLeft className="h-4 w-4" />
+          </Button>
+        )}
+        <Button variant="ghost" size="sm" onClick={() => create(selectedModel)}>
+          <Plus className="mr-1 h-4 w-4" />
+          New chat
+        </Button>
+        <div className="flex-1" />
+        <TooltipProvider delayDuration={0}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn("h-8 w-8", feedbackLoop && "text-primary")}
+                onClick={toggleFeedbackLoop}
+              >
+                <Rss className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {feedbackLoop ? "Feedback loop: ON (responses saved to KB)" : "Feedback loop: OFF"}
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn("h-8 w-8", showDashboard && "text-primary")}
+                onClick={toggleDashboard}
+              >
+                <LayoutDashboard className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {showDashboard ? "Hide metrics dashboard" : "Show metrics dashboard"}
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn("h-8 w-8", showKB && "text-primary")}
+                onClick={() => setShowKB(!showKB)}
+              >
+                <Database className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {showKB ? "Hide knowledge context" : "Show knowledge context"}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        <ModelSelect value={selectedModel} onChange={handleModelChange} />
+      </div>
+
+      {/* Dashboard metrics bar */}
+      {showDashboard && (
+        <ChatDashboard
+          model={selectedModel}
+          messages={active?.messages ?? []}
+          injectedCount={kbContext.injectedContext.length}
+        />
+      )}
+
+      {/* Messages */}
+      <ScrollArea className="flex-1 px-4" ref={scrollRef}>
+        <div className="mx-auto max-w-3xl py-4">
+          {(!active || active.messages.length === 0) && (
+            <div className="flex items-center justify-center py-20 text-muted-foreground">
+              <p>Start a conversation...</p>
+            </div>
+          )}
+          {active?.messages.map((msg) => (
+            <MessageBubble key={msg.id} message={msg} />
+          ))}
+        </div>
+      </ScrollArea>
+
+      {/* Input */}
+      <ChatInput
+        onSend={handleSend}
+        onStop={stop}
+        isStreaming={isStreaming}
+        injectedCount={kbContext.injectedContext.length}
+      />
+    </div>
   )
 
   return (
@@ -91,39 +230,13 @@ export function ChatPanel() {
         </div>
       )}
 
-      {/* Chat area */}
-      <div className="flex flex-1 flex-col">
-        {/* Toolbar */}
-        <div className="flex items-center gap-2 border-b px-4 py-2">
-          {!showHistory && (
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowHistory(true)}>
-              <PanelLeft className="h-4 w-4" />
-            </Button>
-          )}
-          <Button variant="ghost" size="sm" onClick={() => create(model)}>
-            <Plus className="mr-1 h-4 w-4" />
-            New chat
-          </Button>
-          <div className="flex-1" />
-          <ModelSelect value={model} onChange={handleModelChange} />
-        </div>
-
-        {/* Messages */}
-        <ScrollArea className="flex-1 px-4" ref={scrollRef}>
-          <div className="mx-auto max-w-3xl py-4">
-            {(!active || active.messages.length === 0) && (
-              <div className="flex items-center justify-center py-20 text-muted-foreground">
-                <p>Start a conversation...</p>
-              </div>
-            )}
-            {active?.messages.map((msg) => (
-              <MessageBubble key={msg.id} message={msg} />
-            ))}
-          </div>
-        </ScrollArea>
-
-        {/* Input */}
-        <ChatInput onSend={handleSend} onStop={stop} isStreaming={isStreaming} />
+      {/* Chat + KB split pane */}
+      <div className="flex-1">
+        <SplitPane
+          left={chatArea}
+          right={<KBContextPanel {...kbContext} onClose={() => setShowKB(false)} />}
+          showRight={showKB}
+        />
       </div>
     </div>
   )

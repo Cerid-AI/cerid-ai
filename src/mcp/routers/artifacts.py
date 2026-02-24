@@ -93,6 +93,23 @@ class RecategorizeRequest(BaseModel):
     tags: str = ""
 
 
+@router.get("/artifacts/{artifact_id}/related")
+async def related_artifacts_endpoint(
+    artifact_id: str,
+    depth: int = Query(2, ge=1, le=4),
+    max_results: int = Query(5, ge=1, le=20),
+):
+    """Get artifacts related to the given artifact via knowledge graph traversal."""
+    try:
+        driver = get_neo4j()
+        return graph.find_related_artifacts(
+            driver, artifact_ids=[artifact_id], depth=depth, max_results=max_results
+        )
+    except Exception as e:
+        logger.error(f"Related artifacts error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/artifacts")
 async def list_artifacts_endpoint(
     domain: Optional[str] = Query(None, description="Filter by domain"),

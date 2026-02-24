@@ -56,3 +56,11 @@ def list_collections_endpoint():
 @router.get("/stats")
 def stats_endpoint():
     return list_collections()
+
+
+@router.get("/scheduler")
+def scheduler_status_endpoint():
+    """Return status of all scheduled jobs."""
+    from scheduler import get_job_status
+
+    return get_job_status()

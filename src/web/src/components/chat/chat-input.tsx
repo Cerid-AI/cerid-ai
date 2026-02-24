@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, type KeyboardEvent } from "react"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { Send, Square } from "lucide-react"
 
 interface ChatInputProps {
@@ -7,9 +8,10 @@ interface ChatInputProps {
   onStop: () => void
   isStreaming: boolean
   disabled?: boolean
+  injectedCount?: number
 }
 
-export function ChatInput({ onSend, onStop, isStreaming, disabled }: ChatInputProps) {
+export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount = 0 }: ChatInputProps) {
   const [input, setInput] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -55,6 +57,11 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled }: ChatInputPr
         disabled={disabled}
         className="flex-1 resize-none rounded-lg border bg-muted/50 px-4 py-2.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
       />
+      {injectedCount > 0 && (
+        <Badge variant="secondary" className="mb-1.5 text-xs">
+          {injectedCount} source{injectedCount !== 1 ? "s" : ""}
+        </Badge>
+      )}
       {isStreaming ? (
         <Button variant="destructive" size="icon" onClick={onStop}>
           <Square className="h-4 w-4" />

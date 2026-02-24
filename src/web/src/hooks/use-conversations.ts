@@ -1,13 +1,38 @@
 import { useState, useCallback } from "react"
 import type { Conversation, ChatMessage } from "@/lib/types"
+import { MODELS } from "@/lib/types"
 
 const STORAGE_KEY = "cerid-conversations"
 const MAX_CONVERSATIONS = 50
 
+const VALID_MODEL_IDS = new Set(MODELS.map((m) => m.id))
+
+/** Migrate old model IDs (missing openrouter/ prefix) and validate against current MODELS list */
+function migrateConversations(convos: Conversation[]): Conversation[] {
+  let changed = false
+  const migrated = convos.map((c) => {
+    let model = c.model
+    // Add openrouter/ prefix if missing
+    if (model && !model.startsWith("openrouter/")) {
+      model = `openrouter/${model}`
+      changed = true
+    }
+    // If still not a known model, reset to default
+    if (model && !VALID_MODEL_IDS.has(model)) {
+      model = MODELS[0].id
+      changed = true
+    }
+    return model !== c.model ? { ...c, model } : c
+  })
+  if (changed) saveConversations(migrated)
+  return migrated
+}
+
 function loadConversations(): Conversation[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    return raw ? JSON.parse(raw) : []
+    const convos: Conversation[] = raw ? JSON.parse(raw) : []
+    return migrateConversations(convos)
   } catch {
     return []
   }
@@ -71,6 +96,16 @@ export function useConversations() {
     })
   }, [])
 
+  const updateModel = useCallback((convoId: string, model: string) => {
+    setConversations((prev) => {
+      const next = prev.map((c) =>
+        c.id === convoId ? { ...c, model, updatedAt: Date.now() } : c
+      )
+      saveConversations(next)
+      return next
+    })
+  }, [])
+
   const remove = useCallback((convoId: string) => {
     setConversations((prev) => {
       const next = prev.filter((c) => c.id !== convoId)
@@ -84,5 +119,5 @@ export function useConversations() {
     })
   }, [conversations])
 
-  return { conversations, active, activeId, setActiveId, create, addMessage, updateLastMessage, remove }
+  return { conversations, active, activeId, setActiveId, create, addMessage, updateLastMessage, updateModel, remove }
 }

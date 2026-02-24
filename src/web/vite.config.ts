@@ -10,6 +10,18 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  build: {
+    chunkSizeWarningLimit: 800,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          "vendor-charts": ["recharts"],
+          "vendor-markdown": ["react-markdown", "remark-gfm", "react-syntax-highlighter"],
+          "vendor-query": ["@tanstack/react-query"],
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {

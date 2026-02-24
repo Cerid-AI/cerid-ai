@@ -47,6 +47,12 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
         >
           {isUser ? (
             <p className="whitespace-pre-wrap">{message.content}</p>
+          ) : message.content === "" ? (
+            <div className="flex items-center gap-1.5 py-2 px-1">
+              <span className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50" style={{ animationDelay: "0ms" }} />
+              <span className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50" style={{ animationDelay: "150ms" }} />
+              <span className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50" style={{ animationDelay: "300ms" }} />
+            </div>
           ) : (
             <div className="prose prose-sm dark:prose-invert max-w-none">
               <ReactMarkdown
@@ -81,7 +87,9 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
                     )
                   },
                 }}
-              />
+              >
+                {message.content}
+              </ReactMarkdown>
             </div>
           )}
         </div>

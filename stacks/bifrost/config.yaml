@@ -11,7 +11,7 @@ providers:
 
 routing:
   strategy: semantic-intent
-  classifier_model: meta-llama/llama-3.1-8b-instruct:free   # Free-tier model for classification
+  classifier_model: meta-llama/llama-3.3-70b-instruct   # Free-tier model for classification
   classifier_prompt: >-
     Classify this prompt into exactly one category: 
     - coding (technical scripting, algorithms, code writing/debugging, config changes, implementation, programming-related tasks)
@@ -42,15 +42,15 @@ routing:
 
   intent_categories:
     - name: coding
-      target_model: anthropic/claude-3.5-sonnet
+      target_model: anthropic/claude-sonnet-4
     - name: research
-      target_model: xai/grok-4
+      target_model: x-ai/grok-4
     - name: simple
-      target_model: meta-llama/llama-3.1-8b-instruct:free
+      target_model: meta-llama/llama-3.3-70b-instruct
     - name: general
       target_model: openai/gpt-4o-mini
 
-  fallback_models: ["openai/gpt-4o-mini", "meta-llama/llama-3.1-8b-instruct:free"]
+  fallback_models: ["openai/gpt-4o-mini", "meta-llama/llama-3.3-70b-instruct"]
 
 observability:
   enabled: true
