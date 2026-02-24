@@ -37,14 +37,15 @@ def auto_import_if_empty():
     # Neo4j is empty and sync manifest exists — run import
     logger.info("Empty database detected with valid sync manifest — starting auto-import")
     try:
+        import redis as redis_lib
+
         from cerid_sync_lib import (
-            import_neo4j,
-            import_chroma,
             import_bm25,
+            import_chroma,
+            import_neo4j,
             import_redis,
             read_manifest,
         )
-        import redis as redis_lib
 
         manifest = read_manifest(sync_dir)
         if not manifest:

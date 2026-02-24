@@ -1193,7 +1193,6 @@ def compare_status(
     }
     manifest = None
 
-    sync_path = Path(sync_dir)
     try:
         manifest = read_manifest(sync_dir)
         files = manifest.get("files", {})
