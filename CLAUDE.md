@@ -9,7 +9,7 @@
 
 Cerid AI is a self-hosted, privacy-first Personal AI Knowledge Companion. It unifies multi-domain knowledge bases (code, finance, projects, artifacts) into a context-aware LLM interface with RAG-powered retrieval and intelligent agents. All data stays local; only LLM API calls go external.
 
-**Status:** Phase 6 in progress (6A: React GUI foundation). Phases 0–5 complete. All 5 agents operational; 12 MCP tools; hybrid BM25+vector search; scheduled maintenance; CI/CD pipeline; multi-machine sync via Dropbox. React GUI replacing Streamlit dashboard as primary UI.
+**Status:** Phase 6 complete. Phase 7 planned. Phases 0–6 complete. All 5 agents operational; 12 MCP tools; hybrid BM25+vector search; scheduled maintenance; CI/CD pipeline; multi-machine sync via Dropbox. React GUI (port 3000) is the primary UI with streaming chat, KB context pane, monitoring, and audit dashboards. Backend hardened with API key auth, rate limiting, and Redis query caching.
 
 ## Architecture
 
@@ -71,13 +71,17 @@ React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly
 │   │   ├── health.py, query.py, ingestion.py, artifacts.py
 │   │   ├── agents.py, digest.py, mcp_sse.py
 │   │   └── __init__.py
+│   ├── middleware/                    # Request middleware (Phase 6D)
+│   │   ├── auth.py                   # API key authentication (opt-in via CERID_API_KEY)
+│   │   └── rate_limit.py             # Token-bucket rate limiting (Redis-backed)
 │   ├── utils/
 │   │   ├── parsers.py                # Extensible file parser registry
 │   │   ├── metadata.py               # Metadata extraction + AI categorization
 │   │   ├── chunker.py                # Token-based text chunking
 │   │   ├── graph.py                  # Neo4j artifact CRUD
 │   │   ├── bm25.py                   # BM25 keyword search index
-│   │   └── cache.py                  # Redis audit logging
+│   │   ├── cache.py                  # Redis audit logging
+│   │   └── query_cache.py            # Redis query cache (5-min TTL)
 │   ├── scripts/
 │   │   ├── watch_ingest.py           # Watchdog folder watcher (host process)
 │   │   ├── watch_obsidian.py         # Obsidian vault watcher (host process)
@@ -97,13 +101,20 @@ React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly
 │   └── requirements.txt
 ├── src/web/                            # React GUI (Phase 6)
 │   ├── package.json                   # React 19, Vite 7, Tailwind v4, shadcn/ui
-│   ├── vite.config.ts                 # Tailwind plugin, @/ alias, Bifrost proxy
+│   ├── vite.config.ts                 # Tailwind plugin, @/ alias, Bifrost proxy, manualChunks
 │   ├── Dockerfile                     # Multi-stage: Node build → nginx:alpine
 │   ├── nginx.conf                     # SPA fallback + Bifrost reverse proxy
 │   └── src/
-│       ├── lib/types.ts, api.ts       # Types, health client, SSE streaming
-│       ├── hooks/                     # use-theme, use-chat, use-conversations
-│       └── components/layout/, chat/  # Sidebar, status bar, chat panel
+│       ├── lib/types.ts, api.ts       # Types, health/KB/audit clients, SSE streaming
+│       ├── hooks/                     # use-theme, use-chat, use-conversations, use-kb-context, use-settings
+│       ├── contexts/                  # SettingsContext (model prefs, feedback toggle)
+│       └── components/
+│           ├── layout/                # Sidebar nav, status bar
+│           ├── chat/                  # Chat panel, message list, chat-dashboard (model costs, tokens)
+│           ├── kb/                    # KB context panel, artifact cards, domain filter, graph preview
+│           ├── monitoring/            # Health cards, collection chart, scheduler status
+│           ├── audit/                 # Activity chart, ingestion timeline, cost breakdown, query stats
+│           └── ui/                    # shadcn/ui primitives (button, card, badge, etc.)
 ├── stacks/
 │   ├── infrastructure/               # Neo4j, ChromaDB, Redis (Phase 5)
 │   │   ├── docker-compose.yml
@@ -329,7 +340,8 @@ python3 scripts/cerid-sync.py status
 - Batch ChromaDB writes: single `collection.add()` call per ingest, not per-chunk
 - PDF parsing: pdfplumber extracts tables as Markdown, non-table text extracted separately to avoid duplication
 - Host: Mac Pro (16-Core Xeon W, 160GB RAM), macOS
-- **React GUI (`src/web/`):** Tailwind CSS v4 (uses `@tailwindcss/vite` plugin — no `tailwind.config.ts`); shadcn/ui New York style, Zinc base color; path alias `@/*` → `./src/*`; Bifrost CORS handled via Vite dev proxy (`/api/bifrost` → `localhost:8080`) and nginx proxy in Docker; `VITE_MCP_URL` and `VITE_BIFROST_URL` are build-time env vars
+- **React GUI (`src/web/`):** Tailwind CSS v4 (uses `@tailwindcss/vite` plugin — no `tailwind.config.ts`); shadcn/ui New York style, Zinc base color; path alias `@/*` → `./src/*`; Bifrost CORS handled via Vite dev proxy (`/api/bifrost` → `localhost:8080`) and nginx proxy in Docker; `VITE_MCP_URL` and `VITE_BIFROST_URL` are build-time env vars; bundle splitting via React.lazy + Vite manualChunks (75% main chunk reduction)
+- **Backend Hardening (`src/mcp/middleware/`):** API key auth is opt-in — set `CERID_API_KEY` env var to enable. Rate limiting uses Redis token-bucket (100 req/min default, configurable via `RATE_LIMIT_RPM`). Redis query cache with 5-min TTL (`utils/query_cache.py`) — caches `/query` and `/agent/query` results. LLM feedback loop toggled via `ENABLE_FEEDBACK_LOOP` env var. CORS origins configurable via `CORS_ORIGINS` (defaults to `*`)
 
 ## Phase 2: Agent Workflows
 
@@ -483,8 +495,12 @@ Admin and monitoring UI at `http://localhost:8501` (container: `ai-companion-das
 - **Phase 5 (Complete):** Multi-machine dev environment & knowledge sync.
   - **5A:** Infrastructure compose for Neo4j/ChromaDB/Redis (`stacks/infrastructure/`), 4-step startup script, environment validation
   - **5B:** Knowledge base sync via JSONL — export/import CLI, auto-import on startup, Dropbox-based sync directory
-- **Phase 6 (In Progress):** React GUI + Production Hardening. See `docs/plans/2026-02-22-phase6-gui-design.md`.
-  - **6A (In Progress):** Foundation + Chat — React 19 scaffold, sidebar nav, streaming chat via Bifrost, health status bar, Docker/nginx deployment at port 3000
-  - **6B:** Knowledge Context Pane — resizable split-pane with auto KB query, artifact cards, domain filters
-  - **6C:** Monitoring + Audit Panes — health cards, charts, ingestion timeline, cost breakdown
-  - **6D:** Backend Hardening — Redis query caching, API key auth, LLM feedback loop, rate limiting
+- **Phase 6 (Complete):** React GUI + Production Hardening. See `docs/plans/2026-02-22-phase6-gui-design.md`.
+  - **6A (Complete):** Foundation + Chat — React 19 scaffold, sidebar nav, streaming chat via Bifrost SSE, health status bar, conversation persistence, Docker/nginx deployment at port 3000
+  - **6B (Complete):** Knowledge Context Pane — resizable split-pane, auto KB query on message send, artifact cards with relevance scoring, domain filters, graph preview with navigable connections, KB injection into chat via system prompt
+  - **6C (Complete):** Monitoring + Audit Panes — health cards (ChromaDB/Neo4j/Redis/Bifrost), collection size charts, scheduler status, activity timeline, ingestion stats, cost breakdown by tier, query pattern analytics
+  - **6D (Complete):** Backend Hardening — API key auth (opt-in), Redis token-bucket rate limiting (100 req/min), Redis query cache (5-min TTL), LLM feedback loop toggle, CORS configuration, bundle splitting (React.lazy + manualChunks, 75% reduction)
+- **Phase 7 (Planned):** Intelligence & Automation. See `docs/plans/2026-02-23-phase7-plan.md`.
+  - **7A:** Audit Intelligence — hallucination detection agent, conversation analytics, enhanced feedback loop (auto-extract facts from chat)
+  - **7B:** Smart Orchestration — model router with cost/complexity calc, auto-switch recommendations, real-time cost dashboard with budget alerts
+  - **7C:** Proactive Knowledge — configurable drive scanning, memory extraction from conversations, smart KB suggestions based on conversation patterns

@@ -4,7 +4,7 @@
 
 A privacy-first, local-first workspace that unifies multi-domain knowledge bases (code, finance, projects, personal artifacts) into a context-aware LLM interface with RAG-powered retrieval, file ingestion, and intelligent agents.
 
-[![Status](https://img.shields.io/badge/Status-Phase%205%20Complete-green)]()
+[![Status](https://img.shields.io/badge/Status-Phase%206%20Complete-green)]()
 [![License](https://img.shields.io/badge/License-Private-red)]()
 
 ---
@@ -15,22 +15,21 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 
 **Key Capabilities:**
 
+- **React GUI** at port 3000 — streaming chat, knowledge browser, monitoring & audit dashboards
 - **Multi-Provider LLM Access** via Bifrost gateway (Claude, GPT, Grok, Gemini, DeepSeek, Llama)
 - **5 Intelligent Agents** — Query (LLM reranking), Triage (LangGraph), Rectification, Audit, Maintenance
 - **12 MCP Tools** for knowledge base operations from LibreChat chat UI
 - **Hybrid BM25+Vector Search** with knowledge graph traversal and cross-domain connections
-- **Streamlit Admin Dashboard** with 5 panes (Overview, Artifacts, Query, Audit, Maintenance)
+- **KB Context Injection** — auto-query knowledge base on chat messages, inject as system prompt context
 - **File-Based Ingestion Pipeline** with structure-aware parsing (PDF tables as Markdown via pdfplumber, DOCX, XLSX, CSV, 30+ formats)
 - **Multi-Domain Query Agent** with parallel retrieval, LLM reranking, and token budget enforcement
-- **RAG-Powered Context Injection** for token-efficient knowledge retrieval (14k char budget)
 - **Local Vector & Graph Storage** (ChromaDB, Neo4j, Redis)
+- **Backend Hardening** — API key auth, rate limiting, Redis query caching (5-min TTL)
 - **Scheduled Maintenance** via APScheduler with proactive knowledge surfacing
 - **Multi-Machine Sync** via Dropbox — JSONL export/import with auto-import on startup
 - **GitHub Actions CI/CD** with 36 pytest tests
-- **MCP SSE Protocol** for tool integration with LibreChat UI
 - **Three-Tier AI Categorization** (manual, smart, pro) via Bifrost
 - **Obsidian Vault Integration** — auto-sync vault notes into knowledge base
-- **File Deduplication** via SHA-256 content hashing with atomic Neo4j constraints
 - **Privacy-First Architecture** — all data local, only LLM API calls go external
 
 ---
@@ -40,54 +39,55 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         USER BROWSER                                │
-│              http://localhost:3080  (Chat UI)                        │
-│              http://localhost:8501  (Admin Dashboard)                │
-└─────────────────────────────┬───────────────────────────────────────┘
-                              │
-┌─────────────────────────────▼───────────────────────────────────────┐
-│                        LibreChat (UI)                                │
-│                 Container: LibreChat | Port: 3080                    │
-│           Chat Interface + MCP Client + RAG Integration              │
-└──────────┬──────────────────────────────────────┬───────────────────┘
-           │                                      │
-           │ LLM Requests                         │ MCP Tools (SSE)
-           ▼                                      ▼
-┌──────────────────────────┐    ┌─────────────────────────────────────┐
-│    Bifrost Gateway       │    │      AI Companion MCP Server        │
-│  Container: bifrost      │◄───│   Container: ai-companion-mcp       │
-│  Port: 8080              │    │   Port: 8888                        │
-│  Routes to OpenRouter    │    │                                     │
-└──────────┬───────────────┘    │   REST:  /health /collections       │
-           │                    │          /query /ingest /ingest_file │
-           ▼                    │          /artifacts /recategorize    │
-┌──────────────────────────┐    │   Agents: /agent/query              │
-│      OpenRouter API      │    │           /agent/triage (+ /batch)  │
-│ (Claude, GPT, Gemini,    │    │           /agent/rectify            │
-│  Grok, DeepSeek, etc.)   │    │           /agent/audit              │
-└──────────────────────────┘    │           /agent/maintain            │
-                                │   SSE:   /mcp/sse /mcp/messages     │
-┌──────────────────────────┐    │   Tools: 12 MCP tools (pkb_*)       │
-│  Streamlit Dashboard     │    │   Search: Hybrid BM25 + vector      │
-│  Container:              │───►│   Scheduler: APScheduler            │
-│    ai-companion-dashboard│    └──────────┬──────────────────────────┘
-│  Port: 8501              │               │
-│  5 Admin Panes           │    ┌──────────┼──────────┐
-└──────────────────────────┘    │          │          │
-                                ▼          ▼          ▼
-                             ChromaDB    Neo4j      Redis
-                             :8001      :7474      :6379
-                             (vectors)  (graph)    (audit)
+│  http://localhost:3000  (React GUI — primary)                       │
+│  http://localhost:3080  (LibreChat — legacy)                        │
+│  http://localhost:8501  (Streamlit Dashboard — legacy admin)        │
+└────────────────┬────────────────────────────────────────────────────┘
+                 │
+    ┌────────────▼────────────┐
+    │   React GUI (nginx)     │
+    │   Container: cerid-web  │──── /api/bifrost/ ───┐
+    │   Port: 3000            │                      │
+    └────────────┬────────────┘                      │
+                 │ direct API calls                   │
+                 ▼                                    ▼
+┌─────────────────────────────────┐    ┌─────────────────────────────┐
+│    AI Companion MCP Server      │    │    Bifrost Gateway          │
+│  Container: ai-companion-mcp    │    │  Container: bifrost         │
+│  Port: 8888                     │    │  Port: 8080                 │
+│                                 │    │  Routes to OpenRouter       │
+│  REST:  /health /collections    │    └──────────┬──────────────────┘
+│         /query /ingest          │               │
+│         /artifacts              │               ▼
+│  Agents: /agent/query           │    ┌──────────────────────────┐
+│          /agent/triage          │    │    OpenRouter API         │
+│          /agent/rectify         │    │  (Claude, GPT, Gemini,   │
+│          /agent/audit           │    │   Grok, DeepSeek, etc.)  │
+│          /agent/maintain        │    └──────────────────────────┘
+│  SSE:   /mcp/sse /mcp/messages  │
+│  Tools: 12 MCP tools (pkb_*)   │
+│  Search: Hybrid BM25 + vector   │
+│  Middleware: auth, rate-limit    │
+│  Scheduler: APScheduler         │
+└────────────┬────────────────────┘
+             │
+   ┌─────────┼─────────┐
+   │         │         │
+   ▼         ▼         ▼
+ChromaDB   Neo4j     Redis
+:8001     :7474     :6379
+(vectors) (graph)   (cache+audit)
 
 Host Processes (outside Docker):
 ├── watch_ingest.py   → Monitors ~/cerid-archive/, POSTs to :8888
 ├── watch_obsidian.py → Monitors Obsidian vault, POSTs to :8888
 └── ingest_cli.py     → Batch CLI tool, POSTs to :8888
 
-Supporting Services:
-├── MongoDB (chat-mongodb)         - LibreChat data storage (27017)
-├── Meilisearch (chat-meilisearch) - Search indexing (7700)
-├── VectorDB (vectordb)            - PostgreSQL + pgvector for RAG (5432)
-└── RAG API (rag_api)              - Document processing (8000)
+Supporting Services (LibreChat stack):
+├── MongoDB (27017) — LibreChat data storage
+├── Meilisearch (7700) — Search indexing
+├── PostgreSQL+pgvector (5432) — RAG vector store
+└── RAG API (8000) — Document processing
 ```
 
 ---
@@ -143,8 +143,9 @@ curl -s http://localhost:8888/health | python3 -m json.tool
 
 | Service | URL | Purpose |
 |---------|-----|---------|
-| LibreChat | http://localhost:3080 | Main chat interface |
-| Dashboard | http://localhost:8501 | Streamlit admin UI |
+| **React GUI** | http://localhost:3000 | **Primary UI** — chat, KB, monitoring, audit |
+| LibreChat | http://localhost:3080 | Legacy chat interface (MCP tools) |
+| Dashboard | http://localhost:8501 | Legacy Streamlit admin UI |
 | MCP API | http://localhost:8888 | Knowledge base API |
 | API Docs | http://localhost:8888/docs | Swagger/OpenAPI docs |
 | Bifrost | http://localhost:8080 | LLM gateway dashboard |
@@ -309,9 +310,31 @@ cerid-ai/
 │   │   ├── watch_obsidian.py         # Obsidian vault watcher
 │   │   └── ingest_cli.py
 │   │
+│   ├── middleware/                    # Auth + rate limiting (Phase 6D)
+│   │   ├── auth.py                   # X-API-Key validation (opt-in)
+│   │   └── rate_limit.py             # Sliding window rate limiter
+│   │
 │   └── tests/                        # 36 pytest tests
 │
-├── src/gui/                          # Streamlit Dashboard
+├── src/web/                          # React GUI (Phase 6)
+│   ├── package.json                  # React 19, Vite 7, Tailwind v4, shadcn/ui
+│   ├── vite.config.ts                # Bundle splitting, Bifrost proxy
+│   ├── Dockerfile                    # Multi-stage: Node build → nginx:alpine
+│   ├── nginx.conf                    # SPA fallback + Bifrost reverse proxy
+│   └── src/
+│       ├── App.tsx                   # Lazy-loaded pane routing
+│       ├── lib/types.ts, api.ts      # Types, health client, SSE streaming
+│       ├── hooks/                    # use-theme, use-chat, use-conversations,
+│       │                             # use-kb-context, use-settings
+│       ├── contexts/                 # KB injection context provider
+│       └── components/
+│           ├── layout/               # Sidebar, status bar, split-pane
+│           ├── chat/                 # Chat panel, input, bubbles, dashboard
+│           ├── kb/                   # Knowledge pane, artifact cards, graph
+│           ├── monitoring/           # Health cards, charts, scheduler
+│           └── audit/                # Activity, costs, ingestion, queries
+│
+├── src/gui/                          # Streamlit Dashboard (legacy)
 │   ├── app.py
 │   ├── Dockerfile
 │   └── requirements.txt
@@ -438,10 +461,11 @@ Auto-import on startup: when MCP starts with an empty Neo4j database and a valid
 
 | Port | Service | Container | Purpose |
 |------|---------|-----------|---------|
-| 3080 | LibreChat | LibreChat | Chat UI |
+| 3000 | **React GUI** | cerid-web | **Primary UI** |
+| 3080 | LibreChat | LibreChat | Legacy Chat UI |
 | 8080 | Bifrost | bifrost | LLM Gateway |
 | 8888 | MCP Server | ai-companion-mcp | Knowledge Base API |
-| 8501 | Dashboard | ai-companion-dashboard | Streamlit Admin UI |
+| 8501 | Dashboard | ai-companion-dashboard | Legacy Admin UI |
 | 8000 | RAG API | rag_api | Document Processing |
 | 8001 | ChromaDB | ai-companion-chroma | Vector Store |
 | 7474 | Neo4j HTTP | ai-companion-neo4j | Graph DB Browser |
@@ -492,10 +516,18 @@ Auto-import on startup: when MCP starts with an empty Neo4j database and a valid
 - [x] Knowledge base sync CLI (`cerid-sync.py`) — JSONL export/import via Dropbox
 - [x] Auto-import on startup for empty databases
 
-### Phase 6: Production Hardening (Planned)
-- [ ] Redis query caching
-- [ ] Encryption at rest
-- [ ] Production hardening
+### Phase 6: React GUI + Production Hardening ✅
+- [x] **6A:** React 19 scaffold, streaming chat via Bifrost, sidebar nav, conversation history, Docker/nginx
+- [x] **6B:** Knowledge context pane — split-pane layout, artifact cards, domain filters, graph preview, KB injection into chat
+- [x] **6C:** Monitoring & audit panes — health cards, collection charts, scheduler status, cost breakdown, activity charts
+- [x] **6D:** Backend hardening — API key auth, rate limiting, Redis query cache, LLM feedback loop, CORS
+- [x] Chat dashboard metrics bar (model costs, token estimate, context window usage)
+- [x] Bundle splitting via React.lazy + Vite manualChunks (75% main chunk reduction)
+
+### Phase 7: Intelligence & Automation (Planned)
+- [ ] **7A:** Audit intelligence — hallucination detection, conversation analytics, enhanced feedback loop
+- [ ] **7B:** Smart orchestration — model router with cost/complexity calc, auto-switch recommendations
+- [ ] **7C:** Proactive knowledge — drive scanning, memory extraction from chat, smart KB suggestions
 
 ---
 
