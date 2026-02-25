@@ -142,6 +142,30 @@ REDIS_INGEST_LOG = "ingest:log"
 REDIS_LOG_MAX = 10_000
 
 # ---------------------------------------------------------------------------
+# Phase 7A: Hallucination Detection
+# ---------------------------------------------------------------------------
+ENABLE_HALLUCINATION_CHECK = os.getenv("ENABLE_HALLUCINATION_CHECK", "false").lower() == "true"
+HALLUCINATION_THRESHOLD = float(os.getenv("HALLUCINATION_THRESHOLD", "0.75"))
+
+# ---------------------------------------------------------------------------
+# Phase 7A: Feedback Loop Backend Gate
+# ---------------------------------------------------------------------------
+ENABLE_FEEDBACK_LOOP = os.getenv("ENABLE_FEEDBACK_LOOP", "false").lower() == "true"
+
+# ---------------------------------------------------------------------------
+# Phase 7B: Smart Orchestration
+# ---------------------------------------------------------------------------
+ENABLE_MODEL_ROUTER = os.getenv("ENABLE_MODEL_ROUTER", "false").lower() == "true"
+COST_SENSITIVITY = os.getenv("COST_SENSITIVITY", "medium")  # low/medium/high
+MONTHLY_BUDGET = float(os.getenv("MONTHLY_BUDGET", "0"))  # USD, 0 = unlimited
+
+# ---------------------------------------------------------------------------
+# Phase 7C: Proactive Knowledge
+# ---------------------------------------------------------------------------
+ENABLE_MEMORY_EXTRACTION = os.getenv("ENABLE_MEMORY_EXTRACTION", "false").lower() == "true"
+MEMORY_RETENTION_DAYS = int(os.getenv("MEMORY_RETENTION_DAYS", "180"))
+
+# ---------------------------------------------------------------------------
 # Sync (Phase 5B)
 # ---------------------------------------------------------------------------
 SYNC_DIR = os.path.expanduser(os.getenv("CERID_SYNC_DIR", "~/Dropbox/cerid-sync"))

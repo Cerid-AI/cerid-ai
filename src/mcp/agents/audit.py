@@ -236,6 +236,128 @@ def get_query_patterns(
 
 
 # ---------------------------------------------------------------------------
+# Conversation analytics (Phase 7A)
+# ---------------------------------------------------------------------------
+
+REDIS_CONV_METRICS_PREFIX = "conv:"
+REDIS_CONV_METRICS_TTL = 86400 * 30  # 30 days
+
+# Per-model cost rates (USD per 1K tokens, OpenRouter pricing)
+MODEL_COST_RATES = {
+    "anthropic/claude-sonnet-4": {"input": 0.003, "output": 0.015},
+    "openai/gpt-4o": {"input": 0.0025, "output": 0.010},
+    "openai/gpt-4o-mini": {"input": 0.00015, "output": 0.0006},
+    "google/gemini-2.5-flash": {"input": 0.00015, "output": 0.0006},
+    "x-ai/grok-4-fast": {"input": 0.003, "output": 0.015},
+    "deepseek/deepseek-chat-v3-0324": {"input": 0.00027, "output": 0.0011},
+    "meta-llama/llama-3.3-70b-instruct": {"input": 0.00012, "output": 0.0003},
+}
+
+
+def log_conversation_metrics(
+    redis_client,
+    conversation_id: str,
+    model: str,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    latency_ms: int = 0,
+) -> None:
+    """Store per-turn metrics for a conversation in Redis."""
+    import json as _json
+    key = f"{REDIS_CONV_METRICS_PREFIX}{conversation_id}:metrics"
+    entry = _json.dumps({
+        "model": model,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "latency_ms": latency_ms,
+        "timestamp": datetime.utcnow().isoformat(),
+    })
+    try:
+        redis_client.rpush(key, entry)
+        redis_client.expire(key, REDIS_CONV_METRICS_TTL)
+    except Exception as e:
+        logger.warning(f"Failed to log conversation metrics: {e}")
+
+
+def get_conversation_analytics(
+    redis_client,
+    limit: int = 100,
+) -> Dict[str, Any]:
+    """
+    Aggregate conversation metrics across all tracked conversations.
+
+    Returns model usage breakdown, cost estimates, and latency stats.
+    """
+    import json as _json
+
+    try:
+        # Scan for conversation metric keys
+        keys = []
+        cursor = 0
+        while True:
+            cursor, found = redis_client.scan(
+                cursor, match=f"{REDIS_CONV_METRICS_PREFIX}*:metrics", count=100
+            )
+            keys.extend(found)
+            if cursor == 0:
+                break
+            if len(keys) >= limit:
+                break
+        keys = keys[:limit]
+    except Exception as e:
+        logger.warning(f"Failed to scan conversation metrics: {e}")
+        return {"total_conversations": 0, "total_turns": 0, "models": {}, "total_cost_usd": 0.0}
+
+    model_stats: Dict[str, Dict[str, Any]] = defaultdict(lambda: {
+        "turns": 0, "input_tokens": 0, "output_tokens": 0,
+        "total_latency_ms": 0, "cost_usd": 0.0,
+    })
+    total_turns = 0
+
+    for key in keys:
+        try:
+            entries = redis_client.lrange(key, 0, -1)
+            for raw in entries:
+                entry = _json.loads(raw)
+                model = entry.get("model", "unknown")
+                # Strip openrouter/ prefix for cost lookup
+                model_key = model.replace("openrouter/", "")
+                inp = entry.get("input_tokens", 0)
+                out = entry.get("output_tokens", 0)
+                lat = entry.get("latency_ms", 0)
+
+                stats = model_stats[model_key]
+                stats["turns"] += 1
+                stats["input_tokens"] += inp
+                stats["output_tokens"] += out
+                stats["total_latency_ms"] += lat
+
+                # Compute cost
+                rates = MODEL_COST_RATES.get(model_key, {"input": 0.001, "output": 0.005})
+                stats["cost_usd"] += (inp / 1000) * rates["input"] + (out / 1000) * rates["output"]
+                total_turns += 1
+        except Exception:
+            continue
+
+    # Format for output
+    models_out = {}
+    total_cost = 0.0
+    for model_key, stats in model_stats.items():
+        stats["cost_usd"] = round(stats["cost_usd"], 4)
+        stats["avg_latency_ms"] = round(stats["total_latency_ms"] / stats["turns"]) if stats["turns"] else 0
+        del stats["total_latency_ms"]
+        models_out[model_key] = stats
+        total_cost += stats["cost_usd"]
+
+    return {
+        "total_conversations": len(keys),
+        "total_turns": total_turns,
+        "models": models_out,
+        "total_cost_usd": round(total_cost, 4),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Main audit function
 # ---------------------------------------------------------------------------
 
@@ -256,7 +378,7 @@ async def audit(
     Returns:
         Audit report with requested sections
     """
-    all_reports = {"activity", "ingestion", "costs", "queries"}
+    all_reports = {"activity", "ingestion", "costs", "queries", "conversations"}
     if reports is None:
         reports = list(all_reports)
 
@@ -276,5 +398,8 @@ async def audit(
 
     if "queries" in reports:
         result["queries"] = get_query_patterns(redis_client)
+
+    if "conversations" in reports:
+        result["conversations"] = get_conversation_analytics(redis_client)
 
     return result

@@ -9,7 +9,7 @@
 
 Cerid AI is a self-hosted, privacy-first Personal AI Knowledge Companion. It unifies multi-domain knowledge bases (code, finance, projects, artifacts) into a context-aware LLM interface with RAG-powered retrieval and intelligent agents. All data stays local; only LLM API calls go external.
 
-**Status:** Phase 6 complete. Phase 7 planned. Phases 0–6 complete. All 5 agents operational; 12 MCP tools; hybrid BM25+vector search; scheduled maintenance; CI/CD pipeline; multi-machine sync via Dropbox. React GUI (port 3000) is the primary UI with streaming chat, KB context pane, monitoring, and audit dashboards. Backend hardened with API key auth, rate limiting, and Redis query caching.
+**Status:** Phase 7 complete. Phases 0–7 complete. 7 agents operational (query, triage, rectify, audit, maintenance, hallucination, memory); 15 MCP tools; hybrid BM25+vector search; scheduled maintenance; CI/CD pipeline; multi-machine sync via Dropbox. React GUI (port 3000) with streaming chat, KB context pane, monitoring, audit dashboards, hallucination panel, smart model router, and KB suggestions. Backend hardened with API key auth, rate limiting, Redis query caching, and conversation analytics.
 
 ## Architecture
 
@@ -90,8 +90,10 @@ React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly
 │   │   ├── query_agent.py            # Multi-domain query with LLM reranking
 │   │   ├── triage.py                 # LangGraph triage agent
 │   │   ├── rectify.py                # Knowledge base health checks
-│   │   ├── audit.py                  # Operation tracking, cost estimation
-│   │   └── maintenance.py            # System health, stale cleanup
+│   │   ├── audit.py                  # Operation tracking, cost estimation, conversation analytics
+│   │   ├── maintenance.py            # System health, stale cleanup
+│   │   ├── hallucination.py          # Hallucination detection (Phase 7A)
+│   │   └── memory.py                 # Memory extraction from conversations (Phase 7C)
 │   ├── Dockerfile
 │   ├── docker-compose.yml            # MCP server + Dashboard + React GUI
 │   └── requirements.txt
@@ -105,15 +107,15 @@ React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly
 │   ├── Dockerfile                     # Multi-stage: Node build → nginx:alpine
 │   ├── nginx.conf                     # SPA fallback + Bifrost reverse proxy
 │   └── src/
-│       ├── lib/types.ts, api.ts       # Types, health/KB/audit clients, SSE streaming
-│       ├── hooks/                     # use-theme, use-chat, use-conversations, use-kb-context, use-settings
+│       ├── lib/types.ts, api.ts, model-router.ts  # Types, API clients, model recommendation engine
+│       ├── hooks/                     # use-theme, use-chat, use-conversations, use-kb-context, use-settings, use-model-router, use-smart-suggestions
 │       ├── contexts/                  # SettingsContext (model prefs, feedback toggle)
 │       └── components/
 │           ├── layout/                # Sidebar nav, status bar
-│           ├── chat/                  # Chat panel, message list, chat-dashboard (model costs, tokens)
+│           ├── chat/                  # Chat panel, message list, chat-dashboard, model router banner
 │           ├── kb/                    # KB context panel, artifact cards, domain filter, graph preview
 │           ├── monitoring/            # Health cards, collection chart, scheduler status
-│           ├── audit/                 # Activity chart, ingestion timeline, cost breakdown, query stats
+│           ├── audit/                 # Activity chart, ingestion timeline, cost breakdown, query stats, hallucination panel
 │           └── ui/                    # shadcn/ui primitives (button, card, badge, etc.)
 ├── stacks/
 │   ├── infrastructure/               # Neo4j, ChromaDB, Redis (Phase 5)
@@ -187,14 +189,20 @@ Run before starting work to verify the stack is ready:
 - `POST /agent/triage` — LangGraph-powered file triage (validate → parse → categorize → chunk)
 - `POST /agent/triage/batch` — Batch triage with per-file error recovery
 - `POST /agent/rectify` — Knowledge base health checks (duplicates, stale, orphans, distribution)
-- `POST /agent/audit` — Audit reports (activity, ingestion stats, costs, query patterns)
+- `POST /agent/audit` — Audit reports (activity, ingestion stats, costs, query patterns, conversations)
 - `POST /agent/maintain` — Maintenance routines (health, stale detection, collection analysis, orphan cleanup)
+
+**Phase 7 endpoints:**
+- `POST /agent/hallucination` — Check LLM response for hallucinations against KB
+- `GET /agent/hallucination/{conversation_id}` — Retrieve stored hallucination report
+- `POST /agent/memory/extract` — Extract and store memories from conversation
+- `POST /agent/memory/archive` — Archive old conversation memories
 
 **MCP protocol:**
 - `GET /mcp/sse` — SSE stream (MCP protocol, JSON-RPC 2.0)
 - `POST /mcp/messages?sessionId=X` — JSON-RPC handler
 
-MCP tools (12 total):
+MCP tools (15 total):
 - `pkb_query` — Single-domain query
 - `pkb_ingest` — Ingest raw text
 - `pkb_ingest_file` — Ingest a file with parsing and metadata
@@ -205,8 +213,11 @@ MCP tools (12 total):
 - `pkb_recategorize` — Move artifact between domains
 - `pkb_triage` — LangGraph-powered file triage
 - `pkb_rectify` — Knowledge base health checks and auto-fix
-- `pkb_audit` — Audit reports (activity, ingestion, costs, queries)
+- `pkb_audit` — Audit reports (activity, ingestion, costs, queries, conversations)
 - `pkb_maintain` — Maintenance routines (health, stale, collections, orphans)
+- `pkb_check_hallucinations` — Verify LLM claims against KB (Phase 7A)
+- `pkb_memory_extract` — Extract memories from conversations (Phase 7C)
+- `pkb_memory_archive` — Archive old conversation memories (Phase 7C)
 
 ### Ingestion Pipeline
 
@@ -506,7 +517,7 @@ Admin and monitoring UI at `http://localhost:8501` (container: `ai-companion-das
   - **6B (Complete):** Knowledge Context Pane — resizable split-pane, auto KB query on message send, artifact cards with relevance scoring, domain filters, graph preview with navigable connections, KB injection into chat via system prompt
   - **6C (Complete):** Monitoring + Audit Panes — health cards (ChromaDB/Neo4j/Redis/Bifrost), collection size charts, scheduler status, activity timeline, ingestion stats, cost breakdown by tier, query pattern analytics
   - **6D (Complete):** Backend Hardening — API key auth (opt-in, X-API-Key header), in-memory sliding window rate limiting (path-specific), Redis query cache (5-min TTL), LLM feedback loop toggle, CORS configuration, bundle splitting (React.lazy + manualChunks, 75% reduction)
-- **Phase 7 (Planned):** Intelligence & Automation. See `docs/plans/2026-02-23-phase7-plan.md`.
-  - **7A:** Audit Intelligence — hallucination detection agent, conversation analytics, enhanced feedback loop (auto-extract facts from chat)
-  - **7B:** Smart Orchestration — model router with cost/complexity calc, auto-switch recommendations, real-time cost dashboard with budget alerts
-  - **7C:** Proactive Knowledge — configurable drive scanning, memory extraction from conversations, smart KB suggestions based on conversation patterns
+- **Phase 7 (Complete):** Intelligence & Automation. See `docs/plans/2026-02-23-phase7-plan.md`.
+  - **7A (Complete):** Audit Intelligence — hallucination detection agent (claim extraction + KB verification), conversation analytics (per-model cost/token tracking), enhanced feedback loop (backend gate, async hallucination trigger, conversation metrics logging)
+  - **7B (Complete):** Smart Orchestration — client-side model router (complexity scoring, cost sensitivity, tier-based recommendations), auto-switch toggle in toolbar, 15 MCP tools (3 new: `pkb_check_hallucinations`, `pkb_memory_extract`, `pkb_memory_archive`)
+  - **7C (Complete):** Proactive Knowledge — memory extraction from conversations (facts, decisions, preferences, action items stored as KB artifacts with Neo4j relationships), smart KB suggestions (debounced real-time query as user types), memory archival with configurable retention

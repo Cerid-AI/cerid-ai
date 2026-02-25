@@ -19,6 +19,7 @@ import type {
   SchedulerStatus,
   IngestLogResponse,
   AuditResponse,
+  HallucinationReport,
 } from "./types"
 
 export async function fetchHealth(): Promise<HealthResponse> {
@@ -115,6 +116,9 @@ export async function ingestFeedback(
   assistantResponse: string,
   model: string,
   conversationId: string,
+  inputTokens = 0,
+  outputTokens = 0,
+  latencyMs = 0,
 ): Promise<void> {
   const res = await fetch(`${MCP_BASE}/ingest/feedback`, {
     method: "POST",
@@ -124,9 +128,43 @@ export async function ingestFeedback(
       assistant_response: assistantResponse,
       model,
       conversation_id: conversationId,
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      latency_ms: latencyMs,
     }),
   })
   if (!res.ok) throw new Error(`Feedback ingest failed: ${res.status}`)
+}
+
+// --- Hallucination Detection (Phase 7A) ---
+
+export async function checkHallucinations(
+  responseText: string,
+  conversationId: string,
+  threshold?: number,
+): Promise<HallucinationReport> {
+  const res = await fetch(`${MCP_BASE}/agent/hallucination`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      response_text: responseText,
+      conversation_id: conversationId,
+      ...(threshold !== undefined && { threshold }),
+    }),
+  })
+  if (!res.ok) throw new Error(`Hallucination check failed: ${res.status}`)
+  return res.json()
+}
+
+export async function fetchHallucinationReport(
+  conversationId: string,
+): Promise<HallucinationReport | null> {
+  const res = await fetch(`${MCP_BASE}/agent/hallucination/${conversationId}`, {
+    headers: mcpHeaders(),
+  })
+  if (res.status === 404) return null
+  if (!res.ok) throw new Error(`Hallucination report fetch failed: ${res.status}`)
+  return res.json()
 }
 
 // --- Chat ---

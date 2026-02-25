@@ -39,6 +39,22 @@ class RectifyRequest(BaseModel):
     stale_days: int = 90
 
 
+class HallucinationCheckRequest(BaseModel):
+    response_text: str
+    conversation_id: str
+    threshold: Optional[float] = None
+
+
+class MemoryExtractionRequest(BaseModel):
+    response_text: str
+    conversation_id: str
+    model: str = ""
+
+
+class MemoryArchiveRequest(BaseModel):
+    retention_days: int = 180
+
+
 class AuditRequest(BaseModel):
     reports: Optional[List[str]] = None
     hours: int = 24
@@ -158,6 +174,68 @@ async def triage_batch_endpoint(req: TriageBatchRequest):
         }
     except Exception as e:
         logger.error(f"Batch triage error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/agent/hallucination")
+async def hallucination_check_endpoint(req: HallucinationCheckRequest):
+    try:
+        from agents.hallucination import check_hallucinations
+        return await check_hallucinations(
+            response_text=req.response_text,
+            conversation_id=req.conversation_id,
+            chroma_client=get_chroma(),
+            neo4j_driver=get_neo4j(),
+            redis_client=get_redis(),
+            threshold=req.threshold,
+        )
+    except Exception as e:
+        logger.error(f"Hallucination check error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/agent/hallucination/{conversation_id}")
+async def hallucination_report_endpoint(conversation_id: str):
+    try:
+        from agents.hallucination import get_hallucination_report
+        report = get_hallucination_report(get_redis(), conversation_id)
+        if not report:
+            raise HTTPException(status_code=404, detail="No hallucination report found")
+        return report
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Hallucination report error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/agent/memory/extract")
+async def memory_extract_endpoint(req: MemoryExtractionRequest):
+    try:
+        from agents.memory import extract_and_store_memories
+        return await extract_and_store_memories(
+            response_text=req.response_text,
+            conversation_id=req.conversation_id,
+            model=req.model,
+            chroma_client=get_chroma(),
+            neo4j_driver=get_neo4j(),
+            redis_client=get_redis(),
+        )
+    except Exception as e:
+        logger.error(f"Memory extraction error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/agent/memory/archive")
+async def memory_archive_endpoint(req: MemoryArchiveRequest):
+    try:
+        from agents.memory import archive_old_memories
+        return await archive_old_memories(
+            neo4j_driver=get_neo4j(),
+            retention_days=req.retention_days,
+        )
+    except Exception as e:
+        logger.error(f"Memory archive error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

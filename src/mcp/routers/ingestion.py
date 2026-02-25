@@ -339,6 +339,9 @@ class FeedbackIngestRequest(BaseModel):
     assistant_response: str
     model: str = ""
     conversation_id: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    latency_ms: int = 0
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
@@ -383,6 +386,10 @@ async def ingest_file_endpoint(req: IngestFileRequest):
 @router.post("/ingest/feedback")
 async def ingest_feedback_endpoint(req: FeedbackIngestRequest):
     """Ingest a chat turn into the conversations domain for the feedback loop."""
+    # Backend gate: reject if feedback loop is disabled server-side
+    if not config.ENABLE_FEEDBACK_LOOP:
+        return {"status": "skipped", "reason": "Feedback loop disabled (ENABLE_FEEDBACK_LOOP=false)"}
+
     try:
         convo_prefix = req.conversation_id[:8] if req.conversation_id else "unknown"
         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
@@ -399,11 +406,57 @@ async def ingest_feedback_endpoint(req: FeedbackIngestRequest):
         }
         async with _ingest_semaphore:
             result = ingest_content(content, "conversations", metadata=metadata)
+
+        # Log with conversation_id for audit trail
+        try:
+            cache.log_event(
+                get_redis(),
+                event_type="feedback",
+                artifact_id=result.get("artifact_id", ""),
+                domain="conversations",
+                filename=filename,
+                conversation_id=req.conversation_id,
+            )
+        except Exception:
+            pass
+
         try:
             from utils.query_cache import invalidate_all
             invalidate_all()
         except Exception:
             pass
+
+        # Trigger hallucination check if enabled (async, non-blocking)
+        if config.ENABLE_HALLUCINATION_CHECK and result.get("status") == "success":
+            try:
+                from agents.hallucination import check_hallucinations
+                asyncio.get_running_loop().create_task(
+                    check_hallucinations(
+                        response_text=req.assistant_response,
+                        conversation_id=req.conversation_id,
+                        chroma_client=get_chroma(),
+                        neo4j_driver=get_neo4j(),
+                        redis_client=get_redis(),
+                    )
+                )
+            except RuntimeError:
+                pass  # no running loop
+
+        # Log conversation metrics if tokens provided
+        if req.input_tokens or req.output_tokens:
+            try:
+                from agents.audit import log_conversation_metrics
+                log_conversation_metrics(
+                    get_redis(),
+                    conversation_id=req.conversation_id,
+                    model=req.model,
+                    input_tokens=req.input_tokens,
+                    output_tokens=req.output_tokens,
+                    latency_ms=req.latency_ms,
+                )
+            except Exception:
+                pass
+
         return result
     except Exception as e:
         logger.error(f"Feedback ingest error: {e}")

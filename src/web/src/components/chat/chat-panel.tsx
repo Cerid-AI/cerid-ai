@@ -2,18 +2,20 @@ import { useRef, useEffect, useCallback, useState, useMemo } from "react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { Plus, PanelLeftClose, PanelLeft, Database, Rss, LayoutDashboard } from "lucide-react"
+import { Plus, PanelLeftClose, PanelLeft, Database, Rss, LayoutDashboard, Zap } from "lucide-react"
 import { MessageBubble } from "./message-bubble"
 import { ChatInput } from "./chat-input"
 import { ModelSelect } from "./model-select"
 import { ConversationList } from "./conversation-list"
 import { SplitPane } from "@/components/layout/split-pane"
 import { KBContextPanel } from "@/components/kb/kb-context-panel"
+import { HallucinationPanel } from "@/components/audit/hallucination-panel"
 import { ChatDashboard } from "./chat-dashboard"
 import { useChat } from "@/hooks/use-chat"
 import { useConversations } from "@/hooks/use-conversations"
 import { useKBContext } from "@/hooks/use-kb-context"
 import { useSettings } from "@/hooks/use-settings"
+import { useModelRouter } from "@/hooks/use-model-router"
 import type { ChatMessage } from "@/lib/types"
 import { MODELS } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -31,7 +33,12 @@ export function ChatPanel() {
     remove,
   } = useConversations()
 
-  const { feedbackLoop, toggleFeedbackLoop, showDashboard, toggleDashboard } = useSettings()
+  const {
+    feedbackLoop, toggleFeedbackLoop,
+    showDashboard, toggleDashboard,
+    autoModelSwitch, toggleAutoModelSwitch,
+    costSensitivity,
+  } = useSettings()
 
   const { send, stop, isStreaming } = useChat({
     onMessageStart: (convoId, msg) => addMessage(convoId, msg),
@@ -44,9 +51,10 @@ export function ChatPanel() {
   const [showHistory, setShowHistory] = useState(() => window.innerWidth >= 1024)
   const [showKB, setShowKB] = useState(() => window.innerWidth >= 1024)
 
-  // Sync model selector when switching conversations
+  // Sync model selector and reset router when switching conversations
   useEffect(() => {
     if (active?.model) setSelectedModel(active.model)
+    resetDismiss()
   }, [activeId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Extract the latest user message for auto-KB-query
@@ -58,6 +66,15 @@ export function ChatPanel() {
 
   const kbContext = useKBContext(latestUserMessage)
   const { injectedContext, clearInjected } = kbContext
+
+  const currentModelObj = useMemo(() => MODELS.find((m) => m.id === selectedModel) ?? MODELS[0], [selectedModel])
+  const { recommendation, dismiss: dismissRec, resetDismiss } = useModelRouter({
+    enabled: autoModelSwitch,
+    costSensitivity,
+    currentModel: currentModelObj,
+    messages: active?.messages ?? [],
+    kbInjections: kbContext.injectedContext.length,
+  })
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -163,6 +180,21 @@ export function ChatPanel() {
               <Button
                 variant="ghost"
                 size="icon"
+                className={cn("h-8 w-8", autoModelSwitch && "text-primary")}
+                onClick={toggleAutoModelSwitch}
+              >
+                <Zap className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {autoModelSwitch ? "Smart model routing: ON" : "Smart model routing: OFF"}
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
                 className={cn("h-8 w-8", showKB && "text-primary")}
                 onClick={() => setShowKB(!showKB)}
               >
@@ -186,6 +218,28 @@ export function ChatPanel() {
         />
       )}
 
+      {/* Model recommendation banner */}
+      {recommendation && (
+        <div className="flex items-center gap-2 border-b bg-muted/50 px-4 py-1.5 text-xs">
+          <Zap className="h-3.5 w-3.5 text-yellow-500" />
+          <span className="flex-1">{recommendation.reasoning}</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 text-xs"
+            onClick={() => {
+              handleModelChange(recommendation.model.id)
+              dismissRec()
+            }}
+          >
+            Switch
+          </Button>
+          <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={dismissRec}>
+            Dismiss
+          </Button>
+        </div>
+      )}
+
       {/* Messages */}
       <ScrollArea className="flex-1 px-4" ref={scrollRef}>
         <div className="mx-auto max-w-3xl py-4">
@@ -197,6 +251,10 @@ export function ChatPanel() {
           {active?.messages.map((msg) => (
             <MessageBubble key={msg.id} message={msg} />
           ))}
+          {/* Hallucination panel after messages */}
+          {activeId && !isStreaming && (
+            <HallucinationPanel conversationId={activeId} />
+          )}
         </div>
       </ScrollArea>
 

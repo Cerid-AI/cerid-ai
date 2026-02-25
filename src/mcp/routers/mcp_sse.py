@@ -280,6 +280,50 @@ MCP_TOOLS = [
         "description": "Get the status of scheduled maintenance jobs",
         "inputSchema": {"type": "object", "properties": {}},
     },
+    {
+        "name": "pkb_check_hallucinations",
+        "description": "Check an LLM response for hallucinations by verifying claims against the knowledge base",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "response_text": {"type": "string", "description": "The LLM response text to fact-check"},
+                "conversation_id": {"type": "string", "description": "Conversation ID for report storage"},
+                "threshold": {
+                    "type": "number",
+                    "description": "Similarity threshold for claim verification (0-1, default 0.75)",
+                    "default": 0.75,
+                },
+            },
+            "required": ["response_text", "conversation_id"],
+        },
+    },
+    {
+        "name": "pkb_memory_extract",
+        "description": "Extract and store memories (facts, decisions, preferences) from a conversation response",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "response_text": {"type": "string", "description": "The LLM response to extract memories from"},
+                "conversation_id": {"type": "string", "description": "Conversation ID for linking"},
+                "model": {"type": "string", "description": "Model that generated the response", "default": "unknown"},
+            },
+            "required": ["response_text", "conversation_id"],
+        },
+    },
+    {
+        "name": "pkb_memory_archive",
+        "description": "Archive old conversation memories past the retention period",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "retention_days": {
+                    "type": "integer",
+                    "description": "Number of days to retain memories (default 180)",
+                    "default": 180,
+                },
+            },
+        },
+    },
 ]
 
 
@@ -369,6 +413,32 @@ async def execute_tool(name: str, arguments: Dict) -> Any:
     elif name == "pkb_scheduler_status":
         from scheduler import get_job_status
         return get_job_status()
+    elif name == "pkb_check_hallucinations":
+        from agents.hallucination import check_hallucinations
+        return await check_hallucinations(
+            response_text=arguments.get("response_text", ""),
+            conversation_id=arguments.get("conversation_id", ""),
+            chroma_client=get_chroma(),
+            neo4j_driver=get_neo4j(),
+            redis_client=get_redis(),
+            threshold=arguments.get("threshold"),
+        )
+    elif name == "pkb_memory_extract":
+        from agents.memory import extract_and_store_memories
+        return await extract_and_store_memories(
+            response_text=arguments.get("response_text", ""),
+            conversation_id=arguments.get("conversation_id", ""),
+            model=arguments.get("model", "unknown"),
+            chroma_client=get_chroma(),
+            redis_client=get_redis(),
+            neo4j_driver=get_neo4j(),
+        )
+    elif name == "pkb_memory_archive":
+        from agents.memory import archive_old_memories
+        return await archive_old_memories(
+            neo4j_driver=get_neo4j(),
+            retention_days=arguments.get("retention_days", 180),
+        )
     raise ValueError(f"Unknown tool: {name}")
 
 

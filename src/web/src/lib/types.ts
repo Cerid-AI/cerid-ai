@@ -198,6 +198,19 @@ export interface AuditQueries {
   avg_results_per_query: number
 }
 
+export interface AuditConversations {
+  total_conversations: number
+  total_turns: number
+  models: Record<string, {
+    turns: number
+    input_tokens: number
+    output_tokens: number
+    avg_latency_ms: number
+    cost_usd: number
+  }>
+  total_cost_usd: number
+}
+
 export interface AuditResponse {
   timestamp: string
   reports_generated: string[]
@@ -205,4 +218,56 @@ export interface AuditResponse {
   ingestion?: AuditIngestion
   costs?: AuditCosts
   queries?: AuditQueries
+  conversations?: AuditConversations
+}
+
+// Hallucination detection (Phase 7A)
+export interface HallucinationClaim {
+  claim: string
+  status: "verified" | "unverified" | "uncertain" | "error"
+  similarity: number
+  source_artifact_id?: string
+  source_filename?: string
+  source_domain?: string
+  source_snippet?: string
+  reason?: string
+}
+
+export interface HallucinationReport {
+  conversation_id: string
+  timestamp: string
+  skipped: boolean
+  threshold?: number
+  claims: HallucinationClaim[]
+  summary: {
+    total: number
+    verified: number
+    unverified: number
+    uncertain: number
+    error?: number
+  }
+  reason?: string
+}
+
+// Memory extraction (Phase 7C)
+export interface MemoryExtractionResult {
+  conversation_id: string
+  timestamp: string
+  memories_extracted: number
+  memories_stored: number
+  results: {
+    memory_type: string
+    summary: string
+    status: string
+    artifact_id?: string
+    error?: string
+  }[]
+}
+
+// Model router (Phase 7B)
+export interface ModelRecommendation {
+  model: ModelOption
+  estimatedCost: number
+  reasoning: string
+  savingsVsCurrent: number
 }
