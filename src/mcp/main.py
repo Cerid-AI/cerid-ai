@@ -39,6 +39,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Sync auto-import check failed: {e}")
 
+    # Load plugins (Phase 8A)
+    try:
+        from plugins import load_plugins
+        loaded = load_plugins()
+        if loaded:
+            logger.info(f"Plugins loaded: {', '.join(loaded)}")
+    except Exception as e:
+        logger.warning(f"Plugin loading failed (server runs without plugins): {e}")
+
     # Start scheduled maintenance engine (Phase 4C.1)
     try:
         start_scheduler()

@@ -6,76 +6,133 @@ Thank you for your interest in contributing to Cerid AI!
 
 ### Prerequisites
 - Python 3.11+
-- Docker & Docker Compose
-- A running `llm-network` Docker bridge network
+- Node.js 20+ (for React GUI development)
+- Docker & Docker Compose V2
 
 ### Quick Start
 
 ```bash
-# Clone the repo
+# Clone and set up
 git clone https://github.com/YOUR_USERNAME/cerid-ai.git
 cd cerid-ai
 
-# Copy environment template
-cp src/mcp/.env.example src/mcp/.env
-# Edit .env with your values
+# One-command bootstrap (creates network, copies .env, starts services)
+./scripts/setup.sh
 
-# Create the Docker network (if it doesn't exist)
+# Or manually:
+cp .env.example .env          # Edit with your API keys
 docker network create llm-network
-
-# Start all services
-cd src/mcp
-docker compose up --build -d
+./scripts/start-cerid.sh      # Starts all 4 service groups
 ```
 
-The MCP server runs on `http://localhost:8888`. The Streamlit dashboard runs on `http://localhost:8501`.
+**Services after startup:**
+- React GUI: `http://localhost:3000`
+- MCP Server API: `http://localhost:8888`
+- API Docs: `http://localhost:8888/docs`
 
 ### Running Tests
 
 ```bash
 cd src/mcp
-pip install -r requirements.txt
 pip install pytest pytest-asyncio httpx
-pytest tests/
+pytest tests/ -v
 ```
 
 ### Linting
 
 ```bash
+# Python
 pip install ruff
 ruff check src/mcp/
+
+# TypeScript
+cd src/web && npx tsc --noEmit
 ```
+
+### React GUI Development
+
+```bash
+cd src/web
+npm install
+npm run dev          # Vite dev server on port 5173
+```
+
+The Vite dev server proxies `/api/bifrost` to `localhost:8080` (Bifrost LLM gateway).
 
 ## Coding Standards
 
 - **Python 3.11+** with type hints on public functions
 - **FastAPI** routers in `src/mcp/routers/` with `APIRouter`
+- **React 19** + **Tailwind v4** + **shadcn/ui** (New York style, Zinc base)
 - **No hardcoded secrets** — use environment variables via `config.py`
 - **Cypher queries** live in `utils/graph.py`, never inline in routers
+- **ChromaDB metadata** values must be strings or ints (lists stored as JSON strings)
 - Keep functions focused and under ~50 lines where practical
 - Add logging for error paths: `logger.warning()` for recoverable, `logger.error()` for failures
-
-## Pull Request Process
-
-1. Fork the repository and create a feature branch from `main`
-2. Make your changes with clear, focused commits
-3. Ensure tests pass and linting is clean
-4. Update documentation if you're adding new endpoints or MCP tools
-5. Open a PR with a clear description of what and why
 
 ## Architecture Overview
 
 ```
 src/mcp/
-  main.py           — FastAPI app setup + lifespan
+  main.py           — FastAPI app setup + lifespan (plugin loading here)
   config.py         — All configuration (single source of truth)
   deps.py           — Database client singletons
   scheduler.py      — APScheduler background jobs
   routers/          — FastAPI endpoint modules
-  agents/           — LangGraph agent workflows
-  utils/            — Shared utilities (graph, BM25, parsers, etc.)
-  tests/            — pytest test suite
+  agents/           — LangGraph agent workflows (7 agents)
+  utils/            — Shared utilities (graph, BM25, parsers, features, etc.)
+  plugins/          — Plugin system (loader, base classes)
+  middleware/       — Auth + rate limiting
+  tests/            — pytest test suite (59 tests)
+
+src/web/
+  src/components/   — React components (layout, chat, kb, monitoring, audit, ui)
+  src/hooks/        — Custom React hooks
+  src/lib/          — API clients, types, model router
+  src/contexts/     — React contexts (KB injection, settings)
 ```
+
+## Plugin Development
+
+Cerid AI supports plugins for extending functionality. See `src/mcp/plugins/base.py` for abstract base classes.
+
+### Creating a Plugin
+
+1. Create a directory in `src/mcp/plugins/your_plugin/`
+2. Add `manifest.json`:
+   ```json
+   {
+     "name": "your_plugin",
+     "version": "1.0.0",
+     "type": "parser",
+     "description": "What your plugin does",
+     "tier": "community",
+     "requires": []
+   }
+   ```
+3. Add `plugin.py` with a `register()` function:
+   ```python
+   from utils.parsers import PARSER_REGISTRY
+
+   def register():
+       PARSER_REGISTRY[".xyz"] = parse_xyz
+
+   def parse_xyz(file_path):
+       return {"text": "...", "file_type": "xyz", "page_count": None}
+   ```
+4. The plugin is auto-discovered on server startup.
+
+**Plugin types:** `parser` (file parsers), `agent` (workflows), `sync` (sync backends), `middleware`
+
+**Tier gating:** Set `"tier": "pro"` in manifest to require `CERID_TIER=pro` environment variable.
+
+## Pull Request Process
+
+1. Fork the repository and create a feature branch from `main`
+2. Make your changes with clear, focused commits
+3. Ensure tests pass (`pytest`) and linting is clean (`ruff check`, `tsc --noEmit`)
+4. Update documentation if adding new endpoints, MCP tools, or plugins
+5. Open a PR with a clear description of what and why
 
 ## License
 

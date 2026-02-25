@@ -5,6 +5,7 @@ Single source of truth for domains, extensions, categorization, and service URLs
 To add a new domain:  Add to DOMAINS list + mkdir ~/cerid-archive/<domain>
 To add a file type:   Add to SUPPORTED_EXTENSIONS + register a parser in utils/parsers.py
 To change AI tier:    Set CATEGORIZE_MODE env var to manual/smart/pro
+To enable pro tier:   Set CERID_TIER=pro (enables premium plugins and features)
 """
 
 import os
@@ -170,3 +171,34 @@ MEMORY_RETENTION_DAYS = int(os.getenv("MEMORY_RETENTION_DAYS", "180"))
 # ---------------------------------------------------------------------------
 SYNC_DIR = os.path.expanduser(os.getenv("CERID_SYNC_DIR", "~/Dropbox/cerid-sync"))
 MACHINE_ID = os.getenv("CERID_MACHINE_ID", os.uname().nodename.split(".")[0])
+
+# ---------------------------------------------------------------------------
+# Phase 8A: Plugin System & Feature Tiers
+# ---------------------------------------------------------------------------
+# Feature tier: "community" (OSS) or "pro" (commercial plugins enabled)
+FEATURE_TIER = os.getenv("CERID_TIER", "community")
+
+# Plugin directory (relative to app root or absolute path)
+PLUGIN_DIR = os.getenv("CERID_PLUGIN_DIR", os.path.join(os.path.dirname(__file__), "plugins"))
+
+# Comma-separated list of plugin names to load (empty = auto-discover all)
+_enabled_plugins_raw = os.getenv("CERID_ENABLED_PLUGINS", "")
+ENABLED_PLUGINS = [p.strip() for p in _enabled_plugins_raw.split(",") if p.strip()] if _enabled_plugins_raw else []
+
+# Feature flags: controls what's available per tier
+# Community features are always enabled; pro features require CERID_TIER=pro
+FEATURE_FLAGS = {
+    # Pro-only features (disabled in community tier)
+    "ocr_parsing":         FEATURE_TIER == "pro",
+    "audio_transcription": FEATURE_TIER == "pro",
+    "image_understanding": FEATURE_TIER == "pro",
+    "semantic_dedup":      FEATURE_TIER == "pro",
+    "advanced_analytics":  FEATURE_TIER == "pro",
+    "multi_user":          FEATURE_TIER == "pro",
+    # Community features (always enabled)
+    "hierarchical_taxonomy": True,
+    "file_upload_gui":       True,
+    "encryption_at_rest":    True,
+    "truth_audit":           True,
+    "live_metrics":          True,
+}

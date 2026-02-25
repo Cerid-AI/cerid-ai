@@ -5,8 +5,8 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - /Users/sunrunner/cerid-ai/stacks/bifrost/data/config.json:/app/data/config.json
-      - /Users/sunrunner/cerid-ai/stacks/bifrost/data:/app/data
+      - ./data/config.json:/app/data/config.json
+      - ./data:/app/data
     env_file:
       - ../../.env
     environment:

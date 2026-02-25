@@ -18,7 +18,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 - **React GUI** at port 3000 — streaming chat, knowledge browser, monitoring & audit dashboards
 - **Multi-Provider LLM Access** via Bifrost gateway (Claude, GPT, Grok, Gemini, DeepSeek, Llama)
 - **5 Intelligent Agents** — Query (LLM reranking), Triage (LangGraph), Rectification, Audit, Maintenance
-- **12 MCP Tools** for knowledge base operations from LibreChat chat UI
+- **15 MCP Tools** for knowledge base operations from LibreChat chat UI
 - **Hybrid BM25+Vector Search** with knowledge graph traversal and cross-domain connections
 - **KB Context Injection** — auto-query knowledge base on chat messages, inject as system prompt context
 - **File-Based Ingestion Pipeline** with structure-aware parsing (PDF tables as Markdown via pdfplumber, DOCX, XLSX, CSV, 30+ formats)
@@ -27,7 +27,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 - **Backend Hardening** — API key auth, rate limiting, Redis query caching (5-min TTL)
 - **Scheduled Maintenance** via APScheduler with proactive knowledge surfacing
 - **Multi-Machine Sync** via Dropbox — JSONL export/import with auto-import on startup
-- **GitHub Actions CI/CD** with 36 pytest tests
+- **GitHub Actions CI/CD** with 59 pytest tests
 - **Three-Tier AI Categorization** (manual, smart, pro) via Bifrost
 - **Obsidian Vault Integration** — auto-sync vault notes into knowledge base
 - **Privacy-First Architecture** — all data local, only LLM API calls go external
@@ -65,7 +65,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 │          /agent/audit           │    │   Grok, DeepSeek, etc.)  │
 │          /agent/maintain        │    └──────────────────────────┘
 │  SSE:   /mcp/sse /mcp/messages  │
-│  Tools: 12 MCP tools (pkb_*)   │
+│  Tools: 15 MCP tools (pkb_*)   │
 │  Search: Hybrid BM25 + vector   │
 │  Middleware: auth, rate-limit    │
 │  Scheduler: APScheduler         │
@@ -318,7 +318,7 @@ cerid-ai/
 │   │   ├── auth.py                   # X-API-Key validation (opt-in)
 │   │   └── rate_limit.py             # Sliding window rate limiter
 │   │
-│   └── tests/                        # 36 pytest tests
+│   └── tests/                        # 59 pytest tests
 │
 ├── src/web/                          # React GUI (Phase 6)
 │   ├── package.json                  # React 19, Vite 7, Tailwind v4, shadcn/ui
@@ -502,7 +502,7 @@ Auto-import on startup: when MCP starts with an empty Neo4j database and a valid
 ### Phase 2: Agent Workflows ✅
 - [x] Query Agent with LLM reranking (parallel multi-domain retrieval)
 - [x] Triage Agent (LangGraph), Rectification, Audit, Maintenance agents
-- [x] 12 MCP tools total
+- [x] 15 MCP tools total
 
 ### Phase 3: Dashboard & Integrations ✅
 - [x] Streamlit admin dashboard (5 panes)
@@ -528,10 +528,17 @@ Auto-import on startup: when MCP starts with an empty Neo4j database and a valid
 - [x] Chat dashboard metrics bar (model costs, token estimate, context window usage)
 - [x] Bundle splitting via React.lazy + Vite manualChunks (75% main chunk reduction)
 
-### Phase 7: Intelligence & Automation (Planned)
-- [ ] **7A:** Audit intelligence — hallucination detection, conversation analytics, enhanced feedback loop
-- [ ] **7B:** Smart orchestration — model router with cost/complexity calc, auto-switch recommendations
-- [ ] **7C:** Proactive knowledge — drive scanning, memory extraction from chat, smart KB suggestions
+### Phase 7: Intelligence & Automation ✅
+- [x] **7A:** Audit intelligence — hallucination detection agent, conversation analytics, enhanced feedback loop
+- [x] **7B:** Smart orchestration — client-side model router with cost/complexity scoring, auto-switch recommendations
+- [x] **7C:** Proactive knowledge — memory extraction from conversations, smart KB suggestions, memory archival
+
+### Phase 8: Product Foundation (In Progress)
+- [ ] **8A:** Open core foundation — plugin architecture, feature flags, OSS cleanup, licensing
+- [ ] **8B:** Smart ingestion — OCR, new parsers, semantic dedup
+- [ ] **8C:** Hierarchical taxonomy — domains, sub-categories, tags
+- [ ] **8D:** Encryption & sync hardening — app-level encryption, transaction safety
+- [ ] **8E:** GUI intelligence dashboard — truth panel, live metrics, settings, file upload, onboarding
 
 ---
 

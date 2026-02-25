@@ -64,3 +64,15 @@ def scheduler_status_endpoint():
     from scheduler import get_job_status
 
     return get_job_status()
+
+
+@router.get("/plugins")
+def plugins_endpoint():
+    """Return loaded plugins and feature flag status."""
+    from plugins import get_loaded_plugins
+    from utils.features import get_feature_status
+
+    return {
+        "plugins": get_loaded_plugins(),
+        **get_feature_status(),
+    }
