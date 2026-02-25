@@ -154,6 +154,22 @@ def ingest_content(
             "duplicate_of": existing["filename"],
         }
 
+    # Phase 8B: Semantic deduplication (Pro feature)
+    near_dup = None
+    try:
+        from utils.features import is_feature_enabled
+
+        if is_feature_enabled("semantic_dedup"):
+            from utils.dedup import check_semantic_duplicate
+
+            near_dup = check_semantic_duplicate(
+                text=content,
+                domain=domain,
+                chroma_client=get_chroma(),
+            )
+    except Exception as e:
+        logger.debug(f"Semantic dedup check skipped: {e}")
+
     # Re-ingestion check: same filename, different content (Phase 4C.3)
     fname = (metadata or {}).get("filename", "text_input")
     if fname != "text_input":
@@ -169,6 +185,11 @@ def ingest_content(
     base_meta = {"domain": domain, "artifact_id": artifact_id, "ingested_at": ingested_at}
     if metadata:
         base_meta.update(metadata)
+
+    # Phase 8B: tag near-duplicate in metadata
+    if near_dup:
+        base_meta["near_duplicate_of"] = near_dup["artifact_id"]
+        base_meta["near_duplicate_similarity"] = str(near_dup["similarity"])
 
     chunk_ids = [f"{artifact_id}_chunk_{i}" for i in range(len(chunks))]
     chunk_metadatas = [{**base_meta, "chunk_index": i} for i in range(len(chunks))]
@@ -268,7 +289,7 @@ def ingest_content(
         except Exception:
             pass
 
-    return {
+    result = {
         "status": "success",
         "artifact_id": artifact_id,
         "domain": domain,
@@ -277,6 +298,16 @@ def ingest_content(
         "related": related,
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+    # Phase 8B: Include near-duplicate info if detected
+    if near_dup:
+        result["near_duplicate_of"] = {
+            "artifact_id": near_dup["artifact_id"],
+            "filename": near_dup["filename"],
+            "similarity": near_dup["similarity"],
+        }
+
+    return result
 
 
 async def ingest_file(

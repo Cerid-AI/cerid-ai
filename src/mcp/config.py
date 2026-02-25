@@ -70,7 +70,11 @@ INBOX_DOMAIN = "inbox"  # files here trigger AI categorization
 # ---------------------------------------------------------------------------
 SUPPORTED_EXTENSIONS = {
     # Documents
-    ".pdf", ".docx", ".xlsx", ".csv",
+    ".pdf", ".docx", ".xlsx", ".csv", ".tsv",
+    # E-books & rich text (Phase 8B)
+    ".epub", ".rtf",
+    # Email (Phase 8B)
+    ".eml", ".mbox",
     # Text / markup
     ".txt", ".md", ".rst", ".log",
     ".html", ".htm", ".xml",
