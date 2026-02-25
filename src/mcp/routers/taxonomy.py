@@ -1,0 +1,211 @@
+"""Taxonomy management endpoints (Phase 8C).
+
+Provides CRUD for the hierarchical taxonomy: domains → sub-categories → tags.
+"""
+from __future__ import annotations
+
+import json
+import logging
+from typing import List, Optional
+
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
+
+import config
+from deps import get_neo4j
+from utils import graph
+
+router = APIRouter()
+logger = logging.getLogger("ai-companion.taxonomy")
+
+
+# ── Pydantic models ──────────────────────────────────────────────────────────
+
+class CreateDomainRequest(BaseModel):
+    name: str
+    description: str = ""
+    icon: str = "file"
+    sub_categories: List[str] = ["general"]
+
+
+class CreateSubCategoryRequest(BaseModel):
+    domain: str
+    name: str
+
+
+class UpdateArtifactTaxonomyRequest(BaseModel):
+    artifact_id: str
+    sub_category: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+
+class MergeTagsRequest(BaseModel):
+    source_tag: str
+    target_tag: str
+
+
+# ── Endpoints ────────────────────────────────────────────────────────────────
+
+@router.get("/taxonomy")
+async def get_taxonomy_endpoint():
+    """Return the full taxonomy tree (domains, sub-categories, tags)."""
+    try:
+        driver = get_neo4j()
+        return graph.get_taxonomy(driver)
+    except Exception as e:
+        logger.error(f"Get taxonomy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/taxonomy/domain")
+async def create_domain_endpoint(req: CreateDomainRequest):
+    """Create a new domain with optional sub-categories."""
+    name = req.name.strip().lower()
+    if not name:
+        raise HTTPException(status_code=400, detail="Domain name is required")
+    if name in config.DOMAINS:
+        raise HTTPException(status_code=409, detail=f"Domain '{name}' already exists")
+
+    try:
+        driver = get_neo4j()
+        result = graph.create_domain(
+            driver,
+            name=name,
+            description=req.description,
+            icon=req.icon,
+            sub_categories=req.sub_categories,
+        )
+        # Update runtime DOMAINS list and TAXONOMY dict
+        if name not in config.TAXONOMY:
+            config.TAXONOMY[name] = {
+                "description": req.description,
+                "icon": req.icon,
+                "sub_categories": req.sub_categories,
+            }
+            config.DOMAINS = list(config.TAXONOMY.keys())
+        return result
+    except Exception as e:
+        logger.error(f"Create domain error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/taxonomy/subcategory")
+async def create_subcategory_endpoint(req: CreateSubCategoryRequest):
+    """Add a sub-category to an existing domain."""
+    domain = req.domain.strip().lower()
+    label = req.name.strip().lower()
+
+    if not domain or not label:
+        raise HTTPException(status_code=400, detail="Domain and name are required")
+    if domain not in config.DOMAINS:
+        raise HTTPException(status_code=404, detail=f"Domain '{domain}' not found")
+
+    try:
+        driver = get_neo4j()
+        result = graph.create_sub_category(driver, domain=domain, label=label)
+        # Update runtime TAXONOMY
+        if domain in config.TAXONOMY:
+            subs = config.TAXONOMY[domain].get("sub_categories", [])
+            if label not in subs:
+                subs.append(label)
+                config.TAXONOMY[domain]["sub_categories"] = subs
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Create sub-category error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/tags")
+async def list_tags_endpoint(
+    limit: int = Query(100, ge=1, le=500),
+):
+    """List all tags with usage counts, sorted by popularity."""
+    try:
+        driver = get_neo4j()
+        return graph.list_tags(driver, limit=limit)
+    except Exception as e:
+        logger.error(f"List tags error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/taxonomy/artifact")
+async def update_artifact_taxonomy_endpoint(req: UpdateArtifactTaxonomyRequest):
+    """Update an artifact's sub-category and/or tags."""
+    try:
+        driver = get_neo4j()
+        tags_json = json.dumps(req.tags) if req.tags is not None else None
+        return graph.update_artifact_taxonomy(
+            driver,
+            artifact_id=req.artifact_id,
+            sub_category=req.sub_category,
+            tags_json=tags_json,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Update artifact taxonomy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/tags/merge")
+async def merge_tags_endpoint(req: MergeTagsRequest):
+    """Merge source_tag into target_tag (rename/consolidate)."""
+    source = req.source_tag.strip().lower()
+    target = req.target_tag.strip().lower()
+    if not source or not target:
+        raise HTTPException(status_code=400, detail="Both source_tag and target_tag are required")
+    if source == target:
+        raise HTTPException(status_code=400, detail="Source and target tags must be different")
+
+    try:
+        driver = get_neo4j()
+        with driver.session() as session:
+            # Find all artifacts tagged with source
+            result = session.run(
+                "MATCH (a:Artifact)-[r:TAGGED_WITH]->(t:Tag {name: $source}) "
+                "RETURN a.id AS aid, a.tags AS tags",
+                source=source,
+            )
+            updated = 0
+            for record in result:
+                aid = record["aid"]
+                # Update artifact tags property
+                try:
+                    tag_list = json.loads(record["tags"] or "[]")
+                except (json.JSONDecodeError, TypeError):
+                    tag_list = []
+                tag_list = [target if t == source else t for t in tag_list]
+                # Deduplicate
+                tag_list = list(dict.fromkeys(tag_list))
+                session.run(
+                    "MATCH (a:Artifact {id: $aid}) SET a.tags = $tags",
+                    aid=aid,
+                    tags=json.dumps(tag_list),
+                )
+                updated += 1
+
+            # Move relationships: delete source TAGGED_WITH, create target TAGGED_WITH
+            session.run(
+                "MATCH (a:Artifact)-[r:TAGGED_WITH]->(t:Tag {name: $source}) "
+                "DELETE r "
+                "WITH a "
+                "MERGE (t2:Tag {name: $target}) "
+                "MERGE (a)-[:TAGGED_WITH]->(t2)",
+                source=source,
+                target=target,
+            )
+            # Delete source tag node if no remaining relationships
+            session.run(
+                "MATCH (t:Tag {name: $source}) "
+                "WHERE NOT (t)<-[:TAGGED_WITH]-() "
+                "DELETE t",
+                source=source,
+            )
+
+        logger.info(f"Merged tag '{source}' → '{target}' ({updated} artifacts updated)")
+        return {"status": "success", "source": source, "target": target, "artifacts_updated": updated}
+    except Exception as e:
+        logger.error(f"Merge tags error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

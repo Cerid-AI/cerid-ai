@@ -190,6 +190,16 @@ async def categorize_node(state: TriageStateDict) -> TriageStateDict:
         meta["summary"] = ai_result["summary"]
         updates["metadata"] = meta
 
+    # Phase 8C: sub-category and tags from AI
+    if ai_result.get("sub_category"):
+        meta = updates.get("metadata", state.get("metadata", {}))
+        meta["sub_category"] = ai_result["sub_category"]
+        updates["metadata"] = meta
+    if ai_result.get("tags"):
+        meta = updates.get("metadata", state.get("metadata", {}))
+        meta["tags_json"] = json.dumps(ai_result["tags"])
+        updates["metadata"] = meta
+
     # Fallback if AI didn't produce a valid domain
     if not updates.get("domain") or updates["domain"] not in config.DOMAINS:
         updates["domain"] = config.DEFAULT_DOMAIN

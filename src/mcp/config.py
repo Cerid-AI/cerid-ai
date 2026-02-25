@@ -2,19 +2,67 @@
 Cerid AI - Central Configuration
 Single source of truth for domains, extensions, categorization, and service URLs.
 
-To add a new domain:  Add to DOMAINS list + mkdir ~/cerid-archive/<domain>
+To add a new domain:  Add to TAXONOMY dict (or set CERID_CUSTOM_DOMAINS env var)
 To add a file type:   Add to SUPPORTED_EXTENSIONS + register a parser in utils/parsers.py
 To change AI tier:    Set CATEGORIZE_MODE env var to manual/smart/pro
 To enable pro tier:   Set CERID_TIER=pro (enables premium plugins and features)
 """
 
+import json
 import os
 
 # ---------------------------------------------------------------------------
-# Domains
+# Hierarchical Taxonomy (Phase 8C)
+#   Domains → sub-categories → tags
+#   Replaces flat DOMAINS list; backward-compatible via DOMAINS = list(TAXONOMY)
 # ---------------------------------------------------------------------------
-DOMAINS = ["coding", "finance", "projects", "personal", "general", "conversations"]
+TAXONOMY = {
+    "coding": {
+        "description": "Source code, scripts, technical documentation",
+        "icon": "code",
+        "sub_categories": ["python", "javascript", "devops", "architecture", "general"],
+    },
+    "finance": {
+        "description": "Financial documents, tax records, budgets",
+        "icon": "dollar-sign",
+        "sub_categories": ["tax", "investments", "budgets", "receipts", "general"],
+    },
+    "projects": {
+        "description": "Project plans, meeting notes, specifications",
+        "icon": "folder",
+        "sub_categories": ["active", "archived", "proposals", "general"],
+    },
+    "personal": {
+        "description": "Personal notes, journal entries, health records",
+        "icon": "user",
+        "sub_categories": ["notes", "health", "travel", "general"],
+    },
+    "general": {
+        "description": "Uncategorized or cross-domain content",
+        "icon": "file",
+        "sub_categories": ["general"],
+    },
+    "conversations": {
+        "description": "Extracted memories from chat sessions",
+        "icon": "message-circle",
+        "sub_categories": ["facts", "decisions", "preferences", "action-items", "general"],
+    },
+}
+
+# User-defined custom domains via env var (JSON object with same shape as TAXONOMY entries)
+_custom_domains_raw = os.getenv("CERID_CUSTOM_DOMAINS", "")
+if _custom_domains_raw:
+    try:
+        _custom = json.loads(_custom_domains_raw)
+        if isinstance(_custom, dict):
+            TAXONOMY.update(_custom)
+    except (json.JSONDecodeError, TypeError):
+        pass  # silently ignore malformed custom domains
+
+# Backward-compatible DOMAINS list — derived from TAXONOMY keys
+DOMAINS = list(TAXONOMY.keys())
 DEFAULT_DOMAIN = "general"
+DEFAULT_SUB_CATEGORY = "general"
 INBOX_DOMAIN = "inbox"  # files here trigger AI categorization
 
 # ---------------------------------------------------------------------------

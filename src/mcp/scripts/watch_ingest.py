@@ -62,16 +62,29 @@ def _translate_path(host_path: str) -> str:
     return host_path
 
 
-def _detect_domain(host_path: str) -> str:
-    """Detect domain from parent folder name."""
+def _detect_domain(host_path: str) -> tuple[str, str]:
+    """
+    Detect domain and sub-category from folder structure.
+
+    ~/cerid-archive/coding/python/file.py → ("coding", "python")
+    ~/cerid-archive/coding/file.py        → ("coding", "")
+    ~/cerid-archive/inbox/file.pdf        → ("", "")
+    """
     watch = config.WATCH_FOLDER.rstrip("/")
     rel = os.path.relpath(host_path, watch)
     parts = rel.split(os.sep)
     if len(parts) >= 2:
         folder = parts[0].lower()
         if folder in config.DOMAINS:
-            return folder
-    return ""
+            # Check for sub-category (second-level folder)
+            if len(parts) >= 3:
+                sub_cat = parts[1].lower()
+                domain_info = config.TAXONOMY.get(folder, {})
+                valid_subs = [s.lower() for s in domain_info.get("sub_categories", [])]
+                if sub_cat in valid_subs:
+                    return folder, sub_cat
+            return folder, ""
+    return "", ""
 
 
 def _should_process(file_path: str) -> bool:
@@ -157,21 +170,25 @@ def ingest_file(host_path: str, default_mode: str):
         _log("WARN", f"  Skipping (file disappeared): {Path(host_path).name}")
         return
 
-    domain = _detect_domain(host_path)
+    domain, sub_category = _detect_domain(host_path)
     container_path = _translate_path(host_path)
     mode = "manual" if domain else default_mode
 
     filename = Path(host_path).name
-    _log("INFO", f"Ingesting: {filename} → domain={domain or '(AI)'}, mode={mode}")
+    sub_info = f"/{sub_category}" if sub_category else ""
+    _log("INFO", f"Ingesting: {filename} → domain={domain or '(AI)'}{sub_info}, mode={mode}")
 
     try:
+        payload = {
+            "file_path": container_path,
+            "domain": domain,
+            "categorize_mode": mode,
+        }
+        if sub_category:
+            payload["sub_category"] = sub_category
         resp = requests.post(
             f"{MCP_URL}/ingest_file",
-            json={
-                "file_path": container_path,
-                "domain": domain,
-                "categorize_mode": mode,
-            },
+            json=payload,
             timeout=60,
         )
         if resp.status_code == 200:

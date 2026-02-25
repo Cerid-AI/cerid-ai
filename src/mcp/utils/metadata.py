@@ -131,6 +131,16 @@ def _extract_keywords_simple(text: str, max_keywords: int = 10) -> List[str]:
 # AI-assisted categorization (token-efficient)
 # ---------------------------------------------------------------------------
 
+def _build_taxonomy_prompt_section() -> str:
+    """Build the taxonomy description for the AI categorization prompt."""
+    lines = []
+    for domain_name, info in config.TAXONOMY.items():
+        sub_cats = info.get("sub_categories", ["general"])
+        desc = info.get("description", "")
+        lines.append(f"  {domain_name} ({desc}): sub-categories = {', '.join(sub_cats)}")
+    return "\n".join(lines)
+
+
 async def ai_categorize(
     text: str,
     filename: str,
@@ -146,7 +156,13 @@ async def ai_categorize(
         mode: "smart" (Llama free) or "pro" (Claude). None = env default.
 
     Returns:
-        {"suggested_domain": str, "keywords": list, "summary": str}
+        {
+            "suggested_domain": str,
+            "sub_category": str,
+            "tags": list[str],
+            "keywords": list[str],
+            "summary": str,
+        }
         Empty dict on failure (graceful fallback).
     """
     mode = mode or config.CATEGORIZE_MODE
@@ -160,13 +176,17 @@ async def ai_categorize(
     if len(text) > config.AI_SNIPPET_MAX_CHARS:
         snippet += "\n[... truncated for classification ...]"
 
-    domain_list = ", ".join(config.DOMAINS)
+    taxonomy_section = _build_taxonomy_prompt_section()
     prompt = (
-        f"Classify this document into exactly one domain: {domain_list}.\n"
-        f"Also extract up to 5 keywords and a 1-sentence summary.\n\n"
+        f"Classify this document into exactly one domain and sub-category.\n\n"
+        f"Available taxonomy:\n{taxonomy_section}\n\n"
+        f"Also suggest up to 5 descriptive tags (lowercase, hyphenated), "
+        f"extract up to 5 keywords, and write a 1-sentence summary.\n\n"
         f"Filename: {filename}\n"
         f"Content:\n{snippet}\n\n"
-        f'Respond ONLY with JSON: {{"domain": "...", "keywords": ["..."], "summary": "..."}}'
+        f'Respond ONLY with JSON: '
+        f'{{"domain": "...", "sub_category": "...", "tags": ["..."], '
+        f'"keywords": ["..."], "summary": "..."}}'
     )
 
     try:
@@ -177,7 +197,7 @@ async def ai_categorize(
                     "model": model_id,
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.1,
-                    "max_tokens": 150,
+                    "max_tokens": 200,
                     "response_format": {"type": "json_object"},
                 },
             )
@@ -199,8 +219,25 @@ async def ai_categorize(
             logger.warning(f"AI suggested unknown domain '{suggested}', using default")
             suggested = config.DEFAULT_DOMAIN
 
+        # Validate sub_category against taxonomy
+        sub_cat = result.get("sub_category", "").lower().strip()
+        domain_info = config.TAXONOMY.get(suggested, {})
+        valid_subs = [s.lower() for s in domain_info.get("sub_categories", ["general"])]
+        if sub_cat not in valid_subs:
+            sub_cat = config.DEFAULT_SUB_CATEGORY
+
+        # Clean tags: lowercase, strip, limit to 10
+        raw_tags = result.get("tags", [])
+        tags = [
+            t.strip().lower().replace(" ", "-")
+            for t in raw_tags
+            if isinstance(t, str) and t.strip()
+        ][:10]
+
         return {
             "suggested_domain": suggested,
+            "sub_category": sub_cat,
+            "tags": tags,
             "keywords": result.get("keywords", []),
             "summary": result.get("summary", ""),
         }

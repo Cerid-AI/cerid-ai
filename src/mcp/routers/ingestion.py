@@ -194,6 +194,8 @@ def ingest_content(
             chunk_count=len(chunks),
             chunk_ids_json=json.dumps(chunk_ids),
             content_hash=content_hash,
+            sub_category=base_meta.get("sub_category", config.DEFAULT_SUB_CATEGORY),
+            tags_json=base_meta.get("tags_json", "[]"),
         )
         artifact_created = True
     except Exception as e:
@@ -280,6 +282,7 @@ def ingest_content(
 async def ingest_file(
     file_path: str,
     domain: str = "",
+    sub_category: str = "",
     tags: str = "",
     categorize_mode: str = "",
 ) -> Dict:
@@ -302,11 +305,21 @@ async def ingest_file(
             meta["keywords"] = json.dumps(ai_result["keywords"])
         if ai_result.get("summary"):
             meta["summary"] = ai_result["summary"]
+        # Phase 8C: sub-category and tags from AI
+        if ai_result.get("sub_category") and not sub_category:
+            sub_category = ai_result["sub_category"]
+        if ai_result.get("tags") and not tags:
+            tags = json.dumps(ai_result["tags"])
     if not domain or domain not in config.DOMAINS:
         domain = config.DEFAULT_DOMAIN
     meta["domain"] = domain
+    meta["sub_category"] = sub_category or config.DEFAULT_SUB_CATEGORY
+    # Normalize tags: accept JSON array string or comma-separated
     if tags:
-        meta["tags"] = tags
+        if tags.startswith("["):
+            meta["tags_json"] = tags
+        else:
+            meta["tags_json"] = json.dumps([t.strip().lower() for t in tags.split(",") if t.strip()])
     meta["file_type"] = parsed.get("file_type", "")
     if parsed.get("page_count") is not None:
         meta["page_count"] = parsed["page_count"]
@@ -315,7 +328,7 @@ async def ingest_file(
     result["categorize_mode"] = mode
     result["metadata"] = {
         k: v for k, v in meta.items()
-        if k in ("filename", "domain", "keywords", "summary", "tags", "file_type", "estimated_tokens")
+        if k in ("filename", "domain", "sub_category", "keywords", "summary", "tags_json", "file_type", "estimated_tokens")
     }
     return result
 
@@ -330,6 +343,7 @@ class IngestRequest(BaseModel):
 class IngestFileRequest(BaseModel):
     file_path: str
     domain: str = ""
+    sub_category: str = ""
     tags: str = ""
     categorize_mode: str = ""
 
@@ -365,6 +379,7 @@ async def ingest_file_endpoint(req: IngestFileRequest):
             result = await ingest_file(
                 file_path=req.file_path,
                 domain=req.domain,
+                sub_category=req.sub_category,
                 tags=req.tags,
                 categorize_mode=req.categorize_mode,
             )
