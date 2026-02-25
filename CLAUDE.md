@@ -73,7 +73,7 @@ React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly
 │   │   └── __init__.py
 │   ├── middleware/                    # Request middleware (Phase 6D)
 │   │   ├── auth.py                   # API key authentication (opt-in via CERID_API_KEY)
-│   │   └── rate_limit.py             # Token-bucket rate limiting (Redis-backed)
+│   │   └── rate_limit.py             # In-memory sliding window rate limiting (path-specific)
 │   ├── utils/
 │   │   ├── parsers.py                # Extensible file parser registry
 │   │   ├── metadata.py               # Metadata extraction + AI categorization
@@ -245,6 +245,7 @@ Monitors `.md` files only. Uses `/ingest` (text endpoint) since the vault isn't 
 ├── projects/    → domain="projects" (manual)
 ├── personal/    → domain="personal" (manual)
 ├── general/     → domain="general" (manual)
+├── conversations/ → domain="conversations" (feedback loop output)
 └── inbox/       → AI categorization triggered
 ```
 
@@ -285,6 +286,11 @@ curl http://localhost:8888/health
 curl http://localhost:8888/collections
 curl http://localhost:8888/artifacts
 curl http://localhost:8888/ingest_log?limit=10
+
+# With API key auth enabled (set CERID_API_KEY env var):
+curl http://localhost:8888/artifacts \
+  -H "X-API-Key: $CERID_API_KEY"
+# Exempt from auth: /health, /, /docs, /openapi.json, /redoc, /mcp/*
 ```
 
 ### Knowledge Base Sync
@@ -340,8 +346,8 @@ python3 scripts/cerid-sync.py status
 - Batch ChromaDB writes: single `collection.add()` call per ingest, not per-chunk
 - PDF parsing: pdfplumber extracts tables as Markdown, non-table text extracted separately to avoid duplication
 - Host: Mac Pro (16-Core Xeon W, 160GB RAM), macOS
-- **React GUI (`src/web/`):** Tailwind CSS v4 (uses `@tailwindcss/vite` plugin — no `tailwind.config.ts`); shadcn/ui New York style, Zinc base color; path alias `@/*` → `./src/*`; Bifrost CORS handled via Vite dev proxy (`/api/bifrost` → `localhost:8080`) and nginx proxy in Docker; `VITE_MCP_URL` and `VITE_BIFROST_URL` are build-time env vars; bundle splitting via React.lazy + Vite manualChunks (75% main chunk reduction)
-- **Backend Hardening (`src/mcp/middleware/`):** API key auth is opt-in — set `CERID_API_KEY` env var to enable. Rate limiting uses Redis token-bucket (100 req/min default, configurable via `RATE_LIMIT_RPM`). Redis query cache with 5-min TTL (`utils/query_cache.py`) — caches `/query` and `/agent/query` results. LLM feedback loop toggled via `ENABLE_FEEDBACK_LOOP` env var. CORS origins configurable via `CORS_ORIGINS` (defaults to `*`)
+- **React GUI (`src/web/`):** Tailwind CSS v4 (uses `@tailwindcss/vite` plugin — no `tailwind.config.ts`); shadcn/ui New York style, Zinc base color; path alias `@/*` → `./src/*`; Bifrost CORS handled via Vite dev proxy (`/api/bifrost` → `localhost:8080`) and nginx proxy in Docker; `VITE_MCP_URL` and `VITE_BIFROST_URL` are `ENV` defaults baked into Dockerfile (not runtime-configurable without rebuild); `VITE_CERID_API_KEY` is a build `ARG`; bundle splitting via React.lazy + Vite manualChunks (75% main chunk reduction)
+- **Backend Hardening (`src/mcp/middleware/`):** API key auth is opt-in — set `CERID_API_KEY` env var to enable (header: `X-API-Key`). Rate limiting uses in-memory sliding window with path-specific limits (`/agent/` 20 req/min, `/ingest` and `/recategorize` 10 req/min). Redis query cache with 5-min TTL (`utils/query_cache.py`) — caches `/query` and `/agent/query` results. LLM feedback loop toggled via `ENABLE_FEEDBACK_LOOP` env var. CORS origins configurable via `CORS_ORIGINS` (defaults to `*`)
 
 ## Phase 2: Agent Workflows
 
@@ -499,7 +505,7 @@ Admin and monitoring UI at `http://localhost:8501` (container: `ai-companion-das
   - **6A (Complete):** Foundation + Chat — React 19 scaffold, sidebar nav, streaming chat via Bifrost SSE, health status bar, conversation persistence, Docker/nginx deployment at port 3000
   - **6B (Complete):** Knowledge Context Pane — resizable split-pane, auto KB query on message send, artifact cards with relevance scoring, domain filters, graph preview with navigable connections, KB injection into chat via system prompt
   - **6C (Complete):** Monitoring + Audit Panes — health cards (ChromaDB/Neo4j/Redis/Bifrost), collection size charts, scheduler status, activity timeline, ingestion stats, cost breakdown by tier, query pattern analytics
-  - **6D (Complete):** Backend Hardening — API key auth (opt-in), Redis token-bucket rate limiting (100 req/min), Redis query cache (5-min TTL), LLM feedback loop toggle, CORS configuration, bundle splitting (React.lazy + manualChunks, 75% reduction)
+  - **6D (Complete):** Backend Hardening — API key auth (opt-in, X-API-Key header), in-memory sliding window rate limiting (path-specific), Redis query cache (5-min TTL), LLM feedback loop toggle, CORS configuration, bundle splitting (React.lazy + manualChunks, 75% reduction)
 - **Phase 7 (Planned):** Intelligence & Automation. See `docs/plans/2026-02-23-phase7-plan.md`.
   - **7A:** Audit Intelligence — hallucination detection agent, conversation analytics, enhanced feedback loop (auto-extract facts from chat)
   - **7B:** Smart Orchestration — model router with cost/complexity calc, auto-switch recommendations, real-time cost dashboard with budget alerts

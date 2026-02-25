@@ -5,7 +5,7 @@
 A privacy-first, local-first workspace that unifies multi-domain knowledge bases (code, finance, projects, personal artifacts) into a context-aware LLM interface with RAG-powered retrieval, file ingestion, and intelligent agents.
 
 [![Status](https://img.shields.io/badge/Status-Phase%206%20Complete-green)]()
-[![License](https://img.shields.io/badge/License-Private-red)]()
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue)](LICENSE)
 
 ---
 
@@ -244,6 +244,10 @@ curl http://localhost:8888/ingest_log?limit=10
 **MCP SSE:** `/mcp/sse` (SSE stream) + `/mcp/messages` (JSON-RPC 2.0)
 
 **MCP Tools (12):** `pkb_query`, `pkb_ingest`, `pkb_ingest_file`, `pkb_health`, `pkb_collections`, `pkb_agent_query`, `pkb_artifacts`, `pkb_recategorize`, `pkb_triage`, `pkb_rectify`, `pkb_audit`, `pkb_maintain`
+
+**Authentication (Phase 6D, opt-in):** Set `CERID_API_KEY` env var to enable. Requests require `X-API-Key` header. Exempt: `/health`, `/mcp/*`, `/docs`.
+**Rate Limiting:** `/agent/*` (20 req/min), `/ingest*` (10 req/min), `/recategorize*` (10 req/min) per client IP.
+**Query Caching:** `/query` and `/agent/query` responses cached in Redis (5-min TTL).
 
 ---
 
@@ -542,7 +546,7 @@ Auto-import on startup: when MCP starts with an empty Neo4j database and a valid
 
 ## License
 
-Private repository. All rights reserved.
+Licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
 
 ---
 

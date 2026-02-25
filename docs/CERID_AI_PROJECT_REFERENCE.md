@@ -1,8 +1,8 @@
 # Cerid AI - Project Plan & Technical Reference
 
-**Document Version:** 5.0
-**Date:** February 22, 2026
-**Status:** Phases 0–5 Complete
+**Document Version:** 6.0
+**Date:** February 24, 2026
+**Status:** Phases 0–6 Complete
 **Repository:** https://github.com/sunrunnerfire/cerid-ai (private)
 **Owner:** Justin (@sunrunnerfire)
 
@@ -50,7 +50,8 @@ Cerid AI is a **self-hosted Personal AI Knowledge Companion** — a privacy-firs
 - **5 Intelligent Agents** — Query (LLM reranking), Triage (LangGraph), Rectification, Audit, Maintenance
 - **12 MCP Tools** for knowledge base operations from LibreChat chat UI
 - **Hybrid BM25+Vector Search** with knowledge graph traversal and cross-domain connections
-- **Streamlit Admin Dashboard** with 5 panes (Overview, Artifacts, Query, Audit, Maintenance)
+- **React GUI** at port 3000 — streaming chat, KB context pane, monitoring & audit dashboards (Phase 6)
+- **Streamlit Admin Dashboard** (legacy) with 5 panes (Overview, Artifacts, Query, Audit, Maintenance)
 - **File-Based Ingestion Pipeline** with structure-aware parsing (PDF tables via pdfplumber, DOCX, XLSX, CSV, 30+ formats)
 - **RAG-Powered Context Injection** for token-efficient knowledge retrieval (14k char budget)
 - **Multi-Machine Sync** via Dropbox — JSONL export/import with auto-import on startup
@@ -92,7 +93,7 @@ Cerid AI is a **self-hosted Personal AI Knowledge Companion** — a privacy-firs
 | Phase 3 | GUI & Dashboard | ✅ Complete |
 | Phase 4 | Smarter Retrieval, Automation & Polish | ✅ Complete |
 | Phase 5 | Multi-Machine Dev & Sync | ✅ Complete |
-| Phase 6 | Production Hardening | 📋 Planned |
+| Phase 6 | React GUI + Production Hardening | ✅ Complete |
 
 ### Phase 0 Deliverables (Complete ✅)
 
@@ -516,6 +517,14 @@ User files and database volumes never enter the git repo:
 | `pkb_audit` | Audit reports | `reports`, `hours` |
 | `pkb_maintain` | Maintenance routines | `actions`, `auto_purge` |
 
+**Middleware (Phase 6D):**
+
+| Middleware | File | Description |
+|-----------|------|-------------|
+| API Key Auth | `middleware/auth.py` | Opt-in via `CERID_API_KEY` env var. Checks `X-API-Key` header. Exempt: `/health`, `/`, `/docs`, `/redoc`, `/mcp/*` |
+| Rate Limiting | `middleware/rate_limit.py` | In-memory sliding window per client IP. `/agent/` 20 req/60s, `/ingest` 10 req/60s, `/recategorize` 10 req/60s |
+| Query Cache | `utils/query_cache.py` | Redis-backed, 5-min TTL. Caches `/query` and `/agent/query` responses |
+
 ### 5.4 Storage Services
 
 #### ChromaDB (Vector Store)
@@ -807,7 +816,7 @@ Single source of truth for all configurable values. No hardcoded domains, extens
 
 | Setting | Default | Env Override |
 |---------|---------|-------------|
-| DOMAINS | coding, finance, projects, personal, general | — |
+| DOMAINS | coding, finance, projects, personal, general, conversations | — |
 | DEFAULT_DOMAIN | general | — |
 | CATEGORIZE_MODE | smart | `CATEGORIZE_MODE` |
 | CHUNK_MAX_TOKENS | 512 | — |
@@ -816,6 +825,9 @@ Single source of truth for all configurable values. No hardcoded domains, extens
 | ARCHIVE_PATH | /archive | `ARCHIVE_PATH` |
 | WATCH_FOLDER | ~/cerid-archive | `WATCH_FOLDER` |
 | BIFROST_URL | http://bifrost:8080/v1 | `BIFROST_URL` |
+| CERID_API_KEY | (disabled) | `CERID_API_KEY` |
+| ENABLE_FEEDBACK_LOOP | true | `ENABLE_FEEDBACK_LOOP` |
+| CORS_ORIGINS | * | `CORS_ORIGINS` |
 
 ---
 
@@ -1186,7 +1198,7 @@ docker exec ai-companion-mcp python -m spacy download en_core_web_sm
 | Phase 3 | GUI & Dashboard | ✅ Complete |
 | Phase 4 | Smarter Retrieval, Automation & Polish | ✅ Complete |
 | Phase 5 | Multi-Machine Dev & Sync | ✅ Complete |
-| Phase 6 | Production Hardening | 📋 Planned |
+| Phase 6 | React GUI + Production Hardening | ✅ Complete |
 
 ### Phase 0: Infrastructure (Complete ✅)
 
@@ -1263,11 +1275,24 @@ See `docs/PHASE4_PLAN.md` for full implementation details.
 - [x] Auto-import on startup for empty databases (`src/mcp/sync_check.py`)
 - [x] Secrets management: age encryption (`env-lock.sh`, `env-unlock.sh`)
 
-### Phase 6: Production Hardening (Planned 📋)
+### Phase 6: React GUI + Production Hardening (Complete ✅)
 
-- [ ] Redis query caching
-- [ ] Encryption at rest
-- [ ] Production hardening
+See `docs/plans/2026-02-22-phase6-gui-design.md` for full design specification.
+
+- [x] **6A:** Foundation + Chat — React 19 scaffold, sidebar nav, streaming chat via Bifrost SSE, health status bar, conversation persistence (localStorage), Docker/nginx deployment at port 3000
+- [x] **6B:** Knowledge Context Pane — resizable split-pane, auto KB query on message send, artifact cards with relevance scoring, domain filters, graph preview with navigable connections, KB injection into chat via system prompt
+- [x] **6C:** Monitoring + Audit Panes — health cards (ChromaDB/Neo4j/Redis/Bifrost), collection size charts, scheduler status, activity timeline, ingestion stats, cost breakdown by tier, query pattern analytics
+- [x] **6D:** Backend Hardening — API key auth (opt-in, X-API-Key header), in-memory sliding window rate limiting (path-specific), Redis query cache (5-min TTL), LLM feedback loop toggle, CORS configuration, bundle splitting (React.lazy + manualChunks, 75% reduction)
+
+**Tech Stack:** React 19, Vite 7, Tailwind CSS v4, shadcn/ui, TanStack React Query, Recharts, react-resizable-panels
+
+### Phase 7: Intelligence & Automation (Planned 📋)
+
+See `docs/plans/2026-02-23-phase7-plan.md` for full specification.
+
+- [ ] **7A:** Audit Intelligence — hallucination detection agent, conversation analytics, enhanced feedback loop
+- [ ] **7B:** Smart Orchestration — model router with cost/complexity calc, auto-switch recommendations, cost dashboard with budget alerts
+- [ ] **7C:** Proactive Knowledge — configurable drive scanning, memory extraction from conversations, smart KB suggestions
 
 ---
 
