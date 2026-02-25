@@ -57,14 +57,15 @@ def recategorize(artifact_id: str, new_domain: str, tags: str = "") -> Dict:
             meta["tags"] = tags
         updated_metadatas.append(meta)
 
+    # Update Neo4j first — if this fails, ChromaDB remains consistent
+    domains = graph.recategorize_artifact(driver, artifact_id, new_domain)
+
     dest_collection.add(
         ids=fetched["ids"],
         documents=fetched["documents"],
         metadatas=updated_metadatas,
     )
     source_collection.delete(ids=chunk_ids)
-
-    domains = graph.recategorize_artifact(driver, artifact_id, new_domain)
 
     try:
         cache.log_event(

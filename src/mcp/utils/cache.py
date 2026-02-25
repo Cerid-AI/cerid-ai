@@ -21,25 +21,30 @@ def log_event(
     domain: str,
     filename: str,
     extra: Optional[Dict[str, Any]] = None,
+    conversation_id: Optional[str] = None,
 ) -> None:
     """
     Append an event to the Redis audit log.
 
     Args:
-        event_type: "ingest", "recategorize", "delete"
+        event_type: "ingest", "recategorize", "delete", "feedback"
         artifact_id: UUID of the artifact
         domain: Current domain after the event
         filename: Original filename
         extra: Additional context (e.g. old_domain for recategorize)
+        conversation_id: Optional conversation ID for feedback loop events
     """
-    payload = json.dumps({
+    entry: Dict[str, Any] = {
         "event": event_type,
         "artifact_id": artifact_id,
         "domain": domain,
         "filename": filename,
         "timestamp": datetime.utcnow().isoformat(),
         **(extra or {}),
-    })
+    }
+    if conversation_id:
+        entry["conversation_id"] = conversation_id
+    payload = json.dumps(entry)
     try:
         redis_client.lpush(config.REDIS_INGEST_LOG, payload)
         redis_client.ltrim(config.REDIS_INGEST_LOG, 0, config.REDIS_LOG_MAX - 1)

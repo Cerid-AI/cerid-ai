@@ -3,15 +3,19 @@ import type { Theme } from "@/lib/types"
 
 export function useTheme() {
   const [theme, setThemeState] = useState<Theme>(() => {
-    const stored = localStorage.getItem("cerid-theme")
-    if (stored === "dark" || stored === "light") return stored
-    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
+    try {
+      const stored = localStorage.getItem("cerid-theme")
+      if (stored === "dark" || stored === "light") return stored
+    } catch { /* localStorage unavailable */ }
+    try {
+      return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
+    } catch { return "dark" }
   })
 
   useEffect(() => {
     const root = document.documentElement
     root.classList.toggle("dark", theme === "dark")
-    localStorage.setItem("cerid-theme", theme)
+    try { localStorage.setItem("cerid-theme", theme) } catch { /* noop */ }
   }, [theme])
 
   const toggleTheme = useCallback(() => {

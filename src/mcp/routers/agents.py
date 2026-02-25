@@ -82,6 +82,8 @@ async def agent_query_endpoint(req: AgentQueryRequest):
 @router.post("/agent/triage")
 async def triage_file_endpoint(req: TriageFileRequest):
     try:
+        from routers.ingestion import _validate_file_path
+        _validate_file_path(req.file_path)
         from agents.triage import triage_file
         triage_result = await triage_file(
             file_path=req.file_path,

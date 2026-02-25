@@ -50,7 +50,7 @@ export interface HealthResponse {
 export type Theme = "dark" | "light"
 
 // Domain types
-export const DOMAINS = ["coding", "finance", "projects", "personal", "general"] as const
+export const DOMAINS = ["coding", "finance", "projects", "personal", "general", "conversations"] as const
 export type Domain = (typeof DOMAINS)[number]
 
 // Artifact types (GET /artifacts)

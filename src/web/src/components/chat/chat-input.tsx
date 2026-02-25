@@ -54,7 +54,7 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount
         onKeyDown={handleKeyDown}
         placeholder="Type a message... (Enter to send, Shift+Enter for new line)"
         rows={1}
-        disabled={disabled}
+        disabled={disabled || isStreaming}
         className="flex-1 resize-none rounded-lg border bg-muted/50 px-4 py-2.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
       />
       {injectedCount > 0 && (

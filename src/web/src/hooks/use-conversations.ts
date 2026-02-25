@@ -39,7 +39,11 @@ function loadConversations(): Conversation[] {
 }
 
 function saveConversations(convos: Conversation[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(convos.slice(0, MAX_CONVERSATIONS)))
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(convos.slice(0, MAX_CONVERSATIONS)))
+  } catch {
+    // localStorage may be full or unavailable
+  }
 }
 
 export function useConversations() {
@@ -110,14 +114,14 @@ export function useConversations() {
     setConversations((prev) => {
       const next = prev.filter((c) => c.id !== convoId)
       saveConversations(next)
+      // Derive next active ID from fresh state (avoids stale closure)
+      setActiveId((currentId) => {
+        if (currentId !== convoId) return currentId
+        return next[0]?.id ?? null
+      })
       return next
     })
-    setActiveId((prev) => {
-      if (prev !== convoId) return prev
-      const remaining = conversations.filter((c) => c.id !== convoId)
-      return remaining[0]?.id ?? null
-    })
-  }, [conversations])
+  }, [])
 
   return { conversations, active, activeId, setActiveId, create, addMessage, updateLastMessage, updateModel, remove }
 }

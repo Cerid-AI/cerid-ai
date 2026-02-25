@@ -185,6 +185,21 @@ export async function streamChat(
         }
       }
     }
+
+    // Flush any remaining data in the buffer after stream ends
+    if (buffer.trim()) {
+      const trimmed = buffer.trim()
+      if (trimmed.startsWith("data: ")) {
+        const data = trimmed.slice(6)
+        if (data !== "[DONE]") {
+          try {
+            const parsed = JSON.parse(data)
+            const content = parsed.choices?.[0]?.delta?.content
+            if (content) onChunk(content)
+          } catch { /* malformed trailing chunk */ }
+        }
+      }
+    }
   } finally {
     reader.cancel()
   }

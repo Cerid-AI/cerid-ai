@@ -90,64 +90,65 @@ def parse_pdf(file_path: str) -> Dict[str, Any]:
     pages = []
     table_count = 0
 
-    for i, page in enumerate(pdf.pages):
-        try:
-            page_parts = []
+    try:
+        for i, page in enumerate(pdf.pages):
+            try:
+                page_parts = []
 
-            # Extract tables first — they contain structured data that
-            # plain text extraction would jumble
-            tables = page.find_tables()
-            if tables:
-                # Get bounding boxes of all tables so we can exclude them
-                # from plain text extraction (avoids duplicate content)
-                table_bboxes = [t.bbox for t in tables]
+                # Extract tables first — they contain structured data that
+                # plain text extraction would jumble
+                tables = page.find_tables()
+                if tables:
+                    # Get bounding boxes of all tables so we can exclude them
+                    # from plain text extraction (avoids duplicate content)
+                    table_bboxes = [t.bbox for t in tables]
 
-                for table in tables:
-                    table_count += 1
-                    rows = table.extract()
-                    if rows:
-                        # Format as Markdown table for structure preservation
-                        md_rows = []
-                        for row in rows:
-                            cells = [
-                                (cell or "").strip().replace("\n", " ")
-                                for cell in row
-                            ]
-                            md_rows.append("| " + " | ".join(cells) + " |")
-                        # Add header separator after first row
-                        if len(md_rows) > 1:
-                            col_count = len(rows[0]) if rows[0] else 1
-                            md_rows.insert(1, "| " + " | ".join(["---"] * col_count) + " |")
-                        page_parts.append("\n".join(md_rows))
+                    for table in tables:
+                        table_count += 1
+                        rows = table.extract()
+                        if rows:
+                            # Format as Markdown table for structure preservation
+                            md_rows = []
+                            for row in rows:
+                                cells = [
+                                    (cell or "").strip().replace("\n", " ")
+                                    for cell in row
+                                ]
+                                md_rows.append("| " + " | ".join(cells) + " |")
+                            # Add header separator after first row
+                            if len(md_rows) > 1:
+                                col_count = len(rows[0]) if rows[0] else 1
+                                md_rows.insert(1, "| " + " | ".join(["---"] * col_count) + " |")
+                            page_parts.append("\n".join(md_rows))
 
-                # Extract non-table text by cropping around table regions
-                # This prevents duplicating content that's already in tables
-                try:
-                    filtered = page
-                    for bbox in table_bboxes:
-                        # Crop out each table region from the page
-                        # pdfplumber bbox: (x0, top, x1, bottom)
-                        filtered = filtered.outside_bounding_box(bbox)
-                    plain_text = filtered.extract_text()
-                except Exception:
-                    # If cropping fails, fall back to full page text
-                    # (may duplicate some table content — acceptable)
+                    # Extract non-table text by cropping around table regions
+                    # This prevents duplicating content that's already in tables
+                    try:
+                        filtered = page
+                        for bbox in table_bboxes:
+                            # Crop out each table region from the page
+                            # pdfplumber bbox: (x0, top, x1, bottom)
+                            filtered = filtered.outside_bounding_box(bbox)
+                        plain_text = filtered.extract_text()
+                    except Exception:
+                        # If cropping fails, fall back to full page text
+                        # (may duplicate some table content — acceptable)
+                        plain_text = page.extract_text()
+
+                    if plain_text and plain_text.strip():
+                        page_parts.insert(0, plain_text.strip())
+                else:
+                    # No tables on this page — standard text extraction
                     plain_text = page.extract_text()
+                    if plain_text and plain_text.strip():
+                        page_parts.append(plain_text.strip())
 
-                if plain_text and plain_text.strip():
-                    page_parts.insert(0, plain_text.strip())
-            else:
-                # No tables on this page — standard text extraction
-                plain_text = page.extract_text()
-                if plain_text and plain_text.strip():
-                    page_parts.append(plain_text.strip())
-
-            if page_parts:
-                pages.append("\n\n".join(page_parts))
-        except Exception as e:
-            logger.warning(f"PDF page {i+1}/{page_count} failed to extract: {e}")
-
-    pdf.close()
+                if page_parts:
+                    pages.append("\n\n".join(page_parts))
+            except Exception as e:
+                logger.warning(f"PDF page {i+1}/{page_count} failed to extract: {e}")
+    finally:
+        pdf.close()
     text = "\n\n".join(pages)
 
     # Detect image-only PDFs (pages exist but no text extracted)

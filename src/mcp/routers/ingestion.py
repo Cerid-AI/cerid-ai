@@ -27,6 +27,17 @@ logger = logging.getLogger("ai-companion")
 _ingest_semaphore = asyncio.Semaphore(3)
 
 
+def _validate_file_path(file_path: str) -> Path:
+    """Ensure file_path resolves within the configured archive directory."""
+    allowed_root = Path(config.ARCHIVE_PATH).resolve()
+    resolved = Path(file_path).resolve()
+    if not str(resolved).startswith(str(allowed_root)):
+        raise ValueError(
+            f"Path '{file_path}' is outside the allowed archive directory ({allowed_root})."
+        )
+    return resolved
+
+
 # ── Private helpers ────────────────────────────────────────────────────────────
 
 def _content_hash(content: str) -> str:
@@ -231,12 +242,12 @@ def ingest_content(
 
     # Fire webhook notification (Phase 4C.4)
     try:
-        import asyncio
-
         from utils.webhooks import notify_ingestion_complete
-        asyncio.get_event_loop().create_task(
+        asyncio.get_running_loop().create_task(
             notify_ingestion_complete(artifact_id, domain, base_meta.get("filename", "text_input"), len(chunks))
         )
+    except RuntimeError:
+        pass  # no running loop (e.g. sync context) — webhook skipped
     except Exception:
         pass
 
@@ -273,6 +284,7 @@ async def ingest_file(
     categorize_mode: str = "",
 ) -> Dict:
     """Parse a file, extract metadata, optionally AI-categorize, chunk, and store."""
+    _validate_file_path(file_path)
     filename = Path(file_path).name
     parsed = parse_file(file_path)
     text = parsed["text"]

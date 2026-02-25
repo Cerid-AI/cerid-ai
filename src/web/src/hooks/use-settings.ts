@@ -1,18 +1,18 @@
 import { useState, useCallback } from "react"
 
 export function useSettings() {
-  const [feedbackLoop, setFeedbackLoop] = useState(
-    () => localStorage.getItem("cerid-feedback-loop") === "true",
-  )
+  const [feedbackLoop, setFeedbackLoop] = useState(() => {
+    try { return localStorage.getItem("cerid-feedback-loop") === "true" } catch { return false }
+  })
 
-  const [showDashboard, setShowDashboard] = useState(
-    () => localStorage.getItem("cerid-show-dashboard") === "true",
-  )
+  const [showDashboard, setShowDashboard] = useState(() => {
+    try { return localStorage.getItem("cerid-show-dashboard") === "true" } catch { return false }
+  })
 
   const toggleFeedbackLoop = useCallback(() => {
     setFeedbackLoop((prev) => {
       const next = !prev
-      localStorage.setItem("cerid-feedback-loop", String(next))
+      try { localStorage.setItem("cerid-feedback-loop", String(next)) } catch { /* noop */ }
       return next
     })
   }, [])
@@ -20,7 +20,7 @@ export function useSettings() {
   const toggleDashboard = useCallback(() => {
     setShowDashboard((prev) => {
       const next = !prev
-      localStorage.setItem("cerid-show-dashboard", String(next))
+      try { localStorage.setItem("cerid-show-dashboard", String(next)) } catch { /* noop */ }
       return next
     })
   }, [])

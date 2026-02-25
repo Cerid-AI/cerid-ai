@@ -86,11 +86,12 @@ TEMPORAL_RECENCY_WEIGHT = 0.1        # max boost from recency (added to relevanc
 # Cross-Domain Connections (Phase 4B.3)
 # ---------------------------------------------------------------------------
 DOMAIN_AFFINITY = {
-    "coding":   {"projects": 0.6},
-    "projects": {"coding": 0.6, "finance": 0.4},
-    "finance":  {"projects": 0.4},
-    "personal": {"general": 0.5},
-    "general":  {"personal": 0.5},
+    "coding":        {"projects": 0.6},
+    "projects":      {"coding": 0.6, "finance": 0.4},
+    "finance":       {"projects": 0.4},
+    "personal":      {"general": 0.5, "conversations": 0.3},
+    "general":       {"personal": 0.5, "conversations": 0.3},
+    "conversations": {"personal": 0.3, "general": 0.3},
 }
 CROSS_DOMAIN_DEFAULT_AFFINITY = 0.2   # weight for domain pairs not in DOMAIN_AFFINITY
 

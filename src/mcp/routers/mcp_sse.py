@@ -23,6 +23,7 @@ logger = logging.getLogger("ai-companion")
 
 # Session message queues (shared between GET /mcp/sse and POST /mcp/messages)
 _sessions: Dict[str, asyncio.Queue] = {}
+_MAX_SESSIONS = 100
 
 
 def clear_sessions():
@@ -420,6 +421,11 @@ async def mcp_sse_endpoint(request: Request):
     """SSE endpoint — responses to POSTs come through here."""
     session_id = str(uuid.uuid4())
     queue: asyncio.Queue = asyncio.Queue()
+    # Evict oldest session if at capacity
+    if len(_sessions) >= _MAX_SESSIONS:
+        oldest_key = next(iter(_sessions))
+        _sessions.pop(oldest_key, None)
+        logger.warning(f"[MCP] Evicted oldest session {oldest_key} (cap={_MAX_SESSIONS})")
     _sessions[session_id] = queue
     logger.info(f"[MCP] SSE opened: {session_id}")
 

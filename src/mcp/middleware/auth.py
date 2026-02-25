@@ -7,6 +7,7 @@ Exempt paths: /health, /, /docs, /openapi.json, /mcp/*
 """
 from __future__ import annotations
 
+import hmac
 import logging
 import os
 
@@ -41,7 +42,7 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
 
         # Check header
         provided = request.headers.get("X-API-Key", "")
-        if provided != self.api_key:
+        if not hmac.compare_digest(provided, self.api_key):
             client = request.client.host if request.client else "unknown"
             logger.warning(f"Unauthorized request to {path} from {client}")
             return JSONResponse(
