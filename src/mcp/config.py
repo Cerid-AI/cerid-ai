@@ -223,6 +223,14 @@ MEMORY_RETENTION_DAYS = int(os.getenv("MEMORY_RETENTION_DAYS", "180"))
 # ---------------------------------------------------------------------------
 SYNC_DIR = os.path.expanduser(os.getenv("CERID_SYNC_DIR", "~/Dropbox/cerid-sync"))
 MACHINE_ID = os.getenv("CERID_MACHINE_ID", os.uname().nodename.split(".")[0])
+SYNC_BACKEND = os.getenv("CERID_SYNC_BACKEND", "local")
+
+# ---------------------------------------------------------------------------
+# Phase 8D: Encryption
+# ---------------------------------------------------------------------------
+ENABLE_ENCRYPTION = os.getenv("ENABLE_ENCRYPTION", "false").lower() == "true"
+# CERID_ENCRYPTION_KEY is read directly from env by utils/encryption.py
+# Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 
 # ---------------------------------------------------------------------------
 # Phase 8A: Plugin System & Feature Tiers
