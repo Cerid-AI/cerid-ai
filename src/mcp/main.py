@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from deps import close_neo4j, get_neo4j
 from middleware.auth import APIKeyMiddleware
 from middleware.rate_limit import RateLimitMiddleware
-from routers import agents, artifacts, digest, health, ingestion, mcp_sse, query, taxonomy
+from routers import agents, artifacts, digest, health, ingestion, mcp_sse, memories, query, settings, taxonomy, upload
 from scheduler import start_scheduler, stop_scheduler
 from utils import graph
 
@@ -93,6 +93,9 @@ _api_routers = [
     agents.router,
     digest.router,
     taxonomy.router,
+    settings.router,
+    upload.router,
+    memories.router,
 ]
 for r in _api_routers:
     app.include_router(r)

@@ -8,6 +8,8 @@ import type { Pane } from "@/components/layout/sidebar"
 const KnowledgePane = lazy(() => import("@/components/kb/knowledge-pane"))
 const MonitoringPane = lazy(() => import("@/components/monitoring/monitoring-pane"))
 const AuditPane = lazy(() => import("@/components/audit/audit-pane"))
+const MemoriesPane = lazy(() => import("@/components/memories/memories-pane"))
+const SettingsPane = lazy(() => import("@/components/settings/settings-pane"))
 
 function PaneLoader() {
   return (
@@ -37,11 +39,15 @@ export default function App() {
           case "knowledge":
           case "monitoring":
           case "audit":
+          case "memories":
+          case "settings":
             return (
               <Suspense fallback={<PaneLoader />}>
                 {activePane === "knowledge" && <KnowledgePane />}
                 {activePane === "monitoring" && <MonitoringPane />}
                 {activePane === "audit" && <AuditPane />}
+                {activePane === "memories" && <MemoriesPane />}
+                {activePane === "settings" && <SettingsPane />}
               </Suspense>
             )
           default:

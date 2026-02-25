@@ -1,9 +1,9 @@
-import { MessageSquare, Database, Activity, FileBarChart, Brain, Sun, Moon, ChevronLeft, ChevronRight } from "lucide-react"
+import { MessageSquare, Database, Activity, FileBarChart, Brain, Settings, Sun, Moon, ChevronLeft, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
-export type Pane = "chat" | "knowledge" | "monitoring" | "audit" | "memories"
+export type Pane = "chat" | "knowledge" | "monitoring" | "audit" | "memories" | "settings"
 
 interface SidebarProps {
   activePane: Pane
@@ -20,6 +20,7 @@ const NAV_ITEMS: { pane: Pane; icon: typeof MessageSquare; label: string }[] = [
   { pane: "monitoring", icon: Activity, label: "Monitoring" },
   { pane: "audit", icon: FileBarChart, label: "Audit" },
   { pane: "memories", icon: Brain, label: "Memories" },
+  { pane: "settings", icon: Settings, label: "Settings" },
 ]
 
 export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse, theme, onToggleTheme }: SidebarProps) {

@@ -252,6 +252,102 @@ async def check_hallucinations(
     return report
 
 
+async def verify_response_streaming(
+    response_text: str,
+    conversation_id: str,
+    chroma_client,
+    neo4j_driver,
+    redis_client,
+    threshold: Optional[float] = None,
+):
+    """
+    Streaming verification generator — yields claim results as they are verified.
+
+    Yields JSON-serializable dicts with event types:
+      - claim_extracted: {type, claim, index}
+      - claim_verified: {type, index, status, confidence, source?, reason?}
+      - summary: {type, overall_confidence, verified, unverified, uncertain, total}
+
+    This is used by the SSE endpoint for the Truth Panel.
+    """
+    if threshold is None:
+        threshold = float(getattr(config, "HALLUCINATION_THRESHOLD", DEFAULT_THRESHOLD))
+
+    if len(response_text) < MIN_RESPONSE_LENGTH:
+        yield {
+            "type": "summary",
+            "overall_confidence": 0,
+            "verified": 0,
+            "unverified": 0,
+            "uncertain": 0,
+            "total": 0,
+            "skipped": True,
+            "reason": f"Response too short ({len(response_text)} chars)",
+        }
+        return
+
+    # Step 1: Extract claims
+    claims = await extract_claims(response_text)
+    if not claims:
+        yield {
+            "type": "summary",
+            "overall_confidence": 0,
+            "verified": 0,
+            "unverified": 0,
+            "uncertain": 0,
+            "total": 0,
+            "skipped": True,
+            "reason": "No factual claims extracted",
+        }
+        return
+
+    # Yield each extracted claim
+    for i, claim in enumerate(claims):
+        yield {"type": "claim_extracted", "claim": claim, "index": i}
+
+    # Step 2: Verify each claim and yield results immediately
+    verified_count = 0
+    unverified_count = 0
+    uncertain_count = 0
+    total_confidence = 0.0
+
+    for i, claim in enumerate(claims):
+        result = await verify_claim(
+            claim, chroma_client, neo4j_driver, redis_client, threshold
+        )
+        status = result.get("status", "error")
+        confidence = result.get("similarity", 0.0)
+
+        if status == "verified":
+            verified_count += 1
+        elif status == "unverified":
+            unverified_count += 1
+        else:
+            uncertain_count += 1
+
+        total_confidence += confidence
+
+        yield {
+            "type": "claim_verified",
+            "index": i,
+            "status": status,
+            "confidence": confidence,
+            "source": result.get("source_filename", ""),
+            "reason": result.get("reason", ""),
+        }
+
+    # Step 3: Yield summary
+    overall = (total_confidence / len(claims)) if claims else 0
+    yield {
+        "type": "summary",
+        "overall_confidence": round(overall, 3),
+        "verified": verified_count,
+        "unverified": unverified_count,
+        "uncertain": uncertain_count,
+        "total": len(claims),
+    }
+
+
 def get_hallucination_report(
     redis_client,
     conversation_id: str,

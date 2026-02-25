@@ -20,6 +20,10 @@ import type {
   IngestLogResponse,
   AuditResponse,
   HallucinationReport,
+  ServerSettings,
+  SettingsUpdate,
+  Memory,
+  UploadResult,
 } from "./types"
 
 export async function fetchHealth(): Promise<HealthResponse> {
@@ -164,6 +168,92 @@ export async function fetchHallucinationReport(
   })
   if (res.status === 404) return null
   if (!res.ok) throw new Error(`Hallucination report fetch failed: ${res.status}`)
+  return res.json()
+}
+
+// --- Settings (Phase 8E) ---
+
+export async function fetchSettings(): Promise<ServerSettings> {
+  const res = await fetch(`${MCP_BASE}/settings`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(`Settings fetch failed: ${res.status}`)
+  return res.json()
+}
+
+export async function updateSettings(settings: SettingsUpdate): Promise<{ status: string; updated: Record<string, unknown> }> {
+  const res = await fetch(`${MCP_BASE}/settings`, {
+    method: "PATCH",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(settings),
+  })
+  if (!res.ok) throw new Error(`Settings update failed: ${res.status}`)
+  return res.json()
+}
+
+// --- Memories (Phase 8E) ---
+
+export async function fetchMemories(
+  opts: { type?: string; conversationId?: string; limit?: number; offset?: number } = {},
+): Promise<{ memories: Memory[]; total: number }> {
+  const params = new URLSearchParams()
+  if (opts.type) params.set("type", opts.type)
+  if (opts.conversationId) params.set("conversation_id", opts.conversationId)
+  if (opts.limit) params.set("limit", String(opts.limit))
+  if (opts.offset) params.set("offset", String(opts.offset))
+  const res = await fetch(`${MCP_BASE}/memories?${params}`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(`Memories fetch failed: ${res.status}`)
+  return res.json()
+}
+
+export async function updateMemory(memoryId: string, summary: string): Promise<Memory> {
+  const res = await fetch(`${MCP_BASE}/memories/${memoryId}`, {
+    method: "PATCH",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ summary }),
+  })
+  if (!res.ok) throw new Error(`Memory update failed: ${res.status}`)
+  return res.json()
+}
+
+export async function deleteMemory(memoryId: string): Promise<void> {
+  const res = await fetch(`${MCP_BASE}/memories/${memoryId}`, {
+    method: "DELETE",
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(`Memory delete failed: ${res.status}`)
+}
+
+// --- File Upload (Phase 8E) ---
+
+export async function uploadFile(
+  file: File,
+  opts: { domain?: string; subCategory?: string; tags?: string; categorizeMode?: string } = {},
+): Promise<UploadResult> {
+  const formData = new FormData()
+  formData.append("file", file)
+  const params = new URLSearchParams()
+  if (opts.domain) params.set("domain", opts.domain)
+  if (opts.subCategory) params.set("sub_category", opts.subCategory)
+  if (opts.tags) params.set("tags", opts.tags)
+  if (opts.categorizeMode) params.set("categorize_mode", opts.categorizeMode)
+
+  const headers: Record<string, string> = {}
+  if (API_KEY) headers["X-API-Key"] = API_KEY
+
+  const res = await fetch(`${MCP_BASE}/upload?${params}`, {
+    method: "POST",
+    headers,
+    body: formData,
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `Upload failed: ${res.status}` }))
+    throw new Error(err.detail || `Upload failed: ${res.status}`)
+  }
+  return res.json()
+}
+
+export async function fetchSupportedExtensions(): Promise<{ extensions: string[]; count: number }> {
+  const res = await fetch(`${MCP_BASE}/upload/supported`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(`Supported extensions fetch failed: ${res.status}`)
   return res.json()
 }
 

@@ -1,10 +1,12 @@
 """Agent endpoints — thin wrappers over agent modules."""
 from __future__ import annotations
 
+import json
 import logging
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from deps import get_chroma, get_neo4j, get_redis
@@ -237,6 +239,44 @@ async def memory_archive_endpoint(req: MemoryArchiveRequest):
     except Exception as e:
         logger.error(f"Memory archive error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class VerifyStreamRequest(BaseModel):
+    response_text: str
+    conversation_id: str
+    threshold: Optional[float] = None
+
+
+@router.post("/agent/verify-stream")
+async def verify_stream_endpoint(req: VerifyStreamRequest):
+    """SSE endpoint for streaming truth verification of an LLM response."""
+
+    async def event_generator():
+        try:
+            from agents.hallucination import verify_response_streaming
+
+            async for event in verify_response_streaming(
+                response_text=req.response_text,
+                conversation_id=req.conversation_id,
+                chroma_client=get_chroma(),
+                neo4j_driver=get_neo4j(),
+                redis_client=get_redis(),
+                threshold=req.threshold,
+            ):
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception as e:
+            logger.error(f"Verify stream error: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post("/agent/rectify")

@@ -271,3 +271,85 @@ export interface ModelRecommendation {
   reasoning: string
   savingsVsCurrent: number
 }
+
+// Phase 8E: Settings
+export interface ServerSettings {
+  categorize_mode: string
+  chunk_max_tokens: number
+  chunk_overlap: number
+  enable_encryption: boolean
+  enable_feedback_loop: boolean
+  enable_hallucination_check: boolean
+  enable_memory_extraction: boolean
+  hallucination_threshold: number
+  feature_tier: string
+  feature_flags: Record<string, boolean>
+  domains: string[]
+  taxonomy: Record<string, {
+    description: string
+    icon: string
+    sub_categories: string[]
+  }>
+  sync_backend: string
+  machine_id: string
+  version: string
+}
+
+export interface SettingsUpdate {
+  categorize_mode?: string
+  enable_feedback_loop?: boolean
+  enable_hallucination_check?: boolean
+  enable_memory_extraction?: boolean
+  hallucination_threshold?: number
+  cost_sensitivity?: string
+}
+
+// Phase 8E: Memories
+export interface Memory {
+  id: string
+  type: string // facts, decisions, preferences, action-items
+  content: string
+  conversation_id: string
+  created_at: string
+  source_filename: string
+}
+
+// Phase 8E: File upload
+export interface UploadResult {
+  status: string
+  artifact_id: string
+  domain: string
+  filename: string
+  chunks: number
+  categorize_mode: string
+  metadata?: Record<string, string>
+}
+
+// Phase 8E: Live metrics
+export interface LiveMetrics {
+  inputTokens: number
+  outputTokens: number
+  contextPct: number
+  sessionCost: number
+  messageCost: number
+  messagesCount: number
+}
+
+// Phase 8E: Truth audit
+export interface TruthClaim {
+  claim: string
+  index: number
+  status: "pending" | "verified" | "unverified" | "uncertain"
+  confidence: number
+  source?: string
+  reason?: string
+}
+
+export interface TruthAuditState {
+  status: "idle" | "analyzing" | "complete"
+  claims: TruthClaim[]
+  overallConfidence: number
+  verified: number
+  unverified: number
+  uncertain: number
+}
