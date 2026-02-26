@@ -81,11 +81,25 @@ def get_neo4j():
     if _neo4j is None:
         with _neo4j_lock:
             if _neo4j is None:
-                _neo4j = GraphDatabase.driver(
+                if not config.NEO4J_PASSWORD:
+                    raise RuntimeError(
+                        "NEO4J_PASSWORD is empty — check .env file and docker-compose env_file"
+                    )
+                driver = GraphDatabase.driver(
                     config.NEO4J_URI, auth=(config.NEO4J_USER, config.NEO4J_PASSWORD)
                 )
-                _retry(_neo4j.verify_connectivity, "Neo4j")
-                logger.info("Neo4j connected")
+                # verify_connectivity only checks transport, not auth.
+                # Run a simple query to validate credentials.
+                try:
+                    def _verify_neo4j_auth():
+                        with driver.session() as s:
+                            s.run("RETURN 1").consume()
+                    _retry(_verify_neo4j_auth, "Neo4j")
+                except Exception:
+                    driver.close()
+                    raise
+                _neo4j = driver
+                logger.info("Neo4j connected (auth verified)")
     return _neo4j
 
 

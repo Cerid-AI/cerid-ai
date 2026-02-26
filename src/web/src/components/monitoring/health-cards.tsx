@@ -26,8 +26,8 @@ export function HealthCards({ health }: HealthCardsProps) {
         const isOk = normalizedStatus === "connected" || normalizedStatus === "ok" || normalizedStatus === "healthy"
         const isSkipped = normalizedStatus.startsWith("skipped")
         const statusLabel = isOk ? "connected" : isSkipped ? "skipped" : "error"
-        // Extract meaningful error detail for tooltip (strip "error: " prefix)
-        const errorDetail = !isOk && !isSkipped && status.startsWith("error:")
+        // Extract meaningful error detail for tooltip (strip "error: " prefix, case-insensitive)
+        const errorDetail = !isOk && !isSkipped && normalizedStatus.startsWith("error:")
           ? status.slice(7).trim()
           : !isOk && !isSkipped ? status : ""
 

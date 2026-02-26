@@ -1,4 +1,6 @@
 services:
+  # NOTE: ${NEO4J_PASSWORD} requires --env-file ../../.env on the CLI.
+  # Always start via scripts/start-cerid.sh which provides this flag.
   neo4j:
     container_name: ai-companion-neo4j
     image: neo4j:5-community

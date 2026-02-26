@@ -18,18 +18,22 @@ def health_check() -> Dict:
     try:
         get_chroma()
         status["chromadb"] = "connected"
-    except Exception:
-        status["chromadb"] = "error"
+    except Exception as exc:
+        status["chromadb"] = f"error: {exc}"
     try:
         get_redis()
         status["redis"] = "connected"
-    except Exception:
-        status["redis"] = "error"
+    except Exception as exc:
+        status["redis"] = f"error: {exc}"
     try:
-        get_neo4j()
+        driver = get_neo4j()
+        # get_neo4j() validates auth on first connect, but verify on every
+        # health check by running a trivial query (catches stale sessions).
+        with driver.session() as session:
+            session.run("RETURN 1").consume()
         status["neo4j"] = "connected"
-    except Exception:
-        status["neo4j"] = "error"
+    except Exception as exc:
+        status["neo4j"] = f"error: {exc}"
     return {
         "status": "healthy" if all(v == "connected" for v in status.values()) else "degraded",
         "services": status,

@@ -285,3 +285,9 @@ if COST_SENSITIVITY not in ("low", "medium", "high"):
         "Invalid COST_SENSITIVITY=%r, defaulting to 'medium'", COST_SENSITIVITY
     )
     COST_SENSITIVITY = "medium"
+
+if not NEO4J_PASSWORD:
+    _config_logger.warning(
+        "NEO4J_PASSWORD is empty — Neo4j queries will fail with auth errors. "
+        "Check that .env is loaded (env_file in docker-compose.yml)."
+    )

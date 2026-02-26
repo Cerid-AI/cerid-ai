@@ -61,7 +61,7 @@ export function useChat({ onMessageStart, onMessageUpdate, feedbackEnabled }: Us
           }
         }
 
-        // Memory extraction: auto-trigger after 6+ messages in the conversation
+        // Memory extraction: auto-trigger after 3+ user messages (≈6+ total messages)
         const userMessages = messages.filter((m) => m.role === "user")
         if (!aborted && accumulated.length > 100 && userMessages.length >= 3) {
           extractMemories(accumulated, convoId, model)
