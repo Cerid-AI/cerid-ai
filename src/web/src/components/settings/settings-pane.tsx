@@ -34,6 +34,7 @@ export default function SettingsPane() {
   const [settings, setSettings] = useState<ServerSettings | null>(null)
   const [loadState, setLoadState] = useState<LoadState>("loading")
   const [error, setError] = useState("")
+  const [patchError, setPatchError] = useState("")
 
   const load = async () => {
     setLoadState("loading")
@@ -49,17 +50,26 @@ export default function SettingsPane() {
   }
 
   useEffect(() => {
-    load()
+    let cancelled = false
+    setLoadState("loading")
+    setError("")
+    fetchSettings()
+      .then((data) => { if (!cancelled) { setSettings(data); setLoadState("ready") } })
+      .catch((e) => { if (!cancelled) { setError(e instanceof Error ? e.message : "Failed to fetch settings"); setLoadState("error") } })
+    return () => { cancelled = true }
   }, [])
 
   const patch = async (update: SettingsUpdate) => {
     if (!settings) return
     const prev = { ...settings }
     setSettings({ ...settings, ...update } as ServerSettings)
+    setPatchError("")
     try {
       await updateSettings(update)
-    } catch {
+    } catch (e) {
       setSettings(prev)
+      setPatchError(e instanceof Error ? e.message : "Failed to save")
+      setTimeout(() => setPatchError(""), 3000)
     }
   }
 
@@ -94,6 +104,11 @@ export default function SettingsPane() {
   return (
     <div className="flex h-full flex-col">
       <Header />
+      {patchError && (
+        <div className="border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-xs text-destructive">
+          Save failed: {patchError}
+        </div>
+      )}
       <ScrollArea className="flex-1">
         <div className="space-y-6 p-4">
           {/* Connection */}
@@ -194,7 +209,7 @@ export default function SettingsPane() {
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">Cost Sensitivity</span>
                   <Select
-                    value={(settings as ServerSettings & { cost_sensitivity?: string }).cost_sensitivity ?? "medium"}
+                    value={settings.cost_sensitivity ?? "medium"}
                     onValueChange={(v) => patch({ cost_sensitivity: v })}
                   >
                     <SelectTrigger size="sm" className="w-28">

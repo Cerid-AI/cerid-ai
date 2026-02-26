@@ -187,11 +187,11 @@ class TestFeatureFlags:
         assert is_feature_enabled("file_upload_gui") is True
         assert is_feature_enabled("encryption_at_rest") is True
 
-    def test_is_feature_enabled_unknown_defaults_true(self):
-        """Unknown feature names default to enabled (fail-open)."""
+    def test_is_feature_enabled_unknown_defaults_disabled(self):
+        """Unknown feature names default to disabled (fail-closed for safety)."""
         from utils.features import is_feature_enabled
 
-        assert is_feature_enabled("nonexistent_feature") is True
+        assert is_feature_enabled("nonexistent_feature") is False
 
     @patch("config.FEATURE_TIER", "community")
     @patch("config.FEATURE_FLAGS", {"ocr_parsing": False, "semantic_dedup": False})

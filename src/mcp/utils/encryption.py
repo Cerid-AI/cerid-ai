@@ -28,6 +28,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import threading
 from typing import Optional
 
 logger = logging.getLogger("ai-companion.encryption")
@@ -167,34 +168,43 @@ class FieldEncryptor:
         return result
 
 
+_encryptor_lock = threading.Lock()
+
+
 def get_encryptor() -> Optional[FieldEncryptor]:
     """
     Get the singleton encryptor instance.
 
     Returns None if encryption is not configured.
-    Thread-safe: initializes on first call.
+    Thread-safe via double-checked locking.
     """
     global _encryptor, _initialized
 
     if _initialized:
         return _encryptor
 
-    _initialized = True
-    key = os.getenv("CERID_ENCRYPTION_KEY", "")
+    with _encryptor_lock:
+        if _initialized:
+            return _encryptor
 
-    if not key:
-        logger.debug("Encryption disabled: CERID_ENCRYPTION_KEY not set")
-        _encryptor = None
-        return None
+        key = os.getenv("CERID_ENCRYPTION_KEY", "")
 
-    try:
-        _encryptor = FieldEncryptor(key)
-        logger.info(f"Encryption enabled (key hash: {_encryptor.key_hash})")
-        return _encryptor
-    except (ImportError, ValueError) as e:
-        logger.error(f"Encryption initialization failed: {e}")
-        _encryptor = None
-        return None
+        if not key:
+            logger.debug("Encryption disabled: CERID_ENCRYPTION_KEY not set")
+            _encryptor = None
+            _initialized = True
+            return None
+
+        try:
+            _encryptor = FieldEncryptor(key)
+            logger.info(f"Encryption enabled (key hash: {_encryptor.key_hash})")
+            _initialized = True
+            return _encryptor
+        except (ImportError, ValueError) as e:
+            logger.error(f"Encryption initialization failed: {e}")
+            _encryptor = None
+            _initialized = True
+            return None
 
 
 def encrypt_field(value: str) -> str:

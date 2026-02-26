@@ -162,47 +162,52 @@ async def merge_tags_endpoint(req: MergeTagsRequest):
     try:
         driver = get_neo4j()
         with driver.session() as session:
-            # Find all artifacts tagged with source
-            result = session.run(
-                "MATCH (a:Artifact)-[r:TAGGED_WITH]->(t:Tag {name: $source}) "
-                "RETURN a.id AS aid, a.tags AS tags",
-                source=source,
-            )
-            updated = 0
-            for record in result:
-                aid = record["aid"]
-                # Update artifact tags property
-                try:
-                    tag_list = json.loads(record["tags"] or "[]")
-                except (json.JSONDecodeError, TypeError):
-                    tag_list = []
-                tag_list = [target if t == source else t for t in tag_list]
-                # Deduplicate
-                tag_list = list(dict.fromkeys(tag_list))
-                session.run(
-                    "MATCH (a:Artifact {id: $aid}) SET a.tags = $tags",
-                    aid=aid,
-                    tags=json.dumps(tag_list),
+            # Use explicit transaction for atomicity
+            with session.begin_transaction() as tx:
+                # Find all artifacts tagged with source
+                result = tx.run(
+                    "MATCH (a:Artifact)-[r:TAGGED_WITH]->(t:Tag {name: $source}) "
+                    "RETURN a.id AS aid, a.tags AS tags",
+                    source=source,
                 )
-                updated += 1
+                updated = 0
+                # Collect records first to avoid interleaving reads/writes
+                records = list(result)
+                for record in records:
+                    aid = record["aid"]
+                    # Update artifact tags property
+                    try:
+                        tag_list = json.loads(record["tags"] or "[]")
+                    except (json.JSONDecodeError, TypeError):
+                        tag_list = []
+                    tag_list = [target if t == source else t for t in tag_list]
+                    # Deduplicate
+                    tag_list = list(dict.fromkeys(tag_list))
+                    tx.run(
+                        "MATCH (a:Artifact {id: $aid}) SET a.tags = $tags",
+                        aid=aid,
+                        tags=json.dumps(tag_list),
+                    )
+                    updated += 1
 
-            # Move relationships: delete source TAGGED_WITH, create target TAGGED_WITH
-            session.run(
-                "MATCH (a:Artifact)-[r:TAGGED_WITH]->(t:Tag {name: $source}) "
-                "DELETE r "
-                "WITH a "
-                "MERGE (t2:Tag {name: $target}) "
-                "MERGE (a)-[:TAGGED_WITH]->(t2)",
-                source=source,
-                target=target,
-            )
-            # Delete source tag node if no remaining relationships
-            session.run(
-                "MATCH (t:Tag {name: $source}) "
-                "WHERE NOT (t)<-[:TAGGED_WITH]-() "
-                "DELETE t",
-                source=source,
-            )
+                # Move relationships: delete source TAGGED_WITH, create target TAGGED_WITH
+                tx.run(
+                    "MATCH (a:Artifact)-[r:TAGGED_WITH]->(t:Tag {name: $source}) "
+                    "DELETE r "
+                    "WITH a "
+                    "MERGE (t2:Tag {name: $target}) "
+                    "MERGE (a)-[:TAGGED_WITH]->(t2)",
+                    source=source,
+                    target=target,
+                )
+                # Delete source tag node if no remaining relationships
+                tx.run(
+                    "MATCH (t:Tag {name: $source}) "
+                    "WHERE NOT (t)<-[:TAGGED_WITH]-() "
+                    "DELETE t",
+                    source=source,
+                )
+                tx.commit()
 
         logger.info(f"Merged tag '{source}' → '{target}' ({updated} artifacts updated)")
         return {"status": "success", "source": source, "target": target, "artifacts_updated": updated}

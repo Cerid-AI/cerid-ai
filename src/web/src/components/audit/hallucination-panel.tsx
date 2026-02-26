@@ -49,11 +49,13 @@ export function HallucinationPanel({ conversationId }: HallucinationPanelProps) 
       setReport(null)
       return
     }
+    let cancelled = false
     setLoading(true)
     fetchHallucinationReport(conversationId)
-      .then(setReport)
-      .catch(() => setReport(null))
-      .finally(() => setLoading(false))
+      .then((r) => { if (!cancelled) setReport(r) })
+      .catch(() => { if (!cancelled) setReport(null) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
   }, [conversationId])
 
   if (!conversationId || loading) return null

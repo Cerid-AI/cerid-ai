@@ -277,6 +277,7 @@ export interface ServerSettings {
   categorize_mode: string
   chunk_max_tokens: number
   chunk_overlap: number
+  cost_sensitivity: string
   enable_encryption: boolean
   enable_feedback_loop: boolean
   enable_hallucination_check: boolean

@@ -427,7 +427,6 @@ async def rerank_results(
             content = content.rsplit("```", 1)[0]
         content = content.strip()
 
-        import json
         ranking = json.loads(content)
 
         if not isinstance(ranking, list):
@@ -457,7 +456,7 @@ async def rerank_results(
         return reranked + remainder
 
     except Exception as e:
-        print(f"LLM reranking failed, falling back to embedding sort: {e}")
+        logger.warning(f"LLM reranking failed, falling back to embedding sort: {e}")
         return sorted(results, key=lambda x: x["relevance"], reverse=True)
 
 

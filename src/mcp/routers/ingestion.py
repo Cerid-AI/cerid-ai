@@ -31,7 +31,9 @@ def _validate_file_path(file_path: str) -> Path:
     """Ensure file_path resolves within the configured archive directory."""
     allowed_root = Path(config.ARCHIVE_PATH).resolve()
     resolved = Path(file_path).resolve()
-    if not str(resolved).startswith(str(allowed_root)):
+    try:
+        resolved.relative_to(allowed_root)
+    except ValueError:
         raise ValueError(
             f"Path '{file_path}' is outside the allowed archive directory ({allowed_root})."
         )

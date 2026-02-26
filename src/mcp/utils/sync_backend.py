@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -190,8 +191,9 @@ _BACKENDS: Dict[str, type] = {
     "local": LocalSyncBackend,
 }
 
-# Singleton
+# Singleton with thread-safe initialization
 _active_backend: Optional[SyncBackend] = None
+_backend_lock = threading.Lock()
 
 
 def register_sync_backend(name: str, backend_class: type) -> None:
@@ -207,6 +209,8 @@ def get_sync_backend(
     """
     Get the active sync backend instance.
 
+    Thread-safe via double-checked locking.
+
     Args:
         backend_type: Backend type name (default: "local"). Future: "s3", "webdav", "git"
         sync_dir: Override sync directory (only for local backend)
@@ -221,22 +225,27 @@ def get_sync_backend(
     if _active_backend is not None and not sync_dir:
         return _active_backend
 
-    backend_cls = _BACKENDS.get(backend_type)
-    if backend_cls is None:
-        available = ", ".join(_BACKENDS.keys())
-        raise ValueError(
-            f"Unknown sync backend: {backend_type}. Available: {available}"
-        )
+    with _backend_lock:
+        if _active_backend is not None and not sync_dir:
+            return _active_backend
 
-    if backend_type == "local":
-        _active_backend = backend_cls(sync_dir=sync_dir)
-    else:
-        _active_backend = backend_cls()
+        backend_cls = _BACKENDS.get(backend_type)
+        if backend_cls is None:
+            available = ", ".join(_BACKENDS.keys())
+            raise ValueError(
+                f"Unknown sync backend: {backend_type}. Available: {available}"
+            )
 
-    return _active_backend
+        if backend_type == "local":
+            _active_backend = backend_cls(sync_dir=sync_dir)
+        else:
+            _active_backend = backend_cls()
+
+        return _active_backend
 
 
 def reset_sync_backend():
     """Reset the singleton (for testing only)."""
     global _active_backend
-    _active_backend = None
+    with _backend_lock:
+        _active_backend = None

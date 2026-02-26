@@ -21,6 +21,7 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import logging
 from typing import Any, Callable
@@ -39,9 +40,12 @@ def is_feature_enabled(feature_name: str) -> bool:
 
     Returns:
         True if the feature is enabled, False otherwise.
-        Returns True for unknown features (fail-open for core features).
+        Returns False for unknown features (fail-closed for safety).
     """
-    return config.FEATURE_FLAGS.get(feature_name, True)
+    if feature_name not in config.FEATURE_FLAGS:
+        logger.warning(f"Unknown feature flag: '{feature_name}' — defaulting to disabled")
+        return False
+    return config.FEATURE_FLAGS[feature_name]
 
 
 def require_feature(feature_name: str) -> Callable:
@@ -51,10 +55,18 @@ def require_feature(feature_name: str) -> Callable:
     Returns HTTP 403 with a clear message if the feature requires
     a higher tier than currently configured.
 
+    Note: Only supports async endpoint functions (standard for FastAPI).
+
     Args:
         feature_name: Key from config.FEATURE_FLAGS
     """
     def decorator(func: Callable) -> Callable:
+        if not asyncio.iscoroutinefunction(func):
+            raise TypeError(
+                f"@require_feature can only decorate async functions, "
+                f"but '{func.__name__}' is synchronous."
+            )
+
         @functools.wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
             if not is_feature_enabled(feature_name):

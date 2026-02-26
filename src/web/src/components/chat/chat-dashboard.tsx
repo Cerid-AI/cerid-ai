@@ -2,25 +2,12 @@ import { useMemo } from "react"
 import { Cpu, Coins, Binary, Database } from "lucide-react"
 import { MODELS } from "@/lib/types"
 import type { ChatMessage } from "@/lib/types"
+import { estimateTokens } from "@/lib/utils"
 
 interface ChatDashboardProps {
   model: string
   messages: ChatMessage[]
   injectedCount: number
-}
-
-function estimateTokens(messages: ChatMessage[]): { input: number; output: number } {
-  let input = 0
-  let output = 0
-  for (const msg of messages) {
-    const tokens = Math.ceil(msg.content.length / 4)
-    if (msg.role === "assistant") {
-      output += tokens
-    } else {
-      input += tokens
-    }
-  }
-  return { input, output }
 }
 
 export function ChatDashboard({ model, messages, injectedCount }: ChatDashboardProps) {

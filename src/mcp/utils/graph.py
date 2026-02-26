@@ -449,8 +449,9 @@ def find_related_artifacts(
     if not artifact_ids:
         return []
 
-    depth = depth or config.GRAPH_TRAVERSAL_DEPTH
-    max_results = max_results or config.GRAPH_MAX_RELATED
+    # Hard-clamp to prevent injection via f-string interpolation in Cypher
+    depth = max(1, min(int(depth or config.GRAPH_TRAVERSAL_DEPTH), 4))
+    max_results = max(1, min(int(max_results or config.GRAPH_MAX_RELATED), 50))
 
     # Build relationship type filter
     if rel_types:

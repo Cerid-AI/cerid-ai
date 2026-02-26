@@ -20,10 +20,20 @@ export function useSmartSuggestions({
   const [loading, setLoading] = useState(false)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastQueryRef = useRef("")
+  // Use refs to avoid stale closures without re-creating the search callback
+  const injectedRef = useRef(injectedArtifactIds)
+  const enabledRef = useRef(enabled)
+  const maxRef = useRef(maxSuggestions)
+  // Generation counter to discard stale async responses
+  const generationRef = useRef(0)
+
+  useEffect(() => { injectedRef.current = injectedArtifactIds }, [injectedArtifactIds])
+  useEffect(() => { enabledRef.current = enabled }, [enabled])
+  useEffect(() => { maxRef.current = maxSuggestions }, [maxSuggestions])
 
   const search = useCallback(
     async (text: string) => {
-      if (!enabled || text.length < 10) {
+      if (!enabledRef.current || text.length < 10) {
         setSuggestions([])
         return
       }
@@ -32,20 +42,25 @@ export function useSmartSuggestions({
       if (text === lastQueryRef.current) return
       lastQueryRef.current = text
 
+      const gen = ++generationRef.current
       setLoading(true)
       try {
-        const result = await queryKB(text, undefined, maxSuggestions + injectedArtifactIds.length)
+        const ids = injectedRef.current
+        const max = maxRef.current
+        const result = await queryKB(text, undefined, max + ids.length)
+        // Discard if a newer search has started
+        if (gen !== generationRef.current) return
         const filtered = result.results
-          .filter((r) => !injectedArtifactIds.includes(r.artifact_id))
-          .slice(0, maxSuggestions)
+          .filter((r) => !ids.includes(r.artifact_id))
+          .slice(0, max)
         setSuggestions(filtered)
       } catch {
         // Non-critical — silently fail
       } finally {
-        setLoading(false)
+        if (gen === generationRef.current) setLoading(false)
       }
     },
-    [enabled, injectedArtifactIds, maxSuggestions],
+    [], // Stable: reads from refs, no closure deps
   )
 
   const debouncedSearch = useCallback(
@@ -60,6 +75,8 @@ export function useSmartSuggestions({
   useEffect(() => {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current)
+      // Invalidate any in-flight requests
+      generationRef.current++
     }
   }, [])
 

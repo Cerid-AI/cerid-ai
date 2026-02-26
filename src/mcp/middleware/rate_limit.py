@@ -27,7 +27,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     def __init__(self, app):
         super().__init__(app)
         self._hits: dict[str, list[float]] = defaultdict(list)
-        self._lock = asyncio.Lock()
+        # Per-key locks to avoid blocking unrelated endpoints
+        self._locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
@@ -36,7 +37,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         for prefix, (max_req, window) in RATE_LIMITS.items():
             if path.startswith(prefix):
                 key = f"{client_ip}:{prefix}"
-                async with self._lock:
+                async with self._locks[key]:
                     now = time.time()
                     self._hits[key] = [t for t in self._hits[key] if now - t < window]
                     if len(self._hits[key]) >= max_req:

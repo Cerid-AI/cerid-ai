@@ -74,7 +74,7 @@ async def list_memories(
                     status_code=400,
                     detail=f"Invalid memory type: {type}. Valid: facts, decisions, preferences, action-items",
                 )
-            conditions.append("a.filename CONTAINS $memory_type_prefix")
+            conditions.append("a.filename STARTS WITH $memory_type_prefix")
             params["memory_type_prefix"] = f"memory_{memory_type}_"
 
         if conversation_id:
@@ -113,7 +113,21 @@ async def list_memories(
                     "source_filename": filename,
                 })
 
-        return {"memories": memories, "total": len(memories), "limit": limit, "offset": offset}
+        # Get total count for pagination
+        count_conditions = ["a.filename STARTS WITH 'memory_'"]
+        if type and memory_type:
+            count_conditions.append("a.filename STARTS WITH $memory_type_prefix")
+        if conversation_id:
+            count_conditions.append("a.filename CONTAINS $convo_prefix")
+        count_query = (
+            "MATCH (a:Artifact)-[:BELONGS_TO]->(:Domain {name: 'conversations'}) "
+            "WHERE " + " AND ".join(count_conditions) + " "
+            "RETURN count(a) AS total"
+        )
+        with driver.session() as count_session:
+            total = count_session.run(count_query, **params).single()["total"]
+
+        return {"memories": memories, "total": total, "limit": limit, "offset": offset}
 
     except HTTPException:
         raise

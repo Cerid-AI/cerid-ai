@@ -215,13 +215,13 @@ async def check_hallucinations(
             "summary": {"total": 0, "verified": 0, "unverified": 0, "uncertain": 0},
         }
 
-    # Step 2: Verify each claim
-    results = []
-    for claim in claims:
-        result = await verify_claim(
-            claim, chroma_client, neo4j_driver, redis_client, threshold
-        )
-        results.append(result)
+    # Step 2: Verify each claim (parallel for non-streaming path)
+    import asyncio
+
+    results = await asyncio.gather(*[
+        verify_claim(claim, chroma_client, neo4j_driver, redis_client, threshold)
+        for claim in claims
+    ])
 
     # Step 3: Compute summary
     status_counts = {"verified": 0, "unverified": 0, "uncertain": 0, "error": 0}

@@ -1,6 +1,7 @@
 import { useState, useCallback, useMemo } from "react"
 import { MODELS } from "@/lib/types"
 import type { ChatMessage, LiveMetrics, ModelOption } from "@/lib/types"
+import { estimateTokens } from "@/lib/utils"
 
 /**
  * Tracks token usage, context window consumption, and cost estimates
@@ -15,20 +16,10 @@ export function useLiveMetrics(model: string, messages: ChatMessage[]) {
   )
 
   const metrics: LiveMetrics = useMemo(() => {
-    let inputTokens = 0
-    let outputTokens = 0
-
-    for (const msg of messages) {
-      const est = Math.ceil(msg.content.length / 4)
-      if (msg.role === "assistant") {
-        outputTokens += est
-      } else {
-        inputTokens += est
-      }
-    }
+    const { input: inputTokens, output: baseOutputTokens } = estimateTokens(messages)
 
     // Add streaming output that hasn't been committed to messages yet
-    outputTokens += Math.ceil(streamingOutputChars / 4)
+    const outputTokens = baseOutputTokens + Math.ceil(streamingOutputChars / 4)
 
     const contextWindow = modelInfo?.contextWindow ?? 128_000
     const totalTokens = inputTokens + outputTokens
@@ -41,8 +32,8 @@ export function useLiveMetrics(model: string, messages: ChatMessage[]) {
     // Cost of the last message pair (last user + last assistant)
     let messageCost = 0
     if (modelInfo && messages.length >= 2) {
-      const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant")
-      const lastUser = [...messages].reverse().find((m) => m.role === "user")
+      const lastAssistant = messages.findLast((m) => m.role === "assistant")
+      const lastUser = messages.findLast((m) => m.role === "user")
       if (lastAssistant && lastUser) {
         const inTok = Math.ceil(lastUser.content.length / 4)
         const outTok = Math.ceil(lastAssistant.content.length / 4)

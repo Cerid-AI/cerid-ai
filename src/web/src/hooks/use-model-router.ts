@@ -22,7 +22,7 @@ export function useModelRouter({
   const recommendation = useMemo<ModelRecommendation | null>(() => {
     if (!enabled || dismissed) return null
     // Only recommend on the next message (use last user message as proxy)
-    const lastUserMsg = [...messages].reverse().find((m) => m.role === "user")
+    const lastUserMsg = messages.findLast((m) => m.role === "user")
     if (!lastUserMsg) return null
 
     const rec = recommendModel(
