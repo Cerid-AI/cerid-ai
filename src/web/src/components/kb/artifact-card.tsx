@@ -53,7 +53,24 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject }: Artifac
                   cross
                 </Badge>
               )}
+              {result.sub_category && result.sub_category !== "general" && (
+                <Badge variant="secondary" className="text-[10px]">
+                  {result.sub_category}
+                </Badge>
+              )}
             </div>
+            {result.tags && result.tags.length > 0 && (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {result.tags.slice(0, 4).map((tag) => (
+                  <span key={tag} className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                    {tag}
+                  </span>
+                ))}
+                {result.tags.length > 4 && (
+                  <span className="text-[10px] text-muted-foreground">+{result.tags.length - 4}</span>
+                )}
+              </div>
+            )}
           </div>
           {showRelevance && (
             <div className="flex flex-col items-end gap-1">

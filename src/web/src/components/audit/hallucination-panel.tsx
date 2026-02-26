@@ -38,9 +38,11 @@ function ClaimBadge({ claim }: { claim: HallucinationClaim }) {
 
 interface HallucinationPanelProps {
   conversationId: string | null
+  /** Change this value to force a re-fetch (e.g. message count after streaming completes). */
+  refreshKey?: number
 }
 
-export function HallucinationPanel({ conversationId }: HallucinationPanelProps) {
+export function HallucinationPanel({ conversationId, refreshKey = 0 }: HallucinationPanelProps) {
   const [report, setReport] = useState<HallucinationReport | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -51,12 +53,15 @@ export function HallucinationPanel({ conversationId }: HallucinationPanelProps) 
     }
     let cancelled = false
     setLoading(true)
-    fetchHallucinationReport(conversationId)
-      .then((r) => { if (!cancelled) setReport(r) })
-      .catch(() => { if (!cancelled) setReport(null) })
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
-  }, [conversationId])
+    // Delay initial fetch slightly to allow backend feedback loop to process
+    const timer = setTimeout(() => {
+      fetchHallucinationReport(conversationId)
+        .then((r) => { if (!cancelled) setReport(r) })
+        .catch(() => { if (!cancelled) setReport(null) })
+        .finally(() => { if (!cancelled) setLoading(false) })
+    }, refreshKey > 0 ? 2000 : 0) // 2s delay on refresh to let backend finish processing
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [conversationId, refreshKey])
 
   if (!conversationId || loading) return null
   if (!report || report.skipped) return null

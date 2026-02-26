@@ -2,7 +2,8 @@ import { useRef, useEffect, useCallback, useState, useMemo } from "react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { Plus, PanelLeftClose, PanelLeft, Database, Rss, LayoutDashboard, Zap } from "lucide-react"
+import { Plus, PanelLeftClose, PanelLeft, Database, Rss, LayoutDashboard, Zap, Sparkles } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 import { MessageBubble } from "./message-bubble"
 import { ChatInput } from "./chat-input"
 import { ModelSelect } from "./model-select"
@@ -16,6 +17,7 @@ import { useConversations } from "@/hooks/use-conversations"
 import { useKBContext } from "@/hooks/use-kb-context"
 import { useSettings } from "@/hooks/use-settings"
 import { useModelRouter } from "@/hooks/use-model-router"
+import { useSmartSuggestions } from "@/hooks/use-smart-suggestions"
 import type { ChatMessage } from "@/lib/types"
 import { MODELS } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -74,6 +76,16 @@ export function ChatPanel() {
     currentModel: currentModelObj,
     messages: active?.messages ?? [],
     kbInjections: kbContext.injectedContext.length,
+  })
+
+  // Smart suggestions: query KB as user types
+  const injectedArtifactIds = useMemo(
+    () => injectedContext.map((r) => r.artifact_id),
+    [injectedContext],
+  )
+  const smartSuggestions = useSmartSuggestions({
+    enabled: true,
+    injectedArtifactIds,
   })
 
   // Auto-scroll on new messages
@@ -251,19 +263,43 @@ export function ChatPanel() {
           {active?.messages.map((msg) => (
             <MessageBubble key={msg.id} message={msg} />
           ))}
-          {/* Hallucination panel after messages */}
+          {/* Hallucination panel after messages — refreshKey triggers re-fetch after new messages */}
           {activeId && !isStreaming && (
-            <HallucinationPanel conversationId={activeId} />
+            <HallucinationPanel conversationId={activeId} refreshKey={active?.messages.length ?? 0} />
           )}
         </div>
       </ScrollArea>
 
+      {/* Smart KB suggestions */}
+      {smartSuggestions.suggestions.length > 0 && !isStreaming && (
+        <div className="flex items-center gap-1.5 overflow-x-auto border-t bg-muted/30 px-4 py-1.5">
+          <Sparkles className="h-3 w-3 shrink-0 text-muted-foreground" />
+          {smartSuggestions.suggestions.map((s) => (
+            <Badge
+              key={s.artifact_id}
+              variant="secondary"
+              className="shrink-0 cursor-pointer text-xs hover:bg-accent"
+              onClick={() => {
+                kbContext.injectResult(s)
+                smartSuggestions.dismissSuggestion(s.artifact_id)
+              }}
+            >
+              {s.filename}
+            </Badge>
+          ))}
+        </div>
+      )}
+
       {/* Input */}
       <ChatInput
-        onSend={handleSend}
+        onSend={(content) => {
+          handleSend(content)
+          smartSuggestions.clear()
+        }}
         onStop={stop}
         isStreaming={isStreaming}
         injectedCount={kbContext.injectedContext.length}
+        onInputChange={smartSuggestions.debouncedSearch}
       />
     </div>
   )

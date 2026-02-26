@@ -10,6 +10,7 @@ import { CostBreakdown } from "./cost-breakdown"
 import { QueryStats } from "./query-stats"
 import { IngestionStats } from "./ingestion-stats"
 import { RecentFailures } from "./recent-failures"
+import { ConversationStats } from "./conversation-stats"
 import { fetchAudit } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
@@ -25,7 +26,7 @@ export function AuditPane() {
 
   const { data: audit, isLoading, dataUpdatedAt } = useQuery({
     queryKey: ["audit", hours],
-    queryFn: () => fetchAudit(["activity", "ingestion", "costs", "queries"], hours),
+    queryFn: () => fetchAudit(["activity", "ingestion", "costs", "queries", "conversations"], hours),
     refetchInterval: 60_000,
   })
 
@@ -70,6 +71,9 @@ export function AuditPane() {
             </PaneErrorBoundary>
             <PaneErrorBoundary label="Cost Breakdown">
               <CostBreakdown costs={audit?.costs} hours={hours} />
+            </PaneErrorBoundary>
+            <PaneErrorBoundary label="Conversation Stats">
+              <ConversationStats conversations={audit?.conversations} />
             </PaneErrorBoundary>
             <PaneErrorBoundary label="Query Stats">
               <QueryStats queries={audit?.queries} />

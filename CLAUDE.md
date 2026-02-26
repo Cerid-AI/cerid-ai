@@ -9,7 +9,7 @@
 
 Cerid AI is a self-hosted, privacy-first Personal AI Knowledge Companion. It unifies multi-domain knowledge bases (code, finance, projects, artifacts) into a context-aware LLM interface with RAG-powered retrieval and intelligent agents. All data stays local; only LLM API calls go external.
 
-**Status:** Phase 8 complete. Phases 0–8 complete. 7 agents operational (query, triage, rectify, audit, maintenance, hallucination, memory); 15 MCP tools; hybrid BM25+vector search; scheduled maintenance; CI/CD pipeline; multi-machine sync via Dropbox. React GUI (port 3000) with streaming chat, KB context pane, monitoring, audit dashboards, hallucination panel, smart model router, and KB suggestions. Backend hardened with API key auth, rate limiting, Redis query caching, conversation analytics, and optional field-level encryption. Plugin system with feature tiers (community/pro). Hierarchical taxonomy with sub-categories and tags. Smart ingestion with new parsers (.eml, .mbox, .epub, .rtf), semantic dedup, and enhanced CSV/TSV. Infrastructure audit hardened: timezone-aware UTC helpers, per-DB connection locks, retry wrappers, auth bypass fix, production Docker config.
+**Status:** Phase 9 complete. Phases 0–9 complete. 7 agents operational (query, triage, rectify, audit, maintenance, hallucination, memory); 15 MCP tools; hybrid BM25+vector search; scheduled maintenance; CI/CD pipeline; multi-machine sync via Dropbox. React GUI (port 3000) with streaming chat, KB context pane, monitoring, audit dashboards, hallucination panel, smart model router, KB suggestions, file upload, tag browsing, and conversation analytics. GUI fully wired to Phase 7/8 backend features: auto hallucination checks, memory extraction, smart KB suggestions as-you-type, server-synced settings, sub-category/tag display, and upload ingestion. Backend hardened with API key auth, rate limiting, Redis query caching, conversation analytics, and optional field-level encryption. Plugin system with feature tiers (community/pro). Hierarchical taxonomy with sub-categories and tags. Smart ingestion with new parsers (.eml, .mbox, .epub, .rtf), semantic dedup, and enhanced CSV/TSV.
 
 ## Architecture
 
@@ -116,14 +116,14 @@ React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly
 │   ├── nginx.conf                     # SPA fallback + Bifrost reverse proxy
 │   └── src/
 │       ├── lib/types.ts, api.ts, model-router.ts  # Types, API clients, model recommendation engine
-│       ├── hooks/                     # use-theme, use-chat, use-conversations, use-kb-context, use-settings, use-model-router, use-smart-suggestions
+│       ├── hooks/                     # use-theme, use-chat, use-conversations, use-kb-context, use-settings, use-model-router, use-smart-suggestions, use-live-metrics
 │       ├── contexts/                  # SettingsContext (model prefs, feedback toggle)
 │       └── components/
 │           ├── layout/                # Sidebar nav, status bar
-│           ├── chat/                  # Chat panel, message list, chat-dashboard, model router banner
-│           ├── kb/                    # KB context panel, artifact cards, domain filter, graph preview
+│           ├── chat/                  # Chat panel, message list, chat-dashboard, model router banner, smart suggestions
+│           ├── kb/                    # KB context panel, artifact cards, domain filter, graph preview, file upload, tag filter
 │           ├── monitoring/            # Health cards, collection chart, scheduler status
-│           ├── audit/                 # Activity chart, ingestion timeline, cost breakdown, query stats, hallucination panel
+│           ├── audit/                 # Activity chart, ingestion timeline, cost breakdown, query stats, hallucination panel, conversation stats
 │           └── ui/                    # shadcn/ui primitives (button, card, badge, etc.)
 ├── stacks/
 │   ├── infrastructure/               # Neo4j, ChromaDB, Redis (Phase 5)
@@ -535,3 +535,7 @@ Admin and monitoring UI at `http://localhost:8501` (container: `ai-companion-das
   - **8C (Complete):** Hierarchical taxonomy — TAXONOMY dict with sub-categories/tags per domain, taxonomy API router, folder-based sub-category detection in watcher, custom domains via env var
   - **8D (Complete):** Encryption & sync — field-level Fernet encryption (opt-in), pluggable sync backends, sync manifest with checksums
   - **8E (Complete):** Infrastructure audit — comprehensive code audit (31 findings), security fixes, deprecated `datetime.utcnow()` replaced across 16 files, per-DB connection locks, retry wrappers, auth bypass fix, production Docker config, test stub DRY (~300 lines removed), N+1 session fix in sync import
+- **Phase 9 (Complete):** GUI Feature Parity — wire Phase 7/8 backend features into React GUI.
+  - **9A (Complete):** Fix 3 user-reported bugs — Knowledge pane error state + retry, Neo4j health card status normalization (`ok`/`connected`/`healthy`), conversation stats + hallucination aggregate in Audit pane
+  - **9B (Complete):** Wire 5 structural gaps — hallucination auto-fetch after chat (refreshKey + 2s delay), smart KB suggestions as-you-type (useSmartSuggestions wired into ChatInput), memory extraction auto-trigger (after 3+ user messages), server-synced settings (fetchSettings hydration + updateSettings push), ChatDashboard refactored to useLiveMetrics hook
+  - **9C (Complete):** 3 feature enhancements — file upload button in Knowledge pane (uploadFile API), sub-category badge + tag pills on artifact cards, client-side tag browsing/filtering from loaded artifacts

@@ -20,6 +20,7 @@ import type {
   IngestLogResponse,
   AuditResponse,
   HallucinationReport,
+  MemoryExtractionResult,
   ServerSettings,
   SettingsUpdate,
   Memory,
@@ -186,6 +187,26 @@ export async function updateSettings(settings: SettingsUpdate): Promise<{ status
     body: JSON.stringify(settings),
   })
   if (!res.ok) throw new Error(`Settings update failed: ${res.status}`)
+  return res.json()
+}
+
+// --- Memory Extraction (Phase 7C) ---
+
+export async function extractMemories(
+  responseText: string,
+  conversationId: string,
+  model = "",
+): Promise<MemoryExtractionResult> {
+  const res = await fetch(`${MCP_BASE}/agent/memory/extract`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      response_text: responseText,
+      conversation_id: conversationId,
+      model,
+    }),
+  })
+  if (!res.ok) throw new Error(`Memory extraction failed: ${res.status}`)
   return res.json()
 }
 

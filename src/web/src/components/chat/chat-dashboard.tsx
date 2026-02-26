@@ -1,8 +1,6 @@
-import { useMemo } from "react"
 import { Cpu, Coins, Binary, Database } from "lucide-react"
-import { MODELS } from "@/lib/types"
 import type { ChatMessage } from "@/lib/types"
-import { estimateTokens } from "@/lib/utils"
+import { useLiveMetrics } from "@/hooks/use-live-metrics"
 
 interface ChatDashboardProps {
   model: string
@@ -11,16 +9,9 @@ interface ChatDashboardProps {
 }
 
 export function ChatDashboard({ model, messages, injectedCount }: ChatDashboardProps) {
-  const modelInfo = useMemo(() => MODELS.find((m) => m.id === model), [model])
-  const { input, output } = useMemo(() => estimateTokens(messages), [messages])
-  const totalTokens = input + output
+  const { metrics, modelInfo } = useLiveMetrics(model, messages)
   const contextWindow = modelInfo?.contextWindow ?? 128_000
-  const usagePct = contextWindow > 0 ? (totalTokens / contextWindow) * 100 : 0
-
-  const sessionCost = useMemo(() => {
-    if (!modelInfo) return 0
-    return (input * modelInfo.inputCostPer1M + output * modelInfo.outputCostPer1M) / 1_000_000
-  }, [input, output, modelInfo])
+  const totalTokens = metrics.inputTokens + metrics.outputTokens
 
   return (
     <div className="flex items-center gap-4 overflow-x-auto border-b bg-muted/30 px-4 py-1.5 text-xs">
@@ -39,11 +30,11 @@ export function ChatDashboard({ model, messages, injectedCount }: ChatDashboardP
       <div className="flex shrink-0 items-center gap-1.5">
         <Binary className="h-3 w-3 text-muted-foreground" />
         <span className="tabular-nums">~{totalTokens.toLocaleString()}</span>
-        <span className="text-muted-foreground">tokens ({usagePct.toFixed(1)}%)</span>
+        <span className="text-muted-foreground">tokens ({metrics.contextPct.toFixed(1)}%)</span>
         <div className="h-1 w-12 overflow-hidden rounded-full bg-muted">
           <div
             className="h-full rounded-full bg-primary transition-all"
-            style={{ width: `${Math.min(usagePct, 100)}%` }}
+            style={{ width: `${Math.min(metrics.contextPct, 100)}%` }}
           />
         </div>
       </div>
@@ -53,8 +44,11 @@ export function ChatDashboard({ model, messages, injectedCount }: ChatDashboardP
       {/* Cost */}
       <div className="flex shrink-0 items-center gap-1.5">
         <Coins className="h-3 w-3 text-muted-foreground" />
-        <span className="tabular-nums">~${sessionCost.toFixed(4)}</span>
+        <span className="tabular-nums">~${metrics.sessionCost.toFixed(4)}</span>
         <span className="text-muted-foreground">session</span>
+        {metrics.messageCost > 0 && (
+          <span className="text-muted-foreground">(last: ${metrics.messageCost.toFixed(4)})</span>
+        )}
       </div>
 
       <Separator />

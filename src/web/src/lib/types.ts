@@ -58,6 +58,8 @@ export interface Artifact {
   id: string
   filename: string
   domain: string
+  sub_category?: string
+  tags?: string[] | string // May be JSON string array or actual array
   keywords: string // JSON string array
   summary: string
   chunk_count: number
@@ -73,6 +75,8 @@ export interface KBQueryResult {
   artifact_id: string
   filename: string
   domain: string
+  sub_category?: string
+  tags?: string[]
   chunk_index: number
   collection: string
   ingested_at: string

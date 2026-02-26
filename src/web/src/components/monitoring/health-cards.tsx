@@ -22,9 +22,14 @@ export function HealthCards({ health }: HealthCardsProps) {
       {Object.entries(health.services).map(([name, status]) => {
         const meta = SERVICE_META[name] ?? { label: name, icon: Database }
         const Icon = meta.icon
-        const isOk = status === "connected"
-        const isSkipped = status.startsWith("skipped")
+        const normalizedStatus = status.toLowerCase()
+        const isOk = normalizedStatus === "connected" || normalizedStatus === "ok" || normalizedStatus === "healthy"
+        const isSkipped = normalizedStatus.startsWith("skipped")
         const statusLabel = isOk ? "connected" : isSkipped ? "skipped" : "error"
+        // Extract meaningful error detail for tooltip (strip "error: " prefix)
+        const errorDetail = !isOk && !isSkipped && status.startsWith("error:")
+          ? status.slice(7).trim()
+          : !isOk && !isSkipped ? status : ""
 
         return (
           <Card key={name}>
@@ -33,7 +38,7 @@ export function HealthCards({ health }: HealthCardsProps) {
               <CardTitle className="text-sm">{meta.label}</CardTitle>
             </CardHeader>
             <CardContent className="p-3 pt-0">
-              <div className="flex items-center gap-1.5" title={status}>
+              <div className="flex items-center gap-1.5" title={errorDetail || status}>
                 <div
                   className={cn(
                     "h-2 w-2 rounded-full",
@@ -42,6 +47,11 @@ export function HealthCards({ health }: HealthCardsProps) {
                 />
                 <span className="text-xs text-muted-foreground capitalize">{statusLabel}</span>
               </div>
+              {errorDetail && (
+                <p className="mt-1 truncate text-xs text-destructive" title={errorDetail}>
+                  {errorDetail.length > 60 ? `${errorDetail.slice(0, 60)}...` : errorDetail}
+                </p>
+              )}
               {/* Data counts */}
               {name === "chromadb" && health.data?.total_chunks != null && (
                 <p className="mt-1 text-xs text-muted-foreground">

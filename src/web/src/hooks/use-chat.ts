@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from "react"
-import { streamChat, ingestFeedback } from "@/lib/api"
+import { streamChat, ingestFeedback, extractMemories } from "@/lib/api"
 import type { ChatMessage } from "@/lib/types"
 
 interface UseChatOptions {
@@ -59,6 +59,13 @@ export function useChat({ onMessageStart, onMessageUpdate, feedbackEnabled }: Us
             ingestFeedback(lastUserMsg.content, accumulated, model, convoId)
               .catch((err) => console.warn("[feedback-loop]", err))
           }
+        }
+
+        // Memory extraction: auto-trigger after 6+ messages in the conversation
+        const userMessages = messages.filter((m) => m.role === "user")
+        if (!aborted && accumulated.length > 100 && userMessages.length >= 3) {
+          extractMemories(accumulated, convoId, model)
+            .catch((err) => console.warn("[memory-extract]", err))
         }
       }
     },

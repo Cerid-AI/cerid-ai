@@ -9,9 +9,10 @@ interface ChatInputProps {
   isStreaming: boolean
   disabled?: boolean
   injectedCount?: number
+  onInputChange?: (text: string) => void
 }
 
-export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount = 0 }: ChatInputProps) {
+export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount = 0, onInputChange }: ChatInputProps) {
   const [input, setInput] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -50,6 +51,7 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount
         onChange={(e) => {
           setInput(e.target.value)
           handleInput()
+          onInputChange?.(e.target.value)
         }}
         onKeyDown={handleKeyDown}
         placeholder="Type a message... (Enter to send, Shift+Enter for new line)"
