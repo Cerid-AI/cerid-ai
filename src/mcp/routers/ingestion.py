@@ -17,8 +17,8 @@ from deps import get_chroma, get_neo4j, get_redis
 from utils import cache, graph
 from utils.chunker import chunk_text
 from utils.metadata import ai_categorize, extract_metadata
-from utils.time import utcnow, utcnow_iso
 from utils.parsers import parse_file
+from utils.time import utcnow, utcnow_iso
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion")

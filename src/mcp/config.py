@@ -9,6 +9,7 @@ To enable pro tier:   Set CERID_TIER=pro (enables premium plugins and features)
 """
 
 import json
+import logging as _logging
 import os
 
 # ---------------------------------------------------------------------------
@@ -269,8 +270,6 @@ FEATURE_FLAGS = {
 # ---------------------------------------------------------------------------
 # Startup validation — normalize and warn on unrecognized values
 # ---------------------------------------------------------------------------
-import logging as _logging
-
 _config_logger = _logging.getLogger("ai-companion.config")
 
 CATEGORIZE_MODE = CATEGORIZE_MODE.strip().lower()

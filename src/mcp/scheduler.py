@@ -12,13 +12,12 @@ import time
 from typing import Any, Dict, Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-
-from utils.time import utcnow_iso
 from apscheduler.triggers.cron import CronTrigger
 
 import config
 from deps import get_chroma, get_neo4j, get_redis
 from utils.cache import log_event
+from utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.scheduler")
 

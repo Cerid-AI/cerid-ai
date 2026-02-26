@@ -17,10 +17,9 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from utils.time import utcnow, utcnow_iso
-
 import config
 from utils.cache import log_event
+from utils.time import utcnow, utcnow_iso
 
 logger = logging.getLogger("ai-companion.memory")
 

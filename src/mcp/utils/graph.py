@@ -13,9 +13,8 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Set
 
-from utils.time import utcnow_iso
-
 import config
+from utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.graph")
 

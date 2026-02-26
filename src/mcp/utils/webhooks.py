@@ -10,11 +10,10 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict
 
-from utils.time import utcnow_iso
-
 import httpx
 
 import config
+from utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.webhooks")
 

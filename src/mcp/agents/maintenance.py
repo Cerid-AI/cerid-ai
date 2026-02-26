@@ -17,12 +17,11 @@ from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
 import chromadb
-
-from utils.time import utcnow, utcnow_iso
 import httpx
 
 import config
 from utils.cache import log_event
+from utils.time import utcnow, utcnow_iso
 
 logger = logging.getLogger("ai-companion.maintenance")
 

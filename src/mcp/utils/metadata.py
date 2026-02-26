@@ -10,14 +10,13 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-
-from utils.time import utcnow_iso
 from typing import Any, Dict, List, Optional
 
 import httpx
 import tiktoken
 
 import config
+from utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.metadata")
 

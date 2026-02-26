@@ -17,9 +17,8 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from utils.time import utcnow_iso
-
 import config
+from utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.hallucination")
 
