@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
 import chromadb
+
+from utils.time import utcnow, utcnow_iso
 import httpx
 
 import config
@@ -41,7 +43,7 @@ def check_system_health(
     collection counts, and Bifrost reachability.
     """
     health = {
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": utcnow_iso(),
         "services": {},
         "data": {},
     }
@@ -153,7 +155,7 @@ def find_stale_artifacts(
     limit: int = 100,
 ) -> List[Dict[str, Any]]:
     """Find artifacts older than the threshold."""
-    cutoff = (datetime.utcnow() - timedelta(days=days_threshold)).isoformat()
+    cutoff = (utcnow().replace(tzinfo=None) - timedelta(days=days_threshold)).isoformat()
 
     with neo4j_driver.session() as session:
         result = session.run(
@@ -341,7 +343,7 @@ async def maintain(
         actions = list(all_actions)
 
     report = {
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": utcnow_iso(),
         "actions_run": actions,
         "auto_purge": auto_purge,
     }

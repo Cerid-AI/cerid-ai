@@ -6,10 +6,10 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import config
+from utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.cache")
 
@@ -39,7 +39,7 @@ def log_event(
         "artifact_id": artifact_id,
         "domain": domain,
         "filename": filename,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": utcnow_iso(),
         **(extra or {}),
     }
     if conversation_id:

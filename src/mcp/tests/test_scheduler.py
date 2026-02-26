@@ -5,11 +5,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-# Mock heavy dependencies before importing scheduler — must happen before import
-sys.modules.setdefault("chromadb", MagicMock())
-sys.modules.setdefault("chromadb.config", MagicMock())
-sys.modules.setdefault("redis", MagicMock())
-sys.modules.setdefault("neo4j", MagicMock())
+# Dependency stubs (chromadb, neo4j, redis, apscheduler, etc.) are handled
+# by conftest.py pytest_configure(). We still need a deps stub since
+# scheduler.py imports from deps at module level.
 sys.modules.setdefault("deps", MagicMock())
 
 from scheduler import get_job_status, start_scheduler, stop_scheduler  # noqa: E402

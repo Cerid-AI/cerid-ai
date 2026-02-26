@@ -2,100 +2,14 @@
 from __future__ import annotations
 
 import json
-import sys
 import zipfile
 from pathlib import Path
-from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Ensure src/mcp is on the path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-
-# ---------------------------------------------------------------------------
-# Stub out heavy dependencies not available on the host
-# ---------------------------------------------------------------------------
-
-def _ensure_stub(name, stub_module):
-    """Register a stub module if the real one isn't available."""
-    if name not in sys.modules:
-        sys.modules[name] = stub_module
-
-
-# tiktoken stub
-_tiktoken = ModuleType("tiktoken")
-
-
-class _FakeEncoding:
-    def encode(self, text):
-        return text.split()
-
-
-_tiktoken.get_encoding = lambda name: _FakeEncoding()
-_ensure_stub("tiktoken", _tiktoken)
-
-# httpx stub
-_httpx = ModuleType("httpx")
-
-
-class _AsyncClient:
-    def __init__(self, **kwargs):
-        pass
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *args):
-        pass
-
-    async def post(self, *args, **kwargs):
-        return MagicMock()
-
-
-_httpx.AsyncClient = _AsyncClient
-_ensure_stub("httpx", _httpx)
-
-# spacy stub
-_spacy = ModuleType("spacy")
-_spacy.load = MagicMock(side_effect=OSError("stub"))
-_ensure_stub("spacy", _spacy)
-
-# chromadb stub (with submodules)
-_chromadb = ModuleType("chromadb")
-_chromadb.HttpClient = MagicMock
-_chromadb_config = ModuleType("chromadb.config")
-_chromadb_config.Settings = MagicMock
-_chromadb.config = _chromadb_config
-_ensure_stub("chromadb", _chromadb)
-_ensure_stub("chromadb.config", _chromadb_config)
-
-# neo4j stub
-_neo4j = ModuleType("neo4j")
-_neo4j.GraphDatabase = MagicMock()
-_ensure_stub("neo4j", _neo4j)
-
-# redis stub
-_redis_mod = ModuleType("redis")
-_redis_mod.Redis = MagicMock
-_ensure_stub("redis", _redis_mod)
-
-# pdfplumber stub
-_pdfplumber = ModuleType("pdfplumber")
-_ensure_stub("pdfplumber", _pdfplumber)
-
-# openpyxl stub
-_openpyxl = ModuleType("openpyxl")
-_ensure_stub("openpyxl", _openpyxl)
-
-# pandas stub
-_pandas = ModuleType("pandas")
-_ensure_stub("pandas", _pandas)
-
-# docx stub
-_docx = ModuleType("docx")
-_ensure_stub("docx", _docx)
+# Dependency stubs (tiktoken, httpx, spacy, chromadb, neo4j, redis,
+# pdfplumber, openpyxl, pandas, docx) are handled by conftest.py
 
 
 # ---------------------------------------------------------------------------

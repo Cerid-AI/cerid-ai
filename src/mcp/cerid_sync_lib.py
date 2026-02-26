@@ -559,26 +559,26 @@ def import_neo4j(
 
     # --- Domains ---
     domains_path = str(neo4j_dir / DOMAINS_JSONL)
-    for row in _iter_jsonl(domains_path):
-        name = row.get("name")
-        if not name:
-            continue
-        try:
-            with driver.session() as session:
+    with driver.session() as session:
+        for row in _iter_jsonl(domains_path):
+            name = row.get("name")
+            if not name:
+                continue
+            try:
                 session.run("MERGE (:Domain {name: $name})", name=name)
-            domains_merged += 1
-        except Exception as exc:
-            logger.warning("Failed to merge Domain '%s': %s", name, exc)
+                domains_merged += 1
+            except Exception as exc:
+                logger.warning("Failed to merge Domain '%s': %s", name, exc)
 
     # --- Artifacts ---
     artifacts_path = str(neo4j_dir / ARTIFACTS_JSONL)
-    for row in _iter_jsonl(artifacts_path):
-        artifact_id = row.get("id")
-        if not artifact_id:
-            continue
+    with driver.session() as session:
+        for row in _iter_jsonl(artifacts_path):
+            artifact_id = row.get("id")
+            if not artifact_id:
+                continue
 
-        try:
-            with driver.session() as session:
+            try:
                 # Check if artifact exists locally and compare timestamps
                 existing = session.run(
                     "MATCH (a:Artifact {id: $id}) RETURN a.ingested_at AS ingested_at",
@@ -667,45 +667,45 @@ def import_neo4j(
                 else:
                     artifacts_skipped += 1
 
-        except Exception as exc:
-            logger.warning("Failed to import artifact %s: %s", artifact_id[:8], exc)
+            except Exception as exc:
+                logger.warning("Failed to import artifact %s: %s", artifact_id[:8], exc)
 
     # --- Relationships ---
     relationships_path = str(neo4j_dir / RELATIONSHIPS_JSONL)
-    for row in _iter_jsonl(relationships_path):
-        source_id = row.get("source_id")
-        target_id = row.get("target_id")
-        rel_type = row.get("rel_type")
+    with driver.session() as session:
+        for row in _iter_jsonl(relationships_path):
+            source_id = row.get("source_id")
+            target_id = row.get("target_id")
+            rel_type = row.get("rel_type")
 
-        if not (source_id and target_id and rel_type):
-            continue
-        if rel_type not in config.GRAPH_RELATIONSHIP_TYPES:
-            logger.warning("Skipping unknown relationship type: %s", rel_type)
-            continue
+            if not (source_id and target_id and rel_type):
+                continue
+            if rel_type not in config.GRAPH_RELATIONSHIP_TYPES:
+                logger.warning("Skipping unknown relationship type: %s", rel_type)
+                continue
 
-        try:
-            props = {
-                "reason": row.get("reason"),
-                "overlap_count": row.get("overlap_count"),
-                "created_at": row.get("created_at") or _utcnow_iso(),
-            }
-            # Remove None values so we don't overwrite with nulls
-            props = {k: v for k, v in props.items() if v is not None}
+            try:
+                props = {
+                    "reason": row.get("reason"),
+                    "overlap_count": row.get("overlap_count"),
+                    "created_at": row.get("created_at") or _utcnow_iso(),
+                }
+                # Remove None values so we don't overwrite with nulls
+                props = {k: v for k, v in props.items() if v is not None}
 
-            cypher = (
-                f"MATCH (s:Artifact {{id: $source_id}}), (t:Artifact {{id: $target_id}}) "
-                f"MERGE (s)-[r:{rel_type}]->(t) "
-                f"ON CREATE SET r += $props "
-                f"RETURN r IS NOT NULL AS ok"
-            )
-            with driver.session() as session:
+                cypher = (
+                    f"MATCH (s:Artifact {{id: $source_id}}), (t:Artifact {{id: $target_id}}) "
+                    f"MERGE (s)-[r:{rel_type}]->(t) "
+                    f"ON CREATE SET r += $props "
+                    f"RETURN r IS NOT NULL AS ok"
+                )
                 session.run(cypher, source_id=source_id, target_id=target_id, props=props)
-            relationships_merged += 1
-        except Exception as exc:
-            logger.warning(
-                "Failed to merge relationship %s→%s (%s): %s",
-                source_id[:8], target_id[:8], rel_type, exc,
-            )
+                relationships_merged += 1
+            except Exception as exc:
+                logger.warning(
+                    "Failed to merge relationship %s→%s (%s): %s",
+                    source_id[:8], target_id[:8], rel_type, exc,
+                )
 
     logger.info(
         "Neo4j import complete: %d domains, %d artifacts created, %d updated, "
@@ -1307,10 +1307,38 @@ def import_all(
     else:
         logger.warning("No Redis client provided — skipping Redis import")
 
+    # Post-import consistency check
+    consistency_warnings: List[str] = []
+    try:
+        neo4j_created = neo4j_result.get("artifacts_created", 0)
+        neo4j_updated = neo4j_result.get("artifacts_updated", 0)
+        chroma_imported = chroma_result.get("collections_imported", 0)
+
+        if (neo4j_created + neo4j_updated) > 0 and chroma_imported == 0:
+            consistency_warnings.append(
+                "Neo4j artifacts imported but no ChromaDB collections were imported. "
+                "Data may be out of sync — re-run import to complete."
+            )
+
+        # Check for per-domain ChromaDB errors
+        chroma_domains = chroma_result.get("domains", {})
+        failed_domains = [d for d, stats in chroma_domains.items() if isinstance(stats, dict) and "error" in stats]
+        if failed_domains:
+            consistency_warnings.append(
+                f"ChromaDB import failed for domains: {', '.join(failed_domains)}. "
+                "Some domains may be missing chunks."
+            )
+
+        for warning in consistency_warnings:
+            logger.warning("Consistency check: %s", warning)
+    except Exception as exc:
+        logger.warning("Post-import consistency check failed: %s", exc)
+
     logger.info("Full import complete from %s", sync_dir)
     return {
         "neo4j": neo4j_result,
         "chroma": chroma_result,
         "bm25": bm25_result,
         "redis": redis_result,
+        "consistency_warnings": consistency_warnings,
     }

@@ -7,8 +7,6 @@ services:
     ports:
       - "8888:8888"
     volumes:
-      - ./data:/app/data
-      - ./main.py:/app/main.py
       - .:/app
       - ~/cerid-archive:/archive:ro
     env_file:
@@ -19,7 +17,6 @@ services:
       - NEO4J_USER=neo4j
       - NEO4J_PASSWORD=${NEO4J_PASSWORD}
       - REDIS_URL=redis://ai-companion-redis:6379
-      - PORT=8888
       - CATEGORIZE_MODE=${CATEGORIZE_MODE:-smart}
       - BIFROST_URL=http://bifrost:8080/v1
       - ARCHIVE_PATH=/archive
@@ -68,6 +65,12 @@ services:
     depends_on:
       mcp-server:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:80/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
 
 networks:
   llm-network:

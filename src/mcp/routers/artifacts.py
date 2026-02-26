@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
 from typing import Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -12,6 +11,7 @@ from pydantic import BaseModel
 import config
 from deps import get_chroma, get_neo4j, get_redis
 from utils import cache, graph
+from utils.time import utcnow_iso
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion")
@@ -57,7 +57,7 @@ def recategorize(
     for meta in fetched["metadatas"]:
         meta = dict(meta)
         meta["domain"] = new_domain
-        meta["recategorized_at"] = datetime.utcnow().isoformat()
+        meta["recategorized_at"] = utcnow_iso()
         if sub_category:
             meta["sub_category"] = sub_category
         if tags:

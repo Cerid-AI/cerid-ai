@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 import config
+from utils.time import utcnow
 
 # Patterns mapped to lookback window in days (most specific first)
 _TEMPORAL_PATTERNS = [
@@ -62,7 +63,8 @@ def recency_score(ingested_at: str, half_life_days: float = 0) -> float:
     half_life = half_life_days or config.TEMPORAL_HALF_LIFE_DAYS
     try:
         dt = datetime.fromisoformat(ingested_at)
-        age_days = (datetime.utcnow() - dt).total_seconds() / 86400.0
+        # Strip tzinfo for backward-compat with naive timestamps in DB
+        age_days = (utcnow().replace(tzinfo=None) - dt).total_seconds() / 86400.0
         if age_days < 0:
             age_days = 0
         return math.pow(2, -age_days / half_life)
@@ -74,7 +76,7 @@ def is_within_window(ingested_at: str, days: int) -> bool:
     """Check if a timestamp falls within the last N days."""
     try:
         dt = datetime.fromisoformat(ingested_at)
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = utcnow().replace(tzinfo=None) - timedelta(days=days)
         return dt >= cutoff
     except (ValueError, TypeError):
         return True  # include if we can't parse the date

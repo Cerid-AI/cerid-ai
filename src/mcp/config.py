@@ -207,6 +207,9 @@ ENABLE_FEEDBACK_LOOP = os.getenv("ENABLE_FEEDBACK_LOOP", "false").lower() == "tr
 
 # ---------------------------------------------------------------------------
 # Phase 7B: Smart Orchestration
+# NOTE: ENABLE_MODEL_ROUTER and MONTHLY_BUDGET are client-side hints only.
+# They are exposed to the GUI via GET /settings but never enforced server-side.
+# The model router logic lives in src/web/src/lib/model-router.ts.
 # ---------------------------------------------------------------------------
 ENABLE_MODEL_ROUTER = os.getenv("ENABLE_MODEL_ROUTER", "false").lower() == "true"
 COST_SENSITIVITY = os.getenv("COST_SENSITIVITY", "medium")  # low/medium/high
@@ -262,3 +265,24 @@ FEATURE_FLAGS = {
     "truth_audit":           True,
     "live_metrics":          True,
 }
+
+# ---------------------------------------------------------------------------
+# Startup validation — normalize and warn on unrecognized values
+# ---------------------------------------------------------------------------
+import logging as _logging
+
+_config_logger = _logging.getLogger("ai-companion.config")
+
+CATEGORIZE_MODE = CATEGORIZE_MODE.strip().lower()
+if CATEGORIZE_MODE not in ("manual", "smart", "pro"):
+    _config_logger.warning(
+        "Invalid CATEGORIZE_MODE=%r, defaulting to 'smart'", CATEGORIZE_MODE
+    )
+    CATEGORIZE_MODE = "smart"
+
+COST_SENSITIVITY = COST_SENSITIVITY.strip().lower()
+if COST_SENSITIVITY not in ("low", "medium", "high"):
+    _config_logger.warning(
+        "Invalid COST_SENSITIVITY=%r, defaulting to 'medium'", COST_SENSITIVITY
+    )
+    COST_SENSITIVITY = "medium"

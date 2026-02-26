@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
 import chromadb
+
+from utils.time import utcnow, utcnow_iso
 
 import config
 from utils.cache import log_event
@@ -112,7 +114,7 @@ def find_stale_artifacts(
 
     These may contain outdated information and should be flagged for review.
     """
-    cutoff = (datetime.utcnow() - timedelta(days=days_threshold)).isoformat()
+    cutoff = (utcnow().replace(tzinfo=None) - timedelta(days=days_threshold)).isoformat()
 
     with neo4j_driver.session() as session:
         result = session.run(
@@ -377,7 +379,7 @@ async def rectify(
         checks = list(all_checks)
 
     report = {
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": utcnow_iso(),
         "checks_run": checks,
         "auto_fix": auto_fix,
         "findings": {},

@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime
 from typing import Any, Dict, Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+from utils.time import utcnow_iso
 from apscheduler.triggers.cron import CronTrigger
 
 import config
@@ -39,7 +40,7 @@ def _log_execution(job_name: str, status: str, duration: float, detail: str = ""
                 "status": status,
                 "duration_s": round(duration, 2),
                 "detail": detail,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": utcnow_iso(),
             },
         )
     except Exception as e:

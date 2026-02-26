@@ -1,6 +1,6 @@
 """Tests for temporal awareness utilities (Phase 4B.4)."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from utils.temporal import is_within_window, parse_temporal_intent, recency_score
 
@@ -35,17 +35,17 @@ class TestParseTemporalIntent:
 
 class TestRecencyScore:
     def test_just_now(self):
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
         score = recency_score(now, half_life_days=30)
         assert 0.99 <= score <= 1.0
 
     def test_half_life(self):
-        thirty_days_ago = (datetime.utcnow() - timedelta(days=30)).isoformat()
+        thirty_days_ago = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)).isoformat()
         score = recency_score(thirty_days_ago, half_life_days=30)
         assert 0.45 <= score <= 0.55  # should be ~0.5
 
     def test_old_document(self):
-        old = (datetime.utcnow() - timedelta(days=120)).isoformat()
+        old = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=120)).isoformat()
         score = recency_score(old, half_life_days=30)
         assert score < 0.1  # 4 half-lives -> 0.0625
 
@@ -56,11 +56,11 @@ class TestRecencyScore:
 
 class TestIsWithinWindow:
     def test_recent_within(self):
-        recent = (datetime.utcnow() - timedelta(hours=6)).isoformat()
+        recent = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=6)).isoformat()
         assert is_within_window(recent, days=7) is True
 
     def test_old_outside(self):
-        old = (datetime.utcnow() - timedelta(days=30)).isoformat()
+        old = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)).isoformat()
         assert is_within_window(old, days=7) is False
 
     def test_invalid_date_included(self):

@@ -9,7 +9,7 @@
 
 Cerid AI is a self-hosted, privacy-first Personal AI Knowledge Companion. It unifies multi-domain knowledge bases (code, finance, projects, artifacts) into a context-aware LLM interface with RAG-powered retrieval and intelligent agents. All data stays local; only LLM API calls go external.
 
-**Status:** Phase 7 complete. Phases 0–7 complete. 7 agents operational (query, triage, rectify, audit, maintenance, hallucination, memory); 15 MCP tools; hybrid BM25+vector search; scheduled maintenance; CI/CD pipeline; multi-machine sync via Dropbox. React GUI (port 3000) with streaming chat, KB context pane, monitoring, audit dashboards, hallucination panel, smart model router, and KB suggestions. Backend hardened with API key auth, rate limiting, Redis query caching, and conversation analytics.
+**Status:** Phase 8 complete. Phases 0–8 complete. 7 agents operational (query, triage, rectify, audit, maintenance, hallucination, memory); 15 MCP tools; hybrid BM25+vector search; scheduled maintenance; CI/CD pipeline; multi-machine sync via Dropbox. React GUI (port 3000) with streaming chat, KB context pane, monitoring, audit dashboards, hallucination panel, smart model router, and KB suggestions. Backend hardened with API key auth, rate limiting, Redis query caching, conversation analytics, and optional field-level encryption. Plugin system with feature tiers (community/pro). Hierarchical taxonomy with sub-categories and tags. Smart ingestion with new parsers (.eml, .mbox, .epub, .rtf), semantic dedup, and enhanced CSV/TSV. Infrastructure audit hardened: timezone-aware UTC helpers, per-DB connection locks, retry wrappers, auth bypass fix, production Docker config.
 
 ## Architecture
 
@@ -66,22 +66,30 @@ React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly
 │   ├── cerid_sync_lib.py             # Sync export/import library (JSONL)
 │   ├── sync_check.py                 # Auto-import on startup if DB empty
 │   ├── scheduler.py                  # APScheduler maintenance engine
-│   ├── deps.py                       # Dependency injection (DB singletons)
+│   ├── deps.py                       # Dependency injection (DB singletons, per-DB locks, retry)
 │   ├── routers/                      # FastAPI routers (Phase 4A split)
 │   │   ├── health.py, query.py, ingestion.py, artifacts.py
-│   │   ├── agents.py, digest.py, mcp_sse.py
+│   │   ├── agents.py, digest.py, mcp_sse.py, taxonomy.py
 │   │   └── __init__.py
+│   ├── plugins/                      # Plugin system (Phase 8A)
+│   │   └── ocr/                      # OCR parser plugin (pro tier, requires docling)
 │   ├── middleware/                    # Request middleware (Phase 6D)
 │   │   ├── auth.py                   # API key authentication (opt-in via CERID_API_KEY)
 │   │   └── rate_limit.py             # In-memory sliding window rate limiting (path-specific)
 │   ├── utils/
-│   │   ├── parsers.py                # Extensible file parser registry
+│   │   ├── time.py                   # Timezone-aware UTC helpers (replaces datetime.utcnow)
+│   │   ├── parsers.py                # Extensible file parser registry (+eml, mbox, epub, rtf)
 │   │   ├── metadata.py               # Metadata extraction + AI categorization
 │   │   ├── chunker.py                # Token-based text chunking
 │   │   ├── graph.py                  # Neo4j artifact CRUD
 │   │   ├── bm25.py                   # BM25 keyword search index
 │   │   ├── cache.py                  # Redis audit logging
-│   │   └── query_cache.py            # Redis query cache (5-min TTL)
+│   │   ├── query_cache.py            # Redis query cache (5-min TTL)
+│   │   ├── dedup.py                  # Semantic dedup (embedding similarity, Phase 8B)
+│   │   ├── encryption.py             # Field-level Fernet encryption (Phase 8D)
+│   │   ├── sync_backend.py           # Pluggable sync backends (Phase 8D)
+│   │   ├── features.py               # Feature flags and tier gating (Phase 8A)
+│   │   └── temporal.py               # Temporal intent parsing + recency scoring
 │   ├── scripts/
 │   │   ├── watch_ingest.py           # Watchdog folder watcher (host process)
 │   │   ├── watch_obsidian.py         # Obsidian vault watcher (host process)
@@ -301,7 +309,7 @@ curl http://localhost:8888/ingest_log?limit=10
 # With API key auth enabled (set CERID_API_KEY env var):
 curl http://localhost:8888/artifacts \
   -H "X-API-Key: $CERID_API_KEY"
-# Exempt from auth: /health, /, /docs, /openapi.json, /redoc, /mcp/*
+# Exempt from auth: /health, /api/v1/health, /, /docs, /openapi.json, /redoc, /mcp/*
 ```
 
 ### Knowledge Base Sync
@@ -521,3 +529,9 @@ Admin and monitoring UI at `http://localhost:8501` (container: `ai-companion-das
   - **7A (Complete):** Audit Intelligence — hallucination detection agent (claim extraction + KB verification), conversation analytics (per-model cost/token tracking), enhanced feedback loop (backend gate, async hallucination trigger, conversation metrics logging)
   - **7B (Complete):** Smart Orchestration — client-side model router (complexity scoring, cost sensitivity, tier-based recommendations), auto-switch toggle in toolbar, 15 MCP tools (3 new: `pkb_check_hallucinations`, `pkb_memory_extract`, `pkb_memory_archive`)
   - **7C (Complete):** Proactive Knowledge — memory extraction from conversations (facts, decisions, preferences, action items stored as KB artifacts with Neo4j relationships), smart KB suggestions (debounced real-time query as user types), memory archival with configurable retention
+- **Phase 8 (Complete):** Extensibility & Hardening.
+  - **8A (Complete):** Plugin system — manifest-based plugin loading, feature tiers (community/pro), feature flags, OCR parser plugin scaffold
+  - **8B (Complete):** Smart ingestion — new parsers (.eml, .mbox, .epub, .rtf, enhanced CSV/TSV), semantic dedup (embedding similarity), parser registry expansion
+  - **8C (Complete):** Hierarchical taxonomy — TAXONOMY dict with sub-categories/tags per domain, taxonomy API router, folder-based sub-category detection in watcher, custom domains via env var
+  - **8D (Complete):** Encryption & sync — field-level Fernet encryption (opt-in), pluggable sync backends, sync manifest with checksums
+  - **8E (Complete):** Infrastructure audit — comprehensive code audit (31 findings), security fixes, deprecated `datetime.utcnow()` replaced across 16 files, per-DB connection locks, retry wrappers, auth bypass fix, production Docker config, test stub DRY (~300 lines removed), N+1 session fix in sync import

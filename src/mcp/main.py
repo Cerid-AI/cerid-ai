@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from deps import close_neo4j, get_neo4j
+from deps import close_chroma, close_neo4j, close_redis, get_neo4j
 from middleware.auth import APIKeyMiddleware
 from middleware.rate_limit import RateLimitMiddleware
 from routers import agents, artifacts, digest, health, ingestion, mcp_sse, memories, query, settings, taxonomy, upload
@@ -56,9 +56,11 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Shutdown: stop scheduler, close DB driver, clear MCP sessions
+    # Shutdown: stop scheduler, close DB connections, clear MCP sessions
     stop_scheduler()
     close_neo4j()
+    close_chroma()
+    close_redis()
     mcp_sse.clear_sessions()
 
 

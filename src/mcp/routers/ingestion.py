@@ -6,7 +6,6 @@ import hashlib
 import json
 import logging
 import uuid
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -18,6 +17,7 @@ from deps import get_chroma, get_neo4j, get_redis
 from utils import cache, graph
 from utils.chunker import chunk_text
 from utils.metadata import ai_categorize, extract_metadata
+from utils.time import utcnow, utcnow_iso
 from utils.parsers import parse_file
 
 router = APIRouter()
@@ -86,7 +86,7 @@ def _reingest_artifact(
 
     # Create new chunks
     chunks = chunk_text(content, max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP)
-    base_meta = {"domain": domain, "artifact_id": artifact_id, "ingested_at": datetime.utcnow().isoformat()}
+    base_meta = {"domain": domain, "artifact_id": artifact_id, "ingested_at": utcnow_iso()}
     if metadata:
         base_meta.update(metadata)
 
@@ -121,7 +121,7 @@ def _reingest_artifact(
         "artifact_id": artifact_id,
         "domain": domain,
         "chunks": len(chunks),
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": utcnow_iso(),
     }
 
 
@@ -152,7 +152,7 @@ def ingest_content(
             "artifact_id": existing["id"],
             "domain": existing["domain"],
             "chunks": 0,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": utcnow_iso(),
             "duplicate_of": existing["filename"],
         }
 
@@ -183,7 +183,7 @@ def ingest_content(
             logger.warning(f"Re-ingest check failed (proceeding as new): {e}")
 
     chunks = chunk_text(content, max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP)
-    ingested_at = datetime.utcnow().isoformat()
+    ingested_at = utcnow_iso()
     base_meta = {"domain": domain, "artifact_id": artifact_id, "ingested_at": ingested_at}
     if metadata:
         base_meta.update(metadata)
@@ -234,7 +234,7 @@ def ingest_content(
                 "artifact_id": artifact_id,
                 "domain": domain,
                 "chunks": 0,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": utcnow_iso(),
                 "duplicate_of": "(concurrent)",
             }
         logger.error(f"Neo4j artifact creation failed: {e}")
@@ -298,7 +298,7 @@ def ingest_content(
         "chunks": len(chunks),
         "relationships_created": relationships_created,
         "related": related,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": utcnow_iso(),
     }
 
     # Phase 8B: Include near-duplicate info if detected
@@ -440,7 +440,7 @@ async def ingest_feedback_endpoint(req: FeedbackIngestRequest):
 
     try:
         convo_prefix = req.conversation_id[:8] if req.conversation_id else "unknown"
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        timestamp = utcnow().strftime("%Y%m%d_%H%M%S")
         filename = f"chat_{convo_prefix}_{timestamp}"
         content = (
             f"User: {req.user_message}\n\n"

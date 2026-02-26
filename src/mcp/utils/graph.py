@@ -11,8 +11,9 @@ import json
 import logging
 import os
 import re
-from datetime import datetime
 from typing import Any, Dict, List, Optional, Set
+
+from utils.time import utcnow_iso
 
 import config
 
@@ -69,7 +70,7 @@ def init_schema(driver) -> None:
         )
 
         # --- Seed Domain + SubCategory nodes from TAXONOMY ---
-        now = datetime.utcnow().isoformat()
+        now = utcnow_iso()
         for domain_name, domain_info in config.TAXONOMY.items():
             session.run(
                 "MERGE (d:Domain {name: $name}) "
@@ -115,7 +116,7 @@ def create_artifact(
 ) -> str:
     """Create an Artifact node and link it to its Domain (and optionally SubCategory/Tags)."""
     sub_cat = sub_category or config.DEFAULT_SUB_CATEGORY
-    now = datetime.utcnow().isoformat()
+    now = utcnow_iso()
 
     with driver.session() as session:
         result = session.run(
@@ -235,7 +236,7 @@ def update_artifact(
             chunk_count=chunk_count,
             chunk_ids_json=chunk_ids_json,
             content_hash=content_hash,
-            modified_at=datetime.utcnow().isoformat(),
+            modified_at=utcnow_iso(),
         )
     logger.info(f"Updated artifact {artifact_id[:8]} (re-ingestion)")
 
@@ -353,7 +354,7 @@ def recategorize_artifact(
             """,
             artifact_id=artifact_id,
             new_domain=new_domain,
-            now=datetime.utcnow().isoformat(),
+            now=utcnow_iso(),
         )
         record = result.single()
         if not record:
@@ -396,7 +397,7 @@ def create_relationship(
         return False
 
     props = properties or {}
-    props["created_at"] = datetime.utcnow().isoformat()
+    props["created_at"] = utcnow_iso()
 
     # Use MERGE to be idempotent; SET only on CREATE to preserve existing props.
     # Dynamic rel types require APOC or per-type queries. We use per-type for safety.
@@ -749,7 +750,7 @@ def create_domain(
     sub_categories: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Create a new domain with optional sub-categories."""
-    now = datetime.utcnow().isoformat()
+    now = utcnow_iso()
     subs = sub_categories or ["general"]
 
     with driver.session() as session:
@@ -785,7 +786,7 @@ def create_sub_category(
     label: str,
 ) -> Dict[str, str]:
     """Add a sub-category to an existing domain."""
-    now = datetime.utcnow().isoformat()
+    now = utcnow_iso()
     sc_name = f"{domain}/{label}"
 
     with driver.session() as session:
@@ -841,7 +842,7 @@ def update_artifact_taxonomy(
 
     Used by recategorization and manual taxonomy edits.
     """
-    now = datetime.utcnow().isoformat()
+    now = utcnow_iso()
 
     with driver.session() as session:
         # Get current artifact

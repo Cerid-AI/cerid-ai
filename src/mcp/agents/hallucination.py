@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import httpx
+
+from utils.time import utcnow_iso
 
 import config
 
@@ -196,7 +197,7 @@ async def check_hallucinations(
     if len(response_text) < MIN_RESPONSE_LENGTH:
         return {
             "conversation_id": conversation_id,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": utcnow_iso(),
             "skipped": True,
             "reason": f"Response too short ({len(response_text)} chars < {MIN_RESPONSE_LENGTH})",
             "claims": [],
@@ -208,7 +209,7 @@ async def check_hallucinations(
     if not claims:
         return {
             "conversation_id": conversation_id,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": utcnow_iso(),
             "skipped": True,
             "reason": "No factual claims extracted",
             "claims": [],
@@ -232,7 +233,7 @@ async def check_hallucinations(
 
     report = {
         "conversation_id": conversation_id,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": utcnow_iso(),
         "skipped": False,
         "threshold": threshold,
         "claims": results,

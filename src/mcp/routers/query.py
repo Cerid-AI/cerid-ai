@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from typing import Dict
 
 from fastapi import APIRouter
@@ -10,6 +9,7 @@ from pydantic import BaseModel
 
 import config
 from deps import get_chroma
+from utils.time import utcnow_iso
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion")
@@ -25,7 +25,7 @@ def query_knowledge(query: str, domain: str = "general", top_k: int = 3) -> Dict
         n_results=top_k,
         include=["documents", "distances", "metadatas"],
     )
-    timestamp = datetime.utcnow().isoformat()
+    timestamp = utcnow_iso()
     if not results.get("documents") or not results["documents"][0]:
         return {"context": "", "sources": [], "confidence": 0.0, "timestamp": timestamp}
 

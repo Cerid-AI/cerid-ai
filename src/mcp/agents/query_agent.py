@@ -20,6 +20,7 @@ import httpx
 
 import config
 from config import BIFROST_URL, CHROMA_URL, DOMAINS
+from deps import parse_chroma_url
 from utils.cache import log_event
 
 logger = logging.getLogger("ai-companion.query_agent")
@@ -92,10 +93,8 @@ async def multi_domain_query(
 
     # Connect to ChromaDB if client not provided
     if chroma_client is None:
-        chroma_client = chromadb.HttpClient(
-            host=CHROMA_URL.replace("http://", "").split(":")[0],
-            port=int(CHROMA_URL.split(":")[-1])
-        )
+        host, port = parse_chroma_url()
+        chroma_client = chromadb.HttpClient(host=host, port=port)
 
     # Query each domain collection in parallel
     async def query_domain(domain: str) -> List[Dict[str, Any]]:

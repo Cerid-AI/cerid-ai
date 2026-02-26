@@ -3,7 +3,7 @@ API key authentication middleware.
 
 Checks X-API-Key header against CERID_API_KEY env var.
 When no key is configured, all requests pass through (backward compatible).
-Exempt paths: /health, /, /docs, /openapi.json, /mcp/*
+Exempt paths: /health, /api/v1/health, /, /docs, /openapi.json, /redoc, /mcp/*
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from starlette.responses import JSONResponse
 
 logger = logging.getLogger("ai-companion.auth")
 
-EXEMPT_PATHS = {"/health", "/", "/docs", "/openapi.json", "/redoc"}
+EXEMPT_PATHS = {"/health", "/api/v1/health", "/", "/docs", "/openapi.json", "/redoc"}
 EXEMPT_PREFIXES = ("/mcp/",)
 
 
@@ -34,7 +34,7 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         path = request.url.path
 
         # Exempt paths
-        if path in EXEMPT_PATHS or path.endswith("/health"):
+        if path in EXEMPT_PATHS:
             return await call_next(request)
         for prefix in EXEMPT_PREFIXES:
             if path.startswith(prefix):

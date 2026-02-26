@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
 from pathlib import Path
+
+from utils.time import utcnow_iso
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -63,7 +64,7 @@ def extract_metadata(text: str, filename: str, domain: str) -> Dict[str, Any]:
         "filename": filename,
         "file_type": file_type,
         "domain": domain,
-        "ingested_at": datetime.utcnow().isoformat(),
+        "ingested_at": utcnow_iso(),
         "char_count": char_count,
         "estimated_tokens": token_count,
         "keywords": json.dumps(keywords),  # JSON string — ChromaDB can't store lists

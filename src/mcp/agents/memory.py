@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
 import httpx
+
+from utils.time import utcnow, utcnow_iso
 
 import config
 from utils.cache import log_event
@@ -127,7 +129,7 @@ async def extract_and_store_memories(
     if not memories:
         return {
             "conversation_id": conversation_id,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": utcnow_iso(),
             "memories_extracted": 0,
             "memories_stored": 0,
             "results": [],
@@ -142,7 +144,7 @@ async def extract_and_store_memories(
     for idx, mem in enumerate(memories):
         try:
             convo_prefix = conversation_id[:8] if conversation_id else "unknown"
-            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            timestamp = utcnow().strftime("%Y%m%d_%H%M%S")
             filename = f"memory_{mem['memory_type']}_{convo_prefix}_{timestamp}_{idx}"
 
             metadata = {
@@ -204,7 +206,7 @@ async def extract_and_store_memories(
 
     return {
         "conversation_id": conversation_id,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": utcnow_iso(),
         "memories_extracted": len(memories),
         "memories_stored": stored_count,
         "results": results,
@@ -227,7 +229,7 @@ async def archive_old_memories(
     if retention_days is None:
         retention_days = config.MEMORY_RETENTION_DAYS
 
-    cutoff = (datetime.utcnow() - timedelta(days=retention_days)).isoformat()
+    cutoff = (utcnow().replace(tzinfo=None) - timedelta(days=retention_days)).isoformat()
 
     try:
         with neo4j_driver.session() as session:
@@ -237,13 +239,13 @@ async def archive_old_memories(
                 "SET a.archived = true, a.archived_at = $now "
                 "RETURN count(a) AS archived_count",
                 cutoff=cutoff,
-                now=datetime.utcnow().isoformat(),
+                now=utcnow_iso(),
             )
             record = result.single()
             archived_count = record["archived_count"] if record else 0
 
         return {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": utcnow_iso(),
             "retention_days": retention_days,
             "cutoff_date": cutoff,
             "archived_count": archived_count,
@@ -251,7 +253,7 @@ async def archive_old_memories(
     except Exception as e:
         logger.error(f"Memory archival failed: {e}")
         return {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": utcnow_iso(),
             "retention_days": retention_days,
             "error": str(e),
             "archived_count": 0,

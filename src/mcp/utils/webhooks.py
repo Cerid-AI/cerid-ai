@@ -8,8 +8,9 @@ Events: ingestion.complete, health.warning, digest.ready, rectify.findings
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from typing import Any, Dict
+
+from utils.time import utcnow_iso
 
 import httpx
 
@@ -38,7 +39,7 @@ async def fire_event(
 
     body = {
         "event": event_type,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": utcnow_iso(),
         "data": payload,
     }
 

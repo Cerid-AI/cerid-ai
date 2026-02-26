@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import logging
 from collections import Counter, defaultdict
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
 from utils.cache import get_log
+from utils.time import utcnow, utcnow_iso
 
 logger = logging.getLogger("ai-companion.audit")
 
@@ -59,7 +60,7 @@ def get_activity_summary(
         Summary with event counts, domain breakdown, and timeline
     """
     entries = get_log(redis_client, limit=limit)
-    cutoff = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+    cutoff = (utcnow().replace(tzinfo=None) - timedelta(hours=hours)).isoformat()
 
     # Filter to time window
     recent = [e for e in entries if e.get("timestamp", "") >= cutoff]
@@ -151,7 +152,7 @@ def estimate_costs(
     Tracks categorization calls (smart/pro tiers) and reranking operations.
     """
     entries = get_log(redis_client, limit=limit)
-    cutoff = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+    cutoff = (utcnow().replace(tzinfo=None) - timedelta(hours=hours)).isoformat()
     recent = [e for e in entries if e.get("timestamp", "") >= cutoff]
 
     # Count AI operations
@@ -270,7 +271,7 @@ def log_conversation_metrics(
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
         "latency_ms": latency_ms,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": utcnow_iso(),
     })
     try:
         redis_client.rpush(key, entry)
@@ -383,7 +384,7 @@ async def audit(
         reports = list(all_reports)
 
     result = {
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": utcnow_iso(),
         "reports_generated": reports,
     }
 

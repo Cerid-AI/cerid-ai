@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Dict
 
 from fastapi import APIRouter, Query
@@ -10,6 +10,7 @@ from fastapi import APIRouter, Query
 from deps import get_neo4j, get_redis
 from routers.health import health_check
 from utils.cache import get_log
+from utils.time import utcnow, utcnow_iso
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion")
@@ -23,7 +24,7 @@ async def digest_endpoint(hours: int = Query(24, ge=1, le=168)):
     Args:
         hours: Lookback window (default 24h, max 7 days)
     """
-    cutoff = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+    cutoff = (utcnow().replace(tzinfo=None) - timedelta(hours=hours)).isoformat()
 
     # Recent artifacts from Neo4j
     recent_artifacts = []
@@ -81,7 +82,7 @@ async def digest_endpoint(hours: int = Query(24, ge=1, le=168)):
 
     return {
         "period_hours": hours,
-        "generated_at": datetime.utcnow().isoformat(),
+        "generated_at": utcnow_iso(),
         "artifacts": {
             "count": len(recent_artifacts),
             "items": recent_artifacts,

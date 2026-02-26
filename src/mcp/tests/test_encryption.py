@@ -2,74 +2,12 @@
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
-from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Ensure src/mcp is on the path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-
-# ---------------------------------------------------------------------------
-# Stub out heavy dependencies not available on the host
-# ---------------------------------------------------------------------------
-
-def _ensure_stub(name, stub_module):
-    if name not in sys.modules:
-        sys.modules[name] = stub_module
-
-
-_tiktoken = ModuleType("tiktoken")
-
-
-class _FakeEncoding:
-    def encode(self, text):
-        return text.split()
-
-
-_tiktoken.get_encoding = lambda name: _FakeEncoding()
-_ensure_stub("tiktoken", _tiktoken)
-
-_httpx = ModuleType("httpx")
-
-
-class _AsyncClient:
-    def __init__(self, **kwargs):
-        pass
-    async def __aenter__(self):
-        return self
-    async def __aexit__(self, *args):
-        pass
-    async def post(self, *args, **kwargs):
-        return MagicMock()
-
-
-_httpx.AsyncClient = _AsyncClient
-_ensure_stub("httpx", _httpx)
-
-_spacy = ModuleType("spacy")
-_spacy.load = MagicMock(side_effect=OSError("stub"))
-_ensure_stub("spacy", _spacy)
-
-_chromadb = ModuleType("chromadb")
-_chromadb.HttpClient = MagicMock
-_chromadb_config = ModuleType("chromadb.config")
-_chromadb_config.Settings = MagicMock
-_chromadb.config = _chromadb_config
-_ensure_stub("chromadb", _chromadb)
-_ensure_stub("chromadb.config", _chromadb_config)
-
-_neo4j = ModuleType("neo4j")
-_neo4j.GraphDatabase = MagicMock()
-_ensure_stub("neo4j", _neo4j)
-
-_redis_mod = ModuleType("redis")
-_redis_mod.Redis = MagicMock
-_ensure_stub("redis", _redis_mod)
-
+# Dependency stubs are handled by conftest.py pytest_configure()
 
 # ---------------------------------------------------------------------------
 # Check if cryptography is available (tests require it)

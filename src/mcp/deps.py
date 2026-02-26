@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import logging
 import threading
+import time as _time
+from urllib.parse import urlparse
 
 import chromadb
 import redis
@@ -13,23 +15,50 @@ import config
 
 logger = logging.getLogger("ai-companion")
 
+
+def parse_chroma_url(url: str | None = None) -> tuple[str, int]:
+    """Parse a ChromaDB URL into (host, port). Supports http:// and https://."""
+    url = url or config.CHROMA_URL
+    parsed = urlparse(url)
+    host = parsed.hostname or "localhost"
+    port = parsed.port or 8000
+    return host, port
+
+
+def _retry(fn, label: str, attempts: int = 3, delay: float = 2.0):
+    """Retry a connectivity check with linear backoff."""
+    for attempt in range(1, attempts + 1):
+        try:
+            fn()
+            return
+        except Exception as exc:
+            if attempt == attempts:
+                raise
+            logger.warning(
+                "%s connectivity check failed (attempt %d/%d): %s — retrying in %.0fs",
+                label, attempt, attempts, exc, delay,
+            )
+            _time.sleep(delay)
+
+
 _chroma = None
 _redis = None
 _neo4j = None
-_init_lock = threading.Lock()
+_chroma_lock = threading.Lock()
+_redis_lock = threading.Lock()
+_neo4j_lock = threading.Lock()
 
 
 def get_chroma() -> chromadb.HttpClient:
     global _chroma
     if _chroma is None:
-        with _init_lock:
+        with _chroma_lock:
             if _chroma is None:
-                host = config.CHROMA_URL.replace("http://", "").split(":")[0]
-                port = int(config.CHROMA_URL.split(":")[-1])
+                host, port = parse_chroma_url()
                 _chroma = chromadb.HttpClient(
                     host=host, port=port, settings=ChromaSettings(anonymized_telemetry=False)
                 )
-                _chroma.heartbeat()
+                _retry(_chroma.heartbeat, "ChromaDB")
                 logger.info("ChromaDB connected")
     return _chroma
 
@@ -37,12 +66,12 @@ def get_chroma() -> chromadb.HttpClient:
 def get_redis() -> redis.Redis:
     global _redis
     if _redis is None:
-        with _init_lock:
+        with _redis_lock:
             if _redis is None:
                 _redis = redis.from_url(
                     config.REDIS_URL, decode_responses=True, socket_connect_timeout=5
                 )
-                _redis.ping()
+                _retry(_redis.ping, "Redis")
                 logger.info("Redis connected")
     return _redis
 
@@ -50,12 +79,12 @@ def get_redis() -> redis.Redis:
 def get_neo4j():
     global _neo4j
     if _neo4j is None:
-        with _init_lock:
+        with _neo4j_lock:
             if _neo4j is None:
                 _neo4j = GraphDatabase.driver(
                     config.NEO4J_URI, auth=(config.NEO4J_USER, config.NEO4J_PASSWORD)
                 )
-                _neo4j.verify_connectivity()
+                _retry(_neo4j.verify_connectivity, "Neo4j")
                 logger.info("Neo4j connected")
     return _neo4j
 
@@ -67,3 +96,24 @@ def close_neo4j():
         _neo4j.close()
         _neo4j = None
         logger.info("Neo4j connection closed")
+
+
+def close_chroma():
+    """Called from main.py lifespan on shutdown."""
+    global _chroma
+    if _chroma:
+        # HttpClient has no explicit close — clear reference for GC
+        _chroma = None
+        logger.info("ChromaDB client released")
+
+
+def close_redis():
+    """Called from main.py lifespan on shutdown."""
+    global _redis
+    if _redis:
+        try:
+            _redis.close()
+        except Exception:
+            pass
+        _redis = None
+        logger.info("Redis connection closed")
