@@ -2,8 +2,8 @@
 
 > **Created:** 2026-02-25
 > **Last updated:** 2026-02-26
-> **Status:** Phase 10A + 10B + codebase audit + dependency management complete. 4 of 9 issues resolved, 5 open.
-> **Purpose:** Track known bugs, feature gaps, and architecture evaluations for upcoming phases.
+> **Status:** Phase 10A + 10B + codebase audit + dependency management + modularity assessment complete. 4 resolved, 11 open (6 original + 5 structural from modularity analysis), 1 informational (F6).
+> **Purpose:** Track known bugs, feature gaps, structural issues, and architecture evaluations for upcoming phases.
 
 ---
 
@@ -186,14 +186,121 @@ Evaluate the current RAG architecture and options for improvement:
 
 ---
 
+## F. Structural / Modularity
+
+Issues identified by the modularity assessment (2026-02-26). These are mechanical refactors that don't change behavior but reduce file sizes, fix layering violations, and unblock test coverage.
+
+### F1. Service Layer Extraction — `routers/ingestion.py`
+
+**Severity:** High (causes circular import)
+**Status:** Open — Phase 10C
+
+`routers/ingestion.py` (523 lines) exposes `ingest_content()` and `ingest_file()` as service functions consumed by `agents/memory.py` and `routers/mcp_sse.py`. This causes a circular import: `agents/memory.py` does a deferred `from routers.ingestion import ingest_content` inside a function body. This is a layer violation — an agent calling into a router.
+
+**Fix:** Extract `ingest_content()` and `ingest_file()` into `services/ingestion.py`. Routers and agents both import from the service layer. Removes the circular dependency.
+
+**Files:**
+- `src/mcp/routers/ingestion.py` (source — extract business logic)
+- `src/mcp/services/ingestion.py` (new)
+- `src/mcp/agents/memory.py` (update import)
+- `src/mcp/routers/mcp_sse.py` (update import)
+
+### F2. MCP Tool Registry Extraction — `routers/mcp_sse.py`
+
+**Severity:** Medium
+**Status:** Open — Phase 10C
+
+`routers/mcp_sse.py` (593 lines) does four jobs: SSE connection management, JSON-RPC protocol handling, MCP tool schema definitions (15 tools), and a 110-line if/elif `execute_tool()` dispatcher. The tool schemas and dispatcher duplicate wiring already in `routers/agents.py`.
+
+**Fix:** Extract tool schemas dict and `execute_tool()` into `mcp/tools.py`. The SSE router becomes a thin protocol layer (~200 lines). Tool registration becomes a single import.
+
+**Files:**
+- `src/mcp/routers/mcp_sse.py` (source — extract tool definitions + dispatch)
+- `src/mcp/mcp/tools.py` (new — tool registry + dispatcher)
+
+### F3. Neo4j Data Layer — `utils/graph.py`
+
+**Severity:** Medium
+**Status:** Open — Phase 10C
+
+`utils/graph.py` (827 lines, 17 functions) combines 5 distinct concerns: artifact CRUD, schema initialization, relationship discovery (with regex import extraction), relationship management, and taxonomy CRUD (sub-categories, tags). This is a data layer masquerading as a utility. Only 9 tests cover 17 functions.
+
+**Fix:** Promote to `db/neo4j/` package: `schema.py`, `artifacts.py`, `relationships.py`, `taxonomy.py`, `__init__.py` (re-exports for backward compat).
+
+**Files:**
+- `src/mcp/utils/graph.py` (source — split into package)
+- `src/mcp/db/neo4j/` (new package — 4 modules)
+- 14+ importers (update `from utils.graph import` → `from db.neo4j import`)
+
+### F4. Sync Library — `cerid_sync_lib.py`
+
+**Severity:** Medium
+**Status:** Open — Phase 10C
+
+`cerid_sync_lib.py` (~1300 lines, ~28 functions, 0 tests) is the largest file in the backend. It handles export, import, comparison, manifest management, and raw HTTP calls to ChromaDB — all in one flat file. This is the only cross-machine data durability mechanism and has zero test coverage.
+
+**Fix:** Split into `sync/` package: `export.py`, `import_.py`, `manifest.py`, `client.py` (ChromaDB HTTP), `__init__.py`.
+
+**Files:**
+- `src/mcp/cerid_sync_lib.py` (source — split into package)
+- `src/mcp/sync/` (new package — 4 modules)
+- `scripts/cerid-sync.py` (update import)
+- `src/mcp/sync_check.py` (update import)
+
+### F5. Test Coverage Gaps
+
+**Severity:** High (quality risk)
+**Status:** Open — Phase 10D
+
+5 of 7 agents have zero tests. The two largest Python files (sync lib at ~1300 lines, parsers at 875 lines) are completely untested. Both middleware files (auth, rate limiting) are security-critical with no coverage. On the frontend, 40+ components and hooks have no tests.
+
+**Untested backend modules (by priority):**
+1. `middleware/auth.py` + `middleware/rate_limit.py` — security-critical
+2. `agents/query_agent.py` (502 lines) — core search/reranking
+3. `agents/triage.py` (357 lines) — LangGraph ingest pipeline
+4. `agents/rectify.py` (390 lines) — KB health checks
+5. `agents/audit.py` (344 lines) — usage analytics
+6. `agents/maintenance.py` (362 lines) — system health
+7. `cerid_sync_lib.py` (~1300 lines) — data durability
+8. `utils/parsers.py` (875 lines) — file format parsing
+9. `routers/mcp_sse.py` (593 lines) — MCP protocol
+10. `utils/metadata.py` (250 lines) — metadata extraction
+
+**Untested frontend:** All components except source-attribution, all hooks except use-conversations. ~40 files.
+
+**Current coverage:** 156 pytest functions (11 test files), 68 vitest tests (4 test files).
+
+### F6. Secondary Structural Issues (Informational)
+
+**Severity:** Low
+**Status:** Open — opportunistic
+
+These are not blocking but worth addressing during nearby refactors:
+
+- **`config.py` coupling (33 importers):** Domain taxonomy, feature flags, and connection strings co-located. Split into `config/settings.py`, `config/taxonomy.py`, `config/features.py` to reduce blast radius.
+- **`utils/parsers.py` (875 lines):** Registry pattern is sound but each format parser (RTF state machine at 120 lines, EPUB XML at 100 lines) could be its own file under `parsers/`.
+- **Duplicate `find_stale_artifacts`:** Exists in both `agents/rectify.py` and `agents/maintenance.py` with different signatures. `maintenance.py` should reuse `rectify.py` version.
+- **`audit.log_conversation_metrics()`:** Writer function in the audit agent belongs in `utils/cache.py` with other Redis operations.
+- **`use-chat.ts` post-send effects:** Three unrelated side effects (streaming completion, feedback ingestion, memory extraction) packed into a 15-line `finally` block. Not urgent at 83 lines total.
+- **`cerid-web` in `src/mcp/docker-compose.yml`:** The React GUI has no dependency on MCP source — it's a conceptual coupling. Consider moving to its own compose file.
+
+---
+
 ## Priority Order (Suggested)
+
+Structural work before feature work — the splits reduce cost of all subsequent changes and unblock test coverage.
 
 1. ~~**A1** — Chat viewport fix~~ ✅ Resolved (Phase 10A)
 2. ~~**B2** — Source attribution~~ ✅ Resolved (Phase 10A)
-3. ~~**B3 + D2** — Model context break~~ ✅ Resolved (Phase 10B) — "start fresh" deferred to 10C
-4. **D1** — Smart routing + token cost evaluation — Phase 10C
-5. **B1** — Audit agent interactivity — Phase 10D
-6. **C1** — Taxonomy update — Phase 10D
-7. **C2** — Curation agent (requires C1) — Phase 10E (design)
-8. **E2** — RAG evaluation (foundational, informs E1) — Phase 10F (research)
-9. **E1** — Artifact preview (depends on E2 decisions)
+3. ~~**B3 + D2** — Model context break~~ ✅ Resolved (Phase 10B) — "start fresh" deferred to 10E
+4. **F1** — Service layer extraction (fixes circular import) — Phase 10C
+5. **F2** — MCP tool registry extraction — Phase 10C
+6. **F3** — Neo4j data layer split — Phase 10C
+7. **F4** — Sync library split — Phase 10C
+8. **F5** — Test coverage expansion (security middleware first, then agents) — Phase 10D
+9. **D1** — Smart routing + token cost evaluation — Phase 10E
+10. **B1** — Audit agent interactivity — Phase 10F
+11. **C1** — Taxonomy update — Phase 10F
+12. **C2** — Curation agent (requires C1) — Phase 10G (design)
+13. **E2** — RAG evaluation (foundational, informs E1) — Phase 10H (research)
+14. **E1** — Artifact preview (depends on E2 decisions)

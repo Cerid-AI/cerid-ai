@@ -1490,14 +1490,52 @@ See `docs/plans/2026-02-23-phase7-plan.md` for full specification.
 - [x] CI lock-sync job (regenerates lock file and diffs against committed version)
 - [x] Makefile targets (lock-python, lock-python-dev, lock-all, install-hooks, deps-check)
 
-### Phase 10C–F: Planned
+### Modularity Assessment (Complete ✅)
 
-- [ ] **10C:** Smart routing intelligence — token estimator, context replay cost calculation, summarize-and-switch, "start fresh" option
-- [ ] **10D:** Interactive audit & taxonomy — audit agent report filter toggles, time range selector, taxonomy-aware hierarchical KB filtering
-- [ ] **10E:** Knowledge curation agent — design doc for artifact quality improvement agent
-- [ ] **10F:** RAG evaluation — evaluate embedding models, hybrid weights, chunk sizes; artifact preview/generation
+Evidence-based analysis of codebase structure, coupling, and test coverage (2026-02-26).
 
-See `docs/ISSUES.md` for full backlog (5 open issues across 5 categories).
+- [x] File size analysis — flagged 10 Python files over 300 lines, 2 TypeScript files at threshold
+- [x] Coupling analysis — `config.py` at 33 importers, `deps.py` at 14, `types.ts` at 36
+- [x] Identified 4 structural splits needed (F1–F4 in `docs/ISSUES.md`)
+- [x] Identified circular import: `agents/memory.py` → `routers/ingestion.py` (layer violation)
+- [x] Identified duplicate function: `find_stale_artifacts` in both `rectify.py` and `maintenance.py`
+- [x] Test coverage gap analysis — 5 of 7 agents untested, 2 largest files untested, security middleware untested
+- [x] Identified 6 secondary cleanup items (F6 in `docs/ISSUES.md`)
+
+### Phase 10C: Structural Splits (Planned)
+
+Backend modularity — mechanical refactors that don't change behavior but reduce file sizes by 50–60%, fix layering violations, and unblock test coverage.
+
+- [ ] **F1:** Extract `ingest_content()`/`ingest_file()` from `routers/ingestion.py` (523 lines) to `services/ingestion.py` — fixes circular import from `agents/memory.py`
+- [ ] **F2:** Extract MCP tool schemas + `execute_tool()` dispatcher (110-line if/elif) from `routers/mcp_sse.py` (593 lines) to `mcp/tools.py`
+- [ ] **F3:** Split `utils/graph.py` (827 lines, 17 functions) into `db/neo4j/` package (schema, artifacts, relationships, taxonomy)
+- [ ] **F4:** Split `cerid_sync_lib.py` (~1300 lines, ~28 functions) into `sync/` package (export, import, manifest, client)
+- [ ] Split `config.py` (33 importers) into `config/` package (settings, taxonomy, features)
+- [ ] Split `utils/parsers.py` (875 lines) into `parsers/` sub-package
+- [ ] Remove duplicate `find_stale_artifacts` in `maintenance.py`
+- [ ] Move `audit.log_conversation_metrics()` to `utils/cache.py`
+
+### Phase 10D: Test Coverage Expansion (Planned)
+
+Target: cover all security-critical paths, all agents, and the data durability layer.
+
+- [ ] Tests for `middleware/auth.py` + `middleware/rate_limit.py` (security-critical, 0 tests)
+- [ ] Tests for 5 untested agents: query_agent, triage, rectify, audit, maintenance (~2000 lines, 0 tests)
+- [ ] Tests for `cerid_sync_lib.py` / `sync/` (~1300 lines, 0 tests)
+- [ ] Tests for `utils/parsers.py` / `parsers/` (875 lines, 0 tests)
+- [ ] Tests for MCP protocol + tool dispatch (593 lines, 0 tests)
+- [ ] Expand `utils/graph.py` / `db/neo4j/` coverage (9 tests for 17 functions)
+- [ ] Frontend component tests (40+ components with 0 tests)
+- [ ] CI coverage threshold enforcement
+
+### Phase 10E–H: Planned
+
+- [ ] **10E:** Smart routing intelligence — token estimator, context replay cost calculation, summarize-and-switch, "start fresh" option
+- [ ] **10F:** Interactive audit & taxonomy — audit agent report filter toggles, time range selector, taxonomy-aware hierarchical KB filtering
+- [ ] **10G:** Knowledge curation agent — design doc for artifact quality improvement agent
+- [ ] **10H:** RAG evaluation — evaluate embedding models, hybrid weights, chunk sizes; artifact preview/generation
+
+See `docs/ISSUES.md` for full backlog (8 open issues across 6 categories).
 
 ---
 

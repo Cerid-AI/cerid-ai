@@ -630,10 +630,13 @@ Auto-import on startup: when MCP starts with an empty Neo4j database and a valid
 - [x] **10B:** UX polish — model switch dividers, provider-colored model badges (Anthropic amber, OpenAI emerald, Google blue)
 - [x] **Codebase Audit:** Dependency purge (~700MB Docker savings), Docker security hardening (non-root user, pinned images), dead code removal, logic consolidation, error handling overhaul (`except: pass` → logged), input validation (Pydantic response models), accessibility fixes (33 across 14 components), type safety, CI hardening (security scanning, coverage thresholds, Docker image scanning), frontend test expansion (34 → 68 tests)
 - [x] **Dependency Management:** Node version standardized to 22, pip-compile lock files with hashes, pinned CI tool versions, pinned Docker image tags, Dependabot config (weekly grouped PRs), pre-commit hook (lock file sync), cross-service coupling docs, CI lock-sync job, Makefile targets
-- [ ] **10C:** Smart routing intelligence — token estimation, context replay cost
-- [ ] **10D:** Interactive audit & taxonomy — audit filters, taxonomy tree
-- [ ] **10E:** Knowledge curation agent (design)
-- [ ] **10F:** RAG evaluation (research)
+- [x] **Modularity Assessment:** Identified 4 structural splits needed, test coverage gaps across 10 modules, secondary cleanup items
+- [ ] **10C:** Structural splits — service layer extraction, MCP tool registry, Neo4j data layer package, sync library package
+- [ ] **10D:** Test coverage expansion — security middleware, 5 untested agents, sync lib, parsers, frontend components
+- [ ] **10E:** Smart routing intelligence — token estimation, context replay cost
+- [ ] **10F:** Interactive audit & taxonomy — audit filters, taxonomy tree
+- [ ] **10G:** Knowledge curation agent (design)
+- [ ] **10H:** RAG evaluation (research)
 
 ---
 

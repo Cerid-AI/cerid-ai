@@ -1,7 +1,7 @@
 # Cerid AI — Task Tracker
 
 > **Last updated:** 2026-02-26
-> **Current status:** Phase 10A + 10B complete. Codebase audit + dependency management complete. 5 open issues remain.
+> **Current status:** Phase 10A + 10B complete. Codebase audit + dependency management complete. Modularity assessment complete. 8 open issues remain.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md)
 
 ## Current: Phase 10 — Commercial & Open-Source Readiness
@@ -18,7 +18,7 @@
 ### 10B: UX Polish — Model Context Breaks ✅
 - [x] B3 + D2 — Model switch divider (visual break when changing models)
 - [x] Always-visible model badge with provider colors
-- [ ] "Start fresh" option on model switch (deferred to 10C)
+- [ ] "Start fresh" option on model switch (deferred to 10E)
 
 ### Codebase Audit ✅
 - [x] Dependency purge (sentence-transformers, pandas removed, ~700MB Docker savings)
@@ -43,20 +43,46 @@
 - [x] CI lock-sync job
 - [x] Makefile targets (lock-python, install-hooks, deps-check)
 
-### 10C: Smart Routing Intelligence
+### Modularity Assessment ✅
+- [x] Analyze file sizes, coupling, router complexity, agent complexity, utils sprawl
+- [x] Identify 4 structural splits needed (F1–F4 in ISSUES.md)
+- [x] Identify test coverage gaps (F5 in ISSUES.md)
+- [x] Update project plan and tracking docs
+
+### 10C: Structural Splits (Backend Modularity)
+- [ ] F1 — Extract `ingest_content()` from `routers/ingestion.py` to `services/ingestion.py` (fixes circular import from `agents/memory.py`)
+- [ ] F2 — Split `routers/mcp_sse.py` — extract tool registry + dispatcher to `mcp/tools.py`
+- [ ] F3 — Split `utils/graph.py` (827 lines) into `db/neo4j/` package (crud, taxonomy, relationships, schema)
+- [ ] F4 — Split `cerid_sync_lib.py` (1300 lines) into `sync/` package (export, import, manifest, client)
+- [ ] Split `config.py` (33 importers) into `config/settings.py`, `config/taxonomy.py`, `config/features.py`
+- [ ] Split `utils/parsers.py` (875 lines) into `parsers/` sub-package (one file per format family)
+- [ ] Remove duplicate `find_stale_artifacts` in `maintenance.py` (reuse `rectify.py` version)
+- [ ] Move `audit.log_conversation_metrics()` to `utils/cache.py`
+
+### 10D: Test Coverage Expansion
+- [ ] F5 — Tests for untested agents: query_agent, triage, rectify, audit, maintenance (5 agents, ~2000 lines, 0 tests)
+- [ ] Tests for `cerid_sync_lib.py` (1300 lines, 0 tests — only cross-machine data durability mechanism)
+- [ ] Tests for `utils/parsers.py` (875 lines, 0 tests — all file format parsing)
+- [ ] Tests for `middleware/auth.py` and `middleware/rate_limit.py` (security-critical, 0 tests)
+- [ ] Tests for `routers/mcp_sse.py` / `mcp/tools.py` (MCP protocol + tool dispatch, 0 tests)
+- [ ] Tests for `utils/graph.py` / `db/neo4j/` (9 tests for 17 functions — expand coverage)
+- [ ] Frontend component tests (40+ components with 0 tests)
+- [ ] CI coverage threshold enforcement
+
+### 10E: Smart Routing Intelligence
 - [ ] D1 — Token estimator + context replay cost calculation
 - [ ] Context usage indicator in chat dashboard
 - [ ] Summarize-and-switch option for large contexts
 - [ ] "Start fresh" option on model switch (from 10B)
 
-### 10D: Interactive Audit & Taxonomy
+### 10F: Interactive Audit & Taxonomy
 - [ ] B1 — Audit agent report filter toggles, time range selector, manual refresh
 - [ ] C1 — Taxonomy-aware hierarchical KB filtering
 
-### 10E: Knowledge Curation Agent (Design)
+### 10G: Knowledge Curation Agent (Design)
 - [ ] C2 — Design doc for artifact quality improvement agent
 
-### 10F: RAG Evaluation (Research)
+### 10H: RAG Evaluation (Research)
 - [ ] E2 — Evaluate embedding models, hybrid weights, chunk sizes
 - [ ] E1 — Artifact preview/generation (depends on E2 decisions)
 
