@@ -4,7 +4,7 @@
 
 A privacy-first, local-first workspace that unifies multi-domain knowledge bases (code, finance, projects, personal artifacts) into a context-aware LLM interface with RAG-powered retrieval, file ingestion, and intelligent agents.
 
-[![Status](https://img.shields.io/badge/Status-Phase%209%20Complete-green)]()
+[![Status](https://img.shields.io/badge/Status-Phase%2010A%20Complete-green)]()
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue)](LICENSE)
 
 ---
@@ -30,9 +30,13 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 - **Backend Hardening** — API key auth, rate limiting, Redis query caching (5-min TTL)
 - **Scheduled Maintenance** via APScheduler with proactive knowledge surfacing
 - **Multi-Machine Sync** via Dropbox — JSONL export/import with auto-import on startup
-- **GitHub Actions CI/CD** with 156 pytest tests
+- **Source Attribution** — collapsible source references with relevance scores on chat responses
+- **Model Context Breaks** — provider-colored model badges, switch dividers between model changes
+- **GitHub Actions CI/CD** with 224 tests (156 pytest + 68 vitest)
 - **Three-Tier AI Categorization** (manual, smart, pro) via Bifrost
 - **Obsidian Vault Integration** — auto-sync vault notes into knowledge base
+- **Reproducible Builds** — pip-compile lock files with hashes, pinned Docker images, Dependabot
+- **Accessibility** — ARIA labels, keyboard navigation, screen reader support across 14 components
 - **Privacy-First Architecture** — all data local, only LLM API calls go external
 
 ---
@@ -236,6 +240,7 @@ curl http://localhost:8888/ingest_log?limit=10
 | POST | `/query` | Query knowledge base by domain |
 | POST | `/ingest` | Ingest raw text content |
 | POST | `/ingest_file` | Parse + ingest file with metadata |
+| POST | `/upload` | Upload file for ingestion |
 | POST | `/recategorize` | Move artifact between domains |
 | POST | `/agent/query` | Multi-domain query with LLM reranking |
 | POST | `/agent/triage` | LangGraph-powered file triage |
@@ -247,6 +252,7 @@ curl http://localhost:8888/ingest_log?limit=10
 | GET | `/agent/hallucination/{id}` | Retrieve stored hallucination report |
 | POST | `/agent/memory/extract` | Extract and store memories from conversation |
 | POST | `/agent/memory/archive` | Archive old conversation memories |
+| GET | `/memories` | List extracted memories |
 | GET | `/taxonomy` | Hierarchical taxonomy tree (domains, sub-categories, tags) |
 | GET | `/settings` | Server settings and feature flags |
 | PATCH | `/settings` | Update server settings |
@@ -266,112 +272,129 @@ curl http://localhost:8888/ingest_log?limit=10
 ```
 cerid-ai/
 ├── README.md
-├── CLAUDE.md
+├── CLAUDE.md                          # AI developer guide
 ├── CONTRIBUTING.md
-├── LICENSE
-├── .env                              # Secrets (root, encrypted as .env.age)
-├── .env.age                          # Encrypted secrets (age)
-├── .env.example                      # Template
-├── pyproject.toml                    # Ruff config
+├── LICENSE                            # Apache-2.0
+├── NOTICE
+├── Makefile                           # lock-python, install-hooks, deps-check
+├── pyproject.toml                     # Ruff + pytest config
+├── .env.age                           # Encrypted secrets (age)
+├── .env.example                       # Template
 ├── artifacts -> ~/Dropbox/AI-Artifacts
 ├── data -> src/mcp/data
 │
+├── .github/
+│   ├── workflows/ci.yml              # 6-job CI (lint, test, security, lock-sync, frontend, docker)
+│   └── dependabot.yml                # Weekly grouped PRs (pip, npm, actions, docker)
+│
 ├── docs/
-│   ├── CERID_AI_PROJECT_REFERENCE.md
+│   ├── CERID_AI_PROJECT_REFERENCE.md  # Detailed technical reference
+│   ├── DEPENDENCY_COUPLING.md         # Cross-service version constraints
+│   ├── ISSUES.md                      # Issue tracker (5 open)
 │   ├── PHASE4_PLAN.md
-│   └── plans/                        # Implementation plans
+│   └── plans/                         # Implementation plans (6 docs)
 │
 ├── scripts/
-│   ├── start-cerid.sh                # One-command 4-step startup
-│   ├── validate-env.sh               # Pre-flight validation (--quick, --fix)
-│   ├── cerid-sync.py                 # Knowledge base sync CLI
-│   ├── env-lock.sh                   # Encrypt .env → .env.age
-│   └── env-unlock.sh                 # Decrypt .env.age → .env
+│   ├── start-cerid.sh                 # One-command 4-step startup
+│   ├── validate-env.sh                # Pre-flight validation (--quick, --fix)
+│   ├── cerid-sync.py                  # Knowledge base sync CLI
+│   ├── env-lock.sh                    # Encrypt .env → .env.age
+│   ├── env-unlock.sh                  # Decrypt .env.age → .env
+│   └── hooks/pre-commit               # Lock file sync guard
 │
 ├── tasks/
-│   └── todo.md                       # Task tracker
+│   └── todo.md                        # Task tracker
 │
-├── src/mcp/                          # MCP Server
-│   ├── main.py                       # FastAPI entry point
-│   ├── config.py                     # Central configuration
-│   ├── deps.py                       # Dependency injection (DB singletons)
-│   ├── scheduler.py                  # APScheduler maintenance engine
-│   ├── cerid_sync_lib.py             # Sync export/import library
-│   ├── sync_check.py                 # Auto-import on startup
-│   ├── Dockerfile
-│   ├── docker-compose.yml
-│   ├── requirements.txt
+├── src/mcp/                           # MCP Server (FastAPI + Python 3.11)
+│   ├── main.py                        # FastAPI entry point (114 lines — routes via routers/)
+│   ├── config.py                      # Central configuration (domains, tiers, taxonomy)
+│   ├── deps.py                        # DB singletons, retry wrappers, auth validation
+│   ├── scheduler.py                   # APScheduler maintenance engine
+│   ├── cerid_sync_lib.py              # Sync export/import library
+│   ├── sync_check.py                  # Auto-import on startup
+│   ├── Dockerfile                     # python:3.11.14-slim, non-root user
+│   ├── docker-compose.yml             # MCP + Dashboard + React GUI
+│   ├── requirements.txt               # Human-editable dependency ranges
+│   ├── requirements.lock              # pip-compile with hashes (reproducible)
+│   ├── requirements-dev.txt           # Test dependencies
+│   ├── requirements-dev.lock          # Dev lock file with hashes
 │   │
-│   ├── routers/                      # FastAPI routers (Phase 4A+)
-│   │   ├── health.py, query.py, ingestion.py
-│   │   ├── artifacts.py, agents.py, digest.py
-│   │   ├── mcp_sse.py, taxonomy.py
+│   ├── routers/                       # FastAPI routers (10 modules)
+│   │   ├── health.py, query.py, ingestion.py, artifacts.py
+│   │   ├── agents.py, digest.py, mcp_sse.py, taxonomy.py
+│   │   ├── settings.py, upload.py, memories.py
 │   │   └── __init__.py
 │   │
-│   ├── agents/                       # 7 Agent modules
-│   │   ├── query_agent.py            # Multi-domain + LLM reranking
-│   │   ├── triage.py                 # LangGraph triage
-│   │   ├── rectify.py                # KB health checks
-│   │   ├── audit.py                  # Usage analytics + conversation costs
-│   │   ├── maintenance.py            # System health
-│   │   ├── hallucination.py          # Hallucination detection (Phase 7A)
-│   │   └── memory.py                 # Memory extraction (Phase 7C)
+│   ├── agents/                        # 7 Agent modules
+│   │   ├── query_agent.py             # Multi-domain + LLM reranking
+│   │   ├── triage.py                  # LangGraph triage pipeline
+│   │   ├── rectify.py                 # KB health checks + auto-fix
+│   │   ├── audit.py                   # Usage analytics + conversation costs
+│   │   ├── maintenance.py             # System health + cleanup
+│   │   ├── hallucination.py           # Claim extraction + KB verification
+│   │   └── memory.py                  # Memory extraction + archival
 │   │
-│   ├── plugins/                      # Plugin system (Phase 8A)
-│   │   └── ocr/                      # OCR parser plugin (pro tier)
+│   ├── plugins/                       # Plugin system (manifest-based, feature tiers)
+│   │   └── ocr/                       # OCR parser plugin (pro tier)
 │   │
-│   ├── utils/
+│   ├── utils/                         # 15 utility modules
 │   │   ├── parsers.py, metadata.py, chunker.py
 │   │   ├── graph.py, cache.py, query_cache.py
 │   │   ├── bm25.py, dedup.py, encryption.py
-│   │   ├── features.py, temporal.py
-│   │   └── sync_backend.py
+│   │   ├── features.py, temporal.py, time.py
+│   │   ├── llm_parsing.py, sync_backend.py, webhooks.py
+│   │   └── __init__.py
 │   │
 │   ├── scripts/
-│   │   ├── watch_ingest.py
-│   │   ├── watch_obsidian.py         # Obsidian vault watcher
-│   │   └── ingest_cli.py
+│   │   ├── watch_ingest.py            # Folder watcher (host process)
+│   │   ├── watch_obsidian.py          # Obsidian vault watcher
+│   │   └── ingest_cli.py             # Batch CLI ingest tool
 │   │
-│   ├── middleware/                    # Auth + rate limiting (Phase 6D)
-│   │   ├── auth.py                   # X-API-Key validation (opt-in)
-│   │   └── rate_limit.py             # Sliding window rate limiter
+│   ├── middleware/                     # Auth + rate limiting
+│   │   ├── auth.py                    # X-API-Key validation (opt-in)
+│   │   └── rate_limit.py              # Sliding window rate limiter
 │   │
-│   └── tests/                        # 156 pytest tests
+│   └── tests/                         # 156 pytest tests (11 test files)
 │
-├── src/web/                          # React GUI (Phase 6)
-│   ├── package.json                  # React 19, Vite 7, Tailwind v4, shadcn/ui
-│   ├── vite.config.ts                # Bundle splitting, Bifrost proxy
-│   ├── Dockerfile                    # Multi-stage: Node build → nginx:alpine
-│   ├── nginx.conf                    # SPA fallback + Bifrost reverse proxy
+├── src/web/                           # React GUI (Phase 6+)
+│   ├── .nvmrc                         # Node version source of truth (22)
+│   ├── package.json                   # React 19, Vite 7, Tailwind v4, shadcn/ui
+│   ├── vite.config.ts                 # Bundle splitting, Bifrost proxy
+│   ├── Dockerfile                     # Multi-stage: node:22 build → nginx:1.27
+│   ├── nginx.conf                     # SPA fallback + Bifrost reverse proxy
 │   └── src/
-│       ├── App.tsx                   # Lazy-loaded pane routing
-│       ├── lib/types.ts, api.ts, model-router.ts  # Types, API clients, model router
-│       ├── hooks/                    # use-theme, use-chat, use-conversations,
-│       │                             # use-kb-context, use-settings,
-│       │                             # use-model-router, use-smart-suggestions,
-│       │                             # use-live-metrics
-│       ├── contexts/                 # KB injection + settings context providers
+│       ├── App.tsx                    # Lazy-loaded pane routing
+│       ├── lib/                       # types.ts, api.ts, model-router.ts, utils.ts
+│       ├── hooks/                     # 8 hooks: use-chat, use-conversations,
+│       │                              # use-kb-context, use-settings, use-theme,
+│       │                              # use-model-router, use-smart-suggestions,
+│       │                              # use-live-metrics
+│       ├── contexts/                  # KB injection context provider
+│       ├── __tests__/                 # 68 vitest tests (5 test files)
 │       └── components/
-│           ├── layout/               # Sidebar, status bar, split-pane
-│           ├── chat/                 # Chat panel, input, bubbles, dashboard,
-│           │                         # source attribution, model router banner
-│           ├── kb/                   # Knowledge pane, artifact cards, graph,
-│           │                         # file upload, tag filter
-│           ├── monitoring/           # Health cards, charts, scheduler
-│           └── audit/                # Activity, costs, ingestion, queries,
-│                                     # hallucination panel, conversation stats
+│           ├── layout/                # Sidebar, status bar, split-pane
+│           ├── chat/                  # Chat panel, input, bubbles, dashboard,
+│           │                          # source attribution, model badges/dividers
+│           ├── kb/                    # Knowledge pane, artifact cards, graph,
+│           │                          # file upload, tag filter, domain filter
+│           ├── monitoring/            # Health cards, charts, scheduler, ingestion
+│           ├── audit/                 # Activity, costs, ingestion, queries,
+│           │                          # hallucination panel, conversation stats
+│           ├── memories/              # Memory management pane
+│           ├── settings/              # Settings pane (server-synced)
+│           └── ui/                    # shadcn/ui primitives (14 components)
 │
-├── src/gui/                          # Streamlit Dashboard (legacy)
+├── src/gui/                           # Streamlit Dashboard (legacy)
 │   ├── app.py
 │   ├── Dockerfile
 │   └── requirements.txt
 │
 └── stacks/
-    ├── infrastructure/               # Phase 5 — Neo4j, ChromaDB, Redis
+    ├── infrastructure/                # Neo4j, ChromaDB, Redis (pinned versions)
     │   ├── docker-compose.yml
-    │   └── data/                     # Persistent DB data (.gitignored)
-    ├── bifrost/                      # LLM Gateway
-    └── librechat/                    # Chat UI
+    │   └── data/                      # Persistent DB data (.gitignored)
+    ├── bifrost/                       # LLM Gateway
+    └── librechat/                     # Chat UI
 ```
 
 ---
@@ -383,11 +406,14 @@ cerid-ai/
 | File | Purpose |
 |------|---------|
 | `.env` | All secrets (root, encrypted as `.env.age` with age) |
-| `src/mcp/config.py` | Domains, file extensions, AI tiers, DB URLs |
+| `src/mcp/config.py` | Domains, file extensions, AI tiers, taxonomy, DB URLs |
 | `stacks/bifrost/data/config.json` | LLM routing, provider config |
 | `stacks/librechat/librechat.yaml` | MCP servers, endpoints, model list |
 | `scripts/validate-env.sh` | Pre-flight environment validation (14 checks) |
 | `scripts/cerid-sync.py` | Knowledge base sync CLI (export/import/status) |
+| `Makefile` | lock-python, install-hooks, deps-check targets |
+| `docs/DEPENDENCY_COUPLING.md` | Cross-service version constraints |
+| `docs/ISSUES.md` | Open issues and backlog (5 open) |
 
 ### Secrets Management
 
@@ -411,6 +437,36 @@ The age decryption key lives outside the repo at `~/.config/cerid/age-key.txt`.
 
 1. Add extension to `SUPPORTED_EXTENSIONS` in `config.py`
 2. Register parser function in `utils/parsers.py` with `@register_parser([".ext"])`
+
+---
+
+## Dependency Management
+
+### Python (pip-compile)
+
+Dependencies are declared in `src/mcp/requirements.txt` (ranges) and locked in `requirements.lock` (exact versions with hashes). To regenerate after editing ranges:
+
+```bash
+make lock-python      # Regenerate requirements.lock
+make lock-python-dev  # Regenerate requirements-dev.lock
+make lock-all         # Both
+```
+
+### Pre-commit Hook
+
+Install to block commits when lock files are out of sync:
+
+```bash
+make install-hooks
+```
+
+### Dependabot
+
+Automated weekly PRs for Python, npm, GitHub Actions, and monthly for Docker. Configured in `.github/dependabot.yml` with grouped updates.
+
+### Cross-Service Coupling
+
+See `docs/DEPENDENCY_COUPLING.md` for constraints that span files (ChromaDB client/server, spaCy lib/model, Node version, Python version).
 
 ---
 
@@ -486,21 +542,21 @@ Auto-import on startup: when MCP starts with an empty Neo4j database and a valid
 
 ## Service Ports
 
-| Port | Service | Container | Purpose |
-|------|---------|-----------|---------|
-| 3000 | **React GUI** | cerid-web | **Primary UI** |
-| 3080 | LibreChat | LibreChat | Legacy Chat UI |
-| 8080 | Bifrost | bifrost | LLM Gateway |
-| 8888 | MCP Server | ai-companion-mcp | Knowledge Base API |
-| 8501 | Dashboard | ai-companion-dashboard | Legacy Admin UI |
-| 8000 | RAG API | rag_api | Document Processing |
-| 8001 | ChromaDB | ai-companion-chroma | Vector Store |
-| 7474 | Neo4j HTTP | ai-companion-neo4j | Graph DB Browser |
-| 7687 | Neo4j Bolt | ai-companion-neo4j | Graph DB Protocol |
-| 6379 | Redis | ai-companion-redis | Cache + Audit |
-| 5432 | PostgreSQL | vectordb | RAG Vector Store |
-| 27017 | MongoDB | chat-mongodb | LibreChat Data |
-| 7700 | Meilisearch | chat-meilisearch | Search Index |
+| Port | Service | Container | Image | Purpose |
+|------|---------|-----------|-------|---------|
+| 3000 | **React GUI** | cerid-web | node:22 → nginx:1.27 | **Primary UI** |
+| 3080 | LibreChat | LibreChat | librechat-dev | Legacy Chat UI |
+| 8080 | Bifrost | bifrost | bifrost | LLM Gateway |
+| 8888 | MCP Server | ai-companion-mcp | python:3.11.14 | Knowledge Base API |
+| 8501 | Dashboard | ai-companion-dashboard | python:3.11 | Legacy Admin UI |
+| 8000 | RAG API | rag_api | librechat-rag-api | Document Processing |
+| 8001 | ChromaDB | ai-companion-chroma | chroma:0.5.23 | Vector Store |
+| 7474 | Neo4j HTTP | ai-companion-neo4j | neo4j:5.26.21 | Graph DB Browser |
+| 7687 | Neo4j Bolt | ai-companion-neo4j | neo4j:5.26.21 | Graph DB Protocol |
+| 6379 | Redis | ai-companion-redis | redis:7.4.8-alpine | Cache + Audit |
+| 5432 | PostgreSQL | vectordb | pgvector | RAG Vector Store |
+| 27017 | MongoDB | chat-mongodb | mongo:8.0.17 | LibreChat Data |
+| 7700 | Meilisearch | chat-meilisearch | meilisearch:v1.12.3 | Search Index |
 
 ---
 
@@ -570,8 +626,10 @@ Auto-import on startup: when MCP starts with an empty Neo4j database and a valid
 - [x] **9D:** Neo4j auth hardening — docker-compose env var fix, Cypher auth validation
 
 ### Phase 10: Commercial & Open-Source Readiness (In Progress)
-- [x] **10A:** Production quality — copyright headers (132 files), doc updates, frontend tests, CI hardening
-- [x] **10B:** UX polish — model context breaks, provider-colored badges
+- [x] **10A:** Production quality — Apache-2.0 copyright headers (132 files), source attribution in chat, frontend test suite (68 vitest tests), CI hardening (6-job pipeline)
+- [x] **10B:** UX polish — model switch dividers, provider-colored model badges (Anthropic amber, OpenAI emerald, Google blue)
+- [x] **Codebase Audit:** Dependency purge (~700MB Docker savings), Docker security hardening (non-root user, pinned images), dead code removal, logic consolidation, error handling overhaul (`except: pass` → logged), input validation (Pydantic response models), accessibility fixes (33 across 14 components), type safety, CI hardening (security scanning, coverage thresholds, Docker image scanning), frontend test expansion (34 → 68 tests)
+- [x] **Dependency Management:** Node version standardized to 22, pip-compile lock files with hashes, pinned CI tool versions, pinned Docker image tags, Dependabot config (weekly grouped PRs), pre-commit hook (lock file sync), cross-service coupling docs, CI lock-sync job, Makefile targets
 - [ ] **10C:** Smart routing intelligence — token estimation, context replay cost
 - [ ] **10D:** Interactive audit & taxonomy — audit filters, taxonomy tree
 - [ ] **10E:** Knowledge curation agent (design)
