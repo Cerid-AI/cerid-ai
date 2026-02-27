@@ -159,25 +159,48 @@ Single `.env` file at repo root, encrypted with `age`. The decryption key lives 
 ./scripts/env-lock.sh
 ```
 
-**Second-machine bootstrap:**
+**Second-machine bootstrap (complete sequence):**
 ```bash
+# 1. Install dotfiles (age key + global CLAUDE.md)
 git clone git@github.com:sunrunnerfire/dotfiles.git ~/dotfiles
-cd ~/dotfiles && bash install.sh          # age key + global CLAUDE.md
-brew install age
+cd ~/dotfiles && bash install.sh
+
+# 2. Install age encryption tool
+brew install age                          # macOS; use apt on Linux
+
+# 3. Clone cerid-ai
 git clone git@github.com:sunrunnerfire/cerid-ai.git ~/cerid-ai
-cd ~/cerid-ai && ./scripts/env-unlock.sh  # decrypt .env
+cd ~/cerid-ai
+
+# 4. Decrypt secrets (.env.age → .env)
+./scripts/env-unlock.sh
+
+# 5. Set up archive directory
+# Option A: Dropbox sync (recommended)
 ln -s ~/Dropbox/cerid-archive ~/cerid-archive
-./scripts/start-cerid.sh                  # auto-imports KB from Dropbox sync
+# Option B: Standalone
+# mkdir -p ~/cerid-archive/{coding,finance,projects,personal,general,inbox}
+
+# 6. Start stack (first run builds all images — ~5 min for MCP due to Python deps + spaCy model)
+./scripts/start-cerid.sh                  # auto-imports KB from Dropbox sync if Neo4j is empty
+
+# 7. Validate
 ./scripts/validate-env.sh
+```
+
+**After pulling code changes:**
+```bash
+./scripts/start-cerid.sh --build          # rebuilds MCP, Dashboard, React GUI images
 ```
 
 ### Starting the Stack
 
 ```bash
-./scripts/start-cerid.sh   # auto-decrypts .env if needed, starts all 4 service groups
+./scripts/start-cerid.sh            # start all 4 service groups
+./scripts/start-cerid.sh --build    # rebuild images after code changes
 ```
 
-Startup order: `[1/4]` Infrastructure (Neo4j, ChromaDB, Redis) → `[2/4]` Bifrost → `[3/4]` MCP + Dashboard → `[4/4]` LibreChat.
+Startup order: `[1/4]` Infrastructure (Neo4j, ChromaDB, Redis) → `[2/4]` Bifrost → `[3/4]` MCP + Dashboard + React GUI → `[4/4]` LibreChat.
 
 ### Environment Validation
 
@@ -394,6 +417,36 @@ make deps-check
 - **Parsers:** Registry pattern in `utils/parsers.py`. PDF uses pdfplumber (structure-aware). Add Docling later for OCR via `@register_parser`.
 - **Domains:** Add to `config.DOMAINS` list. Neo4j nodes auto-created.
 - **File types:** Add to `config.SUPPORTED_EXTENSIONS` + register parser.
+
+## Claude Code Setup (New Machine)
+
+If you are a Claude Code instance on a new machine, follow these steps to get the development environment working:
+
+1. **Verify prerequisites:** Docker running, `.env` decrypted, `age` installed, archive directory exists
+2. **Run `./scripts/validate-env.sh`** to check all 14 environment validations
+3. **If containers are down:** `./scripts/start-cerid.sh` (or `--build` after a `git pull`)
+4. **Check `.claude/settings.json`** — shared hooks config is committed; per-machine permissions go in `.claude/settings.local.json` (gitignored)
+5. **MCP server is at `http://localhost:8888/mcp/sse`** — configured in `.mcp.json` (committed), exposes 15 `pkb_*` tools
+6. **React GUI dev server:** configured in `.claude/launch.json` (committed) — Vite on port 5173
+
+**Key files for Claude Code:**
+- `.mcp.json` — MCP server connection (Cerid KB tools)
+- `.claude/settings.json` — shared hooks config (session-start, safety-check, typecheck, pythonlint)
+- `.claude/settings.local.json` — per-machine permission allowlist (gitignored, create from scratch)
+- `.claude/launch.json` — React dev server config
+- `.claudeignore` — excludes node_modules, dist, runtime data, binaries, lock files
+
+**Hooks (4 total, run automatically):**
+- `session-start.sh` (SessionStart) — Docker + MCP + GUI health check
+- `safety-check.sh` (PreToolUse/Bash) — blocks destructive commands
+- `typecheck.sh` (PostToolUse/Edit|Write) — `npx tsc --noEmit` for `.ts`/`.tsx` in `src/web/`
+- `pythonlint.sh` (PostToolUse/Edit|Write) — `ruff check` for `.py` in `src/mcp/`
+
+**Tests:** Run Python tests in Docker (`host macOS lacks chromadb`):
+```bash
+docker run --rm -v "$(pwd)/src/mcp:/work" -w /work python:3.11-slim bash -c "pip install -q -r requirements.txt -r requirements-dev.txt && python -m pytest tests/ -v"
+```
+Frontend tests: `cd src/web && npx vitest run`
 
 ## Conventions
 

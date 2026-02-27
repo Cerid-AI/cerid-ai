@@ -28,7 +28,7 @@ services:
       - ./uploads:/app/uploads
       - ./logs:/app/logs
       - ./librechat.yaml:/app/librechat.yaml:ro
-      - ~/Dropbox/AI-Artifacts:/app/artifacts:ro  # Re-added for PKB artifacts
+      - ${CERID_ARTIFACTS_DIR:-~/cerid-archive}:/app/artifacts:ro
     healthcheck:  # Ensure API healthy
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:${PORT:-3080}/api/auth/version"]
       interval: 30s

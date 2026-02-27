@@ -19,6 +19,10 @@ src/mcp/docs/inventory/
 
 # Runtime data & volumes
 data/
+# Bifrost provider config is safe to commit (uses env.OPENROUTER_API_KEY, no secrets)
+!stacks/bifrost/data/
+stacks/bifrost/data/*
+!stacks/bifrost/data/config.json
 uploads/
 logs/
 meili_data*

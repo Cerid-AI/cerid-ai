@@ -160,6 +160,59 @@ curl -s http://localhost:8888/health | python3 -m json.tool
 
 ---
 
+## Second Machine Setup
+
+To set up Cerid AI on an additional machine with existing encrypted secrets and Dropbox sync:
+
+### Prerequisites
+
+- Docker & Docker Compose v2+
+- `age` encryption tool (`brew install age`)
+- Dropbox installed and syncing (for knowledge base sync)
+- Access to the [dotfiles repo](https://github.com/sunrunnerfire/dotfiles) (contains the age decryption key)
+
+### Steps
+
+```bash
+# 1. Install age key from dotfiles
+git clone git@github.com:sunrunnerfire/dotfiles.git ~/dotfiles
+cd ~/dotfiles && bash install.sh    # installs age key to ~/.config/cerid/age-key.txt
+
+# 2. Install age
+brew install age                    # macOS (use apt on Linux)
+
+# 3. Clone the repo
+git clone git@github.com:sunrunnerfire/cerid-ai.git ~/cerid-ai
+cd ~/cerid-ai
+
+# 4. Decrypt secrets
+./scripts/env-unlock.sh             # .env.age → .env (requires age key from step 1)
+
+# 5. Set up archive directory (choose one)
+# Option A: Dropbox sync (recommended for multi-machine)
+ln -s ~/Dropbox/cerid-archive ~/cerid-archive
+# Option B: Standalone (no sync)
+mkdir -p ~/cerid-archive/{coding,finance,projects,personal,general,inbox}
+
+# 6. Start services (first run builds all images — takes a few minutes)
+./scripts/start-cerid.sh
+
+# 7. Validate
+./scripts/validate-env.sh
+```
+
+On first startup with an empty Neo4j database, the MCP server auto-imports knowledge base data from `~/Dropbox/cerid-sync/` if a valid manifest exists there.
+
+### Rebuilding After Code Changes
+
+After pulling new code, rebuild containers that use local Dockerfiles:
+
+```bash
+./scripts/start-cerid.sh --build    # rebuilds MCP, Dashboard, React GUI
+```
+
+---
+
 ## File Ingestion
 
 Cerid AI ingests files from `~/cerid-archive/` into a searchable knowledge base with metadata extraction, optional AI categorization, and full artifact tracking.
@@ -478,6 +531,9 @@ See `docs/DEPENDENCY_COUPLING.md` for constraints that span files (ChromaDB clie
 # Start (4-step: Infrastructure → Bifrost → MCP → LibreChat)
 ./scripts/start-cerid.sh
 
+# Start with rebuild (after pulling code changes)
+./scripts/start-cerid.sh --build
+
 # Stop all stacks
 cd ~/cerid-ai/stacks/librechat && docker compose down
 cd ~/cerid-ai/src/mcp && docker compose down
@@ -485,10 +541,14 @@ cd ~/cerid-ai/stacks/bifrost && docker compose down
 cd ~/cerid-ai/stacks/infrastructure && docker compose down
 ```
 
-### Rebuild MCP After Code Changes
+### Rebuild Individual Services
 
 ```bash
-cd ~/cerid-ai/src/mcp && docker compose up -d --build
+# Rebuild MCP server only
+cd ~/cerid-ai/src/mcp && docker compose up -d --build mcp-server
+
+# Rebuild React GUI only
+cd ~/cerid-ai/src/mcp && docker compose up -d --build cerid-web
 ```
 
 ### View Logs
@@ -527,8 +587,18 @@ tar czf cerid-backup-$(date +%Y%m%d).tar.gz \
 
 ### Knowledge Base Sync (Multi-Machine)
 
-Sync knowledge bases across machines via Dropbox using JSONL exports:
+Sync knowledge bases across machines via Dropbox using JSONL exports.
 
+**Setup (Dropbox):**
+```bash
+# Symlink archive folder so raw files sync across machines
+ln -s ~/Dropbox/cerid-archive ~/cerid-archive
+
+# Database snapshots sync via a separate directory
+# Set in .env: CERID_SYNC_DIR=~/Dropbox/cerid-sync (default)
+```
+
+**Usage:**
 ```bash
 python3 scripts/cerid-sync.py export          # dump to ~/Dropbox/cerid-sync/
 python3 scripts/cerid-sync.py import          # merge from sync dir
