@@ -2,7 +2,7 @@
 
 > **Created:** 2026-02-25
 > **Last updated:** 2026-02-26
-> **Status:** Phase 10A + 10B + codebase audit + dependency management + modularity assessment complete. 4 resolved, 11 open (6 original + 5 structural from modularity analysis), 1 informational (F6).
+> **Status:** Phase 10A + 10B + codebase audit + dependency management + modularity assessment + full-stack audit complete. Phase 10C Sessions 1–2 complete. 18 resolved, 9 open (5 original + 2 structural + 2 audit hardening), 1 informational (F6).
 > **Purpose:** Track known bugs, feature gaps, structural issues, and architecture evaluations for upcoming phases.
 
 ---
@@ -193,30 +193,20 @@ Issues identified by the modularity assessment (2026-02-26). These are mechanica
 ### F1. Service Layer Extraction — `routers/ingestion.py`
 
 **Severity:** High (causes circular import)
-**Status:** Open — Phase 10C
+**Status:** Resolved (Phase 10C-S1, 2026-02-26)
 
-`routers/ingestion.py` (523 lines) exposes `ingest_content()` and `ingest_file()` as service functions consumed by `agents/memory.py` and `routers/mcp_sse.py`. This causes a circular import: `agents/memory.py` does a deferred `from routers.ingestion import ingest_content` inside a function body. This is a layer violation — an agent calling into a router.
+**Resolution:** Extracted `ingest_content()`, `ingest_file()`, `validate_file_path()`, and all private helpers (`_content_hash`, `_check_duplicate`, `_reingest_artifact`) into `services/ingestion.py`. `routers/ingestion.py` is now a thin router (Pydantic models + endpoint handlers). Updated 4 importers: `agents/memory.py`, `routers/mcp_sse.py`, `routers/upload.py`, `routers/agents.py`. Circular import eliminated.
 
-**Fix:** Extract `ingest_content()` and `ingest_file()` into `services/ingestion.py`. Routers and agents both import from the service layer. Removes the circular dependency.
-
-**Files:**
-- `src/mcp/routers/ingestion.py` (source — extract business logic)
-- `src/mcp/services/ingestion.py` (new)
-- `src/mcp/agents/memory.py` (update import)
-- `src/mcp/routers/mcp_sse.py` (update import)
+**Files changed:** `routers/ingestion.py`, `services/ingestion.py` (new), `services/__init__.py` (new), `agents/memory.py`, `routers/mcp_sse.py`, `routers/upload.py`, `routers/agents.py`
 
 ### F2. MCP Tool Registry Extraction — `routers/mcp_sse.py`
 
 **Severity:** Medium
-**Status:** Open — Phase 10C
+**Status:** Resolved (Phase 10C-S2, 2026-02-26)
 
-`routers/mcp_sse.py` (593 lines) does four jobs: SSE connection management, JSON-RPC protocol handling, MCP tool schema definitions (15 tools), and a 110-line if/elif `execute_tool()` dispatcher. The tool schemas and dispatcher duplicate wiring already in `routers/agents.py`.
+**Resolution:** Extracted `MCP_TOOLS` list (17 tool schemas) and `execute_tool()` dispatcher into `tools.py`. `routers/mcp_sse.py` reduced from 593 to ~170 lines — now a thin SSE transport + JSON-RPC framing layer.
 
-**Fix:** Extract tool schemas dict and `execute_tool()` into `mcp/tools.py`. The SSE router becomes a thin protocol layer (~200 lines). Tool registration becomes a single import.
-
-**Files:**
-- `src/mcp/routers/mcp_sse.py` (source — extract tool definitions + dispatch)
-- `src/mcp/mcp/tools.py` (new — tool registry + dispatcher)
+**Files changed:** `tools.py` (new), `routers/mcp_sse.py`
 
 ### F3. Neo4j Data Layer — `utils/graph.py`
 
@@ -273,34 +263,186 @@ Issues identified by the modularity assessment (2026-02-26). These are mechanica
 ### F6. Secondary Structural Issues (Informational)
 
 **Severity:** Low
-**Status:** Open — opportunistic
+**Status:** Partially resolved — 4 of 6 addressed in Phase 10C-S2
 
-These are not blocking but worth addressing during nearby refactors:
+Resolved items:
+- ✅ **`config.py` split:** Split into `config/taxonomy.py`, `config/settings.py`, `config/features.py` with `config/__init__.py` star re-exports (33 importers unchanged).
+- ✅ **Duplicate `find_stale_artifacts`:** Enhanced `rectify.py` version (added `limit` param, `chunk_ids` in return). Removed duplicate from `maintenance.py`, which now imports from `rectify`.
+- ✅ **`audit.log_conversation_metrics()`:** Moved to `utils/cache.py`. Import in `routers/ingestion.py` updated to canonical location.
+- ✅ **`utils/parsers.py`:** Deferred to Phase 10C-S3 (parsers sub-package split).
 
-- **`config.py` coupling (33 importers):** Domain taxonomy, feature flags, and connection strings co-located. Split into `config/settings.py`, `config/taxonomy.py`, `config/features.py` to reduce blast radius.
-- **`utils/parsers.py` (875 lines):** Registry pattern is sound but each format parser (RTF state machine at 120 lines, EPUB XML at 100 lines) could be its own file under `parsers/`.
-- **Duplicate `find_stale_artifacts`:** Exists in both `agents/rectify.py` and `agents/maintenance.py` with different signatures. `maintenance.py` should reuse `rectify.py` version.
-- **`audit.log_conversation_metrics()`:** Writer function in the audit agent belongs in `utils/cache.py` with other Redis operations.
-- **`use-chat.ts` post-send effects:** Three unrelated side effects (streaming completion, feedback ingestion, memory extraction) packed into a 15-line `finally` block. Not urgent at 83 lines total.
-- **`cerid-web` in `src/mcp/docker-compose.yml`:** The React GUI has no dependency on MCP source — it's a conceptual coupling. Consider moving to its own compose file.
+Open items:
+- **`use-chat.ts` post-send effects:** Not urgent at 83 lines total.
+- **`cerid-web` in `src/mcp/docker-compose.yml`:** Conceptual coupling. Consider moving to its own compose file.
+
+---
+
+## G. Audit Hardening
+
+Items identified by the full-stack audit (2026-02-26). Items G1–G7 resolved immediately; G8–G16 integrated into upcoming phases.
+
+### G1. `cryptography` Not Declared in requirements.txt
+
+**Severity:** Critical
+**Status:** Resolved (Step 0, 2026-02-26)
+
+**Resolution:** Added `cryptography>=42,<47` to `requirements.txt`. The package was imported at runtime by `utils/encryption.py` but only present as a transitive dependency — silent degradation if the dep chain changed.
+
+### G2. Trivy Exit-Code Advisory Only
+
+**Severity:** Critical
+**Status:** Resolved (Step 0, 2026-02-26)
+
+**Resolution:** Changed `exit-code: 0` to `exit-code: 1` in both Trivy steps in `.github/workflows/ci.yml`. Docker image scanning now fails CI on CRITICAL/HIGH vulnerabilities.
+
+### G3. FastAPI Range Too Restrictive
+
+**Severity:** Critical
+**Status:** Resolved (Step 0, 2026-02-26)
+
+**Resolution:** Broadened from `>=0.100,<0.120` to `>=0.100,<0.125` in `requirements.txt`. Allows Dependabot to pick up security patches.
+
+### G4. httpx-sse Unpinned
+
+**Severity:** High
+**Status:** Resolved (Step 0, 2026-02-26)
+
+**Resolution:** Pinned to `httpx-sse>=0.3,<0.5` in `requirements.txt`. Core MCP SSE transport dependency was previously unconstrained.
+
+### G5. npm Audit Non-Blocking in CI
+
+**Severity:** High
+**Status:** Resolved (Step 0, 2026-02-26)
+
+**Resolution:** Removed `|| true` from npm audit step in CI. Changed audit level to `--audit-level=high` to balance signal-to-noise.
+
+### G6. pandas Range Too Broad
+
+**Severity:** Medium
+**Status:** Resolved (Step 0, 2026-02-26)
+
+**Resolution:** Narrowed from `>=2.0,<3` to `>=2.0,<2.3` in `requirements.txt`.
+
+### G7. Lock File Regenerated
+
+**Severity:** N/A
+**Status:** Resolved (Step 0, 2026-02-26)
+
+**Resolution:** Regenerated `requirements.lock` with all G1–G6 changes.
+
+### G8. Rate Limiter Lacks X-Forwarded-For Support
+
+**Severity:** High
+**Status:** Resolved (Phase 10C-S1, 2026-02-26)
+
+**Resolution:** Added `TRUSTED_PROXIES` env var (comma-separated CIDRs). `get_client_ip()` walks X-Forwarded-For right-to-left, returning first untrusted IP. Secure by default: no trusted proxies configured means direct peer IP used.
+
+**Files changed:** `src/mcp/middleware/rate_limit.py`
+
+### G9. No Rate Limit Response Headers
+
+**Severity:** High
+**Status:** Resolved (Phase 10C-S1, 2026-02-26)
+
+**Resolution:** Added `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset` headers on all rate-limited paths. 429 responses also include `Retry-After` header.
+
+**Files changed:** `src/mcp/middleware/rate_limit.py`
+
+### G10. Client IP in Auth Failure Logs
+
+**Severity:** Medium
+**Status:** Resolved (Phase 10C-S1, 2026-02-26)
+
+**Resolution:** Auth failure logs now show SHA-256 hash prefix (12 chars) via `_redact_ip()` instead of raw IP.
+
+**Files changed:** `src/mcp/middleware/auth.py`
+
+### G11. No Request ID Tracing
+
+**Severity:** Low
+**Status:** Resolved (Phase 10C-S1, 2026-02-26)
+
+**Resolution:** New `RequestIDMiddleware` generates UUID per request or propagates incoming `X-Request-ID`. Stored in `request.state.request_id` and returned in response header. Added as outermost middleware (runs first).
+
+**Files changed:** `src/mcp/middleware/request_id.py` (new), `src/mcp/main.py`
+
+### G12. pip-audit Misses Transitive Dependencies
+
+**Severity:** High
+**Status:** Open — Phase 10D
+
+CI's `pip-audit` scans `requirements.txt` (direct deps) but not installed transitive dependencies. Should audit the full installed environment.
+
+**Files:** `.github/workflows/ci.yml`
+
+### G13. No CodeQL SAST Workflow
+
+**Severity:** Medium
+**Status:** Open — Phase 10D
+
+Missing GitHub's native static analysis for Python and JavaScript. Add `.github/workflows/codeql.yml` on push to main + weekly schedule.
+
+### G14. Coverage Threshold Only 35%
+
+**Severity:** Medium
+**Status:** Open — Phase 10D
+
+Current `--cov-fail-under=35` is a starting point. Target 55% after Phase 10D test expansion, 70% by end of Phase 10F.
+
+**Files:** `.github/workflows/ci.yml`
+
+### G15. No Bundle Size Monitoring
+
+**Severity:** Medium
+**Status:** Open — Phase 10D
+
+No CI check for Vite output size regressions. Add a step that fails if any JS chunk exceeds 800KB.
+
+### G16. rank_bm25 Unmaintained
+
+**Severity:** Medium
+**Status:** Open — Phase 10H
+
+`rank_bm25` package last updated 2020. Evaluate alternatives (`bm25s`, direct implementation) during RAG evaluation.
+
+**Files:** `src/mcp/utils/bm25.py`, `src/mcp/requirements.txt`
+
+### G17–G22. Documentation Gaps
+
+**Severity:** Low
+**Status:** Open — Phase 10F
+
+- **G17:** No documented API key rotation procedure
+- **G18:** No secrets rotation policy
+- **G19:** pip-compile version not in `DEPENDENCY_COUPLING.md`
+- **G20:** Bifrost version not in coupling constraints
+- **G21:** Branch protection rules not documented
+- **G22:** In-memory rate limiter state limitation not documented
+
+**Files:** `docs/OPERATIONS.md` (new), `docs/DEPENDENCY_COUPLING.md`, `README.md`
 
 ---
 
 ## Priority Order (Suggested)
 
-Structural work before feature work — the splits reduce cost of all subsequent changes and unblock test coverage.
+Structural work before feature work — the splits reduce cost of all subsequent changes and unblock test coverage. Audit hardening items integrated by severity into existing phases.
 
 1. ~~**A1** — Chat viewport fix~~ ✅ Resolved (Phase 10A)
 2. ~~**B2** — Source attribution~~ ✅ Resolved (Phase 10A)
 3. ~~**B3 + D2** — Model context break~~ ✅ Resolved (Phase 10B) — "start fresh" deferred to 10E
-4. **F1** — Service layer extraction (fixes circular import) — Phase 10C
-5. **F2** — MCP tool registry extraction — Phase 10C
-6. **F3** — Neo4j data layer split — Phase 10C
-7. **F4** — Sync library split — Phase 10C
-8. **F5** — Test coverage expansion (security middleware first, then agents) — Phase 10D
-9. **D1** — Smart routing + token cost evaluation — Phase 10E
-10. **B1** — Audit agent interactivity — Phase 10F
-11. **C1** — Taxonomy update — Phase 10F
-12. **C2** — Curation agent (requires C1) — Phase 10G (design)
-13. **E2** — RAG evaluation (foundational, informs E1) — Phase 10H (research)
-14. **E1** — Artifact preview (depends on E2 decisions)
+4. ~~**G1–G7** — Immediate audit fixes~~ ✅ Resolved (Step 0)
+5. ~~**F1** — Service layer extraction~~ ✅ Resolved (Phase 10C-S1)
+6. ~~**G8–G11** — Middleware hardening~~ ✅ Resolved (Phase 10C-S1)
+7. ~~**F2** — MCP tool registry extraction~~ ✅ Resolved (Phase 10C-S2)
+8. ~~**F6 partial** — Config split, dedup cleanup~~ ✅ Resolved (Phase 10C-S2)
+9. **F3** — Neo4j data layer split — Phase 10C-S3
+10. **F4** — Sync library split — Phase 10C-S3
+11. **F5** — Test coverage expansion (security middleware first, then agents) — Phase 10D
+12. **G12–G15** — CI hardening (pip-audit, CodeQL, coverage threshold, bundle size) — Phase 10D
+13. **D1** — Smart routing + token cost evaluation — Phase 10E
+14. **B1** — Audit agent interactivity — Phase 10F
+15. **C1** — Taxonomy update — Phase 10F
+16. **G17–G22** — Operations documentation — Phase 10F
+17. **C2** — Curation agent (requires C1) — Phase 10G (design)
+18. **E2** — RAG evaluation + **G16** (BM25 replacement) — Phase 10H (research)
+19. **E1** — Artifact preview (depends on E2 decisions)

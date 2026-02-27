@@ -7,15 +7,15 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
 import chromadb
 import httpx
 
 import config
+from agents.rectify import find_stale_artifacts
 from utils.cache import log_event
-from utils.time import utcnow, utcnow_iso
+from utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.maintenance")
 
@@ -131,32 +131,6 @@ async def check_bifrost_health() -> str:
 # ---------------------------------------------------------------------------
 # Stale artifact management
 # ---------------------------------------------------------------------------
-
-def find_stale_artifacts(
-    neo4j_driver,
-    days_threshold: int = 90,
-    limit: int = 100,
-) -> List[Dict[str, Any]]:
-    """Find artifacts older than the threshold."""
-    cutoff = (utcnow().replace(tzinfo=None) - timedelta(days=days_threshold)).isoformat()
-
-    with neo4j_driver.session() as session:
-        result = session.run(
-            """
-            MATCH (a:Artifact)-[:BELONGS_TO]->(d:Domain)
-            WHERE a.ingested_at < $cutoff
-            AND (a.recategorized_at IS NULL OR a.recategorized_at < $cutoff)
-            RETURN a.id AS id, a.filename AS filename, d.name AS domain,
-                   a.ingested_at AS ingested_at, a.chunk_count AS chunk_count,
-                   a.chunk_ids AS chunk_ids
-            ORDER BY a.ingested_at ASC
-            LIMIT $limit
-            """,
-            cutoff=cutoff,
-            limit=limit,
-        )
-        return [dict(record) for record in result]
-
 
 def purge_artifacts(
     neo4j_driver,

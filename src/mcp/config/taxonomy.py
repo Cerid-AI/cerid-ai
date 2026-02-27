@@ -1,0 +1,100 @@
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Domain taxonomy, supported extensions, and cross-domain affinity."""
+from __future__ import annotations
+
+import json
+import os
+
+# ---------------------------------------------------------------------------
+# Hierarchical Taxonomy (domains -> sub-categories -> tags)
+# ---------------------------------------------------------------------------
+TAXONOMY = {
+    "coding": {
+        "description": "Source code, scripts, technical documentation",
+        "icon": "code",
+        "sub_categories": ["python", "javascript", "devops", "architecture", "general"],
+    },
+    "finance": {
+        "description": "Financial documents, tax records, budgets",
+        "icon": "dollar-sign",
+        "sub_categories": ["tax", "investments", "budgets", "receipts", "general"],
+    },
+    "projects": {
+        "description": "Project plans, meeting notes, specifications",
+        "icon": "folder",
+        "sub_categories": ["active", "archived", "proposals", "general"],
+    },
+    "personal": {
+        "description": "Personal notes, journal entries, health records",
+        "icon": "user",
+        "sub_categories": ["notes", "health", "travel", "general"],
+    },
+    "general": {
+        "description": "Uncategorized or cross-domain content",
+        "icon": "file",
+        "sub_categories": ["general"],
+    },
+    "conversations": {
+        "description": "Extracted memories from chat sessions",
+        "icon": "message-circle",
+        "sub_categories": ["facts", "decisions", "preferences", "action-items", "general"],
+    },
+}
+
+# User-defined custom domains via env var (JSON object with same shape as TAXONOMY entries)
+_custom_domains_raw = os.getenv("CERID_CUSTOM_DOMAINS", "")
+if _custom_domains_raw:
+    try:
+        _custom = json.loads(_custom_domains_raw)
+        if isinstance(_custom, dict):
+            TAXONOMY.update(_custom)
+    except (json.JSONDecodeError, TypeError):
+        pass  # silently ignore malformed custom domains
+
+DOMAINS = list(TAXONOMY.keys())
+DEFAULT_DOMAIN = "general"
+DEFAULT_SUB_CATEGORY = "general"
+INBOX_DOMAIN = "inbox"  # files here trigger AI categorization
+
+
+def collection_name(domain: str) -> str:
+    """ChromaDB collection name for a given domain."""
+    return f"domain_{domain.replace(' ', '_').lower()}"
+
+
+# ---------------------------------------------------------------------------
+# Supported file extensions (mapped to parser functions in utils/parsers.py)
+# ---------------------------------------------------------------------------
+SUPPORTED_EXTENSIONS = {
+    # Documents
+    ".pdf", ".docx", ".xlsx", ".csv", ".tsv",
+    # E-books & rich text
+    ".epub", ".rtf",
+    # Email
+    ".eml", ".mbox",
+    # Text / markup
+    ".txt", ".md", ".rst", ".log",
+    ".html", ".htm", ".xml",
+    # Code
+    ".py", ".js", ".ts", ".jsx", ".tsx",
+    ".java", ".go", ".rs", ".rb", ".cpp", ".c", ".h", ".cs",
+    ".sql", ".r", ".swift", ".kt",
+    ".sh", ".bash",
+    # Config / data
+    ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg",
+}
+
+# ---------------------------------------------------------------------------
+# Cross-Domain Connections
+# ---------------------------------------------------------------------------
+DOMAIN_AFFINITY = {
+    "coding":        {"projects": 0.6},
+    "projects":      {"coding": 0.6, "finance": 0.4},
+    "finance":       {"projects": 0.4},
+    "personal":      {"general": 0.5, "conversations": 0.3},
+    "general":       {"personal": 0.5, "conversations": 0.3},
+    "conversations": {"personal": 0.3, "general": 0.3},
+}
+CROSS_DOMAIN_DEFAULT_AFFINITY = 0.2   # weight for domain pairs not in DOMAIN_AFFINITY

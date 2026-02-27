@@ -83,7 +83,7 @@ jobs:
       - name: Vite build
         run: npx vite build
       - name: NPM dependency audit
-        run: npm audit --audit-level=moderate || true
+        run: npm audit --audit-level=high
 
   # Docker
   docker:
@@ -97,10 +97,10 @@ jobs:
         with:
           image-ref: cerid-mcp-test
           severity: CRITICAL,HIGH
-          exit-code: 0
+          exit-code: 1
       - name: Scan Web Docker image
         uses: aquasecurity/trivy-action@1bd062560b422f5944df1de50abd05162bea079e
         with:
           image-ref: cerid-web-test
           severity: CRITICAL,HIGH
-          exit-code: 0
+          exit-code: 1

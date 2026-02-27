@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from deps import close_chroma, close_neo4j, close_redis, get_neo4j
 from middleware.auth import APIKeyMiddleware
 from middleware.rate_limit import RateLimitMiddleware
+from middleware.request_id import RequestIDMiddleware
 from routers import agents, artifacts, digest, health, ingestion, mcp_sse, memories, query, settings, taxonomy, upload
 from scheduler import start_scheduler, stop_scheduler
 from utils import graph
@@ -86,8 +87,10 @@ app.add_middleware(
 )
 # 2. Rate limiting (added second)
 app.add_middleware(RateLimitMiddleware)
-# 3. API key auth (added third, runs first — rejects unauthenticated before rate check)
+# 3. API key auth (added third, runs first among auth/rate — rejects unauthenticated before rate check)
 app.add_middleware(APIKeyMiddleware)
+# 4. Request ID (added last, runs first — sets X-Request-ID for all subsequent middleware)
+app.add_middleware(RequestIDMiddleware)
 
 # Register routers at root (backward compatibility) and /api/v1/ prefix
 _api_routers = [

@@ -91,6 +91,7 @@ def find_similar_artifacts(
 def find_stale_artifacts(
     neo4j_driver,
     days_threshold: int = 90,
+    limit: int = 100,
 ) -> List[Dict[str, Any]]:
     """Find artifacts not updated within the threshold period."""
     cutoff = (utcnow().replace(tzinfo=None) - timedelta(days=days_threshold)).isoformat()
@@ -102,11 +103,13 @@ def find_stale_artifacts(
             WHERE a.ingested_at < $cutoff
             AND (a.recategorized_at IS NULL OR a.recategorized_at < $cutoff)
             RETURN a.id AS id, a.filename AS filename, d.name AS domain,
-                   a.ingested_at AS ingested_at, a.chunk_count AS chunk_count
+                   a.ingested_at AS ingested_at, a.chunk_count AS chunk_count,
+                   a.chunk_ids AS chunk_ids
             ORDER BY a.ingested_at ASC
-            LIMIT 100
+            LIMIT $limit
             """,
             cutoff=cutoff,
+            limit=limit,
         )
         return [
             {
@@ -115,6 +118,7 @@ def find_stale_artifacts(
                 "domain": record["domain"],
                 "ingested_at": record["ingested_at"],
                 "chunk_count": record["chunk_count"],
+                "chunk_ids": record["chunk_ids"],
                 "age_indicator": "stale",
             }
             for record in result

@@ -125,7 +125,9 @@ class TestTaxonomyConfig:
         import os
 
         import config
+        import config.taxonomy
 
+        importlib.reload(config.taxonomy)
         importlib.reload(config)
 
         assert "research" in config.TAXONOMY
@@ -133,6 +135,7 @@ class TestTaxonomyConfig:
 
         # Clean up: reload to restore original state
         os.environ.pop("CERID_CUSTOM_DOMAINS", None)
+        importlib.reload(config.taxonomy)
         importlib.reload(config)
 
 

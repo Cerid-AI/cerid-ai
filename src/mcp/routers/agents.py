@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from deps import get_chroma, get_neo4j, get_redis
-from routers.ingestion import ingest_content
+from services.ingestion import ingest_content
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion")
@@ -103,8 +103,8 @@ async def agent_query_endpoint(req: AgentQueryRequest):
 @router.post("/agent/triage")
 async def triage_file_endpoint(req: TriageFileRequest):
     try:
-        from routers.ingestion import _validate_file_path
-        _validate_file_path(req.file_path)
+        from services.ingestion import validate_file_path
+        validate_file_path(req.file_path)
         from agents.triage import triage_file
         triage_result = await triage_file(
             file_path=req.file_path,

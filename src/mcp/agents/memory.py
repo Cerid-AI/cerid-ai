@@ -114,7 +114,7 @@ async def extract_and_store_memories(
             "results": [],
         }
 
-    from routers.ingestion import ingest_content  # avoid circular import
+    from services.ingestion import ingest_content
 
     results = []
     stored_count = 0

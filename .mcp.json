@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "cerid-kb": {
+      "type": "sse",
+      "url": "http://localhost:8888/mcp/sse"
+    }
+  }
+}

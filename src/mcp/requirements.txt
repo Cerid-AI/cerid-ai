@@ -1,11 +1,11 @@
 # Core framework
-fastapi>=0.100,<0.120
+fastapi>=0.100,<0.125
 uvicorn[standard]
 pydantic>=2.0,<3
 
 # HTTP client
 httpx>=0.24,<0.28
-httpx-sse
+httpx-sse>=0.3,<0.5
 
 # Databases
 chromadb>=0.5,<0.6
@@ -24,7 +24,7 @@ langchain-community>=0.3.0,<0.4
 pdfplumber>=0.10,<0.12
 python-docx
 openpyxl>=3.1,<4
-pandas>=2.0,<3
+pandas>=2.0,<2.3
 
 # Search
 rank_bm25>=0.2.2
@@ -33,5 +33,6 @@ rank_bm25>=0.2.2
 apscheduler>=3.10,<4
 
 # Utilities
+cryptography>=42,<47
 python-dotenv
 python-multipart

@@ -40,3 +40,12 @@ archive/
 
 # macOS metadata
 .DS_Store
+
+# CI workflows (rarely need indexing during development)
+.github/
+
+# Historical planning docs (captured in CLAUDE.md roadmap)
+docs/plans/
+
+# LibreChat stack (third-party, not actively developed)
+stacks/librechat/

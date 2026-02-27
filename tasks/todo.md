@@ -1,7 +1,7 @@
 # Cerid AI — Task Tracker
 
 > **Last updated:** 2026-02-26
-> **Current status:** Phase 10A + 10B complete. Codebase audit + dependency management complete. Modularity assessment complete. 8 open issues remain.
+> **Current status:** Phase 10A + 10B complete. Codebase audit + dependency management + modularity assessment + full-stack audit complete. Step 0 immediate fixes applied. Phase 10C Sessions 1–2 complete (service layer, middleware hardening, tool registry, config split, dedup cleanup). 9 open issues remain.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md)
 
 ## Current: Phase 10 — Commercial & Open-Source Readiness
@@ -49,25 +49,41 @@
 - [x] Identify test coverage gaps (F5 in ISSUES.md)
 - [x] Update project plan and tracking docs
 
-### 10C: Structural Splits (Backend Modularity)
-- [ ] F1 — Extract `ingest_content()` from `routers/ingestion.py` to `services/ingestion.py` (fixes circular import from `agents/memory.py`)
-- [ ] F2 — Split `routers/mcp_sse.py` — extract tool registry + dispatcher to `mcp/tools.py`
+### Full-Stack Audit ✅
+- [x] Three parallel audits: project docs/plans, code quality, dependency/security/DevOps
+- [x] Identified 23 improvement items (3 critical, 4 high, 6 medium, 10 low)
+- [x] Step 0 immediate fixes: cryptography declared, httpx-sse pinned, FastAPI broadened, pandas narrowed, Trivy blocking, npm audit blocking
+- [x] Integrated all findings into phases 10C–10H — no new phases needed
+- [x] Updated ISSUES.md with G1–G22 audit findings section
+- [x] Updated task tracker
+
+### 10C: Structural Splits + Security Hardening
+- [x] F1 — Extract `ingest_content()` from `routers/ingestion.py` to `services/ingestion.py` (fixes circular import)
+- [x] G8 — Add X-Forwarded-For support to rate limiter (configurable `TRUSTED_PROXIES`)
+- [x] G9 — Add `RateLimit-Limit/Remaining/Reset` response headers (IETF standard)
+- [x] G10 — Redact client IP in auth failure logs (SHA-256 hash prefix)
+- [x] G11 — Add `RequestIDMiddleware` (UUID per request, `X-Request-ID` header)
+- [x] F2 — Split `routers/mcp_sse.py` — extract tool registry + dispatcher to `tools.py`
+- [x] Split `config.py` (33 importers) into `config/settings.py`, `config/taxonomy.py`, `config/features.py`
+- [x] Remove duplicate `find_stale_artifacts` in `maintenance.py` (reuse `rectify.py` version)
+- [x] Move `audit.log_conversation_metrics()` to `utils/cache.py`
 - [ ] F3 — Split `utils/graph.py` (827 lines) into `db/neo4j/` package (crud, taxonomy, relationships, schema)
 - [ ] F4 — Split `cerid_sync_lib.py` (1300 lines) into `sync/` package (export, import, manifest, client)
-- [ ] Split `config.py` (33 importers) into `config/settings.py`, `config/taxonomy.py`, `config/features.py`
 - [ ] Split `utils/parsers.py` (875 lines) into `parsers/` sub-package (one file per format family)
-- [ ] Remove duplicate `find_stale_artifacts` in `maintenance.py` (reuse `rectify.py` version)
-- [ ] Move `audit.log_conversation_metrics()` to `utils/cache.py`
 
-### 10D: Test Coverage Expansion
-- [ ] F5 — Tests for untested agents: query_agent, triage, rectify, audit, maintenance (5 agents, ~2000 lines, 0 tests)
-- [ ] Tests for `cerid_sync_lib.py` (1300 lines, 0 tests — only cross-machine data durability mechanism)
-- [ ] Tests for `utils/parsers.py` (875 lines, 0 tests — all file format parsing)
+### 10D: Test Coverage + CI Hardening
 - [ ] Tests for `middleware/auth.py` and `middleware/rate_limit.py` (security-critical, 0 tests)
-- [ ] Tests for `routers/mcp_sse.py` / `mcp/tools.py` (MCP protocol + tool dispatch, 0 tests)
-- [ ] Tests for `utils/graph.py` / `db/neo4j/` (9 tests for 17 functions — expand coverage)
+- [ ] Tests for `services/ingestion.py` (extracted service layer)
+- [ ] F5 — Tests for untested agents: query_agent, triage, rectify, audit, maintenance (5 agents, ~2000 lines, 0 tests)
+- [ ] Tests for `sync/` package (1300 lines, 0 tests — only cross-machine data durability mechanism)
+- [ ] Tests for `parsers/` sub-package (875 lines, 0 tests — all file format parsing)
+- [ ] Tests for `mcp/tools.py` (MCP tool registry + dispatch, 0 tests)
+- [ ] Tests for `db/neo4j/` package (9 tests for 17 functions — expand coverage)
+- [ ] G12 — Fix pip-audit to scan installed packages (transitive dependency vulnerabilities)
+- [ ] G13 — Add CodeQL SAST workflow (`.github/workflows/codeql.yml`)
+- [ ] G14 — Raise coverage threshold from 35% to 55%
+- [ ] G15 — Add bundle size monitoring in CI (fail if chunk >800KB)
 - [ ] Frontend component tests (40+ components with 0 tests)
-- [ ] CI coverage threshold enforcement
 
 ### 10E: Smart Routing Intelligence
 - [ ] D1 — Token estimator + context replay cost calculation
@@ -75,15 +91,22 @@
 - [ ] Summarize-and-switch option for large contexts
 - [ ] "Start fresh" option on model switch (from 10B)
 
-### 10F: Interactive Audit & Taxonomy
+### 10F: Interactive Audit, Taxonomy + Operations Docs
 - [ ] B1 — Audit agent report filter toggles, time range selector, manual refresh
 - [ ] C1 — Taxonomy-aware hierarchical KB filtering
+- [ ] G17 — Document API key rotation procedure (`docs/OPERATIONS.md`)
+- [ ] G18 — Document secrets rotation policy
+- [ ] G19 — Add pip-compile version to `DEPENDENCY_COUPLING.md`
+- [ ] G20 — Add Bifrost version to coupling constraints
+- [ ] G21 — Document branch protection rules
+- [ ] G22 — Document rate limiter in-memory state limitation
 
 ### 10G: Knowledge Curation Agent (Design)
 - [ ] C2 — Design doc for artifact quality improvement agent
 
 ### 10H: RAG Evaluation (Research)
 - [ ] E2 — Evaluate embedding models, hybrid weights, chunk sizes
+- [ ] G16 — Evaluate BM25 alternatives (rank_bm25 unmaintained since 2020)
 - [ ] E1 — Artifact preview/generation (depends on E2 decisions)
 
 ## Completed Phases

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-Redis audit logging for ingest and recategorization events.
+Redis audit logging and conversation metrics storage.
 """
 
 from __future__ import annotations
@@ -63,3 +63,35 @@ def get_log(redis_client, limit: int = 50) -> List[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"Failed to read ingest log: {e}")
         return []
+
+
+# ---------------------------------------------------------------------------
+# Conversation metrics storage
+# ---------------------------------------------------------------------------
+
+REDIS_CONV_METRICS_PREFIX = "conv:"
+REDIS_CONV_METRICS_TTL = 86400 * 30  # 30 days
+
+
+def log_conversation_metrics(
+    redis_client,
+    conversation_id: str,
+    model: str,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    latency_ms: int = 0,
+) -> None:
+    """Store per-turn metrics for a conversation in Redis."""
+    key = f"{REDIS_CONV_METRICS_PREFIX}{conversation_id}:metrics"
+    entry = json.dumps({
+        "model": model,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "latency_ms": latency_ms,
+        "timestamp": utcnow_iso(),
+    })
+    try:
+        redis_client.rpush(key, entry)
+        redis_client.expire(key, REDIS_CONV_METRICS_TTL)
+    except Exception as e:
+        logger.warning(f"Failed to log conversation metrics: {e}")

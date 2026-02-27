@@ -10,6 +10,7 @@ Exempt paths: /health, /api/v1/health, /, /docs, /openapi.json, /redoc, /mcp/*
 """
 from __future__ import annotations
 
+import hashlib
 import hmac
 import logging
 import os
@@ -22,6 +23,11 @@ logger = logging.getLogger("ai-companion.auth")
 
 EXEMPT_PATHS = {"/health", "/api/v1/health", "/", "/docs", "/openapi.json", "/redoc"}
 EXEMPT_PREFIXES = ("/mcp/",)
+
+
+def _redact_ip(ip: str) -> str:
+    """Hash-redact an IP address for safe logging."""
+    return hashlib.sha256(ip.encode()).hexdigest()[:12]
 
 
 class APIKeyMiddleware(BaseHTTPMiddleware):
@@ -47,7 +53,7 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         provided = request.headers.get("X-API-Key", "")
         if not hmac.compare_digest(provided, self.api_key):
             client = request.client.host if request.client else "unknown"
-            logger.warning(f"Unauthorized request to {path} from {client}")
+            logger.warning(f"Unauthorized request to {path} from {_redact_ip(client)}")
             return JSONResponse(
                 status_code=401,
                 content={"detail": "Invalid or missing API key"},
