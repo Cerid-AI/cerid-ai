@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """Ingestion endpoints and core ingest service functions."""
 from __future__ import annotations
 
@@ -72,8 +75,8 @@ def _reingest_artifact(
 ) -> Dict:
     """Update an existing artifact with new content. Preserves relationships."""
     chroma = get_chroma()
-    collection_name = f"domain_{domain.replace(' ', '_').lower()}"
-    collection = chroma.get_or_create_collection(name=collection_name)
+    coll_name = config.collection_name(domain)
+    collection = chroma.get_or_create_collection(name=coll_name)
     artifact_id = prev["id"]
 
     # Delete old chunks from ChromaDB
@@ -98,8 +101,8 @@ def _reingest_artifact(
     try:
         from utils.bm25 import index_chunks
         index_chunks(domain, chunk_ids, chunks)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"BM25 indexing failed during re-ingest (non-blocking): {e}")
 
     # Update Neo4j artifact (preserves relationships)
     try:
@@ -134,8 +137,8 @@ def ingest_content(
 ) -> Dict:
     """Core ingest path. Called by REST endpoints, agents.py triage, and mcp_sse execute_tool."""
     chroma = get_chroma()
-    collection_name = f"domain_{domain.replace(' ', '_').lower()}"
-    collection = chroma.get_or_create_collection(name=collection_name)
+    coll_name = config.collection_name(domain)
+    collection = chroma.get_or_create_collection(name=coll_name)
 
     artifact_id = str(uuid.uuid4())
     content_hash = _content_hash(content)
@@ -227,8 +230,8 @@ def ingest_content(
             logger.info(f"Concurrent duplicate detected via constraint: {base_meta.get('filename', '?')}")
             try:
                 collection.delete(ids=chunk_ids)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to clean up chunks after concurrent duplicate: {e}")
             return {
                 "status": "duplicate",
                 "artifact_id": artifact_id,
@@ -273,8 +276,8 @@ def ingest_content(
         )
     except RuntimeError:
         pass  # no running loop (e.g. sync context) — webhook skipped
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Webhook notification failed (non-blocking): {e}")
 
     # Surface related artifacts in response (Phase 4C.2)
     related = []
@@ -288,8 +291,8 @@ def ingest_content(
                  "relationship_type": r.get("relationship_type", "")}
                 for r in found
             ]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Related artifacts lookup failed (non-blocking): {e}")
 
     result = {
         "status": "success",
@@ -400,8 +403,8 @@ async def ingest_endpoint(req: IngestRequest):
     try:
         from utils.query_cache import invalidate_all
         invalidate_all()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Cache invalidation failed (non-blocking): {e}")
     return result
 
 
@@ -419,8 +422,8 @@ async def ingest_file_endpoint(req: IngestFileRequest):
         try:
             from utils.query_cache import invalidate_all
             invalidate_all()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Cache invalidation failed (non-blocking): {e}")
         return result
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -465,14 +468,14 @@ async def ingest_feedback_endpoint(req: FeedbackIngestRequest):
                 filename=filename,
                 conversation_id=req.conversation_id,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Feedback audit log failed (non-blocking): {e}")
 
         try:
             from utils.query_cache import invalidate_all
             invalidate_all()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Cache invalidation failed (non-blocking): {e}")
 
         # Trigger hallucination check if enabled (async, non-blocking)
         if config.ENABLE_HALLUCINATION_CHECK and result.get("status") == "success":
@@ -502,8 +505,8 @@ async def ingest_feedback_endpoint(req: FeedbackIngestRequest):
                     output_tokens=req.output_tokens,
                     latency_ms=req.latency_ms,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Conversation metrics logging failed (non-blocking): {e}")
 
         return result
     except Exception as e:

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 BM25 keyword index management for hybrid search (Phase 4B.1).
 

@@ -1,6 +1,9 @@
+// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState, useRef, useCallback } from "react"
 import { streamChat, ingestFeedback, extractMemories } from "@/lib/api"
-import type { ChatMessage } from "@/lib/types"
+import type { ChatMessage, SourceRef } from "@/lib/types"
 
 interface UseChatOptions {
   onMessageStart: (convoId: string, message: ChatMessage) => void
@@ -13,7 +16,7 @@ export function useChat({ onMessageStart, onMessageUpdate, feedbackEnabled }: Us
   const abortRef = useRef<AbortController | null>(null)
 
   const send = useCallback(
-    async (convoId: string, messages: Pick<ChatMessage, "role" | "content">[], model: string) => {
+    async (convoId: string, messages: Pick<ChatMessage, "role" | "content">[], model: string, sourcesUsed?: SourceRef[]) => {
       setIsStreaming(true)
       abortRef.current = new AbortController()
 
@@ -23,6 +26,7 @@ export function useChat({ onMessageStart, onMessageUpdate, feedbackEnabled }: Us
         content: "",
         model,
         timestamp: Date.now(),
+        sourcesUsed,
       }
       onMessageStart(convoId, assistantMsg)
 
@@ -52,7 +56,6 @@ export function useChat({ onMessageStart, onMessageUpdate, feedbackEnabled }: Us
         setIsStreaming(false)
         abortRef.current = null
 
-        // Feedback loop: auto-ingest completed responses
         if (feedbackEnabled && !aborted && accumulated.length > 100) {
           const lastUserMsg = [...messages].reverse().find((m) => m.role === "user")
           if (lastUserMsg) {

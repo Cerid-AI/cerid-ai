@@ -1,23 +1,64 @@
 # Cerid AI — Task Tracker
 
-> **Last updated:** 2026-02-25
-> **Current status:** Phase 9 complete + Neo4j auth hardening
+> **Last updated:** 2026-02-26
+> **Current status:** Phase 10A + 10B complete. Codebase audit + dependency management complete. 5 open issues remain.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md)
 
-## Next: Phase 10 — Open Issues
+## Current: Phase 10 — Commercial & Open-Source Readiness
 
-See [docs/ISSUES.md](../docs/ISSUES.md) for the full backlog (9 items across 5 categories).
+### 10A: Production Quality ✅
+- [x] A1 — Chat viewport overflow fix (CSS `min-h-0` cascade)
+- [x] B2 — Source attribution in chat (`SourceRef`, collapsible component)
+- [x] Apache-2.0 copyright headers on 132 source files
+- [x] Update stale documentation (this file, ISSUES.md, reference doc, README)
+- [x] Add vitest + @testing-library/react to frontend
+- [x] Write foundational frontend tests (34 tests across 3 files)
+- [x] Harden CI pipeline (frontend lint + types + tests + build)
 
-**Priority order:**
-1. A1 — Chat viewport fix (CSS, quick win)
-2. B2 — Source attribution in chat
-3. B3 + D2 — Model context break indicator
-4. D1 — Smart routing context/token cost evaluation
-5. B1 — Interactive audit agent in GUI
-6. C1 — Taxonomy-aware KB filtering
-7. C2 — Knowledge curation agent
-8. E2 — RAG integration & vectorization evaluation
-9. E1 — Artifact preview/generation
+### 10B: UX Polish — Model Context Breaks ✅
+- [x] B3 + D2 — Model switch divider (visual break when changing models)
+- [x] Always-visible model badge with provider colors
+- [ ] "Start fresh" option on model switch (deferred to 10C)
+
+### Codebase Audit ✅
+- [x] Dependency purge (sentence-transformers, pandas removed, ~700MB Docker savings)
+- [x] Docker security hardening (non-root user, .dockerignore, pinned images)
+- [x] Dead code removal (unused imports, duplicate functions, AI slop comments)
+- [x] Logic consolidation (collection name helper, LLM JSON parsing, centralized constants)
+- [x] Error handling overhaul (silent `except: pass` → logged, `print()` → `logger`)
+- [x] Input validation (Pydantic response models, parameter bounds)
+- [x] Accessibility fixes (33 across 14 components — aria-labels, keyboard nav, sr-only)
+- [x] Type safety (tags normalized to `string[]` at API boundary, error cast fixes)
+- [x] CI hardening (security scanning, coverage thresholds, Docker image scanning)
+- [x] Frontend test expansion (34 → 68 tests: api.ts, model-router.ts, source-attribution)
+
+### Dependency Management ✅
+- [x] Standardize Node version to 22 (.nvmrc, Dockerfile, package.json engines)
+- [x] Python lock files with pip-compile (requirements.lock with hashes)
+- [x] Pin CI tool versions (ruff, bandit, pip-audit, trivy-action SHA)
+- [x] Pin Docker image tags (neo4j, redis, nginx, python, node)
+- [x] Dependabot configuration (weekly grouped PRs for pip, npm, actions, Docker)
+- [x] Pre-commit hook (lock file sync check)
+- [x] Cross-service version coupling docs (DEPENDENCY_COUPLING.md)
+- [x] CI lock-sync job
+- [x] Makefile targets (lock-python, install-hooks, deps-check)
+
+### 10C: Smart Routing Intelligence
+- [ ] D1 — Token estimator + context replay cost calculation
+- [ ] Context usage indicator in chat dashboard
+- [ ] Summarize-and-switch option for large contexts
+- [ ] "Start fresh" option on model switch (from 10B)
+
+### 10D: Interactive Audit & Taxonomy
+- [ ] B1 — Audit agent report filter toggles, time range selector, manual refresh
+- [ ] C1 — Taxonomy-aware hierarchical KB filtering
+
+### 10E: Knowledge Curation Agent (Design)
+- [ ] C2 — Design doc for artifact quality improvement agent
+
+### 10F: RAG Evaluation (Research)
+- [ ] E2 — Evaluate embedding models, hybrid weights, chunk sizes
+- [ ] E1 — Artifact preview/generation (depends on E2 decisions)
 
 ## Completed Phases
 
@@ -47,28 +88,3 @@ See [docs/ISSUES.md](../docs/ISSUES.md) for the full backlog (9 items across 5 c
 - [x] Phase 9B: Wire 5 structural gaps — hallucination auto-fetch, smart suggestions, memory trigger, settings sync, live metrics
 - [x] Phase 9C: 3 feature enhancements — file upload, sub-category/tag display, tag browsing
 - [x] Phase 9D: Neo4j auth hardening — docker-compose env var fix, Cypher auth validation, error detail
-
-<details>
-<summary>Phase 5 Details (completed)</summary>
-
-**Pre-Phase 5: Machine Setup**
-- [x] `git pull` to get all Phase 4 changes
-- [x] Install `age`: `brew install age`
-- [x] Copy `~/.config/cerid/age-key.txt` from primary machine
-- [x] Run `./scripts/env-unlock.sh` to decrypt `.env`
-- [x] Stop legacy containers, verify Docker daemon running
-
-**Phase 5A: Fix Infrastructure**
-- [x] Create `stacks/infrastructure/docker-compose.yml`
-- [x] Update `scripts/start-cerid.sh` — add infrastructure as step 1/4
-- [x] Create `scripts/validate-env.sh`
-- [x] Update `.gitignore` — add `stacks/infrastructure/data/`
-
-**Phase 5B: Knowledge Sync**
-- [x] Add sync config to `.env.example` and `config.py`
-- [x] Create `cerid_sync_lib.py` — export/import for Neo4j, ChromaDB, BM25, Redis
-- [x] Create `scripts/cerid-sync.py` — CLI wrapper
-- [x] Create `sync_check.py` — auto-import on startup
-- [x] Verify export → wipe → restart → auto-import → data restored
-
-</details>

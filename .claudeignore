@@ -2,6 +2,8 @@
 src/web/node_modules/
 src/web/dist/
 src/web/package-lock.json
+src/mcp/requirements.lock
+src/mcp/requirements-dev.lock
 
 # Runtime data volumes (gitignored but may exist locally)
 stacks/infrastructure/data/

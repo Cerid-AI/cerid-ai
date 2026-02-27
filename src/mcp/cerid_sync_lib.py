@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Cerid AI Sync Library — cross-machine knowledge base export/import via Dropbox.
 
@@ -250,25 +253,24 @@ def export_chroma(chroma_url: Optional[str] = None, sync_dir: Optional[str] = No
     total_chunks = 0
 
     for domain in config.DOMAINS:
-        collection_name = f"domain_{domain}"
-        out_path = str(out_dir / f"domain_{domain}.jsonl")
+        coll_name = config.collection_name(domain)
+        out_path = str(out_dir / f"{coll_name}.jsonl")
         chunk_count = 0
 
         try:
-            # Retrieve collection metadata to get total count
             coll_resp = httpx.get(
-                f"{chroma_url}/api/v1/collections/{collection_name}",
+                f"{chroma_url}/api/v1/collections/{coll_name}",
                 timeout=30.0,
             )
             if coll_resp.status_code == 404:
-                logger.warning("ChromaDB collection %s not found — skipping", collection_name)
+                logger.warning("ChromaDB collection %s not found — skipping", coll_name)
                 domain_counts[domain] = 0
                 # Write empty file so manifest can still checksum it
                 _write_jsonl(out_path, [])
                 continue
             coll_resp.raise_for_status()
             coll_data = coll_resp.json()
-            collection_id = coll_data.get("id", collection_name)
+            collection_id = coll_data.get("id", coll_name)
 
             with open(out_path, "w", encoding="utf-8") as fh:
                 offset = 0
@@ -457,8 +459,9 @@ def write_manifest(
 
     # Add per-domain Chroma files
     for domain in config.DOMAINS:
-        rel = f"{CHROMA_SUBDIR}/domain_{domain}.jsonl"
-        tracked_files.append((rel, str(sync_path / CHROMA_SUBDIR / f"domain_{domain}.jsonl")))
+        coll_name = config.collection_name(domain)
+        rel = f"{CHROMA_SUBDIR}/{coll_name}.jsonl"
+        tracked_files.append((rel, str(sync_path / CHROMA_SUBDIR / f"{coll_name}.jsonl")))
 
     # Add BM25 files discovered on disk
     bm25_src = sync_path / BM25_SUBDIR
@@ -754,8 +757,8 @@ def import_chroma(
     total_skipped = 0
 
     for domain in config.DOMAINS:
-        collection_name = f"domain_{domain}"
-        src_path = str(chroma_dir / f"domain_{domain}.jsonl")
+        coll_name = config.collection_name(domain)
+        src_path = str(chroma_dir / f"{coll_name}.jsonl")
 
         if not os.path.exists(src_path):
             logger.warning("No ChromaDB export file found for domain '%s': %s", domain, src_path)
@@ -767,12 +770,11 @@ def import_chroma(
 
         try:
             # Ensure the collection exists (create if absent)
-            _chroma_ensure_collection(chroma_url, collection_name)
+            _chroma_ensure_collection(chroma_url, coll_name)
 
-            # Fetch collection ID (needed for data endpoint)
-            collection_id = _chroma_get_collection_id(chroma_url, collection_name)
+            collection_id = _chroma_get_collection_id(chroma_url, coll_name)
             if not collection_id:
-                logger.error("Cannot resolve collection ID for %s — skipping", collection_name)
+                logger.error("Cannot resolve collection ID for %s — skipping", coll_name)
                 domain_stats[domain] = {"added": 0, "skipped": 0}
                 continue
 
@@ -1055,8 +1057,8 @@ def import_redis(
                 entry = json.loads(raw)
                 key = (entry.get("artifact_id", ""), entry.get("timestamp", ""))
                 existing_keys.add(key)
-            except json.JSONDecodeError:
-                pass
+            except json.JSONDecodeError as e:
+                logger.debug("Skipping malformed Redis log entry during dedup: %s", e)
     except Exception as exc:
         logger.error("Cannot read existing Redis log for dedup: %s", exc)
         return {"error": str(exc), "entries_added": 0, "entries_skipped": 0}
@@ -1157,13 +1159,13 @@ def compare_status(
         logger.warning("Neo4j local count failed: %s", exc)
 
     for domain in config.DOMAINS:
-        collection_name = f"domain_{domain}"
+        coll_name = config.collection_name(domain)
         try:
             coll_resp = httpx.get(
-                f"{chroma_url}/api/v1/collections/{collection_name}", timeout=10.0
+                f"{chroma_url}/api/v1/collections/{coll_name}", timeout=10.0
             )
             if coll_resp.status_code == 200:
-                coll_id = coll_resp.json().get("id", collection_name)
+                coll_id = coll_resp.json().get("id", coll_name)
                 count_resp = httpx.get(
                     f"{chroma_url}/api/v1/collections/{coll_id}/count", timeout=10.0
                 )

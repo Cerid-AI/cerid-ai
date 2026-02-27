@@ -1,11 +1,20 @@
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 FROM python:3.11-slim
 
 WORKDIR /app
 
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+RUN useradd -m -u 1000 cerid && chown -R cerid:cerid /app
+USER cerid
+
+COPY --chown=cerid:cerid . .
 
 EXPOSE 8501
 

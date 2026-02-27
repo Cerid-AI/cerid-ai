@@ -9,7 +9,7 @@
 
 Cerid AI is a self-hosted, privacy-first Personal AI Knowledge Companion. It unifies multi-domain knowledge bases (code, finance, projects, artifacts) into a context-aware LLM interface with RAG-powered retrieval and intelligent agents. All data stays local; only LLM API calls go external.
 
-**Status:** Phase 9 complete + Neo4j auth hardening. Phases 0–9 complete. 7 agents operational (query, triage, rectify, audit, maintenance, hallucination, memory); 15 MCP tools; hybrid BM25+vector search; scheduled maintenance; CI/CD pipeline; multi-machine sync via Dropbox. React GUI (port 3000) with streaming chat, KB context pane, monitoring, audit dashboards, hallucination panel, smart model router, KB suggestions, file upload, tag browsing, and conversation analytics. GUI fully wired to Phase 7/8 backend features: auto hallucination checks, memory extraction, smart KB suggestions as-you-type, server-synced settings, sub-category/tag display, and upload ingestion. Backend hardened with API key auth, rate limiting, Redis query caching, conversation analytics, and optional field-level encryption. Neo4j health check validates auth (Cypher query, not just transport). Plugin system with feature tiers (community/pro). Hierarchical taxonomy with sub-categories and tags. Smart ingestion with new parsers (.eml, .mbox, .epub, .rtf), semantic dedup, and enhanced CSV/TSV.
+**Status:** Phases 0–9 complete. Phase 10A (production quality) + 10B (UX polish) complete. Codebase audit and dependency management shipped. 7 agents operational (query, triage, rectify, audit, maintenance, hallucination, memory); 15 MCP tools; hybrid BM25+vector search; scheduled maintenance; CI/CD pipeline with security scanning and coverage; multi-machine sync via Dropbox. React GUI (port 3000) with streaming chat, source attribution, model switch dividers, KB context pane, monitoring, audit dashboards, hallucination panel, smart model router, KB suggestions, file upload, tag browsing, memories pane, settings pane, and conversation analytics. Backend hardened with API key auth, rate limiting, Redis query caching, conversation analytics, and optional field-level encryption. Docker images pinned, Python deps locked with pip-compile hashes, Dependabot configured. 145+ Python tests, 68 frontend tests. Plugin system with feature tiers (community/pro). Hierarchical taxonomy with sub-categories and tags.
 
 ## Architecture
 
@@ -53,12 +53,14 @@ React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly
 ├── CLAUDE.md                         # This file — developer guide for AI sessions
 ├── .env.age                          # Encrypted secrets (age)
 ├── .env.example                      # Template for .env
+├── Makefile                          # lock-python, install-hooks, deps-check
 ├── scripts/
 │   ├── start-cerid.sh                # One-command 4-step stack startup
 │   ├── validate-env.sh               # Pre-flight environment validation
 │   ├── cerid-sync.py                 # Knowledge base sync CLI (export/import/status)
 │   ├── env-lock.sh                   # Encrypt .env → .env.age
-│   └── env-unlock.sh                 # Decrypt .env.age → .env
+│   ├── env-unlock.sh                 # Decrypt .env.age → .env
+│   └── hooks/pre-commit              # Lock file sync check (git pre-commit hook)
 ├── docs/CERID_AI_PROJECT_REFERENCE.md # Detailed technical reference
 ├── src/mcp/
 │   ├── main.py                       # FastAPI MCP server entry point
@@ -70,6 +72,7 @@ React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly
 │   ├── routers/                      # FastAPI routers (Phase 4A split)
 │   │   ├── health.py, query.py, ingestion.py, artifacts.py
 │   │   ├── agents.py, digest.py, mcp_sse.py, taxonomy.py
+│   │   ├── settings.py, upload.py, memories.py
 │   │   └── __init__.py
 │   ├── plugins/                      # Plugin system (Phase 8A)
 │   │   └── ocr/                      # OCR parser plugin (pro tier, requires docling)
@@ -89,7 +92,8 @@ React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly
 │   │   ├── encryption.py             # Field-level Fernet encryption (Phase 8D)
 │   │   ├── sync_backend.py           # Pluggable sync backends (Phase 8D)
 │   │   ├── features.py               # Feature flags and tier gating (Phase 8A)
-│   │   └── temporal.py               # Temporal intent parsing + recency scoring
+│   │   ├── temporal.py               # Temporal intent parsing + recency scoring
+│   │   └── llm_parsing.py            # Strip markdown fences from LLM JSON responses
 │   ├── scripts/
 │   │   ├── watch_ingest.py           # Watchdog folder watcher (host process)
 │   │   ├── watch_obsidian.py         # Obsidian vault watcher (host process)
@@ -104,26 +108,32 @@ React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly
 │   │   └── memory.py                 # Memory extraction from conversations (Phase 7C)
 │   ├── Dockerfile
 │   ├── docker-compose.yml            # MCP server + Dashboard + React GUI
-│   └── requirements.txt
+│   ├── requirements.txt              # Python deps (human-editable ranges)
+│   ├── requirements.lock             # Pinned deps with hashes (generated by pip-compile)
+│   └── requirements-dev.txt          # Test/dev deps (pytest, httpx, etc.)
 ├── src/gui/
 │   ├── app.py                        # Streamlit dashboard (5 panes) — legacy
 │   ├── Dockerfile
 │   └── requirements.txt
 ├── src/web/                            # React GUI (Phase 6)
 │   ├── package.json                   # React 19, Vite 7, Tailwind v4, shadcn/ui
+│   ├── .nvmrc                         # Node version source of truth (22)
 │   ├── vite.config.ts                 # Tailwind plugin, @/ alias, Bifrost proxy, manualChunks
-│   ├── Dockerfile                     # Multi-stage: Node build → nginx:alpine
+│   ├── Dockerfile                     # Multi-stage: Node build → nginx:alpine (pinned)
 │   ├── nginx.conf                     # SPA fallback + Bifrost reverse proxy
 │   └── src/
+│       ├── __tests__/                 # Vitest tests (68 tests across 5 files)
 │       ├── lib/types.ts, api.ts, model-router.ts  # Types, API clients, model recommendation engine
 │       ├── hooks/                     # use-theme, use-chat, use-conversations, use-kb-context, use-settings, use-model-router, use-smart-suggestions, use-live-metrics
-│       ├── contexts/                  # SettingsContext (model prefs, feedback toggle)
+│       ├── contexts/                  # SettingsContext (model prefs, feedback toggle), KBInjectionContext
 │       └── components/
 │           ├── layout/                # Sidebar nav, status bar
-│           ├── chat/                  # Chat panel, message list, chat-dashboard, model router banner, smart suggestions
+│           ├── chat/                  # Chat panel, message list, chat-dashboard, model router banner, smart suggestions, source attribution, model switch divider
 │           ├── kb/                    # KB context panel, artifact cards, domain filter, graph preview, file upload, tag filter
 │           ├── monitoring/            # Health cards, collection chart, scheduler status
 │           ├── audit/                 # Activity chart, ingestion timeline, cost breakdown, query stats, hallucination panel, conversation stats
+│           ├── memories/              # Memories browsing pane
+│           ├── settings/              # Server-synced settings pane
 │           └── ui/                    # shadcn/ui primitives (button, card, badge, etc.)
 ├── stacks/
 │   ├── infrastructure/               # Neo4j, ChromaDB, Redis (Phase 5)
@@ -205,6 +215,17 @@ Run before starting work to verify the stack is ready:
 - `GET /agent/hallucination/{conversation_id}` — Retrieve stored hallucination report
 - `POST /agent/memory/extract` — Extract and store memories from conversation
 - `POST /agent/memory/archive` — Archive old conversation memories
+
+**Settings & memories:**
+- `GET /settings` — Server configuration and feature flags
+- `PATCH /settings` — Partial settings update
+- `GET /memories` — List/filter memories (type, conversation_id, limit, offset)
+- `PATCH /memories/{id}` — Update memory summary
+- `DELETE /memories/{id}` — Delete a memory
+
+**File upload:**
+- `POST /upload` — Upload file with optional domain, sub_category, tags, categorize_mode (50MB max)
+- `GET /upload/supported` — List supported file extensions
 
 **MCP protocol:**
 - `GET /mcp/sse` — SSE stream (MCP protocol, JSON-RPC 2.0)
@@ -341,6 +362,32 @@ python3 scripts/cerid-sync.py status
 ├── bm25/                   # BM25 corpus files
 └── redis/                  # audit_log.jsonl
 ```
+
+### Dependency Management
+
+Python uses `pip-compile` for reproducible builds with hash verification. NPM uses `package-lock.json`.
+
+```bash
+# Regenerate Python lock files after editing requirements.txt
+make lock-python
+
+# Install git pre-commit hook (checks lock files are in sync)
+make install-hooks
+
+# Verify all lock files are current
+make deps-check
+```
+
+**Key files:**
+- `src/mcp/requirements.txt` — Human-editable ranges (source of truth)
+- `src/mcp/requirements.lock` — Generated by `pip-compile --generate-hashes`
+- `src/mcp/requirements-dev.txt` — Test/dev deps only
+- `Makefile` — Convenience targets
+- `scripts/hooks/pre-commit` — Blocks commits when lock files are stale
+- `.github/dependabot.yml` — Weekly grouped PRs for pip, npm, actions, Docker
+- `docs/DEPENDENCY_COUPLING.md` — Cross-service version constraints
+
+**Cross-service version coupling:** See `docs/DEPENDENCY_COUPLING.md` for constraints (ChromaDB client/server, spaCy lib/model, Node version, Python version). CI enforces lock file sync via `lock-sync` job.
 
 ### Extensibility
 
@@ -542,4 +589,7 @@ Admin and monitoring UI at `http://localhost:8501` (container: `ai-companion-das
   - **9B (Complete):** Wire 5 structural gaps — hallucination auto-fetch after chat (refreshKey + 2s delay), smart KB suggestions as-you-type (useSmartSuggestions wired into ChatInput), memory extraction auto-trigger (after 3+ user messages), server-synced settings (fetchSettings hydration + updateSettings push), ChatDashboard refactored to useLiveMetrics hook
   - **9C (Complete):** 3 feature enhancements — file upload button in Knowledge pane (uploadFile API), sub-category badge + tag pills on artifact cards, client-side tag browsing/filtering from loaded artifacts
   - **9D (Complete):** Neo4j auth hardening — fixed docker-compose env var passthrough bug (empty `NEO4J_PASSWORD` overriding env_file), health check validates auth via Cypher query (not just `verify_connectivity()`), early RuntimeError on empty password, error detail in health responses, config.py startup warning, health-cards case-insensitive error prefix
-- **Open Issues:** See [`docs/ISSUES.md`](docs/ISSUES.md) for tracked bugs, feature gaps, and architecture evaluations (9 items across 5 categories).
+- **Phase 10A (Complete):** Production Quality — copyright headers, source attribution in chat, frontend tests (68), CI hardening (security scanning, coverage, Docker scanning)
+- **Phase 10B (Complete):** UX Polish — model switch dividers, per-message model badges with provider colors
+- **Codebase Audit (Complete):** Accessibility fixes (33 across 14 components), type safety (tag normalization at API boundary), error handling overhaul, dead code removal, logic consolidation (collection name helper, LLM JSON parsing, centralized constants), dependency management (pip-compile lock files, Docker image pinning, Dependabot, pre-commit hooks)
+- **Open Issues:** See [`docs/ISSUES.md`](docs/ISSUES.md) for tracked bugs, feature gaps, and architecture evaluations (5 open items across 4 categories).

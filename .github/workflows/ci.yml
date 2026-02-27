@@ -7,6 +7,7 @@ on:
     branches: [main]
 
 jobs:
+  # Python backend
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -14,7 +15,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install ruff
+      - run: pip install ruff==0.15.4
       - run: ruff check src/mcp/
 
   test:
@@ -26,11 +27,80 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: pip install -r src/mcp/requirements.txt
-      - run: pip install pytest pytest-asyncio httpx
-      - run: cd src/mcp && python -m pytest tests/ -v --tb=short
+      - run: pip install pytest pytest-asyncio httpx pytest-cov
+      - name: Run tests with coverage
+        run: cd src/mcp && python -m pytest tests/ -v --tb=short --cov=. --cov-report=term-missing --cov-fail-under=35
 
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Python security scan (bandit)
+        run: pip install bandit==1.9.4 && bandit -r src/mcp/ -ll --skip B101 -x src/mcp/tests
+      - name: Python dependency audit
+        run: |
+          pip install pip-audit==2.10.0
+          pip install -r src/mcp/requirements.txt
+          pip-audit
+
+  lock-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pip-tools
+      - name: Check Python lock file is up to date
+        run: |
+          cd src/mcp
+          pip-compile requirements.txt -o /tmp/requirements.lock --generate-hashes --no-header --allow-unsafe
+          diff requirements.lock /tmp/requirements.lock || (echo "::error::requirements.lock is out of date. Run: cd src/mcp && pip-compile requirements.txt -o requirements.lock --generate-hashes --no-header --allow-unsafe" && exit 1)
+
+  # Frontend
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: src/web/.nvmrc
+          cache: npm
+          cache-dependency-path: src/web/package-lock.json
+      - run: npm ci
+      - name: TypeScript type check
+        run: npx tsc -b
+      - name: ESLint
+        run: npm run lint
+      - name: Vitest
+        run: npm test
+      - name: Vite build
+        run: npx vite build
+      - name: NPM dependency audit
+        run: npm audit --audit-level=moderate || true
+
+  # Docker
   docker:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -t cerid-ai-test src/mcp/
+      - run: docker build -t cerid-mcp-test src/mcp/
+      - run: docker build -t cerid-web-test src/web/
+      - name: Scan MCP Docker image
+        uses: aquasecurity/trivy-action@1bd062560b422f5944df1de50abd05162bea079e
+        with:
+          image-ref: cerid-mcp-test
+          severity: CRITICAL,HIGH
+          exit-code: 0
+      - name: Scan Web Docker image
+        uses: aquasecurity/trivy-action@1bd062560b422f5944df1de50abd05162bea079e
+        with:
+          image-ref: cerid-web-test
+          severity: CRITICAL,HIGH
+          exit-code: 0

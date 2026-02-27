@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter"
@@ -7,6 +10,8 @@ import { Button } from "@/components/ui/button"
 import { useState, useCallback, useRef, useEffect } from "react"
 import { cn } from "@/lib/utils"
 import type { ChatMessage } from "@/lib/types"
+import { findModel, PROVIDER_COLORS } from "@/lib/types"
+import { SourceAttribution } from "./source-attribution"
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
@@ -28,7 +33,7 @@ function CopyButton({ text }: { text: string }) {
   }, [text])
 
   return (
-    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleCopy}>
+    <Button variant="ghost" size="icon" className="h-6 w-6" aria-label={copied ? "Copied" : "Copy to clipboard"} onClick={handleCopy}>
       {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
     </Button>
   )
@@ -110,10 +115,27 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
           </div>
         )}
 
-        {message.model && (
-          <span className="text-xs text-muted-foreground">{message.model.split("/").pop()}</span>
+        {!isUser && message.sourcesUsed && message.sourcesUsed.length > 0 && message.content !== "" && (
+          <SourceAttribution sources={message.sourcesUsed} />
         )}
+
+        {message.model && <ModelBadge modelId={message.model} />}
       </div>
     </div>
   )
 }
+
+function ModelBadge({ modelId }: { modelId: string }) {
+  const model = findModel(modelId)
+  const label = model?.label ?? modelId.split("/").pop() ?? modelId
+  const provider = model?.provider ?? ""
+  const colorClass = PROVIDER_COLORS[provider] ?? "bg-muted text-muted-foreground"
+
+  return (
+    <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium", colorClass)}>
+      {label}
+    </span>
+  )
+}
+
+export { ModelBadge }

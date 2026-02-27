@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Cerid AI - Auto-import on startup if local DB is empty and sync data exists.
 Called from main.py lifespan after graph.init_schema().

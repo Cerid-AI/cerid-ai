@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """Health check and collection listing endpoints."""
 from __future__ import annotations
 
@@ -54,11 +57,6 @@ def health_check_endpoint():
 
 @router.get("/collections")
 def list_collections_endpoint():
-    return list_collections()
-
-
-@router.get("/stats")
-def stats_endpoint():
     return list_collections()
 
 

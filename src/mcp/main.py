@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 AI Companion MCP Server - MCP SSE Transport + Ingestion Pipeline
 """

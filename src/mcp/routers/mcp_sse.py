@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """MCP SSE transport — responses go through the SSE stream, not HTTP response body."""
 from __future__ import annotations
 

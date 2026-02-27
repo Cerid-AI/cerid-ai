@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { createContext, useContext, useState, useCallback, type ReactNode } from "react"
 import type { KBQueryResult } from "@/lib/types"
 

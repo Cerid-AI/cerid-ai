@@ -1,17 +1,7 @@
-"""
-Sync Backend Abstraction for Cerid AI (Phase 8D).
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 
-Defines the interface for sync backends. The current implementation
-uses the local filesystem (Dropbox-synced directory). Future backends
-(S3, WebDAV, Git) just implement the abstract class.
-
-Usage:
-    from utils.sync_backend import get_sync_backend
-
-    backend = get_sync_backend()
-    manifest = backend.read_manifest()
-    backend.write_file("neo4j/artifacts.jsonl", data)
-"""
+"""Sync backend abstraction — pluggable backends for knowledge base sync."""
 
 from __future__ import annotations
 
@@ -29,22 +19,11 @@ logger = logging.getLogger("ai-companion.sync")
 
 
 class SyncBackend(ABC):
-    """
-    Abstract base class for sync backends.
-
-    All implementations must support basic file operations on the sync
-    directory structure. The sync library (cerid_sync_lib.py) uses this
-    interface instead of direct pathlib calls.
-    """
+    """Abstract base class for sync backends."""
 
     @abstractmethod
     def read_manifest(self) -> Optional[Dict[str, Any]]:
-        """
-        Read the sync manifest file.
-
-        Returns:
-            Parsed manifest dict, or None if not found.
-        """
+        """Read the sync manifest file."""
         ...
 
     @abstractmethod
@@ -54,39 +33,17 @@ class SyncBackend(ABC):
 
     @abstractmethod
     def write_file(self, relative_path: str, data: bytes) -> None:
-        """
-        Write a file to the sync directory.
-
-        Args:
-            relative_path: Path relative to sync root (e.g., "neo4j/artifacts.jsonl")
-            data: File content as bytes
-        """
+        """Write a file to the sync directory."""
         ...
 
     @abstractmethod
     def read_file(self, relative_path: str) -> Optional[bytes]:
-        """
-        Read a file from the sync directory.
-
-        Args:
-            relative_path: Path relative to sync root
-
-        Returns:
-            File content as bytes, or None if not found.
-        """
+        """Read a file from the sync directory."""
         ...
 
     @abstractmethod
     def list_files(self, prefix: str = "") -> List[str]:
-        """
-        List files in the sync directory.
-
-        Args:
-            prefix: Optional path prefix to filter by (e.g., "chroma/")
-
-        Returns:
-            List of relative paths matching the prefix.
-        """
+        """List files in the sync directory, optionally filtered by prefix."""
         ...
 
     @abstractmethod
@@ -96,11 +53,7 @@ class SyncBackend(ABC):
 
     @abstractmethod
     def delete_file(self, relative_path: str) -> bool:
-        """
-        Delete a file from the sync directory.
-
-        Returns True if deleted, False if not found.
-        """
+        """Delete a file. Returns True if deleted, False if not found."""
         ...
 
     @abstractmethod
@@ -110,12 +63,7 @@ class SyncBackend(ABC):
 
 
 class LocalSyncBackend(SyncBackend):
-    """
-    Local filesystem sync backend.
-
-    Reads/writes to a local directory (typically ~/Dropbox/cerid-sync).
-    This is the current default implementation.
-    """
+    """Local filesystem sync backend (default — typically ~/Dropbox/cerid-sync)."""
 
     def __init__(self, sync_dir: Optional[str] = None):
         self._root = Path(sync_dir or config.SYNC_DIR)
@@ -191,7 +139,6 @@ _BACKENDS: Dict[str, type] = {
     "local": LocalSyncBackend,
 }
 
-# Singleton with thread-safe initialization
 _active_backend: Optional[SyncBackend] = None
 _backend_lock = threading.Lock()
 
@@ -206,18 +153,7 @@ def get_sync_backend(
     backend_type: Optional[str] = None,
     sync_dir: Optional[str] = None,
 ) -> SyncBackend:
-    """
-    Get the active sync backend instance.
-
-    Thread-safe via double-checked locking.
-
-    Args:
-        backend_type: Backend type name (default: "local"). Future: "s3", "webdav", "git"
-        sync_dir: Override sync directory (only for local backend)
-
-    Returns:
-        SyncBackend instance
-    """
+    """Get the active sync backend singleton (thread-safe)."""
     global _active_backend
 
     backend_type = backend_type or os.getenv("CERID_SYNC_BACKEND", "local")

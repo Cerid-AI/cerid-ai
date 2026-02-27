@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """Memories API — browse, edit, and delete extracted conversation memories."""
 from __future__ import annotations
 

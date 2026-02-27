@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # Cerid AI — One-command setup for new installations
 # Usage: ./scripts/setup.sh
 set -euo pipefail

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """Agent endpoints — thin wrappers over agent modules."""
 from __future__ import annotations
 
@@ -7,7 +10,7 @@ from typing import Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from deps import get_chroma, get_neo4j, get_redis
 from routers.ingestion import ingest_content
@@ -19,7 +22,7 @@ logger = logging.getLogger("ai-companion")
 class AgentQueryRequest(BaseModel):
     query: str
     domains: Optional[List[str]] = None
-    top_k: int = 10
+    top_k: int = Field(10, ge=1, le=100)
     use_reranking: bool = True
 
 
@@ -38,13 +41,13 @@ class TriageBatchRequest(BaseModel):
 class RectifyRequest(BaseModel):
     checks: Optional[List[str]] = None
     auto_fix: bool = False
-    stale_days: int = 90
+    stale_days: int = Field(90, ge=1, le=3650)
 
 
 class HallucinationCheckRequest(BaseModel):
     response_text: str
     conversation_id: str
-    threshold: Optional[float] = None
+    threshold: Optional[float] = Field(None, ge=0.0, le=1.0)
 
 
 class MemoryExtractionRequest(BaseModel):
@@ -54,17 +57,17 @@ class MemoryExtractionRequest(BaseModel):
 
 
 class MemoryArchiveRequest(BaseModel):
-    retention_days: int = 180
+    retention_days: int = Field(180, ge=1, le=3650)
 
 
 class AuditRequest(BaseModel):
     reports: Optional[List[str]] = None
-    hours: int = 24
+    hours: int = Field(24, ge=1, le=8760)
 
 
 class MaintenanceRequest(BaseModel):
     actions: Optional[List[str]] = None
-    stale_days: int = 90
+    stale_days: int = Field(90, ge=1, le=3650)
     auto_purge: bool = False
 
 
@@ -244,7 +247,7 @@ async def memory_archive_endpoint(req: MemoryArchiveRequest):
 class VerifyStreamRequest(BaseModel):
     response_text: str
     conversation_id: str
-    threshold: Optional[float] = None
+    threshold: Optional[float] = Field(None, ge=0.0, le=1.0)
 
 
 @router.post("/agent/verify-stream")

@@ -1,21 +1,14 @@
-"""
-Cerid AI - Central Configuration
-Single source of truth for domains, extensions, categorization, and service URLs.
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 
-To add a new domain:  Add to TAXONOMY dict (or set CERID_CUSTOM_DOMAINS env var)
-To add a file type:   Add to SUPPORTED_EXTENSIONS + register a parser in utils/parsers.py
-To change AI tier:    Set CATEGORIZE_MODE env var to manual/smart/pro
-To enable pro tier:   Set CERID_TIER=pro (enables premium plugins and features)
-"""
+"""Central configuration — domains, extensions, categorization, service URLs, and feature flags."""
 
 import json
 import logging as _logging
 import os
 
 # ---------------------------------------------------------------------------
-# Hierarchical Taxonomy (Phase 8C)
-#   Domains → sub-categories → tags
-#   Replaces flat DOMAINS list; backward-compatible via DOMAINS = list(TAXONOMY)
+# Hierarchical Taxonomy (domains -> sub-categories -> tags)
 # ---------------------------------------------------------------------------
 TAXONOMY = {
     "coding": {
@@ -60,11 +53,15 @@ if _custom_domains_raw:
     except (json.JSONDecodeError, TypeError):
         pass  # silently ignore malformed custom domains
 
-# Backward-compatible DOMAINS list — derived from TAXONOMY keys
 DOMAINS = list(TAXONOMY.keys())
 DEFAULT_DOMAIN = "general"
 DEFAULT_SUB_CATEGORY = "general"
 INBOX_DOMAIN = "inbox"  # files here trigger AI categorization
+
+
+def collection_name(domain: str) -> str:
+    """ChromaDB collection name for a given domain."""
+    return f"domain_{domain.replace(' ', '_').lower()}"
 
 # ---------------------------------------------------------------------------
 # Supported file extensions (mapped to parser functions in utils/parsers.py)
@@ -72,9 +69,9 @@ INBOX_DOMAIN = "inbox"  # files here trigger AI categorization
 SUPPORTED_EXTENSIONS = {
     # Documents
     ".pdf", ".docx", ".xlsx", ".csv", ".tsv",
-    # E-books & rich text (Phase 8B)
+    # E-books & rich text
     ".epub", ".rtf",
-    # Email (Phase 8B)
+    # Email
     ".eml", ".mbox",
     # Text / markup
     ".txt", ".md", ".rst", ".log",
@@ -114,6 +111,10 @@ AI_SNIPPET_MAX_CHARS = 1500
 # Bifrost / LLM Gateway
 # ---------------------------------------------------------------------------
 BIFROST_URL = os.getenv("BIFROST_URL", "http://bifrost:8080/v1")
+BIFROST_TIMEOUT = float(os.getenv("BIFROST_TIMEOUT", "30.0"))
+
+# Default model for internal LLM calls (reranking, hallucination, memory extraction)
+LLM_INTERNAL_MODEL = CATEGORIZE_MODELS["smart"]
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -131,13 +132,13 @@ NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "")
 REDIS_URL = os.getenv("REDIS_URL", "redis://ai-companion-redis:6379")
 
 # ---------------------------------------------------------------------------
-# Temporal Awareness (Phase 4B.4)
+# Temporal Awareness
 # ---------------------------------------------------------------------------
 TEMPORAL_HALF_LIFE_DAYS = 30         # exponential decay half-life for recency boost
 TEMPORAL_RECENCY_WEIGHT = 0.1        # max boost from recency (added to relevance)
 
 # ---------------------------------------------------------------------------
-# Cross-Domain Connections (Phase 4B.3)
+# Cross-Domain Connections
 # ---------------------------------------------------------------------------
 DOMAIN_AFFINITY = {
     "coding":        {"projects": 0.6},
@@ -150,14 +151,16 @@ DOMAIN_AFFINITY = {
 CROSS_DOMAIN_DEFAULT_AFFINITY = 0.2   # weight for domain pairs not in DOMAIN_AFFINITY
 
 # ---------------------------------------------------------------------------
-# Hybrid Search (Phase 4B.1)
+# Hybrid Search
 # ---------------------------------------------------------------------------
 HYBRID_VECTOR_WEIGHT = 0.6          # weight for vector (cosine) score
 HYBRID_KEYWORD_WEIGHT = 0.4         # weight for BM25 keyword score
 BM25_DATA_DIR = os.path.join(os.getenv("DATA_DIR", "data"), "bm25")
+QUERY_CONTEXT_MAX_CHARS = 14_000    # max chars assembled for LLM context
+QUERY_RERANK_CANDIDATES = 15        # max candidates sent to LLM reranker
 
 # ---------------------------------------------------------------------------
-# Knowledge Graph Traversal (Phase 4B.2)
+# Knowledge Graph Traversal
 # ---------------------------------------------------------------------------
 GRAPH_TRAVERSAL_DEPTH = 2                     # max hops when traversing relationships
 GRAPH_MAX_RELATED = 5                         # max related artifacts returned per query
@@ -171,7 +174,7 @@ GRAPH_RELATIONSHIP_TYPES = [
 ]
 
 # ---------------------------------------------------------------------------
-# Scheduled Maintenance (Phase 4C.1) — cron expressions
+# Scheduled Maintenance — cron expressions
 # ---------------------------------------------------------------------------
 SCHEDULE_RECTIFY = os.getenv("SCHEDULE_RECTIFY", "0 3 * * *")         # daily 3 AM
 SCHEDULE_HEALTH_CHECK = os.getenv("SCHEDULE_HEALTH_CHECK", "0 */6 * * *")  # every 6h
@@ -179,7 +182,7 @@ SCHEDULE_STALE_DETECTION = os.getenv("SCHEDULE_STALE_DETECTION", "0 4 * * 0")  #
 SCHEDULE_STALE_DAYS = int(os.getenv("SCHEDULE_STALE_DAYS", "90"))
 
 # ---------------------------------------------------------------------------
-# Webhooks (Phase 4C.4)
+# Webhooks
 # ---------------------------------------------------------------------------
 # List of webhook endpoints. Each entry: {"url": "...", "events": ["ingestion.complete", ...]}
 # If "events" is omitted, all events are sent.
@@ -196,48 +199,47 @@ REDIS_INGEST_LOG = "ingest:log"
 REDIS_LOG_MAX = 10_000
 
 # ---------------------------------------------------------------------------
-# Phase 7A: Hallucination Detection
+# Hallucination Detection
 # ---------------------------------------------------------------------------
 ENABLE_HALLUCINATION_CHECK = os.getenv("ENABLE_HALLUCINATION_CHECK", "false").lower() == "true"
 HALLUCINATION_THRESHOLD = float(os.getenv("HALLUCINATION_THRESHOLD", "0.75"))
 
 # ---------------------------------------------------------------------------
-# Phase 7A: Feedback Loop Backend Gate
+# Feedback Loop
 # ---------------------------------------------------------------------------
 ENABLE_FEEDBACK_LOOP = os.getenv("ENABLE_FEEDBACK_LOOP", "false").lower() == "true"
 
 # ---------------------------------------------------------------------------
-# Phase 7B: Smart Orchestration
+# Smart Orchestration
 # NOTE: ENABLE_MODEL_ROUTER and MONTHLY_BUDGET are client-side hints only.
 # They are exposed to the GUI via GET /settings but never enforced server-side.
-# The model router logic lives in src/web/src/lib/model-router.ts.
 # ---------------------------------------------------------------------------
 ENABLE_MODEL_ROUTER = os.getenv("ENABLE_MODEL_ROUTER", "false").lower() == "true"
 COST_SENSITIVITY = os.getenv("COST_SENSITIVITY", "medium")  # low/medium/high
 MONTHLY_BUDGET = float(os.getenv("MONTHLY_BUDGET", "0"))  # USD, 0 = unlimited
 
 # ---------------------------------------------------------------------------
-# Phase 7C: Proactive Knowledge
+# Memory Extraction
 # ---------------------------------------------------------------------------
 ENABLE_MEMORY_EXTRACTION = os.getenv("ENABLE_MEMORY_EXTRACTION", "false").lower() == "true"
 MEMORY_RETENTION_DAYS = int(os.getenv("MEMORY_RETENTION_DAYS", "180"))
 
 # ---------------------------------------------------------------------------
-# Sync (Phase 5B)
+# Sync
 # ---------------------------------------------------------------------------
 SYNC_DIR = os.path.expanduser(os.getenv("CERID_SYNC_DIR", "~/Dropbox/cerid-sync"))
 MACHINE_ID = os.getenv("CERID_MACHINE_ID", os.uname().nodename.split(".")[0])
 SYNC_BACKEND = os.getenv("CERID_SYNC_BACKEND", "local")
 
 # ---------------------------------------------------------------------------
-# Phase 8D: Encryption
+# Encryption
 # ---------------------------------------------------------------------------
 ENABLE_ENCRYPTION = os.getenv("ENABLE_ENCRYPTION", "false").lower() == "true"
 # CERID_ENCRYPTION_KEY is read directly from env by utils/encryption.py
 # Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 
 # ---------------------------------------------------------------------------
-# Phase 8A: Plugin System & Feature Tiers
+# Plugin System & Feature Tiers
 # ---------------------------------------------------------------------------
 # Feature tier: "community" (OSS) or "pro" (commercial plugins enabled)
 FEATURE_TIER = os.getenv("CERID_TIER", "community")

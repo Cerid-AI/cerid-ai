@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -40,7 +43,7 @@ export function KBContextPanel({
         {totalResults > 0 && (
           <span className="text-xs text-muted-foreground">{totalResults} results</span>
         )}
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose}>
+        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose} aria-label="Close knowledge panel">
           <X className="h-4 w-4" />
         </Button>
       </div>
@@ -50,6 +53,7 @@ export function KBContextPanel({
         <div className="flex min-w-0 gap-1.5">
           <Input
             placeholder="Search knowledge base..."
+            aria-label="Search knowledge base"
             value={manualQuery}
             onChange={(e) => setManualQuery(e.target.value)}
             onKeyDown={(e) => {
@@ -58,7 +62,7 @@ export function KBContextPanel({
             }}
             className="h-8 text-xs"
           />
-          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={executeManualSearch}>
+          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={executeManualSearch} aria-label="Search knowledge base">
             <Search className="h-4 w-4" />
           </Button>
         </div>

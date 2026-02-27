@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """Tests for scheduled maintenance engine (Phase 4C.1)."""
 
 import sys

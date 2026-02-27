@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { useEffect, useState } from "react"
 import { fetchSettings, updateSettings } from "@/lib/api"
 import type { ServerSettings, SettingsUpdate } from "@/lib/types"
@@ -201,6 +204,7 @@ export default function SettingsPane() {
                       patch({ hallucination_threshold: parseFloat(e.target.value) })
                     }
                     className="h-1.5 w-32 cursor-pointer accent-primary"
+                    aria-label="Hallucination threshold"
                   />
                 </div>
 

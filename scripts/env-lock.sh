@@ -1,4 +1,7 @@
 #!/bin/bash
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # Encrypt .env → .env.age using the cerid age public key.
 # Safe to run anytime — overwrites previous .env.age.
 

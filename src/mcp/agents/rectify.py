@@ -1,13 +1,7 @@
-"""
-Rectification Agent - Detect and resolve conflicts in the knowledge graph.
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 
-Provides:
-- Duplicate detection across domains (same content in multiple collections)
-- Stale artifact detection (old content that may need refresh)
-- Orphaned chunk cleanup (ChromaDB chunks without Neo4j artifact records)
-- Relationship consistency checks between Neo4j and ChromaDB
-- AI-assisted conflict resolution via Bifrost
-"""
+"""Rectification Agent — detect and resolve conflicts in the knowledge graph."""
 
 from __future__ import annotations
 
@@ -33,12 +27,7 @@ def find_duplicate_artifacts(
     neo4j_driver,
     chroma_client: Optional[chromadb.HttpClient] = None,
 ) -> List[Dict[str, Any]]:
-    """
-    Find artifacts that share the same content_hash but exist in different domains.
-
-    These are true duplicates that were ingested before cross-domain dedup was in place,
-    or were re-ingested after a recategorization.
-    """
+    """Find artifacts sharing the same content_hash across different domains."""
     with neo4j_driver.session() as session:
         result = session.run(
             """
@@ -69,16 +58,11 @@ def find_similar_artifacts(
     threshold: float = 0.15,
     top_k: int = 5,
 ) -> List[Dict[str, Any]]:
-    """
-    Find artifacts in a domain that are semantically similar to the given text.
-
-    Uses ChromaDB cosine distance. Results with distance < threshold are
-    considered potential conflicts (near-duplicates or outdated versions).
-    """
-    collection_name = f"domain_{domain}"
+    """Find semantically similar artifacts (cosine distance < threshold)."""
     try:
-        collection = chroma_client.get_collection(name=collection_name)
-    except Exception:
+        collection = chroma_client.get_collection(name=config.collection_name(domain))
+    except Exception as e:
+        logger.debug(f"Collection not found for domain {domain}: {e}")
         return []
 
     results = collection.query(
@@ -108,11 +92,7 @@ def find_stale_artifacts(
     neo4j_driver,
     days_threshold: int = 90,
 ) -> List[Dict[str, Any]]:
-    """
-    Find artifacts that haven't been updated in a long time.
-
-    These may contain outdated information and should be flagged for review.
-    """
+    """Find artifacts not updated within the threshold period."""
     cutoff = (utcnow().replace(tzinfo=None) - timedelta(days=days_threshold)).isoformat()
 
     with neo4j_driver.session() as session:
@@ -145,26 +125,19 @@ def find_orphaned_chunks(
     neo4j_driver,
     chroma_client: chromadb.HttpClient,
 ) -> Dict[str, Any]:
-    """
-    Find ChromaDB chunks that don't have corresponding Neo4j artifact records.
-
-    This can happen after failed ingestions or interrupted recategorizations.
-    """
-    # Get all artifact IDs from Neo4j
+    """Find ChromaDB chunks without corresponding Neo4j artifact records."""
     with neo4j_driver.session() as session:
         result = session.run("MATCH (a:Artifact) RETURN a.id AS id")
         neo4j_ids = {record["id"] for record in result}
 
-    # Check each domain collection for orphaned chunks
     orphaned = {}
     for domain in config.DOMAINS:
-        collection_name = f"domain_{domain}"
         try:
-            collection = chroma_client.get_collection(name=collection_name)
-        except Exception:
+            collection = chroma_client.get_collection(name=config.collection_name(domain))
+        except Exception as e:
+            logger.debug(f"Collection not found for domain {domain}: {e}")
             continue
 
-        # Get all chunks in this collection
         all_data = collection.get(include=["metadatas"])
         if not all_data["ids"]:
             continue
@@ -197,18 +170,7 @@ def resolve_duplicates(
     keep_artifact_id: str,
     redis_client=None,
 ) -> Dict[str, Any]:
-    """
-    Resolve a duplicate set by keeping one artifact and removing the rest.
-
-    Args:
-        content_hash: The shared content hash
-        keep_artifact_id: The artifact ID to keep
-        redis_client: Optional Redis client for audit logging
-
-    Returns:
-        Summary of removed artifacts
-    """
-    # Find all artifacts with this hash
+    """Resolve a duplicate set by keeping one artifact and removing the rest."""
     with neo4j_driver.session() as session:
         result = session.run(
             """
@@ -225,17 +187,14 @@ def resolve_duplicates(
         if artifact["id"] == keep_artifact_id:
             continue
 
-        # Remove chunks from ChromaDB
         chunk_ids = json.loads(artifact.get("chunk_ids", "[]"))
         if chunk_ids:
-            collection_name = f"domain_{artifact['domain']}"
             try:
-                collection = chroma_client.get_collection(name=collection_name)
+                collection = chroma_client.get_collection(name=config.collection_name(artifact['domain']))
                 collection.delete(ids=chunk_ids)
             except Exception as e:
                 logger.warning(f"Failed to delete chunks for {artifact['id']}: {e}")
 
-        # Remove from Neo4j
         with neo4j_driver.session() as session:
             session.run(
                 """
@@ -251,7 +210,6 @@ def resolve_duplicates(
             "domain": artifact["domain"],
         })
 
-        # Audit log
         if redis_client:
             try:
                 log_event(
@@ -262,8 +220,8 @@ def resolve_duplicates(
                     filename=artifact["filename"],
                     extra={"kept": keep_artifact_id, "content_hash": content_hash},
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Failed to log rectify event: {e}")
 
     return {
         "kept": keep_artifact_id,
@@ -276,24 +234,15 @@ def cleanup_orphaned_chunks(
     chroma_client: chromadb.HttpClient,
     orphaned: Dict[str, List[Dict[str, str]]],
 ) -> Dict[str, int]:
-    """
-    Remove orphaned chunks from ChromaDB.
-
-    Args:
-        orphaned: Output from find_orphaned_chunks()
-
-    Returns:
-        Count of removed chunks per domain
-    """
+    """Remove orphaned chunks from ChromaDB."""
     cleaned = {}
     for domain, chunks in orphaned.items():
         chunk_ids = [c["chunk_id"] for c in chunks]
         if not chunk_ids:
             continue
 
-        collection_name = f"domain_{domain}"
         try:
-            collection = chroma_client.get_collection(name=collection_name)
+            collection = chroma_client.get_collection(name=config.collection_name(domain))
             collection.delete(ids=chunk_ids)
             cleaned[domain] = len(chunk_ids)
         except Exception as e:
@@ -308,11 +257,7 @@ def cleanup_orphaned_chunks(
 # ---------------------------------------------------------------------------
 
 def analyze_domain_distribution(neo4j_driver) -> Dict[str, Any]:
-    """
-    Analyze the distribution of artifacts across domains.
-
-    Returns per-domain counts, total artifacts, and any imbalances.
-    """
+    """Analyze per-domain artifact distribution."""
     with neo4j_driver.session() as session:
         result = session.run(
             """
@@ -333,7 +278,6 @@ def analyze_domain_distribution(neo4j_driver) -> Dict[str, Any]:
             total_artifacts += record["count"]
             total_chunks += (record["total_chunks"] or 0)
 
-    # Add empty domains
     for domain in config.DOMAINS:
         if domain not in distribution:
             distribution[domain] = {"artifacts": 0, "chunks": 0}
@@ -358,21 +302,7 @@ async def rectify(
     auto_fix: bool = False,
     stale_days: int = 90,
 ) -> Dict[str, Any]:
-    """
-    Run rectification checks on the knowledge base.
-
-    Args:
-        neo4j_driver: Neo4j driver instance
-        chroma_client: ChromaDB client instance
-        redis_client: Optional Redis client for audit logging
-        checks: List of checks to run. Default: all checks.
-            Options: "duplicates", "stale", "orphans", "distribution"
-        auto_fix: If True, automatically resolve duplicates and clean orphans
-        stale_days: Days threshold for stale artifact detection
-
-    Returns:
-        Rectification report with findings and actions taken
-    """
+    """Run rectification checks on the knowledge base."""
     all_checks = {"duplicates", "stale", "orphans", "distribution"}
     if checks is None:
         checks = list(all_checks)
@@ -385,7 +315,6 @@ async def rectify(
         "actions": [],
     }
 
-    # Duplicates
     if "duplicates" in checks:
         dupes = find_duplicate_artifacts(neo4j_driver, chroma_client)
         report["findings"]["duplicates"] = {
@@ -411,7 +340,6 @@ async def rectify(
                     **result,
                 })
 
-    # Stale artifacts
     if "stale" in checks:
         stale = find_stale_artifacts(neo4j_driver, days_threshold=stale_days)
         report["findings"]["stale"] = {
@@ -420,7 +348,6 @@ async def rectify(
             "artifacts": stale,
         }
 
-    # Orphaned chunks
     if "orphans" in checks:
         orphans = find_orphaned_chunks(neo4j_driver, chroma_client)
         total_orphans = sum(len(v) for v in orphans.values())
@@ -436,12 +363,10 @@ async def rectify(
                 "cleaned": cleaned,
             })
 
-    # Distribution analysis
     if "distribution" in checks:
         dist = analyze_domain_distribution(neo4j_driver)
         report["findings"]["distribution"] = dist
 
-    # Audit log
     if redis_client:
         try:
             log_event(
@@ -459,7 +384,7 @@ async def rectify(
                     },
                 },
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Failed to log rectify event: {e}")
 
     return report

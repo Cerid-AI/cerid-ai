@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { lazy, Suspense } from "react"
 import { Loader2 } from "lucide-react"
 import { AppLayout } from "@/components/layout/app-layout"

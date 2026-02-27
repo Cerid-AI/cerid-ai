@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState, useEffect, useCallback } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { fetchRelatedArtifacts } from "@/lib/api"
@@ -59,7 +62,7 @@ export function GraphPreview({ artifactId }: GraphPreviewProps) {
     <div className="space-y-1 p-3">
       <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
         {stack.length > 0 && (
-          <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={goBack}>
+          <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={goBack} aria-label="Go back">
             <ArrowLeft className="h-3 w-3" />
           </Button>
         )}
@@ -75,8 +78,11 @@ export function GraphPreview({ artifactId }: GraphPreviewProps) {
         <div
           key={item.id}
           className="flex min-w-0 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-muted/50"
+          role="button"
+          tabIndex={0}
+          aria-label={`Explore ${item.filename} connections`}
           onClick={() => navigateTo(item.id)}
-          title="Click to explore connections"
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); navigateTo(item.id) } }}
         >
           <DomainBadge domain={item.domain} />
           <span className="min-w-0 flex-1 truncate">{item.filename}</span>

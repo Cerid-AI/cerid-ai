@@ -1,9 +1,7 @@
-"""
-Neo4j operations for artifact management and knowledge graph traversal.
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 
-All Cypher queries are isolated here. Routers and agents call these
-functions and never run Cypher directly.
-"""
+"""Neo4j artifact CRUD, relationship management, and taxonomy operations."""
 
 from __future__ import annotations
 
@@ -20,10 +18,7 @@ logger = logging.getLogger("ai-companion.graph")
 
 
 def init_schema(driver) -> None:
-    """
-    Create constraints, indexes, and seed Domain/SubCategory nodes.
-    Idempotent — safe to call on every startup.
-    """
+    """Create constraints, indexes, and seed Domain/SubCategory nodes. Idempotent."""
     with driver.session() as session:
         # --- Core constraints ---
         session.run(
@@ -37,14 +32,14 @@ def init_schema(driver) -> None:
         # Drop the old index if it exists (being replaced by unique constraint)
         try:
             session.run("DROP INDEX artifact_content_hash IF EXISTS")
-        except Exception:
-            pass  # index may not exist
+        except Exception as e:
+            logger.debug(f"Old index drop skipped: {e}")
         session.run(
             "CREATE CONSTRAINT artifact_content_hash_unique IF NOT EXISTS "
             "FOR (a:Artifact) REQUIRE a.content_hash IS UNIQUE"
         )
 
-        # --- Phase 8C: SubCategory + Tag constraints ---
+        # --- SubCategory + Tag constraints ---
         session.run(
             "CREATE CONSTRAINT subcategory_name IF NOT EXISTS "
             "FOR (sc:SubCategory) REQUIRE sc.name IS UNIQUE"
@@ -68,7 +63,7 @@ def init_schema(driver) -> None:
             "FOR (a:Artifact) ON (a.sub_category)"
         )
 
-        # --- Seed Domain + SubCategory nodes from TAXONOMY ---
+        # --- Seed Domain + SubCategory nodes ---
         now = utcnow_iso()
         for domain_name, domain_info in config.TAXONOMY.items():
             session.run(
@@ -152,7 +147,7 @@ def create_artifact(
         record = result.single()
         aid = record["id"] if record else artifact_id
 
-        # Link to SubCategory node if it exists
+        # Link to SubCategory node
         sc_name = f"{domain}/{sub_cat}"
         session.run(
             "MATCH (a:Artifact {id: $aid}), (sc:SubCategory {name: $sc_name}) "
@@ -161,7 +156,7 @@ def create_artifact(
             sc_name=sc_name,
         )
 
-        # Link to Tag nodes (create if needed)
+        # Link to Tag nodes
         try:
             tag_list = json.loads(tags_json) if tags_json else []
         except (json.JSONDecodeError, TypeError):
@@ -217,7 +212,7 @@ def update_artifact(
     chunk_ids_json: str,
     content_hash: str,
 ) -> None:
-    """Update an existing artifact's content fields (re-ingestion). Preserves relationships."""
+    """Update an existing artifact's content fields on re-ingestion."""
     with driver.session() as session:
         session.run(
             """
@@ -335,11 +330,7 @@ def recategorize_artifact(
     artifact_id: str,
     new_domain: str,
 ) -> Dict[str, str]:
-    """
-    Move an artifact's BELONGS_TO relationship to a new Domain.
-
-    Returns {"old_domain": ..., "new_domain": ...}
-    """
+    """Move an artifact's BELONGS_TO relationship to a new Domain."""
     with driver.session() as session:
         result = session.run(
             """
@@ -365,7 +356,7 @@ def recategorize_artifact(
 
 
 # ---------------------------------------------------------------------------
-# Relationship management (Phase 4B.2)
+# Relationship management
 # ---------------------------------------------------------------------------
 
 def create_relationship(
@@ -375,20 +366,7 @@ def create_relationship(
     rel_type: str,
     properties: Optional[Dict[str, Any]] = None,
 ) -> bool:
-    """
-    Create a typed relationship between two artifacts. Idempotent — skips if
-    the relationship already exists.
-
-    Args:
-        driver: Neo4j driver
-        source_id: Source artifact ID
-        target_id: Target artifact ID
-        rel_type: One of config.GRAPH_RELATIONSHIP_TYPES
-        properties: Optional relationship metadata (reason, score, etc.)
-
-    Returns:
-        True if relationship was created, False if it already existed.
-    """
+    """Create a typed relationship between two artifacts. Idempotent."""
     if rel_type not in config.GRAPH_RELATIONSHIP_TYPES:
         logger.warning(f"Unknown relationship type: {rel_type}")
         return False
@@ -430,22 +408,7 @@ def find_related_artifacts(
     max_results: int = 0,
     rel_types: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
-    """
-    Traverse the knowledge graph from the given artifacts and return
-    related artifacts up to `depth` hops away.
-
-    Args:
-        driver: Neo4j driver
-        artifact_ids: Starting artifact IDs
-        depth: Max traversal hops (default from config)
-        max_results: Max related artifacts returned (default from config)
-        rel_types: Filter to these relationship types (default: all)
-
-    Returns:
-        List of related artifact dicts, each with:
-            id, filename, domain, summary, keywords,
-            relationship_type, relationship_depth, relationship_reason
-    """
+    """Traverse the knowledge graph and return related artifacts up to `depth` hops away."""
     if not artifact_ids:
         return []
 
@@ -516,10 +479,7 @@ def _parse_keywords(keywords_json: str) -> Set[str]:
 
 
 def _extract_references(content: str, filename: str) -> Set[str]:
-    """
-    Extract filenames referenced in content via import statements or
-    explicit file mentions.
-    """
+    """Extract filenames referenced in content via imports or explicit mentions."""
     refs: Set[str] = set()
 
     # Python imports: `import foo`, `from foo import bar` (line-start only to avoid prose matches)
@@ -562,26 +522,7 @@ def discover_relationships(
     keywords_json: str,
     content: str = "",
 ) -> int:
-    """
-    Discover and create relationships between a newly ingested artifact
-    and existing artifacts. Called after successful ingestion.
-
-    Strategies:
-        1. Same-directory proximity — artifacts from the same parent directory
-        2. Keyword overlap — artifacts sharing >= GRAPH_MIN_KEYWORD_OVERLAP keywords
-        3. Content references — import statements or filename mentions
-
-    Args:
-        driver: Neo4j driver
-        artifact_id: The newly ingested artifact's ID
-        filename: Filename of the new artifact
-        domain: Domain of the new artifact
-        keywords_json: JSON array of keywords
-        content: Full parsed text (for reference extraction)
-
-    Returns:
-        Number of relationships created.
-    """
+    """Discover and create relationships between a newly ingested artifact and existing ones."""
     created = 0
     new_keywords = _parse_keywords(keywords_json)
 
@@ -670,31 +611,15 @@ def discover_relationships(
 
 
 # ---------------------------------------------------------------------------
-# Taxonomy CRUD (Phase 8C)
+# Taxonomy CRUD
 # ---------------------------------------------------------------------------
 
 def get_taxonomy(driver) -> Dict[str, Any]:
-    """
-    Return the full taxonomy tree from Neo4j.
-
-    Returns:
-        {
-            "domains": {
-                "coding": {
-                    "description": "...", "icon": "...",
-                    "sub_categories": ["python", "javascript", ...],
-                    "artifact_count": 42,
-                },
-                ...
-            },
-            "tags": [{"name": "...", "usage_count": N}, ...],
-        }
-    """
+    """Return the full taxonomy tree from Neo4j (domains, sub-categories, tags)."""
     domains: Dict[str, Any] = {}
     tags: List[Dict[str, Any]] = []
 
     with driver.session() as session:
-        # Fetch domains with artifact counts
         result = session.run(
             "MATCH (d:Domain) "
             "OPTIONAL MATCH (a:Artifact)-[:BELONGS_TO]->(d) "
@@ -710,7 +635,6 @@ def get_taxonomy(driver) -> Dict[str, Any]:
                 "artifact_count": record["artifact_count"],
             }
 
-        # Fetch sub-categories per domain
         result = session.run(
             "MATCH (sc:SubCategory)-[:BELONGS_TO]->(d:Domain) "
             "OPTIONAL MATCH (a:Artifact)-[:CATEGORIZED_AS]->(sc) "
@@ -725,7 +649,6 @@ def get_taxonomy(driver) -> Dict[str, Any]:
                     "artifact_count": record["artifact_count"],
                 })
 
-        # Fetch all tags with usage counts
         result = session.run(
             "MATCH (t:Tag) "
             "OPTIONAL MATCH (a:Artifact)-[:TAGGED_WITH]->(t) "
@@ -789,7 +712,6 @@ def create_sub_category(
     sc_name = f"{domain}/{label}"
 
     with driver.session() as session:
-        # Verify domain exists
         result = session.run(
             "MATCH (d:Domain {name: $domain}) RETURN d.name AS name",
             domain=domain,
@@ -836,15 +758,10 @@ def update_artifact_taxonomy(
     sub_category: Optional[str] = None,
     tags_json: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """
-    Update an artifact's sub-category and/or tags.
-
-    Used by recategorization and manual taxonomy edits.
-    """
+    """Update an artifact's sub-category and/or tags."""
     now = utcnow_iso()
 
     with driver.session() as session:
-        # Get current artifact
         result = session.run(
             "MATCH (a:Artifact {id: $aid}) RETURN a.domain AS domain, "
             "a.sub_category AS sub_category, a.tags AS tags",
@@ -857,7 +774,6 @@ def update_artifact_taxonomy(
         domain = record["domain"]
 
         if sub_category is not None:
-            # Update sub_category property and CATEGORIZED_AS relationship
             session.run(
                 "MATCH (a:Artifact {id: $aid}) "
                 "SET a.sub_category = $sc, a.modified_at = $now",
@@ -865,7 +781,6 @@ def update_artifact_taxonomy(
                 sc=sub_category,
                 now=now,
             )
-            # Remove old CATEGORIZED_AS, create new one
             session.run(
                 "MATCH (a:Artifact {id: $aid})-[r:CATEGORIZED_AS]->() DELETE r",
                 aid=artifact_id,
@@ -879,7 +794,6 @@ def update_artifact_taxonomy(
             )
 
         if tags_json is not None:
-            # Update tags property
             session.run(
                 "MATCH (a:Artifact {id: $aid}) "
                 "SET a.tags = $tags, a.modified_at = $now",
@@ -887,12 +801,10 @@ def update_artifact_taxonomy(
                 tags=tags_json,
                 now=now,
             )
-            # Remove old TAGGED_WITH relationships
             session.run(
                 "MATCH (a:Artifact {id: $aid})-[r:TAGGED_WITH]->() DELETE r",
                 aid=artifact_id,
             )
-            # Create new TAGGED_WITH relationships
             try:
                 tag_list = json.loads(tags_json) if tags_json else []
             except (json.JSONDecodeError, TypeError):

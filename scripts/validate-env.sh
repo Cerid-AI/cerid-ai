@@ -1,4 +1,7 @@
 #!/bin/bash
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # Cerid AI - Environment Validation
 # Run before starting work to verify the stack is ready.
 #

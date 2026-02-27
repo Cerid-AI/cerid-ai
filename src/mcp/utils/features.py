@@ -1,23 +1,7 @@
-"""
-Feature flag system for Cerid AI open-core licensing.
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 
-Controls which features are available based on the deployment tier
-(community vs pro). Provides a decorator for gating endpoints and
-a utility function for runtime checks.
-
-Usage:
-    from utils.features import require_feature, is_feature_enabled
-
-    # As a decorator on FastAPI endpoints:
-    @router.post("/agent/ocr")
-    @require_feature("ocr_parsing")
-    async def ocr_endpoint(...):
-        ...
-
-    # As a runtime check:
-    if is_feature_enabled("semantic_dedup"):
-        results = await semantic_dedup_check(content)
-"""
+"""Feature flag system — tier-based gating (community vs pro)."""
 
 from __future__ import annotations
 
@@ -32,16 +16,7 @@ logger = logging.getLogger("ai-companion.features")
 
 
 def is_feature_enabled(feature_name: str) -> bool:
-    """
-    Check if a feature is enabled in the current deployment tier.
-
-    Args:
-        feature_name: Key from config.FEATURE_FLAGS
-
-    Returns:
-        True if the feature is enabled, False otherwise.
-        Returns False for unknown features (fail-closed for safety).
-    """
+    """Check if a feature is enabled (fail-closed for unknown features)."""
     if feature_name not in config.FEATURE_FLAGS:
         logger.warning(f"Unknown feature flag: '{feature_name}' — defaulting to disabled")
         return False
@@ -49,17 +24,7 @@ def is_feature_enabled(feature_name: str) -> bool:
 
 
 def require_feature(feature_name: str) -> Callable:
-    """
-    Decorator that gates a FastAPI endpoint behind a feature flag.
-
-    Returns HTTP 403 with a clear message if the feature requires
-    a higher tier than currently configured.
-
-    Note: Only supports async endpoint functions (standard for FastAPI).
-
-    Args:
-        feature_name: Key from config.FEATURE_FLAGS
-    """
+    """Decorator that gates a FastAPI endpoint behind a feature flag (async only)."""
     def decorator(func: Callable) -> Callable:
         if not asyncio.iscoroutinefunction(func):
             raise TypeError(
@@ -86,11 +51,7 @@ def require_feature(feature_name: str) -> Callable:
 
 
 def get_feature_status() -> dict:
-    """
-    Return the status of all feature flags.
-
-    Useful for the settings API and health checks.
-    """
+    """Return the status of all feature flags."""
     return {
         "tier": config.FEATURE_TIER,
         "features": {

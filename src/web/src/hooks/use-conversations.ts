@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState, useCallback } from "react"
 import type { Conversation, ChatMessage } from "@/lib/types"
 import { MODELS } from "@/lib/types"
@@ -12,12 +15,10 @@ function migrateConversations(convos: Conversation[]): Conversation[] {
   let changed = false
   const migrated = convos.map((c) => {
     let model = c.model
-    // Add openrouter/ prefix if missing
     if (model && !model.startsWith("openrouter/")) {
       model = `openrouter/${model}`
       changed = true
     }
-    // If still not a known model, reset to default
     if (model && !VALID_MODEL_IDS.has(model)) {
       model = MODELS[0].id
       changed = true

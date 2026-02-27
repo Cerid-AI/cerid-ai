@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 // Convert APScheduler trigger strings into human-readable descriptions.
 // Handles interval, cron, and date trigger formats.
 export function humanizeTrigger(trigger: string): string {

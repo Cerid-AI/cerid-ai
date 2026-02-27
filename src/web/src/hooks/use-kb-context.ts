@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState, useCallback, useMemo } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { queryKB } from "@/lib/api"
@@ -89,7 +92,7 @@ export function useKBContext(latestUserMessage: string): UseKBContextReturn {
     totalResults: data?.total_results ?? 0,
     executionTime: data?.execution_time_ms ?? 0,
     isLoading,
-    error: error as Error | null,
+    error: error ?? null,
 
     activeDomains,
     toggleDomain,

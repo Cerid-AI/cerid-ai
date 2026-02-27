@@ -1,10 +1,23 @@
-// Chat types
+// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 export interface ChatMessage {
   id: string
   role: "user" | "assistant" | "system"
   content: string
   model?: string
   timestamp: number
+  sourcesUsed?: SourceRef[]
+}
+
+export interface SourceRef {
+  artifact_id: string
+  filename: string
+  domain: string
+  sub_category?: string
+  relevance: number
+  chunk_index: number
+  tags?: string[]
 }
 
 export interface Conversation {
@@ -16,7 +29,6 @@ export interface Conversation {
   updatedAt: number
 }
 
-// Model types
 export interface ModelOption {
   id: string
   label: string
@@ -36,7 +48,19 @@ export const MODELS: ModelOption[] = [
   { id: "openrouter/meta-llama/llama-3.3-70b-instruct", label: "Llama 3.3", provider: "Meta", contextWindow: 131_072, inputCostPer1M: 0.12, outputCostPer1M: 0.3 },
 ]
 
-// Health types
+export const PROVIDER_COLORS: Record<string, string> = {
+  Anthropic: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+  OpenAI: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
+  Google: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
+  xAI: "bg-slate-500/15 text-slate-700 dark:text-slate-300",
+  DeepSeek: "bg-cyan-500/15 text-cyan-700 dark:text-cyan-400",
+  Meta: "bg-indigo-500/15 text-indigo-700 dark:text-indigo-400",
+}
+
+export function findModel(modelId: string): ModelOption | undefined {
+  return MODELS.find((m) => m.id === modelId)
+}
+
 export interface HealthResponse {
   status: "healthy" | "degraded"
   services: {
@@ -46,20 +70,17 @@ export interface HealthResponse {
   }
 }
 
-// Theme
 export type Theme = "dark" | "light"
 
-// Domain types
 export const DOMAINS = ["coding", "finance", "projects", "personal", "general", "conversations"] as const
 export type Domain = (typeof DOMAINS)[number]
 
-// Artifact types (GET /artifacts)
 export interface Artifact {
   id: string
   filename: string
   domain: string
   sub_category?: string
-  tags?: string[] | string // May be JSON string array or actual array
+  tags?: string[]
   keywords: string // JSON string array
   summary: string
   chunk_count: number
@@ -68,7 +89,6 @@ export interface Artifact {
   recategorized_at: string | null
 }
 
-// KB query result (POST /agent/query)
 export interface KBQueryResult {
   content: string
   relevance: number
@@ -97,7 +117,6 @@ export interface AgentQueryResponse {
   timestamp: string
 }
 
-// Related artifacts (GET /artifacts/{id}/related)
 export interface RelatedArtifact {
   id: string
   filename: string
@@ -109,13 +128,11 @@ export interface RelatedArtifact {
   relationship_reason: string | null
 }
 
-// Collections (GET /collections)
 export interface CollectionsResponse {
   total: number
   collections: string[]
 }
 
-// Maintenance / Health (POST /agent/maintain)
 export interface MaintenanceHealth {
   overall: string
   services: Record<string, string>
@@ -147,13 +164,11 @@ export interface MaintenanceResponse {
   orphan_cleanup?: { orphaned_chunks: number; cleaned: number }
 }
 
-// Scheduler (GET /scheduler)
 export interface SchedulerStatus {
   status: "running" | "not_running"
   jobs: { id: string; name: string; next_run: string | null; trigger: string }[]
 }
 
-// Ingest log (GET /ingest_log)
 export interface IngestLogEntry {
   event: string
   artifact_id: string
@@ -168,7 +183,6 @@ export interface IngestLogResponse {
   entries: IngestLogEntry[]
 }
 
-// Audit (POST /agent/audit)
 export interface AuditActivity {
   time_window_hours: number
   total_events: number
@@ -225,7 +239,6 @@ export interface AuditResponse {
   conversations?: AuditConversations
 }
 
-// Hallucination detection (Phase 7A)
 export interface HallucinationClaim {
   claim: string
   status: "verified" | "unverified" | "uncertain" | "error"
@@ -253,7 +266,6 @@ export interface HallucinationReport {
   reason?: string
 }
 
-// Memory extraction (Phase 7C)
 export interface MemoryExtractionResult {
   conversation_id: string
   timestamp: string
@@ -268,7 +280,6 @@ export interface MemoryExtractionResult {
   }[]
 }
 
-// Model router (Phase 7B)
 export interface ModelRecommendation {
   model: ModelOption
   estimatedCost: number
@@ -276,7 +287,6 @@ export interface ModelRecommendation {
   savingsVsCurrent: number
 }
 
-// Phase 8E: Settings
 export interface ServerSettings {
   categorize_mode: string
   chunk_max_tokens: number
@@ -309,7 +319,6 @@ export interface SettingsUpdate {
   cost_sensitivity?: string
 }
 
-// Phase 8E: Memories
 export interface Memory {
   id: string
   type: string // facts, decisions, preferences, action-items
@@ -319,7 +328,6 @@ export interface Memory {
   source_filename: string
 }
 
-// Phase 8E: File upload
 export interface UploadResult {
   status: string
   artifact_id: string
@@ -330,7 +338,6 @@ export interface UploadResult {
   metadata?: Record<string, string>
 }
 
-// Phase 8E: Live metrics
 export interface LiveMetrics {
   inputTokens: number
   outputTokens: number
@@ -340,21 +347,3 @@ export interface LiveMetrics {
   messagesCount: number
 }
 
-// Phase 8E: Truth audit
-export interface TruthClaim {
-  claim: string
-  index: number
-  status: "pending" | "verified" | "unverified" | "uncertain"
-  confidence: number
-  source?: string
-  reason?: string
-}
-
-export interface TruthAuditState {
-  status: "idle" | "analyzing" | "complete"
-  claims: TruthClaim[]
-  overallConfidence: number
-  verified: number
-  unverified: number
-  uncertain: number
-}

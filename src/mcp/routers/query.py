@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """Query endpoint and query_knowledge service function."""
 from __future__ import annotations
 
@@ -5,7 +8,7 @@ import logging
 from typing import Dict
 
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import config
 from deps import get_chroma
@@ -18,8 +21,8 @@ logger = logging.getLogger("ai-companion")
 def query_knowledge(query: str, domain: str = "general", top_k: int = 3) -> Dict:
     """Public — also called by mcp_sse.py execute_tool."""
     chroma = get_chroma()
-    collection_name = f"domain_{domain.replace(' ', '_').lower()}"
-    collection = chroma.get_or_create_collection(name=collection_name)
+    coll_name = config.collection_name(domain)
+    collection = chroma.get_or_create_collection(name=coll_name)
     results = collection.query(
         query_texts=[query],
         n_results=top_k,
@@ -42,8 +45,8 @@ def query_knowledge(query: str, domain: str = "general", top_k: int = 3) -> Dict
             bm25_hits = bm25_mod.search_bm25(domain, query, top_k=top_k)
             if bm25_hits:
                 bm25_scores = dict(bm25_hits)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"BM25 hybrid scoring unavailable: {e}")
 
     sources = []
     for i, doc in enumerate(docs):
@@ -70,7 +73,7 @@ def query_knowledge(query: str, domain: str = "general", top_k: int = 3) -> Dict
             "chunk_index": meta.get("chunk_index", 0),
         })
 
-    TOKEN_BUDGET_CHARS = 14000
+    TOKEN_BUDGET_CHARS = config.QUERY_CONTEXT_MAX_CHARS
     context_parts = []
     char_count = 0
     for doc in docs:
@@ -96,7 +99,7 @@ def query_knowledge(query: str, domain: str = "general", top_k: int = 3) -> Dict
 class QueryRequest(BaseModel):
     query: str
     domain: str = "general"
-    top_k: int = 3
+    top_k: int = Field(3, ge=1, le=100)
 
 
 @router.post("/query")

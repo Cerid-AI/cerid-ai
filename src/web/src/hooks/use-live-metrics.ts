@@ -1,12 +1,11 @@
+// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState, useCallback, useMemo } from "react"
 import { MODELS } from "@/lib/types"
 import type { ChatMessage, LiveMetrics, ModelOption } from "@/lib/types"
 import { estimateTokens } from "@/lib/utils"
 
-/**
- * Tracks token usage, context window consumption, and cost estimates
- * in real-time as chat messages stream in.
- */
 export function useLiveMetrics(model: string, messages: ChatMessage[]) {
   const [streamingOutputChars, setStreamingOutputChars] = useState(0)
 
@@ -18,7 +17,6 @@ export function useLiveMetrics(model: string, messages: ChatMessage[]) {
   const metrics: LiveMetrics = useMemo(() => {
     const { input: inputTokens, output: baseOutputTokens } = estimateTokens(messages)
 
-    // Add streaming output that hasn't been committed to messages yet
     const outputTokens = baseOutputTokens + Math.ceil(streamingOutputChars / 4)
 
     const contextWindow = modelInfo?.contextWindow ?? 128_000
@@ -29,7 +27,6 @@ export function useLiveMetrics(model: string, messages: ChatMessage[]) {
       ? (inputTokens * modelInfo.inputCostPer1M + outputTokens * modelInfo.outputCostPer1M) / 1_000_000
       : 0
 
-    // Cost of the last message pair (last user + last assistant)
     let messageCost = 0
     if (modelInfo && messages.length >= 2) {
       const lastAssistant = messages.findLast((m) => m.role === "assistant")
@@ -51,12 +48,10 @@ export function useLiveMetrics(model: string, messages: ChatMessage[]) {
     }
   }, [messages, modelInfo, streamingOutputChars])
 
-  // Call during streaming to track incremental output
   const addStreamingChars = useCallback((chars: number) => {
     setStreamingOutputChars((prev) => prev + chars)
   }, [])
 
-  // Reset streaming counter when a message completes
   const resetStreaming = useCallback(() => {
     setStreamingOutputChars(0)
   }, [])

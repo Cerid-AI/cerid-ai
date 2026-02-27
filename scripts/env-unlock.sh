@@ -1,4 +1,7 @@
 #!/bin/bash
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # Decrypt .env.age → .env using age key from dotfiles.
 # Key location: ~/.config/cerid/age-key.txt (override with CERID_AGE_KEY)
 

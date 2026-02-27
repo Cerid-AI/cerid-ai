@@ -1,7 +1,8 @@
 # Cerid AI — Issues & Backlog
 
 > **Created:** 2026-02-25
-> **Status:** Post Phase 9 + Neo4j auth hardening
+> **Last updated:** 2026-02-26
+> **Status:** Phase 10A + 10B + codebase audit + dependency management complete. 4 of 9 issues resolved, 5 open.
 > **Purpose:** Track known bugs, feature gaps, and architecture evaluations for upcoming phases.
 
 ---
@@ -11,18 +12,11 @@
 ### A1. Chat Input & Metrics Dashboard Viewport Overflow
 
 **Severity:** Medium
-**Status:** Open
+**Status:** Resolved (Phase 10A, 2026-02-26)
 
-Chat input box and metrics dashboard don't stay visible unless the browser window is tall enough. On shorter viewports, the metrics dashboard scrolls out of view above messages, and the chat input may not be visible without scrolling.
+**Resolution:** Added `min-h-0` at every flex container level in the chat layout chain (`split-pane.tsx` fallback div + Panel, `chat-panel.tsx` chatArea div + ScrollArea). Pure CSS fix — no JS changes. Verified at mobile viewport (375x812): textarea bottom at 764px, fully visible with 48px to spare.
 
-**Root cause:** `ChatInput` and `ChatDashboard` in `chat-panel.tsx` are positioned via CSS flex column order, not `sticky`. The `ScrollArea` takes `flex-1` space, but the surrounding elements aren't pinned.
-
-**Suggested fix:** Make `ChatInput` sticky at the bottom. Collapse or make `ChatDashboard` collapsible/sticky. Consider a compact metrics bar that's always visible.
-
-**Files:**
-- `src/web/src/components/chat/chat-panel.tsx` (lines 145–305 — layout structure)
-- `src/web/src/components/chat/chat-dashboard.tsx`
-- `src/web/src/components/chat/chat-input.tsx`
+**Files changed:** `split-pane.tsx` (2 edits), `chat-panel.tsx` (2 edits)
 
 ---
 
@@ -47,38 +41,22 @@ The audit pane (`audit-pane.tsx`) auto-fetches reports every 60 seconds via `use
 ### B2. Source Attribution Missing in Chat
 
 **Severity:** High
-**Status:** Open
+**Status:** Resolved (Phase 10A, 2026-02-26)
 
-When KB context is injected into a chat message, users can't see what sources were used or where they appear in the response. Currently:
-- A system message is silently prepended to the API call (hidden from UI)
-- A small "`N source(s)`" badge appears in the input area before sending
-- After sending, there's no per-message indicator of which sources were used
-- The KB Context Pane shows "N sources ready to inject" in the sidebar
+**Resolution:** Added `SourceRef` type to `types.ts` (lightweight subset of `KBQueryResult`), `sourcesUsed?: SourceRef[]` field on `ChatMessage`. At send time, injected KB context is captured as `SourceRef[]` before `clearInjected()`, threaded through `useChat.send()`, and attached to the assistant message. New `SourceAttribution` component renders a collapsible list below each response (Radix Collapsible, domain badges, relevance percentages). Persists in localStorage via existing conversation serialization.
 
-**Suggested fix:** After sending a message with injected context, show an expandable "Sources used" section below the assistant's response. Include filename, domain, relevance score, and a snippet. Consider a "view source" button that highlights the relevant artifact in the KB pane.
-
-**Files:**
-- `src/web/src/components/chat/chat-panel.tsx` (lines 116–127 — context injection)
-- `src/web/src/components/chat/chat-input.tsx` (lines 62–66 — source badge)
-- `src/web/src/hooks/use-kb-context.ts` (injection logic)
-- `src/web/src/components/chat/message-list.tsx` (message rendering)
+**Files changed:** `types.ts`, `use-chat.ts`, `chat-panel.tsx`, `source-attribution.tsx` (new), `message-bubble.tsx`
 
 ### B3. No Model Context Break Indicator
 
 **Severity:** Medium
-**Status:** Open
+**Status:** Resolved (Phase 10B, 2026-02-26)
 
-When a user switches models mid-conversation, all messages stay in one contiguous array with no visual marker. There's no "Model changed from X to Y" divider, no per-message model badge, and no warning about context continuity.
+**Resolution:** Model switch dividers computed at render time — when consecutive assistant messages use different models, a "Switched from [Model A] to [Model B]" divider appears between them. Per-message model badges are now always visible with provider-colored pills (amber for Anthropic, emerald for OpenAI, blue for Google, etc.). Added `PROVIDER_COLORS` map, `findModel()` helper, `ModelBadge` component, and `ModelSwitchDivider` component. No storage format changes — dividers are derived from existing `message.model` field.
 
-**What exists:** `use-conversations.ts` has `updateModel()` which saves the selected model. `use-chat.ts` passes the current model per-send. But conversation history doesn't segment by model.
+**Remaining:** "Start fresh context" option on model switch (deferred to Phase 10C with token cost awareness).
 
-**Suggested fix:** Add a system-style divider message when model changes ("Switched to Claude Sonnet"). Add a small model badge on each message bubble. Consider an optional "start fresh context" toggle when switching.
-
-**Files:**
-- `src/web/src/hooks/use-conversations.ts` (lines 103–111 — updateModel)
-- `src/web/src/hooks/use-chat.ts` (line 16 — model per-send)
-- `src/web/src/components/chat/chat-panel.tsx` (model selector)
-- `src/web/src/components/chat/message-list.tsx` (message rendering)
+**Files changed:** `types.ts`, `message-bubble.tsx`, `model-switch-divider.tsx` (new), `chat-panel.tsx`
 
 ---
 
@@ -156,13 +134,16 @@ Current `model-router.ts` scores message complexity and recommends models based 
 ### D2. Chat Model Switch UX
 
 **Severity:** Medium
-**Status:** Open
+**Status:** Partially Resolved (Phase 10B, 2026-02-26)
 
-Related to B3. When the user manually switches models (not auto-routed), the chat needs a clear visual break between model contexts. Consider:
-- Per-message model badge (small label showing which model generated each response)
-- Conversation fork/branch UI (split into separate threads per model)
-- Context summary on switch (auto-generate a "here's what happened so far" summary)
-- Option to start fresh (new context window) or continue (replay full history)
+**Resolved items:**
+- ✅ Per-message model badge with provider colors (always visible)
+- ✅ "Switched from X to Y" divider between model switches
+
+**Remaining items (deferred to Phase 10C):**
+- [ ] Context summary on switch (summarize prior history before replaying to new model)
+- [ ] "Start fresh" option (new context window vs. continue with full replay)
+- [ ] Conversation fork/branch UI (exploratory)
 
 **Files:** Same as B3 + D1.
 
@@ -207,12 +188,12 @@ Evaluate the current RAG architecture and options for improvement:
 
 ## Priority Order (Suggested)
 
-1. **A1** — Chat viewport fix (quick CSS fix, high user impact)
-2. **B2** — Source attribution (core UX gap)
-3. **B3 + D2** — Model context break (related, implement together)
-4. **D1** — Smart routing evaluation (informs D2 implementation)
-5. **B1** — Audit agent interactivity
-6. **C1** — Taxonomy update
-7. **C2** — Curation agent (requires C1)
-8. **E2** — RAG evaluation (foundational, informs E1)
+1. ~~**A1** — Chat viewport fix~~ ✅ Resolved (Phase 10A)
+2. ~~**B2** — Source attribution~~ ✅ Resolved (Phase 10A)
+3. ~~**B3 + D2** — Model context break~~ ✅ Resolved (Phase 10B) — "start fresh" deferred to 10C
+4. **D1** — Smart routing + token cost evaluation — Phase 10C
+5. **B1** — Audit agent interactivity — Phase 10D
+6. **C1** — Taxonomy update — Phase 10D
+7. **C2** — Curation agent (requires C1) — Phase 10E (design)
+8. **E2** — RAG evaluation (foundational, informs E1) — Phase 10F (research)
 9. **E1** — Artifact preview (depends on E2 decisions)

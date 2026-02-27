@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """Tests for encryption and sync backend (Phase 8D)."""
 from __future__ import annotations
 

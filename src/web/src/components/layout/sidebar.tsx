@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { MessageSquare, Database, Activity, FileBarChart, Brain, Settings, Sun, Moon, ChevronLeft, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -35,7 +38,7 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
         {/* Logo area */}
         <div className="flex h-14 items-center border-b px-3">
           {!collapsed && <span className="text-lg font-semibold tracking-tight">Cerid AI</span>}
-          <Button variant="ghost" size="icon" className={cn("ml-auto h-8 w-8")} onClick={onToggleCollapse}>
+          <Button variant="ghost" size="icon" className={cn("ml-auto h-8 w-8")} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} onClick={onToggleCollapse}>
             {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
           </Button>
         </div>
@@ -67,6 +70,7 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
                 variant="ghost"
                 size="icon"
                 className={cn("w-full", !collapsed && "justify-start gap-3 px-3")}
+                aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
                 onClick={onToggleTheme}
               >
                 {theme === "dark" ? <Sun className="h-4 w-4 shrink-0" /> : <Moon className="h-4 w-4 shrink-0" />}

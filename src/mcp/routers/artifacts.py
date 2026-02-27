@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """Artifact listing and recategorization endpoints."""
 from __future__ import annotations
 
@@ -43,7 +46,7 @@ def recategorize(
         raise ValueError(f"No chunk IDs found for artifact {artifact_id}")
 
     source_collection = chroma.get_or_create_collection(
-        name=f"domain_{old_domain.replace(' ', '_').lower()}"
+        name=config.collection_name(old_domain)
     )
     fetched = source_collection.get(ids=chunk_ids, include=["documents", "metadatas"])
 
@@ -51,7 +54,7 @@ def recategorize(
         raise ValueError(f"No chunks found in ChromaDB for artifact {artifact_id}")
 
     dest_collection = chroma.get_or_create_collection(
-        name=f"domain_{new_domain.replace(' ', '_').lower()}"
+        name=config.collection_name(new_domain)
     )
     updated_metadatas = []
     for meta in fetched["metadatas"]:

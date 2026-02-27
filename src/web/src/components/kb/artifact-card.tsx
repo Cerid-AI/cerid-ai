@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -29,7 +32,11 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject }: Artifac
         "cursor-pointer overflow-hidden transition-colors",
         isSelected && "ring-2 ring-primary",
       )}
+      role="button"
+      tabIndex={0}
+      aria-label={`${result.filename} - ${result.domain}`}
       onClick={onSelect}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect() } }}
     >
       <CardContent className="min-w-0 p-3">
         {/* Header row */}

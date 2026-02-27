@@ -29,6 +29,9 @@ redis/
 stacks/infrastructure/data/
 artifacts/
 
+# Node
+node_modules/
+
 # Python / build
 __pycache__/
 *.pyc

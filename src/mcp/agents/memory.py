@@ -1,12 +1,7 @@
-"""
-Memory Extraction Agent — extracts facts, decisions, and preferences from conversations.
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 
-Post-conversation hook that uses a lightweight LLM to identify extractable knowledge
-from completed assistant responses. Each extraction is stored as a KB artifact in
-the 'conversations' domain with typed metadata (fact, decision, preference, action_item).
-
-Supports retention policies: memories older than a configured threshold can be archived.
-"""
+"""Memory Extraction Agent — extracts facts, decisions, and preferences from conversations."""
 
 from __future__ import annotations
 
@@ -18,6 +13,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 import config
+from utils.llm_parsing import parse_llm_json
 from utils.cache import log_event
 from utils.time import utcnow, utcnow_iso
 
@@ -39,11 +35,7 @@ async def extract_memories(
     conversation_id: str,
     model: str = "",
 ) -> List[Dict[str, Any]]:
-    """
-    Use a lightweight LLM to extract memorable content from a response.
-
-    Returns a list of dicts: [{"content": str, "memory_type": str, "summary": str}]
-    """
+    """Use a lightweight LLM to extract memorable content from a response."""
     if len(response_text) < MIN_RESPONSE_LENGTH:
         return []
 
@@ -60,11 +52,11 @@ async def extract_memories(
     )
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=config.BIFROST_TIMEOUT) as client:
             resp = await client.post(
                 f"{config.BIFROST_URL}/chat/completions",
                 json={
-                    "model": "meta-llama/llama-3.1-8b-instruct:free",
+                    "model": config.LLM_INTERNAL_MODEL,
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.1,
                     "max_tokens": 1000,
@@ -72,18 +64,10 @@ async def extract_memories(
             )
             resp.raise_for_status()
             content = resp.json()["choices"][0]["message"]["content"].strip()
-
-            # Parse JSON array (handle markdown code blocks)
-            if content.startswith("```"):
-                content = content.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
-
-            memories = json.loads(content)
+            memories = parse_llm_json(content)
             if not isinstance(memories, list):
                 return []
 
-            # Validate and sanitize
             valid = []
             for m in memories:
                 if not isinstance(m, dict):
@@ -115,11 +99,7 @@ async def extract_and_store_memories(
     neo4j_driver=None,
     redis_client=None,
 ) -> Dict[str, Any]:
-    """
-    Full extraction pipeline: extract memories → store each as KB artifact.
-
-    Returns report with count of memories stored and their IDs.
-    """
+    """Extract memories and store each as a KB artifact in the conversations domain."""
     if not config.ENABLE_MEMORY_EXTRACTION:
         return {"status": "skipped", "reason": "Memory extraction disabled"}
 
@@ -134,8 +114,7 @@ async def extract_and_store_memories(
             "results": [],
         }
 
-    # Lazy import to avoid circular dependency
-    from routers.ingestion import ingest_content
+    from routers.ingestion import ingest_content  # avoid circular import
 
     results = []
     stored_count = 0
@@ -159,7 +138,6 @@ async def extract_and_store_memories(
             if result.get("status") == "success":
                 stored_count += 1
 
-                # Log to audit trail
                 if redis_client:
                     try:
                         log_event(
@@ -171,10 +149,9 @@ async def extract_and_store_memories(
                             conversation_id=conversation_id,
                             extra={"memory_type": mem["memory_type"]},
                         )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Failed to log memory extraction event: {e}")
 
-                # Create EXTRACTED_FROM relationship in Neo4j
                 if neo4j_driver and result.get("artifact_id"):
                     try:
                         with neo4j_driver.session() as session:
@@ -220,11 +197,7 @@ async def archive_old_memories(
     neo4j_driver,
     retention_days: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """
-    Mark conversation memories older than retention_days as archived.
-
-    Archived memories remain in the KB but are deprioritized in search results.
-    """
+    """Mark old conversation memories as archived (deprioritized in search)."""
     if retention_days is None:
         retention_days = config.MEMORY_RETENTION_DAYS
 

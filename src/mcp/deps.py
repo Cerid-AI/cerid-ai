@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """Database connection dependencies — lazy singletons shared across routers."""
 from __future__ import annotations
 
@@ -127,7 +130,7 @@ def close_redis():
     if _redis:
         try:
             _redis.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Redis close error (ignored): {e}")
         _redis = None
         logger.info("Redis connection closed")

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState, useCallback, useRef, useMemo } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -13,12 +16,6 @@ import { fetchArtifacts, queryKB, uploadFile } from "@/lib/api"
 import { useKBInjection } from "@/contexts/kb-injection-context"
 import type { KBQueryResult, Artifact } from "@/lib/types"
 
-function parseTags(tags: string[] | string | undefined): string[] {
-  if (!tags) return []
-  if (Array.isArray(tags)) return tags
-  try { return JSON.parse(tags) } catch { return [] }
-}
-
 function artifactToResult(a: Artifact): KBQueryResult {
   return {
     content: a.summary || "",
@@ -27,7 +24,7 @@ function artifactToResult(a: Artifact): KBQueryResult {
     filename: a.filename,
     domain: a.domain,
     sub_category: a.sub_category,
-    tags: parseTags(a.tags),
+    tags: a.tags,
     chunk_index: 0,
     collection: `domain_${a.domain}`,
     ingested_at: a.ingested_at,
@@ -65,7 +62,6 @@ export function KnowledgePane() {
 
   const domainKey = [...activeDomains].sort().join(",")
 
-  // Browse mode: list recent artifacts
   const {
     data: artifacts,
     isLoading: browsing,
@@ -83,7 +79,6 @@ export function KnowledgePane() {
     retry: 1,
   })
 
-  // Search mode: query KB
   const {
     data: searchResults,
     isLoading: searching,
@@ -110,7 +105,6 @@ export function KnowledgePane() {
         .filter((a) => activeDomains.size === 0 || activeDomains.has(a.domain))
         .map(artifactToResult)
 
-  // Collect available tags from current results for filtering
   const availableTags = useMemo(() => {
     const tagCounts = new Map<string, number>()
     for (const r of allResults) {
@@ -121,7 +115,6 @@ export function KnowledgePane() {
     return [...tagCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12)
   }, [allResults])
 
-  // Apply tag filter
   const results = activeTag
     ? allResults.filter((r) => r.tags?.includes(activeTag))
     : allResults
@@ -169,7 +162,8 @@ export function KnowledgePane() {
           <input
             ref={fileInputRef}
             type="file"
-            className="hidden"
+            className="sr-only"
+            aria-label="Upload file"
             onChange={(e) => {
               const file = e.target.files?.[0]
               if (file) handleFileUpload(file)
@@ -197,6 +191,7 @@ export function KnowledgePane() {
         <div className="flex min-w-0 gap-1.5">
           <Input
             placeholder="Search artifacts..."
+            aria-label="Search artifacts"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             onKeyDown={(e) => {
@@ -206,11 +201,11 @@ export function KnowledgePane() {
             className="h-9"
           />
           {activeSearch ? (
-            <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={clearSearch}>
+            <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={clearSearch} aria-label="Clear search">
               <X className="h-4 w-4" />
             </Button>
           ) : (
-            <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={executeSearch}>
+            <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={executeSearch} aria-label="Search">
               <Search className="h-4 w-4" />
             </Button>
           )}
@@ -224,7 +219,11 @@ export function KnowledgePane() {
                 key={tag}
                 variant={activeTag === tag ? "default" : "secondary"}
                 className="cursor-pointer text-[10px]"
+                role="button"
+                tabIndex={0}
+                aria-pressed={activeTag === tag}
                 onClick={() => setActiveTag(activeTag === tag ? null : tag)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setActiveTag(activeTag === tag ? null : tag) } }}
               >
                 {tag} ({count})
               </Badge>

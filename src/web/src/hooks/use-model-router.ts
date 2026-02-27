@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState, useCallback, useMemo } from "react"
 import { recommendModel } from "@/lib/model-router"
 import { MODELS, type ModelOption, type ChatMessage, type ModelRecommendation } from "@/lib/types"

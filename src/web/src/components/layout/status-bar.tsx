@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { useQuery } from "@tanstack/react-query"
 import { fetchHealth } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -23,6 +26,7 @@ export function StatusBar() {
             status === "loading" && "bg-muted-foreground/50",
             (status === "error" || status === "unknown") && "bg-red-500"
           )}
+          aria-hidden="true"
         />
         <span>
           {status === "healthy" && "All systems operational"}

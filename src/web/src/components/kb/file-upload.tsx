@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState, useRef, useCallback, useEffect } from "react"
 import { Upload, CheckCircle, AlertCircle, Loader2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -32,7 +35,6 @@ export function FileUpload({ onUploadComplete }: FileUploadProps) {
   const [queueIndex, setQueueIndex] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Fetch supported extensions on mount
   useEffect(() => {
     fetchSupportedExtensions()
       .then((data) => setExtensions(data.extensions))
@@ -149,6 +151,7 @@ export function FileUpload({ onUploadComplete }: FileUploadProps) {
             size="xs"
             onClick={() => setDomain("")}
             className="text-muted-foreground"
+            aria-label="Clear domain selection"
           >
             <X className="h-3 w-3" />
           </Button>
@@ -278,7 +281,8 @@ export function FileUpload({ onUploadComplete }: FileUploadProps) {
         ref={fileInputRef}
         type="file"
         multiple
-        className="hidden"
+        className="sr-only"
+        aria-label="Upload files"
         accept={extensions.map((ext) => `.${ext}`).join(",")}
         onChange={(e) => {
           handleFiles(e.target.files)

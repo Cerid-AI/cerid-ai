@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { useState, useRef, useCallback, type KeyboardEvent } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -55,6 +58,7 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount
         }}
         onKeyDown={handleKeyDown}
         placeholder="Type a message... (Enter to send, Shift+Enter for new line)"
+        aria-label="Chat message input"
         rows={1}
         disabled={disabled || isStreaming}
         className="flex-1 resize-none rounded-lg border bg-muted/50 px-4 py-2.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
@@ -65,11 +69,11 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount
         </Badge>
       )}
       {isStreaming ? (
-        <Button variant="destructive" size="icon" onClick={onStop}>
+        <Button variant="destructive" size="icon" aria-label="Stop generation" onClick={onStop}>
           <Square className="h-4 w-4" />
         </Button>
       ) : (
-        <Button size="icon" onClick={handleSend} disabled={!input.trim() || disabled}>
+        <Button size="icon" aria-label="Send message" onClick={handleSend} disabled={!input.trim() || disabled}>
           <Send className="h-4 w-4" />
         </Button>
       )}

@@ -1,8 +1,8 @@
 # Cerid AI - Project Plan & Technical Reference
 
-**Document Version:** 6.0
-**Date:** February 24, 2026
-**Status:** Phases 0–6 Complete
+**Document Version:** 9.0
+**Date:** February 26, 2026
+**Status:** Phases 0–9 Complete
 **Repository:** https://github.com/sunrunnerfire/cerid-ai (private)
 **Owner:** Justin (@sunrunnerfire)
 
@@ -47,8 +47,8 @@ Cerid AI is a **self-hosted Personal AI Knowledge Companion** — a privacy-firs
 ### Key Capabilities
 
 - **Multi-Provider LLM Access** via Bifrost gateway (Claude, GPT, Grok, Gemini, DeepSeek, Llama)
-- **5 Intelligent Agents** — Query (LLM reranking), Triage (LangGraph), Rectification, Audit, Maintenance
-- **12 MCP Tools** for knowledge base operations from LibreChat chat UI
+- **7 Intelligent Agents** — Query (LLM reranking), Triage (LangGraph), Rectification, Audit, Maintenance, Hallucination Detection, Memory Extraction
+- **15 MCP Tools** for knowledge base operations from LibreChat chat UI
 - **Hybrid BM25+Vector Search** with knowledge graph traversal and cross-domain connections
 - **React GUI** at port 3000 — streaming chat, KB context pane, monitoring & audit dashboards (Phase 6)
 - **Streamlit Admin Dashboard** (legacy) with 5 panes (Overview, Artifacts, Query, Audit, Maintenance)
@@ -94,6 +94,9 @@ Cerid AI is a **self-hosted Personal AI Knowledge Companion** — a privacy-firs
 | Phase 4 | Smarter Retrieval, Automation & Polish | ✅ Complete |
 | Phase 5 | Multi-Machine Dev & Sync | ✅ Complete |
 | Phase 6 | React GUI + Production Hardening | ✅ Complete |
+| Phase 7 | Intelligence & Automation | ✅ Complete |
+| Phase 8 | Extensibility & Hardening | ✅ Complete |
+| Phase 9 | GUI Feature Parity | ✅ Complete |
 
 ### Phase 0 Deliverables (Complete ✅)
 
@@ -1286,13 +1289,28 @@ See `docs/plans/2026-02-22-phase6-gui-design.md` for full design specification.
 
 **Tech Stack:** React 19, Vite 7, Tailwind CSS v4, shadcn/ui, TanStack React Query, Recharts, react-resizable-panels
 
-### Phase 7: Intelligence & Automation (Planned 📋)
+### Phase 7: Intelligence & Automation (Complete ✅)
 
 See `docs/plans/2026-02-23-phase7-plan.md` for full specification.
 
-- [ ] **7A:** Audit Intelligence — hallucination detection agent, conversation analytics, enhanced feedback loop
-- [ ] **7B:** Smart Orchestration — model router with cost/complexity calc, auto-switch recommendations, cost dashboard with budget alerts
-- [ ] **7C:** Proactive Knowledge — configurable drive scanning, memory extraction from conversations, smart KB suggestions
+- [x] **7A:** Audit Intelligence — hallucination detection agent (claim extraction + KB verification), conversation analytics (per-model cost/token tracking), enhanced feedback loop (backend gate, async hallucination trigger, conversation metrics logging)
+- [x] **7B:** Smart Orchestration — client-side model router (complexity scoring, cost sensitivity, tier-based recommendations), auto-switch toggle in toolbar, 15 MCP tools (3 new: `pkb_check_hallucinations`, `pkb_memory_extract`, `pkb_memory_archive`)
+- [x] **7C:** Proactive Knowledge — memory extraction from conversations (facts, decisions, preferences, action items stored as KB artifacts with Neo4j relationships), smart KB suggestions (debounced real-time query as user types), memory archival with configurable retention
+
+### Phase 8: Extensibility & Hardening (Complete ✅)
+
+- [x] **8A:** Plugin system — manifest-based plugin loading, feature tiers (community/pro), feature flags, OCR parser plugin scaffold
+- [x] **8B:** Smart ingestion — new parsers (.eml, .mbox, .epub, .rtf, enhanced CSV/TSV), semantic dedup (embedding similarity), parser registry expansion
+- [x] **8C:** Hierarchical taxonomy — TAXONOMY dict with sub-categories/tags per domain, taxonomy API router, folder-based sub-category detection in watcher, custom domains via env var
+- [x] **8D:** Encryption & sync — field-level Fernet encryption (opt-in), pluggable sync backends, sync manifest with checksums
+- [x] **8E:** Infrastructure audit — comprehensive code audit (31 findings), security fixes, deprecated `datetime.utcnow()` replaced across 16 files, per-DB connection locks, retry wrappers, auth bypass fix, production Docker config, test stub DRY (~300 lines removed), N+1 session fix in sync import
+
+### Phase 9: GUI Feature Parity (Complete ✅)
+
+- [x] **9A:** Fix 3 user-reported bugs — Knowledge pane error state + retry, Neo4j health card status normalization, conversation stats + hallucination aggregate in Audit pane
+- [x] **9B:** Wire 5 structural gaps — hallucination auto-fetch after chat (refreshKey + 2s delay), smart KB suggestions as-you-type, memory extraction auto-trigger (after 3+ user messages), server-synced settings (fetchSettings hydration + updateSettings push), ChatDashboard refactored to useLiveMetrics hook
+- [x] **9C:** 3 feature enhancements — file upload button in Knowledge pane, sub-category badge + tag pills on artifact cards, client-side tag browsing/filtering from loaded artifacts
+- [x] **9D:** Neo4j auth hardening — fixed docker-compose env var passthrough bug, health check validates auth via Cypher query, early RuntimeError on empty password, error detail in health responses
 
 ---
 
@@ -1387,5 +1405,5 @@ See `docs/plans/2026-02-23-phase7-plan.md` for full specification.
 
 ---
 
-*Document updated: February 22, 2026*
-*Phases 0–5 complete. Phase 6 planned.*
+*Document updated: February 26, 2026*
+*Phases 0–9 complete. Phase 10 in progress.*

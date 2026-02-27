@@ -1,13 +1,7 @@
-"""
-Triage Agent - Intelligent ingestion routing with LangGraph orchestration.
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 
-Wraps the existing ingestion pipeline with:
-- Conditional routing based on file type and content characteristics
-- Batch processing with per-file error recovery
-- AI categorization gating (skip AI for known domains, use AI for inbox)
-- Structured state tracking through the ingestion lifecycle
-- Audit trail integration via Redis
-"""
+"""Triage Agent — LangGraph-orchestrated ingestion routing."""
 
 from __future__ import annotations
 
@@ -62,37 +56,6 @@ class TriageState:
 # State dict type for LangGraph (uses dict internally)
 TriageStateDict = Dict[str, Any]
 
-
-def _state_from_dict(d: TriageStateDict) -> TriageState:
-    """Convert LangGraph state dict to TriageState."""
-    s = TriageState()
-    for k, v in d.items():
-        if hasattr(s, k):
-            setattr(s, k, v)
-    return s
-
-
-def _state_to_dict(s: TriageState) -> TriageStateDict:
-    """Convert TriageState to dict for LangGraph."""
-    return {
-        "file_path": s.file_path,
-        "filename": s.filename,
-        "domain": s.domain,
-        "categorize_mode": s.categorize_mode,
-        "tags": s.tags,
-        "parsed_text": s.parsed_text,
-        "file_type": s.file_type,
-        "page_count": s.page_count,
-        "metadata": s.metadata,
-        "chunks": s.chunks,
-        "content_hash": s.content_hash,
-        "artifact_id": s.artifact_id,
-        "needs_ai_categorization": s.needs_ai_categorization,
-        "is_structured": s.is_structured,
-        "status": s.status,
-        "error": s.error,
-        "result": s.result,
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +153,6 @@ async def categorize_node(state: TriageStateDict) -> TriageStateDict:
         meta["summary"] = ai_result["summary"]
         updates["metadata"] = meta
 
-    # Phase 8C: sub-category and tags from AI
     if ai_result.get("sub_category"):
         meta = updates.get("metadata", state.get("metadata", {}))
         meta["sub_category"] = ai_result["sub_category"]
@@ -341,22 +303,7 @@ async def triage_file(
     categorize_mode: str = "",
     tags: str = "",
 ) -> Dict[str, Any]:
-    """
-    Run a single file through the triage pipeline.
-
-    Returns the final state dict with parsed_text, metadata, chunks, domain,
-    and status. The caller (main.py) handles the actual DB writes (ChromaDB,
-    Neo4j, Redis) using the prepared data.
-
-    Args:
-        file_path: Absolute path to the file
-        domain: Target domain (empty = auto-detect)
-        categorize_mode: manual/smart/pro (empty = env default)
-        tags: Optional tags string
-
-    Returns:
-        Final triage state dict with all prepared data
-    """
+    """Run a single file through the triage pipeline, returning prepared state."""
     initial_state = {
         "file_path": file_path,
         "filename": Path(file_path).name,
@@ -387,18 +334,7 @@ async def triage_batch(
     files: List[Dict[str, str]],
     default_mode: str = "",
 ) -> List[Dict[str, Any]]:
-    """
-    Process a batch of files through triage, collecting results.
-
-    Each file is processed independently — one failure doesn't stop the batch.
-
-    Args:
-        files: List of dicts with keys: file_path, domain (optional), tags (optional)
-        default_mode: Default categorization mode for the batch
-
-    Returns:
-        List of triage results (one per file)
-    """
+    """Process a batch of files independently — one failure doesn't stop the batch."""
     results = []
     for file_spec in files:
         try:

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { Badge } from "@/components/ui/badge"
 import { DOMAINS } from "@/lib/types"
 
@@ -24,7 +27,11 @@ export function DomainFilter({ activeDomains, onToggle }: DomainFilterProps) {
             key={domain}
             variant={isActive ? "default" : "outline"}
             className={`cursor-pointer text-xs capitalize ${isActive ? "" : DOMAIN_COLORS[domain] ?? ""}`}
+            role="button"
+            tabIndex={0}
+            aria-pressed={isActive}
             onClick={() => onToggle(domain)}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(domain) } }}
           >
             {domain}
           </Badge>

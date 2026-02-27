@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 const MCP_BASE = import.meta.env.VITE_MCP_URL ?? "http://localhost:8888"
 const BIFROST_BASE = import.meta.env.VITE_BIFROST_URL ?? "/api/bifrost"
 const API_KEY = import.meta.env.VITE_CERID_API_KEY ?? ""
@@ -55,7 +58,11 @@ export async function fetchArtifacts(domain?: string, limit = 50): Promise<Artif
   params.set("limit", String(limit))
   const res = await fetch(`${MCP_BASE}/artifacts?${params}`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(`Artifacts fetch failed: ${res.status}`)
-  return res.json()
+  const artifacts: Artifact[] = await res.json()
+  return artifacts.map((a) => ({
+    ...a,
+    tags: Array.isArray(a.tags) ? a.tags : typeof a.tags === "string" ? (() => { try { return JSON.parse(a.tags) } catch { return [] } })() : undefined,
+  }))
 }
 
 export async function fetchRelatedArtifacts(
@@ -141,7 +148,7 @@ export async function ingestFeedback(
   if (!res.ok) throw new Error(`Feedback ingest failed: ${res.status}`)
 }
 
-// --- Hallucination Detection (Phase 7A) ---
+// --- Hallucination Detection ---
 
 export async function checkHallucinations(
   responseText: string,
@@ -172,7 +179,7 @@ export async function fetchHallucinationReport(
   return res.json()
 }
 
-// --- Settings (Phase 8E) ---
+// --- Settings ---
 
 export async function fetchSettings(): Promise<ServerSettings> {
   const res = await fetch(`${MCP_BASE}/settings`, { headers: mcpHeaders() })
@@ -190,7 +197,7 @@ export async function updateSettings(settings: SettingsUpdate): Promise<{ status
   return res.json()
 }
 
-// --- Memory Extraction (Phase 7C) ---
+// --- Memory Extraction ---
 
 export async function extractMemories(
   responseText: string,
@@ -210,7 +217,7 @@ export async function extractMemories(
   return res.json()
 }
 
-// --- Memories (Phase 8E) ---
+// --- Memories ---
 
 export async function fetchMemories(
   opts: { type?: string; conversationId?: string; limit?: number; offset?: number } = {},
@@ -243,7 +250,7 @@ export async function deleteMemory(memoryId: string): Promise<void> {
   if (!res.ok) throw new Error(`Memory delete failed: ${res.status}`)
 }
 
-// --- File Upload (Phase 8E) ---
+// --- File Upload ---
 
 export async function uploadFile(
   file: File,

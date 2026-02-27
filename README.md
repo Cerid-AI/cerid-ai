@@ -4,7 +4,7 @@
 
 A privacy-first, local-first workspace that unifies multi-domain knowledge bases (code, finance, projects, personal artifacts) into a context-aware LLM interface with RAG-powered retrieval, file ingestion, and intelligent agents.
 
-[![Status](https://img.shields.io/badge/Status-Phase%206%20Complete-green)]()
+[![Status](https://img.shields.io/badge/Status-Phase%209%20Complete-green)]()
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue)](LICENSE)
 
 ---
@@ -17,8 +17,11 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 
 - **React GUI** at port 3000 — streaming chat, knowledge browser, monitoring & audit dashboards
 - **Multi-Provider LLM Access** via Bifrost gateway (Claude, GPT, Grok, Gemini, DeepSeek, Llama)
-- **5 Intelligent Agents** — Query (LLM reranking), Triage (LangGraph), Rectification, Audit, Maintenance
+- **7 Intelligent Agents** — Query (LLM reranking), Triage (LangGraph), Rectification, Audit, Maintenance, Hallucination Detection, Memory Extraction
 - **15 MCP Tools** for knowledge base operations from LibreChat chat UI
+- **Hallucination Detection** — claim extraction + KB verification with per-message truth audit
+- **Memory Extraction** — facts, decisions, preferences extracted from conversations and stored as KB artifacts
+- **Smart Model Router** — complexity scoring, cost sensitivity, auto-switch recommendations
 - **Hybrid BM25+Vector Search** with knowledge graph traversal and cross-domain connections
 - **KB Context Injection** — auto-query knowledge base on chat messages, inject as system prompt context
 - **File-Based Ingestion Pipeline** with structure-aware parsing (PDF tables as Markdown via pdfplumber, DOCX, XLSX, CSV, 30+ formats)
@@ -27,7 +30,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 - **Backend Hardening** — API key auth, rate limiting, Redis query caching (5-min TTL)
 - **Scheduled Maintenance** via APScheduler with proactive knowledge surfacing
 - **Multi-Machine Sync** via Dropbox — JSONL export/import with auto-import on startup
-- **GitHub Actions CI/CD** with 59 pytest tests
+- **GitHub Actions CI/CD** with 156 pytest tests
 - **Three-Tier AI Categorization** (manual, smart, pro) via Bifrost
 - **Obsidian Vault Integration** — auto-sync vault notes into knowledge base
 - **Privacy-First Architecture** — all data local, only LLM API calls go external
@@ -240,10 +243,17 @@ curl http://localhost:8888/ingest_log?limit=10
 | POST | `/agent/rectify` | Knowledge base health checks + auto-fix |
 | POST | `/agent/audit` | Activity, ingestion, cost, query reports |
 | POST | `/agent/maintain` | System health, stale detection, cleanup |
+| POST | `/agent/hallucination` | Check LLM response for hallucinations against KB |
+| GET | `/agent/hallucination/{id}` | Retrieve stored hallucination report |
+| POST | `/agent/memory/extract` | Extract and store memories from conversation |
+| POST | `/agent/memory/archive` | Archive old conversation memories |
+| GET | `/taxonomy` | Hierarchical taxonomy tree (domains, sub-categories, tags) |
+| GET | `/settings` | Server settings and feature flags |
+| PATCH | `/settings` | Update server settings |
 
 **MCP SSE:** `/mcp/sse` (SSE stream) + `/mcp/messages` (JSON-RPC 2.0)
 
-**MCP Tools (12):** `pkb_query`, `pkb_ingest`, `pkb_ingest_file`, `pkb_health`, `pkb_collections`, `pkb_agent_query`, `pkb_artifacts`, `pkb_recategorize`, `pkb_triage`, `pkb_rectify`, `pkb_audit`, `pkb_maintain`
+**MCP Tools (15):** `pkb_query`, `pkb_ingest`, `pkb_ingest_file`, `pkb_health`, `pkb_collections`, `pkb_agent_query`, `pkb_artifacts`, `pkb_recategorize`, `pkb_triage`, `pkb_rectify`, `pkb_audit`, `pkb_maintain`, `pkb_check_hallucinations`, `pkb_memory_extract`, `pkb_memory_archive`
 
 **Authentication (Phase 6D, opt-in):** Set `CERID_API_KEY` env var to enable. Requests require `X-API-Key` header. Exempt: `/health`, `/mcp/*`, `/docs`.
 **Rate Limiting:** `/agent/*` (20 req/min), `/ingest*` (10 req/min), `/recategorize*` (10 req/min) per client IP.
@@ -292,22 +302,30 @@ cerid-ai/
 │   ├── docker-compose.yml
 │   ├── requirements.txt
 │   │
-│   ├── routers/                      # FastAPI routers (Phase 4A)
+│   ├── routers/                      # FastAPI routers (Phase 4A+)
 │   │   ├── health.py, query.py, ingestion.py
 │   │   ├── artifacts.py, agents.py, digest.py
-│   │   └── mcp_sse.py
+│   │   ├── mcp_sse.py, taxonomy.py
+│   │   └── __init__.py
 │   │
-│   ├── agents/                       # 5 Agent modules
+│   ├── agents/                       # 7 Agent modules
 │   │   ├── query_agent.py            # Multi-domain + LLM reranking
 │   │   ├── triage.py                 # LangGraph triage
 │   │   ├── rectify.py                # KB health checks
-│   │   ├── audit.py                  # Usage analytics
-│   │   └── maintenance.py            # System health
+│   │   ├── audit.py                  # Usage analytics + conversation costs
+│   │   ├── maintenance.py            # System health
+│   │   ├── hallucination.py          # Hallucination detection (Phase 7A)
+│   │   └── memory.py                 # Memory extraction (Phase 7C)
+│   │
+│   ├── plugins/                      # Plugin system (Phase 8A)
+│   │   └── ocr/                      # OCR parser plugin (pro tier)
 │   │
 │   ├── utils/
 │   │   ├── parsers.py, metadata.py, chunker.py
-│   │   ├── graph.py, cache.py
-│   │   └── bm25.py                   # BM25 keyword search
+│   │   ├── graph.py, cache.py, query_cache.py
+│   │   ├── bm25.py, dedup.py, encryption.py
+│   │   ├── features.py, temporal.py
+│   │   └── sync_backend.py
 │   │
 │   ├── scripts/
 │   │   ├── watch_ingest.py
@@ -318,7 +336,7 @@ cerid-ai/
 │   │   ├── auth.py                   # X-API-Key validation (opt-in)
 │   │   └── rate_limit.py             # Sliding window rate limiter
 │   │
-│   └── tests/                        # 59 pytest tests
+│   └── tests/                        # 156 pytest tests
 │
 ├── src/web/                          # React GUI (Phase 6)
 │   ├── package.json                  # React 19, Vite 7, Tailwind v4, shadcn/ui
@@ -327,16 +345,21 @@ cerid-ai/
 │   ├── nginx.conf                    # SPA fallback + Bifrost reverse proxy
 │   └── src/
 │       ├── App.tsx                   # Lazy-loaded pane routing
-│       ├── lib/types.ts, api.ts      # Types, health client, SSE streaming
+│       ├── lib/types.ts, api.ts, model-router.ts  # Types, API clients, model router
 │       ├── hooks/                    # use-theme, use-chat, use-conversations,
-│       │                             # use-kb-context, use-settings
-│       ├── contexts/                 # KB injection context provider
+│       │                             # use-kb-context, use-settings,
+│       │                             # use-model-router, use-smart-suggestions,
+│       │                             # use-live-metrics
+│       ├── contexts/                 # KB injection + settings context providers
 │       └── components/
 │           ├── layout/               # Sidebar, status bar, split-pane
-│           ├── chat/                 # Chat panel, input, bubbles, dashboard
-│           ├── kb/                   # Knowledge pane, artifact cards, graph
+│           ├── chat/                 # Chat panel, input, bubbles, dashboard,
+│           │                         # source attribution, model router banner
+│           ├── kb/                   # Knowledge pane, artifact cards, graph,
+│           │                         # file upload, tag filter
 │           ├── monitoring/           # Health cards, charts, scheduler
-│           └── audit/                # Activity, costs, ingestion, queries
+│           └── audit/                # Activity, costs, ingestion, queries,
+│                                     # hallucination panel, conversation stats
 │
 ├── src/gui/                          # Streamlit Dashboard (legacy)
 │   ├── app.py
@@ -533,12 +556,26 @@ Auto-import on startup: when MCP starts with an empty Neo4j database and a valid
 - [x] **7B:** Smart orchestration — client-side model router with cost/complexity scoring, auto-switch recommendations
 - [x] **7C:** Proactive knowledge — memory extraction from conversations, smart KB suggestions, memory archival
 
-### Phase 8: Product Foundation (In Progress)
-- [ ] **8A:** Open core foundation — plugin architecture, feature flags, OSS cleanup, licensing
-- [ ] **8B:** Smart ingestion — OCR, new parsers, semantic dedup
-- [ ] **8C:** Hierarchical taxonomy — domains, sub-categories, tags
-- [ ] **8D:** Encryption & sync hardening — app-level encryption, transaction safety
-- [ ] **8E:** GUI intelligence dashboard — truth panel, live metrics, settings, file upload, onboarding
+### Phase 8: Extensibility & Hardening ✅
+- [x] **8A:** Plugin system — manifest-based loading, feature tiers (community/pro), feature flags, OCR scaffold
+- [x] **8B:** Smart ingestion — new parsers (.eml, .mbox, .epub, .rtf), semantic dedup
+- [x] **8C:** Hierarchical taxonomy — TAXONOMY dict, sub-categories/tags, taxonomy API
+- [x] **8D:** Encryption & sync — field-level Fernet encryption, pluggable sync backends
+- [x] **8E:** Infrastructure audit — 31 findings, security fixes, test DRY, N+1 fix
+
+### Phase 9: GUI Feature Parity ✅
+- [x] **9A:** Fix 3 user-reported bugs — KB error state, Neo4j health normalization, audit stats
+- [x] **9B:** Wire 5 structural gaps — hallucination auto-fetch, smart suggestions, memory trigger, settings sync, live metrics
+- [x] **9C:** 3 feature enhancements — file upload, sub-category/tag display, tag browsing
+- [x] **9D:** Neo4j auth hardening — docker-compose env var fix, Cypher auth validation
+
+### Phase 10: Commercial & Open-Source Readiness (In Progress)
+- [x] **10A:** Production quality — copyright headers (132 files), doc updates, frontend tests, CI hardening
+- [x] **10B:** UX polish — model context breaks, provider-colored badges
+- [ ] **10C:** Smart routing intelligence — token estimation, context replay cost
+- [ ] **10D:** Interactive audit & taxonomy — audit filters, taxonomy tree
+- [ ] **10E:** Knowledge curation agent (design)
+- [ ] **10F:** RAG evaluation (research)
 
 ---
 

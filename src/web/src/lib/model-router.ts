@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Model Router — client-side intelligence for model selection.
  *
@@ -52,12 +55,10 @@ export function scoreQueryComplexity(
 // Cost estimation
 // ---------------------------------------------------------------------------
 
-/** Estimate input tokens from message text (rough: ~4 chars per token) */
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4)
 }
 
-/** Estimate cost for a single turn with a given model */
 export function estimateTurnCost(
   model: ModelOption,
   inputChars: number,
@@ -74,7 +75,6 @@ export function estimateTurnCost(
 // Model recommendation
 // ---------------------------------------------------------------------------
 
-/** Models suitable for each complexity tier, ordered by cost-effectiveness */
 const TIER_MODELS: Record<Complexity, string[]> = {
   simple: [
     "openrouter/google/gemini-2.5-flash",
@@ -104,13 +104,9 @@ export function recommendModel(
 ): ModelRecommendation {
   const complexity = scoreQueryComplexity(query, conversationMessages.length, kbInjections)
 
-  // Get candidate model IDs for this complexity tier
   const candidateIds = TIER_MODELS[complexity]
-
-  // Find the best candidate from MODELS list
   const sensitivityMultiplier = costSensitivity === "high" ? 0.3 : costSensitivity === "low" ? 3.0 : 1.0
 
-  // Estimate conversation context size
   const contextChars = conversationMessages.reduce((sum, m) => sum + m.content.length, 0) + query.length
   const estimatedOutput = complexity === "simple" ? 200 : complexity === "medium" ? 500 : 1000
 

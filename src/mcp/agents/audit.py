@@ -1,13 +1,7 @@
-"""
-Audit Agent - Operation tracking, cost estimation, and usage analytics.
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 
-Provides:
-- Aggregated audit trail from Redis (ingests, queries, recategorizations, rectifications)
-- Per-domain activity summaries with time-range filtering
-- Token/cost estimation for AI operations (categorization, reranking)
-- Query pattern analysis (most-searched domains, top queries)
-- Anomaly detection (unusual ingestion spikes, repeated failures)
-"""
+"""Audit Agent — operation tracking, cost estimation, and usage analytics."""
 
 from __future__ import annotations
 
@@ -48,30 +42,15 @@ def get_activity_summary(
     hours: int = 24,
     limit: int = 500,
 ) -> Dict[str, Any]:
-    """
-    Generate an activity summary from the Redis audit log.
-
-    Args:
-        redis_client: Redis client instance
-        hours: Time window in hours (default: 24h)
-        limit: Maximum log entries to scan
-
-    Returns:
-        Summary with event counts, domain breakdown, and timeline
-    """
+    """Generate an activity summary from the Redis audit log."""
     entries = get_log(redis_client, limit=limit)
     cutoff = (utcnow().replace(tzinfo=None) - timedelta(hours=hours)).isoformat()
 
-    # Filter to time window
     recent = [e for e in entries if e.get("timestamp", "") >= cutoff]
 
-    # Count by event type
     event_counts = Counter(e.get("event", "unknown") for e in recent)
-
-    # Count by domain
     domain_counts = Counter(e.get("domain", "unknown") for e in recent)
 
-    # Count by hour for timeline
     hourly = defaultdict(int)
     for e in recent:
         ts = e.get("timestamp", "")
@@ -79,7 +58,6 @@ def get_activity_summary(
             hour_key = ts[:13]  # YYYY-MM-DDTHH
             hourly[hour_key] += 1
 
-    # Recent failures (events with error info)
     failures = [
         e for e in recent
         if e.get("event", "").endswith("_error") or "error" in e.get("event", "")
@@ -100,22 +78,14 @@ def get_ingestion_stats(
     redis_client,
     limit: int = 1000,
 ) -> Dict[str, Any]:
-    """
-    Compute detailed ingestion statistics.
-
-    Returns file type distribution, domain distribution, duplicate rate,
-    and average chunks per file.
-    """
+    """Compute detailed ingestion statistics from the audit log."""
     entries = get_log(redis_client, limit=limit)
 
     ingests = [e for e in entries if e.get("event") == "ingest"]
     duplicates = [e for e in entries if e.get("event") == "duplicate" or e.get("status") == "duplicate"]
     recategorizations = [e for e in entries if e.get("event") == "recategorize"]
 
-    # Domain distribution of ingests
     domain_dist = Counter(e.get("domain", "unknown") for e in ingests)
-
-    # File extension distribution
     ext_dist = Counter()
     for e in ingests:
         filename = e.get("filename", "")
@@ -123,7 +93,6 @@ def get_ingestion_stats(
             ext = filename.rsplit(".", 1)[-1].lower()
             ext_dist[ext] += 1
 
-    # Chunks per ingest (if recorded)
     chunks_list = [e.get("chunks", 0) for e in ingests if "chunks" in e]
     avg_chunks = sum(chunks_list) / len(chunks_list) if chunks_list else 0
 
@@ -146,16 +115,11 @@ def estimate_costs(
     hours: int = 720,  # 30 days default
     limit: int = 5000,
 ) -> Dict[str, Any]:
-    """
-    Estimate AI token usage and cost from the audit trail.
-
-    Tracks categorization calls (smart/pro tiers) and reranking operations.
-    """
+    """Estimate AI token usage and cost from the audit trail."""
     entries = get_log(redis_client, limit=limit)
     cutoff = (utcnow().replace(tzinfo=None) - timedelta(hours=hours)).isoformat()
     recent = [e for e in entries if e.get("timestamp", "") >= cutoff]
 
-    # Count AI operations
     categorize_smart = sum(
         1 for e in recent
         if e.get("event") == "ingest" and e.get("categorize_mode") == "smart"
@@ -169,13 +133,11 @@ def estimate_costs(
         if e.get("event") == "query" or e.get("event") == "agent_query"
     )
 
-    # Estimate tokens
     smart_tokens = categorize_smart * AVG_TOKENS["categorize_smart"]
     pro_tokens = categorize_pro * AVG_TOKENS["categorize_pro"]
     rerank_tokens = rerank_calls * AVG_TOKENS["rerank"]
     total_tokens = smart_tokens + pro_tokens + rerank_tokens
 
-    # Estimate cost
     smart_cost = (smart_tokens / 1000) * COST_PER_1K_TOKENS["smart"]
     pro_cost = (pro_tokens / 1000) * COST_PER_1K_TOKENS["pro"]
     rerank_cost = (rerank_tokens / 1000) * COST_PER_1K_TOKENS["rerank"]
@@ -207,15 +169,10 @@ def get_query_patterns(
     redis_client,
     limit: int = 500,
 ) -> Dict[str, Any]:
-    """
-    Analyze query patterns from the audit log.
-
-    Returns most-queried domains, query frequency, and confidence distribution.
-    """
+    """Analyze query patterns from the audit log."""
     entries = get_log(redis_client, limit=limit)
     queries = [e for e in entries if e.get("event") in ("query", "agent_query")]
 
-    # Domain frequency
     domain_freq = Counter()
     for q in queries:
         domain_val = q.get("domain", "")
@@ -225,7 +182,6 @@ def get_query_patterns(
         elif domain_val:
             domain_freq[domain_val] += 1
 
-    # Results counts
     result_counts = [q.get("results", 0) for q in queries if "results" in q]
     avg_results = sum(result_counts) / len(result_counts) if result_counts else 0
 
@@ -237,7 +193,7 @@ def get_query_patterns(
 
 
 # ---------------------------------------------------------------------------
-# Conversation analytics (Phase 7A)
+# Conversation analytics
 # ---------------------------------------------------------------------------
 
 REDIS_CONV_METRICS_PREFIX = "conv:"
@@ -284,15 +240,10 @@ def get_conversation_analytics(
     redis_client,
     limit: int = 100,
 ) -> Dict[str, Any]:
-    """
-    Aggregate conversation metrics across all tracked conversations.
-
-    Returns model usage breakdown, cost estimates, and latency stats.
-    """
+    """Aggregate conversation metrics across all tracked conversations."""
     import json as _json
 
     try:
-        # Scan for conversation metric keys
         keys = []
         cursor = 0
         while True:
@@ -321,7 +272,6 @@ def get_conversation_analytics(
             for raw in entries:
                 entry = _json.loads(raw)
                 model = entry.get("model", "unknown")
-                # Strip openrouter/ prefix for cost lookup
                 model_key = model.replace("openrouter/", "")
                 inp = entry.get("input_tokens", 0)
                 out = entry.get("output_tokens", 0)
@@ -333,14 +283,13 @@ def get_conversation_analytics(
                 stats["output_tokens"] += out
                 stats["total_latency_ms"] += lat
 
-                # Compute cost
                 rates = MODEL_COST_RATES.get(model_key, {"input": 0.001, "output": 0.005})
                 stats["cost_usd"] += (inp / 1000) * rates["input"] + (out / 1000) * rates["output"]
                 total_turns += 1
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Failed to parse conversation metric entry: {e}")
             continue
 
-    # Format for output
     models_out = {}
     total_cost = 0.0
     for model_key, stats in model_stats.items():
@@ -367,18 +316,7 @@ async def audit(
     reports: Optional[List[str]] = None,
     hours: int = 24,
 ) -> Dict[str, Any]:
-    """
-    Run audit reports on the knowledge base operations.
-
-    Args:
-        redis_client: Redis client instance
-        reports: List of reports to generate. Default: all.
-            Options: "activity", "ingestion", "costs", "queries"
-        hours: Time window in hours for activity report
-
-    Returns:
-        Audit report with requested sections
-    """
+    """Run audit reports on knowledge base operations."""
     all_reports = {"activity", "ingestion", "costs", "queries", "conversations"}
     if reports is None:
         reports = list(all_reports)

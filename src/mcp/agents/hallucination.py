@@ -1,13 +1,7 @@
-"""
-Hallucination Detection Agent — cross-references LLM responses against the KB.
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 
-Extracts factual claims from assistant responses via a lightweight LLM call,
-then verifies each claim against the knowledge base using the existing
-multi-domain query pipeline. Claims are scored as verified, unverified,
-or contradicted based on similarity thresholds.
-
-Results are stored in Redis keyed by conversation ID for frontend display.
-"""
+"""Hallucination Detection Agent — cross-references LLM responses against the KB."""
 
 from __future__ import annotations
 
@@ -18,6 +12,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 import config
+from utils.llm_parsing import parse_llm_json
 from utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.hallucination")
@@ -39,11 +34,7 @@ REDIS_HALLUCINATION_TTL = 86400 * 7  # 7 days
 # ---------------------------------------------------------------------------
 
 async def extract_claims(response_text: str) -> List[str]:
-    """
-    Extract factual claims from an LLM response using a lightweight model.
-
-    Returns a list of factual statement strings (max MAX_CLAIMS_PER_RESPONSE).
-    """
+    """Extract factual claims from an LLM response using a lightweight model."""
     if len(response_text) < MIN_RESPONSE_LENGTH:
         return []
 
@@ -57,11 +48,11 @@ async def extract_claims(response_text: str) -> List[str]:
     )
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=config.BIFROST_TIMEOUT) as client:
             resp = await client.post(
                 f"{config.BIFROST_URL}/chat/completions",
                 json={
-                    "model": "meta-llama/llama-3.1-8b-instruct:free",
+                    "model": config.LLM_INTERNAL_MODEL,
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.1,
                     "max_tokens": 800,
@@ -69,13 +60,7 @@ async def extract_claims(response_text: str) -> List[str]:
             )
             resp.raise_for_status()
             content = resp.json()["choices"][0]["message"]["content"].strip()
-
-            # Parse JSON array from response (handle markdown code blocks)
-            if content.startswith("```"):
-                content = content.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
-            claims = json.loads(content)
+            claims = parse_llm_json(content)
             if isinstance(claims, list):
                 return [str(c) for c in claims[:MAX_CLAIMS_PER_RESPONSE]]
     except Exception as e:
@@ -95,11 +80,7 @@ async def verify_claim(
     redis_client,
     threshold: float = DEFAULT_THRESHOLD,
 ) -> Dict[str, Any]:
-    """
-    Verify a single claim against the knowledge base.
-
-    Returns a dict with status, similarity score, and source info.
-    """
+    """Verify a single claim against the knowledge base."""
     from agents.query_agent import agent_query
 
     try:
@@ -176,20 +157,7 @@ async def check_hallucinations(
     redis_client,
     threshold: Optional[float] = None,
 ) -> Dict[str, Any]:
-    """
-    Full hallucination check pipeline: extract claims → verify each → store results.
-
-    Args:
-        response_text: The LLM assistant response to check
-        conversation_id: UUID of the conversation
-        chroma_client: ChromaDB client
-        neo4j_driver: Neo4j driver
-        redis_client: Redis client
-        threshold: Override verification threshold (default from config)
-
-    Returns:
-        Report with claims, scores, and summary statistics
-    """
+    """Extract claims, verify each against KB, and store results in Redis."""
     if threshold is None:
         threshold = float(getattr(config, "HALLUCINATION_THRESHOLD", DEFAULT_THRESHOLD))
 
@@ -203,7 +171,6 @@ async def check_hallucinations(
             "summary": {"total": 0, "verified": 0, "unverified": 0, "uncertain": 0},
         }
 
-    # Step 1: Extract claims
     claims = await extract_claims(response_text)
     if not claims:
         return {
@@ -215,7 +182,6 @@ async def check_hallucinations(
             "summary": {"total": 0, "verified": 0, "unverified": 0, "uncertain": 0},
         }
 
-    # Step 2: Verify each claim (parallel for non-streaming path)
     import asyncio
 
     results = await asyncio.gather(*[
@@ -223,7 +189,6 @@ async def check_hallucinations(
         for claim in claims
     ])
 
-    # Step 3: Compute summary
     status_counts = {"verified": 0, "unverified": 0, "uncertain": 0, "error": 0}
     for r in results:
         status = r.get("status", "error")
@@ -242,7 +207,6 @@ async def check_hallucinations(
         },
     }
 
-    # Step 4: Store in Redis
     try:
         key = f"{REDIS_HALLUCINATION_PREFIX}{conversation_id}"
         redis_client.setex(key, REDIS_HALLUCINATION_TTL, json.dumps(report))
@@ -260,16 +224,7 @@ async def verify_response_streaming(
     redis_client,
     threshold: Optional[float] = None,
 ):
-    """
-    Streaming verification generator — yields claim results as they are verified.
-
-    Yields JSON-serializable dicts with event types:
-      - claim_extracted: {type, claim, index}
-      - claim_verified: {type, index, status, confidence, source?, reason?}
-      - summary: {type, overall_confidence, verified, unverified, uncertain, total}
-
-    This is used by the SSE endpoint for the Truth Panel.
-    """
+    """Streaming verification generator — yields claim results as they are verified."""
     if threshold is None:
         threshold = float(getattr(config, "HALLUCINATION_THRESHOLD", DEFAULT_THRESHOLD))
 
@@ -286,7 +241,6 @@ async def verify_response_streaming(
         }
         return
 
-    # Step 1: Extract claims
     claims = await extract_claims(response_text)
     if not claims:
         yield {
@@ -301,11 +255,9 @@ async def verify_response_streaming(
         }
         return
 
-    # Yield each extracted claim
     for i, claim in enumerate(claims):
         yield {"type": "claim_extracted", "claim": claim, "index": i}
 
-    # Step 2: Verify each claim and yield results immediately
     verified_count = 0
     unverified_count = 0
     uncertain_count = 0
@@ -336,7 +288,6 @@ async def verify_response_streaming(
             "reason": result.get("reason", ""),
         }
 
-    # Step 3: Yield summary
     overall = (total_confidence / len(claims)) if claims else 0
     yield {
         "type": "summary",

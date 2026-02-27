@@ -3,7 +3,7 @@ services:
   # Always start via scripts/start-cerid.sh which provides this flag.
   neo4j:
     container_name: ai-companion-neo4j
-    image: neo4j:5-community
+    image: neo4j:5.26.21-community
     ports:
       - "7474:7474"
       - "7687:7687"
@@ -48,7 +48,7 @@ services:
 
   redis:
     container_name: ai-companion-redis
-    image: redis:7-alpine
+    image: redis:7.4.8-alpine
     ports:
       - "6379:6379"
     volumes:

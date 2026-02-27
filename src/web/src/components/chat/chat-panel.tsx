@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { useRef, useEffect, useCallback, useState, useMemo } from "react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
@@ -5,6 +8,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Plus, PanelLeftClose, PanelLeft, Database, Rss, LayoutDashboard, Zap, Sparkles } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { MessageBubble } from "./message-bubble"
+import { ModelSwitchDivider } from "./model-switch-divider"
 import { ChatInput } from "./chat-input"
 import { ModelSelect } from "./model-select"
 import { ConversationList } from "./conversation-list"
@@ -18,7 +22,7 @@ import { useKBContext } from "@/hooks/use-kb-context"
 import { useSettings } from "@/hooks/use-settings"
 import { useModelRouter } from "@/hooks/use-model-router"
 import { useSmartSuggestions } from "@/hooks/use-smart-suggestions"
-import type { ChatMessage } from "@/lib/types"
+import type { ChatMessage, SourceRef } from "@/lib/types"
 import { MODELS } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -53,18 +57,12 @@ export function ChatPanel() {
   const [showHistory, setShowHistory] = useState(() => window.innerWidth >= 1024)
   const [showKB, setShowKB] = useState(() => window.innerWidth >= 1024)
 
-  // Sync model selector and reset router when switching conversations
-  useEffect(() => {
-    if (active?.model) setSelectedModel(active.model)
-    resetDismiss()
-  }, [activeId]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Extract the latest user message for auto-KB-query
+  const messages = active?.messages
   const latestUserMessage = useMemo(() => {
-    if (!active?.messages) return ""
-    const userMsgs = active.messages.filter((m) => m.role === "user")
+    if (!messages) return ""
+    const userMsgs = messages.filter((m) => m.role === "user")
     return userMsgs.length > 0 ? userMsgs[userMsgs.length - 1].content : ""
-  }, [active?.messages])
+  }, [messages])
 
   const kbContext = useKBContext(latestUserMessage)
   const { injectedContext, clearInjected } = kbContext
@@ -78,7 +76,12 @@ export function ChatPanel() {
     kbInjections: kbContext.injectedContext.length,
   })
 
-  // Smart suggestions: query KB as user types
+  // Sync model selector and reset router when switching conversations
+  useEffect(() => {
+    if (active?.model) setSelectedModel(active.model)
+    resetDismiss()
+  }, [activeId]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const injectedArtifactIds = useMemo(
     () => injectedContext.map((r) => r.artifact_id),
     [injectedContext],
@@ -88,7 +91,6 @@ export function ChatPanel() {
     injectedArtifactIds,
   })
 
-  // Auto-scroll on new messages
   useEffect(() => {
     const viewport = scrollRef.current?.querySelector<HTMLDivElement>(
       "[data-radix-scroll-area-viewport]",
@@ -113,9 +115,20 @@ export function ChatPanel() {
       }
       addMessage(convoId, userMsg)
 
-      // Build messages, prepending injected KB context as system message
+      let sourcesForAssistant: SourceRef[] | undefined
       const allMessages: Pick<ChatMessage, "role" | "content">[] = []
       if (injectedContext.length > 0) {
+        // Capture lightweight source refs before clearing
+        sourcesForAssistant = injectedContext.map((r) => ({
+          artifact_id: r.artifact_id,
+          filename: r.filename,
+          domain: r.domain,
+          sub_category: r.sub_category,
+          relevance: r.relevance,
+          chunk_index: r.chunk_index,
+          tags: r.tags,
+        }))
+
         const contextParts = injectedContext.map(
           (r) => `--- Source: ${r.filename} (${r.domain}) ---\n${r.content}`,
         )
@@ -127,7 +140,7 @@ export function ChatPanel() {
       }
 
       allMessages.push(...(active?.messages ?? []), userMsg)
-      send(convoId, allMessages, selectedModel)
+      send(convoId, allMessages, selectedModel, sourcesForAssistant)
     },
     [activeId, active, selectedModel, addMessage, create, send, injectedContext, clearInjected],
   )
@@ -143,11 +156,11 @@ export function ChatPanel() {
   )
 
   const chatArea = (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
       {/* Toolbar */}
       <div className="flex items-center gap-2 border-b px-4 py-2">
         {!showHistory && (
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowHistory(true)}>
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowHistory(true)} aria-label="Show conversation history">
             <PanelLeft className="h-4 w-4" />
           </Button>
         )}
@@ -164,6 +177,7 @@ export function ChatPanel() {
                 size="icon"
                 className={cn("h-8 w-8", feedbackLoop && "text-primary")}
                 onClick={toggleFeedbackLoop}
+                aria-label={feedbackLoop ? "Disable feedback loop" : "Enable feedback loop"}
               >
                 <Rss className="h-4 w-4" />
               </Button>
@@ -179,6 +193,7 @@ export function ChatPanel() {
                 size="icon"
                 className={cn("h-8 w-8", showDashboard && "text-primary")}
                 onClick={toggleDashboard}
+                aria-label={showDashboard ? "Hide metrics dashboard" : "Show metrics dashboard"}
               >
                 <LayoutDashboard className="h-4 w-4" />
               </Button>
@@ -194,6 +209,7 @@ export function ChatPanel() {
                 size="icon"
                 className={cn("h-8 w-8", autoModelSwitch && "text-primary")}
                 onClick={toggleAutoModelSwitch}
+                aria-label={autoModelSwitch ? "Disable smart model routing" : "Enable smart model routing"}
               >
                 <Zap className="h-4 w-4" />
               </Button>
@@ -209,6 +225,7 @@ export function ChatPanel() {
                 size="icon"
                 className={cn("h-8 w-8", showKB && "text-primary")}
                 onClick={() => setShowKB(!showKB)}
+                aria-label={showKB ? "Hide knowledge context" : "Show knowledge context"}
               >
                 <Database className="h-4 w-4" />
               </Button>
@@ -253,16 +270,36 @@ export function ChatPanel() {
       )}
 
       {/* Messages */}
-      <ScrollArea className="flex-1 px-4" ref={scrollRef}>
+      <ScrollArea className="min-h-0 flex-1 px-4" ref={scrollRef}>
         <div className="mx-auto max-w-3xl py-4">
           {(!active || active.messages.length === 0) && (
             <div className="flex items-center justify-center py-20 text-muted-foreground">
               <p>Start a conversation...</p>
             </div>
           )}
-          {active?.messages.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} />
-          ))}
+          {active?.messages.map((msg, i) => {
+            let divider: React.ReactNode = null
+            if (msg.role === "assistant" && msg.model) {
+              const prevAssistant = active.messages
+                .slice(0, i)
+                .findLast((m) => m.role === "assistant" && m.model)
+              if (prevAssistant?.model && prevAssistant.model !== msg.model) {
+                divider = (
+                  <ModelSwitchDivider
+                    key={`switch-${msg.id}`}
+                    fromModelId={prevAssistant.model}
+                    toModelId={msg.model}
+                  />
+                )
+              }
+            }
+            return (
+              <div key={msg.id}>
+                {divider}
+                <MessageBubble message={msg} />
+              </div>
+            )
+          })}
           {/* Hallucination panel after messages — refreshKey triggers re-fetch after new messages */}
           {activeId && !isStreaming && (
             <HallucinationPanel conversationId={activeId} refreshKey={active?.messages.length ?? 0} />
@@ -311,7 +348,7 @@ export function ChatPanel() {
         <div className="flex w-64 flex-col border-r">
           <div className="flex items-center gap-2 border-b px-3 py-2">
             <span className="flex-1 text-sm font-medium">History</span>
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setShowHistory(false)}>
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setShowHistory(false)} aria-label="Hide conversation history">
               <PanelLeftClose className="h-4 w-4" />
             </Button>
           </div>

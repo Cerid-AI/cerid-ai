@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """Daily digest endpoint (Phase 4C.2)."""
 from __future__ import annotations
 
@@ -68,7 +71,8 @@ async def digest_endpoint(hours: int = Query(24, ge=1, le=168)):
     # System health
     try:
         system_health = health_check()
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Health check failed during digest: {e}")
         system_health = {"status": "unknown"}
 
     # Recent activity log from Redis
@@ -77,8 +81,8 @@ async def digest_endpoint(hours: int = Query(24, ge=1, le=168)):
         log = get_log(get_redis(), limit=20)
         if isinstance(log, list):
             recent_events = log
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Redis activity log unavailable for digest: {e}")
 
     return {
         "period_hours": hours,

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """Taxonomy management endpoints (Phase 8C).
 
 Provides CRUD for the hierarchical taxonomy: domains → sub-categories → tags.

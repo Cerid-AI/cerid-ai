@@ -1,13 +1,7 @@
-"""
-Maintenance Agent - Scheduled health checks and automated cleanup.
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
 
-Provides:
-- Comprehensive system health check (all DBs + Bifrost connectivity)
-- Stale artifact detection and optional purge
-- Collection size monitoring and compaction recommendations
-- Orphan cleanup orchestration (wraps rectify agent)
-- Maintenance run summary with before/after metrics
-"""
+"""Maintenance Agent — scheduled health checks and automated cleanup."""
 
 from __future__ import annotations
 
@@ -35,19 +29,13 @@ def check_system_health(
     chroma_client: chromadb.HttpClient,
     redis_client,
 ) -> Dict[str, Any]:
-    """
-    Comprehensive health check across all services.
-
-    Goes beyond the basic /health endpoint — checks data integrity,
-    collection counts, and Bifrost reachability.
-    """
+    """Comprehensive health check — data integrity, collection counts, Bifrost reachability."""
     health = {
         "timestamp": utcnow_iso(),
         "services": {},
         "data": {},
     }
 
-    # ChromaDB
     try:
         chroma_client.heartbeat()
         collections = chroma_client.list_collections()
@@ -64,7 +52,6 @@ def check_system_health(
     except Exception as e:
         health["services"]["chromadb"] = f"error: {e}"
 
-    # Neo4j
     try:
         with neo4j_driver.session() as session:
             result = session.run(
@@ -85,7 +72,6 @@ def check_system_health(
     except Exception as e:
         health["services"]["neo4j"] = f"error: {e}"
 
-    # Redis
     try:
         redis_client.ping()
         log_size = redis_client.llen(config.REDIS_INGEST_LOG)
@@ -94,7 +80,6 @@ def check_system_health(
     except Exception as e:
         health["services"]["redis"] = f"error: {e}"
 
-    # Bifrost (LLM Gateway)
     try:
         import asyncio
         loop = asyncio.get_event_loop()
@@ -103,10 +88,9 @@ def check_system_health(
             health["services"]["bifrost"] = "skipped (async context)"
         else:
             health["services"]["bifrost"] = _check_bifrost_sync()
-    except Exception:
-        health["services"]["bifrost"] = "skipped"
+    except Exception as e:
+        health["services"]["bifrost"] = f"skipped: {e}"
 
-    # Overall status
     service_statuses = health["services"]
     all_ok = all(
         v == "connected" or v.startswith("skipped")
@@ -180,22 +164,12 @@ def purge_artifacts(
     artifact_ids: List[str],
     redis_client=None,
 ) -> Dict[str, Any]:
-    """
-    Remove specified artifacts from Neo4j and ChromaDB.
-
-    Args:
-        artifact_ids: List of artifact UUIDs to purge
-        redis_client: Optional Redis client for audit logging
-
-    Returns:
-        Summary of purged artifacts
-    """
+    """Remove specified artifacts from Neo4j and ChromaDB."""
     purged = []
     errors = []
 
     for artifact_id in artifact_ids:
         try:
-            # Get artifact info from Neo4j
             with neo4j_driver.session() as session:
                 result = session.run(
                     """
@@ -214,16 +188,13 @@ def purge_artifacts(
             filename = record["filename"]
             chunk_ids = json.loads(record.get("chunk_ids") or "[]")
 
-            # Remove chunks from ChromaDB
             if chunk_ids:
-                collection_name = f"domain_{domain}"
                 try:
-                    collection = chroma_client.get_collection(name=collection_name)
+                    collection = chroma_client.get_collection(name=config.collection_name(domain))
                     collection.delete(ids=chunk_ids)
                 except Exception as e:
                     logger.warning(f"Failed to delete chunks for {artifact_id}: {e}")
 
-            # Remove from Neo4j
             with neo4j_driver.session() as session:
                 session.run(
                     "MATCH (a:Artifact {id: $id}) DETACH DELETE a",
@@ -237,7 +208,6 @@ def purge_artifacts(
                 "chunks_removed": len(chunk_ids),
             })
 
-            # Audit log
             if redis_client:
                 try:
                     log_event(
@@ -247,8 +217,8 @@ def purge_artifacts(
                         domain=domain,
                         filename=filename,
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Failed to log maintenance purge event: {e}")
 
         except Exception as e:
             errors.append({"id": artifact_id, "error": str(e)})
@@ -268,12 +238,7 @@ def purge_artifacts(
 def analyze_collections(
     chroma_client: chromadb.HttpClient,
 ) -> Dict[str, Any]:
-    """
-    Analyze ChromaDB collection health and size distribution.
-
-    Returns per-collection chunk counts, empty collections,
-    and recommendations.
-    """
+    """Analyze ChromaDB collection health and size distribution."""
     collections = chroma_client.list_collections()
     analysis = {}
     empty = []
@@ -286,8 +251,7 @@ def analyze_collections(
         if count == 0:
             empty.append(col.name)
 
-    # Check for expected domain collections
-    expected = {f"domain_{d}" for d in config.DOMAINS}
+    expected = {config.collection_name(d) for d in config.DOMAINS}
     existing = {col.name for col in collections}
     missing = expected - existing
     extra = existing - expected
@@ -322,21 +286,7 @@ async def maintain(
     stale_days: int = 90,
     auto_purge: bool = False,
 ) -> Dict[str, Any]:
-    """
-    Run maintenance routines on the knowledge base.
-
-    Args:
-        neo4j_driver: Neo4j driver instance
-        chroma_client: ChromaDB client instance
-        redis_client: Redis client instance
-        actions: List of actions to run. Default: all.
-            Options: "health", "stale", "collections", "orphans"
-        stale_days: Days threshold for stale detection
-        auto_purge: If True, automatically purge stale artifacts
-
-    Returns:
-        Maintenance report
-    """
+    """Run maintenance routines on the knowledge base."""
     all_actions = {"health", "stale", "collections", "orphans"}
     if actions is None:
         actions = list(all_actions)
@@ -347,10 +297,8 @@ async def maintain(
         "auto_purge": auto_purge,
     }
 
-    # System health
     if "health" in actions:
         health = check_system_health(neo4j_driver, chroma_client, redis_client)
-        # Add async Bifrost check
         bifrost_status = await check_bifrost_health()
         health["services"]["bifrost"] = bifrost_status
         health["overall"] = "healthy" if all(
@@ -358,7 +306,6 @@ async def maintain(
         ) else "degraded"
         report["health"] = health
 
-    # Stale artifacts
     if "stale" in actions:
         stale = find_stale_artifacts(neo4j_driver, days_threshold=stale_days)
         report["stale"] = {
@@ -382,11 +329,9 @@ async def maintain(
             )
             report["purge_result"] = purge_result
 
-    # Collection analysis
     if "collections" in actions:
         report["collections"] = analyze_collections(chroma_client)
 
-    # Orphan check (delegates to rectify)
     if "orphans" in actions:
         from agents.rectify import cleanup_orphaned_chunks, find_orphaned_chunks
         orphans = find_orphaned_chunks(neo4j_driver, chroma_client)
@@ -399,7 +344,6 @@ async def maintain(
             cleaned = cleanup_orphaned_chunks(chroma_client, orphans)
             report["orphan_cleanup"] = cleaned
 
-    # Audit log
     try:
         log_event(
             redis_client,
@@ -412,7 +356,7 @@ async def maintain(
                 "auto_purge": auto_purge,
             },
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Failed to log maintenance event: {e}")
 
     return report

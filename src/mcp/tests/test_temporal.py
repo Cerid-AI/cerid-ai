@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """Tests for temporal awareness utilities (Phase 4B.4)."""
 
 from datetime import datetime, timedelta, timezone

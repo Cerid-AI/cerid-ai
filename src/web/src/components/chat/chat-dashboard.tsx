@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { Cpu, Coins, Binary, Database } from "lucide-react"
 import type { ChatMessage } from "@/lib/types"
 import { useLiveMetrics } from "@/hooks/use-live-metrics"

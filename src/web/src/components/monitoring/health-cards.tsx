@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import type { MaintenanceHealth } from "@/lib/types"
@@ -44,6 +47,7 @@ export function HealthCards({ health }: HealthCardsProps) {
                     "h-2 w-2 rounded-full",
                     isOk ? "bg-green-500" : isSkipped ? "bg-yellow-500" : "bg-red-500",
                   )}
+                  aria-hidden="true"
                 />
                 <span className="text-xs text-muted-foreground capitalize">{statusLabel}</span>
               </div>
