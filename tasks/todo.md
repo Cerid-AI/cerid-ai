@@ -1,7 +1,7 @@
 # Cerid AI — Task Tracker
 
 > **Last updated:** 2026-02-28
-> **Current status:** Phase 10D in progress. 510 tests passing (was 156). Middleware, ingestion, agents, sync, tools, parsers all tested. Remaining: neo4j expansion, CI hardening.
+> **Current status:** Phase 10D in progress. 564 tests passing (was 156). All backend modules tested. Remaining: CI hardening (G12-G15).
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md)
 
 ## Current: Phase 10 — Commercial & Open-Source Readiness
@@ -78,7 +78,7 @@
 - [x] Tests for `sync/` package (41 tests: SHA-256 file hashing, JSONL read/write/iterate, manifest read/write/validation, Neo4j export, Redis export/import with deduplication)
 - [x] Tests for `mcp/tools.py` (24 tests: registry validation, dispatch for all tool types, error paths, argument defaults, async agent tool dispatch)
 - [x] Tests for `parsers/` sub-package (108 tests: HTML/RTF stripping, registry validation, parse_file orchestration, text/HTML/EML/RTF/EPUB parsers with real files, PDF/DOCX/XLSX/CSV parsers with mocks)
-- [ ] Tests for `db/neo4j/` package (9 tests for 17 functions — expand coverage)
+- [x] Tests for `db/neo4j/` package (54 new tests: schema init, artifact CRUD, relationship creation/discovery/traversal, taxonomy CRUD, subcategory management, tag listing — expanded from 9 to 63 total)
 - [ ] G12 — Fix pip-audit to scan installed packages (transitive dependency vulnerabilities)
 - [ ] G13 — Add CodeQL SAST workflow (`.github/workflows/codeql.yml`)
 - [ ] G14 — Raise coverage threshold from 35% to 55%
