@@ -79,10 +79,10 @@
 - [x] Tests for `mcp/tools.py` (24 tests: registry validation, dispatch for all tool types, error paths, argument defaults, async agent tool dispatch)
 - [x] Tests for `parsers/` sub-package (108 tests: HTML/RTF stripping, registry validation, parse_file orchestration, text/HTML/EML/RTF/EPUB parsers with real files, PDF/DOCX/XLSX/CSV parsers with mocks)
 - [x] Tests for `db/neo4j/` package (54 new tests: schema init, artifact CRUD, relationship creation/discovery/traversal, taxonomy CRUD, subcategory management, tag listing — expanded from 9 to 63 total)
-- [ ] G12 — Fix pip-audit to scan installed packages (transitive dependency vulnerabilities)
-- [ ] G13 — Add CodeQL SAST workflow (`.github/workflows/codeql.yml`)
-- [ ] G14 — Raise coverage threshold from 35% to 55%
-- [ ] G15 — Add bundle size monitoring in CI (fail if chunk >800KB)
+- [x] G12 — Fix pip-audit to scan installed packages including transitive deps (`--desc` flag)
+- [x] G13 — Add CodeQL SAST workflow (`.github/workflows/codeql.yml` — Python + JavaScript, weekly + push/PR)
+- [x] G14 — Raise coverage threshold from 35% to 55% (actual coverage: 75%)
+- [x] G15 — Add bundle size monitoring in CI (fail if any JS chunk >800KB after vite build)
 - [ ] Frontend component tests (40+ components with 0 tests)
 
 ### 10E: Smart Routing Intelligence

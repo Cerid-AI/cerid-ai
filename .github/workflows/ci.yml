@@ -29,7 +29,7 @@ jobs:
       - run: pip install -r src/mcp/requirements.txt
       - run: pip install pytest pytest-asyncio httpx pytest-cov
       - name: Run tests with coverage
-        run: cd src/mcp && python -m pytest tests/ -v --tb=short --cov=. --cov-report=term-missing --cov-fail-under=35
+        run: cd src/mcp && python -m pytest tests/ -v --tb=short --cov=. --cov-report=term-missing --cov-fail-under=55
 
   security:
     runs-on: ubuntu-latest
@@ -40,11 +40,11 @@ jobs:
           python-version: "3.11"
       - name: Python security scan (bandit)
         run: pip install bandit==1.9.4 && bandit -r src/mcp/ -ll --skip B101 -x src/mcp/tests
-      - name: Python dependency audit
+      - name: Python dependency audit (including transitive deps)
         run: |
           pip install pip-audit==2.10.0
           pip install -r src/mcp/requirements.txt
-          pip-audit
+          pip-audit --desc
 
   lock-sync:
     runs-on: ubuntu-latest
@@ -82,6 +82,20 @@ jobs:
         run: npm test
       - name: Vite build
         run: npx vite build
+      - name: Check bundle size (fail if any chunk > 800KB)
+        run: |
+          max_bytes=$((800 * 1024))
+          fail=0
+          for file in dist/assets/*.js; do
+            size=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file" 2>/dev/null)
+            size_kb=$((size / 1024))
+            echo "$file: ${size_kb}KB"
+            if [ "$size" -gt "$max_bytes" ]; then
+              echo "::error::Bundle chunk $file exceeds 800KB limit: ${size_kb}KB"
+              fail=1
+            fi
+          done
+          if [ "$fail" -eq 1 ]; then exit 1; fi
       - name: NPM dependency audit
         run: npm audit --audit-level=high
 
