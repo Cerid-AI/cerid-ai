@@ -1,7 +1,7 @@
 # Cerid AI — Task Tracker
 
 > **Last updated:** 2026-02-28
-> **Current status:** Phase 10E complete. 94 frontend tests (was 68, +26). Smart model switching with cost estimation, summarize-and-switch, color-coded context gauge. 564 backend tests, 75% coverage.
+> **Current status:** Phase 11 complete. All 4 workstreams done (11A–11D). 658 tests passing.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md)
 
 ## Current: Phase 10 — Commercial & Open-Source Readiness
@@ -105,11 +105,11 @@
 
 ## Forward Plan
 
-### Phase 11: Knowledge Intelligence
-- [ ] B1 — Interactive audit controls (report toggles, time range, manual refresh)
-- [ ] C1 — Taxonomy tree sidebar + tag management CRUD
-- [ ] C2 — Knowledge curation agent design doc
-- [ ] G17–G22 — Operations documentation (OPERATIONS.md, dep coupling, branch protection)
+### Phase 11: Knowledge Intelligence + UI Wiring
+- [x] 11A — Interactive audit + agent controls (B1 + rectify/maintain UI wiring)
+- [x] 11B — Taxonomy tree sidebar + tag management CRUD (C1)
+- [x] 11C — Knowledge curation agent design doc (C2)
+- [x] 11D — Operations documentation (G17–G22: OPERATIONS.md, dep coupling, branch protection)
 
 ### Phase 12: RAG & Retrieval Excellence
 - [ ] E2 — Embedding model evaluation (ChromaDB default vs dedicated models)

@@ -40,6 +40,24 @@ Constraints that span multiple files. When updating one side, check the other.
 
 **Rule:** Both must use the same Python 3.11.x line. Lock files are generated against 3.11.
 
+## pip-tools Version
+
+| Component | File | Current |
+|-----------|------|---------|
+| CI lock-sync job | `.github/workflows/ci.yml` | `pip-tools==7.5.3` |
+| Local generation | Developer machine | Must match CI version |
+
+**Rule:** The `pip-compile` version used locally must match the CI `lock-sync` job. Version mismatches cause non-deterministic lock files and CI failures.
+
+## Bifrost LLM Gateway
+
+| Component | File | Current |
+|-----------|------|---------|
+| Docker image | `stacks/bifrost/docker-compose.yml` | `maximhq/bifrost:latest` |
+| Config | `stacks/bifrost/config.yaml` | Intent routing, model list |
+
+**Rule:** Bifrost uses `latest` tag. When pinning to a specific version, update both the image tag and verify `config.yaml` compatibility with that release.
+
 ## Lock File Workflow
 
 When editing `requirements.txt`:

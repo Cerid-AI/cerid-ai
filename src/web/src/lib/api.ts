@@ -19,6 +19,9 @@ import type {
   RelatedArtifact,
   CollectionsResponse,
   MaintenanceResponse,
+  RectifyResponse,
+  TaxonomyResponse,
+  TagInfo,
   SchedulerStatus,
   IngestLogResponse,
   AuditResponse,
@@ -82,17 +85,79 @@ export async function fetchCollections(): Promise<CollectionsResponse> {
   return res.json()
 }
 
+// --- Taxonomy & Tags ---
+
+export async function fetchTaxonomy(): Promise<TaxonomyResponse> {
+  const res = await fetch(`${MCP_BASE}/taxonomy`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(`Taxonomy fetch failed: ${res.status}`)
+  return res.json()
+}
+
+export async function fetchTags(limit = 200): Promise<TagInfo[]> {
+  const res = await fetch(`${MCP_BASE}/tags?limit=${limit}`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(`Tags fetch failed: ${res.status}`)
+  return res.json()
+}
+
+export async function updateArtifactTaxonomy(
+  artifactId: string,
+  opts: { sub_category?: string; tags?: string[] },
+): Promise<unknown> {
+  const res = await fetch(`${MCP_BASE}/taxonomy/artifact`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ artifact_id: artifactId, ...opts }),
+  })
+  if (!res.ok) throw new Error(`Taxonomy update failed: ${res.status}`)
+  return res.json()
+}
+
+export async function mergeTags(
+  sourceTag: string,
+  targetTag: string,
+): Promise<{ status: string; source: string; target: string; artifacts_updated: number }> {
+  const res = await fetch(`${MCP_BASE}/tags/merge`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ source_tag: sourceTag, target_tag: targetTag }),
+  })
+  if (!res.ok) throw new Error(`Tag merge failed: ${res.status}`)
+  return res.json()
+}
+
 // --- Monitoring & Audit ---
 
 export async function fetchMaintenance(
   actions: string[] = ["health", "collections"],
+  opts: { stale_days?: number; auto_purge?: boolean } = {},
 ): Promise<MaintenanceResponse> {
   const res = await fetch(`${MCP_BASE}/agent/maintain`, {
     method: "POST",
     headers: mcpHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ actions, stale_days: 90, auto_purge: false }),
+    body: JSON.stringify({
+      actions,
+      stale_days: opts.stale_days ?? 90,
+      auto_purge: opts.auto_purge ?? false,
+    }),
   })
   if (!res.ok) throw new Error(`Maintenance fetch failed: ${res.status}`)
+  return res.json()
+}
+
+export async function fetchRectify(
+  checks: string[] = ["duplicates", "stale", "orphans", "distribution"],
+  opts: { auto_fix?: boolean; stale_days?: number } = {},
+): Promise<RectifyResponse> {
+  const res = await fetch(`${MCP_BASE}/agent/rectify`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      checks,
+      auto_fix: opts.auto_fix ?? false,
+      stale_days: opts.stale_days ?? 90,
+    }),
+  })
+  if (!res.ok) throw new Error(`Rectify failed: ${res.status}`)
   return res.json()
 }
 

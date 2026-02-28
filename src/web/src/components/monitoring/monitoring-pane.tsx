@@ -10,6 +10,7 @@ import { HealthCards } from "./health-cards"
 import { CollectionChart } from "./collection-chart"
 import { IngestionTimeline } from "./ingestion-timeline"
 import { SchedulerStatus } from "./scheduler-status"
+import { KBOperations } from "./kb-operations"
 import { fetchMaintenance, fetchIngestLog, fetchSchedulerStatus } from "@/lib/api"
 
 export function MonitoringPane() {
@@ -54,6 +55,9 @@ export function MonitoringPane() {
             </PaneErrorBoundary>
             <PaneErrorBoundary label="Collection Chart">
               <CollectionChart collections={maintenance?.collections} />
+            </PaneErrorBoundary>
+            <PaneErrorBoundary label="KB Operations">
+              <KBOperations />
             </PaneErrorBoundary>
             <PaneErrorBoundary label="Ingestion Timeline">
               <IngestionTimeline entries={ingestLog?.entries} />

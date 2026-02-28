@@ -10,7 +10,7 @@ import { Separator } from "@/components/ui/separator"
 import { Badge } from "@/components/ui/badge"
 import { Search, X, Loader2, AlertCircle, RefreshCcw, Upload, CheckCircle, Tag } from "lucide-react"
 import { ArtifactCard } from "./artifact-card"
-import { DomainFilter } from "./domain-filter"
+import { TaxonomyTree } from "./taxonomy-tree"
 import { GraphPreview } from "./graph-preview"
 import { fetchArtifacts, queryKB, uploadFile } from "@/lib/api"
 import { useKBInjection } from "@/contexts/kb-injection-context"
@@ -35,7 +35,10 @@ export function KnowledgePane() {
   const { injectResult, injectedContext } = useKBInjection()
   const [searchInput, setSearchInput] = useState("")
   const [activeSearch, setActiveSearch] = useState("")
-  const [activeDomains, setActiveDomains] = useState<Set<string>>(new Set())
+  const [taxonomyFilter, setTaxonomyFilter] = useState<{ domain: string | null; subCategory: string | null }>({
+    domain: null,
+    subCategory: null,
+  })
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null)
   const [activeTag, setActiveTag] = useState<string | null>(null)
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "success" | "error">("idle")
@@ -43,11 +46,13 @@ export function KnowledgePane() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const queryClient = useQueryClient()
 
+  const activeDomain = taxonomyFilter.domain
+
   const handleFileUpload = useCallback(async (file: File) => {
     setUploadStatus("uploading")
     setUploadMessage("")
     try {
-      const domain = activeDomains.size === 1 ? [...activeDomains][0] : undefined
+      const domain = activeDomain ?? undefined
       const result = await uploadFile(file, { domain })
       setUploadStatus("success")
       setUploadMessage(`${result.filename} ingested (${result.chunks} chunks)`)
@@ -58,9 +63,7 @@ export function KnowledgePane() {
       setUploadMessage(err instanceof Error ? err.message : "Upload failed")
       setTimeout(() => setUploadStatus("idle"), 5000)
     }
-  }, [activeDomains, queryClient])
-
-  const domainKey = [...activeDomains].sort().join(",")
+  }, [activeDomain, queryClient])
 
   const {
     data: artifacts,
@@ -69,11 +72,8 @@ export function KnowledgePane() {
     error: browseErrorDetail,
     refetch: refetchArtifacts,
   } = useQuery({
-    queryKey: ["artifacts", domainKey],
-    queryFn: () => {
-      const domain = activeDomains.size === 1 ? [...activeDomains][0] : undefined
-      return fetchArtifacts(domain, 200)
-    },
+    queryKey: ["artifacts", activeDomain ?? "all"],
+    queryFn: () => fetchArtifacts(activeDomain ?? undefined, 200),
     enabled: !activeSearch,
     staleTime: 30_000,
     retry: 1,
@@ -86,9 +86,9 @@ export function KnowledgePane() {
     error: searchErrorDetail,
     refetch: refetchSearch,
   } = useQuery({
-    queryKey: ["kb-search", activeSearch, [...activeDomains].sort().join(",")],
+    queryKey: ["kb-search", activeSearch, activeDomain ?? "all"],
     queryFn: () =>
-      queryKB(activeSearch, activeDomains.size > 0 ? [...activeDomains] : undefined),
+      queryKB(activeSearch, activeDomain ? [activeDomain] : undefined),
     enabled: !!activeSearch && activeSearch.length > 2,
     staleTime: 60_000,
     retry: 1,
@@ -102,8 +102,19 @@ export function KnowledgePane() {
   const allResults: KBQueryResult[] = activeSearch
     ? searchResults?.results ?? []
     : (artifacts ?? [])
-        .filter((a) => activeDomains.size === 0 || activeDomains.has(a.domain))
+        .filter((a) => !activeDomain || a.domain === activeDomain)
+        .filter((a) => !taxonomyFilter.subCategory || a.sub_category === taxonomyFilter.subCategory)
         .map(artifactToResult)
+
+  // Compute artifact counts per domain for the taxonomy tree
+  const domainCounts = useMemo(() => {
+    if (activeSearch || !artifacts) return new Map<string, number>()
+    const counts = new Map<string, number>()
+    for (const a of artifacts) {
+      counts.set(a.domain, (counts.get(a.domain) ?? 0) + 1)
+    }
+    return counts
+  }, [artifacts, activeSearch])
 
   const availableTags = useMemo(() => {
     const tagCounts = new Map<string, number>()
@@ -118,15 +129,6 @@ export function KnowledgePane() {
   const results = activeTag
     ? allResults.filter((r) => r.tags?.includes(activeTag))
     : allResults
-
-  const toggleDomain = useCallback((domain: string) => {
-    setActiveDomains((prev) => {
-      const next = new Set(prev)
-      if (next.has(domain)) next.delete(domain)
-      else next.add(domain)
-      return next
-    })
-  }, [])
 
   const executeSearch = useCallback(() => {
     if (searchInput.trim().length > 2) {
@@ -175,6 +177,11 @@ export function KnowledgePane() {
           {activeSearch
             ? `${results.length} results for "${activeSearch}"`
             : `${results.length} artifacts`}
+          {taxonomyFilter.subCategory && (
+            <span className="ml-1 text-primary">
+              in {taxonomyFilter.subCategory}
+            </span>
+          )}
         </p>
         {uploadStatus !== "idle" && (
           <div className={`mt-1 flex items-center gap-1 text-xs ${uploadStatus === "error" ? "text-destructive" : uploadStatus === "success" ? "text-green-500" : "text-muted-foreground"}`}>
@@ -210,7 +217,11 @@ export function KnowledgePane() {
             </Button>
           )}
         </div>
-        <DomainFilter activeDomains={activeDomains} onToggle={toggleDomain} />
+        <TaxonomyTree
+          filter={taxonomyFilter}
+          onFilterChange={setTaxonomyFilter}
+          artifactCounts={domainCounts}
+        />
         {availableTags.length > 0 && (
           <div className="flex flex-wrap items-center gap-1">
             <Tag className="h-3 w-3 shrink-0 text-muted-foreground" />

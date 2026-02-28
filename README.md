@@ -345,6 +345,7 @@ cerid-ai/
 │   ├── CERID_AI_PROJECT_REFERENCE.md  # Detailed technical reference
 │   ├── DEPENDENCY_COUPLING.md         # Cross-service version constraints
 │   ├── ISSUES.md                      # Issue tracker (5 open)
+│   ├── OPERATIONS.md                  # API keys, secrets, rate limits, CI
 │   ├── PHASE4_PLAN.md
 │   └── plans/                         # Implementation plans (6 docs)
 │
@@ -497,6 +498,7 @@ cerid-ai/
 | `Makefile` | lock-python, install-hooks, deps-check targets |
 | `docs/DEPENDENCY_COUPLING.md` | Cross-service version constraints |
 | `docs/ISSUES.md` | Open issues and backlog (5 open) |
+| `docs/OPERATIONS.md` | API keys, secrets rotation, rate limits, CI reference |
 
 ### Secrets Management
 

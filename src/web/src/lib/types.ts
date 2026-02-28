@@ -75,6 +75,21 @@ export type Theme = "dark" | "light"
 export const DOMAINS = ["coding", "finance", "projects", "personal", "general", "conversations"] as const
 export type Domain = (typeof DOMAINS)[number]
 
+export interface TaxonomyDomain {
+  description: string
+  icon: string
+  sub_categories: string[]
+}
+
+export interface TaxonomyResponse {
+  domains: Record<string, TaxonomyDomain>
+}
+
+export interface TagInfo {
+  name: string
+  count: number
+}
+
 export interface Artifact {
   id: string
   filename: string
@@ -162,6 +177,19 @@ export interface MaintenanceResponse {
   collections?: MaintenanceCollections
   stale_artifacts?: { id: string; filename: string; domain: string; ingested_at: string; chunk_count: number }[]
   orphan_cleanup?: { orphaned_chunks: number; cleaned: number }
+}
+
+export interface RectifyResponse {
+  timestamp: string
+  checks_run: string[]
+  auto_fix: boolean
+  findings: {
+    duplicates?: { count: number; details: { content_hash: string; artifacts: { id: string; filename: string; domain: string }[] }[] }
+    stale?: { count: number; threshold_days: number; artifacts: { id: string; filename: string; domain: string; ingested_at: string; chunk_count: number }[] }
+    orphans?: { count: number; by_domain: Record<string, number> }
+    distribution?: { distribution: Record<string, { artifacts: number; chunks: number }>; total_artifacts: number; total_chunks: number; domain_count: number }
+  }
+  actions: { type: string; [key: string]: unknown }[]
 }
 
 export interface SchedulerStatus {

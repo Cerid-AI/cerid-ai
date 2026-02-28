@@ -2,7 +2,7 @@
 
 > **Created:** 2026-02-25
 > **Last updated:** 2026-02-28
-> **Status:** Phase 10E complete. 31 resolved, 4 open (B1, C1, C2, E2), 2 research (E1, G16), 6 ops-docs (G17–G22), 1 informational (F6).
+> **Status:** Phase 11 complete. 40 resolved, 1 open (E2), 2 research (E1, G16), 1 informational (F6).
 > **Purpose:** Track known bugs, feature gaps, structural issues, and architecture evaluations for upcoming phases.
 
 ---
@@ -25,7 +25,7 @@
 ### B1. No Interactive Audit Agent in GUI
 
 **Severity:** Medium
-**Status:** Open
+**Status:** ✅ Resolved (Phase 11A, 2026-02-28)
 
 The audit pane (`audit-pane.tsx`) auto-fetches reports every 60 seconds via `useQuery`, but there's no way for users to manually trigger the audit agent, choose which reports to run, change the time window, or force a refresh.
 
@@ -65,7 +65,7 @@ The audit pane (`audit-pane.tsx`) auto-fetches reports every 60 seconds via `use
 ### C1. Knowledge Context & Tagging Needs Taxonomy Update
 
 **Severity:** Medium
-**Status:** Open
+**Status:** ✅ Resolved (Phase 11B, 2026-02-28)
 
 The GUI has basic tag pills and sub-category badges (added in Phase 9C) but doesn't fully leverage the hierarchical taxonomy system (TAXONOMY dict in `config.py` with domains, sub-categories, and tags). Missing:
 - Taxonomy-aware hierarchical browsing (domain > sub-category > tags)
@@ -87,7 +87,7 @@ The GUI has basic tag pills and sub-category badges (added in Phase 9C) but does
 ### C2. Knowledge Curation Agent Needed
 
 **Severity:** High
-**Status:** Open — needs design
+**Status:** ✅ Design complete (Phase 11C, 2026-02-28) — implementation deferred to post-Phase 12
 
 No agent exists for improving artifact quality. Current artifact cards show raw metadata (auto-extracted summaries, AI-generated keywords). Missing:
 - Content optimization (improve summaries, refine keywords, fix OCR artifacts)
@@ -380,16 +380,11 @@ Added bundle size check step in frontend CI job — fails if any JS chunk exceed
 ### G17–G22. Documentation Gaps
 
 **Severity:** Low
-**Status:** Open — Phase 11
+**Status:** ✅ Resolved — Phase 11D (2026-02-28)
 
-- **G17:** No documented API key rotation procedure
-- **G18:** No secrets rotation policy
-- **G19:** pip-compile version not in `DEPENDENCY_COUPLING.md`
-- **G20:** Bifrost version not in coupling constraints
-- **G21:** Branch protection rules not documented
-- **G22:** In-memory rate limiter state limitation not documented
+**Resolution:** Created `docs/OPERATIONS.md` covering API key rotation (G17), secrets rotation policy (G18), rate limiter limitations (G22), and branch protection rules (G21). Updated `docs/DEPENDENCY_COUPLING.md` with pip-compile version (G19) and Bifrost version (G20). Added OPERATIONS.md link to README.
 
-**Files:** `docs/OPERATIONS.md` (new), `docs/DEPENDENCY_COUPLING.md`, `README.md`
+**Files changed:** `docs/OPERATIONS.md` (new), `docs/DEPENDENCY_COUPLING.md`, `README.md`
 
 ---
 
@@ -412,7 +407,7 @@ Structural work before feature work — the splits reduce cost of all subsequent
 13. ~~**D1** — Smart routing + token cost evaluation~~ ✅ Resolved (Phase 10E)
 14. **B1** — Audit agent interactivity — Phase 11
 15. **C1** — Taxonomy update — Phase 11
-16. **G17–G22** — Operations documentation — Phase 11
+16. ~~**G17–G22** — Operations documentation~~ ✅ Resolved (Phase 11D)
 17. **C2** — Curation agent (requires C1) — Phase 11 (design)
 18. **E2** — RAG evaluation + **G16** (BM25 replacement) — Phase 12 (research)
 19. **E1** — Artifact preview (depends on E2 decisions) — Phase 13

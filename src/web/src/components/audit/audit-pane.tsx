@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
-import { Loader2 } from "lucide-react"
+import { Loader2, RefreshCw } from "lucide-react"
 import { PaneErrorBoundary } from "@/components/ui/pane-error-boundary"
 import { LastUpdated } from "@/components/ui/last-updated"
 import { ActivityChart } from "./activity-chart"
@@ -18,50 +18,107 @@ import { fetchAudit } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 const TIME_RANGES = [
+  { label: "1h", hours: 1 },
+  { label: "6h", hours: 6 },
   { label: "24h", hours: 24 },
-  { label: "48h", hours: 48 },
   { label: "7d", hours: 168 },
   { label: "30d", hours: 720 },
 ] as const
 
+const REPORT_OPTIONS = [
+  { key: "activity", label: "Activity" },
+  { key: "ingestion", label: "Ingestion" },
+  { key: "costs", label: "Costs" },
+  { key: "queries", label: "Queries" },
+  { key: "conversations", label: "Conversations" },
+] as const
+
 export function AuditPane() {
   const [hours, setHours] = useState(24)
+  const [enabledReports, setEnabledReports] = useState<Record<string, boolean>>(
+    Object.fromEntries(REPORT_OPTIONS.map((r) => [r.key, true])),
+  )
+  const queryClient = useQueryClient()
 
-  const { data: audit, isLoading, dataUpdatedAt } = useQuery({
-    queryKey: ["audit", hours],
-    queryFn: () => fetchAudit(["activity", "ingestion", "costs", "queries", "conversations"], hours),
+  const activeReports = REPORT_OPTIONS.filter((r) => enabledReports[r.key]).map((r) => r.key)
+
+  const { data: audit, isLoading, isFetching, dataUpdatedAt } = useQuery({
+    queryKey: ["audit", hours, activeReports],
+    queryFn: () => fetchAudit(activeReports, hours),
     refetchInterval: 60_000,
+    enabled: activeReports.length > 0,
   })
+
+  const toggleReport = (key: string) => {
+    setEnabledReports((prev) => ({ ...prev, [key]: !prev[key] }))
+  }
+
+  const handleRefresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["audit"] })
+  }
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b px-4 py-3">
-        <div>
+      <div className="space-y-2 border-b px-4 py-3">
+        <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <h2 className="text-lg font-semibold">Audit & Analytics</h2>
             <LastUpdated timestamp={dataUpdatedAt} />
           </div>
-          <p className="text-xs text-muted-foreground">Auto-refreshes every 60 seconds</p>
-        </div>
-        <div className="flex gap-1">
-          {TIME_RANGES.map((range) => (
+          <div className="flex items-center gap-2">
+            <div className="flex gap-1">
+              {TIME_RANGES.map((range) => (
+                <Button
+                  key={range.hours}
+                  variant="ghost"
+                  size="sm"
+                  className={cn(
+                    "h-7 text-xs",
+                    hours === range.hours && "bg-muted font-medium",
+                  )}
+                  onClick={() => setHours(range.hours)}
+                >
+                  {range.label}
+                </Button>
+              ))}
+            </div>
             <Button
-              key={range.hours}
+              variant="ghost"
+              size="sm"
+              className="h-7"
+              onClick={handleRefresh}
+              disabled={isFetching}
+              aria-label="Refresh audit"
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5", isFetching && "animate-spin")} />
+            </Button>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {REPORT_OPTIONS.map((report) => (
+            <Button
+              key={report.key}
               variant="ghost"
               size="sm"
               className={cn(
-                "h-7 text-xs",
-                hours === range.hours && "bg-muted font-medium",
+                "h-6 text-xs",
+                enabledReports[report.key]
+                  ? "bg-primary/10 font-medium text-primary"
+                  : "text-muted-foreground",
               )}
-              onClick={() => setHours(range.hours)}
+              onClick={() => toggleReport(report.key)}
             >
-              {range.label}
+              {report.label}
             </Button>
           ))}
         </div>
       </div>
 
-      {isLoading ? (
+      {activeReports.length === 0 ? (
+        <div className="flex flex-1 items-center justify-center text-muted-foreground text-sm">
+          Select at least one report to display
+        </div>
+      ) : isLoading ? (
         <div className="flex flex-1 items-center justify-center text-muted-foreground">
           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
           Loading audit data...
@@ -69,24 +126,36 @@ export function AuditPane() {
       ) : (
         <ScrollArea className="flex-1">
           <div className="space-y-4 p-4">
-            <PaneErrorBoundary label="Activity Chart">
-              <ActivityChart activity={audit?.activity} />
-            </PaneErrorBoundary>
-            <PaneErrorBoundary label="Cost Breakdown">
-              <CostBreakdown costs={audit?.costs} hours={hours} />
-            </PaneErrorBoundary>
-            <PaneErrorBoundary label="Conversation Stats">
-              <ConversationStats conversations={audit?.conversations} />
-            </PaneErrorBoundary>
-            <PaneErrorBoundary label="Query Stats">
-              <QueryStats queries={audit?.queries} />
-            </PaneErrorBoundary>
-            <PaneErrorBoundary label="Ingestion Stats">
-              <IngestionStats ingestion={audit?.ingestion} />
-            </PaneErrorBoundary>
-            <PaneErrorBoundary label="Recent Failures">
-              <RecentFailures failures={audit?.activity?.recent_failures} />
-            </PaneErrorBoundary>
+            {enabledReports.activity && (
+              <PaneErrorBoundary label="Activity Chart">
+                <ActivityChart activity={audit?.activity} />
+              </PaneErrorBoundary>
+            )}
+            {enabledReports.costs && (
+              <PaneErrorBoundary label="Cost Breakdown">
+                <CostBreakdown costs={audit?.costs} hours={hours} />
+              </PaneErrorBoundary>
+            )}
+            {enabledReports.conversations && (
+              <PaneErrorBoundary label="Conversation Stats">
+                <ConversationStats conversations={audit?.conversations} />
+              </PaneErrorBoundary>
+            )}
+            {enabledReports.queries && (
+              <PaneErrorBoundary label="Query Stats">
+                <QueryStats queries={audit?.queries} />
+              </PaneErrorBoundary>
+            )}
+            {enabledReports.ingestion && (
+              <PaneErrorBoundary label="Ingestion Stats">
+                <IngestionStats ingestion={audit?.ingestion} />
+              </PaneErrorBoundary>
+            )}
+            {enabledReports.activity && (
+              <PaneErrorBoundary label="Recent Failures">
+                <RecentFailures failures={audit?.activity?.recent_failures} />
+              </PaneErrorBoundary>
+            )}
           </div>
         </ScrollArea>
       )}
