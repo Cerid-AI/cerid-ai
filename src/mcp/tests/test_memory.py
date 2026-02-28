@@ -90,7 +90,7 @@ class TestExtractAndStoreMemories:
     @pytest.mark.asyncio
     @patch("agents.memory.config")
     @patch("agents.memory.extract_memories", new_callable=AsyncMock)
-    @patch("routers.ingestion.ingest_content")
+    @patch("services.ingestion.ingest_content")
     async def test_successful_storage(self, mock_ingest, mock_extract, mock_config, mock_redis, mock_neo4j):
         """Extracted memories should be ingested into conversations domain."""
         mock_config.ENABLE_MEMORY_EXTRACTION = True
