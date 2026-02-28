@@ -262,7 +262,7 @@ def export_chroma(chroma_url: Optional[str] = None, sync_dir: Optional[str] = No
                 f"{chroma_url}/api/v1/collections/{coll_name}",
                 timeout=30.0,
             )
-            if coll_resp.status_code == 404:
+            if coll_resp.status_code in (400, 404):
                 logger.warning("ChromaDB collection %s not found — skipping", coll_name)
                 domain_counts[domain] = 0
                 # Write empty file so manifest can still checksum it
@@ -873,7 +873,8 @@ def _chroma_ensure_collection(chroma_url: str, collection_name: str) -> None:
         resp = httpx.get(f"{chroma_url}/api/v1/collections/{collection_name}", timeout=15.0)
         if resp.status_code == 200:
             return
-        if resp.status_code == 404:
+        # ChromaDB 0.5.x returns 400 (not 404) for non-existent collections
+        if resp.status_code in (400, 404):
             httpx.post(
                 f"{chroma_url}/api/v1/collections",
                 json={"name": collection_name},

@@ -9,6 +9,7 @@ services:
     volumes:
       - .:/app
       - ~/cerid-archive:/archive:ro
+      - ${CERID_SYNC_DIR:-~/Dropbox/cerid-sync}:/sync:ro
     env_file:
       - ../../.env
     environment:
@@ -19,6 +20,7 @@ services:
       - REDIS_URL=redis://ai-companion-redis:6379
       - BIFROST_URL=http://bifrost:8080/v1
       - ARCHIVE_PATH=/archive
+      - CERID_SYNC_DIR=/sync
       # NEO4J_PASSWORD, CATEGORIZE_MODE, CERID_API_KEY, CORS_ORIGINS
       # are loaded from env_file above — do NOT override here, as
       # ${VAR} interpolation fails when running without --env-file.
