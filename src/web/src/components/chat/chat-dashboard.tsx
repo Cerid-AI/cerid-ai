@@ -4,6 +4,7 @@
 import { Cpu, Coins, Binary, Database } from "lucide-react"
 import type { ChatMessage } from "@/lib/types"
 import { useLiveMetrics } from "@/hooks/use-live-metrics"
+import { cn } from "@/lib/utils"
 
 interface ChatDashboardProps {
   model: string
@@ -33,13 +34,37 @@ export function ChatDashboard({ model, messages, injectedCount }: ChatDashboardP
       <div className="flex shrink-0 items-center gap-1.5">
         <Binary className="h-3 w-3 text-muted-foreground" />
         <span className="tabular-nums">~{totalTokens.toLocaleString()}</span>
-        <span className="text-muted-foreground">tokens ({metrics.contextPct.toFixed(1)}%)</span>
-        <div className="h-1 w-12 overflow-hidden rounded-full bg-muted">
+        <span className="text-muted-foreground">/ {formatContextWindow(contextWindow)}</span>
+        <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
           <div
-            className="h-full rounded-full bg-primary transition-all"
+            className={cn(
+              "h-full rounded-full transition-all",
+              metrics.contextPct < 50
+                ? "bg-green-500"
+                : metrics.contextPct < 80
+                  ? "bg-yellow-500"
+                  : "bg-red-500",
+            )}
             style={{ width: `${Math.min(metrics.contextPct, 100)}%` }}
+            role="progressbar"
+            aria-valuenow={Math.round(metrics.contextPct)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label={`Context window ${metrics.contextPct.toFixed(1)}% used`}
           />
         </div>
+        <span
+          className={cn(
+            "tabular-nums",
+            metrics.contextPct < 50
+              ? "text-green-600 dark:text-green-400"
+              : metrics.contextPct < 80
+                ? "text-yellow-600 dark:text-yellow-400"
+                : "text-red-600 dark:text-red-400",
+          )}
+        >
+          {metrics.contextPct.toFixed(1)}%
+        </span>
       </div>
 
       <Separator />

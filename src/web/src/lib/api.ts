@@ -360,3 +360,39 @@ export async function streamChat(
     reader.cancel()
   }
 }
+
+/**
+ * Summarize conversation history using the current model via Bifrost.
+ * The summary preserves key facts, decisions, code, and action items.
+ */
+export async function summarizeConversation(
+  messages: Pick<ChatMessage, "role" | "content">[],
+  model: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const conversationText = messages
+    .map((m) => `${m.role === "user" ? "User" : m.role === "assistant" ? "Assistant" : "System"}: ${m.content}`)
+    .join("\n\n")
+
+  const summaryMessages: Pick<ChatMessage, "role" | "content">[] = [
+    {
+      role: "system",
+      content:
+        "You are a conversation summarizer. Produce a concise summary of the conversation below. " +
+        "Preserve all key facts, decisions, code snippets, and action items. " +
+        "The summary will be used as context for a new model, so include everything needed to continue the conversation seamlessly. " +
+        "Do not add commentary.",
+    },
+    {
+      role: "user",
+      content: `Summarize this conversation:\n\n${conversationText}`,
+    },
+  ]
+
+  let summary = ""
+  await streamChat(summaryMessages, model, (chunk) => {
+    summary += chunk
+  }, signal)
+
+  return summary
+}

@@ -8,7 +8,15 @@
  * to recommend the most cost-effective model for each message.
  */
 
-import { MODELS, type ModelOption, type ChatMessage, type ModelRecommendation } from "./types"
+import {
+  MODELS,
+  type ModelOption,
+  type ChatMessage,
+  type ModelRecommendation,
+  type SwitchCostEstimate,
+  type SwitchStrategy,
+  type ModelSwitchOptions,
+} from "./types"
 
 // ---------------------------------------------------------------------------
 // Complexity scoring
@@ -149,4 +157,83 @@ export function recommendModel(
     reasoning,
     savingsVsCurrent: Math.max(0, savings),
   }
+}
+
+// ---------------------------------------------------------------------------
+// Model switch cost estimation
+// ---------------------------------------------------------------------------
+
+/**
+ * Calculate costs of switching to a different model, accounting for
+ * full history replay, summarization, and context window fit.
+ */
+export function calculateSwitchCost(
+  targetModel: ModelOption,
+  currentModel: ModelOption,
+  conversationMessages: ChatMessage[],
+): SwitchCostEstimate {
+  const historyText = conversationMessages.map((m) => m.content).join("")
+  const historyTokens = estimateTokens(historyText)
+
+  // Cost to replay full history on target model + one response
+  const replayCost =
+    (historyTokens / 1_000_000) * targetModel.inputCostPer1M +
+    (500 / 1_000_000) * targetModel.outputCostPer1M
+
+  // Cost of next turn staying on current model
+  const currentNextTurnCost =
+    (historyTokens / 1_000_000) * currentModel.inputCostPer1M +
+    (500 / 1_000_000) * currentModel.outputCostPer1M
+
+  // Summarization: ~10% of original tokens (min 200)
+  const summarizedTokens = Math.max(200, Math.ceil(historyTokens * 0.1))
+  const summarizeCost =
+    // Step 1: current model reads history → produces summary
+    (historyTokens / 1_000_000) * currentModel.inputCostPer1M +
+    (summarizedTokens / 1_000_000) * currentModel.outputCostPer1M +
+    // Step 2: target model reads summary → produces response
+    (summarizedTokens / 1_000_000) * targetModel.inputCostPer1M +
+    (500 / 1_000_000) * targetModel.outputCostPer1M
+
+  const exceedsTargetContext = historyTokens > targetModel.contextWindow * 0.8
+
+  return {
+    replayCost,
+    currentNextTurnCost,
+    summarizeCost,
+    historyTokens,
+    summarizedTokens,
+    exceedsTargetContext,
+  }
+}
+
+/**
+ * Build the set of switch strategies available for a model switch,
+ * with a recommended default.
+ */
+export function buildSwitchOptions(
+  targetModel: ModelOption,
+  currentModel: ModelOption,
+  messages: ChatMessage[],
+): ModelSwitchOptions {
+  const costEstimate = calculateSwitchCost(targetModel, currentModel, messages)
+
+  const strategies: SwitchStrategy[] = ["continue", "fresh"]
+
+  // Only offer summarize if there's enough conversation to justify it
+  if (messages.length >= 6) {
+    strategies.splice(1, 0, "summarize")
+  }
+
+  let recommended: SwitchStrategy = "continue"
+  if (costEstimate.exceedsTargetContext) {
+    recommended = messages.length >= 6 ? "summarize" : "fresh"
+  } else if (
+    costEstimate.replayCost > costEstimate.summarizeCost * 1.5 &&
+    messages.length >= 6
+  ) {
+    recommended = "summarize"
+  }
+
+  return { targetModel, costEstimate, strategies, recommended }
 }

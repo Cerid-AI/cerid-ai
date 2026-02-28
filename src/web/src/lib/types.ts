@@ -287,6 +287,24 @@ export interface ModelRecommendation {
   savingsVsCurrent: number
 }
 
+export type SwitchStrategy = "continue" | "summarize" | "fresh"
+
+export interface SwitchCostEstimate {
+  replayCost: number           // Cost to replay full history on target model
+  currentNextTurnCost: number  // Cost of next turn on current model (comparison)
+  summarizeCost: number        // Cost to summarize + switch
+  historyTokens: number        // Token count of full history
+  summarizedTokens: number     // Estimated tokens after summarization
+  exceedsTargetContext: boolean // True if history > 80% of target's window
+}
+
+export interface ModelSwitchOptions {
+  targetModel: ModelOption
+  costEstimate: SwitchCostEstimate
+  strategies: SwitchStrategy[]
+  recommended: SwitchStrategy
+}
+
 export interface ServerSettings {
   categorize_mode: string
   chunk_max_tokens: number

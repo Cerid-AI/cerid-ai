@@ -1,7 +1,7 @@
 # Cerid AI — Task Tracker
 
 > **Last updated:** 2026-02-28
-> **Current status:** Phase 10D in progress. 564 tests passing (was 156). All backend modules tested. Remaining: CI hardening (G12-G15).
+> **Current status:** Phase 10E complete. 94 frontend tests (was 68, +26). Smart model switching with cost estimation, summarize-and-switch, color-coded context gauge. 564 backend tests, 75% coverage.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md)
 
 ## Current: Phase 10 — Commercial & Open-Source Readiness
@@ -71,7 +71,7 @@
 - [x] F4 — Split `cerid_sync_lib.py` (1346 lines) into `sync/` package (export, import_, manifest, status, _helpers)
 - [x] Split `utils/parsers.py` (875 lines) into `parsers/` sub-package (registry, pdf, office, structured, email, ebook)
 
-### 10D: Test Coverage + CI Hardening
+### 10D: Test Coverage + CI Hardening ✅
 - [x] Tests for `middleware/auth.py`, `middleware/rate_limit.py`, `middleware/request_id.py` (49 tests: auth bypass/enforcement, exempt paths, IP redaction, rate limit headers/enforcement/expiry, XFF proxy resolution, request ID generation/propagation)
 - [x] Tests for `services/ingestion.py` (15 tests: content hashing, path validation, duplicate detection, concurrent constraint handling, response shapes, ChromaDB collection naming, Redis logging)
 - [x] F5 — Tests for all 5 agents: query_agent (27 tests: dedup, context assembly, cross-domain affinity, rerank fallback, response shape), triage (23 tests: node validation, parse, routing, metadata merge, chunking), rectify (19 tests: duplicate/stale/orphan detection, resolution, distribution), audit (27 tests: activity summary, ingestion stats, cost estimation, query patterns, conversation analytics), maintenance (24 tests: health checks, bifrost sync, purge, collection analysis)
@@ -83,13 +83,15 @@
 - [x] G13 — Add CodeQL SAST workflow (`.github/workflows/codeql.yml` — Python + JavaScript, weekly + push/PR)
 - [x] G14 — Raise coverage threshold from 35% to 55% (actual coverage: 75%)
 - [x] G15 — Add bundle size monitoring in CI (fail if any JS chunk >800KB after vite build)
-- [ ] Frontend component tests (40+ components with 0 tests)
+- [ ] Frontend component tests (40+ components with 0 tests — deferred, not blocking)
 
-### 10E: Smart Routing Intelligence
-- [ ] D1 — Token estimator + context replay cost calculation
-- [ ] Context usage indicator in chat dashboard
-- [ ] Summarize-and-switch option for large contexts
-- [ ] "Start fresh" option on model switch (from 10B)
+### 10E: Smart Routing Intelligence ✅
+- [x] D1 — Token estimator + context replay cost calculation (`calculateSwitchCost`, `buildSwitchOptions` in model-router.ts)
+- [x] Context usage indicator in chat dashboard (color-coded green/yellow/red progress bar)
+- [x] Summarize-and-switch option for large contexts (`summarizeConversation` API, `useModelSwitch` hook)
+- [x] "Start fresh" option on model switch (from 10B) — inline dialog with 3 strategies: continue/summarize/fresh
+- [x] Model switch dialog with cost estimates, Recommended badge, context overflow warning
+- [x] 26 new frontend tests (model-router cost tests, dialog component tests, conversations hook tests) — 94 total
 
 ### 10F: Interactive Audit, Taxonomy + Operations Docs
 - [ ] B1 — Audit agent report filter toggles, time range selector, manual refresh

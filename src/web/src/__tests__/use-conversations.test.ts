@@ -189,4 +189,75 @@ describe("useConversations", () => {
 
     expect(result.current.conversations[0].model).toBe("openrouter/anthropic/claude-sonnet-4")
   })
+
+  it("replaces all messages for a conversation", () => {
+    const { result } = renderHook(() => useConversations())
+
+    let convoId: string
+    act(() => { convoId = result.current.create(DEFAULT_MODEL) })
+    act(() => {
+      result.current.addMessage(convoId!, {
+        id: "m1", role: "user", content: "Original message", timestamp: Date.now(),
+      })
+    })
+
+    const newMessages = [
+      { id: "summary-1", role: "system" as const, content: "Summary of conversation", timestamp: Date.now() },
+    ]
+    act(() => {
+      result.current.replaceMessages(convoId!, newMessages)
+    })
+
+    expect(result.current.active?.messages).toHaveLength(1)
+    expect(result.current.active?.messages[0].content).toBe("Summary of conversation")
+    expect(result.current.active?.messages[0].role).toBe("system")
+  })
+
+  it("clears all messages for a conversation", () => {
+    const { result } = renderHook(() => useConversations())
+
+    let convoId: string
+    act(() => { convoId = result.current.create(DEFAULT_MODEL) })
+    act(() => {
+      result.current.addMessage(convoId!, {
+        id: "m1", role: "user", content: "Message to clear", timestamp: Date.now(),
+      })
+    })
+    act(() => {
+      result.current.addMessage(convoId!, {
+        id: "m2", role: "assistant", content: "Response", model: DEFAULT_MODEL, timestamp: Date.now(),
+      })
+    })
+
+    expect(result.current.active?.messages).toHaveLength(2)
+
+    act(() => {
+      result.current.clearMessages(convoId!)
+    })
+
+    expect(result.current.active?.messages).toHaveLength(0)
+  })
+
+  it("replaceMessages persists to localStorage", () => {
+    const { result } = renderHook(() => useConversations())
+
+    let convoId: string
+    act(() => { convoId = result.current.create(DEFAULT_MODEL) })
+    act(() => {
+      result.current.addMessage(convoId!, {
+        id: "m1", role: "user", content: "Original", timestamp: Date.now(),
+      })
+    })
+
+    const newMsgs = [
+      { id: "s1", role: "system" as const, content: "Summarized", timestamp: Date.now() },
+    ]
+    act(() => {
+      result.current.replaceMessages(convoId!, newMsgs)
+    })
+
+    const stored = JSON.parse(store["cerid-conversations"] ?? "[]")
+    expect(stored[0].messages).toHaveLength(1)
+    expect(stored[0].messages[0].content).toBe("Summarized")
+  })
 })

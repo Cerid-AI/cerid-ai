@@ -124,5 +124,29 @@ export function useConversations() {
     })
   }, [])
 
-  return { conversations, active, activeId, setActiveId, create, addMessage, updateLastMessage, updateModel, remove }
+  const replaceMessages = useCallback((convoId: string, newMessages: ChatMessage[]) => {
+    setConversations((prev) => {
+      const next = prev.map((c) =>
+        c.id === convoId ? { ...c, messages: newMessages, updatedAt: Date.now() } : c,
+      )
+      saveConversations(next)
+      return next
+    })
+  }, [])
+
+  const clearMessages = useCallback((convoId: string) => {
+    setConversations((prev) => {
+      const next = prev.map((c) =>
+        c.id === convoId ? { ...c, messages: [], updatedAt: Date.now() } : c,
+      )
+      saveConversations(next)
+      return next
+    })
+  }, [])
+
+  return {
+    conversations, active, activeId, setActiveId,
+    create, addMessage, updateLastMessage, updateModel, remove,
+    replaceMessages, clearMessages,
+  }
 }

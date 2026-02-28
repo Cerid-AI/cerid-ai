@@ -16,11 +16,13 @@ import { SplitPane } from "@/components/layout/split-pane"
 import { KBContextPanel } from "@/components/kb/kb-context-panel"
 import { HallucinationPanel } from "@/components/audit/hallucination-panel"
 import { ChatDashboard } from "./chat-dashboard"
+import { ModelSwitchDialog } from "./model-switch-dialog"
 import { useChat } from "@/hooks/use-chat"
 import { useConversations } from "@/hooks/use-conversations"
 import { useKBContext } from "@/hooks/use-kb-context"
 import { useSettings } from "@/hooks/use-settings"
 import { useModelRouter } from "@/hooks/use-model-router"
+import { useModelSwitch } from "@/hooks/use-model-switch"
 import { useSmartSuggestions } from "@/hooks/use-smart-suggestions"
 import type { ChatMessage, SourceRef } from "@/lib/types"
 import { MODELS } from "@/lib/types"
@@ -37,6 +39,8 @@ export function ChatPanel() {
     updateLastMessage,
     updateModel,
     remove,
+    replaceMessages,
+    clearMessages,
   } = useConversations()
 
   const {
@@ -75,6 +79,22 @@ export function ChatPanel() {
     messages: active?.messages ?? [],
     kbInjections: kbContext.injectedContext.length,
   })
+
+  const { pendingSwitch, isSummarizing, initSwitch, executeSwitch, cancelSwitch } =
+    useModelSwitch({
+      currentModel: currentModelObj,
+      messages: active?.messages ?? [],
+      onModelChange: (modelId) => {
+        setSelectedModel(modelId)
+        if (activeId) updateModel(activeId, modelId)
+      },
+      onReplaceMessages: (msgs) => {
+        if (activeId) replaceMessages(activeId, msgs)
+      },
+      onClearMessages: () => {
+        if (activeId) clearMessages(activeId)
+      },
+    })
 
   // Sync model selector and reset router when switching conversations
   useEffect(() => {
@@ -147,12 +167,9 @@ export function ChatPanel() {
 
   const handleModelChange = useCallback(
     (newModel: string) => {
-      setSelectedModel(newModel)
-      if (activeId) {
-        updateModel(activeId, newModel)
-      }
+      initSwitch(newModel)
     },
-    [activeId, updateModel],
+    [initSwitch],
   )
 
   const chatArea = (
@@ -257,7 +274,7 @@ export function ChatPanel() {
             size="sm"
             className="h-6 text-xs"
             onClick={() => {
-              handleModelChange(recommendation.model.id)
+              initSwitch(recommendation.model.id)
               dismissRec()
             }}
           >
@@ -266,6 +283,24 @@ export function ChatPanel() {
           <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={dismissRec}>
             Dismiss
           </Button>
+        </div>
+      )}
+
+      {/* Model switch options dialog */}
+      {pendingSwitch && (
+        <ModelSwitchDialog
+          options={pendingSwitch}
+          currentModelId={selectedModel}
+          onSelect={executeSwitch}
+          onCancel={cancelSwitch}
+        />
+      )}
+
+      {/* Summarizing indicator */}
+      {isSummarizing && (
+        <div className="flex items-center gap-2 border-b bg-muted/50 px-4 py-1.5 text-xs">
+          <span className="h-2 w-2 animate-pulse rounded-full bg-yellow-500" />
+          <span>Summarizing conversation history...</span>
         </div>
       )}
 
