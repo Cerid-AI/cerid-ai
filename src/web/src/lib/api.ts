@@ -264,12 +264,9 @@ export async function uploadFile(
   if (opts.tags) params.set("tags", opts.tags)
   if (opts.categorizeMode) params.set("categorize_mode", opts.categorizeMode)
 
-  const headers: Record<string, string> = {}
-  if (API_KEY) headers["X-API-Key"] = API_KEY
-
   const res = await fetch(`${MCP_BASE}/upload?${params}`, {
     method: "POST",
-    headers,
+    headers: mcpHeaders(),
     body: formData,
   })
   if (!res.ok) {

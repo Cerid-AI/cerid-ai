@@ -4,18 +4,18 @@
 import { useState, useCallback, useEffect, useRef } from "react"
 import { fetchSettings, updateSettings } from "@/lib/api"
 
+function readBool(key: string): boolean {
+  try { return localStorage.getItem(key) === "true" } catch { return false }
+}
+
+function persist(key: string, value: string): void {
+  try { localStorage.setItem(key, value) } catch { /* noop */ }
+}
+
 export function useSettings() {
-  const [feedbackLoop, setFeedbackLoop] = useState(() => {
-    try { return localStorage.getItem("cerid-feedback-loop") === "true" } catch { return false }
-  })
-
-  const [showDashboard, setShowDashboard] = useState(() => {
-    try { return localStorage.getItem("cerid-show-dashboard") === "true" } catch { return false }
-  })
-
-  const [autoModelSwitch, setAutoModelSwitch] = useState(() => {
-    try { return localStorage.getItem("cerid-auto-model-switch") === "true" } catch { return false }
-  })
+  const [feedbackLoop, setFeedbackLoop] = useState(() => readBool("cerid-feedback-loop"))
+  const [showDashboard, setShowDashboard] = useState(() => readBool("cerid-show-dashboard"))
+  const [autoModelSwitch, setAutoModelSwitch] = useState(() => readBool("cerid-auto-model-switch"))
 
   const [costSensitivity, setCostSensitivity] = useState<"low" | "medium" | "high">(() => {
     try {
@@ -33,13 +33,13 @@ export function useSettings() {
       .then((s) => {
         if (s.enable_feedback_loop !== undefined) {
           setFeedbackLoop(s.enable_feedback_loop)
-          try { localStorage.setItem("cerid-feedback-loop", String(s.enable_feedback_loop)) } catch { /* noop */ }
+          persist("cerid-feedback-loop", String(s.enable_feedback_loop))
         }
         if (s.cost_sensitivity) {
           const v = s.cost_sensitivity as "low" | "medium" | "high"
           if (v === "low" || v === "medium" || v === "high") {
             setCostSensitivity(v)
-            try { localStorage.setItem("cerid-cost-sensitivity", v) } catch { /* noop */ }
+            persist("cerid-cost-sensitivity", v)
           }
         }
       })
@@ -49,7 +49,7 @@ export function useSettings() {
   const toggleFeedbackLoop = useCallback(() => {
     setFeedbackLoop((prev) => {
       const next = !prev
-      try { localStorage.setItem("cerid-feedback-loop", String(next)) } catch { /* noop */ }
+      persist("cerid-feedback-loop", String(next))
       updateSettings({ enable_feedback_loop: next }).catch(() => { /* noop */ })
       return next
     })
@@ -58,7 +58,7 @@ export function useSettings() {
   const toggleDashboard = useCallback(() => {
     setShowDashboard((prev) => {
       const next = !prev
-      try { localStorage.setItem("cerid-show-dashboard", String(next)) } catch { /* noop */ }
+      persist("cerid-show-dashboard", String(next))
       return next
     })
   }, [])
@@ -66,14 +66,14 @@ export function useSettings() {
   const toggleAutoModelSwitch = useCallback(() => {
     setAutoModelSwitch((prev) => {
       const next = !prev
-      try { localStorage.setItem("cerid-auto-model-switch", String(next)) } catch { /* noop */ }
+      persist("cerid-auto-model-switch", String(next))
       return next
     })
   }, [])
 
   const updateCostSensitivity = useCallback((value: "low" | "medium" | "high") => {
     setCostSensitivity(value)
-    try { localStorage.setItem("cerid-cost-sensitivity", value) } catch { /* noop */ }
+    persist("cerid-cost-sensitivity", value)
     updateSettings({ cost_sensitivity: value }).catch(() => { /* noop */ })
   }, [])
 

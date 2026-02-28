@@ -97,10 +97,11 @@ export function ChatPanel() {
     })
 
   // Sync model selector and reset router when switching conversations
+  const activeModel = active?.model
   useEffect(() => {
-    if (active?.model) setSelectedModel(active.model)
+    if (activeModel) setSelectedModel(activeModel)
     resetDismiss()
-  }, [activeId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeId, activeModel, resetDismiss])
 
   const injectedArtifactIds = useMemo(
     () => injectedContext.map((r) => r.artifact_id),
