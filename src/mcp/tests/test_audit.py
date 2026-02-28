@@ -7,20 +7,17 @@ import asyncio
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from agents.audit import (
-    COST_PER_1K_TOKENS,
     AVG_TOKENS,
+    COST_PER_1K_TOKENS,
     MODEL_COST_RATES,
-    get_activity_summary,
-    get_ingestion_stats,
-    estimate_costs,
-    get_query_patterns,
-    get_conversation_analytics,
     audit,
+    estimate_costs,
+    get_activity_summary,
+    get_conversation_analytics,
+    get_ingestion_stats,
+    get_query_patterns,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

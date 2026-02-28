@@ -9,7 +9,6 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-import config
 from utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.graph")

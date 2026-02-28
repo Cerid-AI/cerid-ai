@@ -7,16 +7,13 @@ import email
 import email.mime.multipart
 import email.mime.text
 import json
-import os
 import zipfile
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from parsers._utils import _strip_html_tags, _strip_rtf
-from parsers.registry import PARSER_REGISTRY, _MAX_TEXT_CHARS, parse_file, register_parser
-
+from parsers.registry import _MAX_TEXT_CHARS, PARSER_REGISTRY, parse_file, register_parser
 
 # ---------------------------------------------------------------------------
 # Tests: _strip_html_tags (pure function)

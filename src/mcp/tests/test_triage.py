@@ -9,21 +9,18 @@ the full compiled graph (which requires langgraph runtime).
 
 from unittest.mock import patch
 
-import pytest
-
 from agents.triage import (
     TriageState,
-    validate_node,
+    chunk_node,
+    extract_metadata_node,
     parse_node,
     route_categorization,
-    extract_metadata_node,
-    chunk_node,
-    should_continue_after_validate,
-    should_continue_after_parse,
     should_categorize,
     should_continue_after_categorize,
+    should_continue_after_parse,
+    should_continue_after_validate,
+    validate_node,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

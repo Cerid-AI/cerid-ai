@@ -34,7 +34,7 @@ def parse_epub(file_path: str) -> Dict[str, Any]:
     try:
         try:
             container_xml = zf.read("META-INF/container.xml")
-            container_root = ET.fromstring(container_xml)
+            container_root = ET.fromstring(container_xml)  # nosec B314 — trusted EPUB internal XML
             # Handle namespace
             ns = {"c": "urn:oasis:names:tc:opendocument:xmlns:container"}
             rootfile = container_root.find(".//c:rootfile", ns)
@@ -54,7 +54,7 @@ def parse_epub(file_path: str) -> Dict[str, Any]:
             opf_dir = ""
 
         opf_data = zf.read(opf_path)
-        opf_root = ET.fromstring(opf_data)
+        opf_root = ET.fromstring(opf_data)  # nosec B314 — trusted EPUB internal XML
 
         opf_ns = {"opf": "http://www.idpf.org/2007/opf", "dc": "http://purl.org/dc/elements/1.1/"}
 

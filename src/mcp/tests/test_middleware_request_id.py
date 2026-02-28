@@ -13,7 +13,6 @@ from starlette.testclient import TestClient
 
 from middleware.request_id import RequestIDMiddleware
 
-
 # ---------------------------------------------------------------------------
 # Helper: minimal ASGI app with request ID middleware
 # ---------------------------------------------------------------------------

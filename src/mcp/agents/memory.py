@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import timedelta
 from typing import Any, Dict, List, Optional
@@ -13,8 +12,8 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 import config
-from utils.llm_parsing import parse_llm_json
 from utils.cache import log_event
+from utils.llm_parsing import parse_llm_json
 from utils.time import utcnow, utcnow_iso
 
 logger = logging.getLogger("ai-companion.memory")

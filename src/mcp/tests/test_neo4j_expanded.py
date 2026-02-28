@@ -3,8 +3,7 @@
 
 """Expanded tests for db/neo4j/ package — CRUD, relationships, taxonomy, schema."""
 
-import json
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -29,7 +28,6 @@ from db.neo4j.taxonomy import (
     list_tags,
     update_artifact_taxonomy,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

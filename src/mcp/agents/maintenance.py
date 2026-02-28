@@ -107,7 +107,7 @@ def _check_bifrost_sync() -> str:
     try:
         url = config.BIFROST_URL.replace("/v1", "/health")
         req = urllib.request.Request(url, method="GET")
-        with urllib.request.urlopen(req, timeout=5) as resp:
+        with urllib.request.urlopen(req, timeout=5) as resp:  # nosec B310 — URL from config, not user input
             if resp.status == 200:
                 return "connected"
             return f"status {resp.status}"

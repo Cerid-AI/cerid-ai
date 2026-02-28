@@ -15,8 +15,6 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 import config
-from utils.time import utcnow_iso
-
 from sync._helpers import (
     ARTIFACTS_JSONL,
     AUDIT_LOG_JSONL,
@@ -32,6 +30,7 @@ from sync._helpers import (
     _ensure_dir,
     _iter_jsonl,
 )
+from utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.sync")
 

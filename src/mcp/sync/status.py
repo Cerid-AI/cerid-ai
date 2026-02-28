@@ -11,15 +11,14 @@ from typing import Any, Dict, Optional
 import httpx
 
 import config
-
 from sync._helpers import (
     ARTIFACTS_JSONL,
     AUDIT_LOG_JSONL,
     CHROMA_SUBDIR,
+    DOMAINS_JSONL,
     NEO4J_SUBDIR,
     REDIS_SUBDIR,
     RELATIONSHIPS_JSONL,
-    DOMAINS_JSONL,
     _default_sync_dir,
 )
 from sync.manifest import read_manifest

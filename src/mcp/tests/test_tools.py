@@ -4,12 +4,11 @@
 """Tests for tools.py — MCP tool registry and execute_tool() dispatcher."""
 
 import asyncio
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from tools import MCP_TOOLS, execute_tool
-
 
 # ---------------------------------------------------------------------------
 # Tests: Tool registry structure
@@ -82,7 +81,7 @@ class TestExecuteToolSync:
     @patch("tools.query_knowledge")
     def test_pkb_query(self, mock_qk):
         mock_qk.return_value = {"results": []}
-        result = asyncio.get_event_loop().run_until_complete(
+        asyncio.get_event_loop().run_until_complete(
             execute_tool("pkb_query", {"query": "test"})
         )
         mock_qk.assert_called_once_with(query="test")
@@ -90,7 +89,7 @@ class TestExecuteToolSync:
     @patch("tools.ingest_content")
     def test_pkb_ingest(self, mock_ic):
         mock_ic.return_value = {"status": "success"}
-        result = asyncio.get_event_loop().run_until_complete(
+        asyncio.get_event_loop().run_until_complete(
             execute_tool("pkb_ingest", {"content": "hello", "domain": "coding"})
         )
         mock_ic.assert_called_once_with("hello", "coding")

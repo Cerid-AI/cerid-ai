@@ -12,8 +12,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import config
-from utils.time import utcnow_iso
-
 from sync._helpers import (
     ARTIFACTS_JSONL,
     AUDIT_LOG_JSONL,
@@ -28,6 +26,7 @@ from sync._helpers import (
     _default_sync_dir,
     _sha256_file,
 )
+from utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.sync")
 

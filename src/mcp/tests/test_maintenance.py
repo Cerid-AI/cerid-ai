@@ -3,18 +3,14 @@
 
 """Tests for agents/maintenance.py — system health checks and automated cleanup."""
 
-import json
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from agents.maintenance import (
+    _check_bifrost_sync,
     analyze_collections,
     check_system_health,
     purge_artifacts,
-    _check_bifrost_sync,
 )
-
 
 # ---------------------------------------------------------------------------
 # Tests: check_system_health

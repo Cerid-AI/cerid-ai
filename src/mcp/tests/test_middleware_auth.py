@@ -12,8 +12,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from middleware.auth import APIKeyMiddleware, EXEMPT_PATHS, EXEMPT_PREFIXES, _redact_ip
-
+from middleware.auth import EXEMPT_PATHS, EXEMPT_PREFIXES, APIKeyMiddleware, _redact_ip
 
 # ---------------------------------------------------------------------------
 # Helper: minimal ASGI app for middleware testing

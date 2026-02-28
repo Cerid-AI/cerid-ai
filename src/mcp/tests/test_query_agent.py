@@ -5,7 +5,7 @@
 
 import asyncio
 import sys
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -15,15 +15,14 @@ _existing = sys.modules.get("agents.query_agent")
 if _existing is not None and not hasattr(_existing, "_get_adjacent_domains"):
     del sys.modules["agents.query_agent"]
 
-from agents.query_agent import (
+from agents.query_agent import (  # noqa: E402
     _get_adjacent_domains,
+    agent_query,
     assemble_context,
     deduplicate_results,
     multi_domain_query,
     rerank_results,
-    agent_query,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

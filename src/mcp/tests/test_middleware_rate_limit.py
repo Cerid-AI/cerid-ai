@@ -3,7 +3,6 @@
 
 """Tests for middleware/rate_limit.py — sliding window rate limiter."""
 
-import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -13,8 +12,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from middleware.rate_limit import RateLimitMiddleware, get_client_ip, RATE_LIMITS
-
+from middleware.rate_limit import RATE_LIMITS, RateLimitMiddleware, get_client_ip
 
 # ---------------------------------------------------------------------------
 # Helper: minimal ASGI app with rate limiter

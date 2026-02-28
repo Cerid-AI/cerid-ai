@@ -15,7 +15,6 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 import config
-
 from sync._helpers import (
     ARTIFACTS_JSONL,
     AUDIT_LOG_JSONL,

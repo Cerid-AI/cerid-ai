@@ -9,7 +9,6 @@ and core export/import paths with mocked services.
 
 import hashlib
 import json
-import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -30,7 +29,6 @@ from sync._helpers import (
     _write_jsonl,
 )
 from sync.manifest import read_manifest, write_manifest
-
 
 # ---------------------------------------------------------------------------
 # Tests: Constants

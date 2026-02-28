@@ -9,19 +9,15 @@ duplicate detection flow, and response shapes.
 """
 
 import hashlib
-import json
-import os
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from services.ingestion import (
     _content_hash,
-    validate_file_path,
     ingest_content,
+    validate_file_path,
 )
-
 
 # ---------------------------------------------------------------------------
 # Tests: _content_hash

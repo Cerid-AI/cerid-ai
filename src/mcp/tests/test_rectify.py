@@ -3,10 +3,7 @@
 
 """Tests for agents/rectify.py — knowledge graph conflict detection and resolution."""
 
-import json
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from agents.rectify import (
     analyze_domain_distribution,
@@ -17,7 +14,6 @@ from agents.rectify import (
     find_stale_artifacts,
     resolve_duplicates,
 )
-
 
 # ---------------------------------------------------------------------------
 # Tests: find_duplicate_artifacts
