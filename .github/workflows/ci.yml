@@ -61,7 +61,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install pip-tools
+      - run: pip install pip-tools==7.5.3
       - name: Check Python lock file is up to date
         run: |
           cd src/mcp
@@ -121,6 +121,10 @@ jobs:
           CVE-2026-26013
           CVE-2025-64439
           CVE-2026-27794
+          # glibc heap corruption — no fix available in Debian 13 yet
+          CVE-2026-0861
+          # wheel privilege escalation — build-time only, not exploitable at runtime
+          CVE-2026-24049
           EOF
       - name: Scan MCP Docker image
         uses: aquasecurity/trivy-action@1bd062560b422f5944df1de50abd05162bea079e
