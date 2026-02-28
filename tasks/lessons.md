@@ -42,6 +42,21 @@
 
 ---
 
+## Testing
+
+### Watch for `sys.modules` stub pollution across test files
+**When:** One test file injects a module stub (e.g., `sys.modules["agents.query_agent"] = stub`) and another test file tries to import the real module.
+**Problem:** pytest collects all test files before running them. If `test_hallucination.py` injects a stub `agents.query_agent` with only `agent_query`, then `test_query_agent.py` can't import `_get_adjacent_domains` because the stub is cached.
+**Fix:** Guard the import in the consumer test: check if the cached module has the expected attributes, and `del sys.modules[...]` if not, so the real module loads.
+**Rule:** Prefer `unittest.mock.patch` over manual `sys.modules` manipulation for test isolation.
+
+### Use `side_effect` for mocks that return mutable containers
+**When:** A mock's `return_value` is a list that gets mutated by the code under test.
+**Problem:** `mock.return_value = [item]` returns the SAME list on every call. If the code does `results.extend(cross_results)` where both are the same list reference, the list grows unexpectedly.
+**Fix:** Use `mock.side_effect = [[item], []]` to return fresh lists on each call.
+
+---
+
 ## Code Quality
 
 ### Check for latent bugs during structural splits

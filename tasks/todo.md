@@ -1,7 +1,7 @@
 # Cerid AI — Task Tracker
 
 > **Last updated:** 2026-02-28
-> **Current status:** Phase 10C complete. All structural splits done (service layer, middleware hardening, tool registry, config split, dedup cleanup, Neo4j package, sync package, parsers package). 6 open issues remain.
+> **Current status:** Phase 10D in progress. 337 tests passing (was 156). Middleware, ingestion service, and all 5 agents now tested. Remaining: sync/, parsers/, tools.py, neo4j expansion, CI hardening.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md)
 
 ## Current: Phase 10 — Commercial & Open-Source Readiness
@@ -74,7 +74,7 @@
 ### 10D: Test Coverage + CI Hardening
 - [x] Tests for `middleware/auth.py`, `middleware/rate_limit.py`, `middleware/request_id.py` (49 tests: auth bypass/enforcement, exempt paths, IP redaction, rate limit headers/enforcement/expiry, XFF proxy resolution, request ID generation/propagation)
 - [x] Tests for `services/ingestion.py` (15 tests: content hashing, path validation, duplicate detection, concurrent constraint handling, response shapes, ChromaDB collection naming, Redis logging)
-- [ ] F5 — Tests for untested agents: query_agent, triage, rectify, audit, maintenance (5 agents, ~2000 lines, 0 tests)
+- [x] F5 — Tests for all 5 agents: query_agent (27 tests: dedup, context assembly, cross-domain affinity, rerank fallback, response shape), triage (23 tests: node validation, parse, routing, metadata merge, chunking), rectify (19 tests: duplicate/stale/orphan detection, resolution, distribution), audit (27 tests: activity summary, ingestion stats, cost estimation, query patterns, conversation analytics), maintenance (24 tests: health checks, bifrost sync, purge, collection analysis)
 - [ ] Tests for `sync/` package (1300 lines, 0 tests — only cross-machine data durability mechanism)
 - [ ] Tests for `parsers/` sub-package (875 lines, 0 tests — all file format parsing)
 - [ ] Tests for `mcp/tools.py` (MCP tool registry + dispatch, 0 tests)

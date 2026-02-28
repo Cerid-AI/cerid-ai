@@ -1,0 +1,393 @@
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Tests for agents/query_agent.py — multi-domain search with reranking."""
+
+import asyncio
+import sys
+from unittest.mock import MagicMock, AsyncMock, patch
+
+import pytest
+
+# test_hallucination.py may inject a stub agents.query_agent with only
+# `agent_query` — clear it so the real module loads.
+_existing = sys.modules.get("agents.query_agent")
+if _existing is not None and not hasattr(_existing, "_get_adjacent_domains"):
+    del sys.modules["agents.query_agent"]
+
+from agents.query_agent import (
+    _get_adjacent_domains,
+    assemble_context,
+    deduplicate_results,
+    multi_domain_query,
+    rerank_results,
+    agent_query,
+)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _make_result(
+    artifact_id="art-1",
+    chunk_index=0,
+    relevance=0.8,
+    domain="coding",
+    filename="test.py",
+    content="some content",
+    **extra,
+):
+    """Create a minimal result dict for testing."""
+    return {
+        "artifact_id": artifact_id,
+        "chunk_index": chunk_index,
+        "relevance": relevance,
+        "domain": domain,
+        "filename": filename,
+        "content": content,
+        "chunk_id": f"{artifact_id}_chunk_{chunk_index}",
+        "collection": f"domain_{domain}",
+        "ingested_at": "",
+        **extra,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tests: _get_adjacent_domains (pure function)
+# ---------------------------------------------------------------------------
+
+class TestGetAdjacentDomains:
+    def test_returns_dict(self):
+        result = _get_adjacent_domains(["coding"])
+        assert isinstance(result, dict)
+
+    def test_excludes_requested_domains(self):
+        result = _get_adjacent_domains(["coding"])
+        assert "coding" not in result
+
+    def test_all_domains_returns_empty(self):
+        from config import DOMAINS
+        result = _get_adjacent_domains(DOMAINS)
+        assert result == {}
+
+    def test_empty_list_returns_empty(self):
+        result = _get_adjacent_domains([])
+        assert result == {}
+
+    def test_single_domain_includes_others(self):
+        from config import DOMAINS
+        result = _get_adjacent_domains(["coding"])
+        # Should include at least some other domains
+        for d in result:
+            assert d != "coding"
+            assert d in DOMAINS
+
+    def test_values_are_floats(self):
+        result = _get_adjacent_domains(["coding"])
+        for v in result.values():
+            assert isinstance(v, float)
+            assert 0.0 <= v <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# Tests: deduplicate_results (pure function)
+# ---------------------------------------------------------------------------
+
+class TestDeduplicateResults:
+    def test_no_duplicates_unchanged(self):
+        results = [
+            _make_result(artifact_id="a1", chunk_index=0),
+            _make_result(artifact_id="a2", chunk_index=0),
+        ]
+        deduped = deduplicate_results(results)
+        assert len(deduped) == 2
+
+    def test_exact_duplicates_keep_best(self):
+        results = [
+            _make_result(artifact_id="a1", chunk_index=0, relevance=0.5),
+            _make_result(artifact_id="a1", chunk_index=0, relevance=0.9),
+        ]
+        deduped = deduplicate_results(results)
+        assert len(deduped) == 1
+        assert deduped[0]["relevance"] == 0.9
+
+    def test_different_chunk_indices_kept(self):
+        results = [
+            _make_result(artifact_id="a1", chunk_index=0),
+            _make_result(artifact_id="a1", chunk_index=1),
+        ]
+        deduped = deduplicate_results(results)
+        assert len(deduped) == 2
+
+    def test_empty_input(self):
+        assert deduplicate_results([]) == []
+
+    def test_triple_duplicates(self):
+        results = [
+            _make_result(artifact_id="a1", chunk_index=0, relevance=0.3),
+            _make_result(artifact_id="a1", chunk_index=0, relevance=0.7),
+            _make_result(artifact_id="a1", chunk_index=0, relevance=0.5),
+        ]
+        deduped = deduplicate_results(results)
+        assert len(deduped) == 1
+        assert deduped[0]["relevance"] == 0.7
+
+
+# ---------------------------------------------------------------------------
+# Tests: assemble_context (pure function)
+# ---------------------------------------------------------------------------
+
+class TestAssembleContext:
+    def test_single_result(self):
+        results = [_make_result(content="hello world")]
+        context, sources, chars = assemble_context(results)
+        assert "hello world" in context
+        assert len(sources) == 1
+        assert chars == len("hello world")
+
+    def test_respects_max_chars(self):
+        results = [
+            _make_result(content="a" * 100),
+            _make_result(content="b" * 100, artifact_id="a2"),
+        ]
+        context, sources, chars = assemble_context(results, max_chars=150)
+        assert len(sources) == 1  # Only first fits
+        assert chars == 100
+
+    def test_empty_results(self):
+        context, sources, chars = assemble_context([])
+        assert context == ""
+        assert sources == []
+        assert chars == 0
+
+    def test_source_preview_truncated(self):
+        long_content = "x" * 500
+        results = [_make_result(content=long_content)]
+        _, sources, _ = assemble_context(results)
+        assert len(sources[0]["content"]) == 200  # Preview truncated to 200
+
+    def test_source_has_required_fields(self):
+        results = [_make_result()]
+        _, sources, _ = assemble_context(results)
+        source = sources[0]
+        required = {"content", "relevance", "artifact_id", "filename", "domain", "chunk_index"}
+        assert required.issubset(set(source.keys()))
+
+    def test_multiple_results_joined(self):
+        results = [
+            _make_result(content="part one", artifact_id="a1"),
+            _make_result(content="part two", artifact_id="a2"),
+        ]
+        context, sources, _ = assemble_context(results, max_chars=50000)
+        assert "part one" in context
+        assert "part two" in context
+        assert len(sources) == 2
+
+
+# ---------------------------------------------------------------------------
+# Tests: multi_domain_query
+# ---------------------------------------------------------------------------
+
+class TestMultiDomainQuery:
+    def test_invalid_domain_raises(self):
+        with pytest.raises(ValueError, match="Invalid domains"):
+            asyncio.get_event_loop().run_until_complete(
+                multi_domain_query("test", domains=["nonexistent_domain_xyz"])
+            )
+
+    @patch("agents.query_agent.config")
+    def test_query_single_domain(self, mock_config):
+        mock_config.DOMAINS = ["coding", "general"]
+        mock_config.collection_name = lambda d: f"domain_{d}"
+        mock_config.HYBRID_VECTOR_WEIGHT = 0.6
+        mock_config.HYBRID_KEYWORD_WEIGHT = 0.4
+
+        collection = MagicMock()
+        collection.query.return_value = {
+            "ids": [["chunk_1"]],
+            "distances": [[0.2]],
+            "documents": [["test content"]],
+            "metadatas": [[{"artifact_id": "a1", "filename": "test.py", "chunk_index": 0}]],
+        }
+
+        chroma_client = MagicMock()
+        chroma_client.get_collection.return_value = collection
+
+        # Mock BM25 as unavailable
+        with patch("utils.bm25.is_available", return_value=False):
+            results = asyncio.get_event_loop().run_until_complete(
+                multi_domain_query("test query", domains=["coding"], chroma_client=chroma_client)
+            )
+
+        assert len(results) == 1
+        assert results[0]["domain"] == "coding"
+        assert results[0]["content"] == "test content"
+        assert results[0]["relevance"] == 0.8  # 1.0 - 0.2
+
+    @patch("agents.query_agent.config")
+    def test_domain_error_returns_empty(self, mock_config):
+        mock_config.DOMAINS = ["coding", "general"]
+        mock_config.collection_name = lambda d: f"domain_{d}"
+
+        chroma_client = MagicMock()
+        chroma_client.get_collection.side_effect = Exception("Collection not found")
+
+        with patch("utils.bm25.is_available", return_value=False):
+            results = asyncio.get_event_loop().run_until_complete(
+                multi_domain_query("test", domains=["coding"], chroma_client=chroma_client)
+            )
+
+        assert results == []
+
+
+# ---------------------------------------------------------------------------
+# Tests: rerank_results
+# ---------------------------------------------------------------------------
+
+class TestRerankResults:
+    def test_empty_results(self):
+        results = asyncio.get_event_loop().run_until_complete(
+            rerank_results([], "test query")
+        )
+        assert results == []
+
+    def test_no_llm_sorts_by_relevance(self):
+        results = [
+            _make_result(relevance=0.3),
+            _make_result(relevance=0.9, artifact_id="a2"),
+            _make_result(relevance=0.6, artifact_id="a3"),
+        ]
+        reranked = asyncio.get_event_loop().run_until_complete(
+            rerank_results(results, "test", use_llm=False)
+        )
+        assert reranked[0]["relevance"] >= reranked[1]["relevance"]
+        assert reranked[1]["relevance"] >= reranked[2]["relevance"]
+
+    def test_single_candidate_skips_rerank(self):
+        results = [_make_result(relevance=0.5)]
+        reranked = asyncio.get_event_loop().run_until_complete(
+            rerank_results(results, "test", use_llm=True)
+        )
+        assert len(reranked) == 1
+        assert reranked[0]["relevance"] == 0.5
+
+    @patch("agents.query_agent.httpx")
+    @patch("agents.query_agent.parse_llm_json")
+    @patch("agents.query_agent.config")
+    def test_llm_rerank_fallback_on_error(self, mock_config, mock_parse, mock_httpx):
+        """When LLM reranking fails, falls back to embedding sort."""
+        mock_config.QUERY_RERANK_CANDIDATES = 15
+        mock_config.BIFROST_TIMEOUT = 30
+        mock_config.BIFROST_URL = "http://bifrost:8080/v1"
+        mock_config.LLM_INTERNAL_MODEL = "meta-llama/llama-3.3-70b-instruct"
+
+        # Make the async client raise
+        mock_client = AsyncMock()
+        mock_client.post.side_effect = Exception("Connection refused")
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_httpx.AsyncClient.return_value = mock_client
+
+        results = [
+            _make_result(relevance=0.3, artifact_id="a1"),
+            _make_result(relevance=0.9, artifact_id="a2"),
+        ]
+        reranked = asyncio.get_event_loop().run_until_complete(
+            rerank_results(results, "test", use_llm=True)
+        )
+        # Fallback: sorted by relevance descending
+        assert reranked[0]["relevance"] >= reranked[1]["relevance"]
+
+
+# ---------------------------------------------------------------------------
+# Tests: agent_query (integration-level with mocks)
+# ---------------------------------------------------------------------------
+
+class TestAgentQuery:
+    @patch("agents.query_agent.log_event")
+    @patch("agents.query_agent.rerank_results")
+    @patch("agents.query_agent.graph_expand_results")
+    @patch("agents.query_agent.multi_domain_query")
+    @patch("agents.query_agent.config")
+    def test_basic_query_response_shape(
+        self, mock_config, mock_mdq, mock_graph, mock_rerank, mock_log
+    ):
+        mock_config.DOMAINS = ["coding", "general"]
+        mock_config.DOMAIN_AFFINITY = {}
+        mock_config.CROSS_DOMAIN_DEFAULT_AFFINITY = 0.2
+        mock_config.QUERY_CONTEXT_MAX_CHARS = 14000
+
+        result_item = _make_result(content="test content", relevance=0.8)
+        # Use side_effect to return fresh lists (avoids aliasing when extend() mutates)
+        mock_mdq.side_effect = [[result_item], []]
+        mock_graph.return_value = [result_item]
+        mock_rerank.return_value = [result_item]
+
+        with patch("utils.temporal.parse_temporal_intent", return_value=None), \
+             patch("utils.temporal.recency_score", return_value=0.0):
+            response = asyncio.get_event_loop().run_until_complete(
+                agent_query(
+                    "test query",
+                    domains=["coding"],
+                    chroma_client=MagicMock(),
+                )
+            )
+
+        required = {"context", "sources", "confidence", "domains_searched",
+                     "total_results", "token_budget_used", "graph_results", "results"}
+        assert required.issubset(set(response.keys()))
+        assert response["total_results"] == 1
+        assert isinstance(response["confidence"], float)
+
+    @patch("agents.query_agent.log_event")
+    @patch("agents.query_agent.rerank_results")
+    @patch("agents.query_agent.graph_expand_results")
+    @patch("agents.query_agent.multi_domain_query")
+    @patch("agents.query_agent.config")
+    def test_logs_to_redis_when_client_provided(
+        self, mock_config, mock_mdq, mock_graph, mock_rerank, mock_log
+    ):
+        mock_config.DOMAINS = ["coding", "general"]
+        mock_config.DOMAIN_AFFINITY = {}
+        mock_config.CROSS_DOMAIN_DEFAULT_AFFINITY = 0.2
+        mock_config.QUERY_CONTEXT_MAX_CHARS = 14000
+
+        mock_mdq.return_value = []
+        mock_graph.return_value = []
+        mock_rerank.return_value = []
+
+        redis = MagicMock()
+
+        with patch("utils.temporal.parse_temporal_intent", return_value=None):
+            asyncio.get_event_loop().run_until_complete(
+                agent_query("test", redis_client=redis, chroma_client=MagicMock())
+            )
+
+        mock_log.assert_called_once()
+
+    @patch("agents.query_agent.log_event")
+    @patch("agents.query_agent.rerank_results")
+    @patch("agents.query_agent.graph_expand_results")
+    @patch("agents.query_agent.multi_domain_query")
+    @patch("agents.query_agent.config")
+    def test_no_results_returns_zero_confidence(
+        self, mock_config, mock_mdq, mock_graph, mock_rerank, mock_log
+    ):
+        mock_config.DOMAINS = ["coding"]
+        mock_config.DOMAIN_AFFINITY = {}
+        mock_config.CROSS_DOMAIN_DEFAULT_AFFINITY = 0.2
+        mock_config.QUERY_CONTEXT_MAX_CHARS = 14000
+
+        mock_mdq.return_value = []
+        mock_graph.return_value = []
+        mock_rerank.return_value = []
+
+        with patch("utils.temporal.parse_temporal_intent", return_value=None):
+            response = asyncio.get_event_loop().run_until_complete(
+                agent_query("test", domains=["coding"], chroma_client=MagicMock())
+            )
+
+        assert response["confidence"] == 0.0
+        assert response["total_results"] == 0
+        assert response["context"] == ""
