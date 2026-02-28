@@ -732,7 +732,7 @@ Auto-import on startup: when MCP starts with an empty Neo4j database and a valid
 - [x] **Dependency Management:** Node version standardized to 22, pip-compile lock files with hashes, pinned CI tool versions, pinned Docker image tags, Dependabot config (weekly grouped PRs), pre-commit hook (lock file sync), cross-service coupling docs, CI lock-sync job, Makefile targets
 - [x] **Modularity Assessment:** Identified 4 structural splits needed, test coverage gaps across 10 modules, secondary cleanup items
 - [x] **10C:** Structural splits — service layer extraction, middleware hardening, MCP tool registry, config split, Neo4j data layer package, sync library package, parsers package
-- [x] **10D:** Test coverage + CI hardening — 564 backend tests (75% coverage), CodeQL SAST, coverage threshold 55%, bundle size monitoring
+- [x] **10D:** Test coverage + CI hardening — 564 backend tests (75% coverage), coverage threshold 55%, bundle size monitoring
 - [x] **10E:** Smart routing intelligence — token estimation, context replay cost, summarize-and-switch, model switch dialog with cost estimates, color-coded context gauge
 
 ### Phase 11: Knowledge Intelligence
