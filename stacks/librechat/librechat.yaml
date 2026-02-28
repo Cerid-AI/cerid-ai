@@ -1,5 +1,9 @@
 version: "1.2.1"
 
+mcpSettings:
+  allowedDomains:
+    - "http://ai-companion-mcp:8888"
+
 interface:
   mcpServers:
     use: true       # Required: grants permission to use configured MCP servers

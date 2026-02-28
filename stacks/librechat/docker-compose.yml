@@ -30,7 +30,7 @@ services:
       - ./librechat.yaml:/app/librechat.yaml:ro
       - ${CERID_ARTIFACTS_DIR:-~/cerid-archive}:/app/artifacts:ro
     healthcheck:  # Ensure API healthy
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:${PORT:-3080}/api/auth/version"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "-qO/dev/null", "http://127.0.0.1:${PORT:-3080}/api/auth/version"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -60,7 +60,7 @@ services:
     volumes:
       - ./meili_data_v1.12:/meili_data
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:7700/health"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "-qO/dev/null", "http://127.0.0.1:7700/health"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -108,7 +108,7 @@ services:
     volumes:
       - ./logs:/app/logs  # Shared logs
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:${RAG_PORT:-8000}/health"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
