@@ -428,8 +428,8 @@ Structural work before feature work — the splits reduce cost of all subsequent
 6. ~~**G8–G11** — Middleware hardening~~ ✅ Resolved (Phase 10C-S1)
 7. ~~**F2** — MCP tool registry extraction~~ ✅ Resolved (Phase 10C-S2)
 8. ~~**F6 partial** — Config split, dedup cleanup~~ ✅ Resolved (Phase 10C-S2)
-9. **F3** — Neo4j data layer split — Phase 10C-S3
-10. **F4** — Sync library split — Phase 10C-S3
+9. ~~**F3** — Neo4j data layer split~~ ✅ Resolved (Phase 10C-S3)
+10. ~~**F4** — Sync library split~~ ✅ Resolved (Phase 10C-S3)
 11. **F5** — Test coverage expansion (security middleware first, then agents) — Phase 10D
 12. **G12–G15** — CI hardening (pip-audit, CodeQL, coverage threshold, bundle size) — Phase 10D
 13. **D1** — Smart routing + token cost evaluation — Phase 10E

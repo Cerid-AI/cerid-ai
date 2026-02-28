@@ -4,7 +4,7 @@
 
 A privacy-first, local-first workspace that unifies multi-domain knowledge bases (code, finance, projects, personal artifacts) into a context-aware LLM interface with RAG-powered retrieval, file ingestion, and intelligent agents.
 
-[![Status](https://img.shields.io/badge/Status-Phase%2010A%20Complete-green)]()
+[![Status](https://img.shields.io/badge/Status-Phase%2010C%20Complete-green)]()
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue)](LICENSE)
 
 ---
@@ -360,10 +360,13 @@ cerid-ai/
 │
 ├── src/mcp/                           # MCP Server (FastAPI + Python 3.11)
 │   ├── main.py                        # FastAPI entry point (114 lines — routes via routers/)
-│   ├── config.py                      # Central configuration (domains, tiers, taxonomy)
+│   ├── config/                        # Configuration package (split from config.py)
+│   │   ├── settings.py                # URLs, timeouts, env vars
+│   │   ├── taxonomy.py                # TAXONOMY dict, domains, sub-categories
+│   │   └── features.py                # Feature flags, tier constants
 │   ├── deps.py                        # DB singletons, retry wrappers, auth validation
 │   ├── scheduler.py                   # APScheduler maintenance engine
-│   ├── cerid_sync_lib.py              # Sync export/import library
+│   ├── tools.py                       # MCP tool registry + dispatcher (17 tools)
 │   ├── sync_check.py                  # Auto-import on startup
 │   ├── Dockerfile                     # python:3.11.14-slim, non-root user
 │   ├── docker-compose.yml             # MCP + Dashboard + React GUI
@@ -372,11 +375,14 @@ cerid-ai/
 │   ├── requirements-dev.txt           # Test dependencies
 │   ├── requirements-dev.lock          # Dev lock file with hashes
 │   │
-│   ├── routers/                       # FastAPI routers (10 modules)
+│   ├── routers/                       # FastAPI routers (11 modules)
 │   │   ├── health.py, query.py, ingestion.py, artifacts.py
 │   │   ├── agents.py, digest.py, mcp_sse.py, taxonomy.py
 │   │   ├── settings.py, upload.py, memories.py
 │   │   └── __init__.py
+│   │
+│   ├── services/                      # Service layer
+│   │   └── ingestion.py               # Core ingest pipeline (extracted from router)
 │   │
 │   ├── agents/                        # 7 Agent modules
 │   │   ├── query_agent.py             # Multi-domain + LLM reranking
@@ -387,12 +393,34 @@ cerid-ai/
 │   │   ├── hallucination.py           # Claim extraction + KB verification
 │   │   └── memory.py                  # Memory extraction + archival
 │   │
+│   ├── db/                            # Database layer
+│   │   └── neo4j/                     # Neo4j CRUD package
+│   │       ├── schema.py              # Constraints, indexes, seed data
+│   │       ├── artifacts.py           # Artifact CRUD (6 functions)
+│   │       ├── relationships.py       # Relationship discovery (5 functions)
+│   │       └── taxonomy.py            # Domain/tag management (5 functions)
+│   │
+│   ├── parsers/                       # File parser package
+│   │   ├── registry.py                # Parser registry + parse_file()
+│   │   ├── pdf.py, office.py          # PDF, DOCX, XLSX parsers
+│   │   ├── structured.py              # CSV, HTML, plain text parsers
+│   │   ├── email.py                   # EML, MBOX parsers
+│   │   └── ebook.py                   # EPUB, RTF parsers
+│   │
+│   ├── sync/                          # KB sync package
+│   │   ├── export.py                  # Export Neo4j/Chroma/BM25/Redis
+│   │   ├── import_.py                 # Import with merge/overwrite
+│   │   ├── manifest.py                # Manifest read/write
+│   │   ├── status.py                  # Local vs sync comparison
+│   │   └── _helpers.py                # Constants + utility functions
+│   │
 │   ├── plugins/                       # Plugin system (manifest-based, feature tiers)
 │   │   └── ocr/                       # OCR parser plugin (pro tier)
 │   │
-│   ├── utils/                         # 15 utility modules
-│   │   ├── parsers.py, metadata.py, chunker.py
-│   │   ├── graph.py, cache.py, query_cache.py
+│   ├── utils/                         # Utility modules (shims + standalone)
+│   │   ├── parsers.py                 # Re-export shim → parsers/
+│   │   ├── graph.py                   # Re-export shim → db/neo4j/
+│   │   ├── metadata.py, chunker.py, cache.py, query_cache.py
 │   │   ├── bm25.py, dedup.py, encryption.py
 │   │   ├── features.py, temporal.py, time.py
 │   │   ├── llm_parsing.py, sync_backend.py, webhooks.py
@@ -403,9 +431,10 @@ cerid-ai/
 │   │   ├── watch_obsidian.py          # Obsidian vault watcher
 │   │   └── ingest_cli.py             # Batch CLI ingest tool
 │   │
-│   ├── middleware/                     # Auth + rate limiting
+│   ├── middleware/                     # Auth + rate limiting + request tracing
 │   │   ├── auth.py                    # X-API-Key validation (opt-in)
-│   │   └── rate_limit.py              # Sliding window rate limiter
+│   │   ├── rate_limit.py              # Sliding window rate limiter + headers
+│   │   └── request_id.py             # X-Request-ID middleware
 │   │
 │   └── tests/                         # 156 pytest tests (11 test files)
 │
@@ -459,7 +488,7 @@ cerid-ai/
 | File | Purpose |
 |------|---------|
 | `.env` | All secrets (root, encrypted as `.env.age` with age) |
-| `src/mcp/config.py` | Domains, file extensions, AI tiers, taxonomy, DB URLs |
+| `src/mcp/config/` | Domains, file extensions, AI tiers, taxonomy, DB URLs |
 | `stacks/bifrost/data/config.json` | LLM routing, provider config |
 | `stacks/librechat/librechat.yaml` | MCP servers, endpoints, model list |
 | `scripts/validate-env.sh` | Pre-flight environment validation (14 checks) |
@@ -482,14 +511,14 @@ The age decryption key lives outside the repo at `~/.config/cerid/age-key.txt`.
 
 ### Adding a New Domain
 
-1. Edit `src/mcp/config.py` → add to `DOMAINS` list
+1. Edit `src/mcp/config/taxonomy.py` → add to `DOMAINS` list
 2. Create folder: `mkdir ~/cerid-archive/<new_domain>`
 3. Rebuild: `cd src/mcp && docker compose up -d --build`
 
 ### Adding a New File Type
 
-1. Add extension to `SUPPORTED_EXTENSIONS` in `config.py`
-2. Register parser function in `utils/parsers.py` with `@register_parser([".ext"])`
+1. Add extension to `SUPPORTED_EXTENSIONS` in `config/settings.py`
+2. Register parser function in `parsers/` with `@register_parser([".ext"])`
 
 ---
 
@@ -701,7 +730,7 @@ Auto-import on startup: when MCP starts with an empty Neo4j database and a valid
 - [x] **Codebase Audit:** Dependency purge (~700MB Docker savings), Docker security hardening (non-root user, pinned images), dead code removal, logic consolidation, error handling overhaul (`except: pass` → logged), input validation (Pydantic response models), accessibility fixes (33 across 14 components), type safety, CI hardening (security scanning, coverage thresholds, Docker image scanning), frontend test expansion (34 → 68 tests)
 - [x] **Dependency Management:** Node version standardized to 22, pip-compile lock files with hashes, pinned CI tool versions, pinned Docker image tags, Dependabot config (weekly grouped PRs), pre-commit hook (lock file sync), cross-service coupling docs, CI lock-sync job, Makefile targets
 - [x] **Modularity Assessment:** Identified 4 structural splits needed, test coverage gaps across 10 modules, secondary cleanup items
-- [ ] **10C:** Structural splits — service layer extraction, MCP tool registry, Neo4j data layer package, sync library package
+- [x] **10C:** Structural splits — service layer extraction, middleware hardening, MCP tool registry, config split, Neo4j data layer package, sync library package, parsers package
 - [ ] **10D:** Test coverage expansion — security middleware, 5 untested agents, sync lib, parsers, frontend components
 - [ ] **10E:** Smart routing intelligence — token estimation, context replay cost
 - [ ] **10F:** Interactive audit & taxonomy — audit filters, taxonomy tree
