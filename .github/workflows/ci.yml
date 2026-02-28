@@ -56,11 +56,10 @@ jobs:
 
   lock-sync:
     runs-on: ubuntu-latest
+    # Use same Python image as Dockerfile to ensure identical pip-compile output
+    container: python:3.11-slim
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
       - run: pip install pip-tools==7.5.3
       - name: Check Python lock file is up to date
         run: |
@@ -125,6 +124,13 @@ jobs:
           CVE-2026-0861
           # wheel privilege escalation — build-time only, not exploitable at runtime
           CVE-2026-24049
+          # libxml2 CVEs in Alpine base — nginx serves static files only, no XML parsing
+          CVE-2025-32414
+          CVE-2025-32415
+          CVE-2025-49794
+          CVE-2025-49795
+          CVE-2025-49796
+          CVE-2025-6021
           EOF
       - name: Scan MCP Docker image
         uses: aquasecurity/trivy-action@1bd062560b422f5944df1de50abd05162bea079e
@@ -139,3 +145,4 @@ jobs:
           image-ref: cerid-web-test
           severity: CRITICAL,HIGH
           exit-code: 1
+          trivyignores: .trivyignore
