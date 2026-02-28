@@ -1,7 +1,7 @@
 # Cerid AI — Task Tracker
 
 > **Last updated:** 2026-02-28
-> **Current status:** Phase 10D in progress. 337 tests passing (was 156). Middleware, ingestion service, and all 5 agents now tested. Remaining: sync/, parsers/, tools.py, neo4j expansion, CI hardening.
+> **Current status:** Phase 10D in progress. 510 tests passing (was 156). Middleware, ingestion, agents, sync, tools, parsers all tested. Remaining: neo4j expansion, CI hardening.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md)
 
 ## Current: Phase 10 — Commercial & Open-Source Readiness
@@ -75,9 +75,9 @@
 - [x] Tests for `middleware/auth.py`, `middleware/rate_limit.py`, `middleware/request_id.py` (49 tests: auth bypass/enforcement, exempt paths, IP redaction, rate limit headers/enforcement/expiry, XFF proxy resolution, request ID generation/propagation)
 - [x] Tests for `services/ingestion.py` (15 tests: content hashing, path validation, duplicate detection, concurrent constraint handling, response shapes, ChromaDB collection naming, Redis logging)
 - [x] F5 — Tests for all 5 agents: query_agent (27 tests: dedup, context assembly, cross-domain affinity, rerank fallback, response shape), triage (23 tests: node validation, parse, routing, metadata merge, chunking), rectify (19 tests: duplicate/stale/orphan detection, resolution, distribution), audit (27 tests: activity summary, ingestion stats, cost estimation, query patterns, conversation analytics), maintenance (24 tests: health checks, bifrost sync, purge, collection analysis)
-- [ ] Tests for `sync/` package (1300 lines, 0 tests — only cross-machine data durability mechanism)
-- [ ] Tests for `parsers/` sub-package (875 lines, 0 tests — all file format parsing)
-- [ ] Tests for `mcp/tools.py` (MCP tool registry + dispatch, 0 tests)
+- [x] Tests for `sync/` package (41 tests: SHA-256 file hashing, JSONL read/write/iterate, manifest read/write/validation, Neo4j export, Redis export/import with deduplication)
+- [x] Tests for `mcp/tools.py` (24 tests: registry validation, dispatch for all tool types, error paths, argument defaults, async agent tool dispatch)
+- [x] Tests for `parsers/` sub-package (108 tests: HTML/RTF stripping, registry validation, parse_file orchestration, text/HTML/EML/RTF/EPUB parsers with real files, PDF/DOCX/XLSX/CSV parsers with mocks)
 - [ ] Tests for `db/neo4j/` package (9 tests for 17 functions — expand coverage)
 - [ ] G12 — Fix pip-audit to scan installed packages (transitive dependency vulnerabilities)
 - [ ] G13 — Add CodeQL SAST workflow (`.github/workflows/codeql.yml`)

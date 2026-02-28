@@ -50,6 +50,12 @@
 **Fix:** Guard the import in the consumer test: check if the cached module has the expected attributes, and `del sys.modules[...]` if not, so the real module loads.
 **Rule:** Prefer `unittest.mock.patch` over manual `sys.modules` manipulation for test isolation.
 
+### Use `create=True` when patching attributes on stub modules
+**When:** conftest.py stubs heavy dependencies as empty `ModuleType` objects (e.g., `sys.modules["pandas"] = ModuleType("pandas")`).
+**Problem:** `@patch("pandas.read_csv")` fails with `AttributeError: <module 'pandas'> does not have the attribute 'read_csv'` because the stub has no attributes.
+**Fix:** Use `@patch("pandas.read_csv", create=True)` — this allows the mock patcher to create the attribute on the stub if it doesn't already exist.
+**Applies to:** Any `@patch` targeting attributes on stub modules (docx.Document, openpyxl.load_workbook, etc.).
+
 ### Use `side_effect` for mocks that return mutable containers
 **When:** A mock's `return_value` is a list that gets mutated by the code under test.
 **Problem:** `mock.return_value = [item]` returns the SAME list on every call. If the code does `results.extend(cross_results)` where both are the same list reference, the list grows unexpectedly.
