@@ -27,9 +27,9 @@ uploads/
 logs/
 meili_data*
 pgdata*
-neo4j/
-chroma/
-redis/
+/neo4j/
+/chroma/
+/redis/
 stacks/infrastructure/data/
 artifacts/
 

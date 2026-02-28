@@ -1,7 +1,7 @@
 # Cerid AI — Task Tracker
 
-> **Last updated:** 2026-02-26
-> **Current status:** Phase 10A + 10B complete. Codebase audit + dependency management + modularity assessment + full-stack audit complete. Step 0 immediate fixes applied. Phase 10C Sessions 1–2 complete (service layer, middleware hardening, tool registry, config split, dedup cleanup). 9 open issues remain.
+> **Last updated:** 2026-02-27
+> **Current status:** Phase 10C complete. All structural splits done (service layer, middleware hardening, tool registry, config split, dedup cleanup, Neo4j package, sync package, parsers package). 6 open issues remain.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md)
 
 ## Current: Phase 10 — Commercial & Open-Source Readiness
@@ -57,7 +57,7 @@
 - [x] Updated ISSUES.md with G1–G22 audit findings section
 - [x] Updated task tracker
 
-### 10C: Structural Splits + Security Hardening
+### 10C: Structural Splits + Security Hardening ✅
 - [x] F1 — Extract `ingest_content()` from `routers/ingestion.py` to `services/ingestion.py` (fixes circular import)
 - [x] G8 — Add X-Forwarded-For support to rate limiter (configurable `TRUSTED_PROXIES`)
 - [x] G9 — Add `RateLimit-Limit/Remaining/Reset` response headers (IETF standard)
@@ -67,9 +67,9 @@
 - [x] Split `config.py` (33 importers) into `config/settings.py`, `config/taxonomy.py`, `config/features.py`
 - [x] Remove duplicate `find_stale_artifacts` in `maintenance.py` (reuse `rectify.py` version)
 - [x] Move `audit.log_conversation_metrics()` to `utils/cache.py`
-- [ ] F3 — Split `utils/graph.py` (827 lines) into `db/neo4j/` package (crud, taxonomy, relationships, schema)
-- [ ] F4 — Split `cerid_sync_lib.py` (1300 lines) into `sync/` package (export, import, manifest, client)
-- [ ] Split `utils/parsers.py` (875 lines) into `parsers/` sub-package (one file per format family)
+- [x] F3 — Split `utils/graph.py` (827 lines) into `db/neo4j/` package (schema, artifacts, relationships, taxonomy)
+- [x] F4 — Split `cerid_sync_lib.py` (1346 lines) into `sync/` package (export, import_, manifest, status, _helpers)
+- [x] Split `utils/parsers.py` (875 lines) into `parsers/` sub-package (registry, pdf, office, structured, email, ebook)
 
 ### 10D: Test Coverage + CI Hardening
 - [ ] Tests for `middleware/auth.py` and `middleware/rate_limit.py` (security-critical, 0 tests)

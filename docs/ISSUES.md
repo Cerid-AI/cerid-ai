@@ -1,8 +1,8 @@
 # Cerid AI — Issues & Backlog
 
 > **Created:** 2026-02-25
-> **Last updated:** 2026-02-26
-> **Status:** Phase 10A + 10B + codebase audit + dependency management + modularity assessment + full-stack audit complete. Phase 10C Sessions 1–2 complete. 18 resolved, 9 open (5 original + 2 structural + 2 audit hardening), 1 informational (F6).
+> **Last updated:** 2026-02-27
+> **Status:** Phase 10C complete. 21 resolved, 6 open (5 original + 1 audit hardening), 1 informational (F6).
 > **Purpose:** Track known bugs, feature gaps, structural issues, and architecture evaluations for upcoming phases.
 
 ---
@@ -211,31 +211,24 @@ Issues identified by the modularity assessment (2026-02-26). These are mechanica
 ### F3. Neo4j Data Layer — `utils/graph.py`
 
 **Severity:** Medium
-**Status:** Open — Phase 10C
+**Status:** Resolved (Phase 10C-S3, 2026-02-27)
 
-`utils/graph.py` (827 lines, 17 functions) combines 5 distinct concerns: artifact CRUD, schema initialization, relationship discovery (with regex import extraction), relationship management, and taxonomy CRUD (sub-categories, tags). This is a data layer masquerading as a utility. Only 9 tests cover 17 functions.
-
-**Fix:** Promote to `db/neo4j/` package: `schema.py`, `artifacts.py`, `relationships.py`, `taxonomy.py`, `__init__.py` (re-exports for backward compat).
+**Resolution:** Split `utils/graph.py` (827 lines, 18 functions) into `db/neo4j/` package with 4 sub-modules: `schema.py` (init_schema), `artifacts.py` (6 CRUD functions), `relationships.py` (5 functions incl. discovery), `taxonomy.py` (5 functions). Re-export shim in `utils/graph.py` preserves all 7 importers unchanged. All 156 tests pass.
 
 **Files:**
-- `src/mcp/utils/graph.py` (source — split into package)
-- `src/mcp/db/neo4j/` (new package — 4 modules)
-- 14+ importers (update `from utils.graph import` → `from db.neo4j import`)
+- `src/mcp/db/neo4j/` (new package — 4 modules + `__init__.py`)
+- `src/mcp/utils/graph.py` (now re-export shim)
 
 ### F4. Sync Library — `cerid_sync_lib.py`
 
 **Severity:** Medium
-**Status:** Open — Phase 10C
+**Status:** Resolved (Phase 10C-S3, 2026-02-27)
 
-`cerid_sync_lib.py` (~1300 lines, ~28 functions, 0 tests) is the largest file in the backend. It handles export, import, comparison, manifest management, and raw HTTP calls to ChromaDB — all in one flat file. This is the only cross-machine data durability mechanism and has zero test coverage.
-
-**Fix:** Split into `sync/` package: `export.py`, `import_.py`, `manifest.py`, `client.py` (ChromaDB HTTP), `__init__.py`.
+**Resolution:** Split `cerid_sync_lib.py` (1346 lines) into `sync/` package with 5 sub-modules: `export.py` (5 export functions), `import_.py` (5 import functions + 3 ChromaDB helpers), `manifest.py` (write/read), `status.py` (compare_status), `_helpers.py` (constants + 6 utility functions). Fixed 3 latent `collection_name` → `coll_name` bugs in error logging paths. Replaced duplicated `_utcnow_iso()` with canonical `utils.time.utcnow_iso()`. Re-export shim in `cerid_sync_lib.py` preserves all 3 importers unchanged. All 156 tests pass.
 
 **Files:**
-- `src/mcp/cerid_sync_lib.py` (source — split into package)
-- `src/mcp/sync/` (new package — 4 modules)
-- `scripts/cerid-sync.py` (update import)
-- `src/mcp/sync_check.py` (update import)
+- `src/mcp/sync/` (new package — 5 modules + `__init__.py`)
+- `src/mcp/cerid_sync_lib.py` (now re-export shim)
 
 ### F5. Test Coverage Gaps
 
@@ -251,8 +244,8 @@ Issues identified by the modularity assessment (2026-02-26). These are mechanica
 4. `agents/rectify.py` (390 lines) — KB health checks
 5. `agents/audit.py` (344 lines) — usage analytics
 6. `agents/maintenance.py` (362 lines) — system health
-7. `cerid_sync_lib.py` (~1300 lines) — data durability
-8. `utils/parsers.py` (875 lines) — file format parsing
+7. `sync/` package (~1300 lines) — data durability
+8. `parsers/` package (875 lines) — file format parsing
 9. `routers/mcp_sse.py` (593 lines) — MCP protocol
 10. `utils/metadata.py` (250 lines) — metadata extraction
 
@@ -269,7 +262,7 @@ Resolved items:
 - ✅ **`config.py` split:** Split into `config/taxonomy.py`, `config/settings.py`, `config/features.py` with `config/__init__.py` star re-exports (33 importers unchanged).
 - ✅ **Duplicate `find_stale_artifacts`:** Enhanced `rectify.py` version (added `limit` param, `chunk_ids` in return). Removed duplicate from `maintenance.py`, which now imports from `rectify`.
 - ✅ **`audit.log_conversation_metrics()`:** Moved to `utils/cache.py`. Import in `routers/ingestion.py` updated to canonical location.
-- ✅ **`utils/parsers.py`:** Deferred to Phase 10C-S3 (parsers sub-package split).
+- ✅ **`utils/parsers.py`:** Split into `parsers/` package (registry, pdf, office, structured, email, ebook, _utils). Phase 10C-S3, 2026-02-27.
 
 Open items:
 - **`use-chat.ts` post-send effects:** Not urgent at 83 lines total.
