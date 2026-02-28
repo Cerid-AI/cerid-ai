@@ -8,14 +8,13 @@ import { Copy, Check, User, Bot } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
+/** Lazy-load PrismLight (25 common languages, ~200KB) instead of full Prism (~1.6MB) */
 const LazySyntaxHighlighter = lazy(() =>
-  import("react-syntax-highlighter").then((m) => ({ default: m.Prism })),
+  import("@/lib/syntax-highlighter").then((m) => ({ default: m.PrismLight })),
 )
 
 let oneDarkStyle: Record<string, React.CSSProperties> | undefined
-import("react-syntax-highlighter/dist/esm/styles/prism/one-dark").then(
-  (m) => { oneDarkStyle = m.default },
-)
+import("@/lib/syntax-highlighter").then((m) => { oneDarkStyle = m.oneDark })
 import type { ChatMessage } from "@/lib/types"
 import { findModel, PROVIDER_COLORS } from "@/lib/types"
 import { SourceAttribution } from "./source-attribution"

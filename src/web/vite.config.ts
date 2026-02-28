@@ -25,7 +25,7 @@ export default defineConfig({
       output: {
         manualChunks: {
           "vendor-charts": ["recharts"],
-          "vendor-markdown": ["react-markdown", "remark-gfm", "react-syntax-highlighter"],
+          "vendor-markdown": ["react-markdown", "remark-gfm"],
           "vendor-query": ["@tanstack/react-query"],
         },
       },
