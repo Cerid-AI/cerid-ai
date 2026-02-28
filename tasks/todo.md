@@ -1,6 +1,6 @@
 # Cerid AI — Task Tracker
 
-> **Last updated:** 2026-02-27
+> **Last updated:** 2026-02-28
 > **Current status:** Phase 10C complete. All structural splits done (service layer, middleware hardening, tool registry, config split, dedup cleanup, Neo4j package, sync package, parsers package). 6 open issues remain.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md)
 
@@ -72,8 +72,8 @@
 - [x] Split `utils/parsers.py` (875 lines) into `parsers/` sub-package (registry, pdf, office, structured, email, ebook)
 
 ### 10D: Test Coverage + CI Hardening
-- [ ] Tests for `middleware/auth.py` and `middleware/rate_limit.py` (security-critical, 0 tests)
-- [ ] Tests for `services/ingestion.py` (extracted service layer)
+- [x] Tests for `middleware/auth.py`, `middleware/rate_limit.py`, `middleware/request_id.py` (49 tests: auth bypass/enforcement, exempt paths, IP redaction, rate limit headers/enforcement/expiry, XFF proxy resolution, request ID generation/propagation)
+- [x] Tests for `services/ingestion.py` (15 tests: content hashing, path validation, duplicate detection, concurrent constraint handling, response shapes, ChromaDB collection naming, Redis logging)
 - [ ] F5 — Tests for untested agents: query_agent, triage, rectify, audit, maintenance (5 agents, ~2000 lines, 0 tests)
 - [ ] Tests for `sync/` package (1300 lines, 0 tests — only cross-machine data durability mechanism)
 - [ ] Tests for `parsers/` sub-package (875 lines, 0 tests — all file format parsing)
