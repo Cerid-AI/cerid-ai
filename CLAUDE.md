@@ -9,7 +9,7 @@
 
 Cerid AI is a self-hosted, privacy-first Personal AI Knowledge Companion. It unifies multi-domain knowledge bases (code, finance, projects, artifacts) into a context-aware LLM interface with RAG-powered retrieval and intelligent agents. All data stays local; only LLM API calls go external.
 
-**Status:** Phases 0–9 complete. Phase 10A (production quality) + 10B (UX polish) complete. Codebase audit and dependency management shipped. 7 agents operational (query, triage, rectify, audit, maintenance, hallucination, memory); 15 MCP tools; hybrid BM25+vector search; scheduled maintenance; CI/CD pipeline with security scanning and coverage; multi-machine sync via Dropbox. React GUI (port 3000) with streaming chat, source attribution, model switch dividers, KB context pane, monitoring, audit dashboards, hallucination panel, smart model router, KB suggestions, file upload, tag browsing, memories pane, settings pane, and conversation analytics. Backend hardened with API key auth, rate limiting, Redis query caching, conversation analytics, and optional field-level encryption. Docker images pinned, Python deps locked with pip-compile hashes, Dependabot configured. 145+ Python tests, 68 frontend tests. Plugin system with feature tiers (community/pro). Hierarchical taxonomy with sub-categories and tags.
+**Status:** Phase 10E complete. Phase 10A (production quality), 10B (UX polish), 10C (structural splits + middleware hardening), 10D (test coverage + CI hardening), 10E (smart model switching). 564 Python tests (75% coverage), 94 frontend tests. 7 agents operational (query, triage, rectify, audit, maintenance, hallucination, memory); 15 MCP tools; hybrid BM25+vector search; scheduled maintenance; CI/CD pipeline with 6-job pipeline (lint, test, security, lock-sync, frontend, docker) + CodeQL SAST. Multi-machine sync via Dropbox. React GUI (port 3000) with streaming chat, source attribution, model switch dialog with cost estimation, summarize-and-switch, color-coded context gauge, KB context pane, monitoring, audit dashboards, hallucination panel, smart model router, KB suggestions, file upload, tag browsing, memories pane, settings pane, and conversation analytics. Backend hardened with API key auth, rate limiting (XFF-aware with IETF headers), Redis query caching, conversation analytics, request ID tracing, and optional field-level encryption. Docker images pinned, Python deps locked with pip-compile hashes, Dependabot configured. Plugin system with feature tiers (community/pro). Hierarchical taxonomy with sub-categories and tags.
 
 ## Architecture
 
@@ -78,7 +78,8 @@ React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly
 │   │   └── ocr/                      # OCR parser plugin (pro tier, requires docling)
 │   ├── middleware/                    # Request middleware (Phase 6D)
 │   │   ├── auth.py                   # API key authentication (opt-in via CERID_API_KEY)
-│   │   └── rate_limit.py             # In-memory sliding window rate limiting (path-specific)
+│   │   ├── rate_limit.py             # In-memory sliding window rate limiting (path-specific)
+│   │   └── request_id.py             # Request ID tracing (X-Request-ID header)
 │   ├── utils/
 │   │   ├── time.py                   # Timezone-aware UTC helpers (replaces datetime.utcnow)
 │   │   ├── parsers.py                # Extensible file parser registry (+eml, mbox, epub, rtf)
@@ -122,13 +123,13 @@ React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly
 │   ├── Dockerfile                     # Multi-stage: Node build → nginx:alpine (pinned)
 │   ├── nginx.conf                     # SPA fallback + Bifrost reverse proxy
 │   └── src/
-│       ├── __tests__/                 # Vitest tests (68 tests across 5 files)
-│       ├── lib/types.ts, api.ts, model-router.ts  # Types, API clients, model recommendation engine
-│       ├── hooks/                     # use-theme, use-chat, use-conversations, use-kb-context, use-settings, use-model-router, use-smart-suggestions, use-live-metrics
+│       ├── __tests__/                 # 94 vitest tests (7 test files)
+│       ├── lib/types.ts, api.ts, model-router.ts, syntax-highlighter.ts, utils.ts  # Types, API clients, model recommendation engine, utilities
+│       ├── hooks/                     # use-theme, use-chat, use-conversations, use-kb-context, use-settings, use-model-router, use-smart-suggestions, use-live-metrics, use-model-switch
 │       ├── contexts/                  # SettingsContext (model prefs, feedback toggle), KBInjectionContext
 │       └── components/
 │           ├── layout/                # Sidebar nav, status bar
-│           ├── chat/                  # Chat panel, message list, chat-dashboard, model router banner, smart suggestions, source attribution, model switch divider
+│           ├── chat/                  # Chat panel, message list, chat-dashboard, model router banner, smart suggestions, source attribution, model switch divider, model-select, model-switch-dialog
 │           ├── kb/                    # KB context panel, artifact cards, domain filter, graph preview, file upload, tag filter
 │           ├── monitoring/            # Health cards, collection chart, scheduler status
 │           ├── audit/                 # Activity chart, ingestion timeline, cost breakdown, query stats, hallucination panel, conversation stats

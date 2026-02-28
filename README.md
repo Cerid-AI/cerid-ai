@@ -4,7 +4,7 @@
 
 A privacy-first, local-first workspace that unifies multi-domain knowledge bases (code, finance, projects, personal artifacts) into a context-aware LLM interface with RAG-powered retrieval, file ingestion, and intelligent agents.
 
-[![Status](https://img.shields.io/badge/Status-Phase%2010C%20Complete-green)]()
+[![Status](https://img.shields.io/badge/Status-Phase%2010E%20Complete-green)]()
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue)](LICENSE)
 
 ---
@@ -22,6 +22,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 - **Hallucination Detection** — claim extraction + KB verification with per-message truth audit
 - **Memory Extraction** — facts, decisions, preferences extracted from conversations and stored as KB artifacts
 - **Smart Model Router** — complexity scoring, cost sensitivity, auto-switch recommendations
+- **Smart Model Switching** — cost estimation for model switches, summarize-and-switch, "start fresh" option, color-coded context usage gauge
 - **Hybrid BM25+Vector Search** with knowledge graph traversal and cross-domain connections
 - **KB Context Injection** — auto-query knowledge base on chat messages, inject as system prompt context
 - **File-Based Ingestion Pipeline** with structure-aware parsing (PDF tables as Markdown via pdfplumber, DOCX, XLSX, CSV, 30+ formats)
@@ -32,7 +33,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 - **Multi-Machine Sync** via Dropbox — JSONL export/import with auto-import on startup
 - **Source Attribution** — collapsible source references with relevance scores on chat responses
 - **Model Context Breaks** — provider-colored model badges, switch dividers between model changes
-- **GitHub Actions CI/CD** with 224 tests (156 pytest + 68 vitest)
+- **GitHub Actions CI/CD** with 658 tests (564 pytest + 94 vitest)
 - **Three-Tier AI Categorization** (manual, smart, pro) via Bifrost
 - **Obsidian Vault Integration** — auto-sync vault notes into knowledge base
 - **Reproducible Builds** — pip-compile lock files with hashes, pinned Docker images, Dependabot
@@ -436,7 +437,7 @@ cerid-ai/
 │   │   ├── rate_limit.py              # Sliding window rate limiter + headers
 │   │   └── request_id.py             # X-Request-ID middleware
 │   │
-│   └── tests/                         # 156 pytest tests (11 test files)
+│   └── tests/                         # 564 pytest tests (27 test files)
 │
 ├── src/web/                           # React GUI (Phase 6+)
 │   ├── .nvmrc                         # Node version source of truth (22)
@@ -447,12 +448,12 @@ cerid-ai/
 │   └── src/
 │       ├── App.tsx                    # Lazy-loaded pane routing
 │       ├── lib/                       # types.ts, api.ts, model-router.ts, utils.ts
-│       ├── hooks/                     # 8 hooks: use-chat, use-conversations,
+│       ├── hooks/                     # 9 hooks: use-chat, use-conversations,
 │       │                              # use-kb-context, use-settings, use-theme,
-│       │                              # use-model-router, use-smart-suggestions,
-│       │                              # use-live-metrics
+│       │                              # use-model-router, use-model-switch,
+│       │                              # use-smart-suggestions, use-live-metrics
 │       ├── contexts/                  # KB injection context provider
-│       ├── __tests__/                 # 68 vitest tests (5 test files)
+│       ├── __tests__/                 # 94 vitest tests (7 test files)
 │       └── components/
 │           ├── layout/                # Sidebar, status bar, split-pane
 │           ├── chat/                  # Chat panel, input, bubbles, dashboard,
@@ -731,11 +732,17 @@ Auto-import on startup: when MCP starts with an empty Neo4j database and a valid
 - [x] **Dependency Management:** Node version standardized to 22, pip-compile lock files with hashes, pinned CI tool versions, pinned Docker image tags, Dependabot config (weekly grouped PRs), pre-commit hook (lock file sync), cross-service coupling docs, CI lock-sync job, Makefile targets
 - [x] **Modularity Assessment:** Identified 4 structural splits needed, test coverage gaps across 10 modules, secondary cleanup items
 - [x] **10C:** Structural splits — service layer extraction, middleware hardening, MCP tool registry, config split, Neo4j data layer package, sync library package, parsers package
-- [ ] **10D:** Test coverage expansion — security middleware, 5 untested agents, sync lib, parsers, frontend components
-- [ ] **10E:** Smart routing intelligence — token estimation, context replay cost
-- [ ] **10F:** Interactive audit & taxonomy — audit filters, taxonomy tree
-- [ ] **10G:** Knowledge curation agent (design)
-- [ ] **10H:** RAG evaluation (research)
+- [x] **10D:** Test coverage + CI hardening — 564 backend tests (75% coverage), CodeQL SAST, coverage threshold 55%, bundle size monitoring
+- [x] **10E:** Smart routing intelligence — token estimation, context replay cost, summarize-and-switch, model switch dialog with cost estimates, color-coded context gauge
+
+### Phase 11: Knowledge Intelligence
+- [ ] Interactive audit controls, taxonomy tree sidebar, knowledge curation agent design, operations documentation
+
+### Phase 12: RAG & Retrieval Excellence
+- [ ] Embedding model evaluation, BM25 replacement, hybrid retrieval weight tuning
+
+### Phase 13: Content & UX Polish
+- [ ] Artifact preview, conversation fork UI, frontend component tests
 
 ---
 

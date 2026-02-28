@@ -1,8 +1,8 @@
 # Cerid AI - Project Plan & Technical Reference
 
-**Document Version:** 10.2
+**Document Version:** 10.5
 **Date:** February 28, 2026
-**Status:** Phases 0–9 Complete + Phase 10A–10C + Codebase Audit + Dependency Management
+**Status:** Phases 0–9 Complete + Phase 10A–10E + Codebase Audit + Dependency Management
 **Repository:** https://github.com/sunrunnerfire/cerid-ai (private)
 **Owner:** Justin (@sunrunnerfire)
 
@@ -102,7 +102,9 @@ Cerid AI is a **self-hosted Personal AI Knowledge Companion** — a privacy-firs
 | Codebase Audit | Dead code, security, accessibility | ✅ Complete |
 | Dependency Mgmt | Lock files, Dependabot, Docker pins | ✅ Complete |
 | Phase 10C | Structural Splits + Security Hardening | ✅ Complete |
-| Phase 10D–H | Test coverage, smart routing, audit UX, curation, RAG eval | Planned |
+| Phase 10D | Test Coverage + CI Hardening | ✅ Complete |
+| Phase 10E | Smart Routing Intelligence | ✅ Complete |
+| Phase 11–13 | Knowledge Intelligence, RAG Evaluation, Content Polish | 📋 Planned |
 
 ### Phase 0 Deliverables (Complete ✅)
 
@@ -482,7 +484,7 @@ CHAT (Phase 0 - Working):
 │   │   ├── auth.py                        # X-API-Key validation (opt-in)
 │   │   └── rate_limit.py                  # Sliding window rate limiter
 │   │
-│   └── tests/                             # 156 pytest tests (11 test files)
+│   └── tests/                             # 564 pytest tests
 │       ├── conftest.py                    # Shared fixtures
 │       ├── test_bm25.py, test_encryption.py
 │       ├── test_graph.py, test_hallucination.py
@@ -502,7 +504,7 @@ CHAT (Phase 0 - Working):
 │       ├── lib/                           # types.ts, api.ts, model-router.ts, utils.ts, humanize-trigger.ts
 │       ├── hooks/                         # 8 hooks (use-chat, use-conversations, etc.)
 │       ├── contexts/                      # KB injection context provider
-│       ├── __tests__/                     # 68 vitest tests (5 test files)
+│       ├── __tests__/                     # 94 vitest tests (7 test files)
 │       └── components/
 │           ├── layout/                    # Sidebar, status bar, split-pane
 │           ├── chat/                      # Chat panel, input, bubbles, dashboard,
@@ -1369,7 +1371,9 @@ docker exec ai-companion-mcp python -m spacy download en_core_web_sm
 | Codebase Audit | Dead code, security, accessibility, tests | ✅ Complete |
 | Dependency Mgmt | Lock files, Dependabot, Docker pins | ✅ Complete |
 | Phase 10C | Structural Splits + Security Hardening | ✅ Complete |
-| Phase 10D–H | Test coverage, smart routing, audit UX, curation, RAG eval | Planned |
+| Phase 10D | Test Coverage + CI Hardening | ✅ Complete |
+| Phase 10E | Smart Routing Intelligence | ✅ Complete |
+| Phase 11–13 | Knowledge Intelligence, RAG Evaluation, Content Polish | 📋 Planned |
 
 ### Phase 0: Infrastructure (Complete ✅)
 
@@ -1545,31 +1549,39 @@ Backend modularity — mechanical refactors with backward-compatible re-export s
 - [x] **F4:** Split `cerid_sync_lib.py` (1346 lines) into `sync/` package (export, import_, manifest, status, _helpers). Fixed 3 latent `collection_name` bugs.
 - [x] Split `utils/parsers.py` (875 lines) into `parsers/` sub-package (registry, pdf, office, structured, email, ebook)
 
-### Phase 10D: Test Coverage + CI Hardening (Planned)
+### Phase 10D: Test Coverage + CI Hardening (Complete ✅)
 
-Target: cover all security-critical paths, all agents, and the data durability layer.
+564 backend tests (75% coverage). Comprehensive test suites across all security-critical paths, agents, and data durability layers.
 
-- [ ] Tests for `middleware/auth.py` + `middleware/rate_limit.py` (security-critical, 0 tests)
-- [ ] Tests for `services/ingestion.py` (extracted service layer)
-- [ ] Tests for 5 untested agents: query_agent, triage, rectify, audit, maintenance (~2000 lines, 0 tests)
-- [ ] Tests for `sync/` package (~1300 lines, 0 tests)
-- [ ] Tests for `parsers/` package (875 lines, 0 tests)
-- [ ] Tests for `tools.py` (MCP tool registry + dispatch, 0 tests)
-- [ ] Expand `db/neo4j/` coverage (9 tests for 18 functions)
-- [ ] Frontend component tests (40+ components with 0 tests)
-- [ ] G12: Fix pip-audit for transitive deps
-- [ ] G13: Add CodeQL SAST workflow
-- [ ] G14: Raise coverage threshold 35% → 55%
-- [ ] G15: Bundle size monitoring
+- [x] Tests for `middleware/` — auth.py + rate_limit.py (49 tests)
+- [x] Tests for `services/ingestion.py` (15 tests)
+- [x] Tests for all 5 agents: query (27), triage (23), rectify (19), audit (27), maintenance (24)
+- [x] Tests for `sync/` package (41 tests)
+- [x] Tests for `tools.py` — MCP tool registry + dispatch (24 tests)
+- [x] Tests for `parsers/` package (108 tests)
+- [x] Expanded `db/neo4j/` coverage (63 tests)
+- [x] G12: Fix pip-audit for transitive deps
+- [x] G13: Add CodeQL SAST workflow
+- [x] G14: Raise coverage threshold 35% → 55%
+- [x] G15: Bundle size monitoring (800KB threshold)
 
-### Phase 10E–H: Planned
+### Phase 10E: Smart Routing Intelligence (Complete ✅)
 
-- [ ] **10E:** Smart routing intelligence — token estimator, context replay cost calculation, summarize-and-switch, "start fresh" option
-- [ ] **10F:** Interactive audit & taxonomy — audit agent report filter toggles, time range selector, taxonomy-aware hierarchical KB filtering
-- [ ] **10G:** Knowledge curation agent — design doc for artifact quality improvement agent
-- [ ] **10H:** RAG evaluation — evaluate embedding models, hybrid weights, chunk sizes; artifact preview/generation
+Token estimator + context replay cost, color-coded context gauge, summarize-and-switch, model switch dialog with 3 strategies, 26 new frontend tests (94 total).
 
-See `docs/ISSUES.md` for full backlog (8 open issues across 6 categories).
+- [x] Token estimator with context replay cost calculation
+- [x] Color-coded context gauge in chat UI
+- [x] Summarize-and-switch conversation strategy
+- [x] Model switch dialog with 3 strategies (start fresh, summarize, continue)
+- [x] 26 new frontend vitest tests (94 total)
+
+### Phase 11–13: Planned
+
+- [ ] **Phase 11:** Knowledge Intelligence — B1 audit controls, C1 taxonomy, C2 curation agent, G17-G22 ops docs
+- [ ] **Phase 12:** RAG & Retrieval Excellence — E2 embedding models, G16 BM25 replacement, hybrid weights
+- [ ] **Phase 13:** Content & UX Polish — E1 artifact preview, D2 conversation fork, frontend tests
+
+See `docs/ISSUES.md` for full backlog.
 
 ---
 
@@ -1601,7 +1613,7 @@ See `docs/ISSUES.md` for full backlog (8 open issues across 6 categories).
 | Monthly Tokens (AI categorization) | <20k | ~400 per file |
 | Memory Usage | <4GB total | Monitoring |
 | Container Count | 13 | ✅ 13 |
-| Test Coverage | Expanding | 224 total (156 pytest + 68 vitest) |
+| Test Coverage | Expanding | 658 total (564 pytest + 94 vitest), 75% backend |
 | CI Pipeline | Green | 6 jobs (lint, test, security, lock-sync, frontend, docker) |
 
 ---
@@ -1648,7 +1660,7 @@ All secrets stored in root `.env`, encrypted as `.env.age` with age.
 | Agents (7) | `src/mcp/agents/` |
 | Utils (15) | `src/mcp/utils/` |
 | Middleware | `src/mcp/middleware/` (auth.py, rate_limit.py) |
-| Tests | `src/mcp/tests/` (156 tests, 11 files) |
+| Tests | `src/mcp/tests/` (564 tests) |
 | Dependencies | `src/mcp/requirements.txt` (ranges) |
 | Lock File | `src/mcp/requirements.lock` (pip-compile with hashes) |
 | Docker Compose | `src/mcp/docker-compose.yml` |
@@ -1661,7 +1673,7 @@ All secrets stored in root `.env`, encrypted as `.env.age` with age.
 | Model Router | `src/web/src/lib/model-router.ts` |
 | Hooks (8) | `src/web/src/hooks/` |
 | Components | `src/web/src/components/` (8 dirs) |
-| Tests | `src/web/src/__tests__/` (68 tests, 5 files) |
+| Tests | `src/web/src/__tests__/` (94 tests, 7 files) |
 | Docker Build | `src/web/Dockerfile` (node:22 → nginx:1.27) |
 | **Scripts** | |
 | Start Script | `scripts/start-cerid.sh` |
@@ -1688,5 +1700,5 @@ All secrets stored in root `.env`, encrypted as `.env.age` with age.
 
 ---
 
-*Document updated: February 26, 2026*
-*Phases 0–9 complete. Phase 10A–10C + codebase audit + dependency management complete. See `docs/ISSUES.md` for open backlog.*
+*Document updated: February 28, 2026*
+*Phases 0–9 complete. Phase 10A–10E + codebase audit + dependency management complete. See `docs/ISSUES.md` for open backlog.*

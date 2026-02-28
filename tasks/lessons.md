@@ -78,3 +78,36 @@
 **When:** Writing Docker healthcheck commands for Alpine-based containers.
 **Problem:** `localhost` resolves to `::1` (IPv6) in Docker Alpine, but many services only listen on `0.0.0.0` (IPv4).
 **Fix:** Always use `127.0.0.1` explicitly in healthcheck URLs.
+
+---
+
+## CI / DevOps
+
+### pip-compile lock sync requires matching Python micro-version
+**When:** CI job verifies `requirements.lock` matches `pip-compile` output.
+**Problem:** `actions/setup-python@v5` installs a different Python 3.11.x micro-version than the `python:3.11-slim` Docker image. Different micro-versions produce different wheel hashes from `pip-compile`, causing the lock-sync diff to fail on 2-3 hashes.
+**Fix:** Use `container: python:3.11-slim` in the CI lock-sync job to match the Dockerfile exactly. Do not rely on `actions/setup-python` for hash-sensitive operations.
+
+### Trivy `.trivyignore` must be referenced in EACH scan step
+**When:** Adding a `.trivyignore` file to suppress known CVEs in Trivy container scanning.
+**Problem:** If the CI workflow has multiple Trivy scan steps (e.g., one for MCP image, one for web image), the `.trivyignore` is only applied to the step that explicitly sets `trivyignores: .trivyignore`. Other steps scan without suppressions.
+**Fix:** Add `trivyignores: .trivyignore` to every `aquasecurity/trivy-action` step in the CI workflow, not just the first one.
+
+---
+
+## Frontend / Bundle Size
+
+### PrismLight vs full Prism for bundle size
+**When:** Using `react-syntax-highlighter` in a Vite project with `manualChunks`.
+**Problem:** The full `Prism` export bundles all 200+ language grammars (~1.6MB). Even with `React.lazy()`, placing `react-syntax-highlighter` in `manualChunks` forces Vite to create a single eager chunk for the entire library, bypassing code splitting.
+**Fix:** Create a wrapper module (`syntax-highlighter.ts`) that imports `PrismLight` from the ESM sub-path, registers only the ~25 languages needed, and exports the configured component. Lazy-load the wrapper instead of the main package. Reduces the chunk from 1619KB to 104KB.
+**Reference:** `src/web/src/lib/syntax-highlighter.ts`, `src/web/src/lib/react-syntax-highlighter.d.ts`
+
+---
+
+## TypeScript
+
+### `.d.ts` files with same basename as `.ts` files conflict
+**When:** Creating ambient module declarations for a library's ESM sub-paths (e.g., `react-syntax-highlighter/dist/esm/prism-light`).
+**Problem:** If a `.d.ts` file has the same basename as a `.ts` file in the same directory (e.g., `syntax-highlighter.d.ts` alongside `syntax-highlighter.ts`), TypeScript treats the `.d.ts` as the type declaration for that specific `.ts` module rather than as ambient module declarations. The ambient `declare module` statements are ignored.
+**Fix:** Name the `.d.ts` file distinctly from any `.ts` module (e.g., `react-syntax-highlighter.d.ts` instead of `syntax-highlighter.d.ts`).

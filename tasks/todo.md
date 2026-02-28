@@ -83,7 +83,7 @@
 - [x] G13 — Add CodeQL SAST workflow (`.github/workflows/codeql.yml` — Python + JavaScript, weekly + push/PR)
 - [x] G14 — Raise coverage threshold from 35% to 55% (actual coverage: 75%)
 - [x] G15 — Add bundle size monitoring in CI (fail if any JS chunk >800KB after vite build)
-- [ ] Frontend component tests (40+ components with 0 tests — deferred, not blocking)
+- [ ] Frontend component tests (40+ components with 0 tests — nice-to-have, not gating any release, tracked in Phase 13)
 
 ### 10E: Smart Routing Intelligence ✅
 - [x] D1 — Token estimator + context replay cost calculation (`calculateSwitchCost`, `buildSwitchOptions` in model-router.ts)
@@ -93,23 +93,34 @@
 - [x] Model switch dialog with cost estimates, Recommended badge, context overflow warning
 - [x] 26 new frontend tests (model-router cost tests, dialog component tests, conversations hook tests) — 94 total
 
-### 10F: Interactive Audit, Taxonomy + Operations Docs
-- [ ] B1 — Audit agent report filter toggles, time range selector, manual refresh
-- [ ] C1 — Taxonomy-aware hierarchical KB filtering
-- [ ] G17 — Document API key rotation procedure (`docs/OPERATIONS.md`)
-- [ ] G18 — Document secrets rotation policy
-- [ ] G19 — Add pip-compile version to `DEPENDENCY_COUPLING.md`
-- [ ] G20 — Add Bifrost version to coupling constraints
-- [ ] G21 — Document branch protection rules
-- [ ] G22 — Document rate limiter in-memory state limitation
+### Post-10E Audit Fixes ✅
+- [x] Debounced localStorage writes during SSE streaming (500ms trailing)
+- [x] Lazy-loaded PrismLight syntax highlighter (1619KB → 104KB)
+- [x] Batched Neo4j tag creation with UNWIND (N+1 → 1 query)
+- [x] Redis SCAN replacing KEYS for production safety
+- [x] Dead code removal (3 unused components, -701 lines)
+- [x] Module-level ReactMarkdown components extraction
 
-### 10G: Knowledge Curation Agent (Design)
-- [ ] C2 — Design doc for artifact quality improvement agent
+---
 
-### 10H: RAG Evaluation (Research)
-- [ ] E2 — Evaluate embedding models, hybrid weights, chunk sizes
-- [ ] G16 — Evaluate BM25 alternatives (rank_bm25 unmaintained since 2020)
-- [ ] E1 — Artifact preview/generation (depends on E2 decisions)
+## Forward Plan
+
+### Phase 11: Knowledge Intelligence
+- [ ] B1 — Interactive audit controls (report toggles, time range, manual refresh)
+- [ ] C1 — Taxonomy tree sidebar + tag management CRUD
+- [ ] C2 — Knowledge curation agent design doc
+- [ ] G17–G22 — Operations documentation (OPERATIONS.md, dep coupling, branch protection)
+
+### Phase 12: RAG & Retrieval Excellence
+- [ ] E2 — Embedding model evaluation (ChromaDB default vs dedicated models)
+- [ ] G16 — BM25 replacement (rank_bm25 unmaintained since 2020)
+- [ ] Hybrid retrieval weight tuning (query-dependent or learned)
+
+### Phase 13: Content & UX Polish
+- [ ] E1 — Artifact preview (PDF, code, spreadsheet rendering)
+- [ ] D2 remaining — Conversation fork/branch UI (exploratory)
+- [ ] Frontend component test expansion (40+ untested components)
+- [ ] F6 remaining — cerid-web compose separation
 
 ## Completed Phases
 

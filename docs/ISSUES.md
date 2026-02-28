@@ -1,8 +1,8 @@
 # Cerid AI — Issues & Backlog
 
 > **Created:** 2026-02-25
-> **Last updated:** 2026-02-27
-> **Status:** Phase 10C complete. 21 resolved, 6 open (5 original + 1 audit hardening), 1 informational (F6).
+> **Last updated:** 2026-02-28
+> **Status:** Phase 10E complete. 31 resolved, 4 open (B1, C1, C2, E2), 2 research (E1, G16), 6 ops-docs (G17–G22), 1 informational (F6).
 > **Purpose:** Track known bugs, feature gaps, structural issues, and architecture evaluations for upcoming phases.
 
 ---
@@ -114,36 +114,25 @@ No agent exists for improving artifact quality. Current artifact cards show raw 
 ### D1. Smart Routing Needs Context/Token Cost Evaluation
 
 **Severity:** High
-**Status:** Open — needs evaluation
+**Status:** Resolved (Phase 10E, 2026-02-28)
 
-Current `model-router.ts` scores message complexity and recommends models based on cost sensitivity, but doesn't account for:
-- Context window cost when switching models mid-conversation (full history must be re-sent)
-- Token budget awareness (how much of the target model's context window will be consumed)
-- Context preparation/injection for the new model (summarize prior context to reduce token count)
-- Cost comparison: "switching to Model B will cost X tokens for context replay vs. Y tokens to continue with Model A"
+**Resolution:** Added `calculateSwitchCost()` and `buildSwitchOptions()` to `model-router.ts` for context replay cost estimation. Color-coded context usage gauge (green/yellow/red) in chat dashboard. `summarizeConversation()` API for compressing history before model switch. `useModelSwitch` hook orchestrates 3 strategies: continue (full replay), summarize (compress then switch), and fresh (clear history). Model switch dialog shows per-strategy cost estimates, a "Recommended" badge, and context overflow warnings. 26 new frontend tests covering cost calculation and dialog component.
 
-**What exists:** `model-router.ts` has `scoreComplexity()`, `recommendModel()`, and cost tiers. `use-chat.ts` sends full message history per-call. No token counting or context summarization.
-
-**Suggested approach:** Add a token estimator (tiktoken or char-based approximation). Before recommending a switch, calculate the context replay cost. Optionally offer "summarize and switch" which compresses history before sending to the new model. Show the cost delta to the user.
-
-**Files:**
-- `src/web/src/lib/model-router.ts` (lines 98–156 — recommendation logic)
-- `src/web/src/hooks/use-chat.ts` (send with full history)
-- `src/web/src/components/chat/chat-panel.tsx` (model recommendation banner)
+**Files changed:** `model-router.ts`, `api.ts`, `chat-dashboard.tsx`, `use-model-switch.ts` (new), `model-switch-dialog.tsx` (new), `chat-panel.tsx`, `use-conversations.ts`, `types.ts`
 
 ### D2. Chat Model Switch UX
 
 **Severity:** Medium
-**Status:** Partially Resolved (Phase 10B, 2026-02-26)
+**Status:** Mostly Resolved (Phase 10E, 2026-02-28)
 
 **Resolved items:**
-- ✅ Per-message model badge with provider colors (always visible)
-- ✅ "Switched from X to Y" divider between model switches
+- ✅ Per-message model badge with provider colors (always visible) — Phase 10B
+- ✅ "Switched from X to Y" divider between model switches — Phase 10B
+- ✅ Context summary on switch (summarize-and-switch strategy) — Phase 10E
+- ✅ "Start fresh" option (clear history and switch) — Phase 10E
 
-**Remaining items (deferred to Phase 10C):**
-- [ ] Context summary on switch (summarize prior history before replaying to new model)
-- [ ] "Start fresh" option (new context window vs. continue with full replay)
-- [ ] Conversation fork/branch UI (exploratory)
+**Remaining (deferred):**
+- [ ] Conversation fork/branch UI (exploratory — Phase 13)
 
 **Files:** Same as B3 + D1.
 
@@ -233,25 +222,17 @@ Issues identified by the modularity assessment (2026-02-26). These are mechanica
 ### F5. Test Coverage Gaps
 
 **Severity:** High (quality risk)
-**Status:** Open — Phase 10D
+**Status:** Resolved (Phase 10D, 2026-02-28)
 
-5 of 7 agents have zero tests. The two largest Python files (sync lib at ~1300 lines, parsers at 875 lines) are completely untested. Both middleware files (auth, rate limiting) are security-critical with no coverage. On the frontend, 40+ components and hooks have no tests.
+**Resolution:** 564 backend tests across 27 test files achieving 75% code coverage. All previously-untested modules now covered:
+- Middleware: auth (21 tests), rate_limit (19 tests), request_id (9 tests)
+- Services: ingestion (15 tests)
+- All 5 agents: query_agent (27), triage (23), rectify (19), audit (27), maintenance (24)
+- Sync package (41 tests), parsers package (108 tests), MCP tools (24 tests), Neo4j data layer (63 tests)
 
-**Untested backend modules (by priority):**
-1. `middleware/auth.py` + `middleware/rate_limit.py` — security-critical
-2. `agents/query_agent.py` (502 lines) — core search/reranking
-3. `agents/triage.py` (357 lines) — LangGraph ingest pipeline
-4. `agents/rectify.py` (390 lines) — KB health checks
-5. `agents/audit.py` (344 lines) — usage analytics
-6. `agents/maintenance.py` (362 lines) — system health
-7. `sync/` package (~1300 lines) — data durability
-8. `parsers/` package (875 lines) — file format parsing
-9. `routers/mcp_sse.py` (593 lines) — MCP protocol
-10. `utils/metadata.py` (250 lines) — metadata extraction
+Frontend: 94 vitest tests across 7 test files. ~40 frontend components remain untested (nice-to-have, not gating any release — tracked in Phase 13).
 
-**Untested frontend:** All components except source-attribution, all hooks except use-conversations. ~40 files.
-
-**Current coverage:** 156 pytest functions (11 test files), 68 vitest tests (4 test files).
+**Current coverage:** 564 pytest functions (27 test files), 94 vitest tests (7 test files).
 
 ### F6. Secondary Structural Issues (Informational)
 
@@ -390,7 +371,7 @@ Added bundle size check step in frontend CI job — fails if any JS chunk exceed
 ### G16. rank_bm25 Unmaintained
 
 **Severity:** Medium
-**Status:** Open — Phase 10H
+**Status:** Open — Phase 12
 
 `rank_bm25` package last updated 2020. Evaluate alternatives (`bm25s`, direct implementation) during RAG evaluation.
 
@@ -399,7 +380,7 @@ Added bundle size check step in frontend CI job — fails if any JS chunk exceed
 ### G17–G22. Documentation Gaps
 
 **Severity:** Low
-**Status:** Open — Phase 10F
+**Status:** Open — Phase 11
 
 - **G17:** No documented API key rotation procedure
 - **G18:** No secrets rotation policy
@@ -426,12 +407,12 @@ Structural work before feature work — the splits reduce cost of all subsequent
 8. ~~**F6 partial** — Config split, dedup cleanup~~ ✅ Resolved (Phase 10C-S2)
 9. ~~**F3** — Neo4j data layer split~~ ✅ Resolved (Phase 10C-S3)
 10. ~~**F4** — Sync library split~~ ✅ Resolved (Phase 10C-S3)
-11. **F5** — Test coverage expansion (security middleware first, then agents) — Phase 10D
-12. **G12–G15** — CI hardening (pip-audit, CodeQL, coverage threshold, bundle size) — Phase 10D
-13. **D1** — Smart routing + token cost evaluation — Phase 10E
-14. **B1** — Audit agent interactivity — Phase 10F
-15. **C1** — Taxonomy update — Phase 10F
-16. **G17–G22** — Operations documentation — Phase 10F
-17. **C2** — Curation agent (requires C1) — Phase 10G (design)
-18. **E2** — RAG evaluation + **G16** (BM25 replacement) — Phase 10H (research)
-19. **E1** — Artifact preview (depends on E2 decisions)
+11. ~~**F5** — Test coverage expansion~~ ✅ Resolved (Phase 10D)
+12. ~~**G12–G15** — CI hardening~~ ✅ Resolved (Phase 10D)
+13. ~~**D1** — Smart routing + token cost evaluation~~ ✅ Resolved (Phase 10E)
+14. **B1** — Audit agent interactivity — Phase 11
+15. **C1** — Taxonomy update — Phase 11
+16. **G17–G22** — Operations documentation — Phase 11
+17. **C2** — Curation agent (requires C1) — Phase 11 (design)
+18. **E2** — RAG evaluation + **G16** (BM25 replacement) — Phase 12 (research)
+19. **E1** — Artifact preview (depends on E2 decisions) — Phase 13
