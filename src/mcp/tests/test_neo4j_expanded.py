@@ -165,7 +165,9 @@ class TestCreateArtifact:
                         tags_json='["important", "review"]')
         calls = [str(c) for c in session.run.call_args_list]
         tag_calls = [c for c in calls if "TAGGED_WITH" in c]
-        assert len(tag_calls) == 2
+        # Batched into a single UNWIND query
+        assert len(tag_calls) == 1
+        assert "UNWIND" in tag_calls[0]
 
     def test_invalid_tags_json_handled(self):
         driver, session = _mock_driver()

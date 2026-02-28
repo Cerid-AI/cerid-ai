@@ -50,12 +50,22 @@ def set_cached(
 
 
 def invalidate_all() -> None:
-    """Called on ingest to bust all query caches."""
+    """Called on ingest to bust all query caches.
+
+    Uses SCAN instead of KEYS to avoid blocking Redis on large keyspaces.
+    """
     try:
         redis = get_redis()
-        keys = redis.keys(CACHE_PREFIX + "*")
-        if keys:
-            redis.delete(*keys)
-            logger.info(f"Invalidated {len(keys)} cached queries")
+        count = 0
+        cursor = 0
+        while True:
+            cursor, keys = redis.scan(cursor, match=CACHE_PREFIX + "*", count=100)
+            if keys:
+                redis.delete(*keys)
+                count += len(keys)
+            if cursor == 0:
+                break
+        if count:
+            logger.info(f"Invalidated {count} cached queries")
     except Exception as e:
         logger.warning(f"Cache invalidation failed: {e}")

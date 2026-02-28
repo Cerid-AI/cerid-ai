@@ -76,25 +76,25 @@ def create_artifact(
             sc_name=sc_name,
         )
 
-        # Link to Tag nodes
+        # Link to Tag nodes (batched — single query for all tags)
         try:
             tag_list = json.loads(tags_json) if tags_json else []
         except (json.JSONDecodeError, TypeError):
             tag_list = []
-        for tag in tag_list:
-            tag_lower = tag.strip().lower()
-            if tag_lower:
-                session.run(
-                    "MERGE (t:Tag {name: $tag}) "
-                    "ON CREATE SET t.created_at = $now, t.usage_count = 1 "
-                    "ON MATCH SET t.usage_count = t.usage_count + 1 "
-                    "WITH t "
-                    "MATCH (a:Artifact {id: $aid}) "
-                    "MERGE (a)-[:TAGGED_WITH]->(t)",
-                    tag=tag_lower,
-                    aid=aid,
-                    now=now,
-                )
+        clean_tags = [t.strip().lower() for t in tag_list if t.strip()]
+        if clean_tags:
+            session.run(
+                "UNWIND $tags AS tag_name "
+                "MERGE (t:Tag {name: tag_name}) "
+                "ON CREATE SET t.created_at = $now, t.usage_count = 1 "
+                "ON MATCH SET t.usage_count = t.usage_count + 1 "
+                "WITH t "
+                "MATCH (a:Artifact {id: $aid}) "
+                "MERGE (a)-[:TAGGED_WITH]->(t)",
+                tags=clean_tags,
+                aid=aid,
+                now=now,
+            )
 
         return aid
 

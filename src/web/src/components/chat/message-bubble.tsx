@@ -3,15 +3,62 @@
 
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter"
-import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism"
+import { lazy, Suspense, useState, useCallback, useRef, useEffect } from "react"
 import { Copy, Check, User, Bot } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { useState, useCallback, useRef, useEffect } from "react"
 import { cn } from "@/lib/utils"
+
+const LazySyntaxHighlighter = lazy(() =>
+  import("react-syntax-highlighter").then((m) => ({ default: m.Prism })),
+)
+
+let oneDarkStyle: Record<string, React.CSSProperties> | undefined
+import("react-syntax-highlighter/dist/esm/styles/prism/one-dark").then(
+  (m) => { oneDarkStyle = m.default },
+)
 import type { ChatMessage } from "@/lib/types"
 import { findModel, PROVIDER_COLORS } from "@/lib/types"
 import { SourceAttribution } from "./source-attribution"
+
+/** Code block fallback while SyntaxHighlighter loads */
+function CodeFallback({ code }: { code: string }) {
+  return <pre className="rounded-lg bg-[#282c34] p-4 text-sm text-gray-300 overflow-x-auto !my-0"><code>{code}</code></pre>
+}
+
+/** Module-level markdown components — avoids recreation on every render */
+const MD_COMPONENTS: Record<string, React.ComponentType<Record<string, unknown>>> = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  code({ className, children, ...props }: any) {
+    const match = /language-(\w+)/.exec(className ?? "")
+    const codeString = String(children).replace(/\n$/, "")
+
+    if (match) {
+      return (
+        <div className="relative my-2">
+          <div className="absolute right-2 top-2 opacity-0 transition-opacity group-hover:opacity-100">
+            <CopyButton text={codeString} />
+          </div>
+          <Suspense fallback={<CodeFallback code={codeString} />}>
+            <LazySyntaxHighlighter
+              style={oneDarkStyle ?? {}}
+              language={match[1]}
+              PreTag="div"
+              className="rounded-lg !my-0"
+            >
+              {codeString}
+            </LazySyntaxHighlighter>
+          </Suspense>
+        </div>
+      )
+    }
+
+    return (
+      <code className="rounded bg-muted px-1 py-0.5 text-sm" {...props}>
+        {children}
+      </code>
+    )
+  },
+}
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
@@ -72,36 +119,7 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
             <div className="prose prose-sm dark:prose-invert max-w-none">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
-                components={{
-                  code({ className, children, ...props }) {
-                    const match = /language-(\w+)/.exec(className ?? "")
-                    const codeString = String(children).replace(/\n$/, "")
-
-                    if (match) {
-                      return (
-                        <div className="relative my-2">
-                          <div className="absolute right-2 top-2 opacity-0 transition-opacity group-hover:opacity-100">
-                            <CopyButton text={codeString} />
-                          </div>
-                          <SyntaxHighlighter
-                            style={oneDark}
-                            language={match[1]}
-                            PreTag="div"
-                            className="rounded-lg !my-0"
-                          >
-                            {codeString}
-                          </SyntaxHighlighter>
-                        </div>
-                      )
-                    }
-
-                    return (
-                      <code className="rounded bg-muted px-1 py-0.5 text-sm" {...props}>
-                        {children}
-                      </code>
-                    )
-                  },
-                }}
+                components={MD_COMPONENTS}
               >
                 {message.content}
               </ReactMarkdown>

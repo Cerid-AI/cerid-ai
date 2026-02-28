@@ -1,12 +1,13 @@
 // Copyright (c) 2026 Justin Michaels. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useRef, useEffect } from "react"
 import type { Conversation, ChatMessage } from "@/lib/types"
 import { MODELS } from "@/lib/types"
 
 const STORAGE_KEY = "cerid-conversations"
 const MAX_CONVERSATIONS = 50
+const SAVE_DEBOUNCE_MS = 500
 
 const VALID_MODEL_IDS = new Set(MODELS.map((m) => m.id))
 
@@ -53,6 +54,33 @@ export function useConversations() {
 
   const active = conversations.find((c) => c.id === activeId) ?? null
 
+  // Debounced save: flushes to localStorage at most every SAVE_DEBOUNCE_MS.
+  // Immediate saves (create, delete, model change) call saveConversations directly.
+  // High-frequency updates (streaming chunks) use debouncedSave.
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingRef = useRef<Conversation[] | null>(null)
+
+  const debouncedSave = useCallback((convos: Conversation[]) => {
+    pendingRef.current = convos
+    if (!saveTimerRef.current) {
+      saveTimerRef.current = setTimeout(() => {
+        saveTimerRef.current = null
+        if (pendingRef.current) {
+          saveConversations(pendingRef.current)
+          pendingRef.current = null
+        }
+      }, SAVE_DEBOUNCE_MS)
+    }
+  }, [])
+
+  // Flush any pending save on unmount
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+      if (pendingRef.current) saveConversations(pendingRef.current)
+    }
+  }, [])
+
   const create = useCallback((model: string) => {
     const convo: Conversation = {
       id: crypto.randomUUID(),
@@ -96,10 +124,10 @@ export function useConversations() {
         }
         return { ...c, messages, updatedAt: Date.now() }
       })
-      saveConversations(next)
+      debouncedSave(next)
       return next
     })
-  }, [])
+  }, [debouncedSave])
 
   const updateModel = useCallback((convoId: string, model: string) => {
     setConversations((prev) => {
