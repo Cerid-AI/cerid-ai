@@ -2,7 +2,7 @@
 
 > **Created:** 2026-02-25
 > **Last updated:** 2026-02-28
-> **Status:** Phase 11 complete. 40 resolved, 1 open (E2), 2 research (E1, G16), 1 informational (F6).
+> **Status:** Phase 12 complete. 42 resolved, 1 research (E1), 1 informational (F6).
 > **Purpose:** Track known bugs, feature gaps, structural issues, and architecture evaluations for upcoming phases.
 
 ---
@@ -156,22 +156,13 @@ Evaluate options for in-GUI artifact handling:
 ### E2. RAG Integration & Vectorization Strategy
 
 **Severity:** High (foundational)
-**Status:** Open — needs research
+**Status:** ✅ Resolved (Phase 12, 2026-02-28)
 
-Evaluate the current RAG architecture and options for improvement:
-- **Current state:** ChromaDB for vectors (default embedding model), BM25 for keyword search, hybrid 60/40 weighting, LLM reranking via Bifrost
-- **Context window stuffing vs. retrieval-augmented:** Current approach injects top-K results as system message. Evaluate whether direct model RAG (if supported) would be more effective.
-- **Embedding model choice:** Currently using ChromaDB's default. Evaluate dedicated embedding models (OpenAI ada-002, Cohere embed, local models like all-MiniLM).
-- **Re-embedding strategy:** When to re-embed (content change, model upgrade, quality improvement)?
-- **Memory/chat history vectorization:** Currently memories are stored as KB artifacts. Evaluate vectorizing conversation history for cross-conversation recall.
-- **Hybrid retrieval tuning:** Current BM25 weight (0.4) and vector weight (0.6) are hardcoded. Evaluate query-dependent weighting, learned weights, or A/B testing.
-
-**Files:**
-- `src/mcp/agents/query_agent.py` (multi-domain query, reranking)
-- `src/mcp/utils/bm25.py` (BM25 index)
-- `src/mcp/config.py` (HYBRID_VECTOR_WEIGHT, HYBRID_KEYWORD_WEIGHT, GRAPH_* settings)
-- `src/mcp/deps.py` (ChromaDB client configuration)
-- `src/mcp/agents/memory.py` (memory extraction and storage)
+**Resolution:**
+- **BM25 replaced:** `rank_bm25` → `bm25s` + PyStemmer (stemming, stopwords, 500x faster)
+- **Hybrid weights configurable:** `HYBRID_VECTOR_WEIGHT`, `HYBRID_KEYWORD_WEIGHT`, `RERANK_LLM_WEIGHT`, `RERANK_ORIGINAL_WEIGHT` via env vars
+- **Embedding evaluation:** Documented in `docs/EMBEDDING_EVALUATION.md`. Current model (all-MiniLM-L6-v2) adequate; `EMBEDDING_MODEL` config scaffold for future swap
+- **Eval harness:** `eval/` package with NDCG, MRR, Precision@K, Recall@K, Average Precision metrics (31 tests)
 
 ---
 
@@ -371,11 +362,11 @@ Added bundle size check step in frontend CI job — fails if any JS chunk exceed
 ### G16. rank_bm25 Unmaintained
 
 **Severity:** Medium
-**Status:** Open — Phase 12
+**Status:** ✅ Resolved (Phase 12A, 2026-02-28)
 
-`rank_bm25` package last updated 2020. Evaluate alternatives (`bm25s`, direct implementation) during RAG evaluation.
+**Resolution:** Replaced `rank_bm25` with `bm25s>=0.3` + `PyStemmer>=2.2`. New implementation includes English stemming, stopword removal, and backward-compatible JSONL corpus migration. Old token-format corpus files are auto-migrated on load.
 
-**Files:** `src/mcp/utils/bm25.py`, `src/mcp/requirements.txt`
+**Files changed:** `src/mcp/utils/bm25.py` (rewritten), `src/mcp/requirements.txt`, `src/mcp/tests/test_bm25.py` (12 tests)
 
 ### G17–G22. Documentation Gaps
 

@@ -2,17 +2,17 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-BM25 keyword index management for hybrid search (Phase 4B.1).
+BM25 keyword index management for hybrid search.
 
 Maintains per-domain BM25 indexes alongside ChromaDB vector stores.
-Indexes are persisted as JSONL corpus files and rebuilt on load.
+Indexes are persisted as JSONL corpus files and rebuilt with bm25s.
+Uses PyStemmer for English stemming and built-in stopword removal.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -21,26 +21,35 @@ import config
 logger = logging.getLogger("ai-companion.bm25")
 
 # Lazy import to allow graceful degradation
-_bm25_available = True
+_bm25s_available = True
 try:
-    from rank_bm25 import BM25Okapi
+    import bm25s
+    import Stemmer
+
+    _stemmer = Stemmer.Stemmer("english")
 except ImportError:
-    _bm25_available = False
-    logger.warning("rank_bm25 not installed — BM25 hybrid search disabled")
+    _bm25s_available = False
+    logger.warning("bm25s/PyStemmer not installed — BM25 hybrid search disabled")
 
 
 def _tokenize(text: str) -> List[str]:
-    """Simple whitespace tokenizer with lowercasing and punctuation removal."""
-    text = re.sub(r"[^\w\s]", " ", text.lower())
-    return [t for t in text.split() if len(t) > 1]
+    """Tokenize with stemming and stopword removal via bm25s."""
+    if not _bm25s_available:
+        return []
+    tokens = bm25s.tokenize(text, stopwords="en", stemmer=_stemmer, return_ids=False)
+    if tokens is None or len(tokens) == 0:
+        return []
+    # bm25s.tokenize returns a list of token lists (one per input text)
+    return [str(t) for t in tokens[0] if t]
 
 
 class BM25Index:
     """
     Per-domain BM25 index backed by a JSONL corpus file.
 
-    The corpus (tokenized docs + chunk IDs) is persisted to disk.
-    The BM25 object is rebuilt from the corpus on load (fast for <100k docs).
+    The corpus (raw texts + chunk IDs) is persisted to disk as JSONL.
+    The bm25s retriever is rebuilt from the corpus on load.
+    Supports migration from old format (pre-tokenized) to new format (raw text).
     """
 
     def __init__(self, domain: str, data_dir: str = "data/bm25"):
@@ -49,29 +58,28 @@ class BM25Index:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self._corpus_file = self.data_dir / f"{domain}.jsonl"
 
-        self._corpus: List[List[str]] = []
+        self._texts: List[str] = []
         self._doc_ids: List[str] = []
         self._doc_id_set: set = set()
-        self._bm25: Optional[Any] = None  # BM25Okapi when available
+        self._retriever: Optional[Any] = None
 
         self._load()
 
     def add_documents(self, chunk_ids: List[str], texts: List[str]) -> int:
         """Add documents to the index. Skips duplicates. Returns count added."""
-        if not _bm25_available:
+        if not _bm25s_available:
             return 0
 
         new_entries: List[Dict] = []
         for chunk_id, text in zip(chunk_ids, texts):
             if chunk_id in self._doc_id_set:
                 continue
-            tokens = _tokenize(text)
-            if not tokens:
+            if not text or not text.strip():
                 continue
-            self._corpus.append(tokens)
+            self._texts.append(text)
             self._doc_ids.append(chunk_id)
             self._doc_id_set.add(chunk_id)
-            new_entries.append({"id": chunk_id, "tokens": tokens})
+            new_entries.append({"id": chunk_id, "text": text})
 
         if new_entries:
             self._rebuild()
@@ -84,40 +92,60 @@ class BM25Index:
         Search the index. Returns (chunk_id, normalized_score) tuples.
         Scores are normalized to [0, 1] by dividing by the max score.
         """
-        if not _bm25_available or self._bm25 is None or not self._corpus:
+        if not _bm25s_available or self._retriever is None or not self._texts:
             return []
 
-        tokens = _tokenize(query)
-        if not tokens:
+        query_tokens = bm25s.tokenize(
+            query, stopwords="en", stemmer=_stemmer, return_ids=False
+        )
+        if query_tokens is None or len(query_tokens) == 0:
+            return []
+        # Check if query produced any actual tokens
+        if len(query_tokens[0]) == 0:
             return []
 
-        scores = self._bm25.get_scores(tokens)
+        k = min(top_k, len(self._texts))
+        results, scores = self._retriever.retrieve(query_tokens, k=k)
 
-        max_score = max(scores) if len(scores) > 0 else 0
+        # results shape: (1, k) - indices into corpus
+        # scores shape: (1, k) - BM25 scores (descending)
+        if scores.shape[1] == 0:
+            return []
+
+        max_score = float(scores[0, 0])
         if max_score <= 0:
             return []
 
-        indexed = [(i, s / max_score) for i, s in enumerate(scores) if s > 0]
-        indexed.sort(key=lambda x: x[1], reverse=True)
+        output: List[Tuple[str, float]] = []
+        for i in range(scores.shape[1]):
+            score = float(scores[0, i])
+            if score <= 0:
+                break
+            idx = int(results[0, i])
+            output.append((self._doc_ids[idx], round(score / max_score, 4)))
 
-        return [
-            (self._doc_ids[idx], round(norm, 4))
-            for idx, norm in indexed[:top_k]
-        ]
+        return output
 
     @property
     def size(self) -> int:
         return len(self._doc_ids)
 
     def _rebuild(self) -> None:
-        if self._corpus and _bm25_available:
-            self._bm25 = BM25Okapi(self._corpus)
-        else:
-            self._bm25 = None
+        if not self._texts or not _bm25s_available:
+            self._retriever = None
+            return
+
+        corpus_tokens = bm25s.tokenize(
+            self._texts, stopwords="en", stemmer=_stemmer
+        )
+        retriever = bm25s.BM25()
+        retriever.index(corpus_tokens)
+        self._retriever = retriever
 
     def _load(self) -> None:
         if not self._corpus_file.exists():
             return
+        migrated = False
         try:
             with open(self._corpus_file, "r") as f:
                 for line in f:
@@ -126,21 +154,38 @@ class BM25Index:
                         continue
                     entry = json.loads(line)
                     chunk_id = entry["id"]
-                    if chunk_id not in self._doc_id_set:
-                        self._corpus.append(entry["tokens"])
-                        self._doc_ids.append(chunk_id)
-                        self._doc_id_set.add(chunk_id)
+                    if chunk_id in self._doc_id_set:
+                        continue
+
+                    # New format: raw text; old format: pre-tokenized list
+                    if "text" in entry:
+                        text = entry["text"]
+                    elif "tokens" in entry:
+                        text = " ".join(entry["tokens"])
+                        migrated = True
+                    else:
+                        continue
+
+                    self._texts.append(text)
+                    self._doc_ids.append(chunk_id)
+                    self._doc_id_set.add(chunk_id)
+
             self._rebuild()
             if self._doc_ids:
                 logger.info(
                     f"BM25 index loaded for {self.domain}: {len(self._doc_ids)} docs"
                 )
+            if migrated:
+                logger.warning(
+                    f"BM25 corpus for {self.domain} uses old token format. "
+                    "Consider re-ingesting for improved tokenization."
+                )
         except Exception as e:
             logger.error(f"Failed to load BM25 index for {self.domain}: {e}")
-            self._corpus = []
+            self._texts = []
             self._doc_ids = []
             self._doc_id_set = set()
-            self._bm25 = None
+            self._retriever = None
 
     def _append_to_disk(self, entries: List[Dict]) -> None:
         try:
@@ -180,5 +225,5 @@ def search_bm25(
 
 
 def is_available() -> bool:
-    """Check if BM25 is available (rank_bm25 installed)."""
-    return _bm25_available
+    """Check if BM25 is available (bm25s installed)."""
+    return _bm25s_available

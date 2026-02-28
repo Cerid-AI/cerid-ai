@@ -340,11 +340,15 @@ async def rerank_results(
             if i not in seen:
                 reranked.append(r)
 
-        # Blend: 60% LLM rank score + 40% original embedding score
+        # Blend LLM rank score with original embedding score
         for rank_pos, result in enumerate(reranked):
             llm_score = 1.0 - (rank_pos / len(reranked))
             original_score = result["relevance"]
-            result["relevance"] = round(0.6 * llm_score + 0.4 * original_score, 4)
+            result["relevance"] = round(
+                config.RERANK_LLM_WEIGHT * llm_score
+                + config.RERANK_ORIGINAL_WEIGHT * original_score,
+                4,
+            )
 
         return reranked + remainder
 

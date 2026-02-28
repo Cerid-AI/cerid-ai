@@ -1,8 +1,9 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for BM25 hybrid search index (Phase 4B.1)."""
+"""Tests for BM25 hybrid search index (bm25s + PyStemmer)."""
 
+import json
 
 import pytest
 
@@ -11,11 +12,14 @@ from utils.bm25 import BM25Index, _tokenize, is_available
 
 def test_tokenize_basic():
     tokens = _tokenize("Hello, World! This is a test.")
+    # Stemmed: "hello" → "hello", "world" → "world", "test" → "test"
+    # Stopwords removed: "this", "is", "a"
     assert "hello" in tokens
     assert "world" in tokens
     assert "test" in tokens
-    # Single-char tokens should be filtered
     assert "a" not in tokens
+    assert "is" not in tokens
+    assert "this" not in tokens
 
 
 def test_tokenize_code():
@@ -25,7 +29,20 @@ def test_tokenize_code():
     assert "path" in tokens
 
 
-@pytest.mark.skipif(not is_available(), reason="rank_bm25 not installed")
+def test_tokenize_stemming():
+    """Stemmer should reduce words to their root form."""
+    tokens = _tokenize("running programming languages")
+    # "running" → "run", "programming" → "program", "languages" → "languag"
+    assert any("run" in t for t in tokens)
+    assert any("program" in t for t in tokens)
+
+
+def test_tokenize_empty():
+    assert _tokenize("") == []
+    assert _tokenize("   ") == []
+
+
+@pytest.mark.skipif(not is_available(), reason="bm25s not installed")
 class TestBM25Index:
     def test_add_and_search(self, tmp_path):
         idx = BM25Index("test_domain", data_dir=str(tmp_path))
@@ -75,6 +92,34 @@ class TestBM25Index:
         assert len(results) > 0
         assert results[0][0] == "c1"
 
+    def test_persistence_format(self, tmp_path):
+        """Verify JSONL uses new text format (not pre-tokenized)."""
+        idx = BM25Index("test_fmt", data_dir=str(tmp_path))
+        idx.add_documents(["c1"], ["Hello world testing"])
+
+        corpus_file = tmp_path / "test_fmt.jsonl"
+        with open(corpus_file) as f:
+            entry = json.loads(f.readline())
+        assert "text" in entry
+        assert "tokens" not in entry
+        assert entry["text"] == "Hello world testing"
+
+    def test_old_format_migration(self, tmp_path):
+        """Old format (pre-tokenized) should be loadable."""
+        corpus_file = tmp_path / "test_migrate.jsonl"
+        # Write old format entries
+        with open(corpus_file, "w") as f:
+            f.write(json.dumps({"id": "c1", "tokens": ["python", "web", "dev"]}) + "\n")
+            f.write(json.dumps({"id": "c2", "tokens": ["java", "server", "backend"]}) + "\n")
+            f.write(json.dumps({"id": "c3", "tokens": ["python", "data", "science"]}) + "\n")
+
+        idx = BM25Index("test_migrate", data_dir=str(tmp_path))
+        assert idx.size == 3
+
+        # Search should work with migrated data
+        results = idx.search("python")
+        assert len(results) > 0
+
     def test_empty_search(self, tmp_path):
         idx = BM25Index("test_empty", data_dir=str(tmp_path))
         results = idx.search("anything")
@@ -82,6 +127,19 @@ class TestBM25Index:
 
     def test_no_match(self, tmp_path):
         idx = BM25Index("test_nomatch", data_dir=str(tmp_path))
-        idx.add_documents(["c1"], ["apple banana cherry"])
+        idx.add_documents(
+            ["c1", "c2", "c3"],
+            [
+                "apple banana cherry",
+                "grape mango peach",
+                "kiwi lemon orange",
+            ],
+        )
         results = idx.search("xylophone")
         assert results == []
+
+    def test_empty_text_skipped(self, tmp_path):
+        idx = BM25Index("test_skip", data_dir=str(tmp_path))
+        added = idx.add_documents(["c1", "c2"], ["", "valid text here"])
+        assert added == 1
+        assert idx.size == 1

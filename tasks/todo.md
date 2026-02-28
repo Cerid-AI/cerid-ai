@@ -1,7 +1,7 @@
 # Cerid AI — Task Tracker
 
 > **Last updated:** 2026-02-28
-> **Current status:** Phase 11 complete. All 4 workstreams done (11A–11D). 658 tests passing.
+> **Current status:** Phase 12 complete. BM25 replacement, configurable weights, eval harness, embedding scaffold. 689+ tests.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md)
 
 ## Current: Phase 10 — Commercial & Open-Source Readiness
@@ -111,10 +111,11 @@
 - [x] 11C — Knowledge curation agent design doc (C2)
 - [x] 11D — Operations documentation (G17–G22: OPERATIONS.md, dep coupling, branch protection)
 
-### Phase 12: RAG & Retrieval Excellence
-- [ ] E2 — Embedding model evaluation (ChromaDB default vs dedicated models)
-- [ ] G16 — BM25 replacement (rank_bm25 unmaintained since 2020)
-- [ ] Hybrid retrieval weight tuning (query-dependent or learned)
+### Phase 12: RAG & Retrieval Excellence ✅
+- [x] G16 — BM25 replacement: rank_bm25 → bm25s + PyStemmer (stemming, stopwords, 500x faster)
+- [x] E2 — Embedding model evaluation: documented findings, configurable scaffold (EMBEDDING_EVALUATION.md)
+- [x] Configurable retrieval weights: HYBRID_VECTOR_WEIGHT, HYBRID_KEYWORD_WEIGHT, RERANK_LLM_WEIGHT, RERANK_ORIGINAL_WEIGHT
+- [x] Retrieval evaluation harness: NDCG, MRR, Precision@K, Recall@K, Average Precision (31 tests)
 
 ### Phase 13: Content & UX Polish
 - [ ] E1 — Artifact preview (PDF, code, spreadsheet rendering)

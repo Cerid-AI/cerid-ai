@@ -62,11 +62,13 @@ TEMPORAL_RECENCY_WEIGHT = 0.1        # max boost from recency (added to relevanc
 # ---------------------------------------------------------------------------
 # Hybrid Search
 # ---------------------------------------------------------------------------
-HYBRID_VECTOR_WEIGHT = 0.6          # weight for vector (cosine) score
-HYBRID_KEYWORD_WEIGHT = 0.4         # weight for BM25 keyword score
+HYBRID_VECTOR_WEIGHT = float(os.getenv("HYBRID_VECTOR_WEIGHT", "0.6"))
+HYBRID_KEYWORD_WEIGHT = float(os.getenv("HYBRID_KEYWORD_WEIGHT", "0.4"))
 BM25_DATA_DIR = os.path.join(os.getenv("DATA_DIR", "data"), "bm25")
 QUERY_CONTEXT_MAX_CHARS = 14_000    # max chars assembled for LLM context
 QUERY_RERANK_CANDIDATES = 15        # max candidates sent to LLM reranker
+RERANK_LLM_WEIGHT = float(os.getenv("RERANK_LLM_WEIGHT", "0.6"))
+RERANK_ORIGINAL_WEIGHT = float(os.getenv("RERANK_ORIGINAL_WEIGHT", "0.4"))
 
 # ---------------------------------------------------------------------------
 # Knowledge Graph Traversal
@@ -81,6 +83,12 @@ GRAPH_RELATIONSHIP_TYPES = [
     "SUPERSEDES",       # re-ingested file replacing an older version
     "REFERENCES",       # explicit filename mention in content
 ]
+
+# ---------------------------------------------------------------------------
+# Embedding Model
+# ---------------------------------------------------------------------------
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+EMBEDDING_DIMENSIONS = int(os.getenv("EMBEDDING_DIMENSIONS", "384"))
 
 # ---------------------------------------------------------------------------
 # Hallucination Detection
