@@ -19,6 +19,8 @@ from agents.query_agent import (  # noqa: E402
     _enrich_query,
     _get_adjacent_domains,
     agent_query,
+    apply_metadata_boost,
+    apply_quality_boost,
     assemble_context,
     deduplicate_results,
     multi_domain_query,
@@ -555,3 +557,177 @@ class TestAssembleContextArtifactLimiting:
         assert sources[0]["artifact_id"] == "a1"
         assert sources[1]["artifact_id"] == "a3"
         assert chars == 90
+
+
+# ---------------------------------------------------------------------------
+# Tests: apply_metadata_boost (Phase 14C)
+# ---------------------------------------------------------------------------
+
+class TestApplyMetadataBoost:
+    def test_empty_results(self):
+        """Empty input returns empty list."""
+        assert apply_metadata_boost([], "python flask") == []
+
+    def test_no_matching_terms(self):
+        """No boost when query terms don't match any metadata."""
+        results = [
+            _make_result(
+                relevance=0.8,
+                sub_category="databases",
+                tags_json='["sql", "postgres"]',
+                keywords='["migration"]',
+            ),
+        ]
+        boosted = apply_metadata_boost(results, "python flask routing")
+        assert boosted[0]["relevance"] == 0.8
+        assert "metadata_boost" not in boosted[0]
+
+    def test_subcategory_match(self):
+        """Sub-category match adds QUALITY_METADATA_SUBCAT_BOOST (0.08)."""
+        results = [
+            _make_result(
+                relevance=0.7,
+                sub_category="flask web framework",
+                tags_json="[]",
+                keywords="[]",
+            ),
+        ]
+        boosted = apply_metadata_boost(results, "flask routing")
+        assert boosted[0]["relevance"] == round(0.7 + 0.08, 4)
+        assert boosted[0]["metadata_boost"] == 0.08
+
+    def test_tag_match(self):
+        """Each matching tag adds QUALITY_METADATA_TAG_BOOST (0.05)."""
+        results = [
+            _make_result(
+                relevance=0.6,
+                sub_category="",
+                tags_json='["flask", "routing", "middleware"]',
+                keywords="[]",
+            ),
+        ]
+        # "flask" and "routing" match; "middleware" doesn't match query
+        boosted = apply_metadata_boost(results, "flask routing setup")
+        expected_boost = 0.05 * 2  # two matching tags
+        assert boosted[0]["relevance"] == round(0.6 + expected_boost, 4)
+        assert boosted[0]["metadata_boost"] == round(expected_boost, 4)
+
+    def test_keyword_match(self):
+        """Keyword matches add 0.02 each, capped at 0.06."""
+        results = [
+            _make_result(
+                relevance=0.5,
+                sub_category="",
+                tags_json="[]",
+                keywords='["flask", "routing", "blueprint", "middleware"]',
+            ),
+        ]
+        # "flask", "routing", "blueprint", "middleware" — 4 keyword matches
+        # 4 * 0.02 = 0.08, but capped at 0.06
+        boosted = apply_metadata_boost(results, "flask routing blueprint middleware")
+        assert boosted[0]["relevance"] == round(0.5 + 0.06, 4)
+        assert boosted[0]["metadata_boost"] == 0.06
+
+    def test_boost_capped(self):
+        """Total boost capped at QUALITY_METADATA_MAX_BOOST (0.15)."""
+        results = [
+            _make_result(
+                relevance=0.5,
+                sub_category="flask web",  # +0.08
+                tags_json='["flask", "routing", "blueprints"]',  # +0.05 * 3 = 0.15
+                keywords='["flask", "routing"]',  # +0.02 * 2 = 0.04
+            ),
+        ]
+        # Uncapped total: 0.08 + 0.15 + 0.04 = 0.27, capped to 0.15
+        boosted = apply_metadata_boost(results, "flask routing blueprints")
+        assert boosted[0]["relevance"] == round(0.5 + 0.15, 4)
+        assert boosted[0]["metadata_boost"] == 0.15
+
+    def test_stopwords_ignored(self):
+        """Query terms that are stopwords don't trigger boosts."""
+        results = [
+            _make_result(
+                relevance=0.7,
+                sub_category="the very best",
+                tags_json='["with", "from", "about"]',
+                keywords='["have", "been"]',
+            ),
+        ]
+        # "the", "very", "with", "from", "about", "have", "been" are all stopwords
+        # "is" and "a" are <= 2 chars and also filtered
+        boosted = apply_metadata_boost(results, "the very best is a thing")
+        # Only "best" and "thing" pass the filter; "best" matches sub_category
+        assert boosted[0]["relevance"] == round(0.7 + 0.08, 4)
+
+
+# ---------------------------------------------------------------------------
+# Tests: apply_quality_boost (Phase 14B)
+# ---------------------------------------------------------------------------
+
+class TestApplyQualityBoost:
+    def test_no_driver(self):
+        """Returns results unchanged when neo4j_driver is None."""
+        results = [_make_result(relevance=0.8)]
+        boosted = apply_quality_boost(results, neo4j_driver=None)
+        assert boosted[0]["relevance"] == 0.8
+        assert "quality_score" not in boosted[0]
+
+    def test_empty_results(self):
+        """Returns empty list for empty input."""
+        driver = MagicMock()
+        assert apply_quality_boost([], neo4j_driver=driver) == []
+
+    @patch("db.neo4j.artifacts.get_quality_scores")
+    def test_basic_multiplier_quality_1(self, mock_scores):
+        """quality=1.0 → multiplier = 0.8 + 0.2*1.0 = 1.0 (no change)."""
+        mock_scores.return_value = {"art-1": 1.0}
+        results = [_make_result(relevance=0.8, artifact_id="art-1")]
+        boosted = apply_quality_boost(results, neo4j_driver=MagicMock())
+        # 0.8 * (0.8 + 0.2 * 1.0) = 0.8 * 1.0 = 0.8
+        assert boosted[0]["relevance"] == round(0.8 * 1.0, 4)
+
+    @patch("db.neo4j.artifacts.get_quality_scores")
+    def test_basic_multiplier_quality_0(self, mock_scores):
+        """quality=0.0 → multiplier = 0.8 + 0.2*0.0 = 0.8 (20% penalty)."""
+        mock_scores.return_value = {"art-1": 0.0}
+        results = [_make_result(relevance=0.8, artifact_id="art-1")]
+        boosted = apply_quality_boost(results, neo4j_driver=MagicMock())
+        # 0.8 * (0.8 + 0.2 * 0.0) = 0.8 * 0.8 = 0.64
+        assert boosted[0]["relevance"] == round(0.8 * 0.8, 4)
+
+    @patch("db.neo4j.artifacts.get_quality_scores")
+    def test_basic_multiplier_quality_half(self, mock_scores):
+        """quality=0.5 → multiplier = 0.8 + 0.2*0.5 = 0.9."""
+        mock_scores.return_value = {"art-1": 0.5}
+        results = [_make_result(relevance=0.8, artifact_id="art-1")]
+        boosted = apply_quality_boost(results, neo4j_driver=MagicMock())
+        # 0.8 * (0.8 + 0.2 * 0.5) = 0.8 * 0.9 = 0.72
+        assert boosted[0]["relevance"] == round(0.8 * 0.9, 4)
+
+    @patch("db.neo4j.artifacts.get_quality_scores")
+    def test_unscored_default(self, mock_scores):
+        """Artifacts not in scores dict get 0.5 default."""
+        mock_scores.return_value = {}  # No scores returned
+        results = [_make_result(relevance=0.8, artifact_id="art-1")]
+        boosted = apply_quality_boost(results, neo4j_driver=MagicMock())
+        # Default quality = 0.5 → multiplier = 0.8 + 0.2 * 0.5 = 0.9
+        # 0.8 * 0.9 = 0.72
+        assert boosted[0]["relevance"] == round(0.8 * 0.9, 4)
+        assert boosted[0]["quality_score"] == 0.5
+
+    @patch("db.neo4j.artifacts.get_quality_scores")
+    def test_quality_score_attached(self, mock_scores):
+        """quality_score field is added to result dict."""
+        mock_scores.return_value = {"art-1": 0.75}
+        results = [_make_result(relevance=0.8, artifact_id="art-1")]
+        boosted = apply_quality_boost(results, neo4j_driver=MagicMock())
+        assert boosted[0]["quality_score"] == 0.75
+
+    @patch("db.neo4j.artifacts.get_quality_scores")
+    def test_lookup_failure(self, mock_scores):
+        """If get_quality_scores raises, returns results unchanged."""
+        mock_scores.side_effect = Exception("Neo4j connection failed")
+        results = [_make_result(relevance=0.8, artifact_id="art-1")]
+        boosted = apply_quality_boost(results, neo4j_driver=MagicMock())
+        assert boosted[0]["relevance"] == 0.8
+        assert "quality_score" not in boosted[0]

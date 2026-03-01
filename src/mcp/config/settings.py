@@ -108,6 +108,24 @@ AUTO_INJECT_MAX = int(os.getenv("AUTO_INJECT_MAX", "3"))
 CONTEXT_MAX_CHUNKS_PER_ARTIFACT = 2  # max chunks from same artifact in assembled context
 
 # ---------------------------------------------------------------------------
+# Quality Scoring (Phase 14)
+# ---------------------------------------------------------------------------
+QUALITY_WEIGHT_SUMMARY = 0.30       # weight for summary quality dimension
+QUALITY_WEIGHT_KEYWORDS = 0.25      # weight for keyword quality dimension
+QUALITY_WEIGHT_FRESHNESS = 0.20     # weight for freshness dimension
+QUALITY_WEIGHT_COMPLETENESS = 0.25  # weight for metadata completeness dimension
+QUALITY_SUMMARY_MIN_CHARS = 50      # below this: linear ramp to 0
+QUALITY_SUMMARY_MAX_CHARS = 500     # above this: gentle penalty
+QUALITY_KEYWORDS_OPTIMAL = 5        # keyword count for max score
+
+QUALITY_BOOST_FACTOR = 0.2          # max relevance multiplier from quality
+QUALITY_BOOST_BASE = 0.8            # base multiplier (score=0 artifact gets 0.8x)
+
+QUALITY_METADATA_TAG_BOOST = 0.05   # per-matching-tag relevance boost
+QUALITY_METADATA_SUBCAT_BOOST = 0.08  # sub_category match relevance boost
+QUALITY_METADATA_MAX_BOOST = 0.15   # cap on total metadata boost
+
+# ---------------------------------------------------------------------------
 # Memory Extraction
 # ---------------------------------------------------------------------------
 MEMORY_RETENTION_DAYS = int(os.getenv("MEMORY_RETENTION_DAYS", "180"))

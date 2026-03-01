@@ -20,6 +20,7 @@ import type {
   CollectionsResponse,
   MaintenanceResponse,
   RectifyResponse,
+  CurateResponse,
   TaxonomyResponse,
   TagInfo,
   SchedulerStatus,
@@ -165,6 +166,23 @@ export async function fetchRectify(
     }),
   })
   if (!res.ok) throw new Error(`Rectify failed: ${res.status}`)
+  return res.json()
+}
+
+export async function fetchCurate(
+  domains?: string[],
+  maxArtifacts = 200,
+): Promise<CurateResponse> {
+  const res = await fetch(`${MCP_BASE}/agent/curate`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      mode: "audit",
+      domains: domains ?? null,
+      max_artifacts: maxArtifacts,
+    }),
+  })
+  if (!res.ok) throw new Error(`Curate failed: ${res.status}`)
   return res.json()
 }
 

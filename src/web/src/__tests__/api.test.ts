@@ -149,6 +149,7 @@ describe("queryKB", () => {
           domains: ["coding", "finance"],
           top_k: 5,
           use_reranking: true,
+          conversation_messages: null,
         }),
       }),
     )

@@ -172,6 +172,9 @@ async def multi_domain_query(
                         "collection": config.collection_name(domain),
                         "chunk_id": chunk_id,
                         "ingested_at": metadata.get("ingested_at", ""),
+                        "sub_category": metadata.get("sub_category", ""),
+                        "tags_json": metadata.get("tags_json", "[]"),
+                        "keywords": metadata.get("keywords", "[]"),
                     })
                     seen_ids.add(chunk_id)
 
@@ -213,6 +216,9 @@ async def multi_domain_query(
                                     "collection": config.collection_name(domain),
                                     "chunk_id": cid,
                                     "ingested_at": meta.get("ingested_at", ""),
+                                    "sub_category": meta.get("sub_category", ""),
+                                    "tags_json": meta.get("tags_json", "[]"),
+                                    "keywords": meta.get("keywords", "[]"),
                                 })
                                 seen_ids.add(cid)
                         except Exception as e:
@@ -440,6 +446,106 @@ async def rerank_results(
 
 
 # ---------------------------------------------------------------------------
+# Metadata boost (Phase 14C)
+# ---------------------------------------------------------------------------
+
+def apply_metadata_boost(
+    results: List[Dict[str, Any]],
+    query: str,
+) -> List[Dict[str, Any]]:
+    """Boost results whose tags or sub_category match query terms.
+
+    Small additive boost for metadata alignment, capped at
+    QUALITY_METADATA_MAX_BOOST to prevent tag-stuffed artifacts
+    from dominating.
+    """
+    if not results:
+        return results
+
+    query_terms = {w.lower() for w in _WORD_RE.findall(query) if len(w) > 2}
+    query_terms -= _STOPWORDS
+
+    if not query_terms:
+        return results
+
+    for r in results:
+        boost = 0.0
+
+        # Sub-category match
+        sub_cat = r.get("sub_category", "")
+        if sub_cat:
+            sub_cat_terms = {t.lower() for t in _WORD_RE.findall(sub_cat)}
+            if sub_cat_terms & query_terms:
+                boost += config.QUALITY_METADATA_SUBCAT_BOOST
+
+        # Tag match
+        tags_json = r.get("tags_json", "[]")
+        try:
+            tags = json.loads(tags_json) if tags_json else []
+        except (json.JSONDecodeError, TypeError):
+            tags = []
+        for tag in tags:
+            tag_terms = {t.lower() for t in _WORD_RE.findall(tag)}
+            if tag_terms & query_terms:
+                boost += config.QUALITY_METADATA_TAG_BOOST
+
+        # Keyword match (lighter — keywords already used by BM25)
+        kw_json = r.get("keywords", "[]")
+        try:
+            kw_list = json.loads(kw_json) if kw_json else []
+        except (json.JSONDecodeError, TypeError):
+            kw_list = []
+        kw_matches = sum(1 for kw in kw_list if kw.lower() in query_terms)
+        if kw_matches > 0:
+            boost += min(kw_matches * 0.02, 0.06)
+
+        boost = min(boost, config.QUALITY_METADATA_MAX_BOOST)
+        if boost > 0:
+            r["relevance"] = round(r["relevance"] + boost, 4)
+            r["metadata_boost"] = round(boost, 4)
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Quality boost (Phase 14B)
+# ---------------------------------------------------------------------------
+
+def apply_quality_boost(
+    results: List[Dict[str, Any]],
+    neo4j_driver: Optional[Any] = None,
+) -> List[Dict[str, Any]]:
+    """Apply quality score multiplier to relevance scores.
+
+    Formula: adjusted = relevance * (QUALITY_BOOST_BASE + QUALITY_BOOST_FACTOR * quality_score)
+    Default:  adjusted = relevance * (0.8 + 0.2 * quality_score)
+
+    This means quality=1.0 → 1.0x (no change), quality=0.0 → 0.8x (20% penalty).
+    """
+    if neo4j_driver is None or not results:
+        return results
+
+    artifact_ids = list({r["artifact_id"] for r in results if r.get("artifact_id")})
+    if not artifact_ids:
+        return results
+
+    try:
+        from db.neo4j.artifacts import get_quality_scores
+        scores = get_quality_scores(neo4j_driver, artifact_ids)
+    except Exception as e:
+        logger.warning(f"Quality score lookup failed (skipping boost): {e}")
+        return results
+
+    for r in results:
+        quality = scores.get(r.get("artifact_id", ""), 0.5)
+        multiplier = config.QUALITY_BOOST_BASE + config.QUALITY_BOOST_FACTOR * quality
+        r["relevance"] = round(r["relevance"] * multiplier, 4)
+        r["quality_score"] = quality
+
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Context assembly
 # ---------------------------------------------------------------------------
 
@@ -568,12 +674,19 @@ async def agent_query(
             boost = recency_score(ingested) * config.TEMPORAL_RECENCY_WEIGHT
             r["relevance"] = round(r["relevance"] + boost, 4)
 
+    # Step 4.5: Metadata boost — surface tag/sub_category-aligned results before reranking
+    results = apply_metadata_boost(results, query)
+
     # Step 5: Reranking (includes both direct and graph-sourced results)
     results = await rerank_results(
         results=results,
         query=query,
         use_llm=use_reranking,
     )
+
+    # Step 5.5: Quality boost — quality score multiplier after reranking
+    results = apply_quality_boost(results, neo4j_driver=neo4j_driver)
+    results = sorted(results, key=lambda x: x["relevance"], reverse=True)
 
     # Step 6: Assemble context
     context, sources, char_count = assemble_context(results, max_chars=config.QUERY_CONTEXT_MAX_CHARS)

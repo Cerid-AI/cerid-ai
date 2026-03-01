@@ -1,7 +1,7 @@
 # Cerid AI — Task Tracker
 
 > **Last updated:** 2026-02-28
-> **Current status:** Phase 13 complete. Conversation-aware KB queries, auto-injection with confidence gate, context budget optimization. 706+ tests.
+> **Current status:** Phase 14 complete. Artifact quality scoring, quality-weighted retrieval, metadata boost, full GUI integration. 795+ tests.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md)
 
 ## Current: Phase 10 — Commercial & Open-Source Readiness
@@ -122,10 +122,12 @@
 - [x] 13B — Auto-injection with confidence gate: configurable threshold (0.82 default), max 3 auto-injected chunks, settings UI toggle + slider, visual indicator during streaming
 - [x] 13C — Context budget optimization: max 2 chunks per artifact in assembled context, `continue` past oversized chunks instead of `break`
 
-### Phase 14: Artifact Quality
-- [ ] Curation agent (Phase 11C design doc: quality scoring, AI summaries, keyword validation)
-- [ ] Quality-weighted retrieval (wire quality scores into reranking)
-- [ ] Metadata in retrieval (tags/sub-categories as boost signals)
+### Phase 14: Artifact Quality ✅
+- [x] 14A — Curation agent: 4-dimension quality scoring (summary, keywords, freshness, completeness), batch Neo4j storage, `POST /agent/curate` endpoint, `pkb_curate` MCP tool (74 tests)
+- [x] 14B — Quality-weighted retrieval: `apply_quality_boost()` multiplier after LLM reranking, `relevance * (0.8 + 0.2 * quality_score)`, `get_quality_scores()` batch lookup
+- [x] 14C — Metadata boost in retrieval: `apply_metadata_boost()` before reranking, tags/sub_category/keywords matching query terms, capped at 0.15 additive boost
+- [x] 14D — GUI wiring: QualityBadge on artifact cards, quality indicator in source attribution, Quality Audit card in monitoring, `fetchCurate()` API, quality_score on KBQueryResult/SourceRef types
+- [x] 14E — UI fixes: taxonomy crash fix (sub_category type mismatch), dashboard two-row layout, artifact card OCR cleanup + keywords-as-tags fallback
 
 ### Phase 15: Realtime Accuracy Watcher
 - [ ] Streaming verification (wire existing SSE endpoint to frontend)

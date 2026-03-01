@@ -175,6 +175,7 @@ export function ChatPanel() {
           relevance: r.relevance,
           chunk_index: r.chunk_index,
           tags: r.tags,
+          quality_score: r.quality_score,
         }))
 
         const contextParts = manuallyInjected.map(

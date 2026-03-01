@@ -245,6 +245,29 @@ def list_artifacts(
         ]
 
 
+def get_quality_scores(
+    driver,
+    artifact_ids: List[str],
+) -> Dict[str, float]:
+    """Batch-fetch quality_score for artifact IDs. Returns {id: score}.
+
+    Unscored artifacts default to 0.5 (neutral).
+    """
+    if not artifact_ids:
+        return {}
+    with driver.session() as session:
+        result = session.run(
+            "UNWIND $ids AS aid "
+            "MATCH (a:Artifact {id: aid}) "
+            "RETURN a.id AS id, a.quality_score AS score",
+            ids=artifact_ids,
+        )
+        return {
+            record["id"]: record["score"] if record["score"] is not None else 0.5
+            for record in result
+        }
+
+
 def recategorize_artifact(
     driver,
     artifact_id: str,

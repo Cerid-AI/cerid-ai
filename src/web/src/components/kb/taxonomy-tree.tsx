@@ -102,7 +102,7 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts }: Taxonom
           {Object.entries(taxonomy.domains).map(([domain, info]) => {
             const isExpanded = expanded.has(domain)
             const isActive = filter.domain === domain
-            const domainCount = artifactCounts?.get(domain)
+            const domainCount = artifactCounts?.get(domain) ?? (info.artifact_count > 0 ? info.artifact_count : undefined)
 
             return (
               <div key={domain}>
@@ -145,21 +145,28 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts }: Taxonom
                   )}
                 </button>
 
-                {isExpanded && info.sub_categories.length > 0 && (
+                {isExpanded && Array.isArray(info.sub_categories) && info.sub_categories.length > 0 && (
                   <div className="ml-5 space-y-0.5 border-l pl-2">
                     {info.sub_categories.map((subCat) => {
-                      const isSubActive = filter.domain === domain && filter.subCategory === subCat
+                      const label = typeof subCat === "string" ? subCat : subCat.name
+                      const count = typeof subCat === "string" ? undefined : subCat.artifact_count
+                      const isSubActive = filter.domain === domain && filter.subCategory === label
                       return (
                         <button
-                          key={subCat}
+                          key={label}
                           className={cn(
                             "flex w-full items-center gap-1.5 rounded px-2 py-0.5 text-left text-[11px] transition-colors",
                             "hover:bg-muted/50",
                             isSubActive && "bg-primary/10 font-medium",
                           )}
-                          onClick={() => handleSubCategoryClick(domain, subCat)}
+                          onClick={() => handleSubCategoryClick(domain, label)}
                         >
-                          <span className="truncate capitalize">{subCat}</span>
+                          <span className="flex-1 truncate capitalize">{label}</span>
+                          {count !== undefined && count > 0 && (
+                            <Badge variant="secondary" className="h-3.5 px-1 text-[8px]">
+                              {count}
+                            </Badge>
+                          )}
                         </button>
                       )
                     })}

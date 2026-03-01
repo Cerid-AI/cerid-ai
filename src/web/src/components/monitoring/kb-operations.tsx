@@ -6,14 +6,15 @@ import { useMutation } from "@tanstack/react-query"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Loader2, ShieldCheck, Wrench, AlertTriangle, CheckCircle2 } from "lucide-react"
-import { fetchRectify, fetchMaintenance } from "@/lib/api"
+import { Loader2, ShieldCheck, Wrench, Award, AlertTriangle, CheckCircle2 } from "lucide-react"
+import { fetchRectify, fetchMaintenance, fetchCurate } from "@/lib/api"
 import { cn } from "@/lib/utils"
-import type { RectifyResponse, MaintenanceResponse } from "@/lib/types"
+import type { RectifyResponse, MaintenanceResponse, CurateResponse } from "@/lib/types"
 
 export function KBOperations() {
   const [rectifyResult, setRectifyResult] = useState<RectifyResponse | null>(null)
   const [maintenanceResult, setMaintenanceResult] = useState<MaintenanceResponse | null>(null)
+  const [curateResult, setCurateResult] = useState<CurateResponse | null>(null)
 
   const rectify = useMutation({
     mutationFn: () => fetchRectify(["duplicates", "stale", "orphans", "distribution"]),
@@ -26,6 +27,11 @@ export function KBOperations() {
         auto_purge: autoPurge,
       }),
     onSuccess: setMaintenanceResult,
+  })
+
+  const curate = useMutation({
+    mutationFn: () => fetchCurate(),
+    onSuccess: setCurateResult,
   })
 
   return (
@@ -110,6 +116,42 @@ export function KBOperations() {
           {!maintenanceResult && !maintain.isPending && !maintain.isError && (
             <p className="text-xs text-muted-foreground">
               Scan detects stale artifacts and orphaned chunks. Clean removes them automatically.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Quality Audit */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 p-3 pb-2">
+          <div className="flex items-center gap-2">
+            <Award className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm">Quality Audit</CardTitle>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={() => curate.mutate()}
+            disabled={curate.isPending}
+          >
+            {curate.isPending ? (
+              <><Loader2 className="mr-1.5 h-3 w-3 animate-spin" />Scoring...</>
+            ) : (
+              "Run Audit"
+            )}
+          </Button>
+        </CardHeader>
+        <CardContent className="p-3 pt-0">
+          {curate.isError && (
+            <p className="text-xs text-destructive">
+              {curate.error instanceof Error ? curate.error.message : "Quality audit failed"}
+            </p>
+          )}
+          {curateResult && <CurationResults result={curateResult} />}
+          {!curateResult && !curate.isPending && !curate.isError && (
+            <p className="text-xs text-muted-foreground">
+              Score all artifacts on quality dimensions: summary, keywords, freshness, completeness.
             </p>
           )}
         </CardContent>
@@ -208,5 +250,56 @@ function FindingBadge({ label, count, suffix }: { label: string; count: number; 
       {count} {label}
       {suffix && <span className="ml-1 opacity-70">({suffix})</span>}
     </Badge>
+  )
+}
+
+function CurationResults({ result }: { result: CurateResponse }) {
+  const dist = result.score_distribution
+  const avgPct = Math.round(result.avg_quality_score * 100)
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-muted-foreground">
+        Scored {result.artifacts_scored} artifacts — avg quality:{" "}
+        <span className="font-medium">{avgPct}%</span>
+      </p>
+      <div className="grid grid-cols-4 gap-1 text-center">
+        {([
+          ["excellent", "text-green-600 dark:text-green-400"],
+          ["good", "text-blue-600 dark:text-blue-400"],
+          ["fair", "text-yellow-600 dark:text-yellow-400"],
+          ["poor", "text-red-600 dark:text-red-400"],
+        ] as const).map(([tier, color]) => (
+          <div key={tier}>
+            <div className={cn("text-sm font-medium tabular-nums", color)}>
+              {dist[tier] ?? 0}
+            </div>
+            <div className="text-[10px] text-muted-foreground capitalize">{tier}</div>
+          </div>
+        ))}
+      </div>
+      {result.low_quality_artifacts.length > 0 && (
+        <div className="border-t pt-2">
+          <p className="text-[10px] font-medium text-muted-foreground mb-1">
+            Low quality ({result.low_quality_artifacts.length}):
+          </p>
+          <div className="space-y-0.5">
+            {result.low_quality_artifacts.slice(0, 5).map((art) => (
+              <div key={art.artifact_id} className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                <span className="min-w-0 truncate">{art.filename}</span>
+                <span className="ml-auto shrink-0 tabular-nums text-red-600 dark:text-red-400">
+                  {Math.round(art.quality_score * 100)}%
+                </span>
+              </div>
+            ))}
+            {result.low_quality_artifacts.length > 5 && (
+              <p className="text-[9px] text-muted-foreground">
+                +{result.low_quality_artifacts.length - 5} more
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }

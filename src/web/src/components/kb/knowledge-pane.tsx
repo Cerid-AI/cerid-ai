@@ -16,7 +16,20 @@ import { fetchArtifacts, queryKB, uploadFile } from "@/lib/api"
 import { useKBInjection } from "@/contexts/kb-injection-context"
 import type { KBQueryResult, Artifact } from "@/lib/types"
 
+function parseJsonArray(json: string | undefined): string[] {
+  if (!json) return []
+  try {
+    const arr = JSON.parse(json)
+    return Array.isArray(arr) ? arr.filter((s): s is string => typeof s === "string" && s.trim().length > 0) : []
+  } catch { return [] }
+}
+
 function artifactToResult(a: Artifact): KBQueryResult {
+  // Parse keywords to use as tags when the artifact has no tags
+  const tags = a.tags && a.tags.length > 0
+    ? a.tags
+    : parseJsonArray(a.keywords).slice(0, 5)
+
   return {
     content: a.summary || "",
     relevance: 0,
@@ -24,7 +37,7 @@ function artifactToResult(a: Artifact): KBQueryResult {
     filename: a.filename,
     domain: a.domain,
     sub_category: a.sub_category,
-    tags: a.tags,
+    tags,
     chunk_index: 0,
     collection: `domain_${a.domain}`,
     ingested_at: a.ingested_at,

@@ -52,11 +52,24 @@ function SourceCard({ source }: { source: SourceRef }) {
           {source.sub_category}
         </Badge>
       )}
-      {relevancePct > 0 && (
-        <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
-          {relevancePct}%
-        </span>
-      )}
+      <div className="ml-auto flex items-center gap-1.5 shrink-0">
+        {source.quality_score != null && (
+          <span className={cn(
+            "tabular-nums text-[10px]",
+            source.quality_score >= 0.8 ? "text-green-600 dark:text-green-400" :
+            source.quality_score >= 0.6 ? "text-blue-600 dark:text-blue-400" :
+            source.quality_score >= 0.4 ? "text-yellow-600 dark:text-yellow-400" :
+                                          "text-red-600 dark:text-red-400",
+          )}>
+            Q{Math.round(source.quality_score * 100)}
+          </span>
+        )}
+        {relevancePct > 0 && (
+          <span className="tabular-nums text-muted-foreground">
+            {relevancePct}%
+          </span>
+        )}
+      </div>
     </div>
   )
 }

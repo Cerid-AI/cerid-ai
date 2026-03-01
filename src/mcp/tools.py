@@ -248,6 +248,25 @@ MCP_TOOLS = [
         },
     },
     {
+        "name": "pkb_curate",
+        "description": "Score artifact quality across the knowledge base. Returns quality distribution and low-quality artifacts needing attention.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "domains": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": f"Domains to score ({', '.join(config.DOMAINS)}). Empty = all.",
+                },
+                "max_artifacts": {
+                    "type": "integer",
+                    "description": "Max artifacts to score per domain (default 200)",
+                    "default": 200,
+                },
+            },
+        },
+    },
+    {
         "name": "pkb_digest",
         "description": "Get a summary of recent knowledge base activity: new artifacts, connections, and health status",
         "inputSchema": {
@@ -393,6 +412,13 @@ async def execute_tool(name: str, arguments: Dict) -> Any:
             actions=arguments.get("actions"),
             stale_days=arguments.get("stale_days", 90),
             auto_purge=arguments.get("auto_purge", False),
+        )
+    elif name == "pkb_curate":
+        from agents.curator import curate
+        return await curate(
+            neo4j_driver=get_neo4j(),
+            domains=arguments.get("domains"),
+            max_artifacts=arguments.get("max_artifacts", 200),
         )
     elif name == "pkb_digest":
         from routers.digest import digest_endpoint

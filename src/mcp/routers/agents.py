@@ -72,6 +72,12 @@ class MaintenanceRequest(BaseModel):
     auto_purge: bool = False
 
 
+class CurateRequest(BaseModel):
+    mode: str = Field("audit", pattern="^(audit)$")
+    domains: Optional[List[str]] = None
+    max_artifacts: int = Field(200, ge=1, le=1000)
+
+
 @router.post("/agent/query")
 async def agent_query_endpoint(req: AgentQueryRequest):
     try:
@@ -332,4 +338,19 @@ async def maintain_endpoint(req: MaintenanceRequest):
         )
     except Exception as e:
         logger.error(f"Maintenance error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/agent/curate")
+async def curate_endpoint(req: CurateRequest):
+    try:
+        from agents.curator import curate
+        return await curate(
+            neo4j_driver=get_neo4j(),
+            mode=req.mode,
+            domains=req.domains,
+            max_artifacts=req.max_artifacts,
+        )
+    except Exception as e:
+        logger.error(f"Curate error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

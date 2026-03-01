@@ -18,6 +18,7 @@ export interface SourceRef {
   relevance: number
   chunk_index: number
   tags?: string[]
+  quality_score?: number
 }
 
 export interface Conversation {
@@ -75,10 +76,16 @@ export type Theme = "dark" | "light"
 export const DOMAINS = ["coding", "finance", "projects", "personal", "general", "conversations"] as const
 export type Domain = (typeof DOMAINS)[number]
 
+export interface TaxonomySubCategory {
+  name: string
+  artifact_count: number
+}
+
 export interface TaxonomyDomain {
   description: string
   icon: string
-  sub_categories: string[]
+  sub_categories: TaxonomySubCategory[]
+  artifact_count: number
 }
 
 export interface TaxonomyResponse {
@@ -118,6 +125,7 @@ export interface KBQueryResult {
   graph_source?: boolean
   relationship_type?: string
   cross_domain?: boolean
+  quality_score?: number
 }
 
 export interface AgentQueryResponse {
@@ -265,6 +273,24 @@ export interface AuditResponse {
   costs?: AuditCosts
   queries?: AuditQueries
   conversations?: AuditConversations
+}
+
+export interface CurateResponse {
+  timestamp: string
+  mode: string
+  artifacts_scored: number
+  artifacts_stored: number
+  avg_quality_score: number
+  score_distribution: Record<string, number>
+  domains_scored: string[]
+  low_quality_artifacts: {
+    artifact_id: string
+    filename: string
+    domain: string
+    quality_score: number
+    breakdown: Record<string, number>
+    issues: string[]
+  }[]
 }
 
 export interface HallucinationClaim {

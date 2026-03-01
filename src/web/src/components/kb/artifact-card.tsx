@@ -21,7 +21,14 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject }: Artifac
   const [expanded, setExpanded] = useState(false)
   const relevancePct = Math.round(result.relevance * 100)
   const showRelevance = result.relevance > 0
-  const cleanContent = result.content.replace(/\s+/g, " ").trim()
+  const isBrowseMode = result.relevance === 0
+  // Clean up garbled OCR/form text: collapse whitespace, strip control chars, trim trailing truncation
+  const cleanContent = result.content
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "")
+    .replace(/\s+/g, " ")
+    .replace(/[|]{2,}/g, "")
+    .trim()
+    .replace(/[-–]\s*$/, "...")
   const dateStr = result.ingested_at
     ? new Date(result.ingested_at).toLocaleDateString()
     : null
@@ -79,26 +86,37 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject }: Artifac
               </div>
             )}
           </div>
-          {showRelevance && (
-            <div className="flex flex-col items-end gap-1">
-              <span className="text-xs font-medium tabular-nums">{relevancePct}%</span>
-              <div className="h-1.5 w-12 overflow-hidden rounded-full bg-muted">
-                <div
-                  className="h-full rounded-full bg-primary transition-all"
-                  style={{ width: `${relevancePct}%` }}
-                />
-              </div>
-            </div>
-          )}
+          <div className="flex flex-col items-end gap-1">
+            {showRelevance && (
+              <>
+                <span className="text-xs font-medium tabular-nums">{relevancePct}%</span>
+                <div className="h-1.5 w-12 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full rounded-full bg-primary transition-all"
+                    style={{ width: `${relevancePct}%` }}
+                  />
+                </div>
+              </>
+            )}
+            {result.quality_score != null && (
+              <QualityBadge score={result.quality_score} />
+            )}
+          </div>
         </div>
 
         {/* Content */}
-        <p className={cn(
-          "mt-2 text-xs leading-relaxed text-muted-foreground [overflow-wrap:anywhere]",
-          !expanded && "line-clamp-3",
-        )}>
-          {expanded ? result.content : cleanContent}
-        </p>
+        {cleanContent.length > 10 ? (
+          <p className={cn(
+            "mt-2 text-xs leading-relaxed text-muted-foreground [overflow-wrap:anywhere]",
+            !expanded && "line-clamp-2",
+          )}>
+            {expanded ? result.content : cleanContent}
+          </p>
+        ) : isBrowseMode ? (
+          <p className="mt-2 text-xs italic text-muted-foreground/60">
+            No summary available
+          </p>
+        ) : null}
 
         {/* Actions */}
         <div className="mt-2 flex items-center gap-1">
@@ -134,5 +152,20 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject }: Artifac
         </div>
       </CardContent>
     </Card>
+  )
+}
+
+function QualityBadge({ score }: { score: number }) {
+  const pct = Math.round(score * 100)
+  const tier =
+    score >= 0.8 ? { label: "excellent", color: "border-green-500/50 text-green-700 dark:text-green-400" } :
+    score >= 0.6 ? { label: "good", color: "border-blue-500/50 text-blue-700 dark:text-blue-400" } :
+    score >= 0.4 ? { label: "fair", color: "border-yellow-500/50 text-yellow-700 dark:text-yellow-400" } :
+                   { label: "poor", color: "border-red-500/50 text-red-700 dark:text-red-400" }
+
+  return (
+    <Badge variant="outline" className={cn("text-[9px] px-1.5 py-0", tier.color)}>
+      Q{pct}
+    </Badge>
   )
 }
