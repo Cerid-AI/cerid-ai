@@ -72,6 +72,20 @@
 
 ---
 
+## Bifrost / OpenRouter
+
+### Model IDs require `openrouter/` prefix
+**When:** Configuring `CATEGORIZE_MODELS` or any model ID for Bifrost LLM gateway.
+**Problem:** Bifrost requires the `provider/model` format (e.g., `openrouter/meta-llama/...`). Without the prefix, Bifrost returns `{"message":"model should be in provider/model format"}`.
+**Fix:** Always prefix model IDs with `openrouter/` when routing through Bifrost to OpenRouter.
+
+### Free-tier models have aggressive rate limits
+**When:** Calling free OpenRouter models (`:free` suffix) in bulk operations like synopsis generation.
+**Problem:** Free models are limited to ~8 RPM. Retry loops on 429 burn through the quota even faster since each retry counts as a request.
+**Fix:** Use 8+ second base delay between requests. On 429, wait a full 60s before a single retry — don't use exponential backoff with multiple retries, as that wastes quota. Accept incremental progress across multiple runs.
+
+---
+
 ## Docker
 
 ### Use `127.0.0.1` not `localhost` in Alpine healthchecks

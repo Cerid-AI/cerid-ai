@@ -1,7 +1,7 @@
 # Cerid AI — Task Tracker
 
-> **Last updated:** 2026-02-28
-> **Current status:** Phase 14F complete. Audit agent visibility fix, AI synopsis generation for artifact cards. 795+ tests.
+> **Last updated:** 2026-03-01
+> **Current status:** Phase 14F complete + tested. Bifrost model IDs fixed, synopsis rate-limit handling. 795+ tests.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md)
 
 ## Current: Phase 10 — Commercial & Open-Source Readiness
@@ -129,6 +129,7 @@
 - [x] 14D — GUI wiring: QualityBadge on artifact cards, quality indicator in source attribution, Quality Audit card in monitoring, `fetchCurate()` API, quality_score on KBQueryResult/SourceRef types
 - [x] 14E — UI fixes: taxonomy crash fix (sub_category type mismatch), dashboard two-row layout, artifact card OCR cleanup + keywords-as-tags fallback
 - [x] 14F — Audit agent visibility + AI synopses: KBOperations moved outside analytics loading gate, Neo4j sub_category/CATEGORIZED_AS backfill migration, search result deduplication by artifact_id, AI synopsis generation via Bifrost Llama (curator agent extended with `generate_synopses` option), synopsis toggle in Quality Audit UI
+- [x] 14G — Bifrost model fix + rate-limit hardening: `CATEGORIZE_MODELS` updated with `openrouter/` prefix + `llama-3.3-70b-instruct:free` (old model removed from OpenRouter), synopsis 8s inter-request throttle + 60s retry on 429 (free-tier 8 RPM limit), browser-verified all panes functional
 
 ### Phase 15: Realtime Accuracy Watcher
 - [ ] Streaming verification (wire existing SSE endpoint to frontend)
