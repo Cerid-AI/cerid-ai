@@ -13,6 +13,7 @@ summaries, using the free Llama model via Bifrost.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import math
@@ -225,7 +226,11 @@ async def _generate_synopsis(
     max_input_chars: int,
     max_tokens: int,
 ) -> str:
-    """Call Bifrost LLM to generate a concise synopsis. Returns empty string on failure."""
+    """Call Bifrost LLM to generate a concise synopsis. Returns empty string on failure.
+
+    On 429 rate-limit, waits 60s and retries once. Free models on OpenRouter
+    are limited to ~8 RPM, so the caller must also throttle between calls.
+    """
     snippet = text[:max_input_chars]
     prompt = (
         "Write a concise 1-2 sentence synopsis of this document. "
@@ -233,29 +238,39 @@ async def _generate_synopsis(
         "Do not start with 'This document'. Just state the content directly.\n\n"
         f"{snippet}"
     )
-    try:
-        async with httpx.AsyncClient(timeout=config.BIFROST_TIMEOUT) as client:
-            resp = await client.post(
-                f"{bifrost_url}/chat/completions",
-                json={
-                    "model": model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.3,
-                    "max_tokens": max_tokens,
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-        content = data["choices"][0]["message"]["content"].strip()
-        # Strip markdown code fences if present
-        if content.startswith("```"):
-            content = content.split("\n", 1)[-1]
-        if content.endswith("```"):
-            content = content.rsplit("```", 1)[0]
-        return content.strip()
-    except Exception as e:
-        logger.warning(f"Synopsis generation failed: {e}")
-        return ""
+    for attempt in range(2):
+        try:
+            async with httpx.AsyncClient(timeout=config.BIFROST_TIMEOUT) as client:
+                resp = await client.post(
+                    f"{bifrost_url}/chat/completions",
+                    json={
+                        "model": model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.3,
+                        "max_tokens": max_tokens,
+                    },
+                )
+                if resp.status_code == 429 and attempt == 0:
+                    logger.info("Rate limited (429), waiting 60s before retry")
+                    await asyncio.sleep(60)
+                    continue
+                resp.raise_for_status()
+                data = resp.json()
+            content = data["choices"][0]["message"]["content"].strip()
+            # Strip markdown code fences if present
+            if content.startswith("```"):
+                content = content.split("\n", 1)[-1]
+            if content.endswith("```"):
+                content = content.rsplit("```", 1)[0]
+            return content.strip()
+        except Exception as e:
+            if attempt == 0 and "429" in str(e):
+                logger.info("Rate limited, waiting 60s before retry")
+                await asyncio.sleep(60)
+                continue
+            logger.warning(f"Synopsis generation failed: {e}")
+            return ""
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -357,6 +372,8 @@ async def curate(
                         synopses_generated += 1
                     except Exception as e:
                         logger.warning(f"Failed to store synopsis for {artifact['id'][:8]}: {e}")
+                # Throttle to stay within free-model rate limits (8 RPM on OpenRouter)
+                await asyncio.sleep(8.0)
 
         if synopses_generated:
             logger.info(f"Generated {synopses_generated} AI synopses")

@@ -22,8 +22,8 @@ CHUNK_OVERLAP = 0.2  # 20% overlap between chunks
 CATEGORIZE_MODE = os.getenv("CATEGORIZE_MODE", "smart")
 
 CATEGORIZE_MODELS = {
-    "smart": "meta-llama/llama-3.1-8b-instruct:free",
-    "pro": "anthropic/claude-sonnet-4-5-20250929",
+    "smart": "openrouter/meta-llama/llama-3.3-70b-instruct:free",
+    "pro": "openrouter/anthropic/claude-sonnet-4-5-20250929",
 }
 
 # Max chars of document text sent to AI for classification (~400 tokens).
