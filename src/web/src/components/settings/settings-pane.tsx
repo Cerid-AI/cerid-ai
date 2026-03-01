@@ -232,6 +232,44 @@ export default function SettingsPane() {
 
           <Separator />
 
+          {/* Knowledge */}
+          <section>
+            <SectionHeading icon={Database} label="Knowledge" />
+            <Card>
+              <CardContent className="grid gap-3 pt-4">
+                <ToggleRow
+                  label="Auto-inject KB Context"
+                  enabled={settings.enable_auto_inject}
+                  onToggle={(v) => patch({ enable_auto_inject: v })}
+                />
+                {settings.enable_auto_inject && (
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-sm text-muted-foreground">Injection Threshold</p>
+                      <p className="text-xs text-muted-foreground/70">
+                        {settings.auto_inject_threshold.toFixed(2)}
+                      </p>
+                    </div>
+                    <input
+                      type="range"
+                      min={0.5}
+                      max={1}
+                      step={0.05}
+                      value={settings.auto_inject_threshold}
+                      onChange={(e) =>
+                        patch({ auto_inject_threshold: parseFloat(e.target.value) })
+                      }
+                      className="h-1.5 w-32 cursor-pointer accent-primary"
+                      aria-label="Auto-inject threshold"
+                    />
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </section>
+
+          <Separator />
+
           {/* Taxonomy */}
           <section>
             <SectionHeading icon={Tag} label="Taxonomy" />

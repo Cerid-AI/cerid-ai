@@ -47,6 +47,7 @@ export function ChatPanel() {
     feedbackLoop, toggleFeedbackLoop,
     showDashboard, toggleDashboard,
     autoModelSwitch, toggleAutoModelSwitch,
+    autoInject, autoInjectThreshold,
     costSensitivity,
   } = useSettings()
 
@@ -60,6 +61,7 @@ export function ChatPanel() {
   const [selectedModel, setSelectedModel] = useState(MODELS[0].id)
   const [showHistory, setShowHistory] = useState(() => window.innerWidth >= 1024)
   const [showKB, setShowKB] = useState(() => window.innerWidth >= 1024)
+  const [lastAutoInjectCount, setLastAutoInjectCount] = useState(0)
 
   const messages = active?.messages
   const latestUserMessage = useMemo(() => {
@@ -68,7 +70,17 @@ export function ChatPanel() {
     return userMsgs.length > 0 ? userMsgs[userMsgs.length - 1].content : ""
   }, [messages])
 
-  const kbContext = useKBContext(latestUserMessage)
+  // Recent conversation messages for KB query enrichment (last 5 user messages)
+  const recentMessages = useMemo(() => {
+    if (!messages || messages.length === 0) return undefined
+    const userMsgs = messages
+      .filter((m) => m.role === "user")
+      .slice(-5)
+      .map((m) => ({ role: m.role, content: m.content }))
+    return userMsgs.length > 0 ? userMsgs : undefined
+  }, [messages])
+
+  const kbContext = useKBContext(latestUserMessage, recentMessages)
   const { injectedContext, clearInjected } = kbContext
 
   const currentModelObj = useMemo(() => MODELS.find((m) => m.id === selectedModel) ?? MODELS[0], [selectedModel])
@@ -136,11 +148,26 @@ export function ChatPanel() {
       }
       addMessage(convoId, userMsg)
 
+      // Combine manually injected + auto-injected context
+      const manuallyInjected = [...injectedContext]
+      const injectedIds = new Set(manuallyInjected.map((r) => r.artifact_id))
+
+      // Auto-inject high-confidence KB results at send time
+      let autoInjectedCount = 0
+      if (autoInject && kbContext.results.length > 0) {
+        const candidates = kbContext.results
+          .filter((r) => r.relevance >= autoInjectThreshold && !injectedIds.has(r.artifact_id))
+          .slice(0, 3)
+        for (const c of candidates) {
+          manuallyInjected.push(c)
+          autoInjectedCount++
+        }
+      }
+
       let sourcesForAssistant: SourceRef[] | undefined
       const allMessages: Pick<ChatMessage, "role" | "content">[] = []
-      if (injectedContext.length > 0) {
-        // Capture lightweight source refs before clearing
-        sourcesForAssistant = injectedContext.map((r) => ({
+      if (manuallyInjected.length > 0) {
+        sourcesForAssistant = manuallyInjected.map((r) => ({
           artifact_id: r.artifact_id,
           filename: r.filename,
           domain: r.domain,
@@ -150,7 +177,7 @@ export function ChatPanel() {
           tags: r.tags,
         }))
 
-        const contextParts = injectedContext.map(
+        const contextParts = manuallyInjected.map(
           (r) => `--- Source: ${r.filename} (${r.domain}) ---\n${r.content}`,
         )
         allMessages.push({
@@ -160,10 +187,14 @@ export function ChatPanel() {
         clearInjected()
       }
 
+      if (autoInjectedCount > 0) {
+        setLastAutoInjectCount(autoInjectedCount)
+      }
+
       allMessages.push(...(active?.messages ?? []), userMsg)
       send(convoId, allMessages, selectedModel, sourcesForAssistant)
     },
-    [activeId, active, selectedModel, addMessage, create, send, injectedContext, clearInjected],
+    [activeId, active, selectedModel, addMessage, create, send, injectedContext, clearInjected, autoInject, autoInjectThreshold, kbContext.results],
   )
 
   const handleModelChange = useCallback(
@@ -363,6 +394,16 @@ export function ChatPanel() {
         </div>
       )}
 
+      {/* Auto-inject indicator */}
+      {lastAutoInjectCount > 0 && isStreaming && (
+        <div className="flex items-center gap-1.5 border-t bg-primary/5 px-4 py-1">
+          <Database className="h-3 w-3 shrink-0 text-primary" />
+          <span className="text-xs text-muted-foreground">
+            {lastAutoInjectCount} source{lastAutoInjectCount > 1 ? "s" : ""} auto-injected
+          </span>
+        </div>
+      )}
+
       {/* Input */}
       <ChatInput
         onSend={(content) => {
@@ -372,7 +413,10 @@ export function ChatPanel() {
         onStop={stop}
         isStreaming={isStreaming}
         injectedCount={kbContext.injectedContext.length}
-        onInputChange={smartSuggestions.debouncedSearch}
+        onInputChange={(text) => {
+          smartSuggestions.debouncedSearch(text)
+          if (lastAutoInjectCount > 0) setLastAutoInjectCount(0)
+        }}
       />
     </div>
   )

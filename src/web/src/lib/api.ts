@@ -45,11 +45,18 @@ export async function queryKB(
   query: string,
   domains?: string[],
   topK = 10,
+  conversationMessages?: { role: string; content: string }[],
 ): Promise<AgentQueryResponse> {
   const res = await fetch(`${MCP_BASE}/agent/query`, {
     method: "POST",
     headers: mcpHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ query, domains: domains ?? null, top_k: topK, use_reranking: true }),
+    body: JSON.stringify({
+      query,
+      domains: domains ?? null,
+      top_k: topK,
+      use_reranking: true,
+      conversation_messages: conversationMessages ?? null,
+    }),
   })
   if (!res.ok) throw new Error(`KB query failed: ${res.status}`)
   return res.json()

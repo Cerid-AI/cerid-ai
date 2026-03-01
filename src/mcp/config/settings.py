@@ -67,6 +67,7 @@ HYBRID_KEYWORD_WEIGHT = float(os.getenv("HYBRID_KEYWORD_WEIGHT", "0.4"))
 BM25_DATA_DIR = os.path.join(os.getenv("DATA_DIR", "data"), "bm25")
 QUERY_CONTEXT_MAX_CHARS = 14_000    # max chars assembled for LLM context
 QUERY_RERANK_CANDIDATES = 15        # max candidates sent to LLM reranker
+QUERY_CONTEXT_MESSAGES = 5          # max conversation messages used for query enrichment
 RERANK_LLM_WEIGHT = float(os.getenv("RERANK_LLM_WEIGHT", "0.6"))
 RERANK_ORIGINAL_WEIGHT = float(os.getenv("RERANK_ORIGINAL_WEIGHT", "0.4"))
 
@@ -94,6 +95,17 @@ EMBEDDING_DIMENSIONS = int(os.getenv("EMBEDDING_DIMENSIONS", "384"))
 # Hallucination Detection
 # ---------------------------------------------------------------------------
 HALLUCINATION_THRESHOLD = float(os.getenv("HALLUCINATION_THRESHOLD", "0.75"))
+
+# ---------------------------------------------------------------------------
+# Auto-Injection
+# ---------------------------------------------------------------------------
+AUTO_INJECT_THRESHOLD = float(os.getenv("AUTO_INJECT_THRESHOLD", "0.82"))
+AUTO_INJECT_MAX = int(os.getenv("AUTO_INJECT_MAX", "3"))
+
+# ---------------------------------------------------------------------------
+# Context Budget
+# ---------------------------------------------------------------------------
+CONTEXT_MAX_CHUNKS_PER_ARTIFACT = 2  # max chunks from same artifact in assembled context
 
 # ---------------------------------------------------------------------------
 # Memory Extraction

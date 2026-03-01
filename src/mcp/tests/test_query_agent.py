@@ -16,6 +16,7 @@ if _existing is not None and not hasattr(_existing, "_get_adjacent_domains"):
     del sys.modules["agents.query_agent"]
 
 from agents.query_agent import (  # noqa: E402
+    _enrich_query,
     _get_adjacent_domains,
     agent_query,
     assemble_context,
@@ -390,3 +391,167 @@ class TestAgentQuery:
         assert response["confidence"] == 0.0
         assert response["total_results"] == 0
         assert response["context"] == ""
+
+
+# ---------------------------------------------------------------------------
+# Tests: _enrich_query (pure function)
+# ---------------------------------------------------------------------------
+
+class TestEnrichQuery:
+    def test_empty_conversation(self):
+        assert _enrich_query("middleware", []) == "middleware"
+
+    def test_none_like_empty(self):
+        assert _enrich_query("middleware", []) == "middleware"
+
+    def test_adds_context_terms(self):
+        messages = [
+            {"role": "user", "content": "I am building a FastAPI application"},
+        ]
+        enriched = _enrich_query("how do I add middleware", messages)
+        assert "fastapi" in enriched.lower()
+        assert "application" in enriched.lower()
+        assert "how do I add middleware" in enriched
+
+    def test_skips_assistant_messages(self):
+        messages = [
+            {"role": "assistant", "content": "Here is how to use Django"},
+            {"role": "user", "content": "I want Flask instead"},
+        ]
+        enriched = _enrich_query("routing setup", messages)
+        assert "flask" in enriched.lower()
+        assert "django" not in enriched.lower()
+
+    def test_skips_system_messages(self):
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant"},
+            {"role": "user", "content": "Tell me about PostgreSQL"},
+        ]
+        enriched = _enrich_query("database", messages)
+        assert "postgresql" in enriched.lower()
+        assert "helpful" not in enriched.lower()
+
+    def test_removes_stopwords(self):
+        messages = [
+            {"role": "user", "content": "I have been working with Python"},
+        ]
+        enriched = _enrich_query("testing", messages)
+        # "have", "been", "with" are stopwords; "python" and "working" are not
+        assert "python" in enriched.lower()
+        words = enriched.lower().split()
+        assert "have" not in words[1:]  # after the original query
+        assert "been" not in words[1:]
+
+    def test_skips_short_words(self):
+        messages = [
+            {"role": "user", "content": "Go is a great language"},
+        ]
+        enriched = _enrich_query("concurrency", messages)
+        # "go" and "is" and "a" are <= 2 chars, should be skipped
+        words = enriched.split()
+        assert "go" not in [w.lower() for w in words[1:]]
+
+    def test_deduplicates_with_query_terms(self):
+        messages = [
+            {"role": "user", "content": "I need help with middleware for my app"},
+        ]
+        enriched = _enrich_query("middleware setup", messages)
+        # "middleware" is already in query, should not be duplicated
+        assert enriched.lower().count("middleware") == 1
+
+    def test_max_terms_limit(self):
+        # Create a message with many unique words
+        words = [f"word{i}" for i in range(50)]
+        messages = [{"role": "user", "content": " ".join(words)}]
+        enriched = _enrich_query("query", messages, max_terms=5)
+        # Original query + at most 5 context terms
+        parts = enriched.split()
+        assert len(parts) <= 1 + 5  # "query" + 5 terms
+
+    def test_max_context_messages(self):
+        messages = [
+            {"role": "user", "content": f"topic{i} content"} for i in range(10)
+        ]
+        enriched = _enrich_query("query", messages, max_context_messages=2)
+        # Should only use last 2 messages
+        assert "topic9" in enriched.lower() or "topic8" in enriched.lower()
+
+    def test_most_recent_first(self):
+        messages = [
+            {"role": "user", "content": "ancient topic forgotten"},
+            {"role": "user", "content": "recent topic important"},
+        ]
+        enriched = _enrich_query("query", messages, max_terms=3)
+        # Recent message terms should appear (processed first from reversed)
+        assert "recent" in enriched.lower()
+
+    def test_preserves_original_query(self):
+        messages = [{"role": "user", "content": "Python FastAPI"}]
+        enriched = _enrich_query("middleware setup", messages)
+        assert enriched.startswith("middleware setup")
+
+
+# ---------------------------------------------------------------------------
+# Tests: assemble_context — artifact chunk limiting (Phase 13C)
+# ---------------------------------------------------------------------------
+
+class TestAssembleContextArtifactLimiting:
+    def test_limits_chunks_per_artifact(self):
+        """Three chunks from same artifact → only 2 included (default limit)."""
+        results = [
+            _make_result(artifact_id="a1", chunk_index=0, content="chunk0", relevance=0.9),
+            _make_result(artifact_id="a1", chunk_index=1, content="chunk1", relevance=0.8),
+            _make_result(artifact_id="a1", chunk_index=2, content="chunk2", relevance=0.7),
+        ]
+        _, sources, _ = assemble_context(results, max_chars=50000, max_chunks_per_artifact=2)
+        assert len(sources) == 2
+        assert all(s["artifact_id"] == "a1" for s in sources)
+
+    def test_different_artifacts_not_limited(self):
+        """Chunks from different artifacts are each allowed their own quota."""
+        results = [
+            _make_result(artifact_id="a1", chunk_index=0, content="a1c0"),
+            _make_result(artifact_id="a1", chunk_index=1, content="a1c1"),
+            _make_result(artifact_id="a2", chunk_index=0, content="a2c0"),
+            _make_result(artifact_id="a2", chunk_index=1, content="a2c1"),
+        ]
+        _, sources, _ = assemble_context(results, max_chars=50000, max_chunks_per_artifact=2)
+        assert len(sources) == 4
+
+    def test_skipped_chunks_allow_others(self):
+        """When artifact A is capped, chunks from artifact B still fill budget."""
+        results = [
+            _make_result(artifact_id="a1", chunk_index=0, content="x" * 10, relevance=0.9),
+            _make_result(artifact_id="a1", chunk_index=1, content="x" * 10, relevance=0.85),
+            _make_result(artifact_id="a1", chunk_index=2, content="x" * 10, relevance=0.8),
+            _make_result(artifact_id="a2", chunk_index=0, content="y" * 10, relevance=0.7),
+        ]
+        _, sources, _ = assemble_context(results, max_chars=50000, max_chunks_per_artifact=2)
+        assert len(sources) == 3  # 2 from a1 + 1 from a2
+        artifact_ids = [s["artifact_id"] for s in sources]
+        assert artifact_ids.count("a1") == 2
+        assert artifact_ids.count("a2") == 1
+
+    def test_char_budget_still_respected(self):
+        """Char budget takes precedence even when artifact limit allows more."""
+        results = [
+            _make_result(artifact_id="a1", chunk_index=0, content="a" * 100),
+            _make_result(artifact_id="a2", chunk_index=0, content="b" * 100),
+        ]
+        _, sources, chars = assemble_context(results, max_chars=150, max_chunks_per_artifact=5)
+        assert len(sources) == 1
+        assert chars == 100
+
+    def test_continue_past_budget_overflow(self):
+        """Large chunk that exceeds budget is skipped; smaller later chunk fits."""
+        results = [
+            _make_result(artifact_id="a1", chunk_index=0, content="a" * 50, relevance=0.9),
+            _make_result(artifact_id="a2", chunk_index=0, content="b" * 200, relevance=0.8),
+            _make_result(artifact_id="a3", chunk_index=0, content="c" * 40, relevance=0.7),
+        ]
+        _, sources, chars = assemble_context(results, max_chars=100, max_chunks_per_artifact=5)
+        # a1 fits (50), a2 too big (200), a3 fits (40)
+        assert len(sources) == 2
+        assert sources[0]["artifact_id"] == "a1"
+        assert sources[1]["artifact_id"] == "a3"
+        assert chars == 90

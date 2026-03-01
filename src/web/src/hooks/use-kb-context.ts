@@ -5,7 +5,7 @@ import { useState, useCallback, useMemo } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { queryKB } from "@/lib/api"
 import { useKBInjection } from "@/contexts/kb-injection-context"
-import type { KBQueryResult, AgentQueryResponse } from "@/lib/types"
+import type { ChatMessage, KBQueryResult, AgentQueryResponse } from "@/lib/types"
 
 export interface UseKBContextReturn {
   // Query state
@@ -37,7 +37,10 @@ export interface UseKBContextReturn {
   clearInjected: () => void
 }
 
-export function useKBContext(latestUserMessage: string): UseKBContextReturn {
+export function useKBContext(
+  latestUserMessage: string,
+  recentMessages?: Pick<ChatMessage, "role" | "content">[],
+): UseKBContextReturn {
   const [activeDomains, setActiveDomains] = useState<Set<string>>(new Set())
   const [manualQuery, setManualQuery] = useState("")
   const [activeManualQuery, setActiveManualQuery] = useState("")
@@ -52,12 +55,17 @@ export function useKBContext(latestUserMessage: string): UseKBContextReturn {
     [activeDomains],
   )
 
+  // Stable key for conversation context (re-query when message count changes)
+  const contextMsgCount = recentMessages?.length ?? 0
+
   const { data, isLoading, error } = useQuery<AgentQueryResponse>({
-    queryKey: ["kb-query", effectiveQuery, domainKey],
+    queryKey: ["kb-query", effectiveQuery, domainKey, contextMsgCount],
     queryFn: () =>
       queryKB(
         effectiveQuery,
         activeDomains.size > 0 ? [...activeDomains] : undefined,
+        10,
+        recentMessages,
       ),
     enabled: !!effectiveQuery && effectiveQuery.length > 2,
     staleTime: 15_000,

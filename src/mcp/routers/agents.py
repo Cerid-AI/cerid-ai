@@ -24,6 +24,7 @@ class AgentQueryRequest(BaseModel):
     domains: Optional[List[str]] = None
     top_k: int = Field(10, ge=1, le=100)
     use_reranking: bool = True
+    conversation_messages: Optional[List[Dict[str, str]]] = None
 
 
 class TriageFileRequest(BaseModel):
@@ -76,10 +77,12 @@ async def agent_query_endpoint(req: AgentQueryRequest):
     try:
         from utils.query_cache import get_cached, set_cached
 
+        has_context = bool(req.conversation_messages)
         domain_key = f"{','.join(sorted(req.domains)) if req.domains else 'all'}|rerank={req.use_reranking}"
-        cached = get_cached(req.query, domain_key, req.top_k)
-        if cached:
-            return cached
+        if not has_context:
+            cached = get_cached(req.query, domain_key, req.top_k)
+            if cached:
+                return cached
 
         from agents.query_agent import agent_query
         result = await agent_query(
@@ -87,11 +90,13 @@ async def agent_query_endpoint(req: AgentQueryRequest):
             domains=req.domains,
             top_k=req.top_k,
             use_reranking=req.use_reranking,
+            conversation_messages=req.conversation_messages,
             chroma_client=get_chroma(),
             redis_client=get_redis(),
             neo4j_driver=get_neo4j(),
         )
-        set_cached(req.query, domain_key, req.top_k, result)
+        if not has_context:
+            set_cached(req.query, domain_key, req.top_k, result)
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -1,7 +1,7 @@
 # Cerid AI — Task Tracker
 
 > **Last updated:** 2026-02-28
-> **Current status:** Phase 12 complete. BM25 replacement, configurable weights, eval harness, embedding scaffold. 689+ tests.
+> **Current status:** Phase 13 complete. Conversation-aware KB queries, auto-injection with confidence gate, context budget optimization. 706+ tests.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md)
 
 ## Current: Phase 10 — Commercial & Open-Source Readiness
@@ -117,7 +117,23 @@
 - [x] Configurable retrieval weights: HYBRID_VECTOR_WEIGHT, HYBRID_KEYWORD_WEIGHT, RERANK_LLM_WEIGHT, RERANK_ORIGINAL_WEIGHT
 - [x] Retrieval evaluation harness: NDCG, MRR, Precision@K, Recall@K, Average Precision (31 tests)
 
-### Phase 13: Content & UX Polish
+### Phase 13: Conversation Intelligence ✅
+- [x] 13A — Conversation-aware KB queries: query enrichment from last 5 user messages, backend `_enrich_query()` with stopword filtering, frontend passes conversation history
+- [x] 13B — Auto-injection with confidence gate: configurable threshold (0.82 default), max 3 auto-injected chunks, settings UI toggle + slider, visual indicator during streaming
+- [x] 13C — Context budget optimization: max 2 chunks per artifact in assembled context, `continue` past oversized chunks instead of `break`
+
+### Phase 14: Artifact Quality
+- [ ] Curation agent (Phase 11C design doc: quality scoring, AI summaries, keyword validation)
+- [ ] Quality-weighted retrieval (wire quality scores into reranking)
+- [ ] Metadata in retrieval (tags/sub-categories as boost signals)
+
+### Phase 15: Realtime Accuracy Watcher
+- [ ] Streaming verification (wire existing SSE endpoint to frontend)
+- [ ] Accuracy dashboard (hallucination rates by model/domain/time, persist to Neo4j)
+- [ ] User claim feedback (per-claim correct/incorrect buttons)
+- [ ] Model accuracy comparison charts
+
+### Phase 16: Content & UX Polish
 - [ ] E1 — Artifact preview (PDF, code, spreadsheet rendering)
 - [ ] D2 remaining — Conversation fork/branch UI (exploratory)
 - [ ] Frontend component test expansion (40+ untested components)

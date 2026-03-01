@@ -343,6 +343,8 @@ export interface ServerSettings {
   enable_hallucination_check: boolean
   enable_memory_extraction: boolean
   hallucination_threshold: number
+  enable_auto_inject: boolean
+  auto_inject_threshold: number
   feature_tier: string
   feature_flags: Record<string, boolean>
   domains: string[]
@@ -363,6 +365,8 @@ export interface SettingsUpdate {
   enable_memory_extraction?: boolean
   hallucination_threshold?: number
   cost_sensitivity?: string
+  enable_auto_inject?: boolean
+  auto_inject_threshold?: number
 }
 
 export interface Memory {

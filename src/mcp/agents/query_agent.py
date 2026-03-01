@@ -6,6 +6,7 @@
 import asyncio
 import json
 import logging
+import re
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
@@ -37,6 +38,87 @@ def _get_adjacent_domains(requested: List[str]) -> Dict[str, float]:
             weight = explicit.get(other, config.CROSS_DOMAIN_DEFAULT_AFFINITY)
             adjacent[other] = max(adjacent.get(other, 0.0), weight)
     return adjacent
+
+
+# ---------------------------------------------------------------------------
+# Conversation-aware query enrichment
+# ---------------------------------------------------------------------------
+
+# Common English stopwords to filter from context terms
+_STOPWORDS = frozenset({
+    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "do", "does", "did", "will", "would", "could",
+    "should", "may", "might", "shall", "can", "need", "dare", "ought",
+    "used", "to", "of", "in", "for", "on", "with", "at", "by", "from",
+    "as", "into", "through", "during", "before", "after", "above", "below",
+    "between", "out", "off", "over", "under", "again", "further", "then",
+    "once", "here", "there", "when", "where", "why", "how", "all", "each",
+    "every", "both", "few", "more", "most", "other", "some", "such", "no",
+    "nor", "not", "only", "own", "same", "so", "than", "too", "very",
+    "just", "because", "but", "and", "or", "if", "while", "about", "up",
+    "that", "this", "these", "those", "am", "what", "which", "who", "whom",
+    "its", "it", "he", "she", "they", "them", "his", "her", "my", "your",
+    "our", "their", "me", "him", "us", "i", "you", "we", "also", "like",
+    "get", "got", "make", "made", "know", "think", "want", "see", "look",
+    "find", "give", "tell", "say", "said", "going", "come", "take",
+})
+
+_WORD_RE = re.compile(r"[a-zA-Z0-9_]+(?:[-'][a-zA-Z0-9_]+)*")
+
+
+def _enrich_query(
+    query: str,
+    conversation_messages: List[Dict[str, str]],
+    max_context_messages: int = 5,
+    max_terms: int = 10,
+) -> str:
+    """Enrich a query with key terms extracted from recent conversation messages.
+
+    Extracts unique meaningful terms from the last N user messages and appends
+    them to the query. This improves both vector (semantic context) and BM25
+    (keyword coverage) retrieval without an LLM call.
+
+    Returns the original query if no useful context terms are found.
+    """
+    if not conversation_messages:
+        return query
+
+    # Collect text from recent user messages only (skip system/assistant)
+    user_texts: List[str] = []
+    for msg in conversation_messages[-max_context_messages:]:
+        if msg.get("role") == "user":
+            user_texts.append(msg.get("content", ""))
+
+    if not user_texts:
+        return query
+
+    # Extract unique terms not in the query and not stopwords
+    query_lower = query.lower()
+    query_terms = {w.lower() for w in _WORD_RE.findall(query)}
+    context_terms: List[str] = []
+    seen: set = set()
+
+    for text in reversed(user_texts):  # Most recent first
+        words = _WORD_RE.findall(text)
+        for word in words:
+            lower = word.lower()
+            if (
+                len(lower) > 2
+                and lower not in _STOPWORDS
+                and lower not in query_terms
+                and lower not in seen
+            ):
+                seen.add(lower)
+                context_terms.append(lower)
+                if len(context_terms) >= max_terms:
+                    break
+        if len(context_terms) >= max_terms:
+            break
+
+    if not context_terms:
+        return query
+
+    return f"{query} {' '.join(context_terms)}"
 
 
 # ---------------------------------------------------------------------------
@@ -363,30 +445,46 @@ async def rerank_results(
 
 def assemble_context(
     results: List[Dict[str, Any]],
-    max_chars: int = 14000
+    max_chars: int = 14000,
+    max_chunks_per_artifact: int = 0,
 ) -> tuple[str, List[Dict[str, Any]], int]:
-    """Build context window from top results, respecting token budget."""
-    context_parts = []
-    included_sources = []
+    """Build context window from top results, respecting token budget.
+
+    Limits chunks per artifact to promote source diversity.  A value of 0
+    for *max_chunks_per_artifact* means use the global config default.
+    """
+    if max_chunks_per_artifact <= 0:
+        max_chunks_per_artifact = config.CONTEXT_MAX_CHUNKS_PER_ARTIFACT
+
+    context_parts: List[str] = []
+    included_sources: List[Dict[str, Any]] = []
     char_count = 0
+    artifact_counts: Dict[str, int] = defaultdict(int)
 
     for result in results:
+        artifact_id = result["artifact_id"]
+
+        # Skip if this artifact already has enough chunks in context
+        if artifact_counts[artifact_id] >= max_chunks_per_artifact:
+            continue
+
         content = result["content"]
         content_len = len(content)
 
         if char_count + content_len > max_chars:
-            break
+            continue  # don't break — later smaller chunks may still fit
 
         context_parts.append(content)
         included_sources.append({
             "content": content[:200],  # Preview only
             "relevance": result["relevance"],
-            "artifact_id": result["artifact_id"],
+            "artifact_id": artifact_id,
             "filename": result["filename"],
             "domain": result["domain"],
-            "chunk_index": result["chunk_index"]
+            "chunk_index": result["chunk_index"],
         })
         char_count += content_len
+        artifact_counts[artifact_id] += 1
 
     context = "\n\n".join(context_parts)
     return context, included_sources, char_count
@@ -401,13 +499,23 @@ async def agent_query(
     domains: Optional[List[str]] = None,
     top_k: int = 10,
     use_reranking: bool = True,
+    conversation_messages: Optional[List[Dict[str, str]]] = None,
     chroma_client: Optional[chromadb.HttpClient] = None,
     redis_client: Optional[Any] = None,
     neo4j_driver: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Execute multi-domain query with reranking, graph expansion, and context assembly."""
+    # Enrich query with conversation context if provided
+    search_query = query
+    if conversation_messages:
+        search_query = _enrich_query(
+            query, conversation_messages, max_context_messages=config.QUERY_CONTEXT_MESSAGES,
+        )
+        if search_query != query:
+            logger.info(f"Enriched query: {query!r} → {search_query!r}")
+
     results = await multi_domain_query(
-        query=query,
+        query=search_query,
         domains=domains,
         top_k=top_k,
         chroma_client=chroma_client,
@@ -418,7 +526,7 @@ async def agent_query(
         adjacent = _get_adjacent_domains(domains)
         if adjacent:
             cross_results = await multi_domain_query(
-                query=query,
+                query=search_query,
                 domains=list(adjacent.keys()),
                 top_k=max(3, top_k // 2),
                 chroma_client=chroma_client,

@@ -42,6 +42,12 @@ class SettingsUpdateRequest(BaseModel):
     cost_sensitivity: Optional[str] = Field(
         None, description="Cost sensitivity level: low, medium, or high"
     )
+    enable_auto_inject: Optional[bool] = Field(
+        None, description="Toggle automatic KB context injection for high-confidence results"
+    )
+    auto_inject_threshold: Optional[float] = Field(
+        None, ge=0.5, le=1.0, description="Minimum relevance score for auto-injection"
+    )
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -58,7 +64,9 @@ async def get_settings_endpoint():
         "enable_hallucination_check": config.ENABLE_HALLUCINATION_CHECK,
         "enable_memory_extraction": config.ENABLE_MEMORY_EXTRACTION,
         "enable_model_router": config.ENABLE_MODEL_ROUTER,
+        "enable_auto_inject": config.ENABLE_AUTO_INJECT,
         "hallucination_threshold": config.HALLUCINATION_THRESHOLD,
+        "auto_inject_threshold": config.AUTO_INJECT_THRESHOLD,
         "cost_sensitivity": config.COST_SENSITIVITY,
         "feature_tier": config.FEATURE_TIER,
         "feature_flags": config.FEATURE_FLAGS,
@@ -114,12 +122,21 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
         config.COST_SENSITIVITY = req.cost_sensitivity
         updated["cost_sensitivity"] = req.cost_sensitivity
 
+    if req.enable_auto_inject is not None:
+        config.ENABLE_AUTO_INJECT = req.enable_auto_inject
+        updated["enable_auto_inject"] = req.enable_auto_inject
+
+    if req.auto_inject_threshold is not None:
+        config.AUTO_INJECT_THRESHOLD = req.auto_inject_threshold
+        updated["auto_inject_threshold"] = req.auto_inject_threshold
+
     if not updated:
         raise HTTPException(
             status_code=400,
             detail="No valid fields provided. Updatable fields: "
             "categorize_mode, enable_feedback_loop, enable_hallucination_check, "
-            "enable_memory_extraction, hallucination_threshold, cost_sensitivity",
+            "enable_memory_extraction, hallucination_threshold, cost_sensitivity, "
+            "enable_auto_inject, auto_inject_threshold",
         )
 
     logger.info(f"Settings updated: {updated}")
