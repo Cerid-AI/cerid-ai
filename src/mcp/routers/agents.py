@@ -77,6 +77,13 @@ class CurateRequest(BaseModel):
     domains: Optional[List[str]] = None
     max_artifacts: int = Field(200, ge=1, le=1000)
     generate_synopses: bool = False
+    synopsis_model: Optional[str] = None
+
+
+class CurateEstimateRequest(BaseModel):
+    synopsis_model: str = ""
+    domains: Optional[List[str]] = None
+    max_artifacts: int = Field(200, ge=1, le=1000)
 
 
 @router.post("/agent/query")
@@ -226,6 +233,47 @@ async def hallucination_report_endpoint(conversation_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class ClaimFeedbackRequest(BaseModel):
+    conversation_id: str
+    claim_index: int
+    correct: bool
+
+
+@router.post("/agent/hallucination/feedback")
+async def claim_feedback_endpoint(req: ClaimFeedbackRequest):
+    """Record user feedback on a verification claim."""
+    try:
+        from agents.hallucination import get_hallucination_report, REDIS_HALLUCINATION_PREFIX, REDIS_HALLUCINATION_TTL
+        from utils.cache import log_claim_feedback
+
+        redis = get_redis()
+        report = get_hallucination_report(redis, req.conversation_id)
+        if not report:
+            raise HTTPException(status_code=404, detail="No hallucination report found")
+
+        if req.claim_index < 0 or req.claim_index >= len(report.get("claims", [])):
+            raise HTTPException(status_code=400, detail="Invalid claim index")
+
+        # Update claim with user feedback
+        feedback_value = "correct" if req.correct else "incorrect"
+        report["claims"][req.claim_index]["user_feedback"] = feedback_value
+
+        # Write updated report back to Redis
+        key = f"{REDIS_HALLUCINATION_PREFIX}{req.conversation_id}"
+        redis.setex(key, REDIS_HALLUCINATION_TTL, json.dumps(report))
+
+        # Log feedback for analytics
+        model = report.get("model")
+        log_claim_feedback(redis, req.conversation_id, req.claim_index, req.correct, model)
+
+        return {"status": "ok"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Claim feedback error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/agent/memory/extract")
 async def memory_extract_endpoint(req: MemoryExtractionRequest):
     try:
@@ -353,7 +401,24 @@ async def curate_endpoint(req: CurateRequest):
             max_artifacts=req.max_artifacts,
             chroma_client=get_chroma() if req.generate_synopses else None,
             generate_synopses=req.generate_synopses,
+            synopsis_model=req.synopsis_model,
         )
     except Exception as e:
         logger.error(f"Curate error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/agent/curate/estimate")
+async def curate_estimate_endpoint(req: CurateEstimateRequest):
+    try:
+        from agents.curator import estimate_synopsis_run
+        return estimate_synopsis_run(
+            neo4j_driver=get_neo4j(),
+            chroma_client=get_chroma(),
+            model=req.synopsis_model,
+            domains=req.domains,
+            max_artifacts=req.max_artifacts,
+        )
+    except Exception as e:
+        logger.error(f"Curate estimate error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

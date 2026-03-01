@@ -15,6 +15,8 @@ export interface UseKBContextReturn {
   executionTime: number
   isLoading: boolean
   error: Error | null
+  /** True once at least one KB query has returned data. */
+  hasQueried: boolean
 
   // Filter state
   activeDomains: Set<string>
@@ -101,6 +103,7 @@ export function useKBContext(
     executionTime: data?.execution_time_ms ?? 0,
     isLoading,
     error: error ?? null,
+    hasQueried: data !== undefined,
 
     activeDomains,
     toggleDomain,

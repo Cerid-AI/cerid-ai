@@ -99,7 +99,7 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
         {isUser ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
       </div>
 
-      <div className={cn("flex max-w-[80%] flex-col gap-1", isUser && "items-end")}>
+      <div className={cn("flex max-w-[85%] flex-col gap-1", isUser && "items-end")}>
         <div
           className={cn(
             "rounded-2xl px-4 py-2.5",

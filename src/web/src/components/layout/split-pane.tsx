@@ -10,7 +10,7 @@ interface SplitPaneProps {
   defaultSize?: number
 }
 
-export function SplitPane({ left, right, showRight, defaultSize = 60 }: SplitPaneProps) {
+export function SplitPane({ left, right, showRight, defaultSize = 70 }: SplitPaneProps) {
   if (!showRight) {
     return <div className="flex h-full min-h-0 flex-1 flex-col">{left}</div>
   }
@@ -21,7 +21,7 @@ export function SplitPane({ left, right, showRight, defaultSize = 60 }: SplitPan
         {left}
       </Panel>
       <Separator className="w-1 bg-border transition-colors hover:bg-primary/20 active:bg-primary/30" />
-      <Panel defaultSize={100 - defaultSize} minSize={25}>
+      <Panel defaultSize={100 - defaultSize} minSize={20}>
         {right}
       </Panel>
     </Group>

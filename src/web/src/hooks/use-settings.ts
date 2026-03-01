@@ -26,6 +26,7 @@ export function useSettings() {
   const [autoModelSwitch, setAutoModelSwitch] = useState(() => readBool("cerid-auto-model-switch"))
   const [autoInject, setAutoInject] = useState(() => readBool("cerid-auto-inject"))
   const [autoInjectThreshold, setAutoInjectThresholdState] = useState(() => readFloat("cerid-auto-inject-threshold", 0.82))
+  const [hallucinationEnabled, setHallucinationEnabled] = useState(() => readBool("cerid-hallucination-check"))
 
   const [costSensitivity, setCostSensitivity] = useState<"low" | "medium" | "high">(() => {
     try {
@@ -59,6 +60,10 @@ export function useSettings() {
         if (s.auto_inject_threshold !== undefined) {
           setAutoInjectThresholdState(s.auto_inject_threshold)
           persist("cerid-auto-inject-threshold", String(s.auto_inject_threshold))
+        }
+        if (s.enable_hallucination_check !== undefined) {
+          setHallucinationEnabled(s.enable_hallucination_check)
+          persist("cerid-hallucination-check", String(s.enable_hallucination_check))
         }
       })
       .catch(() => { /* Server unavailable — use localStorage values */ })
@@ -110,6 +115,15 @@ export function useSettings() {
     updateSettings({ cost_sensitivity: value }).catch(() => { /* noop */ })
   }, [])
 
+  const toggleHallucinationEnabled = useCallback(() => {
+    setHallucinationEnabled((prev) => {
+      const next = !prev
+      persist("cerid-hallucination-check", String(next))
+      updateSettings({ enable_hallucination_check: next }).catch(() => { /* noop */ })
+      return next
+    })
+  }, [])
+
   return {
     feedbackLoop, toggleFeedbackLoop,
     showDashboard, toggleDashboard,
@@ -117,5 +131,6 @@ export function useSettings() {
     autoInject, toggleAutoInject,
     autoInjectThreshold, setAutoInjectThreshold,
     costSensitivity, updateCostSensitivity,
+    hallucinationEnabled, toggleHallucinationEnabled,
   }
 }

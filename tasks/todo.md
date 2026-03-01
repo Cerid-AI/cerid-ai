@@ -1,8 +1,9 @@
 # Cerid AI — Task Tracker
 
 > **Last updated:** 2026-03-01
-> **Current status:** Phase 14F complete + tested. Bifrost model IDs fixed, synopsis rate-limit handling. 795+ tests.
+> **Current status:** Phase 15H complete. Holistic audit done. 795+ tests.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md)
+> **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](../docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md)
 
 ## Current: Phase 10 — Commercial & Open-Source Readiness
 
@@ -131,17 +132,124 @@
 - [x] 14F — Audit agent visibility + AI synopses: KBOperations moved outside analytics loading gate, Neo4j sub_category/CATEGORIZED_AS backfill migration, search result deduplication by artifact_id, AI synopsis generation via Bifrost Llama (curator agent extended with `generate_synopses` option), synopsis toggle in Quality Audit UI
 - [x] 14G — Bifrost model fix + rate-limit hardening: `CATEGORIZE_MODELS` updated with `openrouter/` prefix + `llama-3.3-70b-instruct:free` (old model removed from OpenRouter), synopsis 8s inter-request throttle + 60s retry on 429 (free-tier 8 RPM limit), browser-verified all panes functional
 
-### Phase 15: Realtime Accuracy Watcher
-- [ ] Streaming verification (wire existing SSE endpoint to frontend)
-- [ ] Accuracy dashboard (hallucination rates by model/domain/time, persist to Neo4j)
-- [ ] User claim feedback (per-claim correct/incorrect buttons)
-- [ ] Model accuracy comparison charts
+### Phase 15: Realtime Accuracy Watcher & UI Polish
 
-### Phase 16: Content & UX Polish
+#### 15E: UI Polish ✅
+- [x] Response verification panel → right-column upper third (vertical split with KB context)
+- [x] Settings pane scroll fix (`min-h-0` on flex container)
+- [x] Settings sections collapsible/expandable (localStorage persistence)
+- [x] Per-setting info tooltips (replaced memory extraction explainer block)
+- [x] Response verification toggle in chat toolbar (Shield icon)
+- [x] Status bar service tooltips enhanced (tech name, purpose, status ✓/✗)
+- [x] Dashboard metric tooltips (model info, token breakdown, cost breakdown, KB sources)
+- [x] Verification status bar above chat input (accuracy %, coherence, claim counts)
+
+#### 15F: Verification Timing + KB Fixes ✅
+- [x] Polling for verification report (8 retries, exponential backoff ~31s)
+- [x] Status bar states fixed ("Verification ready" instead of "Awaiting response...")
+- [x] KB empty state conditional ("No matching knowledge found" vs "Send a message...")
+- [x] Context-weighted query enrichment (recency-weighted terms + context alignment boost)
+
+#### 15G: Audit Pane Layout Fix ✅
+- [x] Audit pane scroll fix (`min-h-0`)
+- [x] Audit pane layout restructure (Operations section separated from Analytics)
+- [x] Analytics filters (Period + Show) colocated with analytics content, not in header
+- [x] Updated project tracker with 15E/15F/15G completion
+
+#### 15H: Streaming Verification & Accuracy Analytics ✅
+- [x] 15H.1 — Streaming verification: replaced polling with SSE streaming (`use-verification-stream.ts` hook, `streamVerification()` API, progressive status bar)
+- [x] 15H.2 — Accuracy dashboard: `log_verification_metrics()` in cache.py, `model` param threaded through `check_hallucinations()`, `get_verification_analytics()` in audit.py, `accuracy-dashboard.tsx` component, "Verification" report toggle in audit pane
+- [x] 15H.3 — User claim feedback: `POST /agent/hallucination/feedback` endpoint, `log_claim_feedback()` in cache.py, thumbs up/down buttons on ClaimBadge, `submitClaimFeedback()` API
+- [x] 15H.4 — Model accuracy comparison chart: `model-accuracy-chart.tsx` with Recharts horizontal BarChart, color-coded accuracy bars, integrated into accuracy dashboard
+
+### Phase 16: Quality, Cleanup & Polish
+
+> Full details: [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](../docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md)
+
+#### 16A: Security & Infrastructure Hardening (Critical)
+- [ ] Pin Bifrost + LibreChat Docker images to specific versions
+- [ ] Harden credentials (PostgreSQL, Redis, MongoDB, Meilisearch)
+- [ ] Add npm audit + secret detection to CI
+- [ ] Runtime MCP_URL config for web container
+
+#### 16B: Dead Code & API Cleanup
+- [ ] Remove 6 dead frontend API functions (checkHallucinations, fetchCollections, fetchSupportedExtensions, fetchTags, mergeTags, updateArtifactTaxonomy)
+- [ ] Remove dead backend code (unused vars, inline imports, single-use helpers)
+- [ ] Verify and remove unused dependencies (python-multipart, spacy, pandas, @tanstack/react-query)
+
+#### 16C: Backend Code Quality
+- [ ] DRY refactoring (9 items: extract helpers in query_agent, triage, audit, maintenance)
+- [ ] Efficiency improvements (6 items: dedup pre-check, Neo4j MERGE, BM25 rebuild, async limiter)
+- [ ] Error handling + type safety + AI slop cleanup (10 items)
+
+#### 16D: Frontend Code Quality
+- [ ] Extract shared utilities (localStorage, cost calc, accuracy colors, OCR cleaning)
+- [ ] Extract shared components (TagPills, LoadingDots, SettingsSection, status colors)
+- [ ] Fix React anti-patterns (handleSend extraction, derived state, module-level mutations)
+- [ ] Performance fixes (unstable keys, batched state updates, memoization)
+
+#### 16E: Dependency & Docker Optimization
+- [ ] Tighten Python version ranges (langgraph, langchain-core)
+- [ ] Docker improvements (multi-stage MCP build, layer caching, Alpine)
+- [ ] CI hardening (mypy, coverage threshold 70%, Codecov)
+
+#### 16F: Backend Feature Wiring
+- [ ] Wire taxonomy CRUD UI (domain/subcategory creation, recategorize)
+- [ ] Wire agent operations UI (batch triage, memory archive, digest)
+- [ ] Wire plugin management + model router settings
+
+#### 16G: Content Experience & Testing
 - [ ] E1 — Artifact preview (PDF, code, spreadsheet rendering)
 - [ ] D2 remaining — Conversation fork/branch UI (exploratory)
 - [ ] Frontend component test expansion (40+ untested components)
 - [ ] F6 remaining — cerid-web compose separation
+
+#### 16H: Documentation Updates
+- [ ] Update ISSUES.md status, mark resolved items, add new sections
+- [ ] Update this file with Phase 16-18 structure
+- [ ] CHANGELOG.md (retroactive from git history)
+
+### Phase 17: Smart Tags & Artifact Quality
+
+#### 17A: Smart Tag System
+- [ ] Define tag vocabulary per domain in TAXONOMY config
+- [ ] Rewrite AI categorization prompt for taxonomy-constrained tag generation
+- [ ] Upgrade tag quality scoring (vocabulary match, relevance, diversity)
+- [ ] Tag suggestion typeahead UI with controlled vocabulary
+- [ ] Tag analytics & discovery (cloud, co-occurrence, orphan detection)
+- [ ] Batch re-tagging for existing artifacts
+
+#### 17B: Artifact Summary Quality
+- [ ] Rewrite summary prompt to "What is this?" format
+- [ ] Update curator synopsis prompt to match
+- [ ] Summary display enhancement (full display, inline edit, AI vs user distinction)
+- [ ] Batch summary regeneration for truncated/poor summaries
+
+### Phase 18: Knowledge Sync & Multi-Computer Parity
+
+#### 18A: Sync Infrastructure
+- [ ] Incremental export (track last_exported_at, delta-only)
+- [ ] Tombstone support (propagate deletions across machines)
+- [ ] Conflict detection & resolution (multi-strategy: remote/local/both/manual)
+- [ ] Scheduled sync (APScheduler integration, export-on-ingest option)
+- [ ] Selective sync (domain/date-range filtering)
+
+#### 18B: Sync GUI Integration
+- [ ] Sync status dashboard in settings (counts, diff, indicators)
+- [ ] Export/Import/Status action buttons with progress
+- [ ] Sync history view + conflict resolution dialog
+
+#### 18C: File Attachment & Drag-Drop Ingestion
+- [ ] Drag-and-drop zone on Knowledge Context pane
+- [ ] Upload progress with pipeline status (parse → categorize → chunk → index)
+- [ ] Pre-upload options dialog (domain, tags, categorization mode, storage mode)
+- [ ] Backend batch upload + storage_mode parameter
+
+#### 18D: Knowledge Storage Options
+- [ ] Storage mode: extract-only vs. curate files in managed archive
+- [ ] Managed file archive (copy to domain/sub_category folders, checksum tracking)
+- [ ] Archive sync strategy (metadata-only vs. file checksums)
+- [ ] GUI file management (view file, open folder, re-ingest)
 
 ## Completed Phases
 

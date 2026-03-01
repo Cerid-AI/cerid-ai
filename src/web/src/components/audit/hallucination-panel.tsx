@@ -1,20 +1,47 @@
 // Copyright (c) 2026 Justin Michaels. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useEffect } from "react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { useState } from "react"
 import { Badge } from "@/components/ui/badge"
-import { fetchHallucinationReport } from "@/lib/api"
-import type { HallucinationReport, HallucinationClaim } from "@/lib/types"
+import { Button } from "@/components/ui/button"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { ShieldOff, Shield, ShieldCheck, Loader2, ThumbsUp, ThumbsDown } from "lucide-react"
+import { submitClaimFeedback } from "@/lib/api"
+import type { HallucinationReport, HallucinationClaim, StreamingClaim } from "@/lib/types"
+import { cn } from "@/lib/utils"
 
 const STATUS_COLORS: Record<string, string> = {
   verified: "bg-green-500/20 text-green-400 border-green-500/30",
   unverified: "bg-red-500/20 text-red-400 border-red-500/30",
   uncertain: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
+  pending: "bg-muted text-muted-foreground border-border",
   error: "bg-muted text-muted-foreground",
 }
 
-function ClaimBadge({ claim }: { claim: HallucinationClaim }) {
+function ClaimBadge({
+  claim,
+  index,
+  conversationId,
+}: {
+  claim: HallucinationClaim
+  index: number
+  conversationId?: string
+}) {
+  const [feedback, setFeedback] = useState<"correct" | "incorrect" | null>(
+    claim.user_feedback ?? null,
+  )
+
+  const handleFeedback = async (correct: boolean) => {
+    if (!conversationId || feedback) return
+    const value = correct ? "correct" : "incorrect"
+    setFeedback(value as "correct" | "incorrect")
+    try {
+      await submitClaimFeedback(conversationId, index, correct)
+    } catch {
+      setFeedback(null) // Revert on error
+    }
+  }
+
   return (
     <div className="flex items-start gap-2 rounded-lg border p-3">
       <Badge
@@ -35,66 +62,206 @@ function ClaimBadge({ claim }: { claim: HallucinationClaim }) {
           <p className="mt-1 text-xs text-muted-foreground">{claim.reason}</p>
         )}
       </div>
+      {conversationId && (
+        <div className="flex shrink-0 gap-0.5">
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(
+              "h-6 w-6",
+              feedback === "correct" && "text-green-500",
+            )}
+            onClick={() => handleFeedback(true)}
+            disabled={!!feedback}
+            aria-label="Mark as correct"
+          >
+            <ThumbsUp className="h-3 w-3" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(
+              "h-6 w-6",
+              feedback === "incorrect" && "text-red-500",
+            )}
+            onClick={() => handleFeedback(false)}
+            disabled={!!feedback}
+            aria-label="Mark as incorrect"
+          >
+            <ThumbsDown className="h-3 w-3" />
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function StreamingClaimBadge({ claim }: { claim: StreamingClaim }) {
+  const status = claim.status ?? "pending"
+  return (
+    <div className="flex items-start gap-2 rounded-lg border p-3">
+      <Badge
+        variant="outline"
+        className={`shrink-0 ${STATUS_COLORS[status] ?? STATUS_COLORS.pending}`}
+      >
+        {status === "pending" ? (
+          <span className="flex items-center gap-1">
+            <Loader2 className="h-2.5 w-2.5 animate-spin" />
+            verifying
+          </span>
+        ) : (
+          status
+        )}
+      </Badge>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm leading-relaxed">{claim.claim}</p>
+        {claim.source && (
+          <p className="mt-1 text-xs text-muted-foreground">
+            Source: {claim.source}
+            {claim.confidence != null && claim.confidence > 0 && ` (${Math.round(claim.confidence * 100)}% match)`}
+          </p>
+        )}
+        {claim.reason && !claim.source && (
+          <p className="mt-1 text-xs text-muted-foreground">{claim.reason}</p>
+        )}
+      </div>
     </div>
   )
 }
 
 interface HallucinationPanelProps {
-  conversationId: string | null
-  /** Change this value to force a re-fetch (e.g. message count after streaming completes). */
-  refreshKey?: number
+  /** Hallucination report data (null = no data yet). */
+  report: HallucinationReport | null
+  /** Whether the report is currently being fetched. */
+  loading: boolean
+  /** Whether the hallucination check feature is enabled. */
+  featureEnabled?: boolean
+  /** Conversation ID for claim feedback. */
+  conversationId?: string
+  /** Streaming claims for real-time display. */
+  streamingClaims?: StreamingClaim[]
 }
 
-export function HallucinationPanel({ conversationId, refreshKey = 0 }: HallucinationPanelProps) {
-  const [report, setReport] = useState<HallucinationReport | null>(null)
-  const [loading, setLoading] = useState(false)
+export function HallucinationPanel({
+  report, loading, featureEnabled = false,
+  conversationId, streamingClaims,
+}: HallucinationPanelProps) {
+  // Feature disabled
+  if (!featureEnabled) {
+    return (
+      <div className="flex h-full flex-col">
+        <PanelHeader />
+        <div className="flex flex-1 items-center justify-center p-3">
+          <div className="flex items-center gap-2">
+            <ShieldOff className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">
+              Response verification is off — enable in Settings or toolbar
+            </span>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
-  useEffect(() => {
-    if (!conversationId) {
-      setReport(null)
-      return
-    }
-    let cancelled = false
-    setLoading(true)
-    // Delay initial fetch slightly to allow backend feedback loop to process
-    const timer = setTimeout(() => {
-      fetchHallucinationReport(conversationId)
-        .then((r) => { if (!cancelled) setReport(r) })
-        .catch(() => { if (!cancelled) setReport(null) })
-        .finally(() => { if (!cancelled) setLoading(false) })
-    }, refreshKey > 0 ? 2000 : 0) // 2s delay on refresh to let backend finish processing
-    return () => { cancelled = true; clearTimeout(timer) }
-  }, [conversationId, refreshKey])
+  // Streaming mode — show claims as they arrive
+  if (streamingClaims && streamingClaims.length > 0) {
+    const resolved = streamingClaims.filter((c) => c.status && c.status !== "pending")
+    const pending = streamingClaims.filter((c) => !c.status || c.status === "pending")
+    return (
+      <div className="flex h-full flex-col">
+        <PanelHeader />
+        <div className="flex gap-3 px-4 py-2 text-xs">
+          <span className="text-muted-foreground">
+            {resolved.length}/{streamingClaims.length} verified
+          </span>
+          {pending.length > 0 && (
+            <span className="flex items-center gap-1 text-muted-foreground">
+              <Loader2 className="h-2.5 w-2.5 animate-spin" />
+              {pending.length} pending
+            </span>
+          )}
+        </div>
+        <ScrollArea className="min-h-0 flex-1 px-4 pb-3">
+          <div className="space-y-2">
+            {streamingClaims.map((claim) => (
+              <StreamingClaimBadge key={claim.index} claim={claim} />
+            ))}
+          </div>
+        </ScrollArea>
+      </div>
+    )
+  }
 
-  if (!conversationId || loading) return null
-  if (!report || report.skipped) return null
-  if (report.summary.total === 0) return null
+  // Loading / checking
+  if (loading) {
+    return (
+      <div className="flex h-full flex-col">
+        <PanelHeader />
+        <div className="flex flex-1 items-center justify-center p-3">
+          <div className="flex items-center gap-2">
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
+            <span className="text-xs text-muted-foreground">Analyzing response...</span>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
+  // No claims found (clean response)
+  if (!report || report.skipped || report.summary.total === 0) {
+    return (
+      <div className="flex h-full flex-col">
+        <PanelHeader />
+        <div className="flex flex-1 items-center justify-center p-3">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4 shrink-0 text-green-500" />
+            <span className="text-xs text-muted-foreground">No factual claims to verify</span>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Claims found — full detailed view
   const { verified, unverified, uncertain } = report.summary
 
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium">Fact Check</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="flex gap-3 text-xs">
-          {verified > 0 && (
-            <span className="text-green-400">{verified} verified</span>
-          )}
-          {uncertain > 0 && (
-            <span className="text-yellow-400">{uncertain} uncertain</span>
-          )}
-          {unverified > 0 && (
-            <span className="text-red-400">{unverified} unverified</span>
-          )}
-        </div>
+    <div className="flex h-full flex-col">
+      <PanelHeader />
+      <div className="flex gap-3 px-4 py-2 text-xs">
+        {verified > 0 && (
+          <span className="text-green-400">{verified} verified</span>
+        )}
+        {uncertain > 0 && (
+          <span className="text-yellow-400">{uncertain} uncertain</span>
+        )}
+        {unverified > 0 && (
+          <span className="text-red-400">{unverified} unverified</span>
+        )}
+      </div>
+      <ScrollArea className="min-h-0 flex-1 px-4 pb-3">
         <div className="space-y-2">
           {report.claims.map((claim, i) => (
-            <ClaimBadge key={i} claim={claim} />
+            <ClaimBadge
+              key={i}
+              claim={claim}
+              index={i}
+              conversationId={conversationId}
+            />
           ))}
         </div>
-      </CardContent>
-    </Card>
+      </ScrollArea>
+    </div>
+  )
+}
+
+function PanelHeader() {
+  return (
+    <div className="border-b px-4 py-2">
+      <div className="flex items-center gap-2">
+        <Shield className="h-3.5 w-3.5 text-muted-foreground" />
+        <span className="text-sm font-medium">Response Verification</span>
+      </div>
+    </div>
   )
 }

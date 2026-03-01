@@ -146,6 +146,7 @@ async def ingest_feedback_endpoint(req: FeedbackIngestRequest):
                         chroma_client=get_chroma(),
                         neo4j_driver=get_neo4j(),
                         redis_client=get_redis(),
+                        model=req.model,
                     )
                 )
             except RuntimeError:

@@ -319,6 +319,16 @@ class TestAgentQuery:
         mock_config.DOMAIN_AFFINITY = {}
         mock_config.CROSS_DOMAIN_DEFAULT_AFFINITY = 0.2
         mock_config.QUERY_CONTEXT_MAX_CHARS = 14000
+        mock_config.QUALITY_BOOST_BASE = 0.8
+        mock_config.QUALITY_BOOST_FACTOR = 0.2
+        mock_config.QUALITY_METADATA_TAG_BOOST = 0.05
+        mock_config.QUALITY_METADATA_SUBCAT_BOOST = 0.08
+        mock_config.QUALITY_METADATA_MAX_BOOST = 0.15
+        mock_config.QUALITY_MIN_RELEVANCE_THRESHOLD = 0.15
+        mock_config.TEMPORAL_HALF_LIFE_DAYS = 30
+        mock_config.TEMPORAL_RECENCY_WEIGHT = 0.1
+        mock_config.CONTEXT_MAX_CHUNKS_PER_ARTIFACT = 2
+        mock_config.QUERY_CONTEXT_MESSAGES = 5
 
         result_item = _make_result(content="test content", relevance=0.8)
         # Use side_effect to return fresh lists (avoids aliasing when extend() mutates)
@@ -354,6 +364,16 @@ class TestAgentQuery:
         mock_config.DOMAIN_AFFINITY = {}
         mock_config.CROSS_DOMAIN_DEFAULT_AFFINITY = 0.2
         mock_config.QUERY_CONTEXT_MAX_CHARS = 14000
+        mock_config.QUALITY_BOOST_BASE = 0.8
+        mock_config.QUALITY_BOOST_FACTOR = 0.2
+        mock_config.QUALITY_METADATA_TAG_BOOST = 0.05
+        mock_config.QUALITY_METADATA_SUBCAT_BOOST = 0.08
+        mock_config.QUALITY_METADATA_MAX_BOOST = 0.15
+        mock_config.QUALITY_MIN_RELEVANCE_THRESHOLD = 0.15
+        mock_config.TEMPORAL_HALF_LIFE_DAYS = 30
+        mock_config.TEMPORAL_RECENCY_WEIGHT = 0.1
+        mock_config.CONTEXT_MAX_CHUNKS_PER_ARTIFACT = 2
+        mock_config.QUERY_CONTEXT_MESSAGES = 5
 
         mock_mdq.return_value = []
         mock_graph.return_value = []
@@ -380,6 +400,16 @@ class TestAgentQuery:
         mock_config.DOMAIN_AFFINITY = {}
         mock_config.CROSS_DOMAIN_DEFAULT_AFFINITY = 0.2
         mock_config.QUERY_CONTEXT_MAX_CHARS = 14000
+        mock_config.QUALITY_BOOST_BASE = 0.8
+        mock_config.QUALITY_BOOST_FACTOR = 0.2
+        mock_config.QUALITY_METADATA_TAG_BOOST = 0.05
+        mock_config.QUALITY_METADATA_SUBCAT_BOOST = 0.08
+        mock_config.QUALITY_METADATA_MAX_BOOST = 0.15
+        mock_config.QUALITY_MIN_RELEVANCE_THRESHOLD = 0.15
+        mock_config.TEMPORAL_HALF_LIFE_DAYS = 30
+        mock_config.TEMPORAL_RECENCY_WEIGHT = 0.1
+        mock_config.CONTEXT_MAX_CHUNKS_PER_ARTIFACT = 2
+        mock_config.QUERY_CONTEXT_MESSAGES = 5
 
         mock_mdq.return_value = []
         mock_graph.return_value = []

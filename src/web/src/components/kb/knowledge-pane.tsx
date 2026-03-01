@@ -275,7 +275,7 @@ export function KnowledgePane() {
 
       {/* Results */}
       <ScrollArea className="flex-1">
-        <div className="min-w-0 space-y-2 overflow-hidden p-4">
+        <div className="min-w-0 space-y-2 p-4">
           {isLoading && (
             <div className="flex items-center justify-center py-12 text-muted-foreground">
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />

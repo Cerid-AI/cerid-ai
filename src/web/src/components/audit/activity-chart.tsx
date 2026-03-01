@@ -1,11 +1,41 @@
 // Copyright (c) 2026 Justin Michaels. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts"
+import { useMemo } from "react"
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from "recharts"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { EmptyState } from "@/components/ui/empty-state"
 import { Activity } from "lucide-react"
 import type { AuditActivity } from "@/lib/types"
+
+/** Color palette for event types (stacked areas). */
+const EVENT_COLORS: Record<string, string> = {
+  ingest: "hsl(var(--chart-1))",
+  query: "hsl(var(--chart-2))",
+  duplicate: "hsl(var(--chart-3))",
+  recategorize: "hsl(var(--chart-4))",
+  memory_extraction: "hsl(var(--chart-5))",
+}
+const FALLBACK_COLOR = "hsl(var(--muted-foreground))"
+const ERROR_COLOR = "hsl(var(--destructive))"
+
+function eventColor(event: string): string {
+  if (event.includes("error")) return ERROR_COLOR
+  return EVENT_COLORS[event] ?? FALLBACK_COLOR
+}
+
+function formatHourLabel(isoHour: string, windowHours: number): string {
+  try {
+    const date = new Date(isoHour + ":00:00Z")
+    if (isNaN(date.getTime())) return isoHour
+    if (windowHours <= 24) {
+      return date.toLocaleTimeString(undefined, { hour: "numeric", hour12: true })
+    }
+    return date.toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "numeric", hour12: true })
+  } catch {
+    return isoHour
+  }
+}
 
 interface ActivityChartProps {
   activity: AuditActivity | undefined
@@ -14,12 +44,31 @@ interface ActivityChartProps {
 export function ActivityChart({ activity }: ActivityChartProps) {
   if (!activity) return <EmptyState icon={Activity} title="No activity data" description="Activity appears as events are logged" />
 
-  const data = Object.entries(activity.hourly_timeline)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([hour, count]) => ({
-      hour: hour.slice(-5), // "HH:MM" or last 5 chars of key
-      count,
-    }))
+  const hasTypedData = !!activity.hourly_by_type && Object.keys(activity.hourly_by_type).length > 0
+
+  const { data, eventTypes } = useMemo(() => {
+    const types = new Set<string>()
+    if (hasTypedData) {
+      Object.values(activity.hourly_by_type!).forEach((evts) =>
+        Object.keys(evts).forEach((e) => types.add(e)),
+      )
+    }
+    const typeList = Array.from(types).sort()
+
+    const chartData = Object.entries(activity.hourly_timeline)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([hour, count]) => {
+        const label = formatHourLabel(hour, activity.time_window_hours)
+        const byType = activity.hourly_by_type?.[hour] ?? {}
+        return {
+          hour: label,
+          count,
+          ...Object.fromEntries(typeList.map((t) => [t, byType[t] ?? 0])),
+        }
+      })
+
+    return { data: chartData, eventTypes: typeList }
+  }, [activity, hasTypedData])
 
   return (
     <Card>
@@ -33,7 +82,8 @@ export function ActivityChart({ activity }: ActivityChartProps) {
         {/* Summary badges */}
         <div className="flex flex-wrap gap-3 pt-1 text-xs text-muted-foreground">
           {Object.entries(activity.event_breakdown).map(([event, count]) => (
-            <span key={event}>
+            <span key={event} className="flex items-center gap-1">
+              <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: eventColor(event) }} />
               <span className="font-medium">{count}</span> {event}
             </span>
           ))}
@@ -41,21 +91,41 @@ export function ActivityChart({ activity }: ActivityChartProps) {
       </CardHeader>
       <CardContent className="p-3">
         {data.length > 0 ? (
-          <ResponsiveContainer width="100%" height={180}>
+          <ResponsiveContainer width="100%" height={200}>
             <AreaChart data={data}>
-              <XAxis dataKey="hour" tick={{ fontSize: 10 }} />
-              <YAxis tick={{ fontSize: 10 }} />
+              <XAxis dataKey="hour" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
+              <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
               <Tooltip
-                contentStyle={{ fontSize: 12, borderRadius: 8 }}
-                formatter={(value) => [value ?? 0, "Events"]}
+                contentStyle={{
+                  fontSize: 12,
+                  borderRadius: 8,
+                  backgroundColor: "hsl(var(--popover))",
+                  color: "hsl(var(--popover-foreground))",
+                  border: "1px solid hsl(var(--border))",
+                }}
               />
-              <Area
-                type="monotone"
-                dataKey="count"
-                stroke="hsl(var(--chart-1))"
-                fill="hsl(var(--chart-1))"
-                fillOpacity={0.2}
-              />
+              {hasTypedData ? (
+                eventTypes.map((evt) => (
+                  <Area
+                    key={evt}
+                    type="monotone"
+                    dataKey={evt}
+                    stackId="events"
+                    stroke={eventColor(evt)}
+                    fill={eventColor(evt)}
+                    fillOpacity={0.3}
+                  />
+                ))
+              ) : (
+                <Area
+                  type="monotone"
+                  dataKey="count"
+                  stroke="hsl(var(--chart-1))"
+                  fill="hsl(var(--chart-1))"
+                  fillOpacity={0.2}
+                />
+              )}
+              {hasTypedData && <Legend wrapperStyle={{ fontSize: 10 }} />}
             </AreaChart>
           </ResponsiveContainer>
         ) : (

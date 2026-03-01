@@ -1,8 +1,9 @@
 # Cerid AI — Issues & Backlog
 
 > **Created:** 2026-02-25
-> **Last updated:** 2026-02-28
-> **Status:** Phase 13 complete. 42 resolved, 1 research (E1), 1 informational (F6).
+> **Last updated:** 2026-03-01
+> **Status:** Phase 15H complete. 44 resolved, 1 research (E1), 1 informational (F6). 795+ tests.
+> **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](plans/DEVELOPMENT_PLAN_PHASE16-18.md)
 > **Purpose:** Track known bugs, feature gaps, structural issues, and architecture evaluations for upcoming phases.
 
 ---
@@ -383,22 +384,27 @@ Added bundle size check step in frontend CI job — fails if any JS chunk exceed
 
 Structural work before feature work — the splits reduce cost of all subsequent changes and unblock test coverage. Audit hardening items integrated by severity into existing phases.
 
+### Resolved (Phases 10–15)
 1. ~~**A1** — Chat viewport fix~~ ✅ Resolved (Phase 10A)
 2. ~~**B2** — Source attribution~~ ✅ Resolved (Phase 10A)
-3. ~~**B3 + D2** — Model context break~~ ✅ Resolved (Phase 10B) — "start fresh" deferred to 10E
+3. ~~**B3 + D2** — Model context break~~ ✅ Resolved (Phase 10B)
 4. ~~**G1–G7** — Immediate audit fixes~~ ✅ Resolved (Step 0)
-5. ~~**F1** — Service layer extraction~~ ✅ Resolved (Phase 10C-S1)
-6. ~~**G8–G11** — Middleware hardening~~ ✅ Resolved (Phase 10C-S1)
-7. ~~**F2** — MCP tool registry extraction~~ ✅ Resolved (Phase 10C-S2)
-8. ~~**F6 partial** — Config split, dedup cleanup~~ ✅ Resolved (Phase 10C-S2)
-9. ~~**F3** — Neo4j data layer split~~ ✅ Resolved (Phase 10C-S3)
-10. ~~**F4** — Sync library split~~ ✅ Resolved (Phase 10C-S3)
-11. ~~**F5** — Test coverage expansion~~ ✅ Resolved (Phase 10D)
-12. ~~**G12–G15** — CI hardening~~ ✅ Resolved (Phase 10D)
-13. ~~**D1** — Smart routing + token cost evaluation~~ ✅ Resolved (Phase 10E)
-14. **B1** — Audit agent interactivity — Phase 11
-15. **C1** — Taxonomy update — Phase 11
-16. ~~**G17–G22** — Operations documentation~~ ✅ Resolved (Phase 11D)
-17. **C2** — Curation agent (requires C1) — Phase 11 (design)
-18. **E2** — RAG evaluation + **G16** (BM25 replacement) — Phase 12 (research)
-19. **E1** — Artifact preview (depends on E2 decisions) — Phase 13
+5. ~~**F1–F5** — Structural splits + test coverage~~ ✅ Resolved (Phases 10C–10D)
+6. ~~**G8–G15** — Middleware + CI hardening~~ ✅ Resolved (Phases 10C–10D)
+7. ~~**D1** — Smart routing + token cost evaluation~~ ✅ Resolved (Phase 10E)
+8. ~~**B1** — Audit agent interactivity~~ ✅ Resolved (Phase 11A)
+9. ~~**C1** — Taxonomy tree + tag CRUD~~ ✅ Resolved (Phase 11B)
+10. ~~**C2** — Curation agent~~ ✅ Resolved (Phase 14A)
+11. ~~**G17–G22** — Operations documentation~~ ✅ Resolved (Phase 11D)
+12. ~~**E2** — RAG evaluation + **G16** (BM25 replacement)~~ ✅ Resolved (Phase 12)
+
+### Open Items
+13. **E1** — Artifact preview — Phase 16G
+14. **F6 remaining** — cerid-web compose separation — Phase 16G
+15. **D2 remaining** — Conversation fork/branch UI — Phase 16G
+
+### New (from Phase 15H holistic audit)
+See [Development Plan Phase 16-18](plans/DEVELOPMENT_PLAN_PHASE16-18.md) for full details:
+- **Phase 16A–H** — Security hardening, dead code cleanup, code quality, dependency optimization, feature wiring, documentation
+- **Phase 17A–B** — Smart tags (taxonomy-constrained vocabulary) + artifact summary quality ("what is this" format)
+- **Phase 18A–D** — Knowledge sync infrastructure, sync GUI, drag-drop ingestion, storage mode options

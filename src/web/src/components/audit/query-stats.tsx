@@ -35,7 +35,13 @@ export function QueryStats({ queries }: QueryStatsProps) {
               <XAxis type="number" tick={{ fontSize: 10 }} />
               <YAxis dataKey="domain" type="category" tick={{ fontSize: 11 }} width={70} />
               <Tooltip
-                contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                contentStyle={{
+                  fontSize: 12,
+                  borderRadius: 8,
+                  backgroundColor: "hsl(var(--popover))",
+                  color: "hsl(var(--popover-foreground))",
+                  border: "1px solid hsl(var(--border))",
+                }}
                 formatter={(value) => [value ?? 0, "Queries"]}
               />
               <Bar dataKey="count" fill="hsl(var(--chart-2))" radius={[0, 4, 4, 0]} />

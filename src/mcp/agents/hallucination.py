@@ -156,6 +156,7 @@ async def check_hallucinations(
     neo4j_driver,
     redis_client,
     threshold: Optional[float] = None,
+    model: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Extract claims, verify each against KB, and store results in Redis."""
     if threshold is None:
@@ -200,6 +201,7 @@ async def check_hallucinations(
         "timestamp": utcnow_iso(),
         "skipped": False,
         "threshold": threshold,
+        "model": model,
         "claims": results,
         "summary": {
             "total": len(results),
@@ -212,6 +214,21 @@ async def check_hallucinations(
         redis_client.setex(key, REDIS_HALLUCINATION_TTL, json.dumps(report))
     except Exception as e:
         logger.warning(f"Failed to store hallucination report in Redis: {e}")
+
+    # Log verification metrics for analytics
+    try:
+        from utils.cache import log_verification_metrics
+        log_verification_metrics(
+            redis_client,
+            conversation_id=conversation_id,
+            model=model,
+            verified=status_counts["verified"],
+            unverified=status_counts["unverified"],
+            uncertain=status_counts["uncertain"],
+            total=len(results),
+        )
+    except Exception as e:
+        logger.debug(f"Failed to log verification metrics (non-blocking): {e}")
 
     return report
 

@@ -274,6 +274,64 @@ async def _generate_synopsis(
 
 
 # ---------------------------------------------------------------------------
+# Synopsis estimation
+# ---------------------------------------------------------------------------
+
+def estimate_synopsis_run(
+    neo4j_driver,
+    chroma_client,
+    model: str,
+    domains: Optional[List[str]] = None,
+    max_artifacts: int = 200,
+) -> Dict[str, Any]:
+    """Count synopsis candidates and estimate cost/time for a given model."""
+    target_domains = domains or config.DOMAINS
+    candidate_count = 0
+
+    for domain in target_domains:
+        try:
+            artifacts = list_artifacts(neo4j_driver, domain=domain, limit=max_artifacts)
+        except Exception:
+            continue
+        candidates = [
+            a for a in artifacts
+            if _is_truncated_summary(a.get("summary", ""))
+        ][:50]
+        candidate_count += len(candidates)
+
+    model_info = config.SYNOPSIS_MODEL_OPTIONS.get(model, {})
+    throttle = model_info.get("throttle", 8.0)
+    rpm = model_info.get("rpm", 8)
+    label = model_info.get("label", model.split("/")[-1])
+    input_per_1m = model_info.get("input_per_1m", 0.0)
+    output_per_1m = model_info.get("output_per_1m", 0.0)
+
+    # Cost estimate: ~500 input tokens + ~80 output tokens per synopsis
+    avg_input_tokens = 500
+    avg_output_tokens = 80
+    estimated_cost = (
+        (candidate_count * avg_input_tokens / 1_000_000) * input_per_1m
+        + (candidate_count * avg_output_tokens / 1_000_000) * output_per_1m
+    )
+
+    estimated_seconds = candidate_count * throttle
+    if estimated_seconds < 60:
+        time_display = f"~{int(estimated_seconds)}s"
+    else:
+        time_display = f"~{int(estimated_seconds / 60)}m"
+
+    return {
+        "candidate_count": candidate_count,
+        "model": model,
+        "model_label": label,
+        "estimated_cost_usd": round(estimated_cost, 4),
+        "estimated_time_display": time_display,
+        "rpm_limit": rpm,
+        "is_free_model": input_per_1m == 0.0 and output_per_1m == 0.0,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Main curation function
 # ---------------------------------------------------------------------------
 
@@ -284,6 +342,7 @@ async def curate(
     max_artifacts: int = 200,
     chroma_client=None,
     generate_synopses: bool = False,
+    synopsis_model: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Score artifact quality across the knowledge base.
 
@@ -332,6 +391,10 @@ async def curate(
 
     # Synopsis generation pass
     synopses_generated = 0
+    effective_model = synopsis_model or config.SYNOPSIS_MODEL
+    model_info = config.SYNOPSIS_MODEL_OPTIONS.get(effective_model, {})
+    throttle_delay = model_info.get("throttle", 8.0)
+
     if generate_synopses and chroma_client:
         for domain, artifacts in artifacts_by_domain.items():
             candidates = [
@@ -362,7 +425,7 @@ async def curate(
                 synopsis = await _generate_synopsis(
                     text,
                     config.BIFROST_URL,
-                    config.SYNOPSIS_MODEL,
+                    effective_model,
                     config.SYNOPSIS_MAX_INPUT_CHARS,
                     config.SYNOPSIS_MAX_TOKENS,
                 )
@@ -372,8 +435,8 @@ async def curate(
                         synopses_generated += 1
                     except Exception as e:
                         logger.warning(f"Failed to store synopsis for {artifact['id'][:8]}: {e}")
-                # Throttle to stay within free-model rate limits (8 RPM on OpenRouter)
-                await asyncio.sleep(8.0)
+                # Adaptive throttle based on model rate limits
+                await asyncio.sleep(throttle_delay)
 
         if synopses_generated:
             logger.info(f"Generated {synopses_generated} AI synopses")

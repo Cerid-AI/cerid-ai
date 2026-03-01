@@ -41,7 +41,13 @@ export function CollectionChart({ collections }: CollectionChartProps) {
             <XAxis dataKey="name" tick={{ fontSize: 11 }} />
             <YAxis tick={{ fontSize: 11 }} />
             <Tooltip
-              contentStyle={{ fontSize: 12, borderRadius: 8 }}
+              contentStyle={{
+                fontSize: 12,
+                borderRadius: 8,
+                backgroundColor: "hsl(var(--popover))",
+                color: "hsl(var(--popover-foreground))",
+                border: "1px solid hsl(var(--border))",
+              }}
               formatter={(value) => [(value ?? 0).toLocaleString(), "Chunks"]}
             />
             <Bar dataKey="chunks" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} />

@@ -95,3 +95,62 @@ def log_conversation_metrics(
         redis_client.expire(key, REDIS_CONV_METRICS_TTL)
     except Exception as e:
         logger.warning(f"Failed to log conversation metrics: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Verification metrics storage
+# ---------------------------------------------------------------------------
+
+REDIS_VERIFICATION_METRICS_KEY = "verify:metrics"
+REDIS_VERIFICATION_FEEDBACK_KEY = "verify:feedback"
+REDIS_VERIFICATION_METRICS_TTL = 86400 * 30  # 30 days
+
+
+def log_verification_metrics(
+    redis_client,
+    conversation_id: str,
+    model: Optional[str] = None,
+    verified: int = 0,
+    unverified: int = 0,
+    uncertain: int = 0,
+    total: int = 0,
+) -> None:
+    """Store verification metrics for analytics aggregation."""
+    accuracy = round(verified / total, 4) if total > 0 else 0.0
+    entry = json.dumps({
+        "conversation_id": conversation_id,
+        "model": model or "unknown",
+        "verified": verified,
+        "unverified": unverified,
+        "uncertain": uncertain,
+        "total": total,
+        "accuracy": accuracy,
+        "timestamp": utcnow_iso(),
+    })
+    try:
+        redis_client.rpush(REDIS_VERIFICATION_METRICS_KEY, entry)
+        redis_client.expire(REDIS_VERIFICATION_METRICS_KEY, REDIS_VERIFICATION_METRICS_TTL)
+    except Exception as e:
+        logger.warning(f"Failed to log verification metrics: {e}")
+
+
+def log_claim_feedback(
+    redis_client,
+    conversation_id: str,
+    claim_index: int,
+    correct: bool,
+    model: Optional[str] = None,
+) -> None:
+    """Store user feedback on a verification claim."""
+    entry = json.dumps({
+        "conversation_id": conversation_id,
+        "claim_index": claim_index,
+        "correct": correct,
+        "model": model or "unknown",
+        "timestamp": utcnow_iso(),
+    })
+    try:
+        redis_client.rpush(REDIS_VERIFICATION_FEEDBACK_KEY, entry)
+        redis_client.expire(REDIS_VERIFICATION_FEEDBACK_KEY, REDIS_VERIFICATION_METRICS_TTL)
+    except Exception as e:
+        logger.warning(f"Failed to log claim feedback: {e}")

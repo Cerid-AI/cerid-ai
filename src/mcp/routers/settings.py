@@ -75,6 +75,13 @@ async def get_settings_endpoint():
         "sync_backend": config.SYNC_BACKEND,
         "machine_id": config.MACHINE_ID,
         "version": _VERSION,
+        "memory_config": {
+            "min_response_length": 100,
+            "memory_types": ["fact", "decision", "preference", "action_item"],
+            "retention_days": config.MEMORY_RETENTION_DAYS,
+            "storage_domain": "conversations",
+            "extraction_model": "Llama 3.3 (free tier)",
+        },
     }
 
 

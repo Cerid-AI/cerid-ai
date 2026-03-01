@@ -1,9 +1,17 @@
 // Copyright (c) 2026 Justin Michaels. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { MessageSquare, Database, Activity, FileBarChart, Brain, Settings, Sun, Moon, ChevronLeft, ChevronRight } from "lucide-react"
+import { useState } from "react"
+import {
+  MessageSquare, Database, Activity, FileBarChart, Brain, Settings,
+  Sun, Moon, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Plus, History,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Separator } from "@/components/ui/separator"
+import { ConversationList } from "@/components/chat/conversation-list"
+import { useConversationsContext } from "@/contexts/conversations-context"
+import { MODELS } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 export type Pane = "chat" | "knowledge" | "monitoring" | "audit" | "memories" | "settings"
@@ -26,7 +34,35 @@ const NAV_ITEMS: { pane: Pane; icon: typeof MessageSquare; label: string }[] = [
   { pane: "settings", icon: Settings, label: "Settings" },
 ]
 
+function readBool(key: string, fallback: boolean): boolean {
+  try {
+    const v = localStorage.getItem(key)
+    return v !== null ? v === "true" : fallback
+  } catch { return fallback }
+}
+
 export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse, theme, onToggleTheme }: SidebarProps) {
+  const { conversations, activeId, setActiveId, create, remove } = useConversationsContext()
+  const [historyExpanded, setHistoryExpanded] = useState(() => readBool("cerid-sidebar-history", true))
+
+  const toggleHistory = () => {
+    setHistoryExpanded((prev) => {
+      const next = !prev
+      try { localStorage.setItem("cerid-sidebar-history", String(next)) } catch { /* noop */ }
+      return next
+    })
+  }
+
+  const handleSelectConversation = (id: string) => {
+    setActiveId(id)
+    if (activePane !== "chat") onPaneChange("chat")
+  }
+
+  const handleNewChat = () => {
+    create(MODELS[0].id)
+    if (activePane !== "chat") onPaneChange("chat")
+  }
+
   return (
     <TooltipProvider delayDuration={0}>
       <div
@@ -44,7 +80,7 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
         </div>
 
         {/* Nav items */}
-        <nav className="flex-1 space-y-1 p-2">
+        <nav className="space-y-1 p-2">
           {NAV_ITEMS.map(({ pane, icon: Icon, label }) => (
             <Tooltip key={pane}>
               <TooltipTrigger asChild>
@@ -61,6 +97,68 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
             </Tooltip>
           ))}
         </nav>
+
+        {/* Conversation history — only when sidebar expanded */}
+        {!collapsed ? (
+          <div className="flex min-h-0 flex-1 flex-col">
+            <Separator />
+            <div className="flex items-center gap-1 px-3 py-1.5">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 flex-1 justify-start gap-1.5 px-1 text-xs text-muted-foreground"
+                onClick={toggleHistory}
+              >
+                {historyExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
+                History
+              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    onClick={handleNewChat}
+                    aria-label="New conversation"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right">New chat</TooltipContent>
+              </Tooltip>
+            </div>
+            {historyExpanded && (
+              <div className="min-h-0 flex-1">
+                <ConversationList
+                  conversations={conversations}
+                  activeId={activeId}
+                  onSelect={handleSelectConversation}
+                  onDelete={remove}
+                />
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="flex-1">
+            {/* Collapsed: just a history icon button */}
+            <div className="p-2">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="w-full"
+                    onClick={() => { onToggleCollapse(); setHistoryExpanded(true) }}
+                    aria-label="Show conversation history"
+                  >
+                    <History className="h-4 w-4 shrink-0" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right">Conversation history</TooltipContent>
+              </Tooltip>
+            </div>
+          </div>
+        )}
 
         {/* Bottom controls */}
         <div className="border-t p-2">

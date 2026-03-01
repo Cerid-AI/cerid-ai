@@ -124,6 +124,12 @@ QUALITY_BOOST_BASE = 0.8            # base multiplier (score=0 artifact gets 0.8
 QUALITY_METADATA_TAG_BOOST = 0.05   # per-matching-tag relevance boost
 QUALITY_METADATA_SUBCAT_BOOST = 0.08  # sub_category match relevance boost
 QUALITY_METADATA_MAX_BOOST = 0.15   # cap on total metadata boost
+QUALITY_MIN_RELEVANCE_THRESHOLD = float(os.getenv("QUALITY_MIN_RELEVANCE_THRESHOLD", "0.15"))
+
+# ---------------------------------------------------------------------------
+# Conversation Context Alignment
+# ---------------------------------------------------------------------------
+CONTEXT_BOOST_WEIGHT = float(os.getenv("CONTEXT_BOOST_WEIGHT", "0.08"))
 
 # ---------------------------------------------------------------------------
 # Synopsis Generation (AI-generated artifact summaries via curator)
@@ -131,6 +137,38 @@ QUALITY_METADATA_MAX_BOOST = 0.15   # cap on total metadata boost
 SYNOPSIS_MODEL = CATEGORIZE_MODELS["smart"]   # free Llama model via Bifrost
 SYNOPSIS_MAX_INPUT_CHARS = 2000
 SYNOPSIS_MAX_TOKENS = 100
+
+# Synopsis model options — user-selectable, with cost and throttle info
+SYNOPSIS_MODEL_OPTIONS = {
+    "openrouter/meta-llama/llama-3.3-70b-instruct:free": {
+        "label": "Llama 3.3 (Free)",
+        "input_per_1m": 0.0,
+        "output_per_1m": 0.0,
+        "rpm": 8,
+        "throttle": 8.0,
+    },
+    "openrouter/openai/gpt-4o-mini": {
+        "label": "GPT-4o Mini",
+        "input_per_1m": 0.15,
+        "output_per_1m": 0.60,
+        "rpm": 1000,
+        "throttle": 0.5,
+    },
+    "openrouter/google/gemini-2.5-flash": {
+        "label": "Gemini Flash",
+        "input_per_1m": 0.15,
+        "output_per_1m": 0.60,
+        "rpm": 1000,
+        "throttle": 0.5,
+    },
+    "openrouter/anthropic/claude-sonnet-4": {
+        "label": "Claude Sonnet",
+        "input_per_1m": 3.0,
+        "output_per_1m": 15.0,
+        "rpm": 1000,
+        "throttle": 0.5,
+    },
+}
 
 # ---------------------------------------------------------------------------
 # Memory Extraction

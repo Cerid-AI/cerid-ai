@@ -225,6 +225,7 @@ export interface AuditActivity {
   event_breakdown: Record<string, number>
   domain_breakdown: Record<string, number>
   hourly_timeline: Record<string, number>
+  hourly_by_type?: Record<string, Record<string, number>>
   recent_failures: IngestLogEntry[]
   scanned_entries: number
 }
@@ -265,6 +266,19 @@ export interface AuditConversations {
   total_cost_usd: number
 }
 
+export interface AuditVerification {
+  total_checks: number
+  avg_accuracy: number
+  by_model: Record<string, {
+    checks: number
+    accuracy: number
+    verified: number
+    unverified: number
+    uncertain: number
+  }>
+  hourly_accuracy: Record<string, number>
+}
+
 export interface AuditResponse {
   timestamp: string
   reports_generated: string[]
@@ -273,6 +287,7 @@ export interface AuditResponse {
   costs?: AuditCosts
   queries?: AuditQueries
   conversations?: AuditConversations
+  verification?: AuditVerification
 }
 
 export interface CurateResponse {
@@ -302,6 +317,16 @@ export interface HallucinationClaim {
   source_filename?: string
   source_domain?: string
   source_snippet?: string
+  reason?: string
+  user_feedback?: "correct" | "incorrect"
+}
+
+export interface StreamingClaim {
+  claim: string
+  index: number
+  status?: "verified" | "unverified" | "uncertain" | "error" | "pending"
+  confidence?: number
+  source?: string
   reason?: string
 }
 
@@ -383,6 +408,13 @@ export interface ServerSettings {
   sync_backend: string
   machine_id: string
   version: string
+  memory_config?: {
+    min_response_length: number
+    memory_types: string[]
+    retention_days: number
+    storage_domain: string
+    extraction_model: string
+  }
 }
 
 export interface SettingsUpdate {
@@ -414,6 +446,23 @@ export interface UploadResult {
   categorize_mode: string
   metadata?: Record<string, string>
 }
+
+export interface SynopsisEstimate {
+  candidate_count: number
+  model: string
+  model_label: string
+  estimated_cost_usd: number
+  estimated_time_display: string
+  rpm_limit: number
+  is_free_model: boolean
+}
+
+export const SYNOPSIS_MODELS = [
+  { id: "openrouter/meta-llama/llama-3.3-70b-instruct:free", label: "Llama 3.3 (Free)" },
+  { id: "openrouter/openai/gpt-4o-mini", label: "GPT-4o Mini" },
+  { id: "openrouter/google/gemini-2.5-flash", label: "Gemini Flash" },
+  { id: "openrouter/anthropic/claude-sonnet-4", label: "Claude Sonnet" },
+] as const
 
 export interface LiveMetrics {
   inputTokens: number

@@ -32,6 +32,7 @@ import type {
   SettingsUpdate,
   Memory,
   UploadResult,
+  SynopsisEstimate,
 } from "./types"
 
 export async function fetchHealth(): Promise<HealthResponse> {
@@ -173,6 +174,7 @@ export async function fetchCurate(
   domains?: string[],
   maxArtifacts = 200,
   generateSynopses = false,
+  synopsisModel?: string,
 ): Promise<CurateResponse> {
   const res = await fetch(`${MCP_BASE}/agent/curate`, {
     method: "POST",
@@ -182,9 +184,28 @@ export async function fetchCurate(
       domains: domains ?? null,
       max_artifacts: maxArtifacts,
       generate_synopses: generateSynopses,
+      ...(synopsisModel && { synopsis_model: synopsisModel }),
     }),
   })
   if (!res.ok) throw new Error(`Curate failed: ${res.status}`)
+  return res.json()
+}
+
+export async function fetchSynopsisEstimate(
+  synopsisModel: string,
+  domains?: string[],
+  maxArtifacts = 200,
+): Promise<SynopsisEstimate> {
+  const res = await fetch(`${MCP_BASE}/agent/curate/estimate`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      synopsis_model: synopsisModel,
+      domains: domains ?? null,
+      max_artifacts: maxArtifacts,
+    }),
+  })
+  if (!res.ok) throw new Error(`Synopsis estimate failed: ${res.status}`)
   return res.json()
 }
 
@@ -201,7 +222,7 @@ export async function fetchIngestLog(limit = 100): Promise<IngestLogResponse> {
 }
 
 export async function fetchAudit(
-  reports: string[] = ["activity", "ingestion", "costs", "queries"],
+  reports: string[] = ["activity", "ingestion", "costs", "queries", "verification"],
   hours = 24,
 ): Promise<AuditResponse> {
   const res = await fetch(`${MCP_BASE}/agent/audit`, {
@@ -269,6 +290,42 @@ export async function fetchHallucinationReport(
   if (res.status === 404) return null
   if (!res.ok) throw new Error(`Hallucination report fetch failed: ${res.status}`)
   return res.json()
+}
+
+export function streamVerification(
+  responseText: string,
+  conversationId: string,
+  threshold?: number,
+): { response: Promise<Response>; abort: () => void } {
+  const controller = new AbortController()
+  const response = fetch(`${MCP_BASE}/agent/verify-stream`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      response_text: responseText,
+      conversation_id: conversationId,
+      ...(threshold !== undefined && { threshold }),
+    }),
+    signal: controller.signal,
+  })
+  return { response, abort: () => controller.abort() }
+}
+
+export async function submitClaimFeedback(
+  conversationId: string,
+  claimIndex: number,
+  correct: boolean,
+): Promise<void> {
+  const res = await fetch(`${MCP_BASE}/agent/hallucination/feedback`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      conversation_id: conversationId,
+      claim_index: claimIndex,
+      correct,
+    }),
+  })
+  if (!res.ok) throw new Error(`Claim feedback failed: ${res.status}`)
 }
 
 // --- Settings ---

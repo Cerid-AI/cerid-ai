@@ -21,6 +21,7 @@ export function KBContextPanel({
   totalResults,
   isLoading,
   error,
+  hasQueried,
   activeDomains,
   toggleDomain,
   manualQuery,
@@ -87,7 +88,7 @@ export function KBContextPanel({
 
       {/* Results */}
       <ScrollArea className="flex-1">
-        <div className="min-w-0 space-y-2 overflow-hidden p-3">
+        <div className="min-w-0 space-y-2 p-3">
           {isLoading && (
             <div className="flex items-center justify-center py-8 text-muted-foreground">
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -103,7 +104,7 @@ export function KBContextPanel({
 
           {!isLoading && !error && results.length === 0 && (
             <div className="py-8 text-center text-sm text-muted-foreground">
-              Send a message to see related knowledge
+              {hasQueried ? "No matching knowledge found" : "Send a message to see related knowledge"}
             </div>
           )}
 

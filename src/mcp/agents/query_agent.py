@@ -72,11 +72,11 @@ def _enrich_query(
     max_context_messages: int = 5,
     max_terms: int = 10,
 ) -> str:
-    """Enrich a query with key terms extracted from recent conversation messages.
+    """Enrich a query with recency-weighted terms from recent conversation messages.
 
-    Extracts unique meaningful terms from the last N user messages and appends
-    them to the query. This improves both vector (semantic context) and BM25
-    (keyword coverage) retrieval without an LLM call.
+    More recent messages contribute more terms to the enriched query, improving
+    retrieval relevance for the current conversational context. Term slots are
+    allocated via exponential decay (newest message gets ~half the budget).
 
     Returns the original query if no useful context terms are found.
     """
@@ -92,13 +92,36 @@ def _enrich_query(
     if not user_texts:
         return query
 
-    # Extract unique terms not in the query and not stopwords
-    query_lower = query.lower()
+    # Allocate term slots per message using exponential decay (most recent = most slots)
+    n = len(user_texts)
+    if n == 1:
+        slots = [max_terms]
+    else:
+        raw_weights = [0.5 ** i for i in range(n)]
+        total_weight = sum(raw_weights)
+        float_slots = [w / total_weight * max_terms for w in raw_weights]
+        slots = [max(1, round(s)) for s in float_slots]
+        # Adjust to hit exact total
+        diff = max_terms - sum(slots)
+        if diff > 0:
+            slots[0] += diff
+        elif diff < 0:
+            for i in range(n - 1, -1, -1):
+                if slots[i] > 1:
+                    remove = min(slots[i] - 1, -diff)
+                    slots[i] -= remove
+                    diff += remove
+                    if diff == 0:
+                        break
+
+    # Extract terms per message, respecting per-message slot allocation
     query_terms = {w.lower() for w in _WORD_RE.findall(query)}
     context_terms: List[str] = []
     seen: set = set()
 
-    for text in reversed(user_texts):  # Most recent first
+    for idx, text in enumerate(reversed(user_texts)):  # Most recent first
+        msg_limit = slots[idx] if idx < len(slots) else 1
+        msg_count = 0
         words = _WORD_RE.findall(text)
         for word in words:
             lower = word.lower()
@@ -110,10 +133,9 @@ def _enrich_query(
             ):
                 seen.add(lower)
                 context_terms.append(lower)
-                if len(context_terms) >= max_terms:
+                msg_count += 1
+                if msg_count >= msg_limit:
                     break
-        if len(context_terms) >= max_terms:
-            break
 
     if not context_terms:
         return query
@@ -508,6 +530,50 @@ def apply_metadata_boost(
 
 
 # ---------------------------------------------------------------------------
+# Context alignment boost (Phase 15F)
+# ---------------------------------------------------------------------------
+
+def apply_context_alignment_boost(
+    results: List[Dict[str, Any]],
+    conversation_messages: Optional[List[Dict[str, str]]] = None,
+) -> List[Dict[str, Any]]:
+    """Boost results whose content aligns with recent conversation context.
+
+    Extracts key terms from conversation messages and computes what proportion
+    appear in each result's content. More term overlap = higher boost.
+    Applied after metadata boost, before reranking.
+    """
+    if not results or not conversation_messages:
+        return results
+
+    # Extract all meaningful terms from conversation
+    context_terms: set = set()
+    for msg in conversation_messages:
+        if msg.get("role") == "user":
+            words = _WORD_RE.findall(msg.get("content", ""))
+            for word in words:
+                lower = word.lower()
+                if len(lower) > 2 and lower not in _STOPWORDS:
+                    context_terms.add(lower)
+
+    if not context_terms:
+        return results
+
+    boost_weight = config.CONTEXT_BOOST_WEIGHT
+
+    for r in results:
+        content_terms = {w.lower() for w in _WORD_RE.findall(r.get("content", "")) if len(w) > 2}
+        matches = context_terms & content_terms
+        if matches:
+            alignment = len(matches) / len(context_terms)
+            boost = alignment * boost_weight
+            r["relevance"] = round(r["relevance"] + boost, 4)
+            r["context_alignment"] = round(alignment, 4)
+
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Quality boost (Phase 14B)
 # ---------------------------------------------------------------------------
 
@@ -677,6 +743,9 @@ async def agent_query(
     # Step 4.5: Metadata boost — surface tag/sub_category-aligned results before reranking
     results = apply_metadata_boost(results, query)
 
+    # Step 4.6: Context alignment boost — reward results matching conversation context
+    results = apply_context_alignment_boost(results, conversation_messages)
+
     # Step 5: Reranking (includes both direct and graph-sourced results)
     results = await rerank_results(
         results=results,
@@ -687,6 +756,9 @@ async def agent_query(
     # Step 5.5: Quality boost — quality score multiplier after reranking
     results = apply_quality_boost(results, neo4j_driver=neo4j_driver)
     results = sorted(results, key=lambda x: x["relevance"], reverse=True)
+
+    # Step 5.6: Filter low-relevance results below minimum threshold
+    results = [r for r in results if r["relevance"] >= config.QUALITY_MIN_RELEVANCE_THRESHOLD]
 
     # Step 6: Assemble context
     context, sources, char_count = assemble_context(results, max_chars=config.QUERY_CONTEXT_MAX_CHARS)

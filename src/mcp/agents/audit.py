@@ -52,11 +52,14 @@ def get_activity_summary(
     domain_counts = Counter(e.get("domain", "unknown") for e in recent)
 
     hourly = defaultdict(int)
+    hourly_by_type: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
     for e in recent:
         ts = e.get("timestamp", "")
         if ts:
             hour_key = ts[:13]  # YYYY-MM-DDTHH
             hourly[hour_key] += 1
+            event = e.get("event", "unknown")
+            hourly_by_type[hour_key][event] += 1
 
     failures = [
         e for e in recent
@@ -69,6 +72,7 @@ def get_activity_summary(
         "event_breakdown": dict(event_counts),
         "domain_breakdown": dict(domain_counts),
         "hourly_timeline": dict(sorted(hourly.items())),
+        "hourly_by_type": {k: dict(v) for k, v in sorted(hourly_by_type.items())},
         "recent_failures": failures[:10],
         "scanned_entries": len(entries),
     }
@@ -282,6 +286,92 @@ def get_conversation_analytics(
 
 
 # ---------------------------------------------------------------------------
+# Verification analytics
+# ---------------------------------------------------------------------------
+
+from utils.cache import REDIS_VERIFICATION_METRICS_KEY  # noqa: E402
+
+
+def get_verification_analytics(
+    redis_client,
+    hours: int = 24,
+) -> Dict[str, Any]:
+    """Aggregate verification metrics for the accuracy dashboard."""
+    import json as _json
+
+    cutoff = (utcnow().replace(tzinfo=None) - timedelta(hours=hours)).isoformat()
+
+    try:
+        raw_entries = redis_client.lrange(REDIS_VERIFICATION_METRICS_KEY, 0, -1)
+    except Exception as e:
+        logger.warning(f"Failed to read verification metrics: {e}")
+        raw_entries = []
+
+    entries = []
+    for raw in raw_entries:
+        try:
+            entry = _json.loads(raw)
+            if entry.get("timestamp", "") >= cutoff:
+                entries.append(entry)
+        except Exception:
+            continue
+
+    if not entries:
+        return {
+            "total_checks": 0,
+            "avg_accuracy": 0.0,
+            "by_model": {},
+            "hourly_accuracy": {},
+        }
+
+    model_stats: Dict[str, Dict[str, Any]] = defaultdict(lambda: {
+        "checks": 0, "verified": 0, "unverified": 0, "uncertain": 0, "total_claims": 0,
+    })
+    total_accuracy_sum = 0.0
+
+    for entry in entries:
+        model = entry.get("model", "unknown").replace("openrouter/", "")
+        stats = model_stats[model]
+        stats["checks"] += 1
+        stats["verified"] += entry.get("verified", 0)
+        stats["unverified"] += entry.get("unverified", 0)
+        stats["uncertain"] += entry.get("uncertain", 0)
+        stats["total_claims"] += entry.get("total", 0)
+        total_accuracy_sum += entry.get("accuracy", 0.0)
+
+    by_model = {}
+    for model, stats in model_stats.items():
+        total = stats["total_claims"]
+        by_model[model] = {
+            "checks": stats["checks"],
+            "accuracy": round(stats["verified"] / total, 4) if total > 0 else 0.0,
+            "verified": stats["verified"],
+            "unverified": stats["unverified"],
+            "uncertain": stats["uncertain"],
+        }
+
+    hourly_buckets: Dict[str, Dict[str, int]] = defaultdict(lambda: {"verified": 0, "total": 0})
+    for entry in entries:
+        ts = entry.get("timestamp", "")
+        if ts:
+            hour_key = ts[:13]
+            hourly_buckets[hour_key]["verified"] += entry.get("verified", 0)
+            hourly_buckets[hour_key]["total"] += entry.get("total", 0)
+
+    hourly_accuracy = {}
+    for hour, counts in sorted(hourly_buckets.items()):
+        if counts["total"] > 0:
+            hourly_accuracy[hour] = round(counts["verified"] / counts["total"], 4)
+
+    return {
+        "total_checks": len(entries),
+        "avg_accuracy": round(total_accuracy_sum / len(entries), 4) if entries else 0.0,
+        "by_model": by_model,
+        "hourly_accuracy": hourly_accuracy,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Main audit function
 # ---------------------------------------------------------------------------
 
@@ -291,7 +381,7 @@ async def audit(
     hours: int = 24,
 ) -> Dict[str, Any]:
     """Run audit reports on knowledge base operations."""
-    all_reports = {"activity", "ingestion", "costs", "queries", "conversations"}
+    all_reports = {"activity", "ingestion", "costs", "queries", "conversations", "verification"}
     if reports is None:
         reports = list(all_reports)
 
@@ -314,5 +404,8 @@ async def audit(
 
     if "conversations" in reports:
         result["conversations"] = get_conversation_analytics(redis_client)
+
+    if "verification" in reports:
+        result["verification"] = get_verification_analytics(redis_client, hours=hours)
 
     return result

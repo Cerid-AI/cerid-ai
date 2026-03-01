@@ -1,21 +1,34 @@
 // Copyright (c) 2026 Justin Michaels. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react"
+import { useState, useRef, useEffect } from "react"
 import { useMutation } from "@tanstack/react-query"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Loader2, ShieldCheck, Wrench, Award, AlertTriangle, CheckCircle2 } from "lucide-react"
-import { fetchRectify, fetchMaintenance, fetchCurate } from "@/lib/api"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { fetchRectify, fetchMaintenance, fetchCurate, fetchSynopsisEstimate } from "@/lib/api"
 import { cn } from "@/lib/utils"
-import type { RectifyResponse, MaintenanceResponse, CurateResponse } from "@/lib/types"
+import type { RectifyResponse, MaintenanceResponse, CurateResponse, SynopsisEstimate } from "@/lib/types"
+import { SYNOPSIS_MODELS } from "@/lib/types"
 
 export function KBOperations() {
   const [rectifyResult, setRectifyResult] = useState<RectifyResponse | null>(null)
   const [maintenanceResult, setMaintenanceResult] = useState<MaintenanceResponse | null>(null)
   const [curateResult, setCurateResult] = useState<CurateResponse | null>(null)
   const [generateSynopses, setGenerateSynopses] = useState(false)
+  const [synopsisModel, setSynopsisModel] = useState<string>(SYNOPSIS_MODELS[0].id)
+  const [synopsisEstimate, setSynopsisEstimate] = useState<SynopsisEstimate | null>(null)
+  const [estimateLoading, setEstimateLoading] = useState(false)
+  const [curateElapsed, setCurateElapsed] = useState(0)
+  const curateTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const rectify = useMutation({
     mutationFn: () => fetchRectify(["duplicates", "stale", "orphans", "distribution"]),
@@ -31,9 +44,41 @@ export function KBOperations() {
   })
 
   const curate = useMutation({
-    mutationFn: () => fetchCurate(undefined, 200, generateSynopses),
-    onSuccess: setCurateResult,
+    mutationFn: () => fetchCurate(undefined, 200, generateSynopses, generateSynopses ? synopsisModel : undefined),
+    onSuccess: (data) => {
+      setCurateResult(data)
+      if (curateTimerRef.current) { clearInterval(curateTimerRef.current); curateTimerRef.current = null }
+      setCurateElapsed(0)
+    },
+    onError: () => {
+      if (curateTimerRef.current) { clearInterval(curateTimerRef.current); curateTimerRef.current = null }
+      setCurateElapsed(0)
+    },
+    onMutate: () => {
+      setCurateElapsed(0)
+      curateTimerRef.current = setInterval(() => setCurateElapsed((s) => s + 1), 1000)
+    },
   })
+
+  // Fetch synopsis estimate when synopses enabled or model changes
+  useEffect(() => {
+    if (!generateSynopses) {
+      setSynopsisEstimate(null)
+      return
+    }
+    let cancelled = false
+    setEstimateLoading(true)
+    fetchSynopsisEstimate(synopsisModel)
+      .then((est) => { if (!cancelled) setSynopsisEstimate(est) })
+      .catch(() => { if (!cancelled) setSynopsisEstimate(null) })
+      .finally(() => { if (!cancelled) setEstimateLoading(false) })
+    return () => { cancelled = true }
+  }, [generateSynopses, synopsisModel])
+
+  // Cleanup interval on unmount
+  useEffect(() => {
+    return () => { if (curateTimerRef.current) clearInterval(curateTimerRef.current) }
+  }, [])
 
   return (
     <div className="space-y-3">
@@ -137,7 +182,7 @@ export function KBOperations() {
             disabled={curate.isPending}
           >
             {curate.isPending ? (
-              <><Loader2 className="mr-1.5 h-3 w-3 animate-spin" />Scoring...</>
+              <><Loader2 className="mr-1.5 h-3 w-3 animate-spin" />Scoring ({curateElapsed}s)...</>
             ) : (
               "Run Audit"
             )}
@@ -153,6 +198,46 @@ export function KBOperations() {
             />
             Generate AI synopses for artifacts with raw summaries
           </label>
+          {generateSynopses && (
+            <div className="mb-2 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-muted-foreground">Model:</span>
+                <Select value={synopsisModel} onValueChange={setSynopsisModel}>
+                  <SelectTrigger className="h-6 w-40 text-[10px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SYNOPSIS_MODELS.map((m) => (
+                      <SelectItem key={m.id} value={m.id} className="text-xs">
+                        {m.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {estimateLoading && (
+                <p className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Estimating...
+                </p>
+              )}
+              {synopsisEstimate && !estimateLoading && (
+                <p className="text-[10px] text-muted-foreground">
+                  ~{synopsisEstimate.candidate_count} artifacts ·{" "}
+                  {synopsisEstimate.is_free_model
+                    ? <span className="text-green-600 dark:text-green-400">Free</span>
+                    : <span>${synopsisEstimate.estimated_cost_usd.toFixed(2)}</span>
+                  }
+                  {" · "}{synopsisEstimate.estimated_time_display}
+                  {synopsisEstimate.is_free_model && (
+                    <span className="ml-1 text-yellow-600 dark:text-yellow-400">
+                      ({synopsisEstimate.rpm_limit} RPM limit)
+                    </span>
+                  )}
+                </p>
+              )}
+            </div>
+          )}
           {curate.isError && (
             <p className="text-xs text-destructive">
               {curate.error instanceof Error ? curate.error.message : "Quality audit failed"}

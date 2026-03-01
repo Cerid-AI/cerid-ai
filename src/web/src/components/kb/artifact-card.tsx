@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Justin Michaels. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react"
+import { useState, useRef, useCallback } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -19,6 +19,18 @@ interface ArtifactCardProps {
 
 export function ArtifactCard({ result, isSelected, onSelect, onInject }: ArtifactCardProps) {
   const [expanded, setExpanded] = useState(false)
+  const cardRef = useRef<HTMLDivElement>(null)
+
+  const toggleExpand = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    const willExpand = !expanded
+    setExpanded(willExpand)
+    if (willExpand) {
+      requestAnimationFrame(() => {
+        cardRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" })
+      })
+    }
+  }, [expanded])
   const relevancePct = Math.round(result.relevance * 100)
   const showRelevance = result.relevance > 0
   const isBrowseMode = result.relevance === 0
@@ -35,8 +47,9 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject }: Artifac
 
   return (
     <Card
+      ref={cardRef}
       className={cn(
-        "cursor-pointer overflow-hidden transition-colors",
+        "min-w-0 cursor-pointer overflow-hidden transition-colors",
         isSelected && "ring-2 ring-primary",
       )}
       role="button"
@@ -124,10 +137,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject }: Artifac
             <Button
               variant="ghost"
               size="xs"
-              onClick={(e) => {
-                e.stopPropagation()
-                setExpanded(!expanded)
-              }}
+              onClick={toggleExpand}
             >
               {expanded ? (
                 <><ChevronUp className="mr-1 h-3 w-3" />Less</>

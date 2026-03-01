@@ -6,6 +6,7 @@ import { Loader2 } from "lucide-react"
 import { AppLayout } from "@/components/layout/app-layout"
 import { ChatPanel } from "@/components/chat/chat-panel"
 import { KBInjectionProvider } from "@/contexts/kb-injection-context"
+import { ConversationsProvider } from "@/contexts/conversations-context"
 import type { Pane } from "@/components/layout/sidebar"
 
 const KnowledgePane = lazy(() => import("@/components/kb/knowledge-pane"))
@@ -33,6 +34,7 @@ function PanePlaceholder({ pane }: { pane: Pane }) {
 
 export default function App() {
   return (
+    <ConversationsProvider>
     <KBInjectionProvider>
     <AppLayout>
       {(activePane) => {
@@ -59,5 +61,6 @@ export default function App() {
       }}
     </AppLayout>
     </KBInjectionProvider>
+    </ConversationsProvider>
   )
 }

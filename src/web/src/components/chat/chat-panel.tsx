@@ -2,46 +2,46 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useRef, useEffect, useCallback, useState, useMemo } from "react"
+import { Group, Panel, Separator as PanelSeparator } from "react-resizable-panels"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { Plus, PanelLeftClose, PanelLeft, Database, Rss, LayoutDashboard, Zap, Sparkles } from "lucide-react"
+import { Plus, Database, Rss, LayoutDashboard, Zap, Sparkles, Shield } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { MessageBubble } from "./message-bubble"
 import { ModelSwitchDivider } from "./model-switch-divider"
 import { ChatInput } from "./chat-input"
 import { ModelSelect } from "./model-select"
-import { ConversationList } from "./conversation-list"
 import { SplitPane } from "@/components/layout/split-pane"
 import { KBContextPanel } from "@/components/kb/kb-context-panel"
 import { HallucinationPanel } from "@/components/audit/hallucination-panel"
+import { VerificationStatusBar } from "@/components/audit/verification-status-bar"
 import { ChatDashboard } from "./chat-dashboard"
 import { ModelSwitchDialog } from "./model-switch-dialog"
 import { useChat } from "@/hooks/use-chat"
-import { useConversations } from "@/hooks/use-conversations"
+import { useConversationsContext } from "@/contexts/conversations-context"
 import { useKBContext } from "@/hooks/use-kb-context"
 import { useSettings } from "@/hooks/use-settings"
 import { useModelRouter } from "@/hooks/use-model-router"
 import { useModelSwitch } from "@/hooks/use-model-switch"
 import { useSmartSuggestions } from "@/hooks/use-smart-suggestions"
-import type { ChatMessage, SourceRef } from "@/lib/types"
+import { useVerificationStream } from "@/hooks/use-verification-stream"
+import { fetchHallucinationReport } from "@/lib/api"
+import type { ChatMessage, SourceRef, HallucinationReport } from "@/lib/types"
 import { MODELS } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 export function ChatPanel() {
   const {
-    conversations,
     active,
     activeId,
-    setActiveId,
     create,
     addMessage,
     updateLastMessage,
     updateModel,
-    remove,
     replaceMessages,
     clearMessages,
-  } = useConversations()
+  } = useConversationsContext()
 
   const {
     feedbackLoop, toggleFeedbackLoop,
@@ -49,6 +49,7 @@ export function ChatPanel() {
     autoModelSwitch, toggleAutoModelSwitch,
     autoInject, autoInjectThreshold,
     costSensitivity,
+    hallucinationEnabled, toggleHallucinationEnabled,
   } = useSettings()
 
   const { send, stop, isStreaming } = useChat({
@@ -59,9 +60,54 @@ export function ChatPanel() {
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const [selectedModel, setSelectedModel] = useState(MODELS[0].id)
-  const [showHistory, setShowHistory] = useState(() => window.innerWidth >= 1024)
   const [showKB, setShowKB] = useState(() => window.innerWidth >= 1024)
   const [lastAutoInjectCount, setLastAutoInjectCount] = useState(0)
+
+  // --- Verification (streaming + fallback) ---
+  const [savedReport, setSavedReport] = useState<HallucinationReport | null>(null)
+  const [savedReportLoading, setSavedReportLoading] = useState(false)
+
+  // Get the latest assistant response text for streaming verification
+  const latestAssistantText = useMemo(() => {
+    if (!active?.messages) return null
+    const assistantMsgs = active.messages.filter((m) => m.role === "assistant")
+    return assistantMsgs.length > 0 ? assistantMsgs[assistantMsgs.length - 1].content : null
+  }, [active?.messages])
+
+  // Trigger key: increments each time a new assistant message finishes streaming
+  const streamTriggerKey = useMemo(() => {
+    if (!active?.messages || isStreaming) return 0
+    return active.messages.filter((m) => m.role === "assistant").length
+  }, [active?.messages, isStreaming])
+
+  // Streaming verification hook
+  const verification = useVerificationStream(
+    latestAssistantText,
+    activeId ?? null,
+    hallucinationEnabled,
+    streamTriggerKey,
+  )
+
+  // Fetch saved report when switching to a conversation (fallback)
+  useEffect(() => {
+    if (!activeId || !hallucinationEnabled) {
+      setSavedReport(null)
+      return
+    }
+    // Only fetch saved report if streaming hasn't started
+    if (verification.phase !== "idle") return
+
+    let cancelled = false
+    setSavedReportLoading(true)
+    fetchHallucinationReport(activeId)
+      .then((r) => { if (!cancelled) { setSavedReport(r); setSavedReportLoading(false) } })
+      .catch(() => { if (!cancelled) setSavedReportLoading(false) })
+    return () => { cancelled = true }
+  }, [activeId, hallucinationEnabled]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Unified report: prefer streaming report when available, fallback to saved
+  const halReport = verification.report ?? savedReport
+  const halLoading = verification.loading || savedReportLoading
 
   const messages = active?.messages
   const latestUserMessage = useMemo(() => {
@@ -209,11 +255,6 @@ export function ChatPanel() {
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       {/* Toolbar */}
       <div className="flex items-center gap-2 border-b px-4 py-2">
-        {!showHistory && (
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setShowHistory(true)} aria-label="Show conversation history">
-            <PanelLeft className="h-4 w-4" />
-          </Button>
-        )}
         <Button variant="ghost" size="sm" onClick={() => create(selectedModel)}>
           <Plus className="mr-1 h-4 w-4" />
           New chat
@@ -284,6 +325,22 @@ export function ChatPanel() {
               {showKB ? "Hide knowledge context" : "Show knowledge context"}
             </TooltipContent>
           </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn("h-8 w-8", hallucinationEnabled && "text-green-500")}
+                onClick={toggleHallucinationEnabled}
+                aria-label={hallucinationEnabled ? "Disable response verification" : "Enable response verification"}
+              >
+                <Shield className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {hallucinationEnabled ? "Response verification: ON" : "Response verification: OFF"}
+            </TooltipContent>
+          </Tooltip>
         </TooltipProvider>
         <ModelSelect value={selectedModel} onChange={handleModelChange} />
       </div>
@@ -339,7 +396,7 @@ export function ChatPanel() {
 
       {/* Messages */}
       <ScrollArea className="min-h-0 flex-1 px-4" ref={scrollRef}>
-        <div className="mx-auto max-w-3xl py-4">
+        <div className="mx-auto max-w-4xl py-4">
           {(!active || active.messages.length === 0) && (
             <div className="flex items-center justify-center py-20 text-muted-foreground">
               <p>Start a conversation...</p>
@@ -368,10 +425,6 @@ export function ChatPanel() {
               </div>
             )
           })}
-          {/* Hallucination panel after messages — refreshKey triggers re-fetch after new messages */}
-          {activeId && !isStreaming && (
-            <HallucinationPanel conversationId={activeId} refreshKey={active?.messages.length ?? 0} />
-          )}
         </div>
       </ScrollArea>
 
@@ -394,6 +447,16 @@ export function ChatPanel() {
           ))}
         </div>
       )}
+
+      {/* Verification status bar */}
+      <VerificationStatusBar
+        report={halReport}
+        loading={halLoading}
+        featureEnabled={hallucinationEnabled}
+        streamPhase={verification.phase}
+        verifiedCount={verification.verifiedCount}
+        totalClaims={verification.totalClaims}
+      />
 
       {/* Auto-inject indicator */}
       {lastAutoInjectCount > 0 && isStreaming && (
@@ -422,34 +485,30 @@ export function ChatPanel() {
     </div>
   )
 
-  return (
-    <div className="flex h-full">
-      {/* Conversation history */}
-      {showHistory && (
-        <div className="flex w-64 flex-col border-r">
-          <div className="flex items-center gap-2 border-b px-3 py-2">
-            <span className="flex-1 text-sm font-medium">History</span>
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setShowHistory(false)} aria-label="Hide conversation history">
-              <PanelLeftClose className="h-4 w-4" />
-            </Button>
-          </div>
-          <ConversationList
-            conversations={conversations}
-            activeId={activeId}
-            onSelect={setActiveId}
-            onDelete={remove}
-          />
-        </div>
-      )}
-
-      {/* Chat + KB split pane */}
-      <div className="flex-1">
-        <SplitPane
-          left={chatArea}
-          right={<KBContextPanel {...kbContext} onClose={() => setShowKB(false)} />}
-          showRight={showKB}
+  // Right column: vertical split — Verification (top) + KB Context (bottom)
+  const rightColumn = (
+    <Group orientation="vertical" className="h-full">
+      <Panel defaultSize={33} minSize={15}>
+        <HallucinationPanel
+          report={halReport}
+          loading={halLoading}
+          featureEnabled={hallucinationEnabled}
+          conversationId={activeId ?? undefined}
+          streamingClaims={verification.phase !== "idle" && verification.phase !== "done" ? verification.claims : undefined}
         />
-      </div>
-    </div>
+      </Panel>
+      <PanelSeparator className="h-1 bg-border transition-colors hover:bg-primary/20 active:bg-primary/30" />
+      <Panel defaultSize={67} minSize={20}>
+        <KBContextPanel {...kbContext} onClose={() => setShowKB(false)} />
+      </Panel>
+    </Group>
+  )
+
+  return (
+    <SplitPane
+      left={chatArea}
+      right={rightColumn}
+      showRight={showKB}
+    />
   )
 }
