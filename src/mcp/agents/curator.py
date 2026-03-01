@@ -1,22 +1,28 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Curation Agent — artifact quality scoring (Phase 14).
+"""Curation Agent — artifact quality scoring + AI synopsis generation.
 
 Scores every artifact on 4 dimensions (summary, keywords, freshness,
 completeness), stores the composite quality_score on Neo4j Artifact
 nodes, and returns a distribution report.  All scoring is pure math —
 no LLM calls required.
+
+Optionally generates AI synopses for artifacts with raw/truncated
+summaries, using the free Llama model via Bifrost.
 """
 from __future__ import annotations
 
 import json
 import logging
 import math
+import re
 from typing import Any, Dict, List, Optional
 
+import httpx
+
 import config
-from db.neo4j.artifacts import list_artifacts
+from db.neo4j.artifacts import list_artifacts, update_artifact_summary
 from utils.time import utcnow, utcnow_iso
 
 logger = logging.getLogger("ai-companion.curator")
@@ -196,6 +202,63 @@ def _store_quality_scores(
 
 
 # ---------------------------------------------------------------------------
+# Synopsis helpers
+# ---------------------------------------------------------------------------
+
+def _is_truncated_summary(summary: str) -> bool:
+    """Detect raw/truncated summaries that need AI regeneration."""
+    if not summary or not summary.strip():
+        return True
+    s = summary.strip()
+    if len(s) < 50:
+        return True
+    # No sentence-ending punctuation — likely cut off mid-text
+    if not re.search(r'[.!?]$', s):
+        return True
+    return False
+
+
+async def _generate_synopsis(
+    text: str,
+    bifrost_url: str,
+    model: str,
+    max_input_chars: int,
+    max_tokens: int,
+) -> str:
+    """Call Bifrost LLM to generate a concise synopsis. Returns empty string on failure."""
+    snippet = text[:max_input_chars]
+    prompt = (
+        "Write a concise 1-2 sentence synopsis of this document. "
+        "Focus on what the document is about and its key content. "
+        "Do not start with 'This document'. Just state the content directly.\n\n"
+        f"{snippet}"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=config.BIFROST_TIMEOUT) as client:
+            resp = await client.post(
+                f"{bifrost_url}/chat/completions",
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.3,
+                    "max_tokens": max_tokens,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        content = data["choices"][0]["message"]["content"].strip()
+        # Strip markdown code fences if present
+        if content.startswith("```"):
+            content = content.split("\n", 1)[-1]
+        if content.endswith("```"):
+            content = content.rsplit("```", 1)[0]
+        return content.strip()
+    except Exception as e:
+        logger.warning(f"Synopsis generation failed: {e}")
+        return ""
+
+
+# ---------------------------------------------------------------------------
 # Main curation function
 # ---------------------------------------------------------------------------
 
@@ -204,6 +267,8 @@ async def curate(
     mode: str = "audit",
     domains: Optional[List[str]] = None,
     max_artifacts: int = 200,
+    chroma_client=None,
+    generate_synopses: bool = False,
 ) -> Dict[str, Any]:
     """Score artifact quality across the knowledge base.
 
@@ -212,10 +277,14 @@ async def curate(
         mode: "audit" (score and report, store scores).
         domains: Filter to specific domains (None = all).
         max_artifacts: Max artifacts to score per domain.
+        chroma_client: ChromaDB client (required if generate_synopses=True).
+        generate_synopses: If True, generate AI synopses for truncated summaries.
     """
     target_domains = domains or config.DOMAINS
 
     all_scores: List[Dict[str, Any]] = []
+    # Collect artifacts by domain for synopsis pass
+    artifacts_by_domain: Dict[str, List[Dict[str, Any]]] = {}
 
     for domain in target_domains:
         try:
@@ -223,6 +292,9 @@ async def curate(
         except Exception as e:
             logger.warning(f"Failed to list artifacts for {domain}: {e}")
             continue
+
+        if generate_synopses:
+            artifacts_by_domain[domain] = artifacts
 
         for artifact in artifacts:
             report = compute_quality_score(artifact)
@@ -243,6 +315,52 @@ async def curate(
         except Exception as e:
             logger.error(f"Failed to store quality scores: {e}")
 
+    # Synopsis generation pass
+    synopses_generated = 0
+    if generate_synopses and chroma_client:
+        for domain, artifacts in artifacts_by_domain.items():
+            candidates = [
+                a for a in artifacts
+                if _is_truncated_summary(a.get("summary", ""))
+            ][:50]  # cap per run
+            if not candidates:
+                continue
+            try:
+                collection = chroma_client.get_collection(
+                    name=config.collection_name(domain)
+                )
+            except Exception as e:
+                logger.warning(f"Cannot access collection for {domain}: {e}")
+                continue
+
+            for artifact in candidates:
+                chunk_id = f"{artifact['id']}_chunk_0"
+                try:
+                    result = collection.get(ids=[chunk_id])
+                    docs = result.get("documents", [])
+                    if not docs or not docs[0]:
+                        continue
+                    text = docs[0]
+                except Exception:
+                    continue
+
+                synopsis = await _generate_synopsis(
+                    text,
+                    config.BIFROST_URL,
+                    config.SYNOPSIS_MODEL,
+                    config.SYNOPSIS_MAX_INPUT_CHARS,
+                    config.SYNOPSIS_MAX_TOKENS,
+                )
+                if synopsis:
+                    try:
+                        update_artifact_summary(neo4j_driver, artifact["id"], synopsis)
+                        synopses_generated += 1
+                    except Exception as e:
+                        logger.warning(f"Failed to store synopsis for {artifact['id'][:8]}: {e}")
+
+        if synopses_generated:
+            logger.info(f"Generated {synopses_generated} AI synopses")
+
     score_values = [s["quality_score"] for s in all_scores]
     avg_score = sum(score_values) / len(score_values) if score_values else 0.0
 
@@ -257,6 +375,7 @@ async def curate(
         "mode": mode,
         "artifacts_scored": len(all_scores),
         "artifacts_stored": updated,
+        "synopses_generated": synopses_generated,
         "avg_quality_score": round(avg_score, 4),
         "score_distribution": _score_distribution(score_values),
         "domains_scored": target_domains,

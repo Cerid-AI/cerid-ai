@@ -280,6 +280,7 @@ export interface CurateResponse {
   mode: string
   artifacts_scored: number
   artifacts_stored: number
+  synopses_generated: number
   avg_quality_score: number
   score_distribution: Record<string, number>
   domains_scored: string[]

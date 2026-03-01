@@ -14,6 +14,7 @@ import { QueryStats } from "./query-stats"
 import { IngestionStats } from "./ingestion-stats"
 import { RecentFailures } from "./recent-failures"
 import { ConversationStats } from "./conversation-stats"
+import { KBOperations } from "@/components/monitoring/kb-operations"
 import { fetchAudit } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
@@ -114,51 +115,57 @@ export function AuditPane() {
         </div>
       </div>
 
-      {activeReports.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center text-muted-foreground text-sm">
-          Select at least one report to display
+      <ScrollArea className="flex-1">
+        <div className="space-y-4 p-4">
+          <PaneErrorBoundary label="KB Operations">
+            <KBOperations />
+          </PaneErrorBoundary>
+
+          {activeReports.length === 0 ? (
+            <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
+              Select at least one report to display
+            </div>
+          ) : isLoading ? (
+            <div className="flex items-center justify-center py-8 text-muted-foreground">
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Loading audit data...
+            </div>
+          ) : (
+            <>
+              {enabledReports.activity && (
+                <PaneErrorBoundary label="Activity Chart">
+                  <ActivityChart activity={audit?.activity} />
+                </PaneErrorBoundary>
+              )}
+              {enabledReports.costs && (
+                <PaneErrorBoundary label="Cost Breakdown">
+                  <CostBreakdown costs={audit?.costs} hours={hours} />
+                </PaneErrorBoundary>
+              )}
+              {enabledReports.conversations && (
+                <PaneErrorBoundary label="Conversation Stats">
+                  <ConversationStats conversations={audit?.conversations} />
+                </PaneErrorBoundary>
+              )}
+              {enabledReports.queries && (
+                <PaneErrorBoundary label="Query Stats">
+                  <QueryStats queries={audit?.queries} />
+                </PaneErrorBoundary>
+              )}
+              {enabledReports.ingestion && (
+                <PaneErrorBoundary label="Ingestion Stats">
+                  <IngestionStats ingestion={audit?.ingestion} />
+                </PaneErrorBoundary>
+              )}
+              {enabledReports.activity && (
+                <PaneErrorBoundary label="Recent Failures">
+                  <RecentFailures failures={audit?.activity?.recent_failures} />
+                </PaneErrorBoundary>
+              )}
+            </>
+          )}
         </div>
-      ) : isLoading ? (
-        <div className="flex flex-1 items-center justify-center text-muted-foreground">
-          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          Loading audit data...
-        </div>
-      ) : (
-        <ScrollArea className="flex-1">
-          <div className="space-y-4 p-4">
-            {enabledReports.activity && (
-              <PaneErrorBoundary label="Activity Chart">
-                <ActivityChart activity={audit?.activity} />
-              </PaneErrorBoundary>
-            )}
-            {enabledReports.costs && (
-              <PaneErrorBoundary label="Cost Breakdown">
-                <CostBreakdown costs={audit?.costs} hours={hours} />
-              </PaneErrorBoundary>
-            )}
-            {enabledReports.conversations && (
-              <PaneErrorBoundary label="Conversation Stats">
-                <ConversationStats conversations={audit?.conversations} />
-              </PaneErrorBoundary>
-            )}
-            {enabledReports.queries && (
-              <PaneErrorBoundary label="Query Stats">
-                <QueryStats queries={audit?.queries} />
-              </PaneErrorBoundary>
-            )}
-            {enabledReports.ingestion && (
-              <PaneErrorBoundary label="Ingestion Stats">
-                <IngestionStats ingestion={audit?.ingestion} />
-              </PaneErrorBoundary>
-            )}
-            {enabledReports.activity && (
-              <PaneErrorBoundary label="Recent Failures">
-                <RecentFailures failures={audit?.activity?.recent_failures} />
-              </PaneErrorBoundary>
-            )}
-          </div>
-        </ScrollArea>
-      )}
+      </ScrollArea>
     </div>
   )
 }

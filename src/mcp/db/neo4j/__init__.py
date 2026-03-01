@@ -9,6 +9,7 @@ __all__ = [
     # artifacts
     "create_artifact", "find_artifact_by_filename", "update_artifact",
     "get_artifact", "get_quality_scores", "list_artifacts", "recategorize_artifact",
+    "update_artifact_summary",
     # relationships
     "create_relationship", "find_related_artifacts",
     "discover_relationships", "_parse_keywords", "_extract_references",
@@ -25,6 +26,7 @@ from db.neo4j.artifacts import (  # noqa: F401,E402
     list_artifacts,
     recategorize_artifact,
     update_artifact,
+    update_artifact_summary,
 )
 from db.neo4j.relationships import (  # noqa: F401,E402
     _extract_references,

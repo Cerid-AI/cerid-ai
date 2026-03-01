@@ -89,6 +89,26 @@ def init_schema(driver) -> None:
                     now=now,
                 )
 
+        # --- Repair: backfill missing sub_category + CATEGORIZED_AS ---
+        fixed = session.run(
+            "MATCH (a:Artifact) WHERE a.sub_category IS NULL "
+            "SET a.sub_category = $default RETURN count(a) AS n",
+            default=config.DEFAULT_SUB_CATEGORY,
+        ).single()["n"]
+
+        linked = session.run(
+            "MATCH (a:Artifact)-[:BELONGS_TO]->(d:Domain) "
+            "WHERE NOT (a)-[:CATEGORIZED_AS]->() "
+            "WITH a, d, coalesce(a.sub_category, $default) AS sc "
+            "MATCH (subcat:SubCategory {name: d.name + '/' + sc}) "
+            "MERGE (a)-[:CATEGORIZED_AS]->(subcat) "
+            "RETURN count(a) AS n",
+            default=config.DEFAULT_SUB_CATEGORY,
+        ).single()["n"]
+
+        if fixed or linked:
+            logger.info(f"Backfilled {fixed} sub_category props, {linked} CATEGORIZED_AS rels")
+
     logger.info(
         f"Neo4j schema initialized with {len(config.TAXONOMY)} domains, "
         f"{sum(len(v.get('sub_categories', [])) for v in config.TAXONOMY.values())} sub-categories"

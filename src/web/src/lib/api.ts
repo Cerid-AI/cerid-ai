@@ -172,6 +172,7 @@ export async function fetchRectify(
 export async function fetchCurate(
   domains?: string[],
   maxArtifacts = 200,
+  generateSynopses = false,
 ): Promise<CurateResponse> {
   const res = await fetch(`${MCP_BASE}/agent/curate`, {
     method: "POST",
@@ -180,6 +181,7 @@ export async function fetchCurate(
       mode: "audit",
       domains: domains ?? null,
       max_artifacts: maxArtifacts,
+      generate_synopses: generateSynopses,
     }),
   })
   if (!res.ok) throw new Error(`Curate failed: ${res.status}`)

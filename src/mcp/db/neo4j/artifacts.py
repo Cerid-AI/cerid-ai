@@ -268,6 +268,24 @@ def get_quality_scores(
         }
 
 
+def update_artifact_summary(
+    driver,
+    artifact_id: str,
+    summary: str,
+) -> bool:
+    """Update an artifact's summary text. Returns True if the artifact was found."""
+    with driver.session() as session:
+        result = session.run(
+            "MATCH (a:Artifact {id: $aid}) "
+            "SET a.summary = $summary, a.modified_at = $now "
+            "RETURN a.id AS id",
+            aid=artifact_id,
+            summary=summary,
+            now=utcnow_iso(),
+        )
+        return result.single() is not None
+
+
 def recategorize_artifact(
     driver,
     artifact_id: str,

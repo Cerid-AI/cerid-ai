@@ -44,6 +44,18 @@ function artifactToResult(a: Artifact): KBQueryResult {
   }
 }
 
+/** Deduplicate search results by artifact_id, keeping the highest-relevance chunk. */
+function deduplicateByArtifact(results: KBQueryResult[]): KBQueryResult[] {
+  const best = new Map<string, KBQueryResult>()
+  for (const r of results) {
+    const existing = best.get(r.artifact_id)
+    if (!existing || r.relevance > existing.relevance) {
+      best.set(r.artifact_id, r)
+    }
+  }
+  return [...best.values()]
+}
+
 export function KnowledgePane() {
   const { injectResult, injectedContext } = useKBInjection()
   const [searchInput, setSearchInput] = useState("")
@@ -113,7 +125,7 @@ export function KnowledgePane() {
   const refetch = activeSearch ? refetchSearch : refetchArtifacts
 
   const allResults: KBQueryResult[] = activeSearch
-    ? searchResults?.results ?? []
+    ? deduplicateByArtifact(searchResults?.results ?? [])
     : (artifacts ?? [])
         .filter((a) => !activeDomain || a.domain === activeDomain)
         .filter((a) => !taxonomyFilter.subCategory || a.sub_category === taxonomyFilter.subCategory)

@@ -126,6 +126,13 @@ QUALITY_METADATA_SUBCAT_BOOST = 0.08  # sub_category match relevance boost
 QUALITY_METADATA_MAX_BOOST = 0.15   # cap on total metadata boost
 
 # ---------------------------------------------------------------------------
+# Synopsis Generation (AI-generated artifact summaries via curator)
+# ---------------------------------------------------------------------------
+SYNOPSIS_MODEL = CATEGORIZE_MODELS["smart"]   # free Llama model via Bifrost
+SYNOPSIS_MAX_INPUT_CHARS = 2000
+SYNOPSIS_MAX_TOKENS = 100
+
+# ---------------------------------------------------------------------------
 # Memory Extraction
 # ---------------------------------------------------------------------------
 MEMORY_RETENTION_DAYS = int(os.getenv("MEMORY_RETENTION_DAYS", "180"))

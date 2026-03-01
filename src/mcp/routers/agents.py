@@ -76,6 +76,7 @@ class CurateRequest(BaseModel):
     mode: str = Field("audit", pattern="^(audit)$")
     domains: Optional[List[str]] = None
     max_artifacts: int = Field(200, ge=1, le=1000)
+    generate_synopses: bool = False
 
 
 @router.post("/agent/query")
@@ -350,6 +351,8 @@ async def curate_endpoint(req: CurateRequest):
             mode=req.mode,
             domains=req.domains,
             max_artifacts=req.max_artifacts,
+            chroma_client=get_chroma() if req.generate_synopses else None,
+            generate_synopses=req.generate_synopses,
         )
     except Exception as e:
         logger.error(f"Curate error: {e}")

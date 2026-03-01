@@ -15,6 +15,7 @@ export function KBOperations() {
   const [rectifyResult, setRectifyResult] = useState<RectifyResponse | null>(null)
   const [maintenanceResult, setMaintenanceResult] = useState<MaintenanceResponse | null>(null)
   const [curateResult, setCurateResult] = useState<CurateResponse | null>(null)
+  const [generateSynopses, setGenerateSynopses] = useState(false)
 
   const rectify = useMutation({
     mutationFn: () => fetchRectify(["duplicates", "stale", "orphans", "distribution"]),
@@ -30,7 +31,7 @@ export function KBOperations() {
   })
 
   const curate = useMutation({
-    mutationFn: () => fetchCurate(),
+    mutationFn: () => fetchCurate(undefined, 200, generateSynopses),
     onSuccess: setCurateResult,
   })
 
@@ -143,6 +144,15 @@ export function KBOperations() {
           </Button>
         </CardHeader>
         <CardContent className="p-3 pt-0">
+          <label className="mb-2 flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+            <input
+              type="checkbox"
+              checked={generateSynopses}
+              onChange={(e) => setGenerateSynopses(e.target.checked)}
+              className="h-3 w-3 rounded border-muted-foreground/40"
+            />
+            Generate AI synopses for artifacts with raw summaries
+          </label>
           {curate.isError && (
             <p className="text-xs text-destructive">
               {curate.error instanceof Error ? curate.error.message : "Quality audit failed"}
@@ -262,6 +272,9 @@ function CurationResults({ result }: { result: CurateResponse }) {
       <p className="text-xs text-muted-foreground">
         Scored {result.artifacts_scored} artifacts — avg quality:{" "}
         <span className="font-medium">{avgPct}%</span>
+        {result.synopses_generated > 0 && (
+          <> — {result.synopses_generated} synopsis{result.synopses_generated !== 1 ? "es" : ""} generated</>
+        )}
       </p>
       <div className="grid grid-cols-4 gap-1 text-center">
         {([
