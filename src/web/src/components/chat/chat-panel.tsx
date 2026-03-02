@@ -67,19 +67,19 @@ export function ChatPanel() {
   const [savedReport, setSavedReport] = useState<HallucinationReport | null>(null)
   const [savedReportLoading, setSavedReportLoading] = useState(false)
 
-  // Get the latest assistant response text for streaming verification
-  const messages = active?.messages
+  // Get the latest assistant response text for streaming verification (uses `messages` defined below)
+  const activeMessages = active?.messages
   const latestAssistantText = useMemo(() => {
-    if (!messages) return null
-    const assistantMsgs = messages.filter((m) => m.role === "assistant")
+    if (!activeMessages) return null
+    const assistantMsgs = activeMessages.filter((m) => m.role === "assistant")
     return assistantMsgs.length > 0 ? assistantMsgs[assistantMsgs.length - 1].content : null
-  }, [messages])
+  }, [activeMessages])
 
   // Trigger key: increments each time a new assistant message finishes streaming
   const streamTriggerKey = useMemo(() => {
-    if (!messages || isStreaming) return 0
-    return messages.filter((m) => m.role === "assistant").length
-  }, [messages, isStreaming])
+    if (!activeMessages || isStreaming) return 0
+    return activeMessages.filter((m) => m.role === "assistant").length
+  }, [activeMessages, isStreaming])
 
   // Streaming verification hook
   const verification = useVerificationStream(
@@ -133,10 +133,10 @@ export function ChatPanel() {
 
   // Compute per-message verification status for the latest assistant message
   const lastAssistantMsgId = useMemo(() => {
-    if (!messages) return null
-    const assistantMsgs = messages.filter((m) => m.role === "assistant" && m.content)
+    if (!activeMessages) return null
+    const assistantMsgs = activeMessages.filter((m) => m.role === "assistant" && m.content)
     return assistantMsgs.length > 0 ? assistantMsgs[assistantMsgs.length - 1].id : null
-  }, [messages])
+  }, [activeMessages])
 
   const verificationStatusForMsg = useMemo((): MessageVerificationStatus => {
     if (!hallucinationEnabled || !lastAssistantMsgId) return null

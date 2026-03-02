@@ -22,9 +22,10 @@ if "agents.query_agent" not in sys.modules:
 
 import config
 from agents.hallucination import (
+    REDIS_HALLUCINATION_PREFIX,
+    _build_verification_details,
     _check_numeric_alignment,
     _compute_adjusted_confidence,
-    _build_verification_details,
     _extract_claims_heuristic,
     _has_staleness_indicators,
     _invert_ignorance_verdict,
@@ -40,7 +41,6 @@ from agents.hallucination import (
     get_hallucination_report,
     verify_claim,
     verify_response_streaming,
-    REDIS_HALLUCINATION_PREFIX,
 )
 
 

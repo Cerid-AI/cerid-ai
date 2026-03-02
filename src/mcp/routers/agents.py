@@ -244,7 +244,7 @@ class ClaimFeedbackRequest(BaseModel):
 async def claim_feedback_endpoint(req: ClaimFeedbackRequest):
     """Record user feedback on a verification claim."""
     try:
-        from agents.hallucination import get_hallucination_report, REDIS_HALLUCINATION_PREFIX, REDIS_HALLUCINATION_TTL
+        from agents.hallucination import REDIS_HALLUCINATION_PREFIX, REDIS_HALLUCINATION_TTL, get_hallucination_report
         from utils.cache import log_claim_feedback
 
         redis = get_redis()

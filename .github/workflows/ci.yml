@@ -48,6 +48,7 @@ jobs:
             --exclude-files '\.env\.age$' \
             --exclude-files '\.lock$' \
             --exclude-files 'package-lock\.json$' \
+            --exclude-files '\.github/workflows/' \
             --exclude-files 'src/mcp/docs/inventory/' \
             --exclude-files 'src/mcp/librechat-logs\.txt$' \
             --exclude-files 'scripts/env-lock\.sh$' \
