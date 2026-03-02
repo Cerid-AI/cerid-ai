@@ -4,7 +4,7 @@
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { lazy, Suspense, useState, useCallback, useRef, useEffect } from "react"
-import { Copy, Check, User, Bot } from "lucide-react"
+import { Copy, Check, User, Bot, ShieldCheck, ShieldAlert, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -85,7 +85,48 @@ function CopyButton({ text }: { text: string }) {
   )
 }
 
-export function MessageBubble({ message }: { message: ChatMessage }) {
+export type MessageVerificationStatus =
+  | { state: "loading" }
+  | { state: "done"; verified: number; unverified: number; uncertain: number; total: number }
+  | null
+
+function VerificationBadge({ status }: { status: MessageVerificationStatus }) {
+  if (!status) return null
+
+  if (status.state === "loading") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+        <Loader2 className="h-2.5 w-2.5 animate-spin" />
+        Verifying
+      </span>
+    )
+  }
+
+  const { verified, total, unverified } = status
+  const accuracy = total > 0 ? Math.round((verified / total) * 100) : 0
+  const hasIssues = unverified > 0
+
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+        hasIssues
+          ? "bg-red-500/10 text-red-400"
+          : accuracy >= 80
+            ? "bg-green-500/10 text-green-400"
+            : "bg-yellow-500/10 text-yellow-400",
+      )}
+    >
+      {hasIssues
+        ? <ShieldAlert className="h-2.5 w-2.5" />
+        : <ShieldCheck className="h-2.5 w-2.5" />
+      }
+      {verified}/{total} verified
+    </span>
+  )
+}
+
+export function MessageBubble({ message, verificationStatus }: { message: ChatMessage; verificationStatus?: MessageVerificationStatus }) {
   const isUser = message.role === "user"
 
   return (
@@ -136,7 +177,10 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
           <SourceAttribution sources={message.sourcesUsed} />
         )}
 
-        {message.model && <ModelBadge modelId={message.model} />}
+        <div className="flex items-center gap-1.5">
+          {message.model && <ModelBadge modelId={message.model} />}
+          {!isUser && verificationStatus && <VerificationBadge status={verificationStatus} />}
+        </div>
       </div>
     </div>
   )

@@ -65,6 +65,10 @@ export function useSettings() {
           setHallucinationEnabled(s.enable_hallucination_check)
           persist("cerid-hallucination-check", String(s.enable_hallucination_check))
         }
+        if (s.enable_model_router !== undefined) {
+          setAutoModelSwitch(s.enable_model_router)
+          persist("cerid-auto-model-switch", String(s.enable_model_router))
+        }
       })
       .catch(() => { /* Server unavailable — use localStorage values */ })
   }, [])
@@ -90,6 +94,7 @@ export function useSettings() {
     setAutoModelSwitch((prev) => {
       const next = !prev
       persist("cerid-auto-model-switch", String(next))
+      updateSettings({ enable_model_router: next }).catch(() => { /* noop */ })
       return next
     })
   }, [])

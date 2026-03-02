@@ -95,6 +95,45 @@ EMBEDDING_DIMENSIONS = int(os.getenv("EMBEDDING_DIMENSIONS", "384"))
 # Hallucination Detection
 # ---------------------------------------------------------------------------
 HALLUCINATION_THRESHOLD = float(os.getenv("HALLUCINATION_THRESHOLD", "0.75"))
+HALLUCINATION_UNVERIFIED_THRESHOLD = float(os.getenv("HALLUCINATION_UNVERIFIED_THRESHOLD", "0.4"))
+HALLUCINATION_MIN_RESPONSE_LENGTH = int(os.getenv("HALLUCINATION_MIN_RESPONSE_LENGTH", "50"))
+HALLUCINATION_MAX_CLAIMS = int(os.getenv("HALLUCINATION_MAX_CLAIMS", "10"))
+
+# ---------------------------------------------------------------------------
+# Verification Pipeline (claim extraction, Q-conversion, cross-model check)
+# ---------------------------------------------------------------------------
+# Primary model for ALL verification LLM calls — must be non-rate-limited.
+# GPT-4o-mini: 1000 RPM, $0.15/$0.60 per 1M tokens.
+VERIFICATION_MODEL = os.getenv("VERIFICATION_MODEL", "openrouter/openai/gpt-4o-mini")
+
+# Pool of non-rate-limited models for cross-model diversity selection.
+# _pick_verification_model() picks from this pool, preferring a different
+# model family than the generator to avoid correlated hallucinations.
+VERIFICATION_MODEL_POOL = [
+    "openrouter/openai/gpt-4o-mini",       # OpenAI — 1000 RPM, $0.15/$0.60
+    "openrouter/google/gemini-2.5-flash",   # Google — 1000 RPM, $0.15/$0.60
+]
+
+# Model with live web search for current-event claim verification.
+# The `:online` suffix enables OpenRouter's native web search plugin
+# which uses xAI's built-in web_search tool for Grok models.
+# Grok 4 Fast: $0.20/$0.50 per 1M tokens, web search currently free.
+VERIFICATION_CURRENT_EVENT_MODEL = os.getenv(
+    "VERIFICATION_CURRENT_EVENT_MODEL",
+    "openrouter/x-ai/grok-4-fast:online",
+)
+
+# ---------------------------------------------------------------------------
+# External (Cross-Model) Verification
+# ---------------------------------------------------------------------------
+ENABLE_EXTERNAL_VERIFICATION = os.getenv("ENABLE_EXTERNAL_VERIFICATION", "true").lower() == "true"
+EXTERNAL_VERIFY_MODEL = os.getenv("EXTERNAL_VERIFY_MODEL", "openrouter/openai/gpt-4o-mini")
+EXTERNAL_VERIFY_KB_THRESHOLD = float(os.getenv("EXTERNAL_VERIFY_KB_THRESHOLD", "0.3"))
+EXTERNAL_VERIFY_MAX_TOKENS = 200
+EXTERNAL_VERIFY_TEMPERATURE = 0.0
+EXTERNAL_VERIFY_MAX_CONCURRENT = int(os.getenv("EXTERNAL_VERIFY_MAX_CONCURRENT", "5"))
+EXTERNAL_VERIFY_RETRY_ATTEMPTS = 3
+EXTERNAL_VERIFY_RETRY_BASE_DELAY = 2.0  # seconds — defense-in-depth (1000 RPM models)
 
 # ---------------------------------------------------------------------------
 # Auto-Injection

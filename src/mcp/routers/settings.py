@@ -48,6 +48,9 @@ class SettingsUpdateRequest(BaseModel):
     auto_inject_threshold: Optional[float] = Field(
         None, ge=0.5, le=1.0, description="Minimum relevance score for auto-injection"
     )
+    enable_model_router: Optional[bool] = Field(
+        None, description="Toggle automatic model routing based on query complexity"
+    )
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -137,13 +140,17 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
         config.AUTO_INJECT_THRESHOLD = req.auto_inject_threshold
         updated["auto_inject_threshold"] = req.auto_inject_threshold
 
+    if req.enable_model_router is not None:
+        config.ENABLE_MODEL_ROUTER = req.enable_model_router
+        updated["enable_model_router"] = req.enable_model_router
+
     if not updated:
         raise HTTPException(
             status_code=400,
             detail="No valid fields provided. Updatable fields: "
             "categorize_mode, enable_feedback_loop, enable_hallucination_check, "
             "enable_memory_extraction, hallucination_threshold, cost_sensitivity, "
-            "enable_auto_inject, auto_inject_threshold",
+            "enable_auto_inject, auto_inject_threshold, enable_model_router",
         )
 
     logger.info(f"Settings updated: {updated}")

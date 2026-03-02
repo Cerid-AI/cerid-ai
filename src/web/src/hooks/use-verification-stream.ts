@@ -13,6 +13,19 @@ interface StreamingSummary {
   uncertain: number
   total: number
   overallConfidence: number
+  extractionMethod?: string
+}
+
+/**
+ * Estimate verification cost for a set of claims.
+ * Based on GPT-4o-mini pricing: $0.15/$0.60 per 1M tokens.
+ * ~250 input + ~75 output tokens per claim verification.
+ * ~1200 input + ~300 output for extraction (amortized per run).
+ */
+function estimateVerificationCost(claimCount: number): number {
+  const extractionCost = (1200 * 0.15 + 300 * 0.6) / 1_000_000 // ~$0.00036
+  const perClaimCost = (250 * 0.15 + 75 * 0.6) / 1_000_000     // ~$0.000083
+  return extractionCost + claimCount * perClaimCost
 }
 
 export interface UseVerificationStreamReturn {
@@ -28,8 +41,14 @@ export interface UseVerificationStreamReturn {
   verifiedCount: number
   /** Total claims extracted (known after extraction phase). */
   totalClaims: number
+  /** Extraction method used: "llm", "heuristic", or "none". */
+  extractionMethod: string | null
   /** Converted to HallucinationReport format for status bar compatibility. */
   report: HallucinationReport | null
+  /** Accumulated session-wide claims checked (resets on page reload). */
+  sessionClaimsChecked: number
+  /** Accumulated session-wide estimated verification cost in USD. */
+  sessionEstCost: number
 }
 
 /**
@@ -42,17 +61,28 @@ export function useVerificationStream(
   enabled: boolean,
   /** Increment to re-trigger verification for the same conversation. */
   triggerKey: number,
+  /** Model ID for analytics tracking. */
+  model?: string,
 ): UseVerificationStreamReturn {
   const [claims, setClaims] = useState<StreamingClaim[]>([])
   const [phase, setPhase] = useState<VerificationPhase>("idle")
   const [summary, setSummary] = useState<StreamingSummary | null>(null)
+  const [extractionMethod, setExtractionMethod] = useState<string | null>(null)
   const abortRef = useRef<(() => void) | null>(null)
+  const modelRef = useRef(model)
+  modelRef.current = model
+
+  // Accumulated session metrics (persist across verification runs, reset on page reload)
+  const sessionRef = useRef({ claimsChecked: 0, estCost: 0 })
+  const [sessionClaimsChecked, setSessionClaimsChecked] = useState(0)
+  const [sessionEstCost, setSessionEstCost] = useState(0)
 
   // Reset state when conversation changes
   useEffect(() => {
     setClaims([])
     setPhase("idle")
     setSummary(null)
+    setExtractionMethod(null)
   }, [conversationId])
 
   useEffect(() => {
@@ -66,8 +96,9 @@ export function useVerificationStream(
     setClaims([])
     setPhase("extracting")
     setSummary(null)
+    setExtractionMethod(null)
 
-    const { response, abort } = streamVerification(responseText, conversationId)
+    const { response, abort } = streamVerification(responseText, conversationId, undefined, modelRef.current)
     abortRef.current = abort
 
     let cancelled = false
@@ -106,6 +137,11 @@ export function useVerificationStream(
               if (cancelled) break
 
               switch (event.type) {
+                case "extraction_complete":
+                  setExtractionMethod(event.method ?? null)
+                  setPhase("verifying")
+                  break
+
                 case "claim_extracted":
                   setClaims((prev) => [
                     ...prev,
@@ -125,10 +161,17 @@ export function useVerificationStream(
                       c.index === event.index
                         ? {
                             ...c,
+                            claim: event.claim || c.claim,
                             status: event.status,
                             confidence: event.confidence,
                             source: event.source,
+                            source_artifact_id: event.source_artifact_id,
+                            source_domain: event.source_domain,
+                            source_snippet: event.source_snippet,
+                            source_urls: event.source_urls || [],
                             reason: event.reason,
+                            verification_method: event.verification_method,
+                            verification_model: event.verification_model,
                           }
                         : c,
                     ),
@@ -142,7 +185,13 @@ export function useVerificationStream(
                     uncertain: event.uncertain,
                     total: event.total,
                     overallConfidence: event.overall_confidence,
+                    extractionMethod: event.extraction_method,
                   })
+                  // Accumulate session-wide metrics
+                  sessionRef.current.claimsChecked += event.total ?? 0
+                  sessionRef.current.estCost += estimateVerificationCost(event.total ?? 0)
+                  setSessionClaimsChecked(sessionRef.current.claimsChecked)
+                  setSessionEstCost(sessionRef.current.estCost)
                   setPhase("done")
                   break
 
@@ -168,6 +217,7 @@ export function useVerificationStream(
       cancelled = true
       abort()
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- model tracked via ref
   }, [responseText, conversationId, enabled, triggerKey])
 
   const verifiedCount = claims.filter((c) => c.status && c.status !== "pending").length
@@ -180,12 +230,19 @@ export function useVerificationStream(
           conversation_id: conversationId ?? "",
           timestamp: new Date().toISOString(),
           skipped: summary.total === 0,
+          extraction_method: summary.extractionMethod,
           claims: claims.map((c) => ({
             claim: c.claim,
             status: (c.status === "pending" ? "uncertain" : c.status) as "verified" | "unverified" | "uncertain" | "error",
             similarity: c.confidence ?? 0,
             source_filename: c.source || undefined,
+            source_artifact_id: c.source_artifact_id || undefined,
+            source_domain: c.source_domain || undefined,
+            source_snippet: c.source_snippet || undefined,
+            source_urls: c.source_urls,
             reason: c.reason || undefined,
+            verification_method: c.verification_method,
+            verification_model: c.verification_model,
           })),
           summary: {
             total: summary.total,
@@ -203,6 +260,9 @@ export function useVerificationStream(
     loading: phase === "extracting" || phase === "verifying",
     verifiedCount,
     totalClaims,
+    extractionMethod: extractionMethod ?? summary?.extractionMethod ?? null,
     report,
+    sessionClaimsChecked,
+    sessionEstCost,
   }
 }

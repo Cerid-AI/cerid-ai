@@ -4,7 +4,7 @@
 import { useState, useCallback, useMemo } from "react"
 import { MODELS } from "@/lib/types"
 import type { ChatMessage, LiveMetrics, ModelOption } from "@/lib/types"
-import { estimateTokens } from "@/lib/utils"
+import { estimateTokens, tokenCost } from "@/lib/utils"
 
 export function useLiveMetrics(model: string, messages: ChatMessage[]) {
   const [streamingOutputChars, setStreamingOutputChars] = useState(0)
@@ -24,7 +24,7 @@ export function useLiveMetrics(model: string, messages: ChatMessage[]) {
     const contextPct = contextWindow > 0 ? (totalTokens / contextWindow) * 100 : 0
 
     const sessionCost = modelInfo
-      ? (inputTokens * modelInfo.inputCostPer1M + outputTokens * modelInfo.outputCostPer1M) / 1_000_000
+      ? tokenCost(inputTokens, modelInfo.inputCostPer1M) + tokenCost(outputTokens, modelInfo.outputCostPer1M)
       : 0
 
     let messageCost = 0
@@ -34,7 +34,7 @@ export function useLiveMetrics(model: string, messages: ChatMessage[]) {
       if (lastAssistant && lastUser) {
         const inTok = Math.ceil(lastUser.content.length / 4)
         const outTok = Math.ceil(lastAssistant.content.length / 4)
-        messageCost = (inTok * modelInfo.inputCostPer1M + outTok * modelInfo.outputCostPer1M) / 1_000_000
+        messageCost = tokenCost(inTok, modelInfo.inputCostPer1M) + tokenCost(outTok, modelInfo.outputCostPer1M)
       }
     }
 

@@ -1,10 +1,15 @@
 // Copyright (c) 2026 Justin Michaels. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { ShieldCheck, ShieldAlert, Loader2 } from "lucide-react"
-import type { HallucinationReport } from "@/lib/types"
+import { useState } from "react"
+import {
+  ShieldCheck, ShieldAlert, Loader2, ChevronDown, ChevronUp,
+  CheckCircle2, XOctagon, AlertTriangle, Circle, ExternalLink,
+} from "lucide-react"
+import type { HallucinationReport, StreamingClaim } from "@/lib/types"
 import type { VerificationPhase } from "@/hooks/use-verification-stream"
-import { cn } from "@/lib/utils"
+import { getClaimDisplayStatus, type ClaimDisplayStatus } from "@/lib/verification-utils"
+import { cn, getAccuracyTier } from "@/lib/utils"
 
 interface VerificationStatusBarProps {
   report: HallucinationReport | null
@@ -16,31 +21,133 @@ interface VerificationStatusBarProps {
   verifiedCount?: number
   /** Total claims extracted (streaming). */
   totalClaims?: number
+  /** Extraction method used ("llm" | "heuristic" | "none"). */
+  extractionMethod?: string | null
+  /** Streaming claims for real-time display during verification. */
+  streamingClaims?: StreamingClaim[]
+  /** Accumulated session-wide claims checked. */
+  sessionClaimsChecked?: number
+  /** Accumulated session-wide estimated verification cost in USD. */
+  sessionEstCost?: number
+}
+
+/** Status icon for a single claim using display status */
+function ClaimStatusIcon({ displayStatus }: { displayStatus: ClaimDisplayStatus }) {
+  switch (displayStatus) {
+    case "verified":
+      return <CheckCircle2 className="h-3 w-3 shrink-0 text-green-400" />
+    case "refuted":
+      return <XOctagon className="h-3 w-3 shrink-0 text-red-400" />
+    case "unverified":
+      return <AlertTriangle className="h-3 w-3 shrink-0 text-yellow-400" />
+    case "pending":
+      return <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" />
+    case "unassessed":
+    default:
+      return <Circle className="h-3 w-3 shrink-0 text-muted-foreground" />
+  }
+}
+
+/** Color class for a claim display status */
+function claimStatusColor(displayStatus: ClaimDisplayStatus): string {
+  switch (displayStatus) {
+    case "verified": return "text-green-400"
+    case "refuted": return "text-red-400"
+    case "unverified": return "text-yellow-400"
+    case "unassessed": return "text-muted-foreground"
+    default: return "text-muted-foreground"
+  }
 }
 
 export function VerificationStatusBar({
   report, loading, featureEnabled,
   streamPhase, verifiedCount = 0, totalClaims = 0,
+  extractionMethod, streamingClaims,
+  sessionClaimsChecked = 0, sessionEstCost = 0,
 }: VerificationStatusBarProps) {
+  const [expanded, setExpanded] = useState(false)
+
   if (!featureEnabled) return null
 
   // Streaming progress states
   if (streamPhase === "extracting") {
     return (
-      <div className="flex items-center gap-2 border-t bg-muted/30 px-4 py-1">
-        <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" />
-        <span className="text-xs text-muted-foreground">Extracting claims...</span>
+      <div className="border-t bg-muted/30">
+        <div className="flex items-center gap-2 px-4 py-1">
+          <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" />
+          <span className="text-xs text-muted-foreground">Extracting claims...</span>
+        </div>
       </div>
     )
   }
 
+  if (streamPhase === "verifying" && streamingClaims) {
+    return (
+      <div className="border-t bg-muted/30">
+        <button
+          className="flex w-full items-center gap-2 px-4 py-1 text-left"
+          onClick={() => setExpanded(!expanded)}
+          aria-expanded={expanded}
+          aria-label="Toggle verification details"
+        >
+          <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" />
+          <span className="flex-1 text-xs text-muted-foreground">
+            Verifying {verifiedCount}/{totalClaims} claims
+            {extractionMethod && <span className="ml-1 text-muted-foreground/60">({extractionMethod})</span>}
+          </span>
+          {expanded ? <ChevronUp className="h-3 w-3 text-muted-foreground" /> : <ChevronDown className="h-3 w-3 text-muted-foreground" />}
+        </button>
+        {expanded && (
+          <div className="border-t border-border/50 px-4 py-1.5">
+            <ul className="space-y-0.5">
+              {streamingClaims.map((c) => {
+                const ds = getClaimDisplayStatus(c.status ?? "pending", c.verification_method)
+                return (
+                  <li key={c.index} className="flex items-start gap-1.5 text-xs">
+                    <ClaimStatusIcon displayStatus={ds} />
+                    <span className={cn("flex-1 leading-tight", claimStatusColor(ds))}>
+                      {c.claim}
+                    </span>
+                    {c.verification_method === "cross_model" && (
+                      <span className="shrink-0 rounded bg-purple-500/15 px-1 text-[10px] text-purple-400">cross-model</span>
+                    )}
+                    {c.verification_method === "web_search" && (
+                      <span className="shrink-0 rounded bg-blue-500/15 px-1 text-[10px] text-blue-400">web search</span>
+                    )}
+                    {(c.source_urls?.length ?? 0) > 0 && (
+                      <a
+                        href={c.source_urls![0]}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="shrink-0 text-blue-400 hover:text-blue-300"
+                        title={c.source_urls![0]}
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    )}
+                    {c.source_domain && (
+                      <span className="shrink-0 rounded bg-muted px-1 text-[10px] text-muted-foreground">{c.source_domain}</span>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // Fallback verifying state without streaming claims
   if (streamPhase === "verifying") {
     return (
-      <div className="flex items-center gap-2 border-t bg-muted/30 px-4 py-1">
-        <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" />
-        <span className="text-xs text-muted-foreground">
-          Verifying {verifiedCount}/{totalClaims}...
-        </span>
+      <div className="border-t bg-muted/30">
+        <div className="flex items-center gap-2 px-4 py-1">
+          <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" />
+          <span className="text-xs text-muted-foreground">
+            Verifying {verifiedCount}/{totalClaims}...
+          </span>
+        </div>
       </div>
     )
   }
@@ -48,9 +155,11 @@ export function VerificationStatusBar({
   // Fallback loading (non-streaming)
   if (loading) {
     return (
-      <div className="flex items-center gap-2 border-t bg-muted/30 px-4 py-1">
-        <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" />
-        <span className="text-xs text-muted-foreground">Analyzing response...</span>
+      <div className="border-t bg-muted/30">
+        <div className="flex items-center gap-2 px-4 py-1">
+          <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" />
+          <span className="text-xs text-muted-foreground">Analyzing response...</span>
+        </div>
       </div>
     )
   }
@@ -58,78 +167,179 @@ export function VerificationStatusBar({
   // No report yet or skipped
   if (!report || report.skipped || report.summary.total === 0) {
     return (
-      <div className="flex items-center gap-2 border-t bg-muted/30 px-4 py-1">
-        <ShieldCheck className="h-3 w-3 shrink-0 text-green-500" />
-        <span className="text-xs text-muted-foreground">
-          {!report ? "Verification ready" : "No claims to verify"}
-        </span>
+      <div className="border-t bg-muted/30">
+        <div className="flex items-center gap-2 px-4 py-1">
+          <ShieldCheck className="h-3 w-3 shrink-0 text-green-500" />
+          <span className="text-xs text-muted-foreground">
+            {!report ? "Verification ready" : "No claims to verify"}
+          </span>
+          {/* Session metrics even when no current report */}
+          {sessionClaimsChecked > 0 && (
+            <>
+              <div className="h-3 w-px shrink-0 bg-border" />
+              <span className="text-xs text-muted-foreground/60">
+                Session: {sessionClaimsChecked} facts &bull; ~${sessionEstCost.toFixed(4)}
+              </span>
+            </>
+          )}
+        </div>
       </div>
     )
   }
 
   const { verified, unverified, uncertain, total } = report.summary
-  const accuracy = total > 0 ? Math.round((verified / total) * 100) : 0
 
-  // Coherence level
-  let coherence: { label: string; color: string }
-  if (accuracy >= 80) {
-    coherence = { label: "High", color: "text-green-400" }
-  } else if (accuracy >= 50) {
-    coherence = { label: "Medium", color: "text-yellow-400" }
-  } else {
-    coherence = { label: "Low", color: "text-red-400" }
-  }
+  // Split unverified into refuted (cross-model/web-search) and soft unverified (KB only)
+  const refutedCount = report.claims.filter(
+    (c) =>
+      c.status === "unverified" &&
+      (c.verification_method === "cross_model" || c.verification_method === "web_search"),
+  ).length
+  const softUnverifiedCount = unverified - refutedCount
 
-  // Shield color based on worst state
-  const shieldColor = unverified > 0
-    ? "text-red-400"
-    : uncertain > 0
-      ? "text-yellow-400"
-      : "text-green-400"
+  // Accuracy: only refuted claims count as failures (not soft unverified)
+  const denominator = verified + refutedCount
+  const accuracyPct = denominator > 0 ? Math.round((verified / denominator) * 100) : 100
+  const accuracyTier = getAccuracyTier(accuracyPct / 100)
 
-  const ShieldIcon = unverified > 0 ? ShieldAlert : ShieldCheck
+  // Shield color — refuted claims trigger the warning
+  const hasRefuted = refutedCount > 0
+  const shieldColor = hasRefuted ? "text-red-400" : "text-green-400"
+  const ShieldIcon = hasRefuted ? ShieldAlert : ShieldCheck
+  const hasClaims = report.claims && report.claims.length > 0
 
   return (
-    <div className="flex items-center gap-3 border-t bg-muted/30 px-4 py-1 text-xs">
-      <ShieldIcon className={cn("h-3 w-3 shrink-0", shieldColor)} />
+    <div className="border-t bg-muted/30">
+      {/* Summary row — clickable to expand claims */}
+      <button
+        className="flex w-full items-center gap-3 px-4 py-1 text-left text-xs"
+        onClick={() => hasClaims && setExpanded(!expanded)}
+        aria-expanded={hasClaims ? expanded : undefined}
+        aria-label="Toggle verified claims"
+        disabled={!hasClaims}
+      >
+        <ShieldIcon className={cn("h-3 w-3 shrink-0", shieldColor)} />
 
-      {verified > 0 && (
-        <span className="text-green-400">{verified} verified</span>
-      )}
-      {uncertain > 0 && (
-        <span className="text-yellow-400">{uncertain} uncertain</span>
-      )}
-      {unverified > 0 && (
-        <span className="text-red-400">{unverified} unverified</span>
-      )}
-
-      <div className="h-3 w-px shrink-0 bg-border" />
-
-      {/* Accuracy bar */}
-      <div className="flex items-center gap-1.5">
-        <span className="text-muted-foreground">Accuracy:</span>
-        <div className="h-1.5 w-12 overflow-hidden rounded-full bg-muted">
-          <div
-            className={cn(
-              "h-full rounded-full transition-all",
-              accuracy >= 80 ? "bg-green-500" : accuracy >= 50 ? "bg-yellow-500" : "bg-red-500",
-            )}
-            style={{ width: `${accuracy}%` }}
-          />
-        </div>
-        <span className={cn(
-          "tabular-nums",
-          accuracy >= 80 ? "text-green-400" : accuracy >= 50 ? "text-yellow-400" : "text-red-400",
-        )}>
-          {accuracy}%
+        {/* Claim count — show assessed vs total when some are unassessed */}
+        <span className="text-muted-foreground">
+          {uncertain > 0 ? `${verified + unverified} of ${total}` : `${total}`} claims assessed
         </span>
-      </div>
 
-      <div className="h-3 w-px shrink-0 bg-border" />
+        {verified > 0 && (
+          <span className="text-green-400">{verified} verified</span>
+        )}
+        {refutedCount > 0 && (
+          <span className="text-red-400">{refutedCount} refuted</span>
+        )}
+        {softUnverifiedCount > 0 && (
+          <span className="text-yellow-400">{softUnverifiedCount} unverified</span>
+        )}
+        {uncertain > 0 && (
+          <span className="text-muted-foreground/60">{uncertain} unassessed</span>
+        )}
 
-      {/* Coherence */}
-      <span className="text-muted-foreground">Coherence:</span>
-      <span className={coherence.color}>{coherence.label}</span>
+        <div className="h-3 w-px shrink-0 bg-border" />
+
+        {/* Accuracy bar */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-muted-foreground">Accuracy:</span>
+          <div className="h-1.5 w-12 overflow-hidden rounded-full bg-muted">
+            <div
+              className={cn("h-full rounded-full transition-all", accuracyTier.barColor)}
+              style={{ width: `${accuracyPct}%` }}
+            />
+          </div>
+          <span className={cn("tabular-nums", accuracyTier.textColor)}>
+            {accuracyPct}%
+          </span>
+        </div>
+
+        <div className="h-3 w-px shrink-0 bg-border" />
+
+        {/* Coherence */}
+        <span className="text-muted-foreground">Coherence:</span>
+        <span className={accuracyTier.textColor}>{accuracyTier.label}</span>
+
+        {/* Extraction method */}
+        {report.extraction_method && (
+          <>
+            <div className="h-3 w-px shrink-0 bg-border" />
+            <span className="text-muted-foreground/60">via {report.extraction_method}</span>
+          </>
+        )}
+
+        {/* Session metrics */}
+        {sessionClaimsChecked > 0 && (
+          <>
+            <div className="h-3 w-px shrink-0 bg-border" />
+            <span className="text-muted-foreground/60">
+              Session: {sessionClaimsChecked} facts &bull; ~${sessionEstCost.toFixed(4)}
+            </span>
+          </>
+        )}
+
+        {/* Expand toggle */}
+        <div className="flex-1" />
+        {hasClaims && (
+          expanded
+            ? <ChevronUp className="h-3 w-3 text-muted-foreground" />
+            : <ChevronDown className="h-3 w-3 text-muted-foreground" />
+        )}
+      </button>
+
+      {/* Expanded claims list with source attribution */}
+      {expanded && hasClaims && (
+        <div className="border-t border-border/50 px-4 py-1.5">
+          <ul className="space-y-1">
+            {report.claims.map((c, i) => {
+              const ds = getClaimDisplayStatus(c.status, c.verification_method)
+              return (
+                <li key={i} className="flex flex-col gap-0.5 text-xs">
+                  <div className="flex items-start gap-1.5">
+                    <ClaimStatusIcon displayStatus={ds} />
+                    <span className={cn("flex-1 leading-tight", claimStatusColor(ds))}>
+                      {c.claim}
+                    </span>
+                    {c.verification_method === "cross_model" && (
+                      <span className="shrink-0 rounded bg-purple-500/15 px-1 text-[10px] text-purple-400">cross-model</span>
+                    )}
+                    {c.verification_method === "web_search" && (
+                      <span className="shrink-0 rounded bg-blue-500/15 px-1 text-[10px] text-blue-400">web search</span>
+                    )}
+                    {(c.source_urls?.length ?? 0) > 0 && (
+                      <a
+                        href={c.source_urls![0]}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="shrink-0 text-blue-400 hover:text-blue-300"
+                        title={c.source_urls![0]}
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    )}
+                    {c.source_domain && (
+                      <span className="shrink-0 rounded bg-muted px-1 text-[10px] text-muted-foreground">{c.source_domain}</span>
+                    )}
+                    {c.source_filename && (
+                      <span className="shrink-0 text-muted-foreground/60">{c.source_filename}</span>
+                    )}
+                    {c.similarity > 0 && (
+                      <span className="shrink-0 tabular-nums text-muted-foreground/60">
+                        {Math.round(c.similarity * 100)}%
+                      </span>
+                    )}
+                  </div>
+                  {c.source_snippet && (
+                    <p className="ml-[18px] line-clamp-2 leading-tight text-muted-foreground/60 italic">
+                      &ldquo;{c.source_snippet.slice(0, 150)}&rdquo;
+                    </p>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      )}
     </div>
   )
 }

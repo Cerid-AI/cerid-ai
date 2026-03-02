@@ -5,7 +5,7 @@ import { useState, useRef, useCallback } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { ChevronDown, ChevronUp, PlusCircle, GitBranch, Globe } from "lucide-react"
+import { ChevronDown, ChevronUp, PlusCircle, GitBranch, Globe, ArrowRightLeft, Loader2, X } from "lucide-react"
 import { DomainBadge } from "./domain-filter"
 import type { KBQueryResult } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -15,10 +15,14 @@ interface ArtifactCardProps {
   isSelected: boolean
   onSelect: () => void
   onInject: () => void
+  domains?: string[]
+  onRecategorize?: (artifactId: string, newDomain: string) => Promise<void>
 }
 
-export function ArtifactCard({ result, isSelected, onSelect, onInject }: ArtifactCardProps) {
+export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, onRecategorize }: ArtifactCardProps) {
   const [expanded, setExpanded] = useState(false)
+  const [showRecategorize, setShowRecategorize] = useState(false)
+  const [recategorizing, setRecategorizing] = useState(false)
   const cardRef = useRef<HTMLDivElement>(null)
 
   const toggleExpand = useCallback((e: React.MouseEvent) => {
@@ -131,6 +135,38 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject }: Artifac
           </p>
         ) : null}
 
+        {/* Recategorize inline picker */}
+        {showRecategorize && domains && onRecategorize && (
+          <div className="mt-2 flex flex-wrap items-center gap-1 rounded border bg-muted/30 p-2">
+            <span className="text-[10px] text-muted-foreground">Move to:</span>
+            {domains.filter((d) => d !== result.domain).map((d) => (
+              <Button
+                key={d}
+                variant="outline"
+                size="xs"
+                className="h-5 text-[10px] capitalize"
+                disabled={recategorizing}
+                onClick={async (e) => {
+                  e.stopPropagation()
+                  setRecategorizing(true)
+                  try {
+                    await onRecategorize(result.artifact_id, d)
+                    setShowRecategorize(false)
+                  } finally {
+                    setRecategorizing(false)
+                  }
+                }}
+              >
+                {d}
+              </Button>
+            ))}
+            {recategorizing && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+            <Button variant="ghost" size="xs" className="ml-auto h-5 w-5 p-0" onClick={(e) => { e.stopPropagation(); setShowRecategorize(false) }}>
+              <X className="h-3 w-3" />
+            </Button>
+          </div>
+        )}
+
         {/* Actions */}
         <div className="mt-2 flex items-center gap-1">
           {cleanContent.length > 150 && (
@@ -144,6 +180,20 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject }: Artifac
               ) : (
                 <><ChevronDown className="mr-1 h-3 w-3" />More</>
               )}
+            </Button>
+          )}
+          {domains && onRecategorize && (
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={(e) => {
+                e.stopPropagation()
+                setShowRecategorize(!showRecategorize)
+              }}
+              title="Move to another domain"
+            >
+              <ArrowRightLeft className="mr-1 h-3 w-3" />
+              Move
             </Button>
           )}
           <div className="flex-1" />

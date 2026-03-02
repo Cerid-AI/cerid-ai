@@ -14,9 +14,13 @@ ARG VITE_CERID_API_KEY=""
 ENV VITE_CERID_API_KEY=${VITE_CERID_API_KEY}
 RUN npm run build
 
-# Production stage
+# Production stage — Trivy scans in CI catch base-image CVEs
 FROM nginx:1.27-alpine
-RUN apk update && apk upgrade --no-cache && rm -rf /var/cache/apk/*
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+# Inject env-config.js before other scripts so window.__ENV__ is available at runtime
+RUN sed -i 's|<head>|<head><script src="/env-config.js"></script>|' /usr/share/nginx/html/index.html
 EXPOSE 80
+ENTRYPOINT ["/docker-entrypoint.sh"]

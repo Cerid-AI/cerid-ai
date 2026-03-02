@@ -296,7 +296,7 @@ class TestGetQueryPatterns:
 class TestGetConversationAnalytics:
     def test_redis_scan_error_returns_empty(self):
         redis = MagicMock()
-        redis.scan.side_effect = Exception("Connection refused")
+        redis.scan_iter.side_effect = Exception("Connection refused")
 
         result = get_conversation_analytics(redis)
         assert result["total_conversations"] == 0
@@ -305,7 +305,7 @@ class TestGetConversationAnalytics:
 
     def test_no_conversations(self):
         redis = MagicMock()
-        redis.scan.return_value = (0, [])
+        redis.scan_iter.return_value = iter([])
 
         result = get_conversation_analytics(redis)
         assert result["total_conversations"] == 0
@@ -313,7 +313,7 @@ class TestGetConversationAnalytics:
 
     def test_aggregates_model_stats(self):
         redis = MagicMock()
-        redis.scan.return_value = (0, ["conv:abc:metrics"])
+        redis.scan_iter.return_value = iter(["conv:abc:metrics"])
 
         entries = [
             json.dumps({
@@ -343,7 +343,7 @@ class TestGetConversationAnalytics:
 
     def test_unknown_model_fallback_rate(self):
         redis = MagicMock()
-        redis.scan.return_value = (0, ["conv:abc:metrics"])
+        redis.scan_iter.return_value = iter(["conv:abc:metrics"])
 
         entries = [
             json.dumps({
@@ -363,7 +363,7 @@ class TestGetConversationAnalytics:
 
     def test_strips_openrouter_prefix(self):
         redis = MagicMock()
-        redis.scan.return_value = (0, ["conv:abc:metrics"])
+        redis.scan_iter.return_value = iter(["conv:abc:metrics"])
 
         entries = [
             json.dumps({

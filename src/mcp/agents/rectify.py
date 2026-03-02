@@ -199,14 +199,18 @@ def resolve_duplicates(
             except Exception as e:
                 logger.warning(f"Failed to delete chunks for {artifact['id']}: {e}")
 
-        with neo4j_driver.session() as session:
-            session.run(
-                """
-                MATCH (a:Artifact {id: $id})
-                DETACH DELETE a
-                """,
-                id=artifact["id"],
-            )
+        try:
+            with neo4j_driver.session() as session:
+                session.run(
+                    """
+                    MATCH (a:Artifact {id: $id})
+                    DETACH DELETE a
+                    """,
+                    id=artifact["id"],
+                )
+        except Exception as e:
+            logger.error(f"Failed to delete artifact {artifact['id']} from Neo4j: {e}")
+            continue
 
         removed.append({
             "id": artifact["id"],

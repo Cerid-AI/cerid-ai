@@ -1,6 +1,6 @@
 services:
   bifrost:
-    image: maximhq/bifrost:latest
+    image: maximhq/bifrost:latest@sha256:0fa2596eb2d05cf2f58b6d7b31076b0cc153f2c60972e83eb1f634bccd0372df
     container_name: bifrost
     ports:
       - "8080:8080"

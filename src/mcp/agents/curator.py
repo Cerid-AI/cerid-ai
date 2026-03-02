@@ -156,25 +156,6 @@ def compute_quality_score(artifact: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Score distribution helper
-# ---------------------------------------------------------------------------
-
-def _score_distribution(scores: List[float]) -> Dict[str, int]:
-    """Categorize scores into quality tiers."""
-    dist = {"excellent": 0, "good": 0, "fair": 0, "poor": 0}
-    for s in scores:
-        if s >= 0.8:
-            dist["excellent"] += 1
-        elif s >= 0.6:
-            dist["good"] += 1
-        elif s >= 0.4:
-            dist["fair"] += 1
-        else:
-            dist["poor"] += 1
-    return dist
-
-
-# ---------------------------------------------------------------------------
 # Neo4j quality score persistence
 # ---------------------------------------------------------------------------
 
@@ -450,6 +431,11 @@ async def curate(
         key=lambda x: x["quality_score"],
     )
 
+    score_dist = {"excellent": 0, "good": 0, "fair": 0, "poor": 0}
+    for s in score_values:
+        tier = "excellent" if s >= 0.8 else "good" if s >= 0.6 else "fair" if s >= 0.4 else "poor"
+        score_dist[tier] += 1
+
     return {
         "timestamp": utcnow_iso(),
         "mode": mode,
@@ -457,7 +443,7 @@ async def curate(
         "artifacts_stored": updated,
         "synopses_generated": synopses_generated,
         "avg_quality_score": round(avg_score, 4),
-        "score_distribution": _score_distribution(score_values),
+        "score_distribution": score_dist,
         "domains_scored": target_domains,
         "low_quality_artifacts": low_quality[:20],
     }

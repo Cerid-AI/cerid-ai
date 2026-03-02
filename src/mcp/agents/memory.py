@@ -21,7 +21,7 @@ logger = logging.getLogger("ai-companion.memory")
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-MIN_RESPONSE_LENGTH = 100  # skip trivially short responses
+MIN_RESPONSE_LENGTH = 100
 MEMORY_TYPES = {"fact", "decision", "preference", "action_item"}
 
 

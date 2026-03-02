@@ -34,8 +34,10 @@ services:
       - ./data/chroma:/chroma/chroma
     environment:
       - ANONYMIZED_TELEMETRY=false
+      - CHROMA_ANONYMIZED_TELEMETRY=false
       - ALLOW_RESET=true
       - IS_PERSISTENT=true
+      - LOG_LEVEL=WARNING
     networks:
       - llm-network
     restart: unless-stopped

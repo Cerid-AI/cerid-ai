@@ -10,7 +10,7 @@ from collections import Counter, defaultdict
 from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
-from utils.cache import get_log
+from utils.cache import REDIS_CONV_METRICS_PREFIX, get_log
 from utils.time import utcnow, utcnow_iso
 
 logger = logging.getLogger("ai-companion.audit")
@@ -52,7 +52,7 @@ def get_activity_summary(
     domain_counts = Counter(e.get("domain", "unknown") for e in recent)
 
     hourly = defaultdict(int)
-    hourly_by_type: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    hourly_by_type: Dict[str, Counter] = defaultdict(Counter)
     for e in recent:
         ts = e.get("timestamp", "")
         if ts:
@@ -200,8 +200,6 @@ def get_query_patterns(
 # Conversation analytics
 # ---------------------------------------------------------------------------
 
-from utils.cache import REDIS_CONV_METRICS_PREFIX  # noqa: E402
-
 # Per-model cost rates (USD per 1K tokens, OpenRouter pricing)
 MODEL_COST_RATES = {
     "anthropic/claude-sonnet-4": {"input": 0.003, "output": 0.015},
@@ -223,17 +221,12 @@ def get_conversation_analytics(
 
     try:
         keys = []
-        cursor = 0
-        while True:
-            cursor, found = redis_client.scan(
-                cursor, match=f"{REDIS_CONV_METRICS_PREFIX}*:metrics", count=100
-            )
-            keys.extend(found)
-            if cursor == 0:
-                break
+        for key in redis_client.scan_iter(
+            match=f"{REDIS_CONV_METRICS_PREFIX}*:metrics", count=100
+        ):
+            keys.append(key)
             if len(keys) >= limit:
                 break
-        keys = keys[:limit]
     except Exception as e:
         logger.warning(f"Failed to scan conversation metrics: {e}")
         return {"total_conversations": 0, "total_turns": 0, "models": {}, "total_cost_usd": 0.0}

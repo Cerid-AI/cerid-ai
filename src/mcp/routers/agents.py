@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from deps import get_chroma, get_neo4j, get_redis
-from services.ingestion import ingest_content
+from services.ingestion import ingest_content, validate_file_path
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion")
@@ -49,6 +49,7 @@ class HallucinationCheckRequest(BaseModel):
     response_text: str
     conversation_id: str
     threshold: Optional[float] = Field(None, ge=0.0, le=1.0)
+    model: Optional[str] = None
 
 
 class MemoryExtractionRequest(BaseModel):
@@ -122,7 +123,6 @@ async def agent_query_endpoint(req: AgentQueryRequest):
 @router.post("/agent/triage")
 async def triage_file_endpoint(req: TriageFileRequest):
     try:
-        from services.ingestion import validate_file_path
         validate_file_path(req.file_path)
         from agents.triage import triage_file
         triage_result = await triage_file(
@@ -212,6 +212,7 @@ async def hallucination_check_endpoint(req: HallucinationCheckRequest):
             neo4j_driver=get_neo4j(),
             redis_client=get_redis(),
             threshold=req.threshold,
+            model=req.model,
         )
     except Exception as e:
         logger.error(f"Hallucination check error: {e}")
@@ -308,6 +309,7 @@ class VerifyStreamRequest(BaseModel):
     response_text: str
     conversation_id: str
     threshold: Optional[float] = Field(None, ge=0.0, le=1.0)
+    model: Optional[str] = None
 
 
 @router.post("/agent/verify-stream")
@@ -325,6 +327,7 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
                 neo4j_driver=get_neo4j(),
                 redis_client=get_redis(),
                 threshold=req.threshold,
+                model=req.model,
             ):
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception as e:

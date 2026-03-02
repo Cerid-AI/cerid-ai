@@ -29,15 +29,36 @@ jobs:
       - run: pip install -r src/mcp/requirements.txt
       - run: pip install pytest pytest-asyncio httpx pytest-cov
       - name: Run tests with coverage
-        run: cd src/mcp && python -m pytest tests/ -v --tb=short --cov=. --cov-report=term-missing --cov-fail-under=55
+        run: cd src/mcp && python -m pytest tests/ -v --tb=short --cov=. --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=70
 
   security:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # Full history for secret scanning
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
+      - name: Secret detection (detect-secrets)
+        run: |
+          pip install detect-secrets==1.5.0
+          # Scan all tracked files for potential secrets
+          detect-secrets scan --all-files --exclude-files '\.env\.age$' --exclude-files '\.lock$' --exclude-files 'package-lock\.json$' > /tmp/secrets.json
+          # Fail if any secrets found (excluding baseline)
+          python -c "
+          import json, sys
+          with open('/tmp/secrets.json') as f:
+              results = json.load(f)
+          secrets = {k: v for k, v in results.get('results', {}).items() if v}
+          if secrets:
+              print('::error::Potential secrets detected in:')
+              for fname, findings in secrets.items():
+                  for finding in findings:
+                      print(f'  {fname}:{finding[\"line_number\"]} - {finding[\"type\"]}')
+              sys.exit(1)
+          print('No secrets detected.')
+          "
       - name: Python security scan (bandit)
         run: pip install bandit==1.9.4 && bandit -r src/mcp/ -ll --skip B101 -x src/mcp/tests
       - name: Python dependency audit (including transitive deps)

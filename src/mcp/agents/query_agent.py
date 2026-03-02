@@ -15,11 +15,39 @@ import httpx
 
 import config
 from config import BIFROST_URL, CHROMA_URL, DOMAINS
-from deps import parse_chroma_url
+from deps import get_chroma
 from utils.cache import log_event
 from utils.llm_parsing import parse_llm_json
 
 logger = logging.getLogger("ai-companion.query_agent")
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _format_chroma_result(
+    content: str,
+    relevance: float,
+    chunk_id: str,
+    domain: str,
+    metadata: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Build a standardized result dict from a ChromaDB chunk."""
+    return {
+        "content": content,
+        "relevance": round(relevance, 4),
+        "artifact_id": metadata.get("artifact_id", ""),
+        "filename": metadata.get("filename", ""),
+        "domain": domain,
+        "chunk_index": metadata.get("chunk_index", 0),
+        "collection": config.collection_name(domain),
+        "chunk_id": chunk_id,
+        "ingested_at": metadata.get("ingested_at", ""),
+        "sub_category": metadata.get("sub_category", ""),
+        "tags_json": metadata.get("tags_json", "[]"),
+        "keywords": metadata.get("keywords", "[]"),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -162,8 +190,7 @@ async def multi_domain_query(
         raise ValueError(f"Invalid domains: {invalid_domains}. Valid: {DOMAINS}")
 
     if chroma_client is None:
-        host, port = parse_chroma_url()
-        chroma_client = chromadb.HttpClient(host=host, port=port)
+        chroma_client = get_chroma()
 
     async def query_domain(domain: str) -> List[Dict[str, Any]]:
         """Query a single domain collection (vector + BM25 hybrid)."""
@@ -184,20 +211,13 @@ async def multi_domain_query(
                     relevance = max(0.0, min(1.0, 1.0 - distance))
                     metadata = results["metadatas"][0][i] if results["metadatas"] else {}
 
-                    formatted.append({
-                        "content": results["documents"][0][i],
-                        "relevance": round(relevance, 4),
-                        "artifact_id": metadata.get("artifact_id", ""),
-                        "filename": metadata.get("filename", ""),
-                        "domain": domain,
-                        "chunk_index": metadata.get("chunk_index", 0),
-                        "collection": config.collection_name(domain),
-                        "chunk_id": chunk_id,
-                        "ingested_at": metadata.get("ingested_at", ""),
-                        "sub_category": metadata.get("sub_category", ""),
-                        "tags_json": metadata.get("tags_json", "[]"),
-                        "keywords": metadata.get("keywords", "[]"),
-                    })
+                    formatted.append(_format_chroma_result(
+                        content=results["documents"][0][i],
+                        relevance=relevance,
+                        chunk_id=chunk_id,
+                        domain=domain,
+                        metadata=metadata,
+                    ))
                     seen_ids.add(chunk_id)
 
             from utils import bm25 as bm25_mod
@@ -226,22 +246,13 @@ async def multi_domain_query(
                                 if cid in seen_ids:
                                     continue
                                 meta = fetched["metadatas"][j] if fetched["metadatas"] else {}
-                                formatted.append({
-                                    "content": fetched["documents"][j],
-                                    "relevance": round(
-                                        config.HYBRID_KEYWORD_WEIGHT * bm25_map[cid], 4
-                                    ),
-                                    "artifact_id": meta.get("artifact_id", ""),
-                                    "filename": meta.get("filename", ""),
-                                    "domain": domain,
-                                    "chunk_index": meta.get("chunk_index", 0),
-                                    "collection": config.collection_name(domain),
-                                    "chunk_id": cid,
-                                    "ingested_at": meta.get("ingested_at", ""),
-                                    "sub_category": meta.get("sub_category", ""),
-                                    "tags_json": meta.get("tags_json", "[]"),
-                                    "keywords": meta.get("keywords", "[]"),
-                                })
+                                formatted.append(_format_chroma_result(
+                                    content=fetched["documents"][j],
+                                    relevance=config.HYBRID_KEYWORD_WEIGHT * bm25_map[cid],
+                                    chunk_id=cid,
+                                    domain=domain,
+                                    metadata=meta,
+                                ))
                                 seen_ids.add(cid)
                         except Exception as e:
                             logger.debug(f"BM25-only fetch failed for {domain}: {e}")
@@ -255,9 +266,7 @@ async def multi_domain_query(
     tasks = [query_domain(domain) for domain in domains]
     domain_results = await asyncio.gather(*tasks)
 
-    all_results = []
-    for results in domain_results:
-        all_results.extend(results)
+    all_results = [r for results in domain_results for r in results]
 
     return all_results
 
@@ -686,9 +695,17 @@ async def agent_query(
         if search_query != query:
             logger.info(f"Enriched query: {query!r} → {search_query!r}")
 
+    # When querying from a chat flow (conversation_messages provided) and no
+    # explicit domain filter was requested, exclude the "conversations" domain.
+    # Feedback-ingested conversation turns would otherwise dominate results,
+    # creating circular noise (same pattern as hallucination.py:87-89).
+    effective_domains = domains
+    if effective_domains is None and conversation_messages:
+        effective_domains = [d for d in config.DOMAINS if d != "conversations"]
+
     results = await multi_domain_query(
         query=search_query,
-        domains=domains,
+        domains=effective_domains,
         top_k=top_k,
         chroma_client=chroma_client,
     )

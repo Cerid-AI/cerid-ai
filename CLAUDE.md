@@ -9,7 +9,7 @@
 
 Cerid AI is a self-hosted, privacy-first Personal AI Knowledge Companion. It unifies multi-domain knowledge bases (code, finance, projects, artifacts) into a context-aware LLM interface with RAG-powered retrieval and intelligent agents. All data stays local; only LLM API calls go external.
 
-**Status:** Phase 10E complete. Phase 10A (production quality), 10B (UX polish), 10C (structural splits + middleware hardening), 10D (test coverage + CI hardening), 10E (smart model switching). 564 Python tests (75% coverage), 94 frontend tests. 7 agents operational (query, triage, rectify, audit, maintenance, hallucination, memory); 15 MCP tools; hybrid BM25+vector search; scheduled maintenance; CI/CD pipeline with 6-job pipeline (lint, test, security, lock-sync, frontend, docker). Multi-machine sync via Dropbox. React GUI (port 3000) with streaming chat, source attribution, model switch dialog with cost estimation, summarize-and-switch, color-coded context gauge, KB context pane, monitoring, audit dashboards, hallucination panel, smart model router, KB suggestions, file upload, tag browsing, memories pane, settings pane, and conversation analytics. Backend hardened with API key auth, rate limiting (XFF-aware with IETF headers), Redis query caching, conversation analytics, request ID tracing, and optional field-level encryption. Docker images pinned, Python deps locked with pip-compile hashes, Dependabot configured. Plugin system with feature tiers (community/pro). Hierarchical taxonomy with sub-categories and tags.
+**Status:** Phase 16A–F complete. Phases 10A–15H shipped + Verification UX Overhaul + Phase 16 quality/cleanup pass (security hardening, dead code removal, code quality, dependency optimization, backend feature wiring). 811+ Python tests, 111+ frontend tests. 8 agents operational (query, triage, rectify, audit, maintenance, hallucination, memory, curator); 17 MCP tools; hybrid BM25s+vector search with configurable weights; quality-weighted retrieval; conversation-aware KB queries with confidence gating; streaming verification with accuracy analytics and ignorance-admission detection; scheduled maintenance; CI/CD pipeline with 6-job pipeline (lint, test, security, lock-sync, frontend, docker). Multi-machine sync via Dropbox. React GUI (port 3000) with streaming chat, source attribution, model switch dialog with cost estimation, summarize-and-switch, color-coded context gauge, KB context pane with taxonomy tree and CRUD, monitoring with KB operations, audit dashboards with accuracy analytics, hallucination panel with claim feedback and source links, smart model router, KB suggestions, file upload, tag browsing, memories pane with archive, settings pane with collapsible sections and tooltips, conversation analytics, and verification status bar with session metrics. Backend hardened with API key auth, rate limiting (XFF-aware with IETF headers), Redis query caching, conversation analytics, request ID tracing, and optional field-level encryption. Docker images pinned (including Bifrost, LibreChat, RAG API SHA digests), Python deps locked with pip-compile hashes, Dependabot configured. Plugin system with feature tiers (community/pro). Hierarchical taxonomy with sub-categories and tags. Codebase structurally split: `db/neo4j/` package, `sync/` package, `parsers/` package, `config/` package, `services/` layer, `eval/` harness.
 
 ## Architecture
 
@@ -64,49 +64,69 @@ React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly
 ├── docs/CERID_AI_PROJECT_REFERENCE.md # Detailed technical reference
 ├── src/mcp/
 │   ├── main.py                       # FastAPI MCP server entry point
-│   ├── config.py                     # Central configuration (domains, tiers, URLs, sync)
-│   ├── cerid_sync_lib.py             # Sync export/import library (JSONL)
+│   ├── config/                       # Configuration package (split from config.py in 10C)
+│   │   ├── settings.py               # Domains, tiers, URLs, sync, model IDs
+│   │   ├── taxonomy.py               # TAXONOMY dict with sub-categories/tags
+│   │   └── features.py               # Feature flags and tier gating
+│   ├── db/neo4j/                     # Neo4j data layer (split from utils/graph.py in 10C)
+│   │   ├── schema.py                 # init_schema (constraints, indexes)
+│   │   ├── artifacts.py              # Artifact CRUD (6 functions)
+│   │   ├── relationships.py          # Graph relationships + discovery
+│   │   └── taxonomy.py               # Taxonomy + sub-category CRUD
+│   ├── sync/                         # KB sync package (split from cerid_sync_lib.py in 10C)
+│   │   ├── export.py                 # JSONL export functions
+│   │   ├── import_.py                # JSONL import + ChromaDB helpers
+│   │   ├── manifest.py               # Sync manifest read/write
+│   │   ├── status.py                 # Compare local vs sync
+│   │   └── _helpers.py               # Constants + utilities
+│   ├── parsers/                      # File parser package (split from utils/parsers.py in 10C)
+│   │   ├── registry.py               # Parser registry + parse_file orchestrator
+│   │   ├── pdf.py, office.py         # PDF (pdfplumber), DOCX/XLSX
+│   │   ├── structured.py             # CSV/TSV/HTML
+│   │   ├── email.py, ebook.py        # EML/MBOX, EPUB/RTF
+│   │   └── _utils.py                 # Shared parser utilities
+│   ├── services/                     # Service layer (extracted in 10C)
+│   │   └── ingestion.py              # ingest_content(), ingest_file(), dedup
+│   ├── eval/                         # Retrieval evaluation harness (Phase 12)
+│   │   ├── harness.py                # NDCG, MRR, Precision@K, Recall@K
+│   │   ├── metrics.py                # Metric computation functions
+│   │   └── benchmark.jsonl           # Eval benchmark data
+│   ├── tools.py                      # MCP tool registry + dispatcher (17 tools)
 │   ├── sync_check.py                 # Auto-import on startup if DB empty
 │   ├── scheduler.py                  # APScheduler maintenance engine
 │   ├── deps.py                       # Dependency injection (DB singletons, per-DB locks, retry)
-│   ├── routers/                      # FastAPI routers (Phase 4A split)
+│   ├── routers/                      # FastAPI routers
 │   │   ├── health.py, query.py, ingestion.py, artifacts.py
 │   │   ├── agents.py, digest.py, mcp_sse.py, taxonomy.py
 │   │   ├── settings.py, upload.py, memories.py
 │   │   └── __init__.py
 │   ├── plugins/                      # Plugin system (Phase 8A)
 │   │   └── ocr/                      # OCR parser plugin (pro tier, requires docling)
-│   ├── middleware/                    # Request middleware (Phase 6D)
+│   ├── middleware/                    # Request middleware
 │   │   ├── auth.py                   # API key authentication (opt-in via CERID_API_KEY)
-│   │   ├── rate_limit.py             # In-memory sliding window rate limiting (path-specific)
+│   │   ├── rate_limit.py             # Sliding window rate limiting (XFF-aware, IETF headers)
 │   │   └── request_id.py             # Request ID tracing (X-Request-ID header)
-│   ├── utils/
-│   │   ├── time.py                   # Timezone-aware UTC helpers (replaces datetime.utcnow)
-│   │   ├── parsers.py                # Extensible file parser registry (+eml, mbox, epub, rtf)
-│   │   ├── metadata.py               # Metadata extraction + AI categorization
-│   │   ├── chunker.py                # Token-based text chunking
-│   │   ├── graph.py                  # Neo4j artifact CRUD
-│   │   ├── bm25.py                   # BM25 keyword search index
-│   │   ├── cache.py                  # Redis audit logging
+│   ├── utils/                        # Utilities (some are now re-export shims)
+│   │   ├── parsers.py                # Re-export shim → parsers/ package
+│   │   ├── graph.py                  # Re-export shim → db/neo4j/ package
+│   │   ├── bm25.py                   # BM25s keyword search (stemming, stopwords)
+│   │   ├── cache.py                  # Redis audit logging + conversation metrics
 │   │   ├── query_cache.py            # Redis query cache (5-min TTL)
-│   │   ├── dedup.py                  # Semantic dedup (embedding similarity, Phase 8B)
-│   │   ├── encryption.py             # Field-level Fernet encryption (Phase 8D)
-│   │   ├── sync_backend.py           # Pluggable sync backends (Phase 8D)
-│   │   ├── features.py               # Feature flags and tier gating (Phase 8A)
-│   │   ├── temporal.py               # Temporal intent parsing + recency scoring
-│   │   └── llm_parsing.py            # Strip markdown fences from LLM JSON responses
+│   │   ├── embeddings.py             # Embedding model config scaffold
+│   │   └── (time, metadata, chunker, dedup, encryption, sync_backend, features, temporal, llm_parsing)
 │   ├── scripts/
 │   │   ├── watch_ingest.py           # Watchdog folder watcher (host process)
 │   │   ├── watch_obsidian.py         # Obsidian vault watcher (host process)
 │   │   └── ingest_cli.py             # Batch CLI ingest tool
 │   ├── agents/
-│   │   ├── query_agent.py            # Multi-domain query with LLM reranking
+│   │   ├── query_agent.py            # Multi-domain query with quality-weighted reranking
+│   │   ├── curator.py                # Artifact quality scoring (Phase 14)
 │   │   ├── triage.py                 # LangGraph triage agent
 │   │   ├── rectify.py                # Knowledge base health checks
-│   │   ├── audit.py                  # Operation tracking, cost estimation, conversation analytics
+│   │   ├── audit.py                  # Operation tracking, cost estimation, verification analytics
 │   │   ├── maintenance.py            # System health, stale cleanup
-│   │   ├── hallucination.py          # Hallucination detection (Phase 7A)
-│   │   └── memory.py                 # Memory extraction from conversations (Phase 7C)
+│   │   ├── hallucination.py          # Hallucination detection + streaming verification
+│   │   └── memory.py                 # Memory extraction from conversations
 │   ├── Dockerfile
 │   ├── docker-compose.yml            # MCP server + Dashboard + React GUI
 │   ├── requirements.txt              # Python deps (human-editable ranges)
@@ -123,18 +143,18 @@ React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly
 │   ├── Dockerfile                     # Multi-stage: Node build → nginx:alpine (pinned)
 │   ├── nginx.conf                     # SPA fallback + Bifrost reverse proxy
 │   └── src/
-│       ├── __tests__/                 # 94 vitest tests (7 test files)
-│       ├── lib/types.ts, api.ts, model-router.ts, syntax-highlighter.ts, utils.ts  # Types, API clients, model recommendation engine, utilities
-│       ├── hooks/                     # use-theme, use-chat, use-conversations, use-kb-context, use-settings, use-model-router, use-smart-suggestions, use-live-metrics, use-model-switch
-│       ├── contexts/                  # SettingsContext (model prefs, feedback toggle), KBInjectionContext
+│       ├── __tests__/                 # 111+ vitest tests (8+ test files)
+│       ├── lib/types.ts, api.ts, model-router.ts, syntax-highlighter.ts  # Types, API clients, model engine
+│       ├── hooks/                     # use-theme, use-chat, use-conversations, use-kb-context, use-settings, use-model-router, use-smart-suggestions, use-live-metrics, use-model-switch, use-verification-stream
+│       ├── contexts/                  # SettingsContext, KBInjectionContext, ConversationsContext
 │       └── components/
-│           ├── layout/                # Sidebar nav, status bar
-│           ├── chat/                  # Chat panel, message list, chat-dashboard, model router banner, smart suggestions, source attribution, model switch divider, model-select, model-switch-dialog
-│           ├── kb/                    # KB context panel, artifact cards, domain filter, graph preview, file upload, tag filter
-│           ├── monitoring/            # Health cards, collection chart, scheduler status
-│           ├── audit/                 # Activity chart, ingestion timeline, cost breakdown, query stats, hallucination panel, conversation stats
+│           ├── layout/                # Sidebar nav, status bar (enhanced tooltips)
+│           ├── chat/                  # Chat panel, message list, chat-dashboard, model router, smart suggestions, source attribution, model switch dialog, verification status bar
+│           ├── kb/                    # KB context panel, artifact cards (quality badges), domain filter, graph preview, taxonomy tree, tag filter
+│           ├── monitoring/            # Health cards, collection chart, scheduler status, KB operations
+│           ├── audit/                 # Activity chart, ingestion timeline, cost breakdown, query stats, hallucination panel (claim feedback), conversation stats, accuracy dashboard, model accuracy chart
 │           ├── memories/              # Memories browsing pane
-│           ├── settings/              # Server-synced settings pane
+│           ├── settings/              # Server-synced settings (collapsible sections, info tooltips)
 │           └── ui/                    # shadcn/ui primitives (button, card, badge, etc.)
 ├── stacks/
 │   ├── infrastructure/               # Neo4j, ChromaDB, Redis (Phase 5)
@@ -427,7 +447,7 @@ If you are a Claude Code instance on a new machine, follow these steps to get th
 2. **Run `./scripts/validate-env.sh`** to check all 14 environment validations
 3. **If containers are down:** `./scripts/start-cerid.sh` (or `--build` after a `git pull`)
 4. **Check `.claude/settings.json`** — shared hooks config is committed; per-machine permissions go in `.claude/settings.local.json` (gitignored)
-5. **MCP server is at `http://localhost:8888/mcp/sse`** — configured in `.mcp.json` (committed), exposes 15 `pkb_*` tools
+5. **MCP server is at `http://localhost:8888/mcp/sse`** — configured in `.mcp.json` (committed), exposes 17 `pkb_*` tools
 6. **React GUI dev server:** configured in `.claude/launch.json` (committed) — Vite on port 5173
 
 **Key files for Claude Code:**
@@ -592,7 +612,7 @@ curl -X POST http://localhost:8888/agent/maintain \
 
 ### Dependencies
 
-LangGraph >=0.2.0, langchain-core, langchain-openai, langchain-community
+LangGraph >=0.3.0, langchain-core, langchain-openai
 
 ## Phase 3: Streamlit Dashboard
 
@@ -645,5 +665,21 @@ Admin and monitoring UI at `http://localhost:8501` (container: `ai-companion-das
   - **9D (Complete):** Neo4j auth hardening — fixed docker-compose env var passthrough bug (empty `NEO4J_PASSWORD` overriding env_file), health check validates auth via Cypher query (not just `verify_connectivity()`), early RuntimeError on empty password, error detail in health responses, config.py startup warning, health-cards case-insensitive error prefix
 - **Phase 10A (Complete):** Production Quality — copyright headers, source attribution in chat, frontend tests (68), CI hardening (security scanning, coverage, Docker scanning)
 - **Phase 10B (Complete):** UX Polish — model switch dividers, per-message model badges with provider colors
-- **Codebase Audit (Complete):** Accessibility fixes (33 across 14 components), type safety (tag normalization at API boundary), error handling overhaul, dead code removal, logic consolidation (collection name helper, LLM JSON parsing, centralized constants), dependency management (pip-compile lock files, Docker image pinning, Dependabot, pre-commit hooks)
-- **Open Issues:** See [`docs/ISSUES.md`](docs/ISSUES.md) for tracked bugs, feature gaps, and architecture evaluations (5 open items across 4 categories).
+- **Codebase Audit (Complete):** Accessibility fixes (33 across 14 components), type safety, error handling overhaul, dead code removal, logic consolidation, dependency management (pip-compile, Docker pinning, Dependabot, pre-commit hooks)
+- **Phase 10C (Complete):** Structural Splits — `config/`, `db/neo4j/`, `sync/`, `parsers/`, `services/` packages; middleware hardening (XFF, IETF headers, IP redaction, request ID tracing)
+- **Phase 10D (Complete):** Test Coverage — 564 Python tests (75% coverage), 94 frontend tests; CI hardening (pip-audit, CodeQL, coverage 55%, bundle size monitoring)
+- **Phase 10E (Complete):** Smart Model Switching — token estimator, context replay cost, summarize-and-switch, model switch dialog with cost estimates
+- **Phase 11 (Complete):** Knowledge Intelligence — interactive audit/agent controls, taxonomy tree sidebar, curation agent design, operations documentation
+- **Phase 12 (Complete):** RAG Excellence — BM25s replacement (stemming, stopwords, 500x faster), configurable retrieval weights, embedding eval scaffold, eval harness (NDCG, MRR, P@K, R@K)
+- **Phase 13 (Complete):** Conversation Intelligence — conversation-aware KB queries (enrichment from last 5 messages), auto-injection with confidence gate (0.82 threshold), context budget optimization
+- **Phase 14 (Complete):** Artifact Quality — curation agent (4-dimension scoring), quality-weighted retrieval, metadata boost, GUI wiring (QualityBadge, quality audit), AI synopsis generation, Bifrost model fixes
+- **Phase 15 (Complete):** Realtime Accuracy Watcher — UI polish (verification panel, settings scroll, collapsible sections, tooltips), streaming verification (SSE), accuracy dashboard, claim feedback, model accuracy comparison
+- **Verification UX Overhaul (Complete):** Refuted/unverified status distinction, source URL extraction from web search, staleness detection with web search escalation, generator model context in prompts, session metrics, ignorance-admission detection with verdict inversion (checks underlying facts instead of model honesty)
+- **Phase 16A (Complete):** Security & Infrastructure Hardening — Bifrost/LibreChat/RAG API Docker image pinning (SHA256), PostgreSQL/Meilisearch credential externalization, secret detection in CI, runtime MCP_URL config for web container
+- **Phase 16B (Complete):** Dead Code & API Cleanup — removed 6 dead frontend API functions, orphaned tests, unused imports; inlined single-use helpers; dependency audit confirmed all deps in-use
+- **Phase 16C (Complete):** Backend Code Quality — extracted `_format_chroma_result()` helper, `defaultdict(Counter)`, `scan_iter()`, try/except in resolve_duplicates, `get_chroma()` factory usage
+- **Phase 16D (Complete):** Frontend Code Quality — extracted `tokenCost()`, `getAccuracyTier()`, `parseTags()` shared utilities; fixed unstable React keys; 18 new utility tests (111 total)
+- **Phase 16E (Complete):** Dependency & Docker Optimization — removed unused `langchain-community` (-3 transitive packages), narrowed langchain bounds, extracted spaCy model ARG, removed `apk upgrade`, ChromaDB telemetry disabled, CI coverage threshold raised to 70%
+- **Phase 16F (Complete):** Backend Feature Wiring — taxonomy CRUD UI (create domain/sub-category), artifact recategorize action, memory archive button, model router server-synced settings toggle
+- **Next:** Phase 16G–H, then 17–18. See [`docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md`](docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md) and [`tasks/todo.md`](tasks/todo.md).
+- **Open Issues:** See [`docs/ISSUES.md`](docs/ISSUES.md) for tracked items (3 open: E1 artifact preview, F6 compose separation, D2 conversation fork).

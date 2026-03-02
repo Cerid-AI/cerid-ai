@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { ChevronRight, ChevronDown, FolderOpen, Folder, Loader2 } from "lucide-react"
-import { fetchTaxonomy } from "@/lib/api"
+import { ChevronRight, ChevronDown, FolderOpen, Folder, Loader2, Plus, X } from "lucide-react"
+import { fetchTaxonomy, createDomain, createSubCategory } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 const DOMAIN_COLORS: Record<string, string> = {
@@ -32,6 +32,14 @@ interface TaxonomyTreeProps {
 
 export function TaxonomyTree({ filter, onFilterChange, artifactCounts }: TaxonomyTreeProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [addingDomain, setAddingDomain] = useState(false)
+  const [newDomainName, setNewDomainName] = useState("")
+  const [addingSubTo, setAddingSubTo] = useState<string | null>(null)
+  const [newSubName, setNewSubName] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState("")
+
+  const queryClient = useQueryClient()
 
   const { data: taxonomy, isLoading } = useQuery({
     queryKey: ["taxonomy"],
@@ -80,23 +88,96 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts }: Taxonom
     onFilterChange({ domain: null, subCategory: null })
   }
 
+  const handleCreateDomain = async () => {
+    const name = newDomainName.trim().toLowerCase()
+    if (!name) return
+    setSaving(true)
+    setError("")
+    try {
+      await createDomain(name)
+      await queryClient.invalidateQueries({ queryKey: ["taxonomy"] })
+      setNewDomainName("")
+      setAddingDomain(false)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to create domain")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleCreateSubCategory = async (domain: string) => {
+    const name = newSubName.trim().toLowerCase()
+    if (!name) return
+    setSaving(true)
+    setError("")
+    try {
+      await createSubCategory(domain, name)
+      await queryClient.invalidateQueries({ queryKey: ["taxonomy"] })
+      setNewSubName("")
+      setAddingSubTo(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to create sub-category")
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const hasFilter = filter.domain !== null
 
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between px-2">
         <span className="text-xs font-medium text-muted-foreground">Taxonomy</span>
-        {hasFilter && (
+        <div className="flex gap-0.5">
+          {hasFilter && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-5 text-[10px]"
+              onClick={clearFilter}
+            >
+              Clear
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"
-            className="h-5 text-[10px]"
-            onClick={clearFilter}
+            className="h-5 w-5 p-0"
+            onClick={() => { setAddingDomain(!addingDomain); setError("") }}
+            title="Add domain"
           >
-            Clear
+            <Plus className="h-3 w-3" />
           </Button>
-        )}
+        </div>
       </div>
+
+      {error && (
+        <div className="mx-2 rounded bg-destructive/10 px-2 py-1 text-[10px] text-destructive">
+          {error}
+        </div>
+      )}
+
+      {addingDomain && (
+        <div className="mx-2 flex items-center gap-1">
+          <input
+            type="text"
+            className="h-6 flex-1 rounded border bg-background px-2 text-[11px] focus:outline-none focus:ring-1 focus:ring-ring"
+            placeholder="Domain name..."
+            value={newDomainName}
+            onChange={(e) => setNewDomainName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") handleCreateDomain(); if (e.key === "Escape") setAddingDomain(false) }}
+            autoFocus
+            disabled={saving}
+          />
+          <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={handleCreateDomain} disabled={saving || !newDomainName.trim()}>
+            {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
+          </Button>
+          <Button variant="ghost" size="sm" className="h-5 w-5 p-0" onClick={() => setAddingDomain(false)} disabled={saving}>
+            <X className="h-3 w-3" />
+          </Button>
+        </div>
+      )}
+
       <ScrollArea className="max-h-[280px]">
         <div className="space-y-0.5 px-1">
           {Object.entries(taxonomy.domains).map(([domain, info]) => {
@@ -106,48 +187,65 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts }: Taxonom
 
             return (
               <div key={domain}>
-                <button
-                  className={cn(
-                    "flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-xs transition-colors",
-                    "hover:bg-muted/50",
-                    isActive && !filter.subCategory && "bg-primary/10 font-medium",
-                  )}
-                  onClick={() => handleDomainClick(domain)}
-                  aria-expanded={isExpanded}
-                >
-                  <span
-                    className="shrink-0 cursor-pointer"
+                <div className="group flex items-center">
+                  <button
+                    className={cn(
+                      "flex flex-1 items-center gap-1.5 rounded px-2 py-1 text-left text-xs transition-colors",
+                      "hover:bg-muted/50",
+                      isActive && !filter.subCategory && "bg-primary/10 font-medium",
+                    )}
+                    onClick={() => handleDomainClick(domain)}
+                    aria-expanded={isExpanded}
+                  >
+                    <span
+                      className="shrink-0 cursor-pointer"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        toggleExpand(domain)
+                      }}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); toggleExpand(domain) } }}
+                      aria-label={isExpanded ? "Collapse" : "Expand"}
+                    >
+                      {isExpanded ? (
+                        <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                      )}
+                    </span>
+                    {isExpanded ? (
+                      <FolderOpen className={cn("h-3.5 w-3.5 shrink-0", DOMAIN_COLORS[domain])} />
+                    ) : (
+                      <Folder className={cn("h-3.5 w-3.5 shrink-0", DOMAIN_COLORS[domain])} />
+                    )}
+                    <span className="flex-1 truncate capitalize">{domain}</span>
+                    {domainCount !== undefined && (
+                      <Badge variant="secondary" className="h-4 px-1 text-[9px]">
+                        {domainCount}
+                      </Badge>
+                    )}
+                  </button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-5 w-5 p-0 opacity-0 group-hover:opacity-100"
                     onClick={(e) => {
                       e.stopPropagation()
-                      toggleExpand(domain)
+                      setAddingSubTo(addingSubTo === domain ? null : domain)
+                      setNewSubName("")
+                      setError("")
+                      if (!expanded.has(domain)) toggleExpand(domain)
                     }}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); toggleExpand(domain) } }}
-                    aria-label={isExpanded ? "Collapse" : "Expand"}
+                    title="Add sub-category"
                   >
-                    {isExpanded ? (
-                      <ChevronDown className="h-3 w-3 text-muted-foreground" />
-                    ) : (
-                      <ChevronRight className="h-3 w-3 text-muted-foreground" />
-                    )}
-                  </span>
-                  {isExpanded ? (
-                    <FolderOpen className={cn("h-3.5 w-3.5 shrink-0", DOMAIN_COLORS[domain])} />
-                  ) : (
-                    <Folder className={cn("h-3.5 w-3.5 shrink-0", DOMAIN_COLORS[domain])} />
-                  )}
-                  <span className="flex-1 truncate capitalize">{domain}</span>
-                  {domainCount !== undefined && (
-                    <Badge variant="secondary" className="h-4 px-1 text-[9px]">
-                      {domainCount}
-                    </Badge>
-                  )}
-                </button>
+                    <Plus className="h-2.5 w-2.5" />
+                  </Button>
+                </div>
 
-                {isExpanded && Array.isArray(info.sub_categories) && info.sub_categories.length > 0 && (
+                {isExpanded && (
                   <div className="ml-5 space-y-0.5 border-l pl-2">
-                    {info.sub_categories.map((subCat) => {
+                    {Array.isArray(info.sub_categories) && info.sub_categories.map((subCat) => {
                       const label = typeof subCat === "string" ? subCat : subCat.name
                       const count = typeof subCat === "string" ? undefined : subCat.artifact_count
                       const isSubActive = filter.domain === domain && filter.subCategory === label
@@ -170,6 +268,26 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts }: Taxonom
                         </button>
                       )
                     })}
+                    {addingSubTo === domain && (
+                      <div className="flex items-center gap-1 py-0.5">
+                        <input
+                          type="text"
+                          className="h-5 flex-1 rounded border bg-background px-1.5 text-[10px] focus:outline-none focus:ring-1 focus:ring-ring"
+                          placeholder="Sub-category..."
+                          value={newSubName}
+                          onChange={(e) => setNewSubName(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") handleCreateSubCategory(domain); if (e.key === "Escape") setAddingSubTo(null) }}
+                          autoFocus
+                          disabled={saving}
+                        />
+                        <Button variant="ghost" size="sm" className="h-4 w-4 p-0" onClick={() => handleCreateSubCategory(domain)} disabled={saving || !newSubName.trim()}>
+                          {saving ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Plus className="h-2.5 w-2.5" />}
+                        </Button>
+                        <Button variant="ghost" size="sm" className="h-4 w-4 p-0" onClick={() => setAddingSubTo(null)} disabled={saving}>
+                          <X className="h-2.5 w-2.5" />
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

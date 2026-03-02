@@ -11,7 +11,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from agents.curator import (
-    _score_distribution,
     _store_quality_scores,
     compute_quality_score,
     curate,
@@ -507,63 +506,6 @@ class TestComputeQualityScore:
         assert "breakdown" in result
         assert "issues" in result
         assert set(result["breakdown"].keys()) == {"summary", "keywords", "freshness", "completeness"}
-
-
-# ---------------------------------------------------------------------------
-# Tests: _score_distribution
-# ---------------------------------------------------------------------------
-
-class TestScoreDistribution:
-    def test_excellent_bucket(self):
-        """Score >= 0.8 -> excellent."""
-        dist = _score_distribution([0.85])
-        assert dist == {"excellent": 1, "good": 0, "fair": 0, "poor": 0}
-
-    def test_good_bucket(self):
-        """0.6 <= score < 0.8 -> good."""
-        dist = _score_distribution([0.65])
-        assert dist == {"excellent": 0, "good": 1, "fair": 0, "poor": 0}
-
-    def test_fair_bucket(self):
-        """0.4 <= score < 0.6 -> fair."""
-        dist = _score_distribution([0.45])
-        assert dist == {"excellent": 0, "good": 0, "fair": 1, "poor": 0}
-
-    def test_poor_bucket(self):
-        """score < 0.4 -> poor."""
-        dist = _score_distribution([0.2])
-        assert dist == {"excellent": 0, "good": 0, "fair": 0, "poor": 1}
-
-    def test_boundary_0_8(self):
-        """Exactly 0.8 -> excellent."""
-        dist = _score_distribution([0.8])
-        assert dist["excellent"] == 1
-
-    def test_boundary_0_6(self):
-        """Exactly 0.6 -> good."""
-        dist = _score_distribution([0.6])
-        assert dist["good"] == 1
-
-    def test_boundary_0_4(self):
-        """Exactly 0.4 -> fair."""
-        dist = _score_distribution([0.4])
-        assert dist["fair"] == 1
-
-    def test_boundary_0_0(self):
-        """0.0 -> poor."""
-        dist = _score_distribution([0.0])
-        assert dist["poor"] == 1
-
-    def test_empty_list(self):
-        """Empty input -> all zeros."""
-        dist = _score_distribution([])
-        assert dist == {"excellent": 0, "good": 0, "fair": 0, "poor": 0}
-
-    def test_mixed_scores(self):
-        """Multiple scores across buckets."""
-        scores = [0.9, 0.85, 0.7, 0.65, 0.5, 0.3, 0.1]
-        dist = _score_distribution(scores)
-        assert dist == {"excellent": 2, "good": 2, "fair": 1, "poor": 2}
 
 
 # ---------------------------------------------------------------------------

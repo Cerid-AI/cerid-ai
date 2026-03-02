@@ -5,17 +5,39 @@ import { useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { ShieldOff, Shield, ShieldCheck, Loader2, ThumbsUp, ThumbsDown } from "lucide-react"
+import { ShieldOff, Shield, ShieldCheck, Loader2, ThumbsUp, ThumbsDown, ExternalLink } from "lucide-react"
 import { submitClaimFeedback } from "@/lib/api"
 import type { HallucinationReport, HallucinationClaim, StreamingClaim } from "@/lib/types"
+import { getClaimDisplayStatus, type ClaimDisplayStatus } from "@/lib/verification-utils"
 import { cn } from "@/lib/utils"
 
-const STATUS_COLORS: Record<string, string> = {
+/** Display-status color map for badge backgrounds */
+const DISPLAY_STATUS_COLORS: Record<ClaimDisplayStatus | "pending" | "error", string> = {
   verified: "bg-green-500/20 text-green-400 border-green-500/30",
-  unverified: "bg-red-500/20 text-red-400 border-red-500/30",
-  uncertain: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
+  refuted: "bg-red-500/20 text-red-400 border-red-500/30",
+  unverified: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
+  unassessed: "bg-muted/50 text-muted-foreground border-border",
   pending: "bg-muted text-muted-foreground border-border",
   error: "bg-muted text-muted-foreground",
+}
+
+function VerificationMethodBadge({ method, model }: { method?: string; model?: string }) {
+  if (!method || method === "kb") return null
+  const label = method === "cross_model" ? "cross-model"
+    : method === "web_search" ? "web search"
+    : method === "cross_model_failed" ? "cross-model (failed)"
+    : method === "web_search_failed" ? "web search (failed)"
+    : method
+  const color = method === "cross_model"
+    ? "bg-purple-500/15 text-purple-400 border-purple-500/30"
+    : method === "web_search"
+    ? "bg-blue-500/15 text-blue-400 border-blue-500/30"
+    : "bg-muted text-muted-foreground border-border"
+  return (
+    <Badge variant="outline" className={`text-[10px] px-1 py-0 ${color}`} title={model ? `Verified by ${model}` : undefined}>
+      {label}
+    </Badge>
+  )
 }
 
 function ClaimBadge({
@@ -30,6 +52,8 @@ function ClaimBadge({
   const [feedback, setFeedback] = useState<"correct" | "incorrect" | null>(
     claim.user_feedback ?? null,
   )
+
+  const displayStatus = getClaimDisplayStatus(claim.status, claim.verification_method)
 
   const handleFeedback = async (correct: boolean) => {
     if (!conversationId || feedback) return
@@ -46,16 +70,36 @@ function ClaimBadge({
     <div className="flex items-start gap-2 rounded-lg border p-3">
       <Badge
         variant="outline"
-        className={`shrink-0 ${STATUS_COLORS[claim.status] ?? STATUS_COLORS.error}`}
+        className={`shrink-0 ${DISPLAY_STATUS_COLORS[displayStatus] ?? DISPLAY_STATUS_COLORS.error}`}
       >
-        {claim.status}
+        {displayStatus}
       </Badge>
       <div className="min-w-0 flex-1">
         <p className="text-sm leading-relaxed">{claim.claim}</p>
-        {claim.source_filename && (
-          <p className="mt-1 text-xs text-muted-foreground">
-            Source: {claim.source_filename}
-            {claim.similarity > 0 && ` (${Math.round(claim.similarity * 100)}% match)`}
+        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+          {claim.source_filename && (
+            <span>Source: {claim.source_filename}</span>
+          )}
+          {claim.source_domain && (
+            <Badge variant="outline" className="text-[10px] px-1 py-0">{claim.source_domain}</Badge>
+          )}
+          <VerificationMethodBadge method={claim.verification_method} model={claim.verification_model} />
+          {(claim.source_urls?.length ?? 0) > 0 && (
+            <a
+              href={claim.source_urls![0]}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-400 hover:text-blue-300"
+              title="View source"
+            >
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          )}
+          {claim.similarity > 0 && <span>({Math.round(claim.similarity * 100)}% match)</span>}
+        </div>
+        {claim.source_snippet && (
+          <p className="mt-1 line-clamp-2 text-xs text-muted-foreground/70 italic leading-relaxed">
+            &ldquo;{claim.source_snippet.slice(0, 150)}&rdquo;
           </p>
         )}
         {claim.reason && !claim.source_filename && (
@@ -74,6 +118,7 @@ function ClaimBadge({
             onClick={() => handleFeedback(true)}
             disabled={!!feedback}
             aria-label="Mark as correct"
+            title="Help improve accuracy: mark this claim as correct"
           >
             <ThumbsUp className="h-3 w-3" />
           </Button>
@@ -87,6 +132,7 @@ function ClaimBadge({
             onClick={() => handleFeedback(false)}
             disabled={!!feedback}
             aria-label="Mark as incorrect"
+            title="Help improve accuracy: mark this claim as incorrect"
           >
             <ThumbsDown className="h-3 w-3" />
           </Button>
@@ -97,28 +143,52 @@ function ClaimBadge({
 }
 
 function StreamingClaimBadge({ claim }: { claim: StreamingClaim }) {
-  const status = claim.status ?? "pending"
+  const rawStatus = claim.status ?? "pending"
+  const displayStatus = rawStatus === "pending"
+    ? "pending" as const
+    : getClaimDisplayStatus(rawStatus, claim.verification_method)
+
   return (
     <div className="flex items-start gap-2 rounded-lg border p-3">
       <Badge
         variant="outline"
-        className={`shrink-0 ${STATUS_COLORS[status] ?? STATUS_COLORS.pending}`}
+        className={`shrink-0 ${DISPLAY_STATUS_COLORS[displayStatus] ?? DISPLAY_STATUS_COLORS.pending}`}
       >
-        {status === "pending" ? (
+        {displayStatus === "pending" ? (
           <span className="flex items-center gap-1">
             <Loader2 className="h-2.5 w-2.5 animate-spin" />
             verifying
           </span>
         ) : (
-          status
+          displayStatus
         )}
       </Badge>
       <div className="min-w-0 flex-1">
         <p className="text-sm leading-relaxed">{claim.claim}</p>
-        {claim.source && (
-          <p className="mt-1 text-xs text-muted-foreground">
-            Source: {claim.source}
-            {claim.confidence != null && claim.confidence > 0 && ` (${Math.round(claim.confidence * 100)}% match)`}
+        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+          {claim.source && (
+            <span>Source: {claim.source}</span>
+          )}
+          {claim.source_domain && (
+            <Badge variant="outline" className="text-[10px] px-1 py-0">{claim.source_domain}</Badge>
+          )}
+          <VerificationMethodBadge method={claim.verification_method} model={claim.verification_model} />
+          {(claim.source_urls?.length ?? 0) > 0 && (
+            <a
+              href={claim.source_urls![0]}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-400 hover:text-blue-300"
+              title="View source"
+            >
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          )}
+          {claim.confidence != null && claim.confidence > 0 && <span>({Math.round(claim.confidence * 100)}% match)</span>}
+        </div>
+        {claim.source_snippet && (
+          <p className="mt-1 line-clamp-2 text-xs text-muted-foreground/70 italic leading-relaxed">
+            &ldquo;{claim.source_snippet.slice(0, 150)}&rdquo;
           </p>
         )}
         {claim.reason && !claim.source && (
@@ -225,6 +295,14 @@ export function HallucinationPanel({
   // Claims found — full detailed view
   const { verified, unverified, uncertain } = report.summary
 
+  // Split unverified into refuted (cross-model/web-search) and soft unverified (KB only)
+  const refutedCount = report.claims.filter(
+    (c) =>
+      c.status === "unverified" &&
+      (c.verification_method === "cross_model" || c.verification_method === "web_search"),
+  ).length
+  const softUnverifiedCount = unverified - refutedCount
+
   return (
     <div className="flex h-full flex-col">
       <PanelHeader />
@@ -232,11 +310,14 @@ export function HallucinationPanel({
         {verified > 0 && (
           <span className="text-green-400">{verified} verified</span>
         )}
-        {uncertain > 0 && (
-          <span className="text-yellow-400">{uncertain} uncertain</span>
+        {refutedCount > 0 && (
+          <span className="text-red-400">{refutedCount} refuted</span>
         )}
-        {unverified > 0 && (
-          <span className="text-red-400">{unverified} unverified</span>
+        {softUnverifiedCount > 0 && (
+          <span className="text-yellow-400">{softUnverifiedCount} unverified</span>
+        )}
+        {uncertain > 0 && (
+          <span className="text-muted-foreground">{uncertain} unassessed</span>
         )}
       </div>
       <ScrollArea className="min-h-0 flex-1 px-4 pb-3">

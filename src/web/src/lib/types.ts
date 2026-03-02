@@ -317,8 +317,11 @@ export interface HallucinationClaim {
   source_filename?: string
   source_domain?: string
   source_snippet?: string
+  source_urls?: string[]
   reason?: string
   user_feedback?: "correct" | "incorrect"
+  verification_method?: "kb" | "cross_model" | "cross_model_failed" | "web_search" | "web_search_failed" | "none"
+  verification_model?: string
 }
 
 export interface StreamingClaim {
@@ -327,7 +330,13 @@ export interface StreamingClaim {
   status?: "verified" | "unverified" | "uncertain" | "error" | "pending"
   confidence?: number
   source?: string
+  source_artifact_id?: string
+  source_domain?: string
+  source_snippet?: string
+  source_urls?: string[]
   reason?: string
+  verification_method?: "kb" | "cross_model" | "cross_model_failed" | "web_search" | "web_search_failed" | "none"
+  verification_model?: string
 }
 
 export interface HallucinationReport {
@@ -335,6 +344,7 @@ export interface HallucinationReport {
   timestamp: string
   skipped: boolean
   threshold?: number
+  extraction_method?: string
   claims: HallucinationClaim[]
   summary: {
     total: number
@@ -394,6 +404,7 @@ export interface ServerSettings {
   enable_feedback_loop: boolean
   enable_hallucination_check: boolean
   enable_memory_extraction: boolean
+  enable_model_router: boolean
   hallucination_threshold: number
   enable_auto_inject: boolean
   auto_inject_threshold: number
@@ -422,6 +433,7 @@ export interface SettingsUpdate {
   enable_feedback_loop?: boolean
   enable_hallucination_check?: boolean
   enable_memory_extraction?: boolean
+  enable_model_router?: boolean
   hallucination_threshold?: number
   cost_sensitivity?: string
   enable_auto_inject?: boolean

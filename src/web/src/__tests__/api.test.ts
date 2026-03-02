@@ -9,7 +9,7 @@ vi.stubEnv("VITE_BIFROST_URL", "http://test-bifrost:8080")
 vi.stubEnv("VITE_CERID_API_KEY", "test-key-123")
 
 // Must import after env stubbing
-const { fetchHealth, fetchArtifacts, queryKB, fetchCollections, fetchSettings } =
+const { fetchHealth, fetchArtifacts, queryKB, fetchSettings } =
   await import("@/lib/api")
 
 // ---------------------------------------------------------------------------
@@ -111,7 +111,7 @@ describe("fetchArtifacts", () => {
     vi.stubGlobal("fetch", mockFetch(artifacts))
 
     const result = await fetchArtifacts()
-    expect(result[0].tags).toBeUndefined()
+    expect(result[0].tags).toEqual([])
   })
 
   it("handles invalid JSON tags string", async () => {
@@ -166,24 +166,6 @@ describe("queryKB", () => {
   it("throws on error response", async () => {
     vi.stubGlobal("fetch", mockFetch({}, 400))
     await expect(queryKB("test")).rejects.toThrow("KB query failed: 400")
-  })
-})
-
-// ---------------------------------------------------------------------------
-// fetchCollections
-// ---------------------------------------------------------------------------
-
-describe("fetchCollections", () => {
-  it("calls /collections", async () => {
-    const data = { collections: [] }
-    vi.stubGlobal("fetch", mockFetch(data))
-
-    const result = await fetchCollections()
-    expect(result).toEqual(data)
-    expect(fetch).toHaveBeenCalledWith(
-      "http://test-mcp:8888/collections",
-      expect.anything(),
-    )
   })
 })
 

@@ -12,7 +12,7 @@ import { Search, X, Loader2, AlertCircle, RefreshCcw, Upload, CheckCircle, Tag }
 import { ArtifactCard } from "./artifact-card"
 import { TaxonomyTree } from "./taxonomy-tree"
 import { GraphPreview } from "./graph-preview"
-import { fetchArtifacts, queryKB, uploadFile } from "@/lib/api"
+import { fetchArtifacts, queryKB, uploadFile, recategorizeArtifact } from "@/lib/api"
 import { useKBInjection } from "@/contexts/kb-injection-context"
 import type { KBQueryResult, Artifact } from "@/lib/types"
 
@@ -140,6 +140,14 @@ export function KnowledgePane() {
     }
     return counts
   }, [artifacts, activeSearch])
+
+  const domainList = useMemo(() => [...domainCounts.keys()].sort(), [domainCounts])
+
+  const handleRecategorize = useCallback(async (artifactId: string, newDomain: string) => {
+    await recategorizeArtifact(artifactId, newDomain)
+    queryClient.invalidateQueries({ queryKey: ["artifacts"] })
+    queryClient.invalidateQueries({ queryKey: ["taxonomy"] })
+  }, [queryClient])
 
   const availableTags = useMemo(() => {
     const tagCounts = new Map<string, number>()
@@ -305,9 +313,9 @@ export function KnowledgePane() {
             </div>
           )}
 
-          {results.map((result, i) => (
+          {results.map((result) => (
             <ArtifactCard
-              key={`${result.artifact_id}-${result.chunk_index}-${i}`}
+              key={`${result.artifact_id}-${result.chunk_index}`}
               result={result}
               isSelected={selectedArtifactId === result.artifact_id}
               onSelect={() =>
@@ -316,6 +324,8 @@ export function KnowledgePane() {
                 )
               }
               onInject={() => injectResult(result)}
+              domains={domainList}
+              onRecategorize={handleRecategorize}
             />
           ))}
         </div>

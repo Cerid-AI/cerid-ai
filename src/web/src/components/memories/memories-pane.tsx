@@ -17,8 +17,9 @@ import {
   Bookmark,
   Loader2,
   X,
+  Archive,
 } from "lucide-react"
-import { fetchMemories, updateMemory, deleteMemory } from "@/lib/api"
+import { fetchMemories, updateMemory, deleteMemory, archiveMemories } from "@/lib/api"
 import type { Memory } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -59,6 +60,8 @@ export default function MemoriesPane() {
   const [editText, setEditText] = useState("")
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [archiving, setArchiving] = useState(false)
+  const [archiveResult, setArchiveResult] = useState<string | null>(null)
 
   const loadMemories = useCallback(async () => {
     setLoading(true)
@@ -71,6 +74,26 @@ export default function MemoriesPane() {
       setLoading(false)
     }
   }, [])
+
+  const handleArchive = useCallback(async () => {
+    setArchiving(true)
+    setArchiveResult(null)
+    try {
+      const res = await archiveMemories(180)
+      setArchiveResult(
+        res.archived > 0
+          ? `Archived ${res.archived} old memories`
+          : "No memories older than 180 days",
+      )
+      if (res.archived > 0) loadMemories()
+      setTimeout(() => setArchiveResult(null), 4000)
+    } catch (err) {
+      setArchiveResult(err instanceof Error ? err.message : "Archive failed")
+      setTimeout(() => setArchiveResult(null), 4000)
+    } finally {
+      setArchiving(false)
+    }
+  }, [loadMemories])
 
   useEffect(() => {
     loadMemories()
@@ -136,15 +159,32 @@ export default function MemoriesPane() {
               <span className="text-xs text-muted-foreground">({memories.length})</span>
             )}
           </div>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            onClick={loadMemories}
-            disabled={loading}
-          >
-            <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
-          </Button>
+          <div className="flex gap-0.5">
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={handleArchive}
+              disabled={loading || archiving}
+              title="Archive memories older than 180 days"
+            >
+              {archiving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Archive className="h-3.5 w-3.5" />}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={loadMemories}
+              disabled={loading}
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
+            </Button>
+          </div>
         </div>
+
+        {archiveResult && (
+          <div className="mt-1 rounded bg-muted/50 px-2 py-1 text-[10px] text-muted-foreground">
+            {archiveResult}
+          </div>
+        )}
 
         {/* Type filters */}
         <div className="mt-2 flex flex-wrap gap-1.5">

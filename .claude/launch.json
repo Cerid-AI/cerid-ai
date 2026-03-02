@@ -4,7 +4,7 @@
     {
       "name": "react-gui",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": ["run", "dev", "--", "--host", "127.0.0.1"],
       "cwd": "src/web",
       "port": 5173
     }

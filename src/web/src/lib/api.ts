@@ -1,9 +1,12 @@
 // Copyright (c) 2026 Justin Michaels. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-const MCP_BASE = import.meta.env.VITE_MCP_URL ?? "http://localhost:8888"
-const BIFROST_BASE = import.meta.env.VITE_BIFROST_URL ?? "/api/bifrost"
-const API_KEY = import.meta.env.VITE_CERID_API_KEY ?? ""
+// Runtime config (window.__ENV__ from docker-entrypoint.sh) takes precedence
+// over build-time Vite env vars, enabling config changes without rebuild.
+const _env = (globalThis as Record<string, unknown>).__ENV__ as Record<string, string> | undefined
+const MCP_BASE = _env?.VITE_MCP_URL || import.meta.env.VITE_MCP_URL || "http://localhost:8888"
+const BIFROST_BASE = _env?.VITE_BIFROST_URL || import.meta.env.VITE_BIFROST_URL || "/api/bifrost"
+const API_KEY = _env?.VITE_CERID_API_KEY || import.meta.env.VITE_CERID_API_KEY || ""
 
 function mcpHeaders(extra: Record<string, string> = {}): Record<string, string> {
   const headers: Record<string, string> = { ...extra }
@@ -11,18 +14,18 @@ function mcpHeaders(extra: Record<string, string> = {}): Record<string, string> 
   return headers
 }
 
+import { parseTags } from "@/lib/utils"
+
 import type {
   HealthResponse,
   ChatMessage,
   AgentQueryResponse,
   Artifact,
   RelatedArtifact,
-  CollectionsResponse,
   MaintenanceResponse,
   RectifyResponse,
   CurateResponse,
   TaxonomyResponse,
-  TagInfo,
   SchedulerStatus,
   IngestLogResponse,
   AuditResponse,
@@ -71,10 +74,7 @@ export async function fetchArtifacts(domain?: string, limit = 50): Promise<Artif
   const res = await fetch(`${MCP_BASE}/artifacts?${params}`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(`Artifacts fetch failed: ${res.status}`)
   const artifacts: Artifact[] = await res.json()
-  return artifacts.map((a) => ({
-    ...a,
-    tags: Array.isArray(a.tags) ? a.tags : typeof a.tags === "string" ? (() => { try { return JSON.parse(a.tags) } catch { return [] } })() : undefined,
-  }))
+  return artifacts.map((a) => ({ ...a, tags: parseTags(a.tags) }))
 }
 
 export async function fetchRelatedArtifacts(
@@ -88,12 +88,6 @@ export async function fetchRelatedArtifacts(
   return res.json()
 }
 
-export async function fetchCollections(): Promise<CollectionsResponse> {
-  const res = await fetch(`${MCP_BASE}/collections`, { headers: mcpHeaders() })
-  if (!res.ok) throw new Error(`Collections fetch failed: ${res.status}`)
-  return res.json()
-}
-
 // --- Taxonomy & Tags ---
 
 export async function fetchTaxonomy(): Promise<TaxonomyResponse> {
@@ -102,35 +96,55 @@ export async function fetchTaxonomy(): Promise<TaxonomyResponse> {
   return res.json()
 }
 
-export async function fetchTags(limit = 200): Promise<TagInfo[]> {
-  const res = await fetch(`${MCP_BASE}/tags?limit=${limit}`, { headers: mcpHeaders() })
-  if (!res.ok) throw new Error(`Tags fetch failed: ${res.status}`)
+export async function createDomain(
+  name: string,
+  description = "",
+  icon = "file",
+  subCategories: string[] = ["general"],
+): Promise<{ status: string; domain: string }> {
+  const res = await fetch(`${MCP_BASE}/taxonomy/domain`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ name, description, icon, sub_categories: subCategories }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `Create domain failed: ${res.status}` }))
+    throw new Error(err.detail || `Create domain failed: ${res.status}`)
+  }
   return res.json()
 }
 
-export async function updateArtifactTaxonomy(
+export async function createSubCategory(
+  domain: string,
+  name: string,
+): Promise<{ status: string; domain: string; sub_category: string }> {
+  const res = await fetch(`${MCP_BASE}/taxonomy/subcategory`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ domain, name }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `Create sub-category failed: ${res.status}` }))
+    throw new Error(err.detail || `Create sub-category failed: ${res.status}`)
+  }
+  return res.json()
+}
+
+export async function recategorizeArtifact(
   artifactId: string,
-  opts: { sub_category?: string; tags?: string[] },
-): Promise<unknown> {
-  const res = await fetch(`${MCP_BASE}/taxonomy/artifact`, {
+  newDomain: string,
+  subCategory = "",
+  tags = "",
+): Promise<{ status: string; artifact_id: string; old_domain: string; new_domain: string; chunks_moved: number }> {
+  const res = await fetch(`${MCP_BASE}/recategorize`, {
     method: "POST",
     headers: mcpHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ artifact_id: artifactId, ...opts }),
+    body: JSON.stringify({ artifact_id: artifactId, new_domain: newDomain, sub_category: subCategory, tags }),
   })
-  if (!res.ok) throw new Error(`Taxonomy update failed: ${res.status}`)
-  return res.json()
-}
-
-export async function mergeTags(
-  sourceTag: string,
-  targetTag: string,
-): Promise<{ status: string; source: string; target: string; artifacts_updated: number }> {
-  const res = await fetch(`${MCP_BASE}/tags/merge`, {
-    method: "POST",
-    headers: mcpHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ source_tag: sourceTag, target_tag: targetTag }),
-  })
-  if (!res.ok) throw new Error(`Tag merge failed: ${res.status}`)
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `Recategorize failed: ${res.status}` }))
+    throw new Error(err.detail || `Recategorize failed: ${res.status}`)
+  }
   return res.json()
 }
 
@@ -263,24 +277,6 @@ export async function ingestFeedback(
 
 // --- Hallucination Detection ---
 
-export async function checkHallucinations(
-  responseText: string,
-  conversationId: string,
-  threshold?: number,
-): Promise<HallucinationReport> {
-  const res = await fetch(`${MCP_BASE}/agent/hallucination`, {
-    method: "POST",
-    headers: mcpHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({
-      response_text: responseText,
-      conversation_id: conversationId,
-      ...(threshold !== undefined && { threshold }),
-    }),
-  })
-  if (!res.ok) throw new Error(`Hallucination check failed: ${res.status}`)
-  return res.json()
-}
-
 export async function fetchHallucinationReport(
   conversationId: string,
 ): Promise<HallucinationReport | null> {
@@ -296,6 +292,7 @@ export function streamVerification(
   responseText: string,
   conversationId: string,
   threshold?: number,
+  model?: string,
 ): { response: Promise<Response>; abort: () => void } {
   const controller = new AbortController()
   const response = fetch(`${MCP_BASE}/agent/verify-stream`, {
@@ -305,6 +302,7 @@ export function streamVerification(
       response_text: responseText,
       conversation_id: conversationId,
       ...(threshold !== undefined && { threshold }),
+      ...(model && { model }),
     }),
     signal: controller.signal,
   })
@@ -366,6 +364,18 @@ export async function extractMemories(
   return res.json()
 }
 
+export async function archiveMemories(
+  retentionDays = 180,
+): Promise<{ archived: number; remaining: number }> {
+  const res = await fetch(`${MCP_BASE}/agent/memory/archive`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ retention_days: retentionDays }),
+  })
+  if (!res.ok) throw new Error(`Memory archive failed: ${res.status}`)
+  return res.json()
+}
+
 // --- Memories ---
 
 export async function fetchMemories(
@@ -422,12 +432,6 @@ export async function uploadFile(
     const err = await res.json().catch(() => ({ detail: `Upload failed: ${res.status}` }))
     throw new Error(err.detail || `Upload failed: ${res.status}`)
   }
-  return res.json()
-}
-
-export async function fetchSupportedExtensions(): Promise<{ extensions: string[]; count: number }> {
-  const res = await fetch(`${MCP_BASE}/upload/supported`, { headers: mcpHeaders() })
-  if (!res.ok) throw new Error(`Supported extensions fetch failed: ${res.status}`)
   return res.json()
 }
 

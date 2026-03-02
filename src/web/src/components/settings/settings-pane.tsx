@@ -216,6 +216,12 @@ export default function SettingsPane() {
                     onToggle={(v) => patch({ enable_memory_extraction: v })}
                     info="Extracts key facts and preferences from conversations into long-term memory"
                   />
+                  <ToggleRow
+                    label="Model Router"
+                    enabled={settings.enable_model_router}
+                    onToggle={(v) => patch({ enable_model_router: v })}
+                    info="Automatically selects the best model based on query complexity and cost sensitivity"
+                  />
 
                   <div className="my-1 h-px bg-border" />
 

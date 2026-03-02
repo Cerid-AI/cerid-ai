@@ -5,7 +5,7 @@ import { Cpu, Coins, Binary, Database } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import type { ChatMessage } from "@/lib/types"
 import { useLiveMetrics } from "@/hooks/use-live-metrics"
-import { cn } from "@/lib/utils"
+import { cn, tokenCost } from "@/lib/utils"
 
 interface ChatDashboardProps {
   model: string
@@ -19,12 +19,8 @@ export function ChatDashboard({ model, messages, injectedCount }: ChatDashboardP
   const totalTokens = metrics.inputTokens + metrics.outputTokens
   const remaining = Math.max(contextWindow - totalTokens, 0)
 
-  const inputCost = modelInfo
-    ? (metrics.inputTokens * modelInfo.inputCostPer1M) / 1_000_000
-    : 0
-  const outputCost = modelInfo
-    ? (metrics.outputTokens * modelInfo.outputCostPer1M) / 1_000_000
-    : 0
+  const inputCost = modelInfo ? tokenCost(metrics.inputTokens, modelInfo.inputCostPer1M) : 0
+  const outputCost = modelInfo ? tokenCost(metrics.outputTokens, modelInfo.outputCostPer1M) : 0
 
   return (
     <TooltipProvider delayDuration={200}>

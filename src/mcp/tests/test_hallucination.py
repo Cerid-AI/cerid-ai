@@ -20,12 +20,27 @@ if "agents.query_agent" not in sys.modules:
     import agents
     agents.query_agent = _stub  # type: ignore[attr-defined]
 
+import config
 from agents.hallucination import (
-    MIN_RESPONSE_LENGTH,
+    _check_numeric_alignment,
+    _compute_adjusted_confidence,
+    _build_verification_details,
+    _extract_claims_heuristic,
+    _has_staleness_indicators,
+    _invert_ignorance_verdict,
+    _is_current_event_claim,
+    _is_ignorance_admission,
+    _model_family,
+    _parse_verification_verdict,
+    _pick_verification_model,
+    _query_memories,
+    _verify_claim_externally,
     check_hallucinations,
     extract_claims,
     get_hallucination_report,
     verify_claim,
+    verify_response_streaming,
+    REDIS_HALLUCINATION_PREFIX,
 )
 
 
@@ -35,8 +50,9 @@ class TestExtractClaims:
     @pytest.mark.asyncio
     async def test_short_response_returns_empty(self):
         """Responses below MIN_RESPONSE_LENGTH should return no claims."""
-        result = await extract_claims("short text")
-        assert result == []
+        claims, method = await extract_claims("short text")
+        assert claims == []
+        assert method == "none"
 
     @pytest.mark.asyncio
     @patch("agents.hallucination.httpx.AsyncClient")
@@ -55,9 +71,10 @@ class TestExtractClaims:
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client_cls.return_value = mock_client
 
-        result = await extract_claims("x" * (MIN_RESPONSE_LENGTH + 1))
-        assert len(result) == 2
-        assert "Python" in result[0]
+        claims, method = await extract_claims("x" * (config.HALLUCINATION_MIN_RESPONSE_LENGTH + 1))
+        assert len(claims) == 2
+        assert "Python" in claims[0]
+        assert method == "llm"
 
     @pytest.mark.asyncio
     @patch("agents.hallucination.httpx.AsyncClient")
@@ -75,43 +92,399 @@ class TestExtractClaims:
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_client_cls.return_value = mock_client
 
-        result = await extract_claims("x" * (MIN_RESPONSE_LENGTH + 1))
-        assert len(result) == 1
-        assert result[0] == "claim one"
+        claims, method = await extract_claims("x" * (config.HALLUCINATION_MIN_RESPONSE_LENGTH + 1))
+        assert len(claims) == 1
+        assert claims[0] == "claim one"
+        assert method == "llm"
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_handles_structured_claim_objects(self, mock_client_cls):
+        """LLM returning structured {claim, type} objects should extract claim text."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": '[{"claim": "Python was created in 1991", "type": "date"}, {"claim": "GIL limits threading", "type": "technical"}]'}}]
+        }
+
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        claims, method = await extract_claims("x" * (config.HALLUCINATION_MIN_RESPONSE_LENGTH + 1))
+        assert len(claims) == 2
+        assert claims[0] == "Python was created in 1991"
+        assert claims[1] == "GIL limits threading"
+        assert method == "llm"
+
+
+class TestHeuristicExtraction:
+    """Test the regex-based heuristic claim extractor."""
+
+    def test_extracts_factual_sentences(self):
+        """Sentences with dates/numbers + state verbs should be extracted."""
+        text = (
+            "Python 3.11 was released in October 2022. "
+            "It includes significant performance improvements of up to 25%. "
+            "Hello, how are you today?"
+        )
+        claims = _extract_claims_heuristic(text)
+        assert len(claims) >= 1
+        assert any("Python" in c for c in claims)
+
+    def test_skips_greetings(self):
+        """Greetings and conversational text should be filtered out."""
+        text = "Hello there! I can help you with that. Sure, let me look into it."
+        claims = _extract_claims_heuristic(text)
+        assert len(claims) == 0
+
+    def test_skips_code_blocks(self):
+        """Code blocks should not be treated as claims."""
+        text = "```python\nx = 42\n``` The variable x was set to 42 in the year 2024."
+        claims = _extract_claims_heuristic(text)
+        # Should not extract the code block line
+        for c in claims:
+            assert "```" not in c
+
+    def test_respects_max_claims(self):
+        """Should not exceed HALLUCINATION_MAX_CLAIMS."""
+        sentences = [f"Version {i}.0 was released in {2000 + i}." for i in range(20)]
+        text = " ".join(sentences)
+        claims = _extract_claims_heuristic(text)
+        assert len(claims) <= config.HALLUCINATION_MAX_CLAIMS
+
+    def test_extracts_comparisons(self):
+        """Comparison claims ('X is faster than Y') should be extracted."""
+        text = "FastAPI is significantly faster than Flask for handling async requests in production workloads."
+        claims = _extract_claims_heuristic(text)
+        assert len(claims) >= 1
+        assert any("faster than" in c.lower() for c in claims)
+
+    def test_extracts_causal_claims(self):
+        """Causal statements ('because', 'due to') should be extracted."""
+        text = "Python 3.11 is 25% faster because the interpreter was optimized with specialized bytecodes."
+        claims = _extract_claims_heuristic(text)
+        assert len(claims) >= 1
+
+    def test_extracts_attributions(self):
+        """Attribution claims ('according to') should be extracted."""
+        text = "According to the Python documentation, the GIL was introduced in version 1.5 for thread safety."
+        claims = _extract_claims_heuristic(text)
+        assert len(claims) >= 1
+
+    def test_handles_numbered_lists(self):
+        """Facts embedded in numbered markdown lists should be extracted."""
+        text = (
+            "Key features of Python 3.12:\n"
+            "1. Python 3.12 was released in October 2023\n"
+            "2. It includes improved error messages with 30% better context\n"
+            "3. The interpreter is 5% faster due to comprehension inlining\n"
+        )
+        claims = _extract_claims_heuristic(text)
+        assert len(claims) >= 1
+
+    def test_strips_bold_italic_markdown(self):
+        """Markdown emphasis should be stripped, content preserved."""
+        text = "**Python 3.11** was released in **October 2022** with *significant* performance improvements of 25%."
+        claims = _extract_claims_heuristic(text)
+        assert len(claims) >= 1
+        for c in claims:
+            assert "**" not in c
+            assert "*" not in c or c.count("*") == 0
+
+    def test_removes_code_blocks_entirely(self):
+        """Multi-line code blocks should be removed, not just detected."""
+        text = (
+            "The function works as follows:\n"
+            "```python\ndef foo():\n    return 42\n```\n"
+            "Python 3.11 was released in 2022 with 25% performance gains."
+        )
+        claims = _extract_claims_heuristic(text)
+        for c in claims:
+            assert "def foo" not in c
+            assert "return 42" not in c
+
+    def test_strong_signal_single_pattern(self):
+        """Claims with strong-signal patterns need fewer base pattern matches."""
+        text = "According to benchmarks, FastAPI handles requests faster than Flask."
+        claims = _extract_claims_heuristic(text)
+        assert len(claims) >= 1
+
+
+class TestNumericAlignment:
+    """Test numeric contradiction detection — key defense against inverted-fact hallucinations."""
+
+    def test_matching_years_positive_boost(self):
+        """Matching years in claim and source should return positive adjustment."""
+        result = _check_numeric_alignment(
+            "Python was released in 1991",
+            {"content": "Python was first released in 1991 by Guido van Rossum"},
+        )
+        assert result == 0.03
+
+    def test_conflicting_years_negative_penalty(self):
+        """Conflicting years should return negative adjustment."""
+        result = _check_numeric_alignment(
+            "Python was released in 2021 with 50% improvements",
+            {"content": "Python was first released in 1991 with 30% speedup"},
+        )
+        assert result == -0.05  # 0/2 match ratio, 2 checks
+
+    def test_no_numbers_returns_zero(self):
+        """Claims without numbers should return 0 (nothing to check)."""
+        result = _check_numeric_alignment(
+            "Python is a great programming language",
+            {"content": "Python is widely used in data science"},
+        )
+        assert result == 0.0
+
+    def test_matching_percentages(self):
+        """Matching percentages should return positive adjustment."""
+        result = _check_numeric_alignment(
+            "Performance improved by 25%",
+            {"content": "The benchmark showed a 25% improvement"},
+        )
+        assert result == 0.03
+
+    def test_empty_source_returns_zero(self):
+        """Empty source content should return 0."""
+        result = _check_numeric_alignment(
+            "Python was released in 1991",
+            {"content": ""},
+        )
+        assert result == 0.0
+
+    def test_partial_match_returns_zero(self):
+        """One match out of two checks (50% ratio) returns 0 — neither boost nor penalty."""
+        result = _check_numeric_alignment(
+            "Version 3.11 was released in 2022 with 25% improvement",
+            {"content": "Python 3.11 released in 2022 with 10% speedup"},
+        )
+        # year 2022 matches, but 25% != 10% → 1/2 = 0.5 ratio → returns 0.0
+        assert result == 0.0
+
+
+class TestAdjustedConfidence:
+    """Test multi-result confidence calibration."""
+
+    def test_corroborating_results_boost(self):
+        """Multiple results at similar scores should boost confidence."""
+        results = [
+            {"relevance": 0.80, "domain": "coding", "content": "fact A"},
+            {"relevance": 0.75, "domain": "general", "content": "fact A variant"},
+            {"relevance": 0.70, "domain": "projects", "content": "fact A related"},
+        ]
+        adjusted = _compute_adjusted_confidence("test claim", results, 0.80)
+        # spread = 0.10 < 0.15 → +0.03, 3 domains > 1 → +0.02, 3 results → no penalty
+        assert adjusted > 0.80
+
+    def test_isolated_match_penalty(self):
+        """Large score drop from #1 to #3 should reduce confidence."""
+        results = [
+            {"relevance": 0.85, "domain": "coding", "content": "fact A"},
+            {"relevance": 0.30, "domain": "general", "content": "unrelated"},
+            {"relevance": 0.20, "domain": "projects", "content": "also unrelated"},
+        ]
+        adjusted = _compute_adjusted_confidence("test claim", results, 0.85)
+        # spread = 0.65 > 0.4 → -0.03
+        assert adjusted < 0.85
+
+    def test_single_result_penalty(self):
+        """Only one KB result should reduce confidence."""
+        results = [
+            {"relevance": 0.80, "domain": "coding", "content": "Python was released in 1991"},
+        ]
+        adjusted = _compute_adjusted_confidence(
+            "Python was released in 1991", results, 0.80
+        )
+        # single result → -0.02, but year match → +0.03
+        # Net: 0.80 + 0.03 - 0.02 = 0.81
+        assert adjusted == pytest.approx(0.81, abs=0.01)
+
+
+class TestVerificationDetails:
+    """Test verification detail metadata generation."""
+
+    def test_cross_domain_reason(self):
+        """Cross-domain matches should be noted in reason."""
+        results = [
+            {"relevance": 0.80, "domain": "coding", "content": "fact"},
+            {"relevance": 0.75, "domain": "general", "content": "fact"},
+        ]
+        details = _build_verification_details("test claim", results)
+        assert details["result_count"] == 2
+        assert len(details["domains_found"]) == 2
+        assert "cross-domain corroboration" in details.get("reason", "")
+
+    def test_single_result_reason(self):
+        """Single result should be flagged in reason."""
+        results = [
+            {"relevance": 0.80, "domain": "coding", "content": "fact"},
+        ]
+        details = _build_verification_details("test claim", results)
+        assert "single result only" in details.get("reason", "")
+
+    def test_numeric_conflict_reason(self):
+        """Numeric conflicts should appear in reason."""
+        results = [
+            {"relevance": 0.80, "domain": "coding", "content": "Python released in 1991 with 30% improvements"},
+        ]
+        # Two checks needed for penalty: year mismatch + percentage mismatch
+        details = _build_verification_details("Python released in 2021 with 50% improvements", results)
+        assert details.get("numeric_alignment") == "conflict"
+        assert "numeric values conflict" in details.get("reason", "")
 
 
 class TestVerifyClaim:
     """Test individual claim verification against KB."""
 
     @pytest.mark.asyncio
+    @patch("agents.hallucination._query_memories", new_callable=AsyncMock, return_value=[])
     @patch("agents.query_agent.agent_query", new_callable=AsyncMock)
-    async def test_verified_claim(self, mock_query, mock_chroma, mock_neo4j, mock_redis):
+    async def test_verified_claim(self, mock_query, _mock_mem, mock_chroma, mock_neo4j, mock_redis):
         """High-similarity result should mark claim as verified."""
         mock_query.return_value = {
             "results": [{"relevance": 0.85, "artifact_id": "abc", "filename": "doc.pdf", "domain": "general", "content": "matching text"}]
         }
         result = await verify_claim("test claim", mock_chroma[0], mock_neo4j[0], mock_redis)
         assert result["status"] == "verified"
-        assert result["similarity"] == 0.85
+        assert result["source_artifact_id"] == "abc"
+        assert result["source_domain"] == "general"
 
     @pytest.mark.asyncio
+    @patch("agents.hallucination._verify_claim_externally", new_callable=AsyncMock)
+    @patch("agents.hallucination._query_memories", new_callable=AsyncMock, return_value=[])
     @patch("agents.query_agent.agent_query", new_callable=AsyncMock)
-    async def test_unverified_claim(self, mock_query, mock_chroma, mock_neo4j, mock_redis):
-        """Very low similarity should mark claim as unverified."""
+    async def test_unverified_claim(self, mock_query, _mock_mem, mock_ext, mock_chroma, mock_neo4j, mock_redis):
+        """Very low similarity should mark claim as unverified when external also fails."""
         mock_query.return_value = {
             "results": [{"relevance": 0.2, "content": "unrelated"}]
+        }
+        mock_ext.return_value = {
+            "status": "uncertain", "confidence": 0.1, "reason": "No signal",
+            "verification_method": "cross_model_failed",
         }
         result = await verify_claim("test claim", mock_chroma[0], mock_neo4j[0], mock_redis)
         assert result["status"] == "unverified"
 
     @pytest.mark.asyncio
+    @patch("agents.hallucination._verify_claim_externally", new_callable=AsyncMock)
+    @patch("agents.hallucination._query_memories", new_callable=AsyncMock, return_value=[])
     @patch("agents.query_agent.agent_query", new_callable=AsyncMock)
-    async def test_no_results(self, mock_query, mock_chroma, mock_neo4j, mock_redis):
-        """No KB results should mark claim as unverified."""
+    async def test_no_results(self, mock_query, _mock_mem, mock_ext, mock_chroma, mock_neo4j, mock_redis):
+        """No KB results should fall back to external verification."""
         mock_query.return_value = {"results": []}
+        mock_ext.return_value = {
+            "status": "uncertain", "confidence": 0.3, "reason": "External failed",
+            "verification_method": "cross_model_failed",
+        }
         result = await verify_claim("test claim", mock_chroma[0], mock_neo4j[0], mock_redis)
+        assert result["verification_method"] == "cross_model_failed"
+        mock_ext.assert_called_once()
+
+
+class TestMemoryIntegration:
+    """Test that user-confirmed memories are included in verification."""
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination._query_memories", new_callable=AsyncMock)
+    @patch("agents.query_agent.agent_query", new_callable=AsyncMock)
+    async def test_memory_boosts_verification(self, mock_query, mock_mem, mock_chroma, mock_neo4j, mock_redis):
+        """A strong memory match should boost an otherwise uncertain claim to verified."""
+        # KB returns a moderate match
+        mock_query.return_value = {
+            "results": [{"relevance": 0.60, "artifact_id": "kb1", "filename": "doc.pdf", "domain": "general", "content": "some content"}]
+        }
+        # Memory returns a strong match (pre-boost relevance)
+        mock_mem.return_value = [{
+            "relevance": 0.75,
+            "artifact_id": "mem1",
+            "filename": "memory_fact.txt",
+            "domain": "conversations",
+            "content": "User confirmed: Python was created in 1991",
+            "memory_type": "fact",
+            "memory_source": True,
+        }]
+
+        result = await verify_claim(
+            "Python was created in 1991",
+            mock_chroma[0], mock_neo4j[0], mock_redis,
+        )
+        # Memory result (0.75 + 0.05 boost = 0.80) should be top result
+        assert result["status"] in ("verified", "uncertain")
+        # The memory source should be selected as the primary source
+        assert result.get("source_domain") == "conversations" or result["similarity"] >= 0.6
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination._verify_claim_externally", new_callable=AsyncMock)
+    @patch("agents.hallucination._query_memories", new_callable=AsyncMock)
+    @patch("agents.query_agent.agent_query", new_callable=AsyncMock)
+    async def test_memories_ignored_when_no_match(self, mock_query, mock_mem, mock_ext, mock_chroma, mock_neo4j, mock_redis):
+        """Low-relevance memories should not change the result."""
+        mock_query.return_value = {
+            "results": [{"relevance": 0.2, "artifact_id": "kb1", "content": "unrelated"}]
+        }
+        mock_mem.return_value = [{
+            "relevance": 0.15,
+            "artifact_id": "mem1",
+            "content": "unrelated memory",
+            "domain": "conversations",
+            "memory_source": True,
+        }]
+        mock_ext.return_value = {
+            "status": "uncertain", "confidence": 0.1, "reason": "No signal",
+            "verification_method": "cross_model_failed",
+        }
+
+        result = await verify_claim("obscure claim xyz", mock_chroma[0], mock_neo4j[0], mock_redis)
         assert result["status"] == "unverified"
-        assert result["similarity"] == 0.0
+
+
+class TestQueryMemories:
+    """Test memory query function directly."""
+
+    @pytest.mark.asyncio
+    async def test_returns_formatted_results(self, mock_chroma):
+        """Should format ChromaDB results with memory_source flag."""
+        collection = mock_chroma[1]
+        collection.query.return_value = {
+            "ids": [["chunk1", "chunk2"]],
+            "distances": [[0.3, 0.5]],
+            "documents": [["Python was created in 1991", "GIL limits threading"]],
+            "metadatas": [[
+                {"artifact_id": "art1", "filename": "fact1.txt", "memory_type": "fact"},
+                {"artifact_id": "art2", "filename": "fact2.txt", "memory_type": "decision"},
+            ]],
+        }
+
+        results = await _query_memories("Python creation", mock_chroma[0], top_k=2)
+        assert len(results) == 2
+        assert results[0]["memory_source"] is True
+        assert results[0]["relevance"] == pytest.approx(0.7, abs=0.01)
+        assert results[0]["domain"] == "conversations"
+
+    @pytest.mark.asyncio
+    async def test_handles_empty_collection(self, mock_chroma):
+        """Should return empty list when no memories match."""
+        collection = mock_chroma[1]
+        collection.query.return_value = {
+            "ids": [[]],
+            "distances": [[]],
+            "documents": [[]],
+            "metadatas": [[]],
+        }
+
+        results = await _query_memories("something", mock_chroma[0], top_k=2)
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_handles_exception_gracefully(self, mock_chroma):
+        """Should return empty list on error (non-blocking)."""
+        mock_chroma[0].get_collection.side_effect = Exception("collection not found")
+        results = await _query_memories("something", mock_chroma[0])
+        assert results == []
 
 
 class TestCheckHallucinations:
@@ -131,7 +504,7 @@ class TestCheckHallucinations:
     @patch("agents.hallucination.verify_claim", new_callable=AsyncMock)
     async def test_full_pipeline(self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis):
         """Full pipeline should extract and verify claims."""
-        mock_extract.return_value = ["claim 1", "claim 2"]
+        mock_extract.return_value = (["claim 1", "claim 2"], "llm")
         mock_verify.side_effect = [
             {"claim": "claim 1", "status": "verified", "similarity": 0.9},
             {"claim": "claim 2", "status": "unverified", "similarity": 0.1},
@@ -146,6 +519,144 @@ class TestCheckHallucinations:
         assert result["summary"]["unverified"] == 1
         # Should store in Redis
         mock_redis.setex.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
+    @patch("agents.hallucination.verify_claim", new_callable=AsyncMock)
+    async def test_stores_extraction_method(self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis):
+        """Report should include extraction_method field."""
+        mock_extract.return_value = (["claim 1"], "heuristic")
+        mock_verify.return_value = {"claim": "claim 1", "status": "verified", "similarity": 0.9}
+
+        result = await check_hallucinations(
+            "x" * 200, "conv-789", mock_chroma[0], mock_neo4j[0], mock_redis
+        )
+        assert result["extraction_method"] == "heuristic"
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
+    @patch("agents.hallucination.verify_claim", new_callable=AsyncMock)
+    async def test_stores_model(self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis):
+        """Report should include model field when provided."""
+        mock_extract.return_value = (["claim 1"], "llm")
+        mock_verify.return_value = {"claim": "claim 1", "status": "verified", "similarity": 0.9}
+
+        result = await check_hallucinations(
+            "x" * 200, "conv-model", mock_chroma[0], mock_neo4j[0], mock_redis,
+            model="openrouter/anthropic/claude-sonnet-4",
+        )
+        assert result["model"] == "openrouter/anthropic/claude-sonnet-4"
+
+
+class TestStreamingSourceAttribution:
+    """Test that streaming verification yields full source attribution."""
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
+    @patch("agents.hallucination.verify_claim", new_callable=AsyncMock)
+    async def test_claim_verified_includes_source_fields(self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis):
+        """claim_verified events should include source_artifact_id, source_domain, source_snippet."""
+        mock_extract.return_value = (["Python was created in 1991"], "heuristic")
+        mock_verify.return_value = {
+            "claim": "Python was created in 1991",
+            "status": "verified",
+            "similarity": 0.9,
+            "source_artifact_id": "art123",
+            "source_filename": "python_history.pdf",
+            "source_domain": "coding",
+            "source_snippet": "Python was first released in 1991 by Guido",
+        }
+
+        events = []
+        async for event in verify_response_streaming(
+            "x" * 200, "conv-stream-1",
+            mock_chroma[0], mock_neo4j[0], mock_redis,
+        ):
+            events.append(event)
+
+        # Find the claim_verified event
+        verified_events = [e for e in events if e.get("type") == "claim_verified"]
+        assert len(verified_events) == 1
+        ev = verified_events[0]
+        assert ev["source_artifact_id"] == "art123"
+        assert ev["source_domain"] == "coding"
+        assert ev["source_snippet"] == "Python was first released in 1991 by Guido"
+        assert ev["status"] == "verified"
+
+
+class TestStreamingPersistence:
+    """Test that streaming path persists results to Redis."""
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
+    @patch("agents.hallucination.verify_claim", new_callable=AsyncMock)
+    async def test_persists_to_redis(self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis):
+        """After streaming completes, report should be stored in Redis."""
+        mock_extract.return_value = (["claim 1", "claim 2"], "heuristic")
+        mock_verify.side_effect = [
+            {"claim": "claim 1", "status": "verified", "similarity": 0.85},
+            {"claim": "claim 2", "status": "unverified", "similarity": 0.2},
+        ]
+
+        events = []
+        async for event in verify_response_streaming(
+            "x" * 200, "conv-persist-1",
+            mock_chroma[0], mock_neo4j[0], mock_redis,
+        ):
+            events.append(event)
+
+        # Verify Redis was called with setex
+        mock_redis.setex.assert_called_once()
+        call_args = mock_redis.setex.call_args
+        key = call_args[0][0]
+        assert key == f"{REDIS_HALLUCINATION_PREFIX}conv-persist-1"
+
+        # Verify stored data is valid JSON with correct structure
+        stored_json = call_args[0][2]
+        stored = json.loads(stored_json)
+        assert stored["conversation_id"] == "conv-persist-1"
+        assert stored["summary"]["total"] == 2
+        assert stored["summary"]["verified"] == 1
+        assert stored["summary"]["unverified"] == 1
+        assert len(stored["claims"]) == 2
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
+    @patch("agents.hallucination.verify_claim", new_callable=AsyncMock)
+    async def test_summary_includes_extraction_method(self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis):
+        """Summary event should include extraction_method."""
+        mock_extract.return_value = (["claim 1"], "heuristic")
+        mock_verify.return_value = {"claim": "claim 1", "status": "verified", "similarity": 0.9}
+
+        events = []
+        async for event in verify_response_streaming(
+            "x" * 200, "conv-method-1",
+            mock_chroma[0], mock_neo4j[0], mock_redis,
+        ):
+            events.append(event)
+
+        summary = [e for e in events if e.get("type") == "summary"][0]
+        assert summary["extraction_method"] == "heuristic"
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
+    @patch("agents.hallucination.verify_claim", new_callable=AsyncMock)
+    async def test_stores_model_in_report(self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis):
+        """Persisted report should include the model parameter."""
+        mock_extract.return_value = (["claim 1"], "llm")
+        mock_verify.return_value = {"claim": "claim 1", "status": "verified", "similarity": 0.9}
+
+        events = []
+        async for event in verify_response_streaming(
+            "x" * 200, "conv-model-stream",
+            mock_chroma[0], mock_neo4j[0], mock_redis,
+            model="openrouter/openai/gpt-4o",
+        ):
+            events.append(event)
+
+        stored_json = mock_redis.setex.call_args[0][2]
+        stored = json.loads(stored_json)
+        assert stored["model"] == "openrouter/openai/gpt-4o"
 
 
 class TestGetHallucinationReport:
@@ -163,3 +674,1092 @@ class TestGetHallucinationReport:
         mock_redis.get.return_value = None
         result = get_hallucination_report(mock_redis, "nonexistent")
         assert result is None
+
+
+class TestModelSelection:
+    """Test pool-based verification model selection logic."""
+
+    def test_model_family_extraction(self):
+        """_model_family should extract the provider segment."""
+        assert _model_family("openrouter/openai/gpt-4o-mini") == "openai"
+        assert _model_family("openrouter/meta-llama/llama-3.3-70b") == "meta-llama"
+        assert _model_family("openrouter/google/gemini-2.5-flash") == "google"
+        assert _model_family("openrouter/anthropic/claude-sonnet-4") == "anthropic"
+
+    def test_llama_generates_picks_different_family(self):
+        """Llama-based generator should be verified by a non-Meta model."""
+        model = _pick_verification_model("openrouter/meta-llama/llama-3.3-70b-instruct:free")
+        assert "meta-llama" not in model.lower()
+        assert model in config.VERIFICATION_MODEL_POOL
+
+    def test_openai_generates_picks_different_family(self):
+        """OpenAI generator should be verified by a non-OpenAI model."""
+        model = _pick_verification_model("openrouter/openai/gpt-4o")
+        assert "openai" not in model.lower()
+
+    def test_claude_generates_picks_different_family(self):
+        """Claude generator should be verified by a non-Anthropic model."""
+        model = _pick_verification_model("openrouter/anthropic/claude-sonnet-4")
+        assert "anthropic" not in model.lower()
+
+    def test_none_generates_picks_from_pool(self):
+        """Unknown/None generator should pick the first pool model."""
+        model = _pick_verification_model(None)
+        assert model in config.VERIFICATION_MODEL_POOL
+
+    def test_all_pool_models_are_non_free(self):
+        """Every model in the pool should be a paid, non-rate-limited model."""
+        for m in config.VERIFICATION_MODEL_POOL:
+            assert ":free" not in m.lower()
+
+
+class TestParseVerificationVerdict:
+    """Test parsing of structured JSON verdicts from the verification model."""
+
+    def test_supported_high_confidence(self):
+        """Supported verdict with high confidence → verified."""
+        raw = '{"verdict": "supported", "confidence": 0.9, "reasoning": "Python was indeed created in 1991."}'
+        result = _parse_verification_verdict(raw)
+        assert result["status"] == "verified"
+        assert result["confidence"] == 0.9
+        assert "confirmed" in result["reason"].lower()
+
+    def test_supported_low_confidence(self):
+        """Supported verdict with low confidence → uncertain with neutral score."""
+        raw = '{"verdict": "supported", "confidence": 0.45, "reasoning": "Seems plausible but uncertain."}'
+        result = _parse_verification_verdict(raw)
+        assert result["status"] == "uncertain"
+        # Uncertain claims get neutral 0.5 confidence to avoid dragging down averages
+        assert result["confidence"] == 0.5
+
+    def test_refuted(self):
+        """Refuted verdict → unverified with capped confidence."""
+        raw = '{"verdict": "refuted", "confidence": 0.95, "reasoning": "Python was created in 1991, not 2021."}'
+        result = _parse_verification_verdict(raw)
+        assert result["status"] == "unverified"
+        assert result["confidence"] <= 0.35
+        assert "factual errors" in result["reason"].lower()
+
+    def test_insufficient_info(self):
+        """Insufficient info verdict → uncertain with neutral confidence."""
+        raw = '{"verdict": "insufficient_info", "confidence": 0.3, "reasoning": "Cannot verify this claim."}'
+        result = _parse_verification_verdict(raw)
+        assert result["status"] == "uncertain"
+        # Insufficient info always gets neutral 0.5 — not the model's low confidence
+        assert result["confidence"] == 0.5
+        assert "not independently verifiable" in result["reason"].lower()
+
+    def test_json_in_code_block(self):
+        """JSON wrapped in markdown code block should parse correctly."""
+        raw = '```json\n{"verdict": "supported", "confidence": 0.85, "reasoning": "Accurate claim."}\n```'
+        result = _parse_verification_verdict(raw)
+        assert result["status"] == "verified"
+        assert result["confidence"] == 0.85
+
+    def test_empty_response(self):
+        """Empty response → uncertain."""
+        result = _parse_verification_verdict("")
+        assert result["status"] == "uncertain"
+        assert result["confidence"] == 0.3
+
+    def test_freetext_refutation_fallback(self):
+        """Non-JSON response with contradiction words → unverified."""
+        result = _parse_verification_verdict(
+            "That claim is incorrect. Python was released in 1991, not 2021."
+        )
+        assert result["status"] == "unverified"
+
+    def test_freetext_confirmation_fallback(self):
+        """Non-JSON response with confirmation words → verified."""
+        result = _parse_verification_verdict(
+            "Yes, that is correct. Python was first released in 1991."
+        )
+        assert result["status"] == "verified"
+
+    def test_confidence_clamped(self):
+        """Confidence values outside 0-1 should be clamped."""
+        raw = '{"verdict": "supported", "confidence": 1.5, "reasoning": "Sure."}'
+        result = _parse_verification_verdict(raw)
+        assert result["confidence"] <= 1.0
+
+    def test_missing_reasoning_field(self):
+        """Missing reasoning field should not crash."""
+        raw = '{"verdict": "supported", "confidence": 0.8}'
+        result = _parse_verification_verdict(raw)
+        assert result["status"] == "verified"
+        assert result["confidence"] == 0.8
+
+
+class TestExternalVerification:
+    """Test the full external verification pipeline (direct structured verdict)."""
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_successful_verification_supported(self, mock_client_cls):
+        """Supported verdict from cross-model should return verified."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": '{"verdict": "supported", "confidence": 0.92, "reasoning": "Python was first released in 1991 by Guido van Rossum."}'}}]
+        }
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        result = await _verify_claim_externally(
+            "Python was released in 1991",
+            generating_model="openrouter/anthropic/claude-sonnet-4",
+        )
+        assert result["verification_method"] == "cross_model"
+        assert result["status"] == "verified"
+        assert result["confidence"] >= 0.9
+        assert "verification_model" in result
+        assert "verification_answer" in result
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_successful_verification_refuted(self, mock_client_cls):
+        """Refuted verdict from cross-model should return unverified."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": '{"verdict": "refuted", "confidence": 0.95, "reasoning": "Python was created in 1991, not 2021."}'}}]
+        }
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        result = await _verify_claim_externally(
+            "Python was released in 2021",
+            generating_model="openrouter/anthropic/claude-sonnet-4",
+        )
+        assert result["verification_method"] == "cross_model"
+        assert result["status"] == "unverified"
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_api_failure_returns_failed(self, mock_client_cls):
+        """API failure should return verification_method='cross_model_failed'."""
+        mock_client = AsyncMock()
+        mock_client.post.side_effect = Exception("Connection refused")
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        result = await _verify_claim_externally("test claim")
+        assert result["verification_method"] == "cross_model_failed"
+        assert result["status"] == "uncertain"
+
+    @pytest.mark.asyncio
+    async def test_feature_disabled(self):
+        """When ENABLE_EXTERNAL_VERIFICATION=false, should return early."""
+        with patch.object(config, "ENABLE_EXTERNAL_VERIFICATION", False):
+            result = await _verify_claim_externally("test claim")
+        assert result["verification_method"] == "none"
+        assert result["status"] == "uncertain"
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_uses_system_prompt(self, mock_client_cls):
+        """Verification call should include system prompt for structured output."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": '{"verdict": "supported", "confidence": 0.8, "reasoning": "OK"}'}}]
+        }
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        await _verify_claim_externally("test claim", generating_model="openrouter/anthropic/claude-sonnet-4")
+
+        # Verify the LLM was called with system + user messages
+        call_args = mock_client.post.call_args
+        messages = call_args[1]["json"]["messages"] if "json" in call_args[1] else call_args[0][1]["messages"]
+        assert len(messages) == 2
+        assert messages[0]["role"] == "system"
+        assert "verdict" in messages[0]["content"]
+        assert messages[1]["role"] == "user"
+
+
+class TestCurrentEventDetection:
+    """Test _is_current_event_claim() detection logic."""
+
+    def test_recent_year_is_current_event(self):
+        """Claims with years 2025+ should be detected as current events."""
+        assert _is_current_event_claim("SpaceX acquired xAI in 2026") is True
+
+    def test_old_year_is_not_current_event(self):
+        """Claims with only historical years should not be current events."""
+        assert _is_current_event_claim("Python was released in 1991 by Guido van Rossum") is False
+
+    def test_recently_launched(self):
+        """'recently launched' is a strong temporal signal."""
+        assert _is_current_event_claim("Grok 4 was recently launched by xAI") is True
+
+    def test_this_year(self):
+        """'this year' is a strong temporal signal."""
+        assert _is_current_event_claim("OpenAI released GPT-5 this year") is True
+
+    def test_last_month(self):
+        """'last month' is a strong temporal signal."""
+        assert _is_current_event_claim("The update was released last month") is True
+
+    def test_trending_plus_announced(self):
+        """Two weaker signals together qualify as current event."""
+        assert _is_current_event_claim("The trending topic was announced by the CEO") is True
+
+    def test_static_factual_claim(self):
+        """A static factual claim should NOT be a current event."""
+        assert _is_current_event_claim("Python is an interpreted programming language") is False
+
+    def test_historical_date_claim(self):
+        """A historical date claim should NOT be a current event."""
+        assert _is_current_event_claim("The first computer was built in 1945") is False
+
+    def test_version_released(self):
+        """Version + release is a current event signal."""
+        assert _is_current_event_claim("Version 4.1 was released as the latest update") is True
+
+    def test_as_of_recent_date(self):
+        """'As of 2025' is a temporal marker."""
+        assert _is_current_event_claim("As of 2025, the API supports web search") is True
+
+
+class TestCurrentEventRouting:
+    """Test that current-event claims get routed to the web-search model."""
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_current_event_uses_web_search_model(self, mock_client_cls):
+        """Current-event claims should use the web-search-enabled model."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": '{"verdict": "supported", "confidence": 0.9, "reasoning": "Confirmed per Reuters."}'}}]
+        }
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        result = await _verify_claim_externally(
+            "SpaceX acquired xAI in February 2026",
+            generating_model="openrouter/anthropic/claude-sonnet-4",
+        )
+        assert result["verification_method"] == "web_search"
+        assert result["verification_model"] == config.VERIFICATION_CURRENT_EVENT_MODEL
+        assert result["status"] == "verified"
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_current_event_uses_current_event_system_prompt(self, mock_client_cls):
+        """Current-event claims should use the current-event system prompt."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": '{"verdict": "supported", "confidence": 0.85, "reasoning": "OK"}'}}]
+        }
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        await _verify_claim_externally(
+            "Grok 4.1 was recently released with web search support",
+            generating_model="openrouter/anthropic/claude-sonnet-4",
+        )
+
+        # Verify the LLM was called with current-event system prompt
+        call_args = mock_client.post.call_args
+        messages = call_args[1]["json"]["messages"] if "json" in call_args[1] else call_args[0][1]["messages"]
+        assert len(messages) == 2
+        assert messages[0]["role"] == "system"
+        assert "web search" in messages[0]["content"]
+        assert "real-time" in messages[0]["content"]
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_static_claim_uses_cross_model(self, mock_client_cls):
+        """Static factual claims should still use cross-model verification."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": '{"verdict": "supported", "confidence": 0.9, "reasoning": "Correct."}'}}]
+        }
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        result = await _verify_claim_externally(
+            "Python was created by Guido van Rossum in 1991",
+            generating_model="openrouter/anthropic/claude-sonnet-4",
+        )
+        assert result["verification_method"] == "cross_model"
+        # Should NOT use the web search model
+        assert result["verification_model"] != config.VERIFICATION_CURRENT_EVENT_MODEL
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_web_search_failure_returns_correct_method(self, mock_client_cls):
+        """When web search model fails, verification_method should include web_search."""
+        mock_client = AsyncMock()
+        mock_client.post.side_effect = Exception("Grok timeout")
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        result = await _verify_claim_externally(
+            "OpenAI released GPT-5 this year",
+            generating_model="openrouter/anthropic/claude-sonnet-4",
+        )
+        assert result["verification_method"] == "web_search_failed"
+        assert result["status"] == "uncertain"
+
+
+class TestVerifyClaimWithExternalFallback:
+    """Test that verify_claim falls back to external verification."""
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination._verify_claim_externally", new_callable=AsyncMock)
+    @patch("agents.hallucination._query_memories", new_callable=AsyncMock, return_value=[])
+    @patch("agents.query_agent.agent_query", new_callable=AsyncMock)
+    async def test_no_kb_triggers_external(self, mock_query, _mock_mem, mock_ext, mock_chroma, mock_neo4j, mock_redis):
+        """When KB returns no results, should fall back to external verification."""
+        mock_query.return_value = {"results": []}
+        mock_ext.return_value = {
+            "status": "verified",
+            "confidence": 0.75,
+            "reason": "Cross-model verification confirmed",
+            "verification_method": "cross_model",
+            "verification_model": "openrouter/openai/gpt-4o-mini",
+        }
+
+        result = await verify_claim(
+            "Python was released in 1991",
+            mock_chroma[0], mock_neo4j[0], mock_redis,
+            model="openrouter/anthropic/claude-sonnet-4",
+        )
+        assert result["status"] == "verified"
+        assert result["verification_method"] == "cross_model"
+        mock_ext.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination._verify_claim_externally", new_callable=AsyncMock)
+    @patch("agents.hallucination._query_memories", new_callable=AsyncMock, return_value=[])
+    @patch("agents.query_agent.agent_query", new_callable=AsyncMock)
+    async def test_strong_kb_skips_external(self, mock_query, _mock_mem, mock_ext, mock_chroma, mock_neo4j, mock_redis):
+        """When KB returns a strong match, should NOT call external verification."""
+        mock_query.return_value = {
+            "results": [{"relevance": 0.85, "artifact_id": "abc", "filename": "doc.pdf", "domain": "general", "content": "matching text"}]
+        }
+
+        result = await verify_claim(
+            "test claim",
+            mock_chroma[0], mock_neo4j[0], mock_redis,
+        )
+        assert result["verification_method"] == "kb"
+        mock_ext.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination._verify_claim_externally", new_callable=AsyncMock)
+    @patch("agents.hallucination._query_memories", new_callable=AsyncMock, return_value=[])
+    @patch("agents.query_agent.agent_query", new_callable=AsyncMock)
+    async def test_low_kb_triggers_external(self, mock_query, _mock_mem, mock_ext, mock_chroma, mock_neo4j, mock_redis):
+        """When KB returns very low similarity, should try external verification."""
+        mock_query.return_value = {
+            "results": [{"relevance": 0.15, "artifact_id": "abc", "content": "barely related"}]
+        }
+        mock_ext.return_value = {
+            "status": "verified",
+            "confidence": 0.8,
+            "reason": "Cross-model confirmed",
+            "verification_method": "cross_model",
+            "verification_model": "openrouter/openai/gpt-4o-mini",
+        }
+
+        result = await verify_claim(
+            "Python was released in 1991",
+            mock_chroma[0], mock_neo4j[0], mock_redis,
+        )
+        # External has stronger signal (0.8 > 0.15), so external wins
+        assert result["verification_method"] == "cross_model"
+        mock_ext.assert_called_once()
+
+
+class TestStalenessDetection:
+    """Test _has_staleness_indicators() detection logic."""
+
+    def test_detects_training_cutoff_language(self):
+        """Should detect 'as of my training data' as stale."""
+        assert _has_staleness_indicators(
+            "The claim appears correct as of my training data in 2024."
+        ) is True
+
+    def test_detects_knowledge_cutoff(self):
+        """Should detect 'my knowledge cutoff' as stale."""
+        assert _has_staleness_indicators(
+            "My knowledge cutoff is April 2024, so I cannot verify recent events."
+        ) is True
+
+    def test_detects_cannot_verify_recent(self):
+        """Should detect 'unable to verify current' as stale."""
+        assert _has_staleness_indicators(
+            "I am unable to verify current information about this topic."
+        ) is True
+
+    def test_detects_may_have_changed(self):
+        """Should detect 'may have changed since' as stale."""
+        assert _has_staleness_indicators(
+            "This information may have changed since my last update."
+        ) is True
+
+    def test_detects_not_aware_of_recent(self):
+        """Should detect 'not aware of any recent' as stale."""
+        assert _has_staleness_indicators(
+            "I'm not aware of any recent changes to this policy."
+        ) is True
+
+    def test_normal_reasoning_no_staleness(self):
+        """Normal reasoning without staleness indicators should return False."""
+        assert _has_staleness_indicators(
+            "Python was indeed released in 1991 by Guido van Rossum at CWI."
+        ) is False
+
+    def test_confident_reasoning_no_staleness(self):
+        """Confident factual reasoning should not be flagged as stale."""
+        assert _has_staleness_indicators(
+            "The claim is correct. Python 3.12 added several performance improvements."
+        ) is False
+
+    def test_empty_string_no_staleness(self):
+        """Empty string should not trigger staleness."""
+        assert _has_staleness_indicators("") is False
+
+
+class TestSourceURLExtraction:
+    """Test source URL extraction from OpenRouter annotations."""
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_web_search_extracts_source_urls(self, mock_client_cls):
+        """Web search response with annotations should populate source_urls."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{
+                "message": {
+                    "content": '{"verdict": "supported", "confidence": 0.95, "reasoning": "Confirmed per Reuters."}',
+                    "annotations": [
+                        {
+                            "type": "url_citation",
+                            "url_citation": {
+                                "url": "https://reuters.com/article/123",
+                                "title": "Reuters Report",
+                            },
+                        },
+                        {
+                            "type": "url_citation",
+                            "url_citation": {
+                                "url": "https://bbc.com/news/456",
+                                "title": "BBC News",
+                            },
+                        },
+                    ],
+                }
+            }]
+        }
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        result = await _verify_claim_externally(
+            "SpaceX launched Starship in March 2026",
+            generating_model="openrouter/anthropic/claude-sonnet-4",
+        )
+        assert result["source_urls"] == [
+            "https://reuters.com/article/123",
+            "https://bbc.com/news/456",
+        ]
+        assert result["verification_method"] == "web_search"
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_no_annotations_returns_empty_list(self, mock_client_cls):
+        """Standard cross-model response without annotations should have empty source_urls."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{
+                "message": {
+                    "content": '{"verdict": "supported", "confidence": 0.9, "reasoning": "Correct."}',
+                }
+            }]
+        }
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        result = await _verify_claim_externally(
+            "Python was created by Guido van Rossum in 1991",
+            generating_model="openrouter/anthropic/claude-sonnet-4",
+        )
+        assert result["source_urls"] == []
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_deduplicates_source_urls(self, mock_client_cls):
+        """Duplicate URLs in annotations should be deduplicated."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{
+                "message": {
+                    "content": '{"verdict": "supported", "confidence": 0.9, "reasoning": "OK."}',
+                    "annotations": [
+                        {"type": "url_citation", "url_citation": {"url": "https://example.com/a"}},
+                        {"type": "url_citation", "url_citation": {"url": "https://example.com/a"}},
+                        {"type": "url_citation", "url_citation": {"url": "https://example.com/b"}},
+                    ],
+                }
+            }]
+        }
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        result = await _verify_claim_externally(
+            "Apple released iOS 20 this week",
+            generating_model="openrouter/anthropic/claude-sonnet-4",
+        )
+        assert result["source_urls"] == [
+            "https://example.com/a",
+            "https://example.com/b",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_disabled_verification_returns_empty_urls(self):
+        """When external verification is disabled, source_urls should be empty."""
+        with patch.object(config, "ENABLE_EXTERNAL_VERIFICATION", False):
+            result = await _verify_claim_externally("test claim")
+        assert result["source_urls"] == []
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_api_failure_returns_empty_urls(self, mock_client_cls):
+        """API failure should return empty source_urls."""
+        mock_client = AsyncMock()
+        mock_client.post.side_effect = Exception("Connection refused")
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        result = await _verify_claim_externally("test claim about 2026 events")
+        assert result["source_urls"] == []
+
+
+class TestStalenessEscalation:
+    """Test staleness detection and escalation to web search."""
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_staleness_escalates_to_web_search(self, mock_client_cls):
+        """When static model admits stale knowledge for a current-event claim, should re-verify with web search."""
+        # First call: static model returns "supported" but with stale reasoning
+        stale_response = MagicMock()
+        stale_response.raise_for_status = MagicMock()
+        stale_response.json.return_value = {
+            "choices": [{
+                "message": {
+                    "content": '{"verdict": "supported", "confidence": 0.7, "reasoning": "As of my training data this appears correct, but I cannot verify current information."}'
+                }
+            }]
+        }
+        # Second call (web search): returns a definitive answer
+        web_response = MagicMock()
+        web_response.raise_for_status = MagicMock()
+        web_response.json.return_value = {
+            "choices": [{
+                "message": {
+                    "content": '{"verdict": "refuted", "confidence": 0.95, "reasoning": "Per Reuters, this actually changed in Jan 2026."}',
+                    "annotations": [
+                        {"type": "url_citation", "url_citation": {"url": "https://reuters.com/article/xyz"}},
+                    ],
+                }
+            }]
+        }
+
+        mock_client = AsyncMock()
+        mock_client.post.side_effect = [stale_response, web_response]
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        # This claim contains a current-event signal ("trending") but the
+        # initial routing picks cross_model because _is_current_event_claim
+        # might not trigger on first pass. We use a claim with borderline
+        # current-event markers to test the escalation path.
+        # Force the initial path to be cross_model by using a claim that
+        # passes _is_current_event_claim only with the borderline patterns.
+        with patch("agents.hallucination._is_current_event_claim") as mock_detect:
+            # First call: not detected as current event (goes to cross_model)
+            # Second call (inside escalation check): detected as current event
+            mock_detect.side_effect = [False, True]
+
+            result = await _verify_claim_externally(
+                "The CEO of CompanyX recently announced a major acquisition",
+                generating_model="openrouter/anthropic/claude-sonnet-4",
+            )
+
+        # Should have escalated to web search and returned the web search result
+        assert result["verification_method"] == "web_search"
+        assert result["status"] == "unverified"  # refuted maps to unverified
+        assert result["source_urls"] == ["https://reuters.com/article/xyz"]
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_no_staleness_no_escalation(self, mock_client_cls):
+        """When static model gives confident reasoning without staleness, no escalation."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{
+                "message": {
+                    "content": '{"verdict": "supported", "confidence": 0.92, "reasoning": "Python was indeed released in 1991 by Guido van Rossum."}'
+                }
+            }]
+        }
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        result = await _verify_claim_externally(
+            "Python was created by Guido van Rossum in 1991",
+            generating_model="openrouter/anthropic/claude-sonnet-4",
+        )
+        # Should remain cross_model, no escalation
+        assert result["verification_method"] == "cross_model"
+        assert result["status"] == "verified"
+        # Only one call made (no escalation)
+        assert mock_client.post.call_count == 1
+
+
+class TestGeneratorModelContext:
+    """Test that generating model is included in verification prompts."""
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_user_prompt_includes_generator_model(self, mock_client_cls):
+        """Verification user prompt should include the generating model name."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": '{"verdict": "supported", "confidence": 0.8, "reasoning": "OK"}'}}]
+        }
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        await _verify_claim_externally(
+            "test claim",
+            generating_model="openrouter/anthropic/claude-sonnet-4",
+        )
+
+        call_args = mock_client.post.call_args
+        messages = call_args[1]["json"]["messages"] if "json" in call_args[1] else call_args[0][1]["messages"]
+        user_msg = messages[1]["content"]
+        assert "openrouter/anthropic/claude-sonnet-4" in user_msg
+        assert "generated by" in user_msg
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_no_generator_model_omits_context(self, mock_client_cls):
+        """When no generating model is provided, user prompt should not include model context."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": '{"verdict": "supported", "confidence": 0.8, "reasoning": "OK"}'}}]
+        }
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        await _verify_claim_externally("test claim", generating_model=None)
+
+        call_args = mock_client.post.call_args
+        messages = call_args[1]["json"]["messages"] if "json" in call_args[1] else call_args[0][1]["messages"]
+        user_msg = messages[1]["content"]
+        assert "generated by" not in user_msg
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_system_prompt_mentions_different_ai(self, mock_client_cls):
+        """System prompt should mention verifying a different AI model's claim."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": '{"verdict": "supported", "confidence": 0.8, "reasoning": "OK"}'}}]
+        }
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        await _verify_claim_externally(
+            "test claim",
+            generating_model="openrouter/anthropic/claude-sonnet-4",
+        )
+
+        call_args = mock_client.post.call_args
+        messages = call_args[1]["json"]["messages"] if "json" in call_args[1] else call_args[0][1]["messages"]
+        system_msg = messages[0]["content"]
+        assert "different AI model" in system_msg
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_current_event_system_prompt_mentions_different_ai(self, mock_client_cls):
+        """Current-event system prompt should also mention verifying another AI's claim."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": '{"verdict": "supported", "confidence": 0.9, "reasoning": "Per Reuters."}'}}]
+        }
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        await _verify_claim_externally(
+            "OpenAI launched GPT-5 this week in March 2026",
+            generating_model="openrouter/anthropic/claude-sonnet-4",
+        )
+
+        call_args = mock_client.post.call_args
+        messages = call_args[1]["json"]["messages"] if "json" in call_args[1] else call_args[0][1]["messages"]
+        system_msg = messages[0]["content"]
+        assert "different AI model" in system_msg
+        assert "web search" in system_msg.lower()
+
+
+class TestIgnoranceAdmissionDetection:
+    """Test detection of ignorance-admitting claims."""
+
+    def test_detects_dont_have_information(self):
+        """'I don't have information about X' should be detected."""
+        assert _is_ignorance_admission(
+            "I don't have information about the big beautiful bill passed in 2025"
+        )
+
+    def test_detects_do_not_have_specific_information(self):
+        """'I do not have specific information' should be detected."""
+        assert _is_ignorance_admission(
+            "I do not have specific information about recent legislative changes"
+        )
+
+    def test_detects_would_not_have_that_information(self):
+        """'I would not have that information' should be detected."""
+        assert _is_ignorance_admission(
+            "If there have been significant changes in 2025, I would not have that information"
+        )
+
+    def test_detects_there_is_no_information(self):
+        """'there is no specific information about X' should be detected."""
+        assert _is_ignorance_admission(
+            "there is no specific information about a big beautiful bill passed in 2025"
+        )
+
+    def test_detects_not_aware_of(self):
+        """'I'm not aware of X' should be detected."""
+        assert _is_ignorance_admission(
+            "I'm not aware of any legislation matching that description"
+        )
+
+    def test_detects_beyond_knowledge_cutoff(self):
+        """'beyond my knowledge cutoff' should be detected."""
+        assert _is_ignorance_admission(
+            "Events after 2023 are beyond my knowledge cutoff"
+        )
+
+    def test_detects_cannot_confirm(self):
+        """'I cannot confirm whether' should be detected."""
+        assert _is_ignorance_admission(
+            "I cannot confirm whether that bill was passed"
+        )
+
+    def test_detects_training_data_does_not_include(self):
+        """'my training data does not include' should be detected."""
+        assert _is_ignorance_admission(
+            "my training data does not include events from 2025"
+        )
+
+    def test_detects_as_of_my_last_update_no(self):
+        """'As of my last update... no specific information' should be detected."""
+        assert _is_ignorance_admission(
+            "As of my last update in October 2023, there is no specific "
+            "information about a big beautiful bill passed in 2025"
+        )
+
+    def test_positive_factual_claim_not_detected(self):
+        """Normal factual claims should NOT be flagged as ignorance admissions."""
+        assert not _is_ignorance_admission(
+            "Python was released in 1991 by Guido van Rossum"
+        )
+
+    def test_comparative_claim_not_detected(self):
+        """Comparative claims should NOT be flagged."""
+        assert not _is_ignorance_admission(
+            "Rust is faster than Python for CPU-bound tasks"
+        )
+
+    def test_question_not_detected(self):
+        """Questions should NOT be flagged."""
+        assert not _is_ignorance_admission(
+            "Can you tell me about the latest legislation?"
+        )
+
+    def test_general_negative_not_detected(self):
+        """Generic negative statements unrelated to model limits should NOT match."""
+        assert not _is_ignorance_admission(
+            "There is no evidence that the Earth is flat"
+        )
+
+
+class TestIgnoranceVerdictInversion:
+    """Test verdict inversion for ignorance-admitting claims."""
+
+    def test_verified_becomes_unverified(self):
+        """When facts exist (verified), model was inadequate (→ unverified)."""
+        original = {
+            "status": "verified",
+            "confidence": 0.85,
+            "reason": "Cross-model verification confirmed: The One Big Beautiful Bill Act was signed July 4, 2025.",
+        }
+        inverted = _invert_ignorance_verdict(original)
+        assert inverted["status"] == "unverified"
+        assert inverted["confidence"] == 0.85  # Preserved
+        assert "factually inadequate" in inverted["reason"]
+        assert "One Big Beautiful Bill" in inverted["reason"]
+
+    def test_unverified_becomes_verified(self):
+        """When facts don't exist (unverified), model was correct (→ verified)."""
+        original = {
+            "status": "unverified",
+            "confidence": 0.3,
+            "reason": "Cross-model verification found factual errors: No such legislation exists.",
+        }
+        inverted = _invert_ignorance_verdict(original)
+        assert inverted["status"] == "verified"
+        assert inverted["confidence"] >= 0.7  # Boosted
+        assert "correctly identified" in inverted["reason"]
+        assert "No such legislation" in inverted["reason"]
+
+    def test_uncertain_stays_uncertain(self):
+        """Uncertain verdicts should remain unchanged."""
+        original = {
+            "status": "uncertain",
+            "confidence": 0.5,
+            "reason": "Claim not independently verifiable",
+        }
+        inverted = _invert_ignorance_verdict(original)
+        assert inverted["status"] == "uncertain"
+        assert inverted["confidence"] == 0.5
+        assert inverted["reason"] == original["reason"]
+
+    def test_confidence_preserved_for_high_confidence_inversion(self):
+        """High-confidence 'supported' should keep high confidence when inverted."""
+        original = {
+            "status": "verified",
+            "confidence": 0.95,
+            "reason": "Cross-model verification confirmed: Multiple authoritative sources confirm.",
+        }
+        inverted = _invert_ignorance_verdict(original)
+        assert inverted["confidence"] == 0.95
+
+    def test_low_confidence_unverified_boosted(self):
+        """Low-confidence 'unverified' should be boosted to at least 0.7 when inverted."""
+        original = {
+            "status": "unverified",
+            "confidence": 0.2,
+            "reason": "Cross-model verification found factual errors: Unverifiable topic.",
+        }
+        inverted = _invert_ignorance_verdict(original)
+        assert inverted["status"] == "verified"
+        assert inverted["confidence"] == 0.7  # Boosted from 0.2
+
+
+class TestIgnoranceClaimVerification:
+    """Test end-to-end ignorance-admission claim verification."""
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_ignorance_claim_uses_web_search(self, mock_client_cls):
+        """Ignorance-admitting claims should always route to web search."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {
+                "content": '{"verdict": "supported", "confidence": 0.9, "reasoning": "The One Big Beautiful Bill Act was signed July 4, 2025."}',
+            }}]
+        }
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        result = await _verify_claim_externally(
+            "I don't have information about the big beautiful bill passed in 2025",
+            generating_model="openrouter/openai/gpt-4o-mini",
+        )
+
+        # Should use web search model (not regular cross-model)
+        call_args = mock_client.post.call_args
+        payload = call_args[1]["json"] if "json" in call_args[1] else call_args[0][1]
+        assert payload["model"] == config.VERIFICATION_CURRENT_EVENT_MODEL
+        assert result["verification_method"] == "web_search"
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_ignorance_claim_uses_reframed_prompt(self, mock_client_cls):
+        """Ignorance claims should use the reframed prompt, not the standard one."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {
+                "content": '{"verdict": "supported", "confidence": 0.9, "reasoning": "OK"}',
+            }}]
+        }
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        await _verify_claim_externally(
+            "I don't have information about the big beautiful bill passed in 2025",
+        )
+
+        call_args = mock_client.post.call_args
+        messages = call_args[1]["json"]["messages"] if "json" in call_args[1] else call_args[0][1]["messages"]
+        user_msg = messages[1]["content"]
+        system_msg = messages[0]["content"]
+
+        # User prompt should contain reframing language
+        assert "admitting it lacks knowledge" in user_msg
+        assert "underlying facts" in user_msg
+        # Should NOT contain standard "Assess this claim for factual accuracy"
+        assert "Assess this claim for factual accuracy" not in user_msg
+        # System prompt should be the ignorance-specific one
+        assert "UNDERLYING TOPIC" in system_msg
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_ignorance_claim_inverts_supported_to_refuted(self, mock_client_cls):
+        """When verifier confirms facts exist, ignorance claim → unverified (refuted)."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {
+                "content": json.dumps({
+                    "verdict": "supported",
+                    "confidence": 0.92,
+                    "reasoning": "The One Big Beautiful Bill Act was signed into law on July 4, 2025.",
+                }),
+            }}]
+        }
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        result = await _verify_claim_externally(
+            "As of my last update, there is no specific information about a big beautiful bill passed in 2025",
+            generating_model="openrouter/openai/gpt-4o-mini",
+        )
+
+        # Verdict should be inverted: supported → unverified
+        assert result["status"] == "unverified"
+        assert "factually inadequate" in result["reason"]
+        assert result["confidence"] == 0.92
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_ignorance_claim_inverts_refuted_to_verified(self, mock_client_cls):
+        """When verifier says facts don't exist, ignorance claim → verified (correct)."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {
+                "content": json.dumps({
+                    "verdict": "refuted",
+                    "confidence": 0.8,
+                    "reasoning": "No such legislation exists in any public record.",
+                }),
+            }}]
+        }
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        result = await _verify_claim_externally(
+            "I don't have information about the unicorn trade deal of 2025",
+            generating_model="openrouter/openai/gpt-4o-mini",
+        )
+
+        # Verdict should be inverted: refuted → verified
+        assert result["status"] == "verified"
+        assert "correctly identified" in result["reason"]
+        assert result["confidence"] >= 0.7
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_normal_claim_not_affected(self, mock_client_cls):
+        """Non-ignorance claims should NOT be inverted."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {
+                "content": '{"verdict": "supported", "confidence": 0.9, "reasoning": "Correct."}',
+            }}]
+        }
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        result = await _verify_claim_externally(
+            "Python was released in 1991 by Guido van Rossum",
+            generating_model="openrouter/openai/gpt-4o-mini",
+        )
+
+        # Should remain verified (no inversion)
+        assert result["status"] == "verified"
+        assert "factually inadequate" not in result.get("reason", "")

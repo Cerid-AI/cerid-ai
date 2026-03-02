@@ -2,7 +2,7 @@
 
 > **Created:** 2026-02-25
 > **Last updated:** 2026-03-01
-> **Status:** Phase 15H complete. 44 resolved, 1 research (E1), 1 informational (F6). 795+ tests.
+> **Status:** Phase 16A–F complete. 49 resolved, 1 research (E1), 1 informational (F6). 811+ Python tests, 111 frontend tests.
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](plans/DEVELOPMENT_PLAN_PHASE16-18.md)
 > **Purpose:** Track known bugs, feature gaps, structural issues, and architecture evaluations for upcoming phases.
 
@@ -380,6 +380,107 @@ Added bundle size check step in frontend CI job — fails if any JS chunk exceed
 
 ---
 
+## H. Response Verification & KB Context Issues
+
+### H1. Verification Returns "No Factual Claims" for Verifiable Responses
+
+**Severity:** High
+**Status:** Resolved (2026-03-01)
+
+**Resolution:** Complete rewrite of `agents/hallucination.py` with three-pronged fix:
+
+1. **Heuristic fallback extractor:** New `_extract_claims_heuristic()` function uses regex patterns to identify factual sentences when LLM extraction fails. Detects years, percentages, numbers, state verbs, release verbs, and version references. Requires >=2 factual pattern matches per sentence. Filters out greetings, questions, and code blocks.
+
+2. **Configurable thresholds:** `MIN_RESPONSE_LENGTH` lowered from 100 to 50 chars (configurable via `HALLUCINATION_MIN_RESPONSE_LENGTH` env var). All hallucination constants now configurable via env vars in `config/settings.py`: `HALLUCINATION_THRESHOLD`, `HALLUCINATION_UNVERIFIED_THRESHOLD`, `HALLUCINATION_MAX_CLAIMS`.
+
+3. **Failure propagation to frontend:** `extract_claims()` now returns `Tuple[List[str], str]` (claims + method). New `extraction_complete` SSE event with `method` field ("llm", "heuristic", or "none"). `claim_verified` event now includes `claim` text for frontend display. Frontend `use-verification-stream.ts` updated to handle new events and expose `extractionMethod`.
+
+**Files changed:**
+- `src/mcp/agents/hallucination.py` (complete rewrite)
+- `src/mcp/config/settings.py` (4 new env-configurable constants)
+- `src/web/src/hooks/use-verification-stream.ts` (new event handling + extractionMethod state)
+
+### H2. Verification UX Too Passive — Should Actively Display Checked Claims
+
+**Severity:** Medium
+**Status:** Resolved (2026-03-01)
+
+**Resolution:** Two UI enhancements:
+
+1. **Collapsible inline claims in status bar:** `VerificationStatusBar` now has a clickable summary row that expands to show all individual claims with status icons (CheckCircle2/XCircle/AlertCircle), claim text, source filename, and similarity percentage. During streaming, claims are shown in real-time with animated spinner for pending claims. Extraction method label shown during verification.
+
+2. **Per-message verification badge:** New `VerificationBadge` component on `MessageBubble` shows compact "X/Y verified" pill on the latest assistant message. Badge color indicates status: green (>=80% verified), yellow (50-80%), red (unverified claims present). Shows spinner during verification. Badge only appears on the most recent assistant message.
+
+**Files changed:**
+- `src/web/src/components/audit/verification-status-bar.tsx` (rewritten: collapsible claims list, streaming claims view, ClaimStatusIcon component)
+- `src/web/src/components/chat/message-bubble.tsx` (new VerificationBadge + MessageVerificationStatus type)
+- `src/web/src/components/chat/chat-panel.tsx` (wire verification status to latest assistant message, pass streaming claims to status bar)
+
+### H3. KB Context Pane Shows Current Conversation as Artifacts
+
+**Severity:** Medium
+**Status:** Resolved (2026-03-01)
+
+**Resolution:** When `conversation_messages` are provided to `agent_query()` (indicating the query originates from the chat flow), the `conversations` domain is now automatically excluded from the domain list. This prevents feedback-ingested conversation turns from appearing as KB context results. Same pattern already used by `hallucination.py` for verification queries. Manual searches (without conversation context) still include all domains.
+
+**Files changed:**
+- `src/mcp/agents/query_agent.py` (added `effective_domains` filtering when `conversation_messages` provided)
+
+### H4. Verification UX: "Unverified" Ambiguity + Missing Source Attribution
+
+**Severity:** High
+**Status:** Resolved (2026-03-01)
+
+**Resolution:** Nine-step Verification UX Overhaul:
+
+1. **Refuted vs. unverified distinction:** Frontend-only status mapping using `getClaimDisplayStatus(status, verification_method)` — claims actively found wrong by cross-model/web-search show "Refuted" (red, XOctagon icon), while claims with no KB evidence show "Unverified" (yellow, AlertTriangle icon). Zero backend enum changes.
+
+2. **Source URL extraction:** `_verify_claim_externally()` now extracts `source_urls` from OpenRouter web search annotations (`url_citation` type). Propagated through `verify_claim()` → `verify_response_streaming()` → `claim_verified` SSE event → frontend. Displayed as external link icons on claim cards.
+
+3. **Staleness detection & web search escalation:** 6 compiled regex patterns (`_STALE_KNOWLEDGE_PATTERNS`) detect when a static verification model admits stale knowledge (e.g., "as of my training data"). When detected on "supported" verdicts for current-event claims, automatically re-verifies via web search model (`force_web_search=True`).
+
+4. **Generator model context:** Both `_SYSTEM_DIRECT_VERIFICATION` and `_SYSTEM_CURRENT_EVENT_VERIFICATION` prompts now say "You are verifying a claim made by a different AI model." User prompt includes which model generated the claim for cross-model awareness.
+
+5. **Session metrics:** `useRef({ claimsChecked: 0, estCost: 0 })` accumulates across verification runs. Displayed in status bar as "Session: N facts • ~$X.XXXX".
+
+6. **Feedback tooltips:** Thumbs up/down buttons now have descriptive `title` attributes.
+
+7. **Web search badge:** `VerificationMethodBadge` handles `web_search` and `web_search_failed` methods with blue styling.
+
+8. **Accuracy recalculation:** Only refuted claims count as failures; unverified (no evidence) excluded from accuracy denominator.
+
+**Files changed:**
+- `src/mcp/agents/hallucination.py` (source URL extraction, staleness patterns, model context in prompts)
+- `src/web/src/lib/verification-utils.ts` (new shared utility)
+- `src/web/src/lib/types.ts` (`source_urls` field, `web_search` method)
+- `src/web/src/hooks/use-verification-stream.ts` (source_urls wiring, session metrics)
+- `src/web/src/components/audit/verification-status-bar.tsx` (refuted/unverified, source links, session metrics)
+- `src/web/src/components/audit/hallucination-panel.tsx` (display status, web search badge, tooltips)
+- `src/web/src/components/chat/chat-panel.tsx` (session metrics passthrough)
+
+### H5. Verification Confirms Model Honesty Instead of Checking Facts
+
+**Severity:** High
+**Status:** Resolved (2026-03-01)
+
+**Resolution:** When a model says "I don't have information about X", the verifier was confirming the model's honesty ("yes, you don't know") instead of checking whether X actually exists. Fixed with ignorance-admission detection and verdict inversion:
+
+1. **Ignorance-admission patterns:** 8 compiled regex patterns (`_IGNORANCE_ADMISSION_PATTERNS`) detect claims that admit ignorance (e.g., "I don't have specific information about...", "beyond my knowledge cutoff", "I cannot confirm whether...").
+
+2. **Web search routing:** Ignorance claims always route to web search model (Grok `:online`) regardless of `_is_current_event_claim()` result, since the model admitted stale/missing knowledge.
+
+3. **Reframed verification prompt:** New `_SYSTEM_IGNORANCE_VERIFICATION` prompt tells the verifier: "Do NOT evaluate whether the model is being honest about its limitations. Instead, search the web for authoritative sources about the UNDERLYING TOPIC."
+
+4. **Verdict inversion:** `_invert_ignorance_verdict()` flips results — if the verifier finds the information exists (supported), the original claim is marked "unverified" (model was factually inadequate). If the verifier confirms the information doesn't exist (refuted), the original claim is marked "verified" (model was correct).
+
+**Tests:** 23 new tests across 3 test classes: `TestIgnoranceAdmissionDetection` (13 tests), `TestIgnoranceVerdictInversion` (5 tests), `TestIgnoranceClaimVerification` (5 tests). Total hallucination tests: 125.
+
+**Files changed:**
+- `src/mcp/agents/hallucination.py` (ignorance patterns, `_is_ignorance_admission()`, `_invert_ignorance_verdict()`, `_SYSTEM_IGNORANCE_VERIFICATION`, modified `_verify_claim_externally()`)
+- `src/mcp/tests/test_hallucination.py` (23 new tests, 125 total)
+
+---
+
 ## Priority Order (Suggested)
 
 Structural work before feature work — the splits reduce cost of all subsequent changes and unblock test coverage. Audit hardening items integrated by severity into existing phases.
@@ -403,8 +504,16 @@ Structural work before feature work — the splits reduce cost of all subsequent
 14. **F6 remaining** — cerid-web compose separation — Phase 16G
 15. **D2 remaining** — Conversation fork/branch UI — Phase 16G
 
+### Recently Resolved (2026-03-01)
+16. ~~**H1** — Verification "no factual claims" false negative~~ ✅ Resolved
+17. ~~**H2** — Verification UX too passive~~ ✅ Resolved
+18. ~~**H3** — KB context returns current conversation~~ ✅ Resolved
+19. ~~**H4** — Verification UX ambiguity + missing source attribution~~ ✅ Resolved
+20. ~~**H5** — Verification confirms model honesty instead of checking facts~~ ✅ Resolved
+
 ### New (from Phase 15H holistic audit)
 See [Development Plan Phase 16-18](plans/DEVELOPMENT_PLAN_PHASE16-18.md) for full details:
-- **Phase 16A–H** — Security hardening, dead code cleanup, code quality, dependency optimization, feature wiring, documentation
+- **Phase 16A–F** ✅ — Security hardening, dead code cleanup, code quality, dependency optimization, feature wiring (taxonomy CRUD, recategorize, memory archive, model router settings)
+- **Phase 16G–H** — Content experience & testing, documentation updates
 - **Phase 17A–B** — Smart tags (taxonomy-constrained vocabulary) + artifact summary quality ("what is this" format)
 - **Phase 18A–D** — Knowledge sync infrastructure, sync GUI, drag-drop ingestion, storage mode options

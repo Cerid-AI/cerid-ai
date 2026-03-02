@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Plus, Database, Rss, LayoutDashboard, Zap, Sparkles, Shield } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { MessageBubble } from "./message-bubble"
+import { MessageBubble, type MessageVerificationStatus } from "./message-bubble"
 import { ModelSwitchDivider } from "./model-switch-divider"
 import { ChatInput } from "./chat-input"
 import { ModelSelect } from "./model-select"
@@ -86,6 +86,7 @@ export function ChatPanel() {
     activeId ?? null,
     hallucinationEnabled,
     streamTriggerKey,
+    selectedModel,
   )
 
   // Fetch saved report when switching to a conversation (fallback)
@@ -128,6 +129,28 @@ export function ChatPanel() {
 
   const kbContext = useKBContext(latestUserMessage, recentMessages)
   const { injectedContext, clearInjected } = kbContext
+
+  // Compute per-message verification status for the latest assistant message
+  const lastAssistantMsgId = useMemo(() => {
+    if (!active?.messages) return null
+    const assistantMsgs = active.messages.filter((m) => m.role === "assistant" && m.content)
+    return assistantMsgs.length > 0 ? assistantMsgs[assistantMsgs.length - 1].id : null
+  }, [active?.messages])
+
+  const verificationStatusForMsg = useMemo((): MessageVerificationStatus => {
+    if (!hallucinationEnabled || !lastAssistantMsgId) return null
+    if (verification.loading) return { state: "loading" }
+    if (halReport && !halReport.skipped && halReport.summary.total > 0) {
+      return {
+        state: "done",
+        verified: halReport.summary.verified,
+        unverified: halReport.summary.unverified,
+        uncertain: halReport.summary.uncertain,
+        total: halReport.summary.total,
+      }
+    }
+    return null
+  }, [hallucinationEnabled, lastAssistantMsgId, verification.loading, halReport])
 
   const currentModelObj = useMemo(() => MODELS.find((m) => m.id === selectedModel) ?? MODELS[0], [selectedModel])
   const { recommendation, dismiss: dismissRec, resetDismiss } = useModelRouter({
@@ -421,7 +444,10 @@ export function ChatPanel() {
             return (
               <div key={msg.id}>
                 {divider}
-                <MessageBubble message={msg} />
+                <MessageBubble
+                  message={msg}
+                  verificationStatus={msg.id === lastAssistantMsgId ? verificationStatusForMsg : undefined}
+                />
               </div>
             )
           })}
@@ -456,6 +482,10 @@ export function ChatPanel() {
         streamPhase={verification.phase}
         verifiedCount={verification.verifiedCount}
         totalClaims={verification.totalClaims}
+        extractionMethod={verification.extractionMethod}
+        streamingClaims={verification.phase !== "idle" && verification.phase !== "done" ? verification.claims : undefined}
+        sessionClaimsChecked={verification.sessionClaimsChecked}
+        sessionEstCost={verification.sessionEstCost}
       />
 
       {/* Auto-inject indicator */}

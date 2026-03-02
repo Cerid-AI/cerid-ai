@@ -30,6 +30,13 @@ logger = logging.getLogger("ai-companion")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Startup validation: warn on missing critical env vars
+    if not os.getenv("OPENROUTER_API_KEY"):
+        logger.warning(
+            "OPENROUTER_API_KEY not set — LLM features (categorization, reranking, "
+            "verification, memory extraction) will fail"
+        )
+
     # Startup: initialize Neo4j schema
     try:
         graph.init_schema(get_neo4j())
