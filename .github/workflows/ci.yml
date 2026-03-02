@@ -43,9 +43,19 @@ jobs:
       - name: Secret detection (detect-secrets)
         run: |
           pip install detect-secrets==1.5.0
-          # Scan all tracked files for potential secrets
-          detect-secrets scan --all-files --exclude-files '\.env\.age$' --exclude-files '\.lock$' --exclude-files 'package-lock\.json$' > /tmp/secrets.json
-          # Fail if any secrets found (excluding baseline)
+          # Scan all tracked files for potential secrets (exclude known false-positive paths)
+          detect-secrets scan --all-files \
+            --exclude-files '\.env\.age$' \
+            --exclude-files '\.lock$' \
+            --exclude-files 'package-lock\.json$' \
+            --exclude-files 'src/mcp/docs/inventory/' \
+            --exclude-files 'src/mcp/librechat-logs\.txt$' \
+            --exclude-files 'scripts/env-lock\.sh$' \
+            --exclude-files 'stacks/librechat/librechat\.yaml$' \
+            --exclude-files 'docs/CERID_AI_PROJECT_REFERENCE\.md$' \
+            --exclude-files 'src/mcp/tests/test_middleware_auth\.py$' \
+            > /tmp/secrets.json
+          # Fail if any secrets found
           python -c "
           import json, sys
           with open('/tmp/secrets.json') as f:

@@ -68,17 +68,18 @@ export function ChatPanel() {
   const [savedReportLoading, setSavedReportLoading] = useState(false)
 
   // Get the latest assistant response text for streaming verification
+  const messages = active?.messages
   const latestAssistantText = useMemo(() => {
-    if (!active?.messages) return null
-    const assistantMsgs = active.messages.filter((m) => m.role === "assistant")
+    if (!messages) return null
+    const assistantMsgs = messages.filter((m) => m.role === "assistant")
     return assistantMsgs.length > 0 ? assistantMsgs[assistantMsgs.length - 1].content : null
-  }, [active?.messages])
+  }, [messages])
 
   // Trigger key: increments each time a new assistant message finishes streaming
   const streamTriggerKey = useMemo(() => {
-    if (!active?.messages || isStreaming) return 0
-    return active.messages.filter((m) => m.role === "assistant").length
-  }, [active?.messages, isStreaming])
+    if (!messages || isStreaming) return 0
+    return messages.filter((m) => m.role === "assistant").length
+  }, [messages, isStreaming])
 
   // Streaming verification hook
   const verification = useVerificationStream(
@@ -132,10 +133,10 @@ export function ChatPanel() {
 
   // Compute per-message verification status for the latest assistant message
   const lastAssistantMsgId = useMemo(() => {
-    if (!active?.messages) return null
-    const assistantMsgs = active.messages.filter((m) => m.role === "assistant" && m.content)
+    if (!messages) return null
+    const assistantMsgs = messages.filter((m) => m.role === "assistant" && m.content)
     return assistantMsgs.length > 0 ? assistantMsgs[assistantMsgs.length - 1].id : null
-  }, [active?.messages])
+  }, [messages])
 
   const verificationStatusForMsg = useMemo((): MessageVerificationStatus => {
     if (!hallucinationEnabled || !lastAssistantMsgId) return null

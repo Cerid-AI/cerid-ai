@@ -42,11 +42,10 @@ interface ActivityChartProps {
 }
 
 export function ActivityChart({ activity }: ActivityChartProps) {
-  if (!activity) return <EmptyState icon={Activity} title="No activity data" description="Activity appears as events are logged" />
-
-  const hasTypedData = !!activity.hourly_by_type && Object.keys(activity.hourly_by_type).length > 0
+  const hasTypedData = !!activity?.hourly_by_type && Object.keys(activity.hourly_by_type).length > 0
 
   const { data, eventTypes } = useMemo(() => {
+    if (!activity) return { data: [], eventTypes: [] }
     const types = new Set<string>()
     if (hasTypedData) {
       Object.values(activity.hourly_by_type!).forEach((evts) =>
@@ -69,6 +68,8 @@ export function ActivityChart({ activity }: ActivityChartProps) {
 
     return { data: chartData, eventTypes: typeList }
   }, [activity, hasTypedData])
+
+  if (!activity) return <EmptyState icon={Activity} title="No activity data" description="Activity appears as events are logged" />
 
   return (
     <Card>

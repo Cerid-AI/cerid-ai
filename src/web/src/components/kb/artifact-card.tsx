@@ -40,6 +40,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
   const isBrowseMode = result.relevance === 0
   // Clean up garbled OCR/form text: collapse whitespace, strip control chars, trim trailing truncation
   const cleanContent = result.content
+    // eslint-disable-next-line no-control-regex -- intentional: strip control chars from OCR/form text
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, "")
     .replace(/\s+/g, " ")
     .replace(/[|]{2,}/g, "")

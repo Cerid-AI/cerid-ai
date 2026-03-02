@@ -36,8 +36,7 @@ import {
 
 type LoadState = "loading" | "error" | "ready"
 
-const SECTION_KEYS = ["connection", "ingestion", "features", "knowledge", "taxonomy", "encryption", "flags"] as const
-type SectionKey = (typeof SECTION_KEYS)[number]
+type SectionKey = "connection" | "ingestion" | "features" | "knowledge" | "taxonomy" | "encryption" | "flags"
 
 function readSectionState(): Record<SectionKey, boolean> {
   const defaults: Record<SectionKey, boolean> = {
