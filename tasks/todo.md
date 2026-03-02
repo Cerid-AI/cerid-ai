@@ -1,9 +1,10 @@
 # Cerid AI — Task Tracker
 
-> **Last updated:** 2026-03-01
-> **Current status:** Phase 15H complete + Verification UX Overhaul + 16A–F complete. 811+ Python tests, 111 frontend tests. H1–H5 resolved.
+> **Last updated:** 2026-03-02
+> **Current status:** Phase 16A-F complete. 811+ Python tests, 111 frontend tests. Next: 16G-H.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md)
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](../docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md)
+> **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
 
 ## Current: Phase 10 — Commercial & Open-Source Readiness
 
@@ -243,8 +244,11 @@
 - [ ] F6 remaining — cerid-web compose separation
 
 #### 16H: Documentation Updates
-- [ ] Update ISSUES.md status, mark resolved items, add new sections
-- [ ] Update this file with Phase 16-18 structure
+- [x] Slim CLAUDE.md (685 → 204 lines): moved API reference, agent docs, completed phases to separate files
+- [x] Create `docs/API_REFERENCE.md` (endpoints, agents, ingestion, sync, deps)
+- [x] Create `docs/COMPLETED_PHASES.md` (all 28 completed phase entries)
+- [x] Update ISSUES.md status, mark resolved items, clean priority section
+- [x] Update this file with Phase 16-18 structure + doc links
 - [ ] CHANGELOG.md (retroactive from git history)
 
 ### Phase 17: Smart Tags & Artifact Quality

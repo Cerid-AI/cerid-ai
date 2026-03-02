@@ -1,9 +1,10 @@
 # Cerid AI — Issues & Backlog
 
 > **Created:** 2026-02-25
-> **Last updated:** 2026-03-01
-> **Status:** Phase 16A–F complete. 49 resolved, 1 research (E1), 1 informational (F6). 811+ Python tests, 111 frontend tests.
+> **Last updated:** 2026-03-02
+> **Status:** Phase 16A–F complete. 49 resolved, 3 open (E1, F6, D2). 811+ Python tests, 111 frontend tests.
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](plans/DEVELOPMENT_PLAN_PHASE16-18.md)
+> **Completed phases:** [docs/COMPLETED_PHASES.md](COMPLETED_PHASES.md)
 > **Purpose:** Track known bugs, feature gaps, structural issues, and architecture evaluations for upcoming phases.
 
 ---
@@ -481,39 +482,18 @@ Added bundle size check step in frontend CI job — fails if any JS chunk exceed
 
 ---
 
-## Priority Order (Suggested)
+## Priority Order
 
-Structural work before feature work — the splits reduce cost of all subsequent changes and unblock test coverage. Audit hardening items integrated by severity into existing phases.
+### Open Items (3)
+1. **E1** — Artifact preview (PDF, code, spreadsheet rendering) — Phase 16G
+2. **F6** — cerid-web compose separation — Phase 16G
+3. **D2** — Conversation fork/branch UI (exploratory) — Phase 16G
 
-### Resolved (Phases 10–15)
-1. ~~**A1** — Chat viewport fix~~ ✅ Resolved (Phase 10A)
-2. ~~**B2** — Source attribution~~ ✅ Resolved (Phase 10A)
-3. ~~**B3 + D2** — Model context break~~ ✅ Resolved (Phase 10B)
-4. ~~**G1–G7** — Immediate audit fixes~~ ✅ Resolved (Step 0)
-5. ~~**F1–F5** — Structural splits + test coverage~~ ✅ Resolved (Phases 10C–10D)
-6. ~~**G8–G15** — Middleware + CI hardening~~ ✅ Resolved (Phases 10C–10D)
-7. ~~**D1** — Smart routing + token cost evaluation~~ ✅ Resolved (Phase 10E)
-8. ~~**B1** — Audit agent interactivity~~ ✅ Resolved (Phase 11A)
-9. ~~**C1** — Taxonomy tree + tag CRUD~~ ✅ Resolved (Phase 11B)
-10. ~~**C2** — Curation agent~~ ✅ Resolved (Phase 14A)
-11. ~~**G17–G22** — Operations documentation~~ ✅ Resolved (Phase 11D)
-12. ~~**E2** — RAG evaluation + **G16** (BM25 replacement)~~ ✅ Resolved (Phase 12)
-
-### Open Items
-13. **E1** — Artifact preview — Phase 16G
-14. **F6 remaining** — cerid-web compose separation — Phase 16G
-15. **D2 remaining** — Conversation fork/branch UI — Phase 16G
-
-### Recently Resolved (2026-03-01)
-16. ~~**H1** — Verification "no factual claims" false negative~~ ✅ Resolved
-17. ~~**H2** — Verification UX too passive~~ ✅ Resolved
-18. ~~**H3** — KB context returns current conversation~~ ✅ Resolved
-19. ~~**H4** — Verification UX ambiguity + missing source attribution~~ ✅ Resolved
-20. ~~**H5** — Verification confirms model honesty instead of checking facts~~ ✅ Resolved
-
-### New (from Phase 15H holistic audit)
+### Forward Plan
 See [Development Plan Phase 16-18](plans/DEVELOPMENT_PLAN_PHASE16-18.md) for full details:
-- **Phase 16A–F** ✅ — Security hardening, dead code cleanup, code quality, dependency optimization, feature wiring (taxonomy CRUD, recategorize, memory archive, model router settings)
-- **Phase 16G–H** — Content experience & testing, documentation updates
-- **Phase 17A–B** — Smart tags (taxonomy-constrained vocabulary) + artifact summary quality ("what is this" format)
-- **Phase 18A–D** — Knowledge sync infrastructure, sync GUI, drag-drop ingestion, storage mode options
+- **Phase 16G-H** — Content experience & testing, documentation updates
+- **Phase 17A-B** — Smart tags (taxonomy-constrained vocabulary) + artifact summary quality
+- **Phase 18A-D** — Knowledge sync infrastructure, sync GUI, drag-drop ingestion, storage mode options
+
+### Resolved (52 items)
+All items from sections A-H above marked with ✅ are resolved. Phases 10A-16F addressed all critical, high, and medium severity findings from the holistic audit. See [COMPLETED_PHASES.md](COMPLETED_PHASES.md) for full history.

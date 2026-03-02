@@ -1,0 +1,57 @@
+# Cerid AI — Completed Phases
+
+> Full history of completed development phases. For current status and next steps, see [CLAUDE.md](../CLAUDE.md).
+> **Last updated:** 2026-03-02
+
+---
+
+- **Phase 1 (Complete):** File ingestion, metadata extraction, AI categorization, deduplication, watcher, CLI, production hardening
+- **Phase 1.5 (Complete):** Bulk ingest hardening — concurrent CLI (ThreadPoolExecutor), watcher retry queue, atomic dedup (UNIQUE CONSTRAINT), query improvements (real relevance scores, source attribution, token budget), pdfplumber for structured PDF table extraction
+- **Phase 2 (Complete):** Query Agent + LLM reranking, Triage Agent (LangGraph), Rectification Agent, Audit Agent, Maintenance Agent, MCP tool expansion (12 tools)
+- **Phase 3 (Complete):** Streamlit dashboard with 5 panes (Overview, Artifacts, Query, Audit, Maintenance). Obsidian vault watcher for auto-sync into knowledge base.
+- **Phase 4 (Complete):** See `docs/PHASE4_PLAN.md` for details.
+  - **4A:** Modular refactor — split main.py into FastAPI routers
+  - **4B:** Smarter retrieval — hybrid BM25+vector search, knowledge graph traversal, cross-domain connections, temporal awareness
+  - **4C:** Workflow automation — scheduled maintenance (APScheduler), proactive knowledge surfacing, smart ingestion, webhooks
+  - **4D:** Engineering polish — 36 tests passing, GitHub Actions CI, security cleanup (secrets scrubbed from history), centralized encrypted `.env`
+- **Phase 5 (Complete):** Multi-machine dev environment & knowledge sync.
+  - **5A:** Infrastructure compose for Neo4j/ChromaDB/Redis (`stacks/infrastructure/`), 4-step startup script, environment validation
+  - **5B:** Knowledge base sync via JSONL — export/import CLI, auto-import on startup, Dropbox-based sync directory
+- **Phase 6 (Complete):** React GUI + Production Hardening. See `docs/plans/2026-02-22-phase6-gui-design.md`.
+  - **6A (Complete):** Foundation + Chat — React 19 scaffold, sidebar nav, streaming chat via Bifrost SSE, health status bar, conversation persistence, Docker/nginx deployment at port 3000
+  - **6B (Complete):** Knowledge Context Pane — resizable split-pane, auto KB query on message send, artifact cards with relevance scoring, domain filters, graph preview with navigable connections, KB injection into chat via system prompt
+  - **6C (Complete):** Monitoring + Audit Panes — health cards (ChromaDB/Neo4j/Redis/Bifrost), collection size charts, scheduler status, activity timeline, ingestion stats, cost breakdown by tier, query pattern analytics
+  - **6D (Complete):** Backend Hardening — API key auth (opt-in, X-API-Key header), in-memory sliding window rate limiting (path-specific), Redis query cache (5-min TTL), LLM feedback loop toggle, CORS configuration, bundle splitting (React.lazy + manualChunks, 75% reduction)
+- **Phase 7 (Complete):** Intelligence & Automation. See `docs/plans/2026-02-23-phase7-plan.md`.
+  - **7A (Complete):** Audit Intelligence — hallucination detection agent (claim extraction + KB verification), conversation analytics (per-model cost/token tracking), enhanced feedback loop (backend gate, async hallucination trigger, conversation metrics logging)
+  - **7B (Complete):** Smart Orchestration — client-side model router (complexity scoring, cost sensitivity, tier-based recommendations), auto-switch toggle in toolbar, 15 MCP tools (3 new: `pkb_check_hallucinations`, `pkb_memory_extract`, `pkb_memory_archive`)
+  - **7C (Complete):** Proactive Knowledge — memory extraction from conversations (facts, decisions, preferences, action items stored as KB artifacts with Neo4j relationships), smart KB suggestions (debounced real-time query as user types), memory archival with configurable retention
+- **Phase 8 (Complete):** Extensibility & Hardening.
+  - **8A (Complete):** Plugin system — manifest-based plugin loading, feature tiers (community/pro), feature flags, OCR parser plugin scaffold
+  - **8B (Complete):** Smart ingestion — new parsers (.eml, .mbox, .epub, .rtf, enhanced CSV/TSV), semantic dedup (embedding similarity), parser registry expansion
+  - **8C (Complete):** Hierarchical taxonomy — TAXONOMY dict with sub-categories/tags per domain, taxonomy API router, folder-based sub-category detection in watcher, custom domains via env var
+  - **8D (Complete):** Encryption & sync — field-level Fernet encryption (opt-in), pluggable sync backends, sync manifest with checksums
+  - **8E (Complete):** Infrastructure audit — comprehensive code audit (31 findings), security fixes, deprecated `datetime.utcnow()` replaced across 16 files, per-DB connection locks, retry wrappers, auth bypass fix, production Docker config, test stub DRY (~300 lines removed), N+1 session fix in sync import
+- **Phase 9 (Complete):** GUI Feature Parity — wire Phase 7/8 backend features into React GUI.
+  - **9A (Complete):** Fix 3 user-reported bugs — Knowledge pane error state + retry, Neo4j health card status normalization (`ok`/`connected`/`healthy`), conversation stats + hallucination aggregate in Audit pane
+  - **9B (Complete):** Wire 5 structural gaps — hallucination auto-fetch after chat (refreshKey + 2s delay), smart KB suggestions as-you-type (useSmartSuggestions wired into ChatInput), memory extraction auto-trigger (after 3+ user messages), server-synced settings (fetchSettings hydration + updateSettings push), ChatDashboard refactored to useLiveMetrics hook
+  - **9C (Complete):** 3 feature enhancements — file upload button in Knowledge pane (uploadFile API), sub-category badge + tag pills on artifact cards, client-side tag browsing/filtering from loaded artifacts
+  - **9D (Complete):** Neo4j auth hardening — fixed docker-compose env var passthrough bug (empty `NEO4J_PASSWORD` overriding env_file), health check validates auth via Cypher query (not just `verify_connectivity()`), early RuntimeError on empty password, error detail in health responses, config.py startup warning, health-cards case-insensitive error prefix
+- **Phase 10A (Complete):** Production Quality — copyright headers, source attribution in chat, frontend tests (68), CI hardening (security scanning, coverage, Docker scanning)
+- **Phase 10B (Complete):** UX Polish — model switch dividers, per-message model badges with provider colors
+- **Codebase Audit (Complete):** Accessibility fixes (33 across 14 components), type safety, error handling overhaul, dead code removal, logic consolidation, dependency management (pip-compile, Docker pinning, Dependabot, pre-commit hooks)
+- **Phase 10C (Complete):** Structural Splits — `config/`, `db/neo4j/`, `sync/`, `parsers/`, `services/` packages; middleware hardening (XFF, IETF headers, IP redaction, request ID tracing)
+- **Phase 10D (Complete):** Test Coverage — 564 Python tests (75% coverage), 94 frontend tests; CI hardening (pip-audit, CodeQL, coverage 55%, bundle size monitoring)
+- **Phase 10E (Complete):** Smart Model Switching — token estimator, context replay cost, summarize-and-switch, model switch dialog with cost estimates
+- **Phase 11 (Complete):** Knowledge Intelligence — interactive audit/agent controls, taxonomy tree sidebar, curation agent design, operations documentation
+- **Phase 12 (Complete):** RAG Excellence — BM25s replacement (stemming, stopwords, 500x faster), configurable retrieval weights, embedding eval scaffold, eval harness (NDCG, MRR, P@K, R@K)
+- **Phase 13 (Complete):** Conversation Intelligence — conversation-aware KB queries (enrichment from last 5 messages), auto-injection with confidence gate (0.82 threshold), context budget optimization
+- **Phase 14 (Complete):** Artifact Quality — curation agent (4-dimension scoring), quality-weighted retrieval, metadata boost, GUI wiring (QualityBadge, quality audit), AI synopsis generation, Bifrost model fixes
+- **Phase 15 (Complete):** Realtime Accuracy Watcher — UI polish (verification panel, settings scroll, collapsible sections, tooltips), streaming verification (SSE), accuracy dashboard, claim feedback, model accuracy comparison
+- **Verification UX Overhaul (Complete):** Refuted/unverified status distinction, source URL extraction from web search, staleness detection with web search escalation, generator model context in prompts, session metrics, ignorance-admission detection with verdict inversion (checks underlying facts instead of model honesty)
+- **Phase 16A (Complete):** Security & Infrastructure Hardening — Bifrost/LibreChat/RAG API Docker image pinning (SHA256), PostgreSQL/Meilisearch credential externalization, secret detection in CI, runtime MCP_URL config for web container
+- **Phase 16B (Complete):** Dead Code & API Cleanup — removed 6 dead frontend API functions, orphaned tests, unused imports; inlined single-use helpers; dependency audit confirmed all deps in-use
+- **Phase 16C (Complete):** Backend Code Quality — extracted `_format_chroma_result()` helper, `defaultdict(Counter)`, `scan_iter()`, try/except in resolve_duplicates, `get_chroma()` factory usage
+- **Phase 16D (Complete):** Frontend Code Quality — extracted `tokenCost()`, `getAccuracyTier()`, `parseTags()` shared utilities; fixed unstable React keys; 18 new utility tests (111 total)
+- **Phase 16E (Complete):** Dependency & Docker Optimization — removed unused `langchain-community` (-3 transitive packages), narrowed langchain bounds, extracted spaCy model ARG, removed `apk upgrade`, ChromaDB telemetry disabled, CI coverage threshold raised to 70%
+- **Phase 16F (Complete):** Backend Feature Wiring — taxonomy CRUD UI (create domain/sub-category), artifact recategorize action, memory archive button, model router server-synced settings toggle
