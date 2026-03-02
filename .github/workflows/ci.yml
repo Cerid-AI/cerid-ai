@@ -45,6 +45,7 @@ jobs:
           pip install detect-secrets==1.5.0
           # Scan all tracked files for potential secrets (exclude known false-positive paths)
           detect-secrets scan --all-files \
+            --exclude-files '\.git/' \
             --exclude-files '\.env\.age$' \
             --exclude-files '\.lock$' \
             --exclude-files 'package-lock\.json$' \

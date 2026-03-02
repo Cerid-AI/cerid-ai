@@ -11,7 +11,6 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Loader2, AlertCircle, FileText, Code2, Table2, FileType } from "lucide-react"
 import { DomainBadge } from "./domain-filter"

@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel

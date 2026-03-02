@@ -8,15 +8,17 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 
-def _mock_driver():
-    driver = MagicMock()
-    session = MagicMock()
-    driver.session.return_value.__enter__ = MagicMock(return_value=session)
-    driver.session.return_value.__exit__ = MagicMock(return_value=False)
-    return driver, session
+def _make_app():
+    """Create minimal FastAPI app with just the artifacts router."""
+    from routers.artifacts import router
+
+    app = FastAPI()
+    app.include_router(router)
+    return app
 
 
 def _sample_artifact(
@@ -48,9 +50,7 @@ class TestArtifactDetailEndpoint:
     @patch("routers.artifacts.get_neo4j")
     @patch("routers.artifacts.graph")
     def test_returns_artifact_with_chunks(self, mock_graph, mock_neo4j, mock_chroma, _mock_redis):
-        from main import app
-
-        client = TestClient(app)
+        client = TestClient(_make_app())
 
         mock_graph.get_artifact.return_value = _sample_artifact()
 
@@ -81,9 +81,7 @@ class TestArtifactDetailEndpoint:
     @patch("routers.artifacts.get_neo4j")
     @patch("routers.artifacts.graph")
     def test_returns_404_when_not_found(self, mock_graph, mock_neo4j, mock_chroma, _mock_redis):
-        from main import app
-
-        client = TestClient(app)
+        client = TestClient(_make_app())
 
         mock_graph.get_artifact.return_value = None
 
@@ -96,9 +94,7 @@ class TestArtifactDetailEndpoint:
     @patch("routers.artifacts.get_neo4j")
     @patch("routers.artifacts.graph")
     def test_chunks_sorted_by_index(self, mock_graph, mock_neo4j, mock_chroma, _mock_redis):
-        from main import app
-
-        client = TestClient(app)
+        client = TestClient(_make_app())
 
         mock_graph.get_artifact.return_value = _sample_artifact(
             chunk_ids=["c2", "c1", "c3"]
@@ -129,9 +125,7 @@ class TestArtifactDetailEndpoint:
     @patch("routers.artifacts.get_neo4j")
     @patch("routers.artifacts.graph")
     def test_total_content_assembled_in_order(self, mock_graph, mock_neo4j, mock_chroma, _mock_redis):
-        from main import app
-
-        client = TestClient(app)
+        client = TestClient(_make_app())
 
         mock_graph.get_artifact.return_value = _sample_artifact(
             chunk_ids=["c1", "c2"]
@@ -156,9 +150,7 @@ class TestArtifactDetailEndpoint:
     @patch("routers.artifacts.get_neo4j")
     @patch("routers.artifacts.graph")
     def test_empty_chunk_ids_returns_empty_content(self, mock_graph, mock_neo4j, mock_chroma, _mock_redis):
-        from main import app
-
-        client = TestClient(app)
+        client = TestClient(_make_app())
 
         artifact = _sample_artifact()
         artifact["chunk_ids"] = "[]"
@@ -177,9 +169,7 @@ class TestArtifactDetailEndpoint:
     @patch("routers.artifacts.get_neo4j")
     @patch("routers.artifacts.graph")
     def test_metadata_fields_included(self, mock_graph, mock_neo4j, mock_chroma, _mock_redis):
-        from main import app
-
-        client = TestClient(app)
+        client = TestClient(_make_app())
 
         mock_graph.get_artifact.return_value = _sample_artifact()
 
