@@ -5,7 +5,7 @@ import { useState, useRef, useCallback } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { ChevronDown, ChevronUp, PlusCircle, GitBranch, Globe, ArrowRightLeft, Loader2, X } from "lucide-react"
+import { ChevronDown, ChevronUp, PlusCircle, GitBranch, Globe, ArrowRightLeft, Loader2, X, Eye } from "lucide-react"
 import { DomainBadge } from "./domain-filter"
 import type { KBQueryResult } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -17,9 +17,10 @@ interface ArtifactCardProps {
   onInject: () => void
   domains?: string[]
   onRecategorize?: (artifactId: string, newDomain: string) => Promise<void>
+  onPreview?: (artifactId: string) => void
 }
 
-export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, onRecategorize }: ArtifactCardProps) {
+export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, onRecategorize, onPreview }: ArtifactCardProps) {
   const [expanded, setExpanded] = useState(false)
   const [showRecategorize, setShowRecategorize] = useState(false)
   const [recategorizing, setRecategorizing] = useState(false)
@@ -195,6 +196,20 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
             >
               <ArrowRightLeft className="mr-1 h-3 w-3" />
               Move
+            </Button>
+          )}
+          {onPreview && (
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={(e) => {
+                e.stopPropagation()
+                onPreview(result.artifact_id)
+              }}
+              title="Preview content"
+            >
+              <Eye className="mr-1 h-3 w-3" />
+              Preview
             </Button>
           )}
           <div className="flex-1" />

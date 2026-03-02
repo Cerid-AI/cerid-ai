@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Justin Michaels. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useCallback, useRef, useMemo } from "react"
+import { useState, useCallback, useRef, useMemo, lazy, Suspense } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Input } from "@/components/ui/input"
@@ -15,6 +15,8 @@ import { GraphPreview } from "./graph-preview"
 import { fetchArtifacts, queryKB, uploadFile, recategorizeArtifact } from "@/lib/api"
 import { useKBInjection } from "@/contexts/kb-injection-context"
 import type { KBQueryResult, Artifact } from "@/lib/types"
+
+const ArtifactPreview = lazy(() => import("./artifact-preview"))
 
 function parseJsonArray(json: string | undefined): string[] {
   if (!json) return []
@@ -66,6 +68,7 @@ export function KnowledgePane() {
   })
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null)
   const [activeTag, setActiveTag] = useState<string | null>(null)
+  const [previewArtifactId, setPreviewArtifactId] = useState<string | null>(null)
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "success" | "error">("idle")
   const [uploadMessage, setUploadMessage] = useState("")
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -326,6 +329,7 @@ export function KnowledgePane() {
               onInject={() => injectResult(result)}
               domains={domainList}
               onRecategorize={handleRecategorize}
+              onPreview={setPreviewArtifactId}
             />
           ))}
         </div>
@@ -343,6 +347,16 @@ export function KnowledgePane() {
         <div className="border-t px-4 py-1.5 text-xs text-muted-foreground">
           {injectedContext.length} source{injectedContext.length !== 1 ? "s" : ""} ready — switch to Chat to use
         </div>
+      )}
+
+      {previewArtifactId && (
+        <Suspense fallback={null}>
+          <ArtifactPreview
+            artifactId={previewArtifactId}
+            open={!!previewArtifactId}
+            onClose={() => setPreviewArtifactId(null)}
+          />
+        </Suspense>
       )}
     </div>
   )

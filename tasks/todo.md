@@ -1,7 +1,7 @@
 # Cerid AI — Task Tracker
 
 > **Last updated:** 2026-03-02
-> **Current status:** Phase 16A-F complete. 811+ Python tests, 111 frontend tests. Next: 16G-H.
+> **Current status:** Phase 16A-G (E1) complete. 811+ Python tests, 130 frontend tests. Next: 16G remaining, 16H.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md)
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](../docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
@@ -238,7 +238,7 @@
 - Skipped (by design): batch triage UI (requires container-side paths, poor GUI UX), digest view (new component, lower priority), plugin management (no backend plugin API or plugin files exist)
 
 #### 16G: Content Experience & Testing
-- [ ] E1 — Artifact preview (PDF, code, spreadsheet rendering)
+- [x] E1 — Artifact preview: backend `GET /artifacts/{artifact_id}`, preview dialog with syntax highlighting (PrismLight), file type detection utils, Eye button on artifact cards, 6 backend + 19 frontend tests (130 total)
 - [ ] D2 remaining — Conversation fork/branch UI (exploratory)
 - [ ] Frontend component test expansion (40+ untested components)
 - [ ] F6 remaining — cerid-web compose separation

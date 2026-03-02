@@ -21,6 +21,7 @@ import type {
   ChatMessage,
   AgentQueryResponse,
   Artifact,
+  ArtifactDetail,
   RelatedArtifact,
   MaintenanceResponse,
   RectifyResponse,
@@ -85,6 +86,12 @@ export async function fetchRelatedArtifacts(
   const params = new URLSearchParams({ depth: String(depth), max_results: String(maxResults) })
   const res = await fetch(`${MCP_BASE}/artifacts/${artifactId}/related?${params}`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(`Related artifacts fetch failed: ${res.status}`)
+  return res.json()
+}
+
+export async function fetchArtifactDetail(artifactId: string): Promise<ArtifactDetail> {
+  const res = await fetch(`${MCP_BASE}/artifacts/${artifactId}`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(`Artifact detail fetch failed: ${res.status}`)
   return res.json()
 }
 

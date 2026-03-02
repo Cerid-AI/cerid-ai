@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "vitest"
-import { tokenCost, getAccuracyTier, parseTags } from "@/lib/utils"
+import { tokenCost, getAccuracyTier, parseTags, getFileRenderMode, getLanguageFromFilename } from "@/lib/utils"
 
 // ---------------------------------------------------------------------------
 // tokenCost
@@ -101,5 +101,93 @@ describe("parseTags", () => {
 
   it("returns empty array for empty string", () => {
     expect(parseTags("")).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// getFileRenderMode
+// ---------------------------------------------------------------------------
+
+describe("getFileRenderMode", () => {
+  it("returns 'code' for Python files", () => {
+    expect(getFileRenderMode("example.py")).toBe("code")
+  })
+
+  it("returns 'code' for TypeScript files", () => {
+    expect(getFileRenderMode("app.tsx")).toBe("code")
+  })
+
+  it("returns 'code' for JSON files", () => {
+    expect(getFileRenderMode("config.json")).toBe("code")
+  })
+
+  it("returns 'markdown' for .md files", () => {
+    expect(getFileRenderMode("README.md")).toBe("markdown")
+  })
+
+  it("returns 'markdown' for .mdx files", () => {
+    expect(getFileRenderMode("page.mdx")).toBe("markdown")
+  })
+
+  it("returns 'table' for CSV files", () => {
+    expect(getFileRenderMode("data.csv")).toBe("table")
+  })
+
+  it("returns 'table' for TSV files", () => {
+    expect(getFileRenderMode("data.tsv")).toBe("table")
+  })
+
+  it("returns 'text' for unknown extensions", () => {
+    expect(getFileRenderMode("notes.txt")).toBe("text")
+  })
+
+  it("returns 'text' for PDF files", () => {
+    expect(getFileRenderMode("document.pdf")).toBe("text")
+  })
+
+  it("returns 'text' for extensionless files", () => {
+    expect(getFileRenderMode("Makefile")).toBe("text")
+  })
+
+  it("handles uppercase extensions", () => {
+    expect(getFileRenderMode("script.PY")).toBe("code")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// getLanguageFromFilename
+// ---------------------------------------------------------------------------
+
+describe("getLanguageFromFilename", () => {
+  it("maps .py to python", () => {
+    expect(getLanguageFromFilename("app.py")).toBe("python")
+  })
+
+  it("maps .ts to typescript", () => {
+    expect(getLanguageFromFilename("index.ts")).toBe("typescript")
+  })
+
+  it("maps .jsx to jsx", () => {
+    expect(getLanguageFromFilename("App.jsx")).toBe("jsx")
+  })
+
+  it("maps .sh to bash", () => {
+    expect(getLanguageFromFilename("script.sh")).toBe("bash")
+  })
+
+  it("maps .yml to yaml", () => {
+    expect(getLanguageFromFilename("config.yml")).toBe("yaml")
+  })
+
+  it("returns 'text' for unknown extensions", () => {
+    expect(getLanguageFromFilename("file.xyz")).toBe("text")
+  })
+
+  it("maps Dockerfile to dockerfile", () => {
+    expect(getLanguageFromFilename("Dockerfile")).toBe("dockerfile")
+  })
+
+  it("handles uppercase extensions", () => {
+    expect(getLanguageFromFilename("main.RS")).toBe("rust")
   })
 })

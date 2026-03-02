@@ -49,6 +49,42 @@ export function getAccuracyTier(accuracy: number): {
 }
 
 /**
+ * Determine render mode from a filename extension.
+ */
+const CODE_EXTS = new Set([
+  "py", "js", "ts", "jsx", "tsx", "go", "rs", "rb", "java", "c", "cpp", "cs",
+  "swift", "kt", "sh", "bash", "zsh", "sql", "css", "scss", "html", "xml",
+  "json", "yaml", "yml", "toml", "dockerfile", "diff",
+])
+const TABLE_EXTS = new Set(["csv", "tsv", "xlsx"])
+const MARKDOWN_EXTS = new Set(["md", "markdown", "mdx"])
+
+export function getFileRenderMode(filename: string): "code" | "markdown" | "table" | "text" {
+  const ext = filename.split(".").pop()?.toLowerCase() ?? ""
+  if (CODE_EXTS.has(ext)) return "code"
+  if (MARKDOWN_EXTS.has(ext)) return "markdown"
+  if (TABLE_EXTS.has(ext)) return "table"
+  return "text"
+}
+
+const EXT_TO_LANGUAGE: Record<string, string> = {
+  py: "python", js: "javascript", ts: "typescript", jsx: "jsx", tsx: "tsx",
+  go: "go", rs: "rust", rb: "ruby", java: "java", c: "c", cpp: "cpp",
+  cs: "csharp", swift: "swift", kt: "kotlin", sh: "bash", bash: "bash",
+  zsh: "bash", sql: "sql", css: "css", scss: "scss", html: "html",
+  xml: "xml", json: "json", yaml: "yaml", yml: "yaml", toml: "toml",
+  dockerfile: "dockerfile", diff: "diff", md: "markdown",
+}
+
+/**
+ * Map filename extension to PrismLight language name.
+ */
+export function getLanguageFromFilename(filename: string): string {
+  const ext = filename.split(".").pop()?.toLowerCase() ?? ""
+  return EXT_TO_LANGUAGE[ext] ?? "text"
+}
+
+/**
  * Parse a value that may be a JSON-encoded string array, a native array, or undefined.
  * Returns a clean `string[]` regardless of input shape.
  */

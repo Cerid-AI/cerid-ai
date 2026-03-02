@@ -25,7 +25,7 @@ def recategorize(
     new_domain: str,
     sub_category: str = "",
     tags: str = "",
-) -> Dict:
+) -> dict:
     """Public — also called by mcp_sse.py execute_tool."""
     if new_domain not in config.DOMAINS:
         raise ValueError(f"Invalid domain: {new_domain}. Valid: {config.DOMAINS}")
@@ -138,11 +138,69 @@ async def related_artifacts_endpoint(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/artifacts/{artifact_id}")
+async def artifact_detail_endpoint(artifact_id: str):
+    """Fetch full artifact content: Neo4j metadata + reassembled ChromaDB chunks."""
+    try:
+        driver = get_neo4j()
+        chroma = get_chroma()
+
+        artifact = graph.get_artifact(driver, artifact_id)
+        if not artifact:
+            raise HTTPException(status_code=404, detail=f"Artifact not found: {artifact_id}")
+
+        chunk_ids = json.loads(artifact.get("chunk_ids", "[]"))
+        chunks = []
+        total_content = ""
+
+        if chunk_ids:
+            collection = chroma.get_or_create_collection(
+                name=config.collection_name(artifact["domain"])
+            )
+            fetched = collection.get(ids=chunk_ids, include=["documents", "metadatas"])
+
+            # Build sorted chunks by chunk_index
+            raw_chunks = []
+            for i, doc_id in enumerate(fetched["ids"]):
+                meta = fetched["metadatas"][i] if fetched["metadatas"] else {}
+                text = fetched["documents"][i] if fetched["documents"] else ""
+                idx = int(meta.get("chunk_index", i))
+                raw_chunks.append({"index": idx, "text": text})
+
+            raw_chunks.sort(key=lambda c: c["index"])
+            chunks = raw_chunks
+            total_content = "\n\n".join(c["text"] for c in raw_chunks)
+
+        return {
+            "artifact_id": artifact["id"],
+            "title": artifact.get("filename", ""),
+            "domain": artifact["domain"],
+            "filename": artifact.get("filename", ""),
+            "source_type": artifact.get("source_type", ""),
+            "chunk_count": artifact.get("chunk_count", len(chunks)),
+            "total_content": total_content,
+            "chunks": chunks,
+            "metadata": {
+                "sub_category": artifact.get("sub_category", ""),
+                "tags": artifact.get("tags", "[]"),
+                "keywords": artifact.get("keywords", ""),
+                "summary": artifact.get("summary", ""),
+                "ingested_at": artifact.get("ingested_at", ""),
+                "recategorized_at": artifact.get("recategorized_at"),
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Artifact detail error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/artifacts")
 async def list_artifacts_endpoint(
-    domain: Optional[str] = Query(None, description="Filter by domain"),
-    sub_category: Optional[str] = Query(None, description="Filter by sub-category"),
-    tag: Optional[str] = Query(None, description="Filter by tag"),
+    domain: str | None = Query(None, description="Filter by domain"),
+    sub_category: str | None = Query(None, description="Filter by sub-category"),
+    tag: str | None = Query(None, description="Filter by tag"),
     limit: int = Query(50, ge=1, le=500),
 ):
     try:

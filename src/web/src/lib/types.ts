@@ -62,6 +62,23 @@ export function findModel(modelId: string): ModelOption | undefined {
   return MODELS.find((m) => m.id === modelId)
 }
 
+export interface ArtifactChunk {
+  index: number
+  text: string
+}
+
+export interface ArtifactDetail {
+  artifact_id: string
+  title: string
+  domain: string
+  filename: string
+  source_type: string
+  chunk_count: number
+  total_content: string
+  chunks: ArtifactChunk[]
+  metadata: Record<string, unknown>
+}
+
 export interface HealthResponse {
   status: "healthy" | "degraded"
   services: {

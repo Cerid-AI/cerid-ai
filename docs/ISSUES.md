@@ -2,7 +2,7 @@
 
 > **Created:** 2026-02-25
 > **Last updated:** 2026-03-02
-> **Status:** Phase 16A–F complete. 49 resolved, 3 open (E1, F6, D2). 811+ Python tests, 111 frontend tests.
+> **Status:** Phase 16A–G (E1) complete. 49 resolved, 2 open (F6, D2). 811+ Python tests, 130 frontend tests.
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](plans/DEVELOPMENT_PLAN_PHASE16-18.md)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](COMPLETED_PHASES.md)
 > **Purpose:** Track known bugs, feature gaps, structural issues, and architecture evaluations for upcoming phases.
@@ -142,18 +142,14 @@ No agent exists for improving artifact quality. Current artifact cards show raw 
 
 ## E. Architecture Evaluations
 
-### E1. Artifact Preview/Generation & Interactive Editing
+### E1. Artifact Preview
 
 **Severity:** Low (exploratory)
-**Status:** Open — needs research
+**Status:** ✅ Resolved (Phase 16G, 2026-03-02)
 
-Evaluate options for in-GUI artifact handling:
-- **Preview:** PDF rendering (pdf.js), code syntax highlighting (already have markdown), spreadsheet/table preview, email rendering
-- **Generation:** Save chat responses as artifacts ("Save to KB" button), generate artifacts from templates
-- **Interactive editing:** Edit artifact metadata (title, domain, tags) in-place, edit content with re-chunking, annotation/highlighting on artifacts
-- **Version history:** Track changes to artifacts over time
+**Resolution:** Added artifact content preview dialog to the Knowledge pane. Backend `GET /artifacts/{artifact_id}` endpoint fetches Neo4j metadata + reassembled ChromaDB chunks (sorted by index). Frontend: `ArtifactPreview` dialog (lazy-loaded) with conditional rendering — code files use PrismLight syntax highlighting, markdown/table/text use formatted `<pre>` blocks. Eye icon button on every artifact card. File type detection utilities (`getFileRenderMode`, `getLanguageFromFilename`). shadcn/ui Dialog primitive. 6 backend tests, 19 new frontend tests (130 total).
 
-**Dependencies:** Requires decisions on E2 (how artifacts are stored/vectorized) before implementation.
+**Files changed:** `routers/artifacts.py`, `types.ts`, `api.ts`, `utils.ts`, `artifact-preview.tsx` (new), `artifact-card.tsx`, `knowledge-pane.tsx`, `dialog.tsx` (new, shadcn), `test_artifact_detail.py` (new), `utils.test.ts`
 
 ### E2. RAG Integration & Vectorization Strategy
 
@@ -484,10 +480,9 @@ Added bundle size check step in frontend CI job — fails if any JS chunk exceed
 
 ## Priority Order
 
-### Open Items (3)
-1. **E1** — Artifact preview (PDF, code, spreadsheet rendering) — Phase 16G
-2. **F6** — cerid-web compose separation — Phase 16G
-3. **D2** — Conversation fork/branch UI (exploratory) — Phase 16G
+### Open Items (2)
+1. **F6** — cerid-web compose separation — Phase 16G
+2. **D2** — Conversation fork/branch UI (exploratory) — Phase 16G
 
 ### Forward Plan
 See [Development Plan Phase 16-18](plans/DEVELOPMENT_PLAN_PHASE16-18.md) for full details:
@@ -495,5 +490,5 @@ See [Development Plan Phase 16-18](plans/DEVELOPMENT_PLAN_PHASE16-18.md) for ful
 - **Phase 17A-B** — Smart tags (taxonomy-constrained vocabulary) + artifact summary quality
 - **Phase 18A-D** — Knowledge sync infrastructure, sync GUI, drag-drop ingestion, storage mode options
 
-### Resolved (52 items)
+### Resolved (53 items)
 All items from sections A-H above marked with ✅ are resolved. Phases 10A-16F addressed all critical, high, and medium severity findings from the holistic audit. See [COMPLETED_PHASES.md](COMPLETED_PHASES.md) for full history.
