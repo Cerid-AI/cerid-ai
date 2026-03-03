@@ -16,7 +16,7 @@ export function SplitPane({ left, right, showRight, defaultSize = 70 }: SplitPan
   }
 
   return (
-    <Group orientation="horizontal" className="h-full" resizeTargetMinimumSize={22}>
+    <Group orientation="horizontal" className="h-full" resizeTargetMinimumSize={{ coarse: 22, fine: 5 }}>
       <Panel defaultSize={defaultSize} minSize={35} className="min-h-0">
         {left}
       </Panel>

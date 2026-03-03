@@ -118,7 +118,7 @@ export function KBContextPanel({
             </div>
           )}
 
-          {results.map((result, i) => (
+          {results.map((result) => (
             <ArtifactCard
               key={`${result.artifact_id}-${result.chunk_index}`}
               result={result}

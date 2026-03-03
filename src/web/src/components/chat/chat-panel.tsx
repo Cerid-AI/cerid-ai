@@ -569,7 +569,7 @@ export function ChatPanel() {
 
   // Right column: vertical split — Verification (top) + KB Context (bottom)
   const rightColumn = (
-    <Group orientation="vertical" className="h-full" resizeTargetMinimumSize={22}>
+    <Group orientation="vertical" className="h-full" resizeTargetMinimumSize={{ coarse: 22, fine: 5 }}>
       <Panel defaultSize={33} minSize={15}>
         <HallucinationPanel
           report={halReport}
