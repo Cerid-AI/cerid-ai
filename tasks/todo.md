@@ -1,7 +1,7 @@
 # Cerid AI — Task Tracker
 
 > **Last updated:** 2026-03-02
-> **Current status:** Phase 16A-G (E1) complete. 811+ Python tests, 130 frontend tests. Next: 16G remaining, 16H.
+> **Current status:** Phase 16A–H complete. 811+ Python tests, 130 frontend tests. Next: Phase 17.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md)
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](../docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
@@ -237,19 +237,19 @@
 - [x] Add `archiveMemories()` API function + Archive button in memories pane header
 - Skipped (by design): batch triage UI (requires container-side paths, poor GUI UX), digest view (new component, lower priority), plugin management (no backend plugin API or plugin files exist)
 
-#### 16G: Content Experience & Testing
+#### 16G: Content Experience & Testing ✅
 - [x] E1 — Artifact preview: backend `GET /artifacts/{artifact_id}`, preview dialog with syntax highlighting (PrismLight), file type detection utils, Eye button on artifact cards, 6 backend + 19 frontend tests (130 total)
-- [ ] D2 remaining — Conversation fork/branch UI (exploratory)
-- [ ] Frontend component test expansion (40+ untested components)
-- [ ] F6 remaining — cerid-web compose separation
+- [x] F6 — cerid-web compose separation: extracted to `src/web/docker-compose.yml`, startup script updated to 5-step
+- Deferred to Phase 17+: D2 conversation fork/branch UI (exploratory, 40-60 hrs), frontend component test expansion (20-30 hrs)
 
-#### 16H: Documentation Updates
+#### 16H: Documentation Updates ✅
 - [x] Slim CLAUDE.md (685 → 204 lines): moved API reference, agent docs, completed phases to separate files
 - [x] Create `docs/API_REFERENCE.md` (endpoints, agents, ingestion, sync, deps)
 - [x] Create `docs/COMPLETED_PHASES.md` (all 28 completed phase entries)
 - [x] Update ISSUES.md status, mark resolved items, clean priority section
 - [x] Update this file with Phase 16-18 structure + doc links
-- [ ] CHANGELOG.md (retroactive from git history)
+- [x] F6 compose separation doc updates (CLAUDE.md startup order, ISSUES.md, todo.md)
+- Deferred: CHANGELOG.md (retroactive from git history)
 
 ### Phase 17: Smart Tags & Artifact Quality
 

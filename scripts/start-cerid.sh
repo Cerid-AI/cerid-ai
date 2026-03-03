@@ -52,16 +52,19 @@ if [ -n "$BUILD_FLAG" ]; then
 fi
 
 # Start in dependency order — all stacks read .env from repo root
-echo "[1/4] Starting Infrastructure (Neo4j, ChromaDB, Redis)..."
+echo "[1/5] Starting Infrastructure (Neo4j, ChromaDB, Redis)..."
 docker compose -f "$CERID_ROOT/stacks/infrastructure/docker-compose.yml" --env-file "$ENV_FILE" up -d
 
-echo "[2/4] Starting Bifrost (LLM Gateway)..."
+echo "[2/5] Starting Bifrost (LLM Gateway)..."
 docker compose -f "$CERID_ROOT/stacks/bifrost/docker-compose.yml" --env-file "$ENV_FILE" up -d
 
-echo "[3/4] Starting MCP Services..."
+echo "[3/5] Starting MCP Services (MCP + Dashboard)..."
 docker compose -f "$CERID_ROOT/src/mcp/docker-compose.yml" --env-file "$ENV_FILE" up -d $BUILD_FLAG
 
-echo "[4/4] Starting LibreChat..."
+echo "[4/5] Starting React GUI..."
+docker compose -f "$CERID_ROOT/src/web/docker-compose.yml" --env-file "$ENV_FILE" up -d $BUILD_FLAG
+
+echo "[5/5] Starting LibreChat..."
 docker compose -f "$CERID_ROOT/stacks/librechat/docker-compose.yml" --env-file "$ENV_FILE" up -d
 
 echo ""

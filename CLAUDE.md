@@ -9,11 +9,11 @@
 
 Cerid AI is a self-hosted, privacy-first Personal AI Knowledge Companion. It unifies multi-domain knowledge bases (code, finance, projects, artifacts) into a context-aware LLM interface with RAG-powered retrieval and intelligent agents. All data stays local; only LLM API calls go external.
 
-**Status:** Phase 16A-F complete. 811+ Python tests, 111+ frontend tests. 8 agents, 17 MCP tools, hybrid BM25s+vector search, streaming verification, React GUI with full feature set. CI/CD 6-job pipeline. See [`docs/COMPLETED_PHASES.md`](docs/COMPLETED_PHASES.md) for history.
+**Status:** Phase 16A–H complete. 811+ Python tests, 130+ frontend tests. 8 agents, 17 MCP tools, hybrid BM25s+vector search, streaming verification, React GUI with full feature set. CI/CD 6-job pipeline. See [`docs/COMPLETED_PHASES.md`](docs/COMPLETED_PHASES.md) for history.
 
-**Next:** Phase 16G-H, then 17-18. See [`docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md`](docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md) and [`tasks/todo.md`](tasks/todo.md).
+**Next:** Phase 17-18. See [`docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md`](docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md) and [`tasks/todo.md`](tasks/todo.md).
 
-**Open issues:** [`docs/ISSUES.md`](docs/ISSUES.md) (3 open: E1 artifact preview, F6 compose separation, D2 conversation fork).
+**Open issues:** [`docs/ISSUES.md`](docs/ISSUES.md) (1 open: D2 conversation fork).
 
 ## Architecture
 
@@ -75,11 +75,12 @@ React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly
 │   ├── scripts/                 # watch_ingest.py, watch_obsidian.py, ingest_cli.py
 │   └── requirements.txt/.lock   # Python deps (ranges / pinned with hashes)
 ├── src/web/                     # React GUI (React 19, Vite 7, Tailwind v4, shadcn/ui)
+│   ├── docker-compose.yml       # cerid-web service (separate from MCP)
 │   ├── src/lib/                 # types.ts, api.ts, model-router.ts
 │   ├── src/hooks/               # use-chat, use-kb-context, use-settings, use-verification-stream, etc.
 │   ├── src/contexts/            # SettingsContext, KBInjectionContext, ConversationsContext
 │   ├── src/components/          # layout/, chat/, kb/, monitoring/, audit/, memories/, settings/, ui/
-│   └── src/__tests__/           # 111+ vitest tests
+│   └── src/__tests__/           # 130+ vitest tests
 ├── src/gui/                     # Streamlit dashboard (legacy)
 ├── stacks/                      # infrastructure/ (Neo4j, ChromaDB, Redis), bifrost/, librechat/
 ├── artifacts/ → ~/Dropbox/AI-Artifacts (symlink)
@@ -102,11 +103,11 @@ Single `.env` file at repo root, encrypted with `age`. Key at `~/.config/cerid/a
 ### Starting the Stack
 
 ```bash
-./scripts/start-cerid.sh            # start all 4 service groups
+./scripts/start-cerid.sh            # start all 5 service groups
 ./scripts/start-cerid.sh --build    # rebuild images after code changes
 ```
 
-Startup order: `[1/4]` Infrastructure (Neo4j, ChromaDB, Redis) → `[2/4]` Bifrost → `[3/4]` MCP + Dashboard + React GUI → `[4/4]` LibreChat.
+Startup order: `[1/5]` Infrastructure (Neo4j, ChromaDB, Redis) → `[2/5]` Bifrost → `[3/5]` MCP + Dashboard → `[4/5]` React GUI → `[5/5]` LibreChat.
 
 ### Environment Validation
 

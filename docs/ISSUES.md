@@ -2,7 +2,7 @@
 
 > **Created:** 2026-02-25
 > **Last updated:** 2026-03-02
-> **Status:** Phase 16A–G (E1) complete. 49 resolved, 2 open (F6, D2). 811+ Python tests, 130 frontend tests.
+> **Status:** Phase 16A–H complete. 54 resolved, 1 open (D2). 811+ Python tests, 130 frontend tests.
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](plans/DEVELOPMENT_PLAN_PHASE16-18.md)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](COMPLETED_PHASES.md)
 > **Purpose:** Track known bugs, feature gaps, structural issues, and architecture evaluations for upcoming phases.
@@ -226,7 +226,7 @@ Frontend: 94 vitest tests across 7 test files. ~40 frontend components remain un
 ### F6. Secondary Structural Issues (Informational)
 
 **Severity:** Low
-**Status:** Partially resolved — 4 of 6 addressed in Phase 10C-S2
+**Status:** ✅ Resolved (Phase 16G-H, 2026-03-02)
 
 Resolved items:
 - ✅ **`config.py` split:** Split into `config/taxonomy.py`, `config/settings.py`, `config/features.py` with `config/__init__.py` star re-exports (33 importers unchanged).
@@ -234,9 +234,9 @@ Resolved items:
 - ✅ **`audit.log_conversation_metrics()`:** Moved to `utils/cache.py`. Import in `routers/ingestion.py` updated to canonical location.
 - ✅ **`utils/parsers.py`:** Split into `parsers/` package (registry, pdf, office, structured, email, ebook, _utils). Phase 10C-S3, 2026-02-27.
 
-Open items:
+Remaining (non-blocking):
 - **`use-chat.ts` post-send effects:** Not urgent at 83 lines total.
-- **`cerid-web` in `src/mcp/docker-compose.yml`:** Conceptual coupling. Consider moving to its own compose file.
+- ✅ **`cerid-web` compose separation:** Moved to `src/web/docker-compose.yml`. Startup script updated to 5-step (Phase 16G-H, 2026-03-02).
 
 ---
 
@@ -480,9 +480,8 @@ Added bundle size check step in frontend CI job — fails if any JS chunk exceed
 
 ## Priority Order
 
-### Open Items (2)
-1. **F6** — cerid-web compose separation — Phase 16G
-2. **D2** — Conversation fork/branch UI (exploratory) — Phase 16G
+### Open Items (1)
+1. **D2** — Conversation fork/branch UI (exploratory) — deferred to Phase 17+
 
 ### Forward Plan
 See [Development Plan Phase 16-18](plans/DEVELOPMENT_PLAN_PHASE16-18.md) for full details:
@@ -490,5 +489,5 @@ See [Development Plan Phase 16-18](plans/DEVELOPMENT_PLAN_PHASE16-18.md) for ful
 - **Phase 17A-B** — Smart tags (taxonomy-constrained vocabulary) + artifact summary quality
 - **Phase 18A-D** — Knowledge sync infrastructure, sync GUI, drag-drop ingestion, storage mode options
 
-### Resolved (53 items)
-All items from sections A-H above marked with ✅ are resolved. Phases 10A-16F addressed all critical, high, and medium severity findings from the holistic audit. See [COMPLETED_PHASES.md](COMPLETED_PHASES.md) for full history.
+### Resolved (54 items)
+All items from sections A-H above marked with ✅ are resolved. Phases 10A-16H addressed all critical, high, and medium severity findings from the holistic audit. See [COMPLETED_PHASES.md](COMPLETED_PHASES.md) for full history.

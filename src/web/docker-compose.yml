@@ -1,0 +1,21 @@
+services:
+  cerid-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cerid-web
+    ports:
+      - "3000:80"
+    networks:
+      - llm-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO/dev/null", "http://127.0.0.1:80/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+networks:
+  llm-network:
+    external: true
