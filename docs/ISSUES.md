@@ -219,9 +219,9 @@ Issues identified by the modularity assessment (2026-02-26). These are mechanica
 - All 5 agents: query_agent (27), triage (23), rectify (19), audit (27), maintenance (24)
 - Sync package (41 tests), parsers package (108 tests), MCP tools (24 tests), Neo4j data layer (63 tests)
 
-Frontend: 94 vitest tests across 7 test files. ~40 frontend components remain untested (nice-to-have, not gating any release — tracked in Phase 13).
+Frontend: 130+ vitest tests across 9+ test files. ~40 frontend components remain untested (nice-to-have, not gating any release — tracked in Phase 13).
 
-**Current coverage:** 564 pytest functions (27 test files), 94 vitest tests (7 test files).
+**Current coverage:** 564 pytest functions (27 test files), 130+ vitest tests (9+ test files).
 
 ### F6. Secondary Structural Issues (Informational)
 

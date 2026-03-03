@@ -9,7 +9,7 @@
 
 Cerid AI is a self-hosted, privacy-first Personal AI Knowledge Companion. It unifies multi-domain knowledge bases (code, finance, projects, artifacts) into a context-aware LLM interface with RAG-powered retrieval and intelligent agents. All data stays local; only LLM API calls go external.
 
-**Status:** Phase 20A-B complete + codebase audit. 808+ Python tests, 130+ frontend tests. 8 agents, 17 MCP tools, hybrid BM25s+vector search with semantic chunking, circuit breakers on all Bifrost calls, distributed request tracing, adaptive quality feedback, per-domain tag vocabulary with typeahead UI, improved synopsis generation, streaming verification, React GUI with iPad/tablet responsive touch UX, LAN access with auto-IP detection, optional Caddy HTTPS gateway and Cloudflare Tunnel for demos. CI/CD 6-job pipeline. See [`docs/COMPLETED_PHASES.md`](docs/COMPLETED_PHASES.md) for history.
+**Status:** Phase 20A-B complete + codebase audit. 808+ Python tests, 130+ frontend tests. 8 agents, 18 MCP tools, hybrid BM25s+vector search with semantic chunking, circuit breakers on all Bifrost calls, distributed request tracing, adaptive quality feedback, per-domain tag vocabulary with typeahead UI, improved synopsis generation, streaming verification, React GUI with iPad/tablet responsive touch UX, LAN access with auto-IP detection, optional Caddy HTTPS gateway and Cloudflare Tunnel for demos. CI/CD 6-job pipeline. See [`docs/COMPLETED_PHASES.md`](docs/COMPLETED_PHASES.md) for history.
 
 **Next:** Phase 21 (Knowledge Sync). See [`docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md`](docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md) and [`tasks/todo.md`](tasks/todo.md).
 
@@ -69,7 +69,7 @@ React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly
 │   ├── agents/                  # query, curator, triage, rectify, audit, maintenance, hallucination, memory
 │   ├── routers/                 # FastAPI routers (health, query, ingestion, agents, taxonomy, etc.)
 │   ├── middleware/              # auth.py, rate_limit.py, request_id.py
-│   ├── tools.py                 # MCP tool registry + dispatcher (17 tools)
+│   ├── tools.py                 # MCP tool registry + dispatcher (18 tools)
 │   ├── plugins/                 # Plugin system (OCR scaffold)
 │   ├── utils/                   # bm25, cache, query_cache, embeddings, chunker, dedup, encryption, etc.
 │   ├── scripts/                 # watch_ingest.py, watch_obsidian.py, ingest_cli.py
@@ -160,7 +160,7 @@ curl http://localhost:8888/artifacts
 2. **Run `./scripts/validate-env.sh`** to check all 14 environment validations
 3. **If containers are down:** `./scripts/start-cerid.sh` (or `--build` after a `git pull`)
 4. **Check `.claude/settings.json`** — shared hooks config is committed; per-machine permissions go in `.claude/settings.local.json` (gitignored)
-5. **MCP server is at `http://localhost:8888/mcp/sse`** — configured in `.mcp.json` (committed), exposes 17 `pkb_*` tools
+5. **MCP server is at `http://localhost:8888/mcp/sse`** — configured in `.mcp.json` (committed), exposes 18 `pkb_*` tools
 6. **React GUI dev server:** configured in `.claude/launch.json` (committed) — Vite on port 5173
 
 **Key files for Claude Code:**

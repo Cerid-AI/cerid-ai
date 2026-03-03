@@ -48,7 +48,7 @@
 - `GET /mcp/sse` — SSE stream (MCP protocol, JSON-RPC 2.0)
 - `POST /mcp/messages?sessionId=X` — JSON-RPC handler
 
-### MCP Tools (15 total)
+### MCP Tools (18 total)
 
 - `pkb_query` — Single-domain query
 - `pkb_ingest` — Ingest raw text
@@ -62,6 +62,9 @@
 - `pkb_rectify` — Knowledge base health checks and auto-fix
 - `pkb_audit` — Audit reports (activity, ingestion, costs, queries, conversations)
 - `pkb_maintain` — Maintenance routines (health, stale, collections, orphans)
+- `pkb_curate` — Score artifact quality across the knowledge base (Phase 14)
+- `pkb_digest` — Summary of recent KB activity, connections, and health status
+- `pkb_scheduler_status` — Get status of scheduled maintenance jobs
 - `pkb_check_hallucinations` — Verify LLM claims against KB (Phase 7A)
 - `pkb_memory_extract` — Extract memories from conversations (Phase 7C)
 - `pkb_memory_archive` — Archive old conversation memories (Phase 7C)
@@ -263,7 +266,7 @@ Admin and monitoring UI at `http://localhost:8501` (container: `ai-companion-das
 
 ## Adding a New Domain
 
-1. Edit `src/mcp/config.py` → add to `DOMAINS` list
+1. Edit `src/mcp/config/settings.py` → add to `DOMAINS` list
 2. Create folder: `mkdir ~/cerid-archive/<new_domain>`
 3. Rebuild: `cd src/mcp && docker compose up -d --build`
 
@@ -286,7 +289,7 @@ curl -X POST http://localhost:8888/recategorize \
 ## Configuration
 
 - `.env` (repo root) — All secrets. Encrypted as `.env.age`. Never committed in plaintext.
-- `src/mcp/config.py` — Domains, extensions, categorization tiers, DB URLs
+- `src/mcp/config/settings.py` — Domains, extensions, categorization tiers, DB URLs
 - `stacks/bifrost/config.yaml` — Intent classification, model routing, budget
 - `stacks/librechat/librechat.yaml` — MCP servers, endpoints, model list
 
