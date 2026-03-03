@@ -5,12 +5,13 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from collections import Counter, defaultdict
 from datetime import timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from utils.cache import REDIS_CONV_METRICS_PREFIX, get_log
+from utils.cache import REDIS_CONV_METRICS_PREFIX, REDIS_VERIFICATION_METRICS_KEY, get_log
 from utils.time import utcnow, utcnow_iso
 
 logger = logging.getLogger("ai-companion.audit")
@@ -41,7 +42,7 @@ def get_activity_summary(
     redis_client,
     hours: int = 24,
     limit: int = 500,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Generate an activity summary from the Redis audit log."""
     entries = get_log(redis_client, limit=limit)
     cutoff = (utcnow().replace(tzinfo=None) - timedelta(hours=hours)).isoformat()
@@ -52,7 +53,7 @@ def get_activity_summary(
     domain_counts = Counter(e.get("domain", "unknown") for e in recent)
 
     hourly = defaultdict(int)
-    hourly_by_type: Dict[str, Counter] = defaultdict(Counter)
+    hourly_by_type: dict[str, Counter] = defaultdict(Counter)
     for e in recent:
         ts = e.get("timestamp", "")
         if ts:
@@ -81,7 +82,7 @@ def get_activity_summary(
 def get_ingestion_stats(
     redis_client,
     limit: int = 1000,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Compute detailed ingestion statistics from the audit log."""
     entries = get_log(redis_client, limit=limit)
 
@@ -118,7 +119,7 @@ def estimate_costs(
     redis_client,
     hours: int = 720,  # 30 days default
     limit: int = 5000,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Estimate AI token usage and cost from the audit trail."""
     entries = get_log(redis_client, limit=limit)
     cutoff = (utcnow().replace(tzinfo=None) - timedelta(hours=hours)).isoformat()
@@ -172,7 +173,7 @@ def estimate_costs(
 def get_query_patterns(
     redis_client,
     limit: int = 500,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Analyze query patterns from the audit log."""
     entries = get_log(redis_client, limit=limit)
     queries = [e for e in entries if e.get("event") in ("query", "agent_query")]
@@ -215,10 +216,8 @@ MODEL_COST_RATES = {
 def get_conversation_analytics(
     redis_client,
     limit: int = 100,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Aggregate conversation metrics across all tracked conversations."""
-    import json as _json
-
     try:
         keys = []
         for key in redis_client.scan_iter(
@@ -231,7 +230,7 @@ def get_conversation_analytics(
         logger.warning(f"Failed to scan conversation metrics: {e}")
         return {"total_conversations": 0, "total_turns": 0, "models": {}, "total_cost_usd": 0.0}
 
-    model_stats: Dict[str, Dict[str, Any]] = defaultdict(lambda: {
+    model_stats: dict[str, dict[str, Any]] = defaultdict(lambda: {
         "turns": 0, "input_tokens": 0, "output_tokens": 0,
         "total_latency_ms": 0, "cost_usd": 0.0,
     })
@@ -241,7 +240,7 @@ def get_conversation_analytics(
         try:
             entries = redis_client.lrange(key, 0, -1)
             for raw in entries:
-                entry = _json.loads(raw)
+                entry = json.loads(raw)
                 model = entry.get("model", "unknown")
                 model_key = model.replace("openrouter/", "")
                 inp = entry.get("input_tokens", 0)
@@ -282,16 +281,11 @@ def get_conversation_analytics(
 # Verification analytics
 # ---------------------------------------------------------------------------
 
-from utils.cache import REDIS_VERIFICATION_METRICS_KEY  # noqa: E402
-
-
 def get_verification_analytics(
     redis_client,
     hours: int = 24,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Aggregate verification metrics for the accuracy dashboard."""
-    import json as _json
-
     cutoff = (utcnow().replace(tzinfo=None) - timedelta(hours=hours)).isoformat()
 
     try:
@@ -303,7 +297,7 @@ def get_verification_analytics(
     entries = []
     for raw in raw_entries:
         try:
-            entry = _json.loads(raw)
+            entry = json.loads(raw)
             if entry.get("timestamp", "") >= cutoff:
                 entries.append(entry)
         except Exception:
@@ -317,7 +311,7 @@ def get_verification_analytics(
             "hourly_accuracy": {},
         }
 
-    model_stats: Dict[str, Dict[str, Any]] = defaultdict(lambda: {
+    model_stats: dict[str, dict[str, Any]] = defaultdict(lambda: {
         "checks": 0, "verified": 0, "unverified": 0, "uncertain": 0, "total_claims": 0,
     })
     total_accuracy_sum = 0.0
@@ -343,7 +337,7 @@ def get_verification_analytics(
             "uncertain": stats["uncertain"],
         }
 
-    hourly_buckets: Dict[str, Dict[str, int]] = defaultdict(lambda: {"verified": 0, "total": 0})
+    hourly_buckets: dict[str, dict[str, int]] = defaultdict(lambda: {"verified": 0, "total": 0})
     for entry in entries:
         ts = entry.get("timestamp", "")
         if ts:
@@ -370,9 +364,9 @@ def get_verification_analytics(
 
 async def audit(
     redis_client,
-    reports: Optional[List[str]] = None,
+    reports: list[str] | None = None,
     hours: int = 24,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Run audit reports on knowledge base operations."""
     all_reports = {"activity", "ingestion", "costs", "queries", "conversations", "verification"}
     if reports is None:

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-Temporal awareness utilities for time-based search (Phase 4B.4).
+Temporal awareness utilities for time-based search.
 
 Provides:
 - Temporal intent parsing (detect "last week", "recent", etc. in queries)
@@ -14,7 +14,6 @@ from __future__ import annotations
 import math
 import re
 from datetime import datetime, timedelta
-from typing import Optional
 
 import config
 from utils.time import utcnow
@@ -34,7 +33,7 @@ _TEMPORAL_PATTERNS = [
 ]
 
 
-def parse_temporal_intent(query: str) -> Optional[int]:
+def parse_temporal_intent(query: str) -> int | None:
     """
     Detect temporal phrases in a query.
 

@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 import httpx
 
@@ -28,10 +28,10 @@ logger = logging.getLogger("ai-companion.sync")
 
 def compare_status(
     driver,
-    chroma_url: Optional[str] = None,
+    chroma_url: str | None = None,
     redis_client=None,
-    sync_dir: Optional[str] = None,
-) -> Dict[str, Any]:
+    sync_dir: str | None = None,
+) -> dict[str, Any]:
     """
     Compare local database counts against the counts recorded in the sync manifest.
     """
@@ -39,7 +39,7 @@ def compare_status(
     sync_dir = sync_dir or _default_sync_dir()
 
     # --- Local counts ---
-    local: Dict[str, Any] = {
+    local: dict[str, Any] = {
         "neo4j_artifacts": 0,
         "neo4j_domains": 0,
         "neo4j_relationships": 0,
@@ -90,7 +90,7 @@ def compare_status(
             logger.warning("Redis local count failed: %s", exc)
 
     # --- Sync counts (from manifest + JSONL line counts) ---
-    sync: Dict[str, Any] = {
+    sync: dict[str, Any] = {
         "neo4j_artifacts": 0,
         "neo4j_domains": 0,
         "neo4j_relationships": 0,
@@ -121,7 +121,7 @@ def compare_status(
         logger.warning("Manifest parse error: %s", exc)
 
     # --- Diff ---
-    diff: Dict[str, Any] = {}
+    diff: dict[str, Any] = {}
     for key in ("neo4j_artifacts", "neo4j_domains", "neo4j_relationships", "redis_entries"):
         diff[key] = local[key] - sync[key]
 

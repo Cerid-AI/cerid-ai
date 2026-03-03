@@ -63,10 +63,6 @@ export function scoreQueryComplexity(
 // Cost estimation
 // ---------------------------------------------------------------------------
 
-function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4)
-}
-
 export function estimateTurnCost(
   model: ModelOption,
   inputChars: number,
@@ -126,8 +122,8 @@ export function recommendModel(
     if (!candidate) continue
 
     // Skip if context would exceed model's window
-    const estimatedInputTokens = estimateTokens(
-      conversationMessages.map((m) => m.content).join("") + query,
+    const estimatedInputTokens = Math.ceil(
+      (conversationMessages.map((m) => m.content).join("") + query).length / 4,
     )
     if (estimatedInputTokens > candidate.contextWindow * 0.8) continue
 
@@ -173,7 +169,7 @@ export function calculateSwitchCost(
   conversationMessages: ChatMessage[],
 ): SwitchCostEstimate {
   const historyText = conversationMessages.map((m) => m.content).join("")
-  const historyTokens = estimateTokens(historyText)
+  const historyTokens = Math.ceil(historyText.length / 4)
 
   // Cost to replay full history on target model + one response
   const replayCost =

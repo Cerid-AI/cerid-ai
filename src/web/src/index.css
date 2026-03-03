@@ -122,3 +122,42 @@
     @apply bg-background text-foreground;
     }
 }
+
+/* --- Touch device overrides (iPad, phones) --- */
+
+/* Show hover-hidden controls on touch devices that lack a fine pointer */
+@media (hover: none) {
+  .group-hover\:opacity-100 {
+    opacity: 1 !important;
+  }
+}
+
+/* Enforce Apple HIG 44px minimum touch targets on coarse pointers */
+@media (pointer: coarse) {
+  .touch-target {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Expand small icon buttons to a tappable area via padding */
+  [data-slot="button"][data-size="icon-xs"],
+  [data-slot="button"][data-size="icon-sm"] {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Prevent iOS Safari zoom on focused inputs (requires >=16px font) */
+  input,
+  textarea,
+  select {
+    font-size: max(16px, 1em);
+  }
+}
+
+/* Safe area insets for devices with rounded corners / notches */
+@supports (padding: env(safe-area-inset-top)) {
+  .safe-area-top { padding-top: env(safe-area-inset-top); }
+  .safe-area-bottom { padding-bottom: env(safe-area-inset-bottom); }
+  .safe-area-left { padding-left: env(safe-area-inset-left); }
+  .safe-area-right { padding-right: env(safe-area-inset-right); }
+}

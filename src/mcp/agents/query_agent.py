@@ -8,15 +8,17 @@ import json
 import logging
 import re
 from collections import defaultdict
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import chromadb
 import httpx
 
 import config
-from config import BIFROST_URL, CHROMA_URL, DOMAINS
+from config import BIFROST_URL, DOMAINS
 from deps import get_chroma
+from middleware.request_id import tracing_headers
 from utils.cache import log_event
+from utils.circuit_breaker import CircuitOpenError, get_breaker
 from utils.llm_parsing import parse_llm_json
 
 logger = logging.getLogger("ai-companion.query_agent")
@@ -31,8 +33,8 @@ def _format_chroma_result(
     relevance: float,
     chunk_id: str,
     domain: str,
-    metadata: Dict[str, Any],
-) -> Dict[str, Any]:
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
     """Build a standardized result dict from a ChromaDB chunk."""
     return {
         "content": content,
@@ -54,10 +56,10 @@ def _format_chroma_result(
 # Cross-domain affinity
 # ---------------------------------------------------------------------------
 
-def _get_adjacent_domains(requested: List[str]) -> Dict[str, float]:
+def _get_adjacent_domains(requested: list[str]) -> dict[str, float]:
     """Return non-requested domains with their max affinity score."""
     requested_set = set(requested)
-    adjacent: Dict[str, float] = {}
+    adjacent: dict[str, float] = {}
     for req in requested:
         explicit = config.DOMAIN_AFFINITY.get(req, {})
         for other in DOMAINS:
@@ -96,7 +98,7 @@ _WORD_RE = re.compile(r"[a-zA-Z0-9_]+(?:[-'][a-zA-Z0-9_]+)*")
 
 def _enrich_query(
     query: str,
-    conversation_messages: List[Dict[str, str]],
+    conversation_messages: list[dict[str, str]],
     max_context_messages: int = 5,
     max_terms: int = 10,
 ) -> str:
@@ -112,7 +114,7 @@ def _enrich_query(
         return query
 
     # Collect text from recent user messages only (skip system/assistant)
-    user_texts: List[str] = []
+    user_texts: list[str] = []
     for msg in conversation_messages[-max_context_messages:]:
         if msg.get("role") == "user":
             user_texts.append(msg.get("content", ""))
@@ -144,7 +146,7 @@ def _enrich_query(
 
     # Extract terms per message, respecting per-message slot allocation
     query_terms = {w.lower() for w in _WORD_RE.findall(query)}
-    context_terms: List[str] = []
+    context_terms: list[str] = []
     seen: set = set()
 
     for idx, text in enumerate(reversed(user_texts)):  # Most recent first
@@ -177,10 +179,10 @@ def _enrich_query(
 
 async def multi_domain_query(
     query: str,
-    domains: Optional[List[str]] = None,
+    domains: list[str] | None = None,
     top_k: int = 10,
-    chroma_client: Optional[chromadb.HttpClient] = None
-) -> List[Dict[str, Any]]:
+    chroma_client: chromadb.HttpClient | None = None
+) -> list[dict[str, Any]]:
     """Query multiple ChromaDB collections in parallel and aggregate results."""
     if domains is None:
         domains = DOMAINS
@@ -192,7 +194,7 @@ async def multi_domain_query(
     if chroma_client is None:
         chroma_client = get_chroma()
 
-    async def query_domain(domain: str) -> List[Dict[str, Any]]:
+    async def query_domain(domain: str) -> list[dict[str, Any]]:
         """Query a single domain collection (vector + BM25 hybrid)."""
         try:
             collection = chroma_client.get_collection(name=config.collection_name(domain))
@@ -275,7 +277,7 @@ async def multi_domain_query(
 # Deduplication
 # ---------------------------------------------------------------------------
 
-def deduplicate_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def deduplicate_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Remove duplicate chunks, keeping highest relevance per (artifact_id, chunk_index)."""
     groups = defaultdict(list)
     for result in results:
@@ -295,11 +297,11 @@ def deduplicate_results(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 async def graph_expand_results(
-    results: List[Dict[str, Any]],
+    results: list[dict[str, Any]],
     query: str,
-    chroma_client: Optional[chromadb.HttpClient] = None,
-    neo4j_driver: Optional[Any] = None,
-) -> List[Dict[str, Any]]:
+    chroma_client: chromadb.HttpClient | None = None,
+    neo4j_driver: Any | None = None,
+) -> list[dict[str, Any]]:
     """Expand results by traversing the knowledge graph for related artifacts."""
     if neo4j_driver is None or not results:
         return results
@@ -325,13 +327,10 @@ async def graph_expand_results(
         return results
 
     if chroma_client is None:
-        chroma_client = chromadb.HttpClient(
-            host=CHROMA_URL.replace("http://", "").split(":")[0],
-            port=int(CHROMA_URL.split(":")[-1]),
-        )
+        chroma_client = get_chroma()
 
     existing_ids = {r.get("chunk_id") for r in results}
-    graph_results: List[Dict[str, Any]] = []
+    graph_results: list[dict[str, Any]] = []
 
     for rel_artifact in related:
         try:
@@ -398,10 +397,10 @@ async def graph_expand_results(
 # ---------------------------------------------------------------------------
 
 async def rerank_results(
-    results: List[Dict[str, Any]],
+    results: list[dict[str, Any]],
     query: str,
     use_llm: bool = True
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Rerank results via Bifrost LLM. Falls back to embedding sort on failure."""
     if not use_llm or len(results) == 0:
         return sorted(results, key=lambda x: x["relevance"], reverse=True)
@@ -427,8 +426,10 @@ async def rerank_results(
         + f"\n\nRespond with ONLY a JSON array like [2, 0, 5, 1, ...] containing all indices 0-{len(candidates)-1}."
     )
 
-    try:
-        async with httpx.AsyncClient(timeout=config.BIFROST_TIMEOUT) as client:
+    breaker = get_breaker("bifrost-rerank")
+
+    async def _bifrost_rerank() -> dict:
+        async with httpx.AsyncClient(timeout=config.BIFROST_TIMEOUT, headers=tracing_headers()) as client:
             resp = await client.post(
                 f"{BIFROST_URL}/chat/completions",
                 json={
@@ -439,7 +440,10 @@ async def rerank_results(
                 },
             )
             resp.raise_for_status()
-            data = resp.json()
+            return resp.json()
+
+    try:
+        data = await breaker.call(_bifrost_rerank)
 
         content = data["choices"][0]["message"]["content"].strip()
         ranking = parse_llm_json(content)
@@ -471,19 +475,22 @@ async def rerank_results(
 
         return reranked + remainder
 
+    except CircuitOpenError:
+        logger.warning("Bifrost rerank circuit open, falling back to embedding sort")
+        return sorted(results, key=lambda x: x["relevance"], reverse=True)
     except Exception as e:
         logger.warning(f"LLM reranking failed, falling back to embedding sort: {e}")
         return sorted(results, key=lambda x: x["relevance"], reverse=True)
 
 
 # ---------------------------------------------------------------------------
-# Metadata boost (Phase 14C)
+# Metadata boost
 # ---------------------------------------------------------------------------
 
 def apply_metadata_boost(
-    results: List[Dict[str, Any]],
+    results: list[dict[str, Any]],
     query: str,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Boost results whose tags or sub_category match query terms.
 
     Small additive boost for metadata alignment, capped at
@@ -539,13 +546,13 @@ def apply_metadata_boost(
 
 
 # ---------------------------------------------------------------------------
-# Context alignment boost (Phase 15F)
+# Context alignment boost
 # ---------------------------------------------------------------------------
 
 def apply_context_alignment_boost(
-    results: List[Dict[str, Any]],
-    conversation_messages: Optional[List[Dict[str, str]]] = None,
-) -> List[Dict[str, Any]]:
+    results: list[dict[str, Any]],
+    conversation_messages: list[dict[str, str]] | None = None,
+) -> list[dict[str, Any]]:
     """Boost results whose content aligns with recent conversation context.
 
     Extracts key terms from conversation messages and computes what proportion
@@ -583,13 +590,13 @@ def apply_context_alignment_boost(
 
 
 # ---------------------------------------------------------------------------
-# Quality boost (Phase 14B)
+# Quality boost
 # ---------------------------------------------------------------------------
 
 def apply_quality_boost(
-    results: List[Dict[str, Any]],
-    neo4j_driver: Optional[Any] = None,
-) -> List[Dict[str, Any]]:
+    results: list[dict[str, Any]],
+    neo4j_driver: Any | None = None,
+) -> list[dict[str, Any]]:
     """Apply quality score multiplier to relevance scores.
 
     Formula: adjusted = relevance * (QUALITY_BOOST_BASE + QUALITY_BOOST_FACTOR * quality_score)
@@ -625,10 +632,10 @@ def apply_quality_boost(
 # ---------------------------------------------------------------------------
 
 def assemble_context(
-    results: List[Dict[str, Any]],
+    results: list[dict[str, Any]],
     max_chars: int = 14000,
     max_chunks_per_artifact: int = 0,
-) -> tuple[str, List[Dict[str, Any]], int]:
+) -> tuple[str, list[dict[str, Any]], int]:
     """Build context window from top results, respecting token budget.
 
     Limits chunks per artifact to promote source diversity.  A value of 0
@@ -637,10 +644,10 @@ def assemble_context(
     if max_chunks_per_artifact <= 0:
         max_chunks_per_artifact = config.CONTEXT_MAX_CHUNKS_PER_ARTIFACT
 
-    context_parts: List[str] = []
-    included_sources: List[Dict[str, Any]] = []
+    context_parts: list[str] = []
+    included_sources: list[dict[str, Any]] = []
     char_count = 0
-    artifact_counts: Dict[str, int] = defaultdict(int)
+    artifact_counts: dict[str, int] = defaultdict(int)
 
     for result in results:
         artifact_id = result["artifact_id"]
@@ -677,16 +684,15 @@ def assemble_context(
 
 async def agent_query(
     query: str,
-    domains: Optional[List[str]] = None,
+    domains: list[str] | None = None,
     top_k: int = 10,
     use_reranking: bool = True,
-    conversation_messages: Optional[List[Dict[str, str]]] = None,
-    chroma_client: Optional[chromadb.HttpClient] = None,
-    redis_client: Optional[Any] = None,
-    neo4j_driver: Optional[Any] = None,
-) -> Dict[str, Any]:
+    conversation_messages: list[dict[str, str]] | None = None,
+    chroma_client: chromadb.HttpClient | None = None,
+    redis_client: Any | None = None,
+    neo4j_driver: Any | None = None,
+) -> dict[str, Any]:
     """Execute multi-domain query with reranking, graph expansion, and context assembly."""
-    # Enrich query with conversation context if provided
     search_query = query
     if conversation_messages:
         search_query = _enrich_query(
@@ -803,7 +809,6 @@ async def agent_query(
         except Exception as e:
             logger.warning(f"Failed to log query: {e}")
 
-    # Return structured response
     return {
         "context": context,
         "sources": sources,

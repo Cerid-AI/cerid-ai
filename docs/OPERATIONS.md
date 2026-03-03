@@ -125,6 +125,93 @@ Branch protection is configured via **GitHub UI** (not checked into the reposito
 
 ---
 
+## LAN Access (iPad / Other Devices)
+
+Cerid AI can be accessed from any device on your local network (iPad, phone, second computer).
+
+### Automatic Setup
+
+The startup script auto-detects your LAN IP:
+
+```bash
+./scripts/start-cerid.sh
+# Output: [net] CERID_HOST=192.168.1.42
+# ...
+# === LAN Access (iPad / other devices) ===
+# React GUI: http://192.168.1.42:3000
+# MCP API:   http://192.168.1.42:8888
+```
+
+### Manual Override
+
+Set `CERID_HOST` in `.env` or export it before starting:
+
+```bash
+export CERID_HOST=192.168.1.42
+./scripts/start-cerid.sh
+```
+
+### How It Works
+
+1. `start-cerid.sh` detects the LAN IP via `ipconfig getifaddr en0` (macOS) or `ip addr` (Linux)
+2. Exports `VITE_MCP_URL=http://<CERID_HOST>:8888`
+3. The web container's `docker-entrypoint.sh` injects this URL into `/env-config.js` at runtime
+4. The React GUI picks up `window.__ENV__.VITE_MCP_URL` for API calls
+5. Bifrost chat API is proxied through nginx (`/api/bifrost/`), so no additional config needed
+
+### CORS Configuration
+
+MCP server defaults to `CORS_ORIGINS=*` (allows all origins). To restrict:
+
+```bash
+# In .env
+CORS_ORIGINS=http://localhost:3000,http://192.168.1.42:3000
+```
+
+### Troubleshooting
+
+- **iPad can't connect:** Ensure both devices are on the same WiFi network. Check macOS firewall allows ports 3000 and 8888.
+- **MCP API errors on iPad:** Verify `VITE_MCP_URL` is set to the LAN IP (not `localhost`). Run `docker logs cerid-web` to check `/env-config.js` contents.
+- **After IP change:** Re-run `./scripts/start-cerid.sh` — it re-detects the IP and regenerates the config.
+
+---
+
+## Caddy Reverse Proxy (Local HTTPS)
+
+For HTTPS access on your local network (required by some iOS features):
+
+```bash
+# Set in .env
+CERID_GATEWAY=true
+
+# Start stack (Caddy starts as step [6/6])
+./scripts/start-cerid.sh
+```
+
+Access via `https://<hostname>.local` (Bonjour/mDNS). Caddy uses `tls internal` for automatic self-signed certificates.
+
+**Files:** `stacks/gateway/docker-compose.yml`, `stacks/gateway/Caddyfile`
+
+---
+
+## Cloudflare Tunnel (Public Demos)
+
+For sharing Cerid AI publicly without port forwarding:
+
+```bash
+# Set in .env
+CLOUDFLARE_TUNNEL_TOKEN=<your-tunnel-token>
+
+# Start stack (tunnel starts as step [7/7])
+./scripts/start-cerid.sh
+```
+
+Access via your Cloudflare tunnel hostname. Configure email-based OTP access policies in the Cloudflare Zero Trust dashboard for security.
+
+**Files:** `stacks/tunnel/docker-compose.yml`
+
+---
+
 ## CI Pipeline Reference
 
 **Trigger:** Push to `main` + pull requests

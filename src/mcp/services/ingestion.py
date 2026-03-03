@@ -3,9 +3,9 @@
 
 """Core ingestion service functions.
 
-Extracted from routers/ingestion.py (Phase 10C, F1) to eliminate
-the circular import between agents/memory.py → routers/ingestion.py.
-Routers and agents both import from this service layer.
+Extracted from routers/ingestion.py to eliminate the circular import
+between agents/memory.py → routers/ingestion.py. Routers and agents
+both import from this service layer.
 """
 from __future__ import annotations
 
@@ -15,12 +15,12 @@ import json
 import logging
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 import config
 from deps import get_chroma, get_neo4j, get_redis
 from utils import cache, graph
-from utils.chunker import chunk_text
+from utils.chunker import chunk_text, make_context_header
 from utils.metadata import ai_categorize, extract_metadata
 from utils.parsers import parse_file
 from utils.time import utcnow_iso
@@ -47,7 +47,7 @@ def _content_hash(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
-def _check_duplicate(content_hash: str, domain: str) -> Optional[Dict]:
+def _check_duplicate(content_hash: str, domain: str) -> dict | None:
     try:
         driver = get_neo4j()
         with driver.session() as session:
@@ -69,8 +69,8 @@ def _check_duplicate(content_hash: str, domain: str) -> Optional[Dict]:
 
 
 def _reingest_artifact(
-    prev: Dict, content: str, domain: str, metadata: Optional[Dict], content_hash: str
-) -> Dict:
+    prev: dict, content: str, domain: str, metadata: dict | None, content_hash: str
+) -> dict:
     """Update an existing artifact with new content. Preserves relationships."""
     chroma = get_chroma()
     coll_name = config.collection_name(domain)
@@ -85,8 +85,14 @@ def _reingest_artifact(
         except Exception as e:
             logger.warning(f"Failed to delete old chunks during re-ingest: {e}")
 
-    # Create new chunks
-    chunks = chunk_text(content, max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP)
+    # Create new chunks with contextual header
+    filename = metadata.get("filename", "") if metadata else ""
+    sub_cat = metadata.get("sub_category", "") if metadata else ""
+    ctx_header = make_context_header(filename=filename, domain=domain, sub_category=sub_cat)
+    chunks = chunk_text(
+        content, max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP,
+        context_header=ctx_header,
+    )
     base_meta = {"domain": domain, "artifact_id": artifact_id, "ingested_at": utcnow_iso()}
     if metadata:
         base_meta.update(metadata)
@@ -131,8 +137,8 @@ def _reingest_artifact(
 def ingest_content(
     content: str,
     domain: str = "general",
-    metadata: Optional[Dict[str, Any]] = None,
-) -> Dict:
+    metadata: dict[str, Any] | None = None,
+) -> dict:
     """Core ingest path. Called by REST endpoints, agents, and MCP tool dispatcher."""
     chroma = get_chroma()
     coll_name = config.collection_name(domain)
@@ -157,7 +163,7 @@ def ingest_content(
             "duplicate_of": existing["filename"],
         }
 
-    # Phase 8B: Semantic deduplication (Pro feature)
+    # Semantic deduplication (Pro feature)
     near_dup = None
     try:
         from utils.features import is_feature_enabled
@@ -173,7 +179,7 @@ def ingest_content(
     except Exception as e:
         logger.debug(f"Semantic dedup check skipped: {e}")
 
-    # Re-ingestion check: same filename, different content (Phase 4C.3)
+    # Re-ingestion check: same filename, different content
     fname = (metadata or {}).get("filename", "text_input")
     if fname != "text_input":
         try:
@@ -183,13 +189,21 @@ def ingest_content(
         except Exception as e:
             logger.warning(f"Re-ingest check failed (proceeding as new): {e}")
 
-    chunks = chunk_text(content, max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP)
+    fname_for_header = (metadata or {}).get("filename", "")
+    sub_cat_for_header = (metadata or {}).get("sub_category", "")
+    ctx_header = make_context_header(
+        filename=fname_for_header, domain=domain, sub_category=sub_cat_for_header,
+    )
+    chunks = chunk_text(
+        content, max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP,
+        context_header=ctx_header,
+    )
     ingested_at = utcnow_iso()
     base_meta = {"domain": domain, "artifact_id": artifact_id, "ingested_at": ingested_at}
     if metadata:
         base_meta.update(metadata)
 
-    # Phase 8B: tag near-duplicate in metadata
+    # Tag near-duplicate in metadata
     if near_dup:
         base_meta["near_duplicate_of"] = near_dup["artifact_id"]
         base_meta["near_duplicate_similarity"] = str(near_dup["similarity"])
@@ -198,7 +212,7 @@ def ingest_content(
     chunk_metadatas = [{**base_meta, "chunk_index": i} for i in range(len(chunks))]
     collection.add(ids=chunk_ids, documents=chunks, metadatas=chunk_metadatas)
 
-    # Index for BM25 hybrid search (Phase 4B.1)
+    # Index for BM25 hybrid search
     try:
         from utils.bm25 import index_chunks
         index_chunks(domain, chunk_ids, chunks)
@@ -239,6 +253,10 @@ def ingest_content(
                 "duplicate_of": "(concurrent)",
             }
         logger.error(f"Neo4j artifact creation failed: {e}")
+        try:
+            collection.delete(ids=chunk_ids)
+        except Exception as ce:
+            logger.warning(f"Failed to roll back chunks after Neo4j failure: {ce}")
 
     try:
         cache.log_event(
@@ -251,7 +269,7 @@ def ingest_content(
     except Exception as e:
         logger.error(f"Redis log failed: {e}")
 
-    # Discover and create relationships with existing artifacts (Phase 4B.2)
+    # Discover and create relationships with existing artifacts
     relationships_created = 0
     if artifact_created:
         try:
@@ -266,7 +284,7 @@ def ingest_content(
         except Exception as e:
             logger.warning(f"Relationship discovery failed (non-blocking): {e}")
 
-    # Fire webhook notification (Phase 4C.4)
+    # Fire webhook notification
     try:
         from utils.webhooks import notify_ingestion_complete
         asyncio.get_running_loop().create_task(
@@ -277,7 +295,7 @@ def ingest_content(
     except Exception as e:
         logger.debug(f"Webhook notification failed (non-blocking): {e}")
 
-    # Surface related artifacts in response (Phase 4C.2)
+    # Surface related artifacts in response
     related = []
     if relationships_created > 0:
         try:
@@ -302,7 +320,7 @@ def ingest_content(
         "timestamp": utcnow_iso(),
     }
 
-    # Phase 8B: Include near-duplicate info if detected
+    # Include near-duplicate info if detected
     if near_dup:
         result["near_duplicate_of"] = {
             "artifact_id": near_dup["artifact_id"],
@@ -319,7 +337,7 @@ async def ingest_file(
     sub_category: str = "",
     tags: str = "",
     categorize_mode: str = "",
-) -> Dict:
+) -> dict:
     """Parse a file, extract metadata, optionally AI-categorize, chunk, and store."""
     validate_file_path(file_path)
     filename = Path(file_path).name
@@ -339,7 +357,7 @@ async def ingest_file(
             meta["keywords"] = json.dumps(ai_result["keywords"])
         if ai_result.get("summary"):
             meta["summary"] = ai_result["summary"]
-        # Phase 8C: sub-category and tags from AI
+        # Sub-category and tags from AI
         if ai_result.get("sub_category") and not sub_category:
             sub_category = ai_result["sub_category"]
         if ai_result.get("tags") and not tags:

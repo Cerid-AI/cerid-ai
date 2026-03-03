@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import chromadb
 
@@ -25,8 +25,8 @@ logger = logging.getLogger("ai-companion.rectify")
 
 def find_duplicate_artifacts(
     neo4j_driver,
-    chroma_client: Optional[chromadb.HttpClient] = None,
-) -> List[Dict[str, Any]]:
+    chroma_client: chromadb.HttpClient | None = None,
+) -> list[dict[str, Any]]:
     """Find artifacts sharing the same content_hash across different domains."""
     with neo4j_driver.session() as session:
         result = session.run(
@@ -57,7 +57,7 @@ def find_similar_artifacts(
     chroma_client: chromadb.HttpClient,
     threshold: float = 0.15,
     top_k: int = 5,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Find semantically similar artifacts (cosine distance < threshold)."""
     try:
         collection = chroma_client.get_collection(name=config.collection_name(domain))
@@ -92,7 +92,7 @@ def find_stale_artifacts(
     neo4j_driver,
     days_threshold: int = 90,
     limit: int = 100,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Find artifacts not updated within the threshold period."""
     cutoff = (utcnow().replace(tzinfo=None) - timedelta(days=days_threshold)).isoformat()
 
@@ -128,7 +128,7 @@ def find_stale_artifacts(
 def find_orphaned_chunks(
     neo4j_driver,
     chroma_client: chromadb.HttpClient,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Find ChromaDB chunks without corresponding Neo4j artifact records."""
     with neo4j_driver.session() as session:
         result = session.run("MATCH (a:Artifact) RETURN a.id AS id")
@@ -173,7 +173,7 @@ def resolve_duplicates(
     content_hash: str,
     keep_artifact_id: str,
     redis_client=None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Resolve a duplicate set by keeping one artifact and removing the rest."""
     with neo4j_driver.session() as session:
         result = session.run(
@@ -240,8 +240,8 @@ def resolve_duplicates(
 
 def cleanup_orphaned_chunks(
     chroma_client: chromadb.HttpClient,
-    orphaned: Dict[str, List[Dict[str, str]]],
-) -> Dict[str, int]:
+    orphaned: dict[str, list[dict[str, str]]],
+) -> dict[str, int]:
     """Remove orphaned chunks from ChromaDB."""
     cleaned = {}
     for domain, chunks in orphaned.items():
@@ -264,7 +264,7 @@ def cleanup_orphaned_chunks(
 # Graph relationship analysis
 # ---------------------------------------------------------------------------
 
-def analyze_domain_distribution(neo4j_driver) -> Dict[str, Any]:
+def analyze_domain_distribution(neo4j_driver) -> dict[str, Any]:
     """Analyze per-domain artifact distribution."""
     with neo4j_driver.session() as session:
         result = session.run(
@@ -306,10 +306,10 @@ async def rectify(
     neo4j_driver,
     chroma_client: chromadb.HttpClient,
     redis_client=None,
-    checks: Optional[List[str]] = None,
+    checks: list[str] | None = None,
     auto_fix: bool = False,
     stale_days: int = 90,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Run rectification checks on the knowledge base."""
     all_checks = {"duplicates", "stale", "orphans", "distribution"}
     if checks is None:

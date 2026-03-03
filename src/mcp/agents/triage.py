@@ -7,14 +7,13 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from langgraph.graph import END, StateGraph
 
 import config
-from utils.chunker import chunk_text
+from utils.chunker import chunk_text, make_context_header
 from utils.metadata import ai_categorize, extract_metadata
 from utils.parsers import PARSER_REGISTRY, parse_file
 
@@ -25,37 +24,8 @@ logger = logging.getLogger("ai-companion.triage")
 # State definition
 # ---------------------------------------------------------------------------
 
-@dataclass
-class TriageState:
-    """State carried through the triage graph for a single file."""
-    file_path: str = ""
-    filename: str = ""
-    domain: str = ""
-    categorize_mode: str = ""
-    tags: str = ""
-
-    # Populated during processing
-    parsed_text: str = ""
-    file_type: str = ""
-    page_count: Optional[int] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    chunks: List[str] = field(default_factory=list)
-    content_hash: str = ""
-    artifact_id: str = ""
-
-    # Routing decisions
-    needs_ai_categorization: bool = False
-    is_structured: bool = False  # PDF/XLSX/CSV with tables
-
-    # Result
-    status: str = "pending"  # pending | parsed | categorized | ingested | error | duplicate
-    error: str = ""
-    result: Dict[str, Any] = field(default_factory=dict)
-
-
 # State dict type for LangGraph (uses dict internally)
-TriageStateDict = Dict[str, Any]
-
+TriageStateDict = dict[str, Any]
 
 
 # ---------------------------------------------------------------------------
@@ -199,7 +169,15 @@ def extract_metadata_node(state: TriageStateDict) -> TriageStateDict:
 def chunk_node(state: TriageStateDict) -> TriageStateDict:
     """Chunk the parsed text for vector storage."""
     text = state.get("parsed_text", "")
-    chunks = chunk_text(text, max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP)
+    ctx_header = make_context_header(
+        filename=state.get("filename", ""),
+        domain=state.get("domain", ""),
+        sub_category=state.get("metadata", {}).get("sub_category", ""),
+    )
+    chunks = chunk_text(
+        text, max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP,
+        context_header=ctx_header,
+    )
     return {**state, "chunks": chunks}
 
 
@@ -225,11 +203,6 @@ def should_categorize(state: TriageStateDict) -> str:
     """Route after categorization decision."""
     if state.get("needs_ai_categorization"):
         return "categorize"
-    return "extract_metadata"
-
-
-def should_continue_after_categorize(state: TriageStateDict) -> str:
-    """Route after AI categorization."""
     return "extract_metadata"
 
 
@@ -302,7 +275,7 @@ async def triage_file(
     domain: str = "",
     categorize_mode: str = "",
     tags: str = "",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Run a single file through the triage pipeline, returning prepared state."""
     initial_state = {
         "file_path": file_path,
@@ -331,9 +304,9 @@ async def triage_file(
 
 
 async def triage_batch(
-    files: List[Dict[str, str]],
+    files: list[dict[str, str]],
     default_mode: str = "",
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Process a batch of files independently — one failure doesn't stop the batch."""
     results = []
     for file_spec in files:

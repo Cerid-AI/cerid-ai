@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -30,7 +29,7 @@ class MemoryUpdateRequest(BaseModel):
 
 class MemoryExtractRequest(BaseModel):
     conversation_id: str
-    messages: List[dict]
+    messages: list[dict]
 
 
 # ---------------------------------------------------------------------------
@@ -39,8 +38,8 @@ class MemoryExtractRequest(BaseModel):
 
 @router.get("/memories")
 async def list_memories(
-    type: Optional[str] = Query(None, description="Filter by memory type (facts/decisions/preferences/action-items)"),
-    conversation_id: Optional[str] = Query(None, description="Filter by conversation ID"),
+    type: str | None = Query(None, description="Filter by memory type (facts/decisions/preferences/action-items)"),
+    conversation_id: str | None = Query(None, description="Filter by conversation ID"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
@@ -55,8 +54,8 @@ async def list_memories(
         conditions = []
         params: dict = {"limit": limit, "offset": offset}
 
-        # Only include artifacts that have a memory_type (i.e., actual memories)
         conditions.append("a.filename STARTS WITH 'memory_'")
+        memory_type = None
 
         if type:
             # Map plural/hyphenated API names to stored memory_type values
@@ -162,7 +161,6 @@ async def update_memory(memory_id: str, req: MemoryUpdateRequest):
             if not record:
                 raise HTTPException(status_code=404, detail=f"Memory not found: {memory_id}")
 
-            # Update the summary
             session.run(
                 "MATCH (a:Artifact {id: $memory_id}) "
                 "SET a.summary = $summary",
@@ -226,14 +224,12 @@ async def delete_memory(memory_id: str):
             except (json.JSONDecodeError, TypeError) as e:
                 logger.warning(f"Failed to parse chunk_ids for memory {memory_id[:8]}: {e}")
 
-        # Delete the artifact node and all its relationships from Neo4j
         with driver.session() as session:
             session.run(
                 "MATCH (a:Artifact {id: $memory_id}) DETACH DELETE a",
                 memory_id=memory_id,
             )
 
-        # Log deletion to audit trail
         try:
             cache.log_event(
                 get_redis(),

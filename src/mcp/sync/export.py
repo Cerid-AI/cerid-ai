@@ -10,7 +10,7 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
 
@@ -34,7 +34,7 @@ from sync.manifest import write_manifest
 logger = logging.getLogger("ai-companion.sync")
 
 
-def export_neo4j(driver, sync_dir: Optional[str] = None) -> Dict[str, Any]:
+def export_neo4j(driver, sync_dir: str | None = None) -> dict[str, Any]:
     """
     Export all Artifact nodes, Domain nodes, and inter-artifact relationships
     from Neo4j to JSONL files under {sync_dir}/neo4j/.
@@ -42,9 +42,9 @@ def export_neo4j(driver, sync_dir: Optional[str] = None) -> Dict[str, Any]:
     sync_dir = sync_dir or _default_sync_dir()
     out_dir = _ensure_dir(os.path.join(sync_dir, NEO4J_SUBDIR))
 
-    artifacts: List[Dict[str, Any]] = []
-    domains: List[Dict[str, Any]] = []
-    relationships: List[Dict[str, Any]] = []
+    artifacts: list[dict[str, Any]] = []
+    domains: list[dict[str, Any]] = []
+    relationships: list[dict[str, Any]] = []
 
     try:
         with driver.session() as session:
@@ -112,7 +112,7 @@ def export_neo4j(driver, sync_dir: Optional[str] = None) -> Dict[str, Any]:
     }
 
 
-def export_chroma(chroma_url: Optional[str] = None, sync_dir: Optional[str] = None) -> Dict[str, Any]:
+def export_chroma(chroma_url: str | None = None, sync_dir: str | None = None) -> dict[str, Any]:
     """
     Export all ChromaDB collections (one per domain) to per-domain JSONL files
     under {sync_dir}/chroma/.
@@ -121,7 +121,7 @@ def export_chroma(chroma_url: Optional[str] = None, sync_dir: Optional[str] = No
     sync_dir = sync_dir or _default_sync_dir()
     out_dir = _ensure_dir(os.path.join(sync_dir, CHROMA_SUBDIR))
 
-    domain_counts: Dict[str, int] = {}
+    domain_counts: dict[str, int] = {}
     total_chunks = 0
 
     for domain in config.DOMAINS:
@@ -158,13 +158,13 @@ def export_chroma(chroma_url: Optional[str] = None, sync_dir: Optional[str] = No
                     resp.raise_for_status()
                     batch = resp.json()
 
-                    ids: List[str] = batch.get("ids", [])
+                    ids: list[str] = batch.get("ids", [])
                     if not ids:
                         break
 
-                    documents: List[str] = batch.get("documents", [])
-                    metadatas: List[Dict] = batch.get("metadatas", [])
-                    embeddings: List[List[float]] = batch.get("embeddings", [])
+                    documents: list[str] = batch.get("documents", [])
+                    metadatas: list[dict] = batch.get("metadatas", [])
+                    embeddings: list[list[float]] = batch.get("embeddings", [])
 
                     for i, chunk_id in enumerate(ids):
                         row = {
@@ -201,7 +201,7 @@ def export_chroma(chroma_url: Optional[str] = None, sync_dir: Optional[str] = No
     }
 
 
-def export_bm25(sync_dir: Optional[str] = None) -> Dict[str, Any]:
+def export_bm25(sync_dir: str | None = None) -> dict[str, Any]:
     """Copy BM25 JSONL corpus files from config.BM25_DATA_DIR to {sync_dir}/bm25/."""
     sync_dir = sync_dir or _default_sync_dir()
     out_dir = _ensure_dir(os.path.join(sync_dir, BM25_SUBDIR))
@@ -232,7 +232,7 @@ def export_bm25(sync_dir: Optional[str] = None) -> Dict[str, Any]:
     }
 
 
-def export_redis(redis_client, sync_dir: Optional[str] = None) -> Dict[str, Any]:
+def export_redis(redis_client, sync_dir: str | None = None) -> dict[str, Any]:
     """Dump the full Redis ingest:log list to {sync_dir}/redis/audit_log.jsonl."""
     sync_dir = sync_dir or _default_sync_dir()
     out_dir = _ensure_dir(os.path.join(sync_dir, REDIS_SUBDIR))
@@ -241,7 +241,7 @@ def export_redis(redis_client, sync_dir: Optional[str] = None) -> Dict[str, Any]
     entries_exported = 0
 
     try:
-        raw_entries: List[str] = redis_client.lrange(config.REDIS_INGEST_LOG, 0, -1)
+        raw_entries: list[str] = redis_client.lrange(config.REDIS_INGEST_LOG, 0, -1)
     except Exception as exc:
         logger.error("Redis LRANGE failed: %s", exc)
         return {"error": str(exc), "entries_exported": 0, "output_dir": str(out_dir)}
@@ -267,11 +267,11 @@ def export_redis(redis_client, sync_dir: Optional[str] = None) -> Dict[str, Any]
 
 def export_all(
     driver,
-    chroma_url: Optional[str] = None,
+    chroma_url: str | None = None,
     redis_client=None,
-    sync_dir: Optional[str] = None,
-    machine_id: Optional[str] = None,
-) -> Dict[str, Any]:
+    sync_dir: str | None = None,
+    machine_id: str | None = None,
+) -> dict[str, Any]:
     """Run all export steps in sequence and write a manifest."""
     chroma_url = chroma_url or config.CHROMA_URL
     sync_dir = sync_dir or _default_sync_dir()
@@ -282,7 +282,7 @@ def export_all(
     chroma_result = export_chroma(chroma_url=chroma_url, sync_dir=sync_dir)
     bm25_result = export_bm25(sync_dir=sync_dir)
 
-    redis_result: Dict[str, Any] = {"entries_exported": 0, "skipped": True}
+    redis_result: dict[str, Any] = {"entries_exported": 0, "skipped": True}
     if redis_client is not None:
         redis_result = export_redis(redis_client, sync_dir=sync_dir)
     else:

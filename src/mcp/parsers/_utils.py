@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import re
-from typing import List
 
 
 def _strip_html_tags(html: str) -> str:
@@ -16,7 +15,7 @@ def _strip_html_tags(html: str) -> str:
     class _Stripper(HTMLParser):
         def __init__(self):
             super().__init__()
-            self._parts: List[str] = []
+            self._parts: list[str] = []
             self._skip = False
 
         def handle_starttag(self, tag, attrs):

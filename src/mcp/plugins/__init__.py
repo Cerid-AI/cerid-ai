@@ -24,14 +24,14 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import config
 
 logger = logging.getLogger("ai-companion.plugins")
 
 # Global registry of loaded plugins
-_loaded_plugins: Dict[str, Dict[str, Any]] = {}
+_loaded_plugins: dict[str, dict[str, Any]] = {}
 
 
 class PluginLoadError(Exception):
@@ -40,7 +40,7 @@ class PluginLoadError(Exception):
     pass
 
 
-def _validate_manifest(manifest: Dict[str, Any], plugin_dir: Path) -> None:
+def _validate_manifest(manifest: dict[str, Any], plugin_dir: Path) -> None:
     """Validate plugin manifest has required fields."""
     required = ["name", "version", "type"]
     missing = [f for f in required if f not in manifest]
@@ -67,7 +67,7 @@ def _is_plugin_enabled(name: str) -> bool:
     return True
 
 
-def _load_single_plugin(plugin_dir: Path) -> Optional[Dict[str, Any]]:
+def _load_single_plugin(plugin_dir: Path) -> dict[str, Any] | None:
     """
     Load a single plugin from its directory.
 
@@ -169,7 +169,7 @@ def _load_single_plugin(plugin_dir: Path) -> Optional[Dict[str, Any]]:
     }
 
 
-def load_plugins(plugin_dir: Optional[str] = None) -> List[str]:
+def load_plugins(plugin_dir: str | None = None) -> list[str]:
     """
     Discover and load all plugins from the plugin directory.
 
@@ -213,7 +213,7 @@ def load_plugins(plugin_dir: Optional[str] = None) -> List[str]:
     return loaded
 
 
-def get_loaded_plugins() -> Dict[str, Dict[str, Any]]:
+def get_loaded_plugins() -> dict[str, dict[str, Any]]:
     """Return info about all loaded plugins (without module references)."""
     return {
         name: {k: v for k, v in info.items() if k != "module"}
@@ -221,6 +221,6 @@ def get_loaded_plugins() -> Dict[str, Dict[str, Any]]:
     }
 
 
-def get_plugin(name: str) -> Optional[Dict[str, Any]]:
+def get_plugin(name: str) -> dict[str, Any] | None:
     """Get a specific loaded plugin by name."""
     return _loaded_plugins.get(name)

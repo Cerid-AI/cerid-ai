@@ -21,6 +21,8 @@ export interface UseKBContextReturn {
   // Filter state
   activeDomains: Set<string>
   toggleDomain: (domain: string) => void
+  activeTags: string[]
+  toggleTag: (tag: string) => void
 
   // Manual search
   manualQuery: string
@@ -44,6 +46,7 @@ export function useKBContext(
   recentMessages?: Pick<ChatMessage, "role" | "content">[],
 ): UseKBContextReturn {
   const [activeDomains, setActiveDomains] = useState<Set<string>>(new Set())
+  const [activeTags, setActiveTags] = useState<string[]>([])
   const [manualQuery, setManualQuery] = useState("")
   const [activeManualQuery, setActiveManualQuery] = useState("")
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null)
@@ -85,6 +88,12 @@ export function useKBContext(
     })
   }, [])
 
+  const toggleTag = useCallback((tag: string) => {
+    setActiveTags((prev) =>
+      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag],
+    )
+  }, [])
+
   const executeManualSearch = useCallback(() => {
     if (manualQuery.trim().length > 2) {
       setActiveManualQuery(manualQuery.trim())
@@ -96,8 +105,18 @@ export function useKBContext(
     setActiveManualQuery("")
   }, [])
 
+  // Client-side tag filtering
+  const rawResults = data?.results ?? []
+  const filteredResults = useMemo(() => {
+    if (activeTags.length === 0) return rawResults
+    return rawResults.filter((r) => {
+      const rTags = r.tags ?? []
+      return activeTags.every((t) => rTags.includes(t))
+    })
+  }, [rawResults, activeTags])
+
   return {
-    results: data?.results ?? [],
+    results: filteredResults,
     confidence: data?.confidence ?? 0,
     totalResults: data?.total_results ?? 0,
     executionTime: data?.execution_time_ms ?? 0,
@@ -107,6 +126,8 @@ export function useKBContext(
 
     activeDomains,
     toggleDomain,
+    activeTags,
+    toggleTag,
 
     manualQuery,
     setManualQuery,

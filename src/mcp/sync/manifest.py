@@ -9,7 +9,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import config
 from sync._helpers import (
@@ -32,9 +32,9 @@ logger = logging.getLogger("ai-companion.sync")
 
 
 def write_manifest(
-    sync_dir: Optional[str] = None,
-    machine_id: Optional[str] = None,
-) -> Dict[str, Any]:
+    sync_dir: str | None = None,
+    machine_id: str | None = None,
+) -> dict[str, Any]:
     """
     Write manifest.json to sync_dir root with:
         - machine_id (defaults to hostname)
@@ -52,7 +52,7 @@ def write_manifest(
         machine_id = socket.gethostname()
 
     # Enumerate all tracked files across subdirs
-    tracked_files: List[Tuple[str, str]] = [
+    tracked_files: list[tuple[str, str]] = [
         # (relative path within sync_dir, absolute path)
         (f"{NEO4J_SUBDIR}/{ARTIFACTS_JSONL}",    str(sync_path / NEO4J_SUBDIR / ARTIFACTS_JSONL)),
         (f"{NEO4J_SUBDIR}/{DOMAINS_JSONL}",       str(sync_path / NEO4J_SUBDIR / DOMAINS_JSONL)),
@@ -73,14 +73,14 @@ def write_manifest(
             rel = f"{BM25_SUBDIR}/{f.name}"
             tracked_files.append((rel, str(f)))
 
-    file_entries: Dict[str, Dict[str, Any]] = {}
+    file_entries: dict[str, dict[str, Any]] = {}
     for rel_path, abs_path in tracked_files:
         if not os.path.exists(abs_path):
             file_entries[rel_path] = {"exists": False, "count": 0, "sha256": ""}
             continue
         count = _count_jsonl_lines(abs_path) if abs_path.endswith(".jsonl") else None
         checksum = _sha256_file(abs_path)
-        entry: Dict[str, Any] = {"exists": True, "sha256": checksum}
+        entry: dict[str, Any] = {"exists": True, "sha256": checksum}
         if count is not None:
             entry["count"] = count
         file_entries[rel_path] = entry
@@ -101,7 +101,7 @@ def write_manifest(
     return manifest
 
 
-def read_manifest(sync_dir: Optional[str] = None) -> Dict[str, Any]:
+def read_manifest(sync_dir: str | None = None) -> dict[str, Any]:
     """
     Read and parse manifest.json from sync_dir.
 
@@ -114,7 +114,7 @@ def read_manifest(sync_dir: Optional[str] = None) -> Dict[str, Any]:
     if not manifest_path.exists():
         raise FileNotFoundError(f"No manifest found at {manifest_path}")
 
-    with open(str(manifest_path), "r", encoding="utf-8") as fh:
+    with open(str(manifest_path), encoding="utf-8") as fh:
         try:
             manifest = json.load(fh)
         except json.JSONDecodeError as exc:

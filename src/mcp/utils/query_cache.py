@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 from deps import get_redis
 
@@ -27,7 +27,7 @@ def _cache_key(query: str, domain: str, top_k: int) -> str:
     return CACHE_PREFIX + hashlib.sha256(raw.encode()).hexdigest()[:32]
 
 
-def get_cached(query: str, domain: str, top_k: int) -> Optional[Dict[str, Any]]:
+def get_cached(query: str, domain: str, top_k: int) -> dict[str, Any] | None:
     try:
         key = _cache_key(query, domain, top_k)
         raw = get_redis().get(key)
@@ -40,7 +40,7 @@ def get_cached(query: str, domain: str, top_k: int) -> Optional[Dict[str, Any]]:
 
 
 def set_cached(
-    query: str, domain: str, top_k: int, result: Dict[str, Any], ttl: int = DEFAULT_TTL
+    query: str, domain: str, top_k: int, result: dict[str, Any], ttl: int = DEFAULT_TTL
 ) -> None:
     try:
         key = _cache_key(query, domain, top_k)

@@ -6,14 +6,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 from parsers._utils import _strip_html_tags
 from parsers.registry import _MAX_TEXT_CHARS, register_parser
 
 
 @register_parser([".eml"])
-def parse_eml(file_path: str) -> Dict[str, Any]:
+def parse_eml(file_path: str) -> dict[str, Any]:
     """Parse .eml — headers, body (prefers text/plain), attachment list."""
     import email
     import email.policy
@@ -89,7 +89,7 @@ def parse_eml(file_path: str) -> Dict[str, Any]:
 
 
 @register_parser([".mbox"])
-def parse_mbox(file_path: str) -> Dict[str, Any]:
+def parse_mbox(file_path: str) -> dict[str, Any]:
     """Parse .mbox — extract messages as sections (max 100)."""
     import mailbox
 

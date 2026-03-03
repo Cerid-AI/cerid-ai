@@ -1,12 +1,11 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Daily digest endpoint (Phase 4C.2)."""
+"""Daily digest endpoint."""
 from __future__ import annotations
 
 import logging
 from datetime import timedelta
-from typing import Dict
 
 from fastapi import APIRouter, Query
 
@@ -64,7 +63,7 @@ async def digest_endpoint(hours: int = Query(24, ge=1, le=168)):
         logger.warning(f"Digest Neo4j query failed: {e}")
 
     # Domain distribution of recent artifacts
-    domain_counts: Dict[str, int] = {}
+    domain_counts: dict[str, int] = {}
     for a in recent_artifacts:
         domain_counts[a["domain"]] = domain_counts.get(a["domain"], 0) + 1
 

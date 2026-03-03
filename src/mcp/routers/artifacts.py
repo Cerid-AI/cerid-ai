@@ -221,3 +221,81 @@ async def recategorize_endpoint(req: RecategorizeRequest):
     except Exception as e:
         logger.error(f"Recategorize error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Adaptive quality feedback
+# ---------------------------------------------------------------------------
+
+class FeedbackRequest(BaseModel):
+    signal: str  # "inject" or "dismiss"
+    query: str = ""  # the query that surfaced this artifact
+
+
+# Quality score adjustment amounts
+_INJECT_BOOST = 0.05
+_DISMISS_PENALTY = 0.03
+
+
+@router.post("/artifacts/{artifact_id}/feedback")
+async def artifact_feedback_endpoint(artifact_id: str, req: FeedbackRequest):
+    """Record user inject/dismiss feedback and adjust artifact quality score.
+
+    When a user injects a KB result into their chat, its quality score gets a
+    small boost. When dismissed, it gets a small penalty. This creates an
+    adaptive loop where frequently-useful artifacts rise in quality-weighted
+    retrieval rankings.
+    """
+    if req.signal not in ("inject", "dismiss"):
+        raise HTTPException(status_code=400, detail="signal must be 'inject' or 'dismiss'")
+
+    try:
+        driver = get_neo4j()
+        artifact = graph.get_artifact(driver, artifact_id)
+        if not artifact:
+            raise HTTPException(status_code=404, detail=f"Artifact not found: {artifact_id}")
+
+        current_score = float(artifact.get("quality_score", 0.5))
+        if req.signal == "inject":
+            new_score = min(1.0, current_score + _INJECT_BOOST)
+        else:
+            new_score = max(0.0, current_score - _DISMISS_PENALTY)
+
+        # Update quality_score on the Neo4j node
+        with driver.session() as session:
+            session.run(
+                "MATCH (a:Artifact {id: $aid}) "
+                "SET a.quality_score = $score, a.quality_scored_at = $now",
+                aid=artifact_id, score=round(new_score, 4), now=utcnow_iso(),
+            )
+
+        # Log feedback to Redis for analytics
+        try:
+            cache.log_event(
+                get_redis(),
+                event_type="quality_feedback",
+                artifact_id=artifact_id,
+                domain=artifact.get("domain", ""),
+                filename=artifact.get("filename", ""),
+                extra={
+                    "signal": req.signal,
+                    "query": req.query[:200] if req.query else "",
+                    "old_score": round(current_score, 4),
+                    "new_score": round(new_score, 4),
+                },
+            )
+        except Exception as e:
+            logger.debug(f"Feedback Redis log failed: {e}")
+
+        return {
+            "status": "ok",
+            "artifact_id": artifact_id,
+            "signal": req.signal,
+            "old_score": round(current_score, 4),
+            "new_score": round(new_score, 4),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Artifact feedback error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

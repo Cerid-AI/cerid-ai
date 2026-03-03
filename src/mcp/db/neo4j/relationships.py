@@ -9,7 +9,7 @@ import json
 import logging
 import os
 import re
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 import config
 from utils.time import utcnow_iso
@@ -22,7 +22,7 @@ def create_relationship(
     source_id: str,
     target_id: str,
     rel_type: str,
-    properties: Optional[Dict[str, Any]] = None,
+    properties: dict[str, Any] | None = None,
 ) -> bool:
     """Create a typed relationship between two artifacts. Idempotent."""
     if rel_type not in config.GRAPH_RELATIONSHIP_TYPES:
@@ -61,11 +61,11 @@ def create_relationship(
 
 def find_related_artifacts(
     driver,
-    artifact_ids: List[str],
+    artifact_ids: list[str],
     depth: int = 0,
     max_results: int = 0,
-    rel_types: Optional[List[str]] = None,
-) -> List[Dict[str, Any]]:
+    rel_types: list[str] | None = None,
+) -> list[dict[str, Any]]:
     """Traverse the knowledge graph and return related artifacts up to `depth` hops away."""
     if not artifact_ids:
         return []
@@ -127,7 +127,7 @@ def find_related_artifacts(
 # Relationship discovery (called during ingestion)
 # ---------------------------------------------------------------------------
 
-def _parse_keywords(keywords_json: str) -> Set[str]:
+def _parse_keywords(keywords_json: str) -> set[str]:
     """Safely parse a JSON keyword list into a lowercase set."""
     try:
         kw = json.loads(keywords_json) if keywords_json else []
@@ -136,9 +136,9 @@ def _parse_keywords(keywords_json: str) -> Set[str]:
         return set()
 
 
-def _extract_references(content: str, filename: str) -> Set[str]:
+def _extract_references(content: str, filename: str) -> set[str]:
     """Extract filenames referenced in content via imports or explicit mentions."""
-    refs: Set[str] = set()
+    refs: set[str] = set()
 
     # Python imports: `import foo`, `from foo import bar` (line-start only to avoid prose matches)
     for match in re.finditer(r'^\s*(?:from|import)\s+([\w.]+)', content, re.MULTILINE):

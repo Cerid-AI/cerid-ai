@@ -43,14 +43,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Neo4j schema init failed (will retry on first use): {e}")
 
-    # Auto-import from sync directory if DB is empty (Phase 5B)
+    # Auto-import from sync directory if DB is empty
     try:
         from sync_check import auto_import_if_empty
         auto_import_if_empty()
     except Exception as e:
         logger.warning(f"Sync auto-import check failed: {e}")
 
-    # Load plugins (Phase 8A)
+    # Load plugins
     try:
         from plugins import load_plugins
         loaded = load_plugins()
@@ -59,7 +59,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Plugin loading failed (server runs without plugins): {e}")
 
-    # Start scheduled maintenance engine (Phase 4C.1)
+    # Start scheduled maintenance engine
     try:
         start_scheduler()
     except Exception as e:

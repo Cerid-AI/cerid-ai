@@ -3,7 +3,7 @@
 
 """Ingestion REST endpoints.
 
-Business logic lives in services/ingestion.py (Phase 10C, F1).
+Business logic lives in services/ingestion.py.
 This module is a thin router: Pydantic models + endpoint handlers.
 """
 from __future__ import annotations
@@ -23,7 +23,7 @@ from utils.time import utcnow
 router = APIRouter()
 logger = logging.getLogger("ai-companion")
 
-# Concurrency limiter for ingestion (Phase 4C.3)
+# Concurrency limiter for ingestion
 _ingest_semaphore = asyncio.Semaphore(3)
 
 
@@ -116,7 +116,6 @@ async def ingest_feedback_endpoint(req: FeedbackIngestRequest):
         async with _ingest_semaphore:
             result = ingest_content(content, "conversations", metadata=metadata)
 
-        # Log with conversation_id for audit trail
         try:
             cache.log_event(
                 get_redis(),

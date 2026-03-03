@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict
 
 from fastapi import APIRouter
 
@@ -15,7 +14,7 @@ router = APIRouter()
 logger = logging.getLogger("ai-companion")
 
 
-def health_check() -> Dict:
+def health_check() -> dict:
     """Public — also called by mcp_sse.py execute_tool."""
     status = {"chromadb": "unknown", "redis": "unknown", "neo4j": "unknown"}
     try:
@@ -43,7 +42,7 @@ def health_check() -> Dict:
     }
 
 
-def list_collections() -> Dict:
+def list_collections() -> dict:
     """Public — also called by mcp_sse.py execute_tool."""
     chroma = get_chroma()
     collections = chroma.list_collections()

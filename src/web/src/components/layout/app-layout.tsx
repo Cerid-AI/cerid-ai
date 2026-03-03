@@ -12,18 +12,18 @@ interface AppLayoutProps {
 
 export function AppLayout({ children }: AppLayoutProps) {
   const [activePane, setActivePane] = useState<Pane>("chat")
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.innerWidth < 768)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.innerWidth < 1024)
   const { theme, toggleTheme } = useTheme()
 
   useEffect(() => {
-    const mq = window.matchMedia("(max-width: 768px)")
+    const mq = window.matchMedia("(max-width: 1024px)")
     const handler = (e: MediaQueryListEvent) => setSidebarCollapsed(e.matches)
     mq.addEventListener("change", handler)
     return () => mq.removeEventListener("change", handler)
   }, [])
 
   return (
-    <div className="flex h-screen flex-col bg-background text-foreground">
+    <div className="flex h-screen flex-col bg-background text-foreground safe-area-top safe-area-bottom safe-area-left safe-area-right">
       <div className="flex flex-1 overflow-hidden">
         <Sidebar
           activePane={activePane}

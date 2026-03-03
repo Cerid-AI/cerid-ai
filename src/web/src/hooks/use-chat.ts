@@ -38,7 +38,6 @@ export function useChat({ onMessageStart, onMessageUpdate, feedbackEnabled }: Us
           accumulated += chunk
           onMessageUpdate(convoId, accumulated)
         }, abortRef.current.signal)
-        // Catch silent failures: streaming completed but yielded nothing
         if (accumulated.length === 0) {
           accumulated = "\u26A0 No response received. Check your connection or try a different model."
           onMessageUpdate(convoId, accumulated)
@@ -46,7 +45,6 @@ export function useChat({ onMessageStart, onMessageUpdate, feedbackEnabled }: Us
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") {
           aborted = true
-          // User cancelled — keep partial content
         } else {
           const errorText = err instanceof Error ? err.message : "Unknown error"
           accumulated += accumulated ? `\n\n---\n**Error:** ${errorText}` : `**Error:** ${errorText}`

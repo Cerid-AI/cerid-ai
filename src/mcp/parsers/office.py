@@ -7,13 +7,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from parsers.registry import _MAX_TEXT_CHARS, logger, register_parser
 
 
 @register_parser([".docx"])
-def parse_docx(file_path: str) -> Dict[str, Any]:
+def parse_docx(file_path: str) -> dict[str, Any]:
     import docx
 
     try:
@@ -50,7 +50,7 @@ def parse_docx(file_path: str) -> Dict[str, Any]:
 
 
 @register_parser([".xlsx"])
-def parse_xlsx(file_path: str) -> Dict[str, Any]:
+def parse_xlsx(file_path: str) -> dict[str, Any]:
     """Parse XLSX with header auto-detection and Markdown table formatting."""
     from openpyxl import load_workbook
 
@@ -64,7 +64,7 @@ def parse_xlsx(file_path: str) -> Dict[str, Any]:
 
     sheet_names = list(wb.sheetnames)
     sheets_text = []
-    all_columns: List[str] = []
+    all_columns: list[str] = []
     total_rows = 0
     truncated = False
 
@@ -113,7 +113,7 @@ def parse_xlsx(file_path: str) -> Dict[str, Any]:
 
     text = "\n\n".join(sheets_text)
 
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "text": text[:_MAX_TEXT_CHARS],
         "file_type": "xlsx",
         "page_count": len(sheet_names),

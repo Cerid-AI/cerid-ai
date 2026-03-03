@@ -8,6 +8,7 @@ import { Separator } from "@/components/ui/separator"
 import { X, Search, Loader2 } from "lucide-react"
 import { ArtifactCard } from "./artifact-card"
 import { DomainFilter } from "./domain-filter"
+import { TagFilter } from "./tag-filter"
 import { GraphPreview } from "./graph-preview"
 import type { UseKBContextReturn } from "@/hooks/use-kb-context"
 
@@ -24,6 +25,8 @@ export function KBContextPanel({
   hasQueried,
   activeDomains,
   toggleDomain,
+  activeTags,
+  toggleTag,
   manualQuery,
   setManualQuery,
   executeManualSearch,
@@ -70,6 +73,13 @@ export function KBContextPanel({
         <div className="mt-2">
           <DomainFilter activeDomains={activeDomains} onToggle={toggleDomain} />
         </div>
+        <div className="mt-2">
+          <TagFilter
+            activeTags={activeTags}
+            onToggleTag={toggleTag}
+            domain={activeDomains.size === 1 ? [...activeDomains][0] : null}
+          />
+        </div>
       </div>
 
       {/* Confidence bar */}
@@ -110,7 +120,7 @@ export function KBContextPanel({
 
           {results.map((result, i) => (
             <ArtifactCard
-              key={`${result.artifact_id}-${result.chunk_index}-${i}`}
+              key={`${result.artifact_id}-${result.chunk_index}`}
               result={result}
               isSelected={selectedArtifactId === result.artifact_id}
               onSelect={() =>

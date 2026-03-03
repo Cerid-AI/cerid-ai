@@ -1,105 +1,20 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for smart ingestion features (Phase 8B)."""
+"""Tests for smart ingestion features.
+
+Parser-level tests (eml, epub, rtf, html stripping, rtf stripping)
+live in test_parsers.py. This file covers higher-level features:
+mbox parsing, enhanced CSV, parser registry, semantic dedup,
+OCR plugin structure, and feature flag gating.
+"""
 from __future__ import annotations
 
 import json
-import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-# Dependency stubs (tiktoken, httpx, spacy, chromadb, neo4j, redis,
-# pdfplumber, openpyxl, pandas, docx) are handled by conftest.py
-
-
-# ---------------------------------------------------------------------------
-# Tests for new parsers (Phase 8B)
-# ---------------------------------------------------------------------------
-
-
-class TestEmlParser:
-    """Test .eml email file parsing."""
-
-    def test_parse_simple_eml(self, tmp_path):
-        """Parse a simple text/plain email."""
-        from utils.parsers import parse_eml
-
-        eml_content = (
-            "From: alice@example.com\r\n"
-            "To: bob@example.com\r\n"
-            "Subject: Test Email\r\n"
-            "Date: Tue, 25 Feb 2026 10:00:00 -0500\r\n"
-            "Content-Type: text/plain; charset=utf-8\r\n"
-            "\r\n"
-            "Hello Bob,\r\n\r\n"
-            "This is a test email.\r\n\r\n"
-            "Best,\r\nAlice"
-        )
-
-        eml_path = tmp_path / "test.eml"
-        eml_path.write_bytes(eml_content.encode("utf-8"))
-
-        result = parse_eml(str(eml_path))
-
-        assert result["file_type"] == "eml"
-        assert "alice@example.com" in result["text"]
-        assert "Test Email" in result["text"]
-        assert "Hello Bob" in result["text"]
-        assert result["subject"] == "Test Email"
-
-    def test_parse_multipart_eml(self, tmp_path):
-        """Parse a multipart email with text/plain body."""
-        eml_content = (
-            "From: alice@example.com\r\n"
-            "To: bob@example.com\r\n"
-            "Subject: Multipart Test\r\n"
-            "MIME-Version: 1.0\r\n"
-            "Content-Type: multipart/mixed; boundary=boundary123\r\n"
-            "\r\n"
-            "--boundary123\r\n"
-            "Content-Type: text/plain; charset=utf-8\r\n"
-            "\r\n"
-            "Plain text body here.\r\n"
-            "--boundary123\r\n"
-            "Content-Type: application/pdf; name=\"report.pdf\"\r\n"
-            "Content-Disposition: attachment; filename=\"report.pdf\"\r\n"
-            "\r\n"
-            "PDF-BINARY-DATA\r\n"
-            "--boundary123--\r\n"
-        )
-
-        eml_path = tmp_path / "multipart.eml"
-        eml_path.write_bytes(eml_content.encode("utf-8"))
-
-        from utils.parsers import parse_eml
-
-        result = parse_eml(str(eml_path))
-
-        assert "Plain text body here" in result["text"]
-        assert result["attachment_count"] == 1
-        assert "report.pdf" in result["text"]
-
-    def test_parse_empty_eml(self, tmp_path):
-        """Empty email should parse without error."""
-        eml_content = (
-            "From: alice@example.com\r\n"
-            "To: bob@example.com\r\n"
-            "Subject: Empty\r\n"
-            "Content-Type: text/plain\r\n"
-            "\r\n"
-        )
-
-        eml_path = tmp_path / "empty.eml"
-        eml_path.write_bytes(eml_content.encode("utf-8"))
-
-        from utils.parsers import parse_eml
-
-        result = parse_eml(str(eml_path))
-        assert result["file_type"] == "eml"
-        assert "alice@example.com" in result["text"]
 
 
 class TestMboxParser:
@@ -128,255 +43,6 @@ class TestMboxParser:
         assert result["page_count"] == 1
         assert "Test Message" in result["text"]
         assert "This is the body" in result["text"]
-
-
-class TestEpubParser:
-    """Test .epub e-book parsing."""
-
-    def _create_minimal_epub(self, epub_path):
-        """Create a minimal valid EPUB file for testing."""
-        with zipfile.ZipFile(epub_path, "w") as zf:
-            # mimetype (must be first, uncompressed)
-            zf.writestr("mimetype", "application/epub+zip")
-
-            # container.xml
-            container_xml = """<?xml version="1.0" encoding="UTF-8"?>
-<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
-  <rootfiles>
-    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
-  </rootfiles>
-</container>"""
-            zf.writestr("META-INF/container.xml", container_xml)
-
-            # content.opf
-            opf = """<?xml version="1.0" encoding="UTF-8"?>
-<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="id" version="3.0">
-  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
-    <dc:title>Test Book</dc:title>
-    <dc:identifier id="id">test-isbn-123</dc:identifier>
-  </metadata>
-  <manifest>
-    <item id="ch1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
-    <item id="ch2" href="chapter2.xhtml" media-type="application/xhtml+xml"/>
-  </manifest>
-  <spine>
-    <itemref idref="ch1"/>
-    <itemref idref="ch2"/>
-  </spine>
-</package>"""
-            zf.writestr("OEBPS/content.opf", opf)
-
-            # Chapter 1
-            ch1 = """<?xml version="1.0" encoding="UTF-8"?>
-<html xmlns="http://www.w3.org/1999/xhtml">
-<head><title>Chapter 1</title></head>
-<body>
-<h1>Chapter One</h1>
-<p>This is the first chapter of the test book.</p>
-<p>It contains multiple paragraphs.</p>
-</body>
-</html>"""
-            zf.writestr("OEBPS/chapter1.xhtml", ch1)
-
-            # Chapter 2
-            ch2 = """<?xml version="1.0" encoding="UTF-8"?>
-<html xmlns="http://www.w3.org/1999/xhtml">
-<head><title>Chapter 2</title></head>
-<body>
-<h1>Chapter Two</h1>
-<p>This is the second chapter with more content.</p>
-</body>
-</html>"""
-            zf.writestr("OEBPS/chapter2.xhtml", ch2)
-
-    def test_parse_epub(self, tmp_path):
-        """Parse a minimal EPUB and extract chapter text."""
-        epub_path = tmp_path / "test.epub"
-        self._create_minimal_epub(str(epub_path))
-
-        from utils.parsers import parse_epub
-
-        result = parse_epub(str(epub_path))
-
-        assert result["file_type"] == "epub"
-        assert result["page_count"] == 2
-        assert result["title"] == "Test Book"
-        assert "Chapter One" in result["text"]
-        assert "first chapter" in result["text"]
-        assert "Chapter Two" in result["text"]
-
-    def test_parse_epub_not_zip(self, tmp_path):
-        """Non-ZIP file raises ValueError."""
-        bad_path = tmp_path / "not_an_epub.epub"
-        bad_path.write_text("This is not a zip file")
-
-        from utils.parsers import parse_epub
-
-        with pytest.raises(ValueError, match="Failed to read EPUB"):
-            parse_epub(str(bad_path))
-
-    def test_parse_epub_no_content(self, tmp_path):
-        """EPUB with no text content raises ValueError."""
-        epub_path = tmp_path / "empty.epub"
-        with zipfile.ZipFile(epub_path, "w") as zf:
-            zf.writestr("mimetype", "application/epub+zip")
-            container = """<?xml version="1.0"?>
-<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
-  <rootfiles>
-    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
-  </rootfiles>
-</container>"""
-            zf.writestr("META-INF/container.xml", container)
-            opf = """<?xml version="1.0"?>
-<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="id" version="3.0">
-  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
-    <dc:identifier id="id">test</dc:identifier>
-  </metadata>
-  <manifest/>
-  <spine/>
-</package>"""
-            zf.writestr("content.opf", opf)
-
-        from utils.parsers import parse_epub
-
-        with pytest.raises(ValueError, match="No text content"):
-            parse_epub(str(epub_path))
-
-
-class TestRtfParser:
-    """Test .rtf rich text format parsing."""
-
-    def test_parse_simple_rtf(self, tmp_path):
-        """Parse a simple RTF document."""
-        from utils.parsers import parse_rtf
-
-        rtf_content = rb"{\rtf1\ansi Hello, World! \par This is a test.}"
-        rtf_path = tmp_path / "test.rtf"
-        rtf_path.write_bytes(rtf_content)
-
-        result = parse_rtf(str(rtf_path))
-
-        assert result["file_type"] == "rtf"
-        assert "Hello, World!" in result["text"]
-        assert "This is a test" in result["text"]
-
-    def test_parse_rtf_with_formatting(self, tmp_path):
-        """Parse RTF with bold/italic control words."""
-        rtf_content = rb"{\rtf1\ansi {\b Bold text} and {\i italic text} here.}"
-        rtf_path = tmp_path / "formatted.rtf"
-        rtf_path.write_bytes(rtf_content)
-
-        from utils.parsers import parse_rtf
-
-        result = parse_rtf(str(rtf_path))
-
-        assert "Bold text" in result["text"]
-        assert "italic text" in result["text"]
-
-    def test_parse_rtf_with_unicode(self, tmp_path):
-        """Parse RTF with Unicode escape sequences."""
-        # \u233 is ë (e with diaeresis), followed by 'e' as replacement char
-        rtf_content = rb"{\rtf1\ansi Caf\u233e is nice.}"
-        rtf_path = tmp_path / "unicode.rtf"
-        rtf_path.write_bytes(rtf_content)
-
-        from utils.parsers import parse_rtf
-
-        result = parse_rtf(str(rtf_path))
-
-        assert "Caf" in result["text"]
-        assert result["file_type"] == "rtf"
-
-    def test_parse_rtf_skips_metadata(self, tmp_path):
-        """RTF font tables and color tables should be stripped."""
-        rtf_content = (
-            rb"{\rtf1\ansi"
-            rb"{\fonttbl{\f0 Times New Roman;}}"
-            rb"{\colortbl;\red0\green0\blue0;}"
-            rb" Visible text only.}"
-        )
-        rtf_path = tmp_path / "meta.rtf"
-        rtf_path.write_bytes(rtf_content)
-
-        from utils.parsers import parse_rtf
-
-        result = parse_rtf(str(rtf_path))
-
-        assert "Visible text only" in result["text"]
-        assert "Times New Roman" not in result["text"]
-        assert "colortbl" not in result["text"]
-
-    def test_parse_empty_rtf(self, tmp_path):
-        """RTF with no visible text raises ValueError."""
-        rtf_content = rb"{\rtf1\ansi }"
-        rtf_path = tmp_path / "empty.rtf"
-        rtf_path.write_bytes(rtf_content)
-
-        from utils.parsers import parse_rtf
-
-        with pytest.raises(ValueError, match="No text content"):
-            parse_rtf(str(rtf_path))
-
-
-class TestHtmlTagStripper:
-    """Test the shared _strip_html_tags utility."""
-
-    def test_basic_strip(self):
-        from utils.parsers import _strip_html_tags
-
-        html = "<p>Hello <b>world</b></p>"
-        assert "Hello" in _strip_html_tags(html)
-        assert "world" in _strip_html_tags(html)
-
-    def test_script_tags_removed(self):
-        from utils.parsers import _strip_html_tags
-
-        html = "<p>Visible</p><script>alert('xss')</script><p>More</p>"
-        result = _strip_html_tags(html)
-        assert "Visible" in result
-        assert "More" in result
-        assert "alert" not in result
-
-    def test_style_tags_removed(self):
-        from utils.parsers import _strip_html_tags
-
-        html = "<style>body{color:red}</style><p>Content</p>"
-        result = _strip_html_tags(html)
-        assert "Content" in result
-        assert "color" not in result
-
-
-class TestRtfStripper:
-    """Test the RTF text stripping utility."""
-
-    def test_hex_chars(self):
-        from utils.parsers import _strip_rtf
-
-        # \'e9 = é
-        raw = rb"{\rtf1 caf\\'e9}"
-        result = _strip_rtf(raw)
-        assert "caf" in result
-
-    def test_special_symbols(self):
-        from utils.parsers import _strip_rtf
-
-        raw = rb"{\rtf1 line1\par line2\tab end}"
-        result = _strip_rtf(raw)
-        assert "line1" in result
-        assert "line2" in result
-
-    def test_escaped_braces(self):
-        from utils.parsers import _strip_rtf
-
-        raw = rb"{\rtf1 Open \{ and close \} braces}"
-        result = _strip_rtf(raw)
-        assert "{" in result
-        assert "}" in result
-
-
-# ---------------------------------------------------------------------------
-# Tests for enhanced parsers
-# ---------------------------------------------------------------------------
 
 
 class TestEnhancedCsvParser:
@@ -459,16 +125,10 @@ class TestEnhancedCsvParser:
         assert result.get("truncated") is True
 
 
-# ---------------------------------------------------------------------------
-# Tests for parser registry
-# ---------------------------------------------------------------------------
-
-
 class TestParserRegistry:
-    """Test that all new extensions are registered."""
+    """Test that parser extensions are registered."""
 
     def test_new_extensions_in_registry(self):
-        """All Phase 8B parsers are registered."""
         from utils.parsers import PARSER_REGISTRY
 
         new_exts = [".eml", ".mbox", ".epub", ".rtf", ".tsv"]
@@ -476,7 +136,6 @@ class TestParserRegistry:
             assert ext in PARSER_REGISTRY, f"{ext} not registered in PARSER_REGISTRY"
 
     def test_new_extensions_in_config(self):
-        """All Phase 8B extensions are in SUPPORTED_EXTENSIONS."""
         import config
 
         new_exts = {".eml", ".mbox", ".epub", ".rtf", ".tsv"}
@@ -502,16 +161,10 @@ class TestParserRegistry:
         assert "Dispatch Test" in result["text"]
 
 
-# ---------------------------------------------------------------------------
-# Tests for semantic dedup
-# ---------------------------------------------------------------------------
-
-
 class TestSemanticDedup:
     """Test semantic deduplication utility."""
 
     def test_no_dup_when_collection_empty(self):
-        """No duplicate detected when collection is empty."""
         from utils.dedup import check_semantic_duplicate
 
         mock_collection = MagicMock()
@@ -528,14 +181,13 @@ class TestSemanticDedup:
         assert result is None
 
     def test_no_dup_when_distance_high(self):
-        """No duplicate when similarity is below threshold."""
         from utils.dedup import check_semantic_duplicate
 
         mock_collection = MagicMock()
         mock_collection.count.return_value = 5
         mock_collection.query.return_value = {
             "ids": [["chunk_1"]],
-            "distances": [[10.0]],  # High distance = low similarity
+            "distances": [[10.0]],
             "metadatas": [[{"artifact_id": "abc", "filename": "old.py"}]],
         }
 
@@ -550,14 +202,13 @@ class TestSemanticDedup:
         assert result is None
 
     def test_dup_detected_when_distance_low(self):
-        """Near-duplicate detected when distance is very low."""
         from utils.dedup import check_semantic_duplicate
 
         mock_collection = MagicMock()
         mock_collection.count.return_value = 5
         mock_collection.query.return_value = {
             "ids": [["chunk_1"]],
-            "distances": [[0.01]],  # Very low distance = very high similarity
+            "distances": [[0.01]],
             "metadatas": [[{"artifact_id": "abc-123", "filename": "original.py"}]],
         }
 
@@ -575,7 +226,6 @@ class TestSemanticDedup:
         assert result["similarity"] > 0.9
 
     def test_skip_self_match(self):
-        """Exclude self-match when exclude_artifact_id is provided."""
         from utils.dedup import check_semantic_duplicate
 
         mock_collection = MagicMock()
@@ -598,7 +248,6 @@ class TestSemanticDedup:
         assert result is None
 
     def test_empty_text_returns_none(self):
-        """Empty text returns None immediately."""
         from utils.dedup import check_semantic_duplicate
 
         result = check_semantic_duplicate(
@@ -608,35 +257,11 @@ class TestSemanticDedup:
         )
         assert result is None
 
-    def test_batch_check(self):
-        """Batch semantic duplicate check processes multiple docs."""
-        from utils.dedup import check_semantic_duplicate_batch
-
-        mock_collection = MagicMock()
-        mock_collection.count.return_value = 0
-
-        mock_chroma = MagicMock()
-        mock_chroma.get_or_create_collection.return_value = mock_collection
-
-        results = check_semantic_duplicate_batch(
-            texts=["doc1", "doc2", "doc3"],
-            domains=["coding", "coding", "finance"],
-            chroma_client=mock_chroma,
-        )
-        assert len(results) == 3
-        assert all(r is None for r in results)
-
-
-# ---------------------------------------------------------------------------
-# Tests for OCR plugin structure
-# ---------------------------------------------------------------------------
-
 
 class TestOCRPluginManifest:
     """Test OCR plugin manifest and structure."""
 
     def test_manifest_exists(self):
-        """OCR plugin has a valid manifest.json."""
         manifest_path = Path(__file__).parent.parent / "plugins" / "ocr" / "manifest.json"
         assert manifest_path.exists(), "OCR plugin manifest.json not found"
 
@@ -647,7 +272,6 @@ class TestOCRPluginManifest:
         assert "version" in manifest
 
     def test_plugin_module_exists(self):
-        """OCR plugin has a plugin.py with register function."""
         plugin_path = Path(__file__).parent.parent / "plugins" / "ocr" / "plugin.py"
         assert plugin_path.exists(), "OCR plugin plugin.py not found"
 
@@ -656,35 +280,25 @@ class TestOCRPluginManifest:
         assert "parse_pdf_with_ocr" in content
 
     def test_plugin_not_loaded_in_community_tier(self):
-        """OCR plugin skipped in community tier (requires pro + docling)."""
         from plugins import _load_single_plugin
 
         plugin_dir = Path(__file__).parent.parent / "plugins" / "ocr"
 
         with patch("config.FEATURE_TIER", "community"):
             result = _load_single_plugin(plugin_dir)
-            # Should be None because tier is community, not pro
             assert result is None
-
-
-# ---------------------------------------------------------------------------
-# Tests for feature flag integration
-# ---------------------------------------------------------------------------
 
 
 class TestFeatureFlagIntegration:
     """Test that Pro features are properly gated."""
 
     def test_semantic_dedup_disabled_in_community(self):
-        """Semantic dedup feature flag is off in community tier."""
         import config
 
-        # In community tier, semantic_dedup should be disabled
         if config.FEATURE_TIER == "community":
             assert config.FEATURE_FLAGS["semantic_dedup"] is False
 
     def test_ocr_disabled_in_community(self):
-        """OCR feature flag is off in community tier."""
         import config
 
         if config.FEATURE_TIER == "community":

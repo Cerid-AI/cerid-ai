@@ -139,11 +139,95 @@ class TestTaxonomyConfig:
         importlib.reload(config)
 
 
+class TestTagVocabulary:
+    """Test per-domain tag vocabulary (Phase 20A)."""
+
+    def test_tag_vocabulary_has_all_domains(self):
+        """TAG_VOCABULARY covers all TAXONOMY domains."""
+        import config
+
+        for domain in config.TAXONOMY:
+            assert domain in config.TAG_VOCABULARY, f"Missing vocabulary for domain: {domain}"
+
+    def test_vocabulary_tags_are_lowercase_strings(self):
+        """All vocabulary tags are lowercase strings."""
+        import config
+
+        for domain, tags in config.TAG_VOCABULARY.items():
+            assert isinstance(tags, list), f"{domain} tags is not a list"
+            for tag in tags:
+                assert isinstance(tag, str), f"Non-string tag in {domain}: {tag}"
+                assert tag == tag.lower(), f"Non-lowercase tag in {domain}: {tag}"
+
+    def test_vocabulary_has_reasonable_size(self):
+        """Each domain has 10-25 vocabulary tags."""
+        import config
+
+        for domain, tags in config.TAG_VOCABULARY.items():
+            assert len(tags) >= 10, f"{domain} has too few tags: {len(tags)}"
+            assert len(tags) <= 25, f"{domain} has too many tags: {len(tags)}"
+
+    def test_no_duplicate_tags_per_domain(self):
+        """No duplicate tags within a single domain vocabulary."""
+        import config
+
+        for domain, tags in config.TAG_VOCABULARY.items():
+            assert len(tags) == len(set(tags)), f"Duplicate tags in {domain}"
+
+
+class TestTagScoring:
+    """Test tag quality scoring (Phase 20A)."""
+
+    def test_score_empty_tags(self):
+        """Empty tag list scores 0.0."""
+        from utils.metadata import score_tags
+
+        assert score_tags([], "coding") == 0.0
+
+    def test_score_all_vocabulary_tags(self):
+        """All vocabulary tags score high."""
+        from utils.metadata import score_tags
+
+        score = score_tags(["python", "docker", "api", "testing", "git"], "coding")
+        assert score == 1.0  # 5 vocab tags * 0.2 = 1.0
+
+    def test_score_all_freeform_tags(self):
+        """Free-form tags score lower than vocabulary tags."""
+        from utils.metadata import score_tags
+
+        score = score_tags(["custom-tag", "another-tag"], "coding")
+        assert score == 0.2  # 2 freeform * 0.1 = 0.2
+
+    def test_score_mixed_tags(self):
+        """Mixed vocabulary and free-form tags score appropriately."""
+        from utils.metadata import score_tags
+
+        score = score_tags(["python", "custom-tag", "docker"], "coding")
+        assert score == 0.5  # 2 vocab * 0.2 + 1 freeform * 0.1 = 0.5
+
+    def test_score_capped_at_one(self):
+        """Score is capped at 1.0 even with many tags."""
+        from utils.metadata import score_tags
+
+        score = score_tags(
+            ["python", "javascript", "docker", "api", "cli", "testing", "git"],
+            "coding",
+        )
+        assert score == 1.0
+
+    def test_score_unknown_domain(self):
+        """Tags for unknown domain are all free-form."""
+        from utils.metadata import score_tags
+
+        score = score_tags(["tag1", "tag2"], "nonexistent")
+        assert score == 0.2  # 2 freeform * 0.1 = 0.2
+
+
 class TestAICategorization:
     """Test AI categorization with taxonomy-aware prompts."""
 
     def test_build_taxonomy_prompt_section(self):
-        """Taxonomy prompt section includes domains and sub-categories."""
+        """Taxonomy prompt section includes domains, sub-categories, and preferred tags."""
         from utils.metadata import _build_taxonomy_prompt_section
 
         result = _build_taxonomy_prompt_section()
@@ -152,6 +236,8 @@ class TestAICategorization:
         assert "finance" in result
         assert "tax" in result
         assert "sub-categories" in result
+        # Phase 20A: vocabulary tags included
+        assert "preferred tags" in result
 
     @pytest.mark.asyncio
     async def test_ai_categorize_returns_sub_category(self):
@@ -364,6 +450,50 @@ class TestTaxonomyRouter:
         req = MergeTagsRequest(source_tag="py", target_tag="python")
         assert req.source_tag == "py"
         assert req.target_tag == "python"
+
+
+class TestSuggestTagsEndpoint:
+    """Test tag suggestion endpoint (Phase 20A)."""
+
+    @pytest.mark.asyncio
+    async def test_suggest_tags_with_domain(self):
+        """Suggest tags returns vocabulary tags for a specific domain."""
+        with patch("routers.taxonomy.get_neo4j") as mock_neo4j:
+            mock_driver = MagicMock()
+            mock_session = MagicMock()
+            mock_result = MagicMock()
+            mock_result.__iter__ = MagicMock(return_value=iter([]))
+            mock_session.run.return_value = mock_result
+            mock_driver.session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_driver.session.return_value.__exit__ = MagicMock(return_value=False)
+            mock_neo4j.return_value = mock_driver
+
+            from routers.taxonomy import suggest_tags_endpoint
+
+            result = await suggest_tags_endpoint(domain="coding", prefix="", limit=10)
+            assert len(result) > 0
+            assert all(r["source"] == "vocabulary" for r in result)
+            tag_names = [r["name"] for r in result]
+            assert "python" in tag_names
+
+    @pytest.mark.asyncio
+    async def test_suggest_tags_with_prefix(self):
+        """Suggest tags filters by prefix."""
+        with patch("routers.taxonomy.get_neo4j") as mock_neo4j:
+            mock_driver = MagicMock()
+            mock_session = MagicMock()
+            mock_result = MagicMock()
+            mock_result.__iter__ = MagicMock(return_value=iter([]))
+            mock_session.run.return_value = mock_result
+            mock_driver.session.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_driver.session.return_value.__exit__ = MagicMock(return_value=False)
+            mock_neo4j.return_value = mock_driver
+
+            from routers.taxonomy import suggest_tags_endpoint
+
+            result = await suggest_tags_endpoint(domain="coding", prefix="py", limit=30)
+            assert len(result) > 0
+            assert all(r["name"].startswith("py") for r in result)
 
 
 class TestIngestionWithTaxonomy:

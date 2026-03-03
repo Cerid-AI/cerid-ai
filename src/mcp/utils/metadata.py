@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
 import tiktoken
@@ -49,7 +49,7 @@ def _get_nlp():
 # Local metadata extraction (no API calls)
 # ---------------------------------------------------------------------------
 
-def extract_metadata(text: str, filename: str, domain: str) -> Dict[str, Any]:
+def extract_metadata(text: str, filename: str, domain: str) -> dict[str, Any]:
     """
     Extract core metadata from parsed text. No external calls.
 
@@ -70,11 +70,41 @@ def extract_metadata(text: str, filename: str, domain: str) -> Dict[str, Any]:
         "char_count": char_count,
         "estimated_tokens": token_count,
         "keywords": json.dumps(keywords),  # JSON string — ChromaDB can't store lists
-        "summary": text[:200].replace("\n", " ").strip(),
+        "summary": _extract_summary(text),
     }
 
 
-def _extract_keywords(text: str, max_keywords: int = 10) -> List[str]:
+def _extract_summary(text: str, max_len: int = 200) -> str:
+    """Extract a meaningful summary from the first portion of text.
+
+    Prefers the first complete sentence over a hard truncation at max_len.
+    Strips whitespace, control characters, and Markdown headings.
+    """
+    import re
+
+    # Collapse whitespace and strip control chars
+    clean = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text[:500])
+    clean = re.sub(r"\s+", " ", clean).strip()
+    # Strip leading Markdown headings
+    clean = re.sub(r"^#{1,6}\s+", "", clean)
+
+    if len(clean) <= max_len:
+        return clean
+
+    # Try to end at the first sentence boundary
+    match = re.search(r"[.!?]\s", clean[:max_len])
+    if match:
+        return clean[: match.end()].strip()
+
+    # Fall back to word boundary near max_len
+    truncated = clean[:max_len]
+    last_space = truncated.rfind(" ")
+    if last_space > max_len // 2:
+        return truncated[:last_space] + "..."
+    return truncated + "..."
+
+
+def _extract_keywords(text: str, max_keywords: int = 10) -> list[str]:
     """
     Extract keywords using spaCy NER if available, else simple word frequency.
     Uses cached model to avoid reloading on every call.
@@ -97,7 +127,7 @@ def _extract_keywords(text: str, max_keywords: int = 10) -> List[str]:
     return unique[:max_keywords]
 
 
-def _extract_keywords_simple(text: str, max_keywords: int = 10) -> List[str]:
+def _extract_keywords_simple(text: str, max_keywords: int = 10) -> list[str]:
     """Fallback keyword extraction using word frequency."""
     import re
     from collections import Counter
@@ -140,15 +170,19 @@ def _build_taxonomy_prompt_section() -> str:
     for domain_name, info in config.TAXONOMY.items():
         sub_cats = info.get("sub_categories", ["general"])
         desc = info.get("description", "")
-        lines.append(f"  {domain_name} ({desc}): sub-categories = {', '.join(sub_cats)}")
+        vocab = config.TAG_VOCABULARY.get(domain_name, [])
+        line = f"  {domain_name} ({desc}): sub-categories = {', '.join(sub_cats)}"
+        if vocab:
+            line += f"; preferred tags = {', '.join(vocab[:10])}"
+        lines.append(line)
     return "\n".join(lines)
 
 
 async def ai_categorize(
     text: str,
     filename: str,
-    mode: Optional[str] = None,
-) -> Dict[str, Any]:
+    mode: str | None = None,
+) -> dict[str, Any]:
     """
     Classify a document using Bifrost AI. Token-efficient: sends a snippet,
     not the full document.
@@ -183,8 +217,10 @@ async def ai_categorize(
     prompt = (
         f"Classify this document into exactly one domain and sub-category.\n\n"
         f"Available taxonomy:\n{taxonomy_section}\n\n"
-        f"Also suggest up to 5 descriptive tags (lowercase, hyphenated), "
-        f"extract up to 5 keywords, and write a 1-sentence summary.\n\n"
+        f"Also suggest up to 5 descriptive tags (lowercase, hyphenated). "
+        f"Prefer the 'preferred tags' listed for the chosen domain when they fit. "
+        f"You may add 1-2 free-form tags if nothing in the vocabulary matches.\n"
+        f"Extract up to 5 keywords, and write a 1-sentence summary.\n\n"
         f"Filename: {filename}\n"
         f"Content:\n{snippet}\n\n"
         f'Respond ONLY with JSON: '
@@ -248,3 +284,33 @@ async def ai_categorize(
     except Exception as e:
         logger.error(f"AI categorization failed: {e}")
         return {}
+
+
+# ---------------------------------------------------------------------------
+# Tag quality scoring
+# ---------------------------------------------------------------------------
+
+def score_tags(tags: list[str], domain: str) -> float:
+    """Score a tag list based on vocabulary membership and diversity.
+
+    Returns a float in [0.0, 1.0]:
+      - 1.0 = all tags from vocabulary, good diversity
+      - 0.0 = no tags at all
+
+    Scoring:
+      - Each vocabulary tag contributes 0.2 (up to 1.0)
+      - Each free-form tag contributes 0.1 (up to 0.5)
+      - Capped at 1.0
+    """
+    if not tags:
+        return 0.0
+
+    vocab = set(config.TAG_VOCABULARY.get(domain, []))
+    score = 0.0
+    for tag in tags[:10]:  # cap at 10
+        tag_lower = tag.strip().lower()
+        if tag_lower in vocab:
+            score += 0.2
+        else:
+            score += 0.1
+    return min(1.0, round(score, 2))

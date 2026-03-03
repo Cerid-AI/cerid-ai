@@ -3,7 +3,7 @@
 
 """MCP SSE transport — thin protocol layer.
 
-Tool schemas and execute_tool() dispatcher live in tools.py (Phase 10C, F2).
+Tool schemas and execute_tool() dispatcher live in tools.py.
 This module handles only SSE streaming, session management, and JSON-RPC framing.
 """
 from __future__ import annotations
@@ -12,7 +12,6 @@ import asyncio
 import json
 import logging
 import uuid
-from typing import Dict
 
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import StreamingResponse
@@ -23,7 +22,7 @@ router = APIRouter()
 logger = logging.getLogger("ai-companion")
 
 # Session message queues (shared between GET /mcp/sse and POST /mcp/messages)
-_sessions: Dict[str, asyncio.Queue] = {}
+_sessions: dict[str, asyncio.Queue] = {}
 _MAX_SESSIONS = 100
 
 
@@ -115,7 +114,7 @@ async def mcp_sse_endpoint(request: Request):
                     data = json.dumps(msg)
                     yield f"event: message\ndata: {data}\n\n"
                     logger.info(f"[MCP] Sent via SSE: {msg.get('id', 'notification')}")
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield ": keepalive\n\n"
                 count += 1
         finally:

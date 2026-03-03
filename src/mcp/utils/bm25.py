@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import config
 
@@ -32,7 +32,7 @@ except ImportError:
     logger.warning("bm25s/PyStemmer not installed — BM25 hybrid search disabled")
 
 
-def _tokenize(text: str) -> List[str]:
+def _tokenize(text: str) -> list[str]:
     """Tokenize with stemming and stopword removal via bm25s."""
     if not _bm25s_available:
         return []
@@ -58,19 +58,19 @@ class BM25Index:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self._corpus_file = self.data_dir / f"{domain}.jsonl"
 
-        self._texts: List[str] = []
-        self._doc_ids: List[str] = []
+        self._texts: list[str] = []
+        self._doc_ids: list[str] = []
         self._doc_id_set: set = set()
-        self._retriever: Optional[Any] = None
+        self._retriever: Any | None = None
 
         self._load()
 
-    def add_documents(self, chunk_ids: List[str], texts: List[str]) -> int:
+    def add_documents(self, chunk_ids: list[str], texts: list[str]) -> int:
         """Add documents to the index. Skips duplicates. Returns count added."""
         if not _bm25s_available:
             return 0
 
-        new_entries: List[Dict] = []
+        new_entries: list[dict] = []
         for chunk_id, text in zip(chunk_ids, texts):
             if chunk_id in self._doc_id_set:
                 continue
@@ -87,7 +87,7 @@ class BM25Index:
 
         return len(new_entries)
 
-    def search(self, query: str, top_k: int = 10) -> List[Tuple[str, float]]:
+    def search(self, query: str, top_k: int = 10) -> list[tuple[str, float]]:
         """
         Search the index. Returns (chunk_id, normalized_score) tuples.
         Scores are normalized to [0, 1] by dividing by the max score.
@@ -116,7 +116,7 @@ class BM25Index:
         if max_score <= 0:
             return []
 
-        output: List[Tuple[str, float]] = []
+        output: list[tuple[str, float]] = []
         for i in range(scores.shape[1]):
             score = float(scores[0, i])
             if score <= 0:
@@ -147,7 +147,7 @@ class BM25Index:
             return
         migrated = False
         try:
-            with open(self._corpus_file, "r") as f:
+            with open(self._corpus_file) as f:
                 for line in f:
                     line = line.strip()
                     if not line:
@@ -187,7 +187,7 @@ class BM25Index:
             self._doc_id_set = set()
             self._retriever = None
 
-    def _append_to_disk(self, entries: List[Dict]) -> None:
+    def _append_to_disk(self, entries: list[dict]) -> None:
         try:
             with open(self._corpus_file, "a") as f:
                 for entry in entries:
@@ -200,7 +200,7 @@ class BM25Index:
 # Module-level index cache
 # ---------------------------------------------------------------------------
 
-_indexes: Dict[str, BM25Index] = {}
+_indexes: dict[str, BM25Index] = {}
 
 
 def get_index(domain: str) -> BM25Index:
@@ -210,7 +210,7 @@ def get_index(domain: str) -> BM25Index:
     return _indexes[domain]
 
 
-def index_chunks(domain: str, chunk_ids: List[str], texts: List[str]) -> int:
+def index_chunks(domain: str, chunk_ids: list[str], texts: list[str]) -> int:
     """Index chunks for BM25 search. Called during ingestion."""
     idx = get_index(domain)
     return idx.add_documents(chunk_ids, texts)
@@ -218,7 +218,7 @@ def index_chunks(domain: str, chunk_ids: List[str], texts: List[str]) -> int:
 
 def search_bm25(
     domain: str, query: str, top_k: int = 10
-) -> List[Tuple[str, float]]:
+) -> list[tuple[str, float]]:
     """Search a domain's BM25 index. Returns (chunk_id, score) tuples."""
     idx = get_index(domain)
     return idx.search(query, top_k)

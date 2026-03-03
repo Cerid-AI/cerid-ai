@@ -6,14 +6,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 from parsers._utils import _strip_html_tags, _strip_rtf
 from parsers.registry import _MAX_TEXT_CHARS, logger, register_parser
 
 
 @register_parser([".epub"])
-def parse_epub(file_path: str) -> Dict[str, Any]:
+def parse_epub(file_path: str) -> dict[str, Any]:
     """Parse EPUB — extract XHTML chapters in reading order via OPF manifest."""
     import xml.etree.ElementTree as ET
     import zipfile
@@ -118,7 +118,7 @@ def parse_epub(file_path: str) -> Dict[str, Any]:
 
 
 @register_parser([".rtf"])
-def parse_rtf(file_path: str) -> Dict[str, Any]:
+def parse_rtf(file_path: str) -> dict[str, Any]:
     """Parse RTF — extract plain text via state-machine RTF stripper."""
     path = Path(file_path)
     raw = path.read_bytes()

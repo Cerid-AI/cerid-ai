@@ -7,13 +7,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from parsers.registry import _MAX_TEXT_CHARS, logger, register_parser
 
 
 @register_parser([".csv", ".tsv"])
-def parse_csv(file_path: str) -> Dict[str, Any]:
+def parse_csv(file_path: str) -> dict[str, Any]:
     """Parse CSV/TSV with auto-delimiter detection and schema summary."""
     import csv as csv_module
 
@@ -24,7 +24,7 @@ def parse_csv(file_path: str) -> Dict[str, Any]:
 
     delimiter = "\t" if ext == ".tsv" else ","
     try:
-        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+        with open(file_path, encoding="utf-8", errors="replace") as f:
             sample = f.read(8192)
         try:
             dialect = csv_module.Sniffer().sniff(sample, delimiters=",;\t|")
@@ -82,7 +82,7 @@ def parse_csv(file_path: str) -> Dict[str, Any]:
 
     text = "\n".join(schema_lines) + "\n\n--- Sample (first 5 rows) ---\n" + sample_text + "\n\n--- Full Data ---\n" + full_text
 
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "text": text[:_MAX_TEXT_CHARS],
         "file_type": ext.lstrip("."),
         "page_count": None,
@@ -97,7 +97,7 @@ def parse_csv(file_path: str) -> Dict[str, Any]:
 
 
 @register_parser([".html", ".htm"])
-def parse_html(file_path: str) -> Dict[str, Any]:
+def parse_html(file_path: str) -> dict[str, Any]:
     """Parse HTML files, stripping tags to extract readable text."""
     path = Path(file_path)
     raw = path.read_text(encoding="utf-8", errors="replace")
@@ -108,7 +108,7 @@ def parse_html(file_path: str) -> Dict[str, Any]:
         class _TextExtractor(HTMLParser):
             def __init__(self):
                 super().__init__()
-                self._parts: List[str] = []
+                self._parts: list[str] = []
                 self._skip = False
 
             def handle_starttag(self, tag, attrs):
@@ -147,7 +147,7 @@ def parse_html(file_path: str) -> Dict[str, Any]:
     ".java", ".go", ".rs", ".rb", ".cpp", ".c", ".h", ".cs",
     ".sql", ".r", ".swift", ".kt",
 ])
-def parse_text(file_path: str) -> Dict[str, Any]:
+def parse_text(file_path: str) -> dict[str, Any]:
     path = Path(file_path)
 
     try:

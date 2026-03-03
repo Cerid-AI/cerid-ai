@@ -11,11 +11,11 @@ and relevant ID sets to compute standard IR metrics.
 from __future__ import annotations
 
 import math
-from typing import Sequence, Set
+from collections.abc import Sequence
 
 
 def precision_at_k(
-    ranked_ids: Sequence[str], relevant_ids: Set[str], k: int
+    ranked_ids: Sequence[str], relevant_ids: set[str], k: int
 ) -> float:
     """Proportion of top-k results that are relevant."""
     if k <= 0:
@@ -28,7 +28,7 @@ def precision_at_k(
 
 
 def recall_at_k(
-    ranked_ids: Sequence[str], relevant_ids: Set[str], k: int
+    ranked_ids: Sequence[str], relevant_ids: set[str], k: int
 ) -> float:
     """Proportion of relevant items found in top-k results."""
     if not relevant_ids or k <= 0:
@@ -38,7 +38,7 @@ def recall_at_k(
     return hits / len(relevant_ids)
 
 
-def mrr(ranked_ids: Sequence[str], relevant_ids: Set[str]) -> float:
+def mrr(ranked_ids: Sequence[str], relevant_ids: set[str]) -> float:
     """
     Mean Reciprocal Rank — reciprocal of the rank of the first relevant result.
     Returns 0.0 if no relevant results are found.
@@ -50,7 +50,7 @@ def mrr(ranked_ids: Sequence[str], relevant_ids: Set[str]) -> float:
 
 
 def ndcg_at_k(
-    ranked_ids: Sequence[str], relevant_ids: Set[str], k: int
+    ranked_ids: Sequence[str], relevant_ids: set[str], k: int
 ) -> float:
     """
     Normalized Discounted Cumulative Gain at k.
@@ -79,7 +79,7 @@ def ndcg_at_k(
 
 
 def average_precision(
-    ranked_ids: Sequence[str], relevant_ids: Set[str]
+    ranked_ids: Sequence[str], relevant_ids: set[str]
 ) -> float:
     """
     Average Precision — mean of precision values at each relevant result position.

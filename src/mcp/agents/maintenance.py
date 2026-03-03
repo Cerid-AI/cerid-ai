@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import chromadb
 import httpx
@@ -28,7 +28,7 @@ def check_system_health(
     neo4j_driver,
     chroma_client: chromadb.HttpClient,
     redis_client,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Comprehensive health check — data integrity, collection counts, Bifrost reachability."""
     health = {
         "timestamp": utcnow_iso(),
@@ -80,16 +80,9 @@ def check_system_health(
     except Exception as e:
         health["services"]["redis"] = f"error: {e}"
 
-    try:
-        import asyncio
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # Can't run sync check inside async — mark as skipped
-            health["services"]["bifrost"] = "skipped (async context)"
-        else:
-            health["services"]["bifrost"] = _check_bifrost_sync()
-    except Exception as e:
-        health["services"]["bifrost"] = f"skipped: {e}"
+    # Bifrost check is async-only; callers in async context (maintain())
+    # overwrite this with the real result after awaiting _check_bifrost_async().
+    health["services"]["bifrost"] = "skipped (sync context)"
 
     service_statuses = health["services"]
     all_ok = all(
@@ -135,9 +128,9 @@ async def check_bifrost_health() -> str:
 def purge_artifacts(
     neo4j_driver,
     chroma_client: chromadb.HttpClient,
-    artifact_ids: List[str],
+    artifact_ids: list[str],
     redis_client=None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Remove specified artifacts from Neo4j and ChromaDB."""
     purged = []
     errors = []
@@ -211,7 +204,7 @@ def purge_artifacts(
 
 def analyze_collections(
     chroma_client: chromadb.HttpClient,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Analyze ChromaDB collection health and size distribution."""
     collections = chroma_client.list_collections()
     analysis = {}
@@ -256,10 +249,10 @@ async def maintain(
     neo4j_driver,
     chroma_client: chromadb.HttpClient,
     redis_client,
-    actions: Optional[List[str]] = None,
+    actions: list[str] | None = None,
     stale_days: int = 90,
     auto_purge: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Run maintenance routines on the knowledge base."""
     all_actions = {"health", "stale", "collections", "orphans"}
     if actions is None:

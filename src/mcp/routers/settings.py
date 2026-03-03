@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -24,31 +23,31 @@ _VERSION = "0.8.0"
 class SettingsUpdateRequest(BaseModel):
     """Subset of settings that can be changed at runtime without restart."""
 
-    categorize_mode: Optional[str] = Field(
+    categorize_mode: str | None = Field(
         None, description="Categorization tier: manual, smart, or pro"
     )
-    enable_feedback_loop: Optional[bool] = Field(
+    enable_feedback_loop: bool | None = Field(
         None, description="Toggle conversation feedback loop"
     )
-    enable_hallucination_check: Optional[bool] = Field(
+    enable_hallucination_check: bool | None = Field(
         None, description="Toggle hallucination detection on feedback"
     )
-    enable_memory_extraction: Optional[bool] = Field(
+    enable_memory_extraction: bool | None = Field(
         None, description="Toggle memory extraction from conversations"
     )
-    hallucination_threshold: Optional[float] = Field(
+    hallucination_threshold: float | None = Field(
         None, ge=0.0, le=1.0, description="Confidence threshold for hallucination flagging"
     )
-    cost_sensitivity: Optional[str] = Field(
+    cost_sensitivity: str | None = Field(
         None, description="Cost sensitivity level: low, medium, or high"
     )
-    enable_auto_inject: Optional[bool] = Field(
+    enable_auto_inject: bool | None = Field(
         None, description="Toggle automatic KB context injection for high-confidence results"
     )
-    auto_inject_threshold: Optional[float] = Field(
+    auto_inject_threshold: float | None = Field(
         None, ge=0.5, le=1.0, description="Minimum relevance score for auto-injection"
     )
-    enable_model_router: Optional[bool] = Field(
+    enable_model_router: bool | None = Field(
         None, description="Toggle automatic model routing based on query complexity"
     )
 

@@ -44,6 +44,20 @@ if [ ! -d "$ARCHIVE_DIR" ] && [ ! -L "$ARCHIVE_DIR" ]; then
     mkdir -p "$ARCHIVE_DIR"/{coding,finance,projects,personal,general,inbox}
 fi
 
+# Detect LAN IP for remote access (iPad, other machines)
+if [ -z "${CERID_HOST:-}" ]; then
+    LAN_IP=$(ipconfig getifaddr en0 2>/dev/null || ip -4 addr show scope global 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1 || echo "")
+    if [ -n "$LAN_IP" ]; then
+        export CERID_HOST="$LAN_IP"
+    else
+        export CERID_HOST="localhost"
+    fi
+fi
+echo "[net] CERID_HOST=$CERID_HOST"
+
+# Set runtime URLs for web container based on CERID_HOST
+export VITE_MCP_URL="http://${CERID_HOST}:8888"
+
 # Ensure network exists
 docker network create llm-network 2>/dev/null || true
 
@@ -66,6 +80,20 @@ docker compose -f "$CERID_ROOT/src/web/docker-compose.yml" --env-file "$ENV_FILE
 
 echo "[5/5] Starting LibreChat..."
 docker compose -f "$CERID_ROOT/stacks/librechat/docker-compose.yml" --env-file "$ENV_FILE" up -d
+
+# Optional: Caddy reverse proxy for local HTTPS
+GATEWAY_ENABLED=$(grep -s '^CERID_GATEWAY=true' "$ENV_FILE" 2>/dev/null || echo "")
+if [ -n "${GATEWAY_ENABLED}" ] || [ "${CERID_GATEWAY:-}" = "true" ]; then
+    echo "[6/6] Starting Caddy Gateway (HTTPS)..."
+    docker compose -f "$CERID_ROOT/stacks/gateway/docker-compose.yml" --env-file "$ENV_FILE" up -d
+fi
+
+# Optional: Cloudflare Tunnel for public demos
+TUNNEL_TOKEN=$(grep -s '^CLOUDFLARE_TUNNEL_TOKEN=' "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- || echo "")
+if [ -n "${TUNNEL_TOKEN}" ] && [ "${TUNNEL_TOKEN}" != "" ]; then
+    echo "[7/7] Starting Cloudflare Tunnel..."
+    docker compose -f "$CERID_ROOT/stacks/tunnel/docker-compose.yml" --env-file "$ENV_FILE" up -d
+fi
 
 echo ""
 echo "Waiting 30s for services to initialize..."
@@ -93,3 +121,12 @@ echo "LibreChat: http://localhost:3080"
 echo "Dashboard: http://localhost:8501"
 echo "MCP Docs:  http://localhost:8888/docs"
 echo "Bifrost:   http://localhost:8080"
+if [ "$CERID_HOST" != "localhost" ]; then
+    echo ""
+    echo "=== LAN Access (iPad / other devices) ==="
+    echo "React GUI: http://${CERID_HOST}:3000"
+    echo "MCP API:   http://${CERID_HOST}:8888"
+    if [ -n "${GATEWAY_ENABLED}" ] || [ "${CERID_GATEWAY:-}" = "true" ]; then
+        echo "HTTPS:     https://${CERID_HOST} (Caddy, self-signed cert)"
+    fi
+fi

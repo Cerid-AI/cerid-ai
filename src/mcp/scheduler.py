@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-Scheduled Maintenance Engine (Phase 4C.1).
+Scheduled Maintenance Engine.
 
 Runs background tasks on configurable schedules using APScheduler.
 Execution results are logged to Redis for monitoring.
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, Optional
+from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -24,7 +24,7 @@ from utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.scheduler")
 
-_scheduler: Optional[AsyncIOScheduler] = None
+_scheduler: AsyncIOScheduler | None = None
 
 
 def _log_execution(job_name: str, status: str, duration: float, detail: str = "") -> None:
@@ -163,12 +163,12 @@ def stop_scheduler() -> None:
         _scheduler = None
 
 
-def get_scheduler() -> Optional[AsyncIOScheduler]:
+def get_scheduler() -> AsyncIOScheduler | None:
     """Get the current scheduler instance."""
     return _scheduler
 
 
-def get_job_status() -> Dict[str, Any]:
+def get_job_status() -> dict[str, Any]:
     """Return status of all scheduled jobs."""
     if _scheduler is None:
         return {"status": "not_running", "jobs": []}

@@ -10,7 +10,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import config
 
@@ -67,7 +67,7 @@ def _count_jsonl_lines(filepath: str) -> int:
     """Return number of non-empty lines in a JSONL file."""
     try:
         count = 0
-        with open(filepath, "r", encoding="utf-8") as fh:
+        with open(filepath, encoding="utf-8") as fh:
             for line in fh:
                 if line.strip():
                     count += 1
@@ -76,7 +76,7 @@ def _count_jsonl_lines(filepath: str) -> int:
         return 0
 
 
-def _write_jsonl(filepath: str, rows: List[Dict[str, Any]]) -> int:
+def _write_jsonl(filepath: str, rows: list[dict[str, Any]]) -> int:
     """Write a list of dicts to a JSONL file. Returns number of rows written."""
     written = 0
     with open(filepath, "w", encoding="utf-8") as fh:
@@ -89,7 +89,7 @@ def _write_jsonl(filepath: str, rows: List[Dict[str, Any]]) -> int:
 def _iter_jsonl(filepath: str):
     """Yield parsed dicts from a JSONL file, skipping blank/invalid lines."""
     try:
-        with open(filepath, "r", encoding="utf-8") as fh:
+        with open(filepath, encoding="utf-8") as fh:
             for lineno, line in enumerate(fh, start=1):
                 line = line.strip()
                 if not line:

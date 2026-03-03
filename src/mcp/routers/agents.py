@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -21,10 +20,10 @@ logger = logging.getLogger("ai-companion")
 
 class AgentQueryRequest(BaseModel):
     query: str
-    domains: Optional[List[str]] = None
+    domains: list[str] | None = None
     top_k: int = Field(10, ge=1, le=100)
     use_reranking: bool = True
-    conversation_messages: Optional[List[Dict[str, str]]] = None
+    conversation_messages: list[dict[str, str]] | None = None
 
 
 class TriageFileRequest(BaseModel):
@@ -35,12 +34,12 @@ class TriageFileRequest(BaseModel):
 
 
 class TriageBatchRequest(BaseModel):
-    files: List[Dict[str, str]]
+    files: list[dict[str, str]]
     default_mode: str = ""
 
 
 class RectifyRequest(BaseModel):
-    checks: Optional[List[str]] = None
+    checks: list[str] | None = None
     auto_fix: bool = False
     stale_days: int = Field(90, ge=1, le=3650)
 
@@ -48,8 +47,8 @@ class RectifyRequest(BaseModel):
 class HallucinationCheckRequest(BaseModel):
     response_text: str
     conversation_id: str
-    threshold: Optional[float] = Field(None, ge=0.0, le=1.0)
-    model: Optional[str] = None
+    threshold: float | None = Field(None, ge=0.0, le=1.0)
+    model: str | None = None
 
 
 class MemoryExtractionRequest(BaseModel):
@@ -63,27 +62,27 @@ class MemoryArchiveRequest(BaseModel):
 
 
 class AuditRequest(BaseModel):
-    reports: Optional[List[str]] = None
+    reports: list[str] | None = None
     hours: int = Field(24, ge=1, le=8760)
 
 
 class MaintenanceRequest(BaseModel):
-    actions: Optional[List[str]] = None
+    actions: list[str] | None = None
     stale_days: int = Field(90, ge=1, le=3650)
     auto_purge: bool = False
 
 
 class CurateRequest(BaseModel):
     mode: str = Field("audit", pattern="^(audit)$")
-    domains: Optional[List[str]] = None
+    domains: list[str] | None = None
     max_artifacts: int = Field(200, ge=1, le=1000)
     generate_synopses: bool = False
-    synopsis_model: Optional[str] = None
+    synopsis_model: str | None = None
 
 
 class CurateEstimateRequest(BaseModel):
     synopsis_model: str = ""
-    domains: Optional[List[str]] = None
+    domains: list[str] | None = None
     max_artifacts: int = Field(200, ge=1, le=1000)
 
 
@@ -308,8 +307,8 @@ async def memory_archive_endpoint(req: MemoryArchiveRequest):
 class VerifyStreamRequest(BaseModel):
     response_text: str
     conversation_id: str
-    threshold: Optional[float] = Field(None, ge=0.0, le=1.0)
-    model: Optional[str] = None
+    threshold: float | None = Field(None, ge=0.0, le=1.0)
+    model: str | None = None
 
 
 @router.post("/agent/verify-stream")

@@ -114,6 +114,12 @@ export interface TagInfo {
   count: number
 }
 
+export interface TagSuggestion {
+  name: string
+  source: "vocabulary" | "existing"
+  usage_count: number
+}
+
 export interface Artifact {
   id: string
   filename: string

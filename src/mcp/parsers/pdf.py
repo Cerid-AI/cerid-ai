@@ -6,13 +6,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 from parsers.registry import _MAX_TEXT_CHARS, logger, register_parser
 
 
 @register_parser([".pdf"])
-def parse_pdf(file_path: str) -> Dict[str, Any]:
+def parse_pdf(file_path: str) -> dict[str, Any]:
     """Structure-aware PDF extraction — tables as Markdown, plain text for the rest."""
     import pdfplumber
 
@@ -113,7 +113,7 @@ def parse_pdf(file_path: str) -> Dict[str, Any]:
             f"{table_count} tables extracted as Markdown"
         )
 
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "text": text[:_MAX_TEXT_CHARS],
         "file_type": "pdf",
         "page_count": page_count,

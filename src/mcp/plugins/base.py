@@ -11,7 +11,8 @@ Each plugin type has a specific contract for what register() should do.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict
+from collections.abc import Callable
+from typing import Any
 
 
 class CeridPlugin(ABC):
@@ -77,7 +78,7 @@ class ParserPlugin(CeridPlugin):
     """
 
     @abstractmethod
-    def get_parsers(self) -> Dict[str, Callable[[str], Dict[str, Any]]]:
+    def get_parsers(self) -> dict[str, Callable[[str], dict[str, Any]]]:
         """
         Return mapping of file extensions to parser functions.
 

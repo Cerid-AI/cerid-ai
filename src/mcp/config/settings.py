@@ -12,6 +12,7 @@ import os
 # ---------------------------------------------------------------------------
 CHUNK_MAX_TOKENS = 512
 CHUNK_OVERLAP = 0.2  # 20% overlap between chunks
+CHUNKING_MODE = os.getenv("CHUNKING_MODE", "semantic")  # "token" or "semantic"
 
 # ---------------------------------------------------------------------------
 # Categorization tiers
@@ -147,7 +148,7 @@ AUTO_INJECT_MAX = int(os.getenv("AUTO_INJECT_MAX", "3"))
 CONTEXT_MAX_CHUNKS_PER_ARTIFACT = 2  # max chunks from same artifact in assembled context
 
 # ---------------------------------------------------------------------------
-# Quality Scoring (Phase 14)
+# Quality Scoring
 # ---------------------------------------------------------------------------
 QUALITY_WEIGHT_SUMMARY = 0.30       # weight for summary quality dimension
 QUALITY_WEIGHT_KEYWORDS = 0.25      # weight for keyword quality dimension

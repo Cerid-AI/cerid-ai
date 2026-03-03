@@ -10,13 +10,11 @@ the full compiled graph (which requires langgraph runtime).
 from unittest.mock import patch
 
 from agents.triage import (
-    TriageState,
     chunk_node,
     extract_metadata_node,
     parse_node,
     route_categorization,
     should_categorize,
-    should_continue_after_categorize,
     should_continue_after_parse,
     should_continue_after_validate,
     validate_node,
@@ -49,25 +47,6 @@ def _base_state(**overrides) -> dict:
     }
     state.update(overrides)
     return state
-
-
-# ---------------------------------------------------------------------------
-# Tests: TriageState dataclass
-# ---------------------------------------------------------------------------
-
-class TestTriageState:
-    def test_default_values(self):
-        state = TriageState()
-        assert state.status == "pending"
-        assert state.domain == ""
-        assert state.chunks == []
-        assert state.metadata == {}
-        assert state.needs_ai_categorization is False
-
-    def test_custom_values(self):
-        state = TriageState(file_path="/tmp/test.py", domain="coding")
-        assert state.file_path == "/tmp/test.py"
-        assert state.domain == "coding"
 
 
 # ---------------------------------------------------------------------------
@@ -285,6 +264,3 @@ class TestRoutingFunctions:
 
     def test_no_ai_routes_to_metadata(self):
         assert should_categorize({"needs_ai_categorization": False}) == "extract_metadata"
-
-    def test_after_categorize_always_metadata(self):
-        assert should_continue_after_categorize({}) == "extract_metadata"

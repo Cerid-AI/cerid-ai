@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import config
+from middleware.request_id import get_request_id
 from utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.cache")
@@ -23,8 +24,8 @@ def log_event(
     artifact_id: str,
     domain: str,
     filename: str,
-    extra: Optional[Dict[str, Any]] = None,
-    conversation_id: Optional[str] = None,
+    extra: dict[str, Any] | None = None,
+    conversation_id: str | None = None,
 ) -> None:
     """
     Append an event to the Redis audit log.
@@ -37,7 +38,7 @@ def log_event(
         extra: Additional context (e.g. old_domain for recategorize)
         conversation_id: Optional conversation ID for feedback loop events
     """
-    entry: Dict[str, Any] = {
+    entry: dict[str, Any] = {
         "event": event_type,
         "artifact_id": artifact_id,
         "domain": domain,
@@ -45,6 +46,9 @@ def log_event(
         "timestamp": utcnow_iso(),
         **(extra or {}),
     }
+    rid = get_request_id()
+    if rid:
+        entry["request_id"] = rid
     if conversation_id:
         entry["conversation_id"] = conversation_id
     payload = json.dumps(entry)
@@ -55,7 +59,7 @@ def log_event(
         logger.error(f"Failed to log event to Redis: {e}")
 
 
-def get_log(redis_client, limit: int = 50) -> List[Dict[str, Any]]:
+def get_log(redis_client, limit: int = 50) -> list[dict[str, Any]]:
     """Read recent audit log entries."""
     try:
         entries = redis_client.lrange(config.REDIS_INGEST_LOG, 0, limit - 1)
@@ -109,7 +113,7 @@ REDIS_VERIFICATION_METRICS_TTL = 86400 * 30  # 30 days
 def log_verification_metrics(
     redis_client,
     conversation_id: str,
-    model: Optional[str] = None,
+    model: str | None = None,
     verified: int = 0,
     unverified: int = 0,
     uncertain: int = 0,
@@ -139,7 +143,7 @@ def log_claim_feedback(
     conversation_id: str,
     claim_index: int,
     correct: bool,
-    model: Optional[str] = None,
+    model: str | None = None,
 ) -> None:
     """Store user feedback on a verification claim."""
     entry = json.dumps({

@@ -1,12 +1,14 @@
 // Copyright (c) 2026 Justin Michaels. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useRef, useEffect, useCallback, useState, useMemo } from "react"
+import { useRef, useEffect, useCallback, useState, useMemo, useSyncExternalStore } from "react"
 import { Group, Panel, Separator as PanelSeparator } from "react-resizable-panels"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { Plus, Database, Rss, LayoutDashboard, Zap, Sparkles, Shield } from "lucide-react"
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
+import { Plus, Database, Rss, LayoutDashboard, Zap, Sparkles, Shield, MoreVertical } from "lucide-react"
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover"
 import { Badge } from "@/components/ui/badge"
 import { MessageBubble, type MessageVerificationStatus } from "./message-bubble"
 import { ModelSwitchDivider } from "./model-switch-divider"
@@ -31,7 +33,16 @@ import type { ChatMessage, SourceRef, HallucinationReport } from "@/lib/types"
 import { MODELS } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
+const NARROW_MQ = "(max-width: 1024px)"
+const narrowSubscribe = (cb: () => void) => {
+  const mq = window.matchMedia(NARROW_MQ)
+  mq.addEventListener("change", cb)
+  return () => mq.removeEventListener("change", cb)
+}
+const getIsNarrow = () => window.matchMedia(NARROW_MQ).matches
+
 export function ChatPanel() {
+  const isNarrow = useSyncExternalStore(narrowSubscribe, getIsNarrow)
   const {
     active,
     activeId,
@@ -281,58 +292,11 @@ export function ChatPanel() {
       <div className="flex items-center gap-2 border-b px-4 py-2">
         <Button variant="ghost" size="sm" onClick={() => create(selectedModel)}>
           <Plus className="mr-1 h-4 w-4" />
-          New chat
+          {!isNarrow && "New chat"}
         </Button>
         <div className="flex-1" />
         <TooltipProvider delayDuration={0}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className={cn("h-8 w-8", feedbackLoop && "text-primary")}
-                onClick={toggleFeedbackLoop}
-                aria-label={feedbackLoop ? "Disable feedback loop" : "Enable feedback loop"}
-              >
-                <Rss className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {feedbackLoop ? "Feedback loop: ON (responses saved to KB)" : "Feedback loop: OFF"}
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className={cn("h-8 w-8", showDashboard && "text-primary")}
-                onClick={toggleDashboard}
-                aria-label={showDashboard ? "Hide metrics dashboard" : "Show metrics dashboard"}
-              >
-                <LayoutDashboard className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {showDashboard ? "Hide metrics dashboard" : "Show metrics dashboard"}
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className={cn("h-8 w-8", autoModelSwitch && "text-primary")}
-                onClick={toggleAutoModelSwitch}
-                aria-label={autoModelSwitch ? "Disable smart model routing" : "Enable smart model routing"}
-              >
-                <Zap className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {autoModelSwitch ? "Smart model routing: ON" : "Smart model routing: OFF"}
-            </TooltipContent>
-          </Tooltip>
+          {/* Always visible: KB toggle */}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -349,6 +313,7 @@ export function ChatPanel() {
               {showKB ? "Hide knowledge context" : "Show knowledge context"}
             </TooltipContent>
           </Tooltip>
+          {/* Always visible: Verification */}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -365,6 +330,92 @@ export function ChatPanel() {
               {hallucinationEnabled ? "Response verification: ON" : "Response verification: OFF"}
             </TooltipContent>
           </Tooltip>
+          {/* Wide viewport: show all buttons inline */}
+          {!isNarrow && (
+            <>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={cn("h-8 w-8", feedbackLoop && "text-primary")}
+                    onClick={toggleFeedbackLoop}
+                    aria-label={feedbackLoop ? "Disable feedback loop" : "Enable feedback loop"}
+                  >
+                    <Rss className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {feedbackLoop ? "Feedback loop: ON (responses saved to KB)" : "Feedback loop: OFF"}
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={cn("h-8 w-8", showDashboard && "text-primary")}
+                    onClick={toggleDashboard}
+                    aria-label={showDashboard ? "Hide metrics dashboard" : "Show metrics dashboard"}
+                  >
+                    <LayoutDashboard className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {showDashboard ? "Hide metrics dashboard" : "Show metrics dashboard"}
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={cn("h-8 w-8", autoModelSwitch && "text-primary")}
+                    onClick={toggleAutoModelSwitch}
+                    aria-label={autoModelSwitch ? "Disable smart model routing" : "Enable smart model routing"}
+                  >
+                    <Zap className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {autoModelSwitch ? "Smart model routing: ON" : "Smart model routing: OFF"}
+                </TooltipContent>
+              </Tooltip>
+            </>
+          )}
+          {/* Narrow viewport: overflow menu */}
+          {isNarrow && (
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="More options">
+                  <MoreVertical className="h-4 w-4" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-48">
+                <button
+                  className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent", feedbackLoop && "text-primary")}
+                  onClick={toggleFeedbackLoop}
+                >
+                  <Rss className="h-4 w-4" />
+                  {feedbackLoop ? "Feedback: ON" : "Feedback: OFF"}
+                </button>
+                <button
+                  className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent", showDashboard && "text-primary")}
+                  onClick={toggleDashboard}
+                >
+                  <LayoutDashboard className="h-4 w-4" />
+                  {showDashboard ? "Dashboard: ON" : "Dashboard: OFF"}
+                </button>
+                <button
+                  className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent", autoModelSwitch && "text-primary")}
+                  onClick={toggleAutoModelSwitch}
+                >
+                  <Zap className="h-4 w-4" />
+                  {autoModelSwitch ? "Smart route: ON" : "Smart route: OFF"}
+                </button>
+              </PopoverContent>
+            </Popover>
+          )}
         </TooltipProvider>
         <ModelSelect value={selectedModel} onChange={handleModelChange} />
       </div>
@@ -518,7 +569,7 @@ export function ChatPanel() {
 
   // Right column: vertical split — Verification (top) + KB Context (bottom)
   const rightColumn = (
-    <Group orientation="vertical" className="h-full">
+    <Group orientation="vertical" className="h-full" resizeTargetMinimumSize={22}>
       <Panel defaultSize={33} minSize={15}>
         <HallucinationPanel
           report={halReport}
@@ -534,6 +585,21 @@ export function ChatPanel() {
       </Panel>
     </Group>
   )
+
+  // On narrow viewports, show KB as a bottom drawer instead of split pane
+  if (isNarrow) {
+    return (
+      <>
+        {chatArea}
+        <Sheet open={showKB} onOpenChange={setShowKB}>
+          <SheetContent side="bottom" className="h-[70vh] flex flex-col">
+            <SheetTitle className="sr-only">Knowledge Context</SheetTitle>
+            <div className="min-h-0 flex-1 overflow-auto">{rightColumn}</div>
+          </SheetContent>
+        </Sheet>
+      </>
+    )
+  }
 
   return (
     <SplitPane

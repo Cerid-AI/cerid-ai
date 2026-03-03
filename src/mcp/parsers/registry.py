@@ -6,27 +6,28 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Dict, List
+from typing import Any
 
 logger = logging.getLogger("ai-companion.parsers")
 
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
-PARSER_REGISTRY: Dict[str, Callable[[str], Dict[str, Any]]] = {}
+PARSER_REGISTRY: dict[str, Callable[[str], dict[str, Any]]] = {}
 
 
-def register_parser(extensions: List[str]):
+def register_parser(extensions: list[str]):
     """Decorator that maps file extensions to a parser function."""
-    def decorator(func: Callable[[str], Dict[str, Any]]):
+    def decorator(func: Callable[[str], dict[str, Any]]):
         for ext in extensions:
             PARSER_REGISTRY[ext.lower()] = func
         return func
     return decorator
 
 
-def parse_file(file_path: str) -> Dict[str, Any]:
+def parse_file(file_path: str) -> dict[str, Any]:
     """Parse a file and return {"text", "file_type", "page_count"}."""
     path = Path(file_path)
     if not path.exists():

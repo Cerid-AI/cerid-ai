@@ -3,12 +3,12 @@
 
 """MCP tool registry — schemas and execute_tool() dispatcher.
 
-Extracted from routers/mcp_sse.py (Phase 10C, F2) so the SSE router
-is a thin protocol layer and tools are testable independently.
+Extracted from routers/mcp_sse.py so the SSE router is a thin
+protocol layer and tools are testable independently.
 """
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 import config
 from deps import get_chroma, get_neo4j, get_redis
@@ -334,7 +334,7 @@ MCP_TOOLS = [
 
 # ── Tool execution ────────────────────────────────────────────────────────────
 
-async def execute_tool(name: str, arguments: Dict) -> Any:
+async def execute_tool(name: str, arguments: dict) -> Any:
     """Dispatch a tool call by name. Raises ValueError for unknown tools."""
     if name == "pkb_query":
         return query_knowledge(**arguments)

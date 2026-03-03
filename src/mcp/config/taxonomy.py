@@ -98,3 +98,42 @@ DOMAIN_AFFINITY = {
     "conversations": {"personal": 0.3, "general": 0.3},
 }
 CROSS_DOMAIN_DEFAULT_AFFINITY = 0.2   # weight for domain pairs not in DOMAIN_AFFINITY
+
+
+# ---------------------------------------------------------------------------
+# Per-Domain Tag Vocabulary (controlled vocabulary for constrained tagging)
+# ---------------------------------------------------------------------------
+# Tags in the vocabulary are preferred during AI categorization and surfaced
+# first in typeahead suggestions.  Free-form tags are still allowed but
+# vocabulary tags are boosted in quality scoring.
+TAG_VOCABULARY: dict[str, list[str]] = {
+    "coding": [
+        "python", "javascript", "typescript", "docker", "api", "cli",
+        "testing", "debugging", "refactoring", "architecture", "database",
+        "security", "performance", "ci-cd", "git", "frontend", "backend",
+        "documentation", "config", "automation", "data-pipeline",
+    ],
+    "finance": [
+        "tax-return", "invoice", "receipt", "budget", "investment",
+        "expense", "income", "bank-statement", "tax-deduction", "payroll",
+        "insurance", "retirement", "mortgage", "credit-card", "report",
+    ],
+    "projects": [
+        "meeting-notes", "specification", "proposal", "roadmap", "design",
+        "requirements", "milestone", "retrospective", "status-update",
+        "architecture", "timeline", "stakeholder", "risk", "deliverable",
+    ],
+    "personal": [
+        "journal", "health", "travel", "recipe", "workout", "meditation",
+        "goal", "habit", "book-notes", "learning", "family", "gratitude",
+        "planning", "reflection", "inspiration",
+    ],
+    "general": [
+        "reference", "tutorial", "how-to", "research", "notes",
+        "bookmark", "template", "cheatsheet", "summary", "faq",
+    ],
+    "conversations": [
+        "fact", "decision", "preference", "action-item", "insight",
+        "question", "recommendation", "follow-up", "context", "memory",
+    ],
+}

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import config
 from utils.time import utcnow_iso
@@ -103,7 +103,7 @@ def find_artifact_by_filename(
     driver,
     filename: str,
     domain: str,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Find an existing artifact by filename and domain."""
     with driver.session() as session:
         result = session.run(
@@ -155,7 +155,7 @@ def update_artifact(
     logger.info(f"Updated artifact {artifact_id[:8]} (re-ingestion)")
 
 
-def get_artifact(driver, artifact_id: str) -> Optional[Dict[str, Any]]:
+def get_artifact(driver, artifact_id: str) -> dict[str, Any] | None:
     """Fetch a single artifact by ID."""
     with driver.session() as session:
         result = session.run(
@@ -188,15 +188,15 @@ def get_artifact(driver, artifact_id: str) -> Optional[Dict[str, Any]]:
 
 def list_artifacts(
     driver,
-    domain: Optional[str] = None,
-    sub_category: Optional[str] = None,
-    tag: Optional[str] = None,
+    domain: str | None = None,
+    sub_category: str | None = None,
+    tag: str | None = None,
     limit: int = 50,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """List artifacts, optionally filtered by domain, sub_category, and/or tag."""
     base_query = "MATCH (a:Artifact)-[:BELONGS_TO]->(d:Domain) "
     conditions = []
-    params: Dict[str, Any] = {"limit": limit}
+    params: dict[str, Any] = {"limit": limit}
 
     if domain:
         conditions.append("d.name = $domain")
@@ -247,8 +247,8 @@ def list_artifacts(
 
 def get_quality_scores(
     driver,
-    artifact_ids: List[str],
-) -> Dict[str, float]:
+    artifact_ids: list[str],
+) -> dict[str, float]:
     """Batch-fetch quality_score for artifact IDs. Returns {id: score}.
 
     Unscored artifacts default to 0.5 (neutral).
@@ -290,7 +290,7 @@ def recategorize_artifact(
     driver,
     artifact_id: str,
     new_domain: str,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """Move an artifact's BELONGS_TO relationship to a new Domain."""
     with driver.session() as session:
         result = session.run(

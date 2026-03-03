@@ -11,6 +11,7 @@ const API_KEY = _env?.VITE_CERID_API_KEY || import.meta.env.VITE_CERID_API_KEY |
 function mcpHeaders(extra: Record<string, string> = {}): Record<string, string> {
   const headers: Record<string, string> = { ...extra }
   if (API_KEY) headers["X-API-Key"] = API_KEY
+  headers["X-Request-ID"] = crypto.randomUUID()
   return headers
 }
 
@@ -37,6 +38,7 @@ import type {
   Memory,
   UploadResult,
   SynopsisEstimate,
+  TagSuggestion,
 } from "./types"
 
 export async function fetchHealth(): Promise<HealthResponse> {
@@ -152,6 +154,20 @@ export async function recategorizeArtifact(
     const err = await res.json().catch(() => ({ detail: `Recategorize failed: ${res.status}` }))
     throw new Error(err.detail || `Recategorize failed: ${res.status}`)
   }
+  return res.json()
+}
+
+export async function fetchTagSuggestions(
+  domain?: string,
+  prefix = "",
+  limit = 30,
+): Promise<TagSuggestion[]> {
+  const params = new URLSearchParams()
+  if (domain) params.set("domain", domain)
+  if (prefix) params.set("prefix", prefix)
+  params.set("limit", String(limit))
+  const res = await fetch(`${MCP_BASE}/tags/suggest?${params}`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(`Tag suggestions failed: ${res.status}`)
   return res.json()
 }
 

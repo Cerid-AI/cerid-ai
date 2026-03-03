@@ -28,8 +28,10 @@ def parse_chroma_url(url: str | None = None) -> tuple[str, int]:
     return host, port
 
 
-def _retry(fn, label: str, attempts: int = 3, delay: float = 2.0):
-    """Retry a connectivity check with linear backoff."""
+def _retry(fn, label: str, attempts: int = 3, base_delay: float = 1.0, max_delay: float = 30.0):
+    """Retry a connectivity check with exponential backoff and jitter."""
+    import random
+
     for attempt in range(1, attempts + 1):
         try:
             fn()
@@ -37,11 +39,13 @@ def _retry(fn, label: str, attempts: int = 3, delay: float = 2.0):
         except Exception as exc:
             if attempt == attempts:
                 raise
+            delay = min(max_delay, base_delay * (2 ** (attempt - 1)))
+            jittered = random.uniform(0, delay)
             logger.warning(
-                "%s connectivity check failed (attempt %d/%d): %s — retrying in %.0fs",
-                label, attempt, attempts, exc, delay,
+                "%s connectivity check failed (attempt %d/%d): %s — retrying in %.1fs",
+                label, attempt, attempts, exc, jittered,
             )
-            _time.sleep(delay)
+            _time.sleep(jittered)
 
 
 _chroma = None

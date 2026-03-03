@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
@@ -18,7 +17,7 @@ router = APIRouter()
 logger = logging.getLogger("ai-companion")
 
 
-def query_knowledge(query: str, domain: str = "general", top_k: int = 3) -> Dict:
+def query_knowledge(query: str, domain: str = "general", top_k: int = 3) -> dict:
     """Public — also called by mcp_sse.py execute_tool."""
     chroma = get_chroma()
     coll_name = config.collection_name(domain)
@@ -37,7 +36,7 @@ def query_knowledge(query: str, domain: str = "general", top_k: int = 3) -> Dict
     metadatas = results.get("metadatas", [[]])[0]
     chunk_ids = results.get("ids", [[]])[0]
 
-    # BM25 hybrid scoring (Phase 4B.1)
+    # BM25 hybrid scoring
     bm25_scores: dict = {}
     try:
         from utils import bm25 as bm25_mod

@@ -51,12 +51,11 @@ ENABLE_AUTO_INJECT = os.getenv("ENABLE_AUTO_INJECT", "false").lower() == "true"
 
 # ---------------------------------------------------------------------------
 # Smart Orchestration
-# NOTE: ENABLE_MODEL_ROUTER and MONTHLY_BUDGET are client-side hints only.
-# They are exposed to the GUI via GET /settings but never enforced server-side.
+# NOTE: ENABLE_MODEL_ROUTER is a client-side hint only.
+# It is exposed to the GUI via GET /settings but never enforced server-side.
 # ---------------------------------------------------------------------------
 ENABLE_MODEL_ROUTER = os.getenv("ENABLE_MODEL_ROUTER", "false").lower() == "true"
 COST_SENSITIVITY = os.getenv("COST_SENSITIVITY", "medium")  # low/medium/high
-MONTHLY_BUDGET = float(os.getenv("MONTHLY_BUDGET", "0"))  # USD, 0 = unlimited
 
 # ---------------------------------------------------------------------------
 # Startup validation

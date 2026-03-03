@@ -7,17 +7,17 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.graph")
 
 
-def get_taxonomy(driver) -> Dict[str, Any]:
+def get_taxonomy(driver) -> dict[str, Any]:
     """Return the full taxonomy tree from Neo4j (domains, sub-categories, tags)."""
-    domains: Dict[str, Any] = {}
-    tags: List[Dict[str, Any]] = []
+    domains: dict[str, Any] = {}
+    tags: list[dict[str, Any]] = []
 
     with driver.session() as session:
         result = session.run(
@@ -69,8 +69,8 @@ def create_domain(
     name: str,
     description: str = "",
     icon: str = "file",
-    sub_categories: Optional[List[str]] = None,
-) -> Dict[str, Any]:
+    sub_categories: list[str] | None = None,
+) -> dict[str, Any]:
     """Create a new domain with optional sub-categories."""
     now = utcnow_iso()
     subs = sub_categories or ["general"]
@@ -106,7 +106,7 @@ def create_sub_category(
     driver,
     domain: str,
     label: str,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """Add a sub-category to an existing domain."""
     now = utcnow_iso()
     sc_name = f"{domain}/{label}"
@@ -135,7 +135,7 @@ def create_sub_category(
     return {"domain": domain, "sub_category": label}
 
 
-def list_tags(driver, limit: int = 100) -> List[Dict[str, Any]]:
+def list_tags(driver, limit: int = 100) -> list[dict[str, Any]]:
     """List all tags with usage counts, sorted by popularity."""
     with driver.session() as session:
         result = session.run(
@@ -155,9 +155,9 @@ def list_tags(driver, limit: int = 100) -> List[Dict[str, Any]]:
 def update_artifact_taxonomy(
     driver,
     artifact_id: str,
-    sub_category: Optional[str] = None,
-    tags_json: Optional[str] = None,
-) -> Dict[str, Any]:
+    sub_category: str | None = None,
+    tags_json: str | None = None,
+) -> dict[str, Any]:
     """Update an artifact's sub-category and/or tags."""
     now = utcnow_iso()
 

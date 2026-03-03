@@ -2,8 +2,8 @@
 
 > **Created:** 2026-02-25
 > **Last updated:** 2026-03-02
-> **Status:** Phase 16A–H complete. 54 resolved, 1 open (D2). 811+ Python tests, 130 frontend tests.
-> **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](plans/DEVELOPMENT_PLAN_PHASE16-18.md)
+> **Status:** Phase 20A-B complete + codebase audit. 54 resolved, 1 open (D2). 808+ Python tests, 130+ frontend tests. Next: Phase 21.
+> **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21 roadmap)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](COMPLETED_PHASES.md)
 > **Purpose:** Track known bugs, feature gaps, structural issues, and architecture evaluations for upcoming phases.
 
@@ -485,9 +485,7 @@ Added bundle size check step in frontend CI job — fails if any JS chunk exceed
 
 ### Forward Plan
 See [Development Plan Phase 16-18](plans/DEVELOPMENT_PLAN_PHASE16-18.md) for full details:
-- **Phase 16G-H** — Content experience & testing, documentation updates
-- **Phase 17A-B** — Smart tags (taxonomy-constrained vocabulary) + artifact summary quality
-- **Phase 18A-D** — Knowledge sync infrastructure, sync GUI, drag-drop ingestion, storage mode options
+- **Phase 21A-D** — Knowledge sync infrastructure, sync GUI, drag-drop ingestion, storage mode options
 
 ### Resolved (54 items)
 All items from sections A-H above marked with ✅ are resolved. Phases 10A-16H addressed all critical, high, and medium severity findings from the holistic audit. See [COMPLETED_PHASES.md](COMPLETED_PHASES.md) for full history.

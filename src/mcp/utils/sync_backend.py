@@ -11,7 +11,7 @@ import os
 import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import config
 
@@ -22,12 +22,12 @@ class SyncBackend(ABC):
     """Abstract base class for sync backends."""
 
     @abstractmethod
-    def read_manifest(self) -> Optional[Dict[str, Any]]:
+    def read_manifest(self) -> dict[str, Any] | None:
         """Read the sync manifest file."""
         ...
 
     @abstractmethod
-    def write_manifest(self, manifest: Dict[str, Any]) -> None:
+    def write_manifest(self, manifest: dict[str, Any]) -> None:
         """Write the sync manifest file."""
         ...
 
@@ -37,12 +37,12 @@ class SyncBackend(ABC):
         ...
 
     @abstractmethod
-    def read_file(self, relative_path: str) -> Optional[bytes]:
+    def read_file(self, relative_path: str) -> bytes | None:
         """Read a file from the sync directory."""
         ...
 
     @abstractmethod
-    def list_files(self, prefix: str = "") -> List[str]:
+    def list_files(self, prefix: str = "") -> list[str]:
         """List files in the sync directory, optionally filtered by prefix."""
         ...
 
@@ -65,14 +65,14 @@ class SyncBackend(ABC):
 class LocalSyncBackend(SyncBackend):
     """Local filesystem sync backend (default — typically ~/Dropbox/cerid-sync)."""
 
-    def __init__(self, sync_dir: Optional[str] = None):
+    def __init__(self, sync_dir: str | None = None):
         self._root = Path(sync_dir or config.SYNC_DIR)
 
     @property
     def root(self) -> Path:
         return self._root
 
-    def read_manifest(self) -> Optional[Dict[str, Any]]:
+    def read_manifest(self) -> dict[str, Any] | None:
         manifest_path = self._root / "manifest.json"
         if not manifest_path.exists():
             return None
@@ -82,7 +82,7 @@ class LocalSyncBackend(SyncBackend):
             logger.warning(f"Failed to read manifest: {e}")
             return None
 
-    def write_manifest(self, manifest: Dict[str, Any]) -> None:
+    def write_manifest(self, manifest: dict[str, Any]) -> None:
         self.ensure_directory("")
         manifest_path = self._root / "manifest.json"
         manifest_path.write_text(
@@ -95,7 +95,7 @@ class LocalSyncBackend(SyncBackend):
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_bytes(data)
 
-    def read_file(self, relative_path: str) -> Optional[bytes]:
+    def read_file(self, relative_path: str) -> bytes | None:
         full_path = self._root / relative_path
         if not full_path.exists():
             return None
@@ -105,7 +105,7 @@ class LocalSyncBackend(SyncBackend):
             logger.warning(f"Failed to read {relative_path}: {e}")
             return None
 
-    def list_files(self, prefix: str = "") -> List[str]:
+    def list_files(self, prefix: str = "") -> list[str]:
         search_dir = self._root / prefix if prefix else self._root
         if not search_dir.exists():
             return []
@@ -135,11 +135,11 @@ class LocalSyncBackend(SyncBackend):
 # Backend registry
 # ---------------------------------------------------------------------------
 
-_BACKENDS: Dict[str, type] = {
+_BACKENDS: dict[str, type] = {
     "local": LocalSyncBackend,
 }
 
-_active_backend: Optional[SyncBackend] = None
+_active_backend: SyncBackend | None = None
 _backend_lock = threading.Lock()
 
 
@@ -150,8 +150,8 @@ def register_sync_backend(name: str, backend_class: type) -> None:
 
 
 def get_sync_backend(
-    backend_type: Optional[str] = None,
-    sync_dir: Optional[str] = None,
+    backend_type: str | None = None,
+    sync_dir: str | None = None,
 ) -> SyncBackend:
     """Get the active sync backend singleton (thread-safe)."""
     global _active_backend

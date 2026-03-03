@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-Event-driven webhook notifications (Phase 4C.4).
+Event-driven webhook notifications.
 
 Fires HTTP POST to configured endpoints when events occur.
 Events: ingestion.complete, health.warning, digest.ready, rectify.findings
@@ -11,7 +11,7 @@ Events: ingestion.complete, health.warning, digest.ready, rectify.findings
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any
 
 import httpx
 
@@ -23,7 +23,7 @@ logger = logging.getLogger("ai-companion.webhooks")
 
 async def fire_event(
     event_type: str,
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
 ) -> int:
     """
     Send a webhook notification for the given event.
@@ -87,6 +87,6 @@ async def notify_health_warning(status: str, detail: str = "") -> None:
     await fire_event("health.warning", {"status": status, "detail": detail})
 
 
-async def notify_rectify_findings(findings: int, detail: Dict[str, Any] = None) -> None:
+async def notify_rectify_findings(findings: int, detail: dict[str, Any] = None) -> None:
     """Fire rectify.findings event."""
     await fire_event("rectify.findings", {"total_findings": findings, **(detail or {})})

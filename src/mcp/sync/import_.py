@@ -10,7 +10,7 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
 
@@ -37,9 +37,9 @@ logger = logging.getLogger("ai-companion.sync")
 
 def import_neo4j(
     driver,
-    sync_dir: Optional[str] = None,
+    sync_dir: str | None = None,
     force: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Merge Neo4j data from sync_dir into the local graph.
 
@@ -218,10 +218,10 @@ def import_neo4j(
 
 
 def import_chroma(
-    chroma_url: Optional[str] = None,
-    sync_dir: Optional[str] = None,
+    chroma_url: str | None = None,
+    sync_dir: str | None = None,
     force: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Merge ChromaDB chunks from sync JSONL files into the local ChromaDB instance.
     """
@@ -229,7 +229,7 @@ def import_chroma(
     sync_dir = sync_dir or _default_sync_dir()
     chroma_dir = Path(sync_dir) / CHROMA_SUBDIR
 
-    domain_stats: Dict[str, Dict[str, int]] = {}
+    domain_stats: dict[str, dict[str, int]] = {}
     total_added = 0
     total_skipped = 0
 
@@ -258,10 +258,10 @@ def import_chroma(
             if not force:
                 existing_ids = _chroma_get_all_ids(chroma_url, collection_id)
 
-            batch_ids: List[str] = []
-            batch_docs: List[str] = []
-            batch_metas: List[Dict] = []
-            batch_embs: List[List[float]] = []
+            batch_ids: list[str] = []
+            batch_docs: list[str] = []
+            batch_metas: list[dict] = []
+            batch_embs: list[list[float]] = []
 
             def _flush_batch() -> int:
                 nonlocal added
@@ -357,7 +357,7 @@ def _chroma_ensure_collection(chroma_url: str, collection_name: str) -> None:
         logger.warning("Could not ensure collection %s: %s", collection_name, exc)
 
 
-def _chroma_get_collection_id(chroma_url: str, collection_name: str) -> Optional[str]:
+def _chroma_get_collection_id(chroma_url: str, collection_name: str) -> str | None:
     """Return the UUID for a named ChromaDB collection, or None on failure."""
     try:
         resp = httpx.get(
@@ -383,7 +383,7 @@ def _chroma_get_all_ids(chroma_url: str, collection_id: str) -> set:
                 timeout=60.0,
             )
             resp.raise_for_status()
-            batch_ids: List[str] = resp.json().get("ids", [])
+            batch_ids: list[str] = resp.json().get("ids", [])
             if not batch_ids:
                 break
             ids.update(batch_ids)
@@ -396,7 +396,7 @@ def _chroma_get_all_ids(chroma_url: str, collection_id: str) -> set:
     return ids
 
 
-def import_bm25(sync_dir: Optional[str] = None) -> Dict[str, Any]:
+def import_bm25(sync_dir: str | None = None) -> dict[str, Any]:
     """Merge BM25 corpus files from {sync_dir}/bm25/ into config.BM25_DATA_DIR."""
     sync_dir = sync_dir or _default_sync_dir()
     src_dir = Path(sync_dir) / BM25_SUBDIR
@@ -433,7 +433,7 @@ def import_bm25(sync_dir: Optional[str] = None) -> Dict[str, Any]:
                 if cid:
                     existing_ids.add(cid)
 
-            new_rows: List[Dict[str, Any]] = []
+            new_rows: list[dict[str, Any]] = []
             for row in _iter_jsonl(str(src_file)):
                 cid = row.get("chunk_id") or row.get("id")
                 if cid and cid not in existing_ids:
@@ -468,8 +468,8 @@ def import_bm25(sync_dir: Optional[str] = None) -> Dict[str, Any]:
 
 def import_redis(
     redis_client,
-    sync_dir: Optional[str] = None,
-) -> Dict[str, Any]:
+    sync_dir: str | None = None,
+) -> dict[str, Any]:
     """Append audit log entries from {sync_dir}/redis/audit_log.jsonl into Redis."""
     sync_dir = sync_dir or _default_sync_dir()
     src_path = str(Path(sync_dir) / REDIS_SUBDIR / AUDIT_LOG_JSONL)
@@ -495,7 +495,7 @@ def import_redis(
         logger.error("Cannot read existing Redis log for dedup: %s", exc)
         return {"error": str(exc), "entries_added": 0, "entries_skipped": 0}
 
-    new_entries: List[str] = []
+    new_entries: list[str] = []
     for row in _iter_jsonl(src_path):
         key = (row.get("artifact_id", ""), row.get("timestamp", ""))
         if key in existing_keys:
@@ -521,11 +521,11 @@ def import_redis(
 
 def import_all(
     driver,
-    chroma_url: Optional[str] = None,
+    chroma_url: str | None = None,
     redis_client=None,
-    sync_dir: Optional[str] = None,
+    sync_dir: str | None = None,
     force: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Run all import steps in sequence."""
     chroma_url = chroma_url or config.CHROMA_URL
     sync_dir = sync_dir or _default_sync_dir()
@@ -536,14 +536,14 @@ def import_all(
     chroma_result = import_chroma(chroma_url=chroma_url, sync_dir=sync_dir, force=force)
     bm25_result = import_bm25(sync_dir=sync_dir)
 
-    redis_result: Dict[str, Any] = {"entries_added": 0, "skipped": True}
+    redis_result: dict[str, Any] = {"entries_added": 0, "skipped": True}
     if redis_client is not None:
         redis_result = import_redis(redis_client, sync_dir=sync_dir)
     else:
         logger.warning("No Redis client provided — skipping Redis import")
 
     # Post-import consistency check
-    consistency_warnings: List[str] = []
+    consistency_warnings: list[str] = []
     try:
         neo4j_created = neo4j_result.get("artifacts_created", 0)
         neo4j_updated = neo4j_result.get("artifacts_updated", 0)

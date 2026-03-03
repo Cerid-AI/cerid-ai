@@ -31,7 +31,7 @@ export function useSettings() {
   const [costSensitivity, setCostSensitivity] = useState<"low" | "medium" | "high">(() => {
     try {
       const v = localStorage.getItem("cerid-cost-sensitivity")
-      return v === "low" || v === "high" ? v : "medium"
+      return v === "low" || v === "medium" || v === "high" ? v : "medium"
     } catch { return "medium" }
   })
 

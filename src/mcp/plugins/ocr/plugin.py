@@ -28,7 +28,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 logger = logging.getLogger("ai-companion.plugins.ocr")
 
@@ -81,7 +81,7 @@ def _ocr_with_tesseract(file_path: str) -> str:
         raise
 
 
-def parse_pdf_with_ocr(file_path: str) -> Dict[str, Any]:
+def parse_pdf_with_ocr(file_path: str) -> dict[str, Any]:
     """
     OCR-aware PDF parser that extends the default pdfplumber parser.
 

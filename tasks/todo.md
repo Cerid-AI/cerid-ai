@@ -1,9 +1,9 @@
 # Cerid AI — Task Tracker
 
 > **Last updated:** 2026-03-02
-> **Current status:** Phase 16A–H complete. 811+ Python tests, 130 frontend tests. Next: Phase 17.
+> **Current status:** Phase 20A-B complete + codebase audit. 808+ Python tests, 130+ frontend tests. Next: Phase 21 (Knowledge Sync & Multi-Computer Parity).
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md)
-> **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](../docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md)
+> **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](../docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
 
 ## Current: Phase 10 — Commercial & Open-Source Readiness
@@ -251,47 +251,141 @@
 - [x] F6 compose separation doc updates (CLAUDE.md startup order, ISSUES.md, todo.md)
 - Deferred: CHANGELOG.md (retroactive from git history)
 
-### Phase 17: Smart Tags & Artifact Quality
+### Phase 17: iPad & Responsive Touch UX ✅
 
-#### 17A: Smart Tag System
-- [ ] Define tag vocabulary per domain in TAXONOMY config
-- [ ] Rewrite AI categorization prompt for taxonomy-constrained tag generation
-- [ ] Upgrade tag quality scoring (vocabulary match, relevance, diversity)
-- [ ] Tag suggestion typeahead UI with controlled vocabulary
-- [ ] Tag analytics & discovery (cloud, co-occurrence, orphan detection)
-- [ ] Batch re-tagging for existing artifacts
+#### 17A: Touch-Visibility Fixes ✅
+- [x] Global touch CSS — `@media (hover: none)` forces `group-hover:opacity-100` visible on touch devices (index.css)
+- [x] All hover-hidden controls (copy buttons, delete buttons, taxonomy buttons) now visible via global CSS rule
+- [x] Split pane separator touch target — `resizeTargetMinimumSize={22}` gives 44px+ hit area (split-pane.tsx, chat-panel.tsx)
 
-#### 17B: Artifact Summary Quality
-- [ ] Rewrite summary prompt to "What is this?" format
-- [ ] Update curator synopsis prompt to match
-- [ ] Summary display enhancement (full display, inline edit, AI vs user distinction)
-- [ ] Batch summary regeneration for truncated/poor summaries
+#### 17B: Tablet Layout Optimization ✅
+- [x] Responsive sidebar breakpoint (768px → 1024px, app-layout.tsx)
+- [x] KB pane as bottom drawer on tablet (Sheet component, chat-panel.tsx)
+- [x] Chat toolbar overflow menu — 3 secondary buttons collapse to popover on narrow viewports (chat-panel.tsx)
+- [x] Touch-friendly button targets — `@media (pointer: coarse)` enforces 44px min on icon-xs/icon-sm buttons (index.css)
+- [x] New components: Sheet (ui/sheet.tsx), Popover (ui/popover.tsx)
 
-### Phase 18: Knowledge Sync & Multi-Computer Parity
+#### 17C: iPad-Specific Polish ✅
+- [x] Safe area insets — CSS utilities + `viewport-fit=cover` meta tag (index.css, index.html, app-layout.tsx)
+- [x] Input zoom prevention for iOS Safari — `font-size: max(16px, 1em)` on inputs (index.css)
+- [x] Orientation change handling — matchMedia listener auto-collapses sidebar (app-layout.tsx)
 
-#### 18A: Sync Infrastructure
-- [ ] Incremental export (track last_exported_at, delta-only)
-- [ ] Tombstone support (propagate deletions across machines)
-- [ ] Conflict detection & resolution (multi-strategy: remote/local/both/manual)
-- [ ] Scheduled sync (APScheduler integration, export-on-ingest option)
+### Phase 18: Network Access & Demo Deployment ✅
+
+#### 18A: LAN Hostname Configuration ✅
+- [x] Dynamic LAN IP detection in start-cerid.sh (macOS `ipconfig getifaddr en0` + Linux fallback)
+- [x] `CERID_HOST` env var with auto-detection, exports `VITE_MCP_URL`
+- [x] Web docker-compose `VITE_MCP_URL` environment passthrough
+- [x] CORS already defaults to `*`; documented how to restrict in OPERATIONS.md
+- [x] LAN access documentation with troubleshooting (OPERATIONS.md)
+- [x] `CERID_HOST`, `CERID_GATEWAY`, `CLOUDFLARE_TUNNEL_TOKEN` added to .env.example
+
+#### 18B: Caddy Reverse Proxy (Local HTTPS) ✅
+- [x] Caddy docker-compose + Caddyfile (stacks/gateway/) — routes `/` → web, `/api/mcp/` → MCP, `/api/bifrost/` → Bifrost
+- [x] `tls internal` for auto self-signed certs, SSE streaming support
+- [x] Startup script optional step [6/6] when `CERID_GATEWAY=true`
+- [x] Documentation in OPERATIONS.md
+
+#### 18C: Cloudflare Tunnel (Public Demos) ✅
+- [x] Cloudflared container + config (stacks/tunnel/docker-compose.yml)
+- [x] `CLOUDFLARE_TUNNEL_TOKEN` env var triggers startup as step [7/7]
+- [x] Documentation in OPERATIONS.md (email OTP access policy reference)
+
+### Phase 19: Expert Orchestration & Validation ✅
+
+#### 19A: Circuit Breakers & Resilience ✅
+- [x] AsyncCircuitBreaker utility class (utils/circuit_breaker.py) — CLOSED/OPEN/HALF_OPEN states, configurable threshold/timeout
+- [x] 5 named circuit breaker instances: bifrost-rerank, bifrost-claims, bifrost-verify, bifrost-synopsis, bifrost-memory
+- [x] Wrap query_agent.py reranking (bifrost-rerank, falls back to embedding sort on CircuitOpenError)
+- [x] Wrap hallucination.py claim extraction (bifrost-claims) and external verification (bifrost-verify)
+- [x] Wrap curator.py synopsis generation (bifrost-synopsis) and memory.py extraction (bifrost-memory)
+- [x] Exponential backoff with jitter in deps.py (replaced linear retry)
+- [x] `exponential_backoff_with_jitter()` utility function in circuit_breaker.py
+
+#### 19B: Distributed Tracing ✅
+- [x] `contextvars.ContextVar` request ID in middleware/request_id.py (`request_id_var`, `get_request_id()`, `tracing_headers()`)
+- [x] Request ID propagated to all 5 outbound httpx clients via `headers=tracing_headers()`
+- [x] Request ID included in Redis audit log entries (`cache.log_event()`)
+- [x] Frontend generates `X-Request-ID` via `crypto.randomUUID()` in `mcpHeaders()`
+
+#### 19C: Chunking Quality Improvements ✅
+- [x] Semantic chunking mode (`chunk_text_semantic()`) — paragraph-boundary aware, sentence-integrity preserving
+- [x] Table preservation — Markdown table blocks kept as single paragraphs
+- [x] Contextual headers (`make_context_header()`) — prepends `Source: | Domain: | Category:` to each chunk
+- [x] `CHUNKING_MODE` env var: "semantic" (default) or "token" (original)
+- [x] Headers applied in ingestion.py (both paths) and triage.py chunk node
+
+#### 19D: Evaluation Enhancement ✅
+- [x] Latency metrics — `time.perf_counter()` per query, P50/P95/P99 percentiles in `summarize()`
+- [x] Per-domain metric breakdowns via `summarize_by_domain()`
+- [x] Domain field added to `EvalResult` dataclass
+- [x] A/B pipeline comparison via `compare_pipelines()` with paired difference analysis and win/loss/tie counts
+
+#### 19E: Adaptive Quality Feedback ✅
+- [x] `POST /artifacts/{artifact_id}/feedback` endpoint (inject/dismiss signals)
+- [x] Reactive quality_score updates (+0.05 inject, -0.03 dismiss, clamped to [0, 1])
+- [x] Feedback events logged to Redis audit trail (signal, query, old/new score)
+
+### Phase 20: Smart Tags & Artifact Quality ✅
+
+#### 20A: Smart Tag System ✅
+- [x] Per-domain tag vocabulary (`TAG_VOCABULARY` in config/taxonomy.py) — 10-21 curated tags per domain
+- [x] Taxonomy-constrained AI tag generation — prompt includes preferred tags per domain, prefers vocabulary
+- [x] Tag quality scoring function (`score_tags()` in utils/metadata.py) — vocabulary match = 0.2, free-form = 0.1, capped at 1.0
+- [x] `GET /tags/suggest` endpoint — vocabulary tags first, then popular existing tags, prefix filter, domain scoping
+- [x] `TagFilter` component (tag-filter.tsx) — typeahead dropdown with sparkle/hash icons for vocabulary vs existing tags
+- [x] Tag filter wired into KB context panel — client-side AND filtering on active tags, domain-scoped suggestions
+- [x] `TagSuggestion` type + `fetchTagSuggestions()` API function
+- [x] 12 new tests: tag vocabulary validation, tag scoring, suggest endpoint
+
+#### 20B: Artifact Summary Quality ✅
+- [x] "What is this?" synopsis prompt rewrite — structured rules, includes filename/domain context
+- [x] Improved initial summary extraction (`_extract_summary()`) — sentence-boundary aware, strips Markdown headings
+- [x] Synopsis generation passes filename/domain to prompt for context
+
+### Codebase Audit (Post-Phase 20) ✅
+- [x] Critical bug fixes: ingestion Neo4j rollback on failure, unbound `memory_type` variable, dead Bifrost sync check removal, fragile ChromaDB URL parsing → `get_chroma()` factory
+- [x] Dead code removal: deleted `utils/embeddings.py` (always None), removed `check_semantic_duplicate_batch()`, `TriageState` dataclass, `should_continue_after_categorize()`, `MONTHLY_BUDGET`, `PanePlaceholder` component
+- [x] Typing modernization: `Dict`/`List`/`Optional`/`Tuple` → `dict`/`list`/`X | None`/`tuple` across 30+ backend files (agents, routers, utils, services, config, db, sync, parsers, plugins, eval)
+- [x] Frontend cleanup: removed duplicate `estimateTokens`, fixed `costSensitivity` always-zero bug, removed unstable React keys, cleaned AI slop comments
+- [x] Test deduplication: rewrote `test_smart_ingestion.py` (eliminated overlap with `test_ingestion.py`)
+- [x] Lint cleanup: fixed 9 unused imports left by typing modernization agent
+- [x] Consolidated mid-file `import json as _json` to top-level in `agents/audit.py`
+- [x] All tests pass: 808 Python (5 skipped, 1 xfailed), 130 frontend, ruff clean
+
+### Phase 21: Knowledge Sync & Multi-Computer Parity (Medium)
+
+#### 21A: Sync Infrastructure
+- [ ] Incremental export (delta-only based on last_exported_at)
+- [ ] Tombstone support (propagate deletions)
+- [ ] Conflict detection & resolution strategies
+- [ ] Scheduled sync (APScheduler, export-on-ingest)
 - [ ] Selective sync (domain/date-range filtering)
 
-#### 18B: Sync GUI Integration
-- [ ] Sync status dashboard in settings (counts, diff, indicators)
+#### 21B: Sync GUI Integration
+- [ ] Sync status dashboard in settings
 - [ ] Export/Import/Status action buttons with progress
-- [ ] Sync history view + conflict resolution dialog
+- [ ] Sync history + conflict resolution dialog
 
-#### 18C: File Attachment & Drag-Drop Ingestion
-- [ ] Drag-and-drop zone on Knowledge Context pane
-- [ ] Upload progress with pipeline status (parse → categorize → chunk → index)
-- [ ] Pre-upload options dialog (domain, tags, categorization mode, storage mode)
-- [ ] Backend batch upload + storage_mode parameter
+#### 21C: Drag-Drop Ingestion
+- [ ] Drop zone on Knowledge pane (touch-compatible)
+- [ ] Upload progress with pipeline status
+- [ ] Pre-upload options dialog
+- [ ] Backend batch upload + storage_mode
 
-#### 18D: Knowledge Storage Options
-- [ ] Storage mode: extract-only vs. curate files in managed archive
-- [ ] Managed file archive (copy to domain/sub_category folders, checksum tracking)
-- [ ] Archive sync strategy (metadata-only vs. file checksums)
-- [ ] GUI file management (view file, open folder, re-ingest)
+#### 21D: Storage Options
+- [ ] Storage mode: extract-only vs curate files
+- [ ] Managed file archive (domain/sub_category folders)
+- [ ] Archive sync strategy
+- [ ] GUI file management (view/open/re-ingest)
+
+### Deferred
+- [ ] D2: Conversation fork/branch UI (40-60 hrs, exploratory)
+- [ ] Frontend component tests (40+ untested, 20-30 hrs)
+- [ ] CHANGELOG.md (retroactive from git history)
+- [ ] Env var naming standardization doc
+- [ ] mypy/pyright type checking
+- [ ] Self-RAG validation loop (8-12 hrs)
 
 ## Completed Phases
 

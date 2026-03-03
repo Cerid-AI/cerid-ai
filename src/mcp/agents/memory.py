@@ -7,12 +7,14 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
 
 import config
+from middleware.request_id import tracing_headers
 from utils.cache import log_event
+from utils.circuit_breaker import CircuitOpenError, get_breaker
 from utils.llm_parsing import parse_llm_json
 from utils.time import utcnow, utcnow_iso
 
@@ -33,7 +35,7 @@ async def extract_memories(
     response_text: str,
     conversation_id: str,
     model: str = "",
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Use a lightweight LLM to extract memorable content from a response."""
     if len(response_text) < MIN_RESPONSE_LENGTH:
         return []
@@ -50,8 +52,10 @@ async def extract_memories(
         "JSON array:"
     )
 
-    try:
-        async with httpx.AsyncClient(timeout=config.BIFROST_TIMEOUT) as client:
+    breaker = get_breaker("bifrost-memory")
+
+    async def _bifrost_memory() -> dict:
+        async with httpx.AsyncClient(timeout=config.BIFROST_TIMEOUT, headers=tracing_headers()) as client:
             resp = await client.post(
                 f"{config.BIFROST_URL}/chat/completions",
                 json={
@@ -62,25 +66,32 @@ async def extract_memories(
                 },
             )
             resp.raise_for_status()
-            content = resp.json()["choices"][0]["message"]["content"].strip()
-            memories = parse_llm_json(content)
-            if not isinstance(memories, list):
-                return []
+            return resp.json()
 
-            valid = []
-            for m in memories:
-                if not isinstance(m, dict):
-                    continue
-                mem_type = m.get("memory_type", "fact")
-                if mem_type not in MEMORY_TYPES:
-                    mem_type = "fact"
-                valid.append({
-                    "content": str(m.get("content", ""))[:2000],
-                    "memory_type": mem_type,
-                    "summary": str(m.get("summary", ""))[:100],
-                })
-            return valid
+    try:
+        data = await breaker.call(_bifrost_memory)
+        content = data["choices"][0]["message"]["content"].strip()
+        memories = parse_llm_json(content)
+        if not isinstance(memories, list):
+            return []
 
+        valid = []
+        for m in memories:
+            if not isinstance(m, dict):
+                continue
+            mem_type = m.get("memory_type", "fact")
+            if mem_type not in MEMORY_TYPES:
+                mem_type = "fact"
+            valid.append({
+                "content": str(m.get("content", ""))[:2000],
+                "memory_type": mem_type,
+                "summary": str(m.get("summary", ""))[:100],
+            })
+        return valid
+
+    except CircuitOpenError:
+        logger.warning("Bifrost memory circuit open, skipping memory extraction")
+        return []
     except Exception as e:
         logger.warning(f"Memory extraction LLM call failed: {e}")
         return []
@@ -97,7 +108,7 @@ async def extract_and_store_memories(
     chroma_client=None,
     neo4j_driver=None,
     redis_client=None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Extract memories and store each as a KB artifact in the conversations domain."""
     if not config.ENABLE_MEMORY_EXTRACTION:
         return {"status": "skipped", "reason": "Memory extraction disabled"}
@@ -194,8 +205,8 @@ async def extract_and_store_memories(
 
 async def archive_old_memories(
     neo4j_driver,
-    retention_days: Optional[int] = None,
-) -> Dict[str, Any]:
+    retention_days: int | None = None,
+) -> dict[str, Any]:
     """Mark old conversation memories as archived (deprioritized in search)."""
     if retention_days is None:
         retention_days = config.MEMORY_RETENTION_DAYS

@@ -18,12 +18,14 @@ import json
 import logging
 import math
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
 
 import config
 from db.neo4j.artifacts import list_artifacts, update_artifact_summary
+from middleware.request_id import tracing_headers
+from utils.circuit_breaker import CircuitOpenError, get_breaker
 from utils.time import utcnow, utcnow_iso
 
 logger = logging.getLogger("ai-companion.curator")
@@ -60,7 +62,7 @@ def score_keywords(keywords_json: str) -> float:
     return count / config.QUALITY_KEYWORDS_OPTIMAL
 
 
-def score_freshness(ingested_at: str, modified_at: Optional[str] = None) -> float:
+def score_freshness(ingested_at: str, modified_at: str | None = None) -> float:
     """Score freshness using exponential decay. Returns [0, 1]."""
     timestamp = modified_at or ingested_at
     if not timestamp:
@@ -80,7 +82,7 @@ def score_freshness(ingested_at: str, modified_at: Optional[str] = None) -> floa
         return 0.5
 
 
-def score_completeness(artifact: Dict[str, Any]) -> float:
+def score_completeness(artifact: dict[str, Any]) -> float:
     """Score metadata completeness. Returns [0, 1]."""
     checks = 0
     total = 4
@@ -116,7 +118,7 @@ def score_completeness(artifact: Dict[str, Any]) -> float:
     return checks / total
 
 
-def compute_quality_score(artifact: Dict[str, Any]) -> Dict[str, Any]:
+def compute_quality_score(artifact: dict[str, Any]) -> dict[str, Any]:
     """Compute weighted quality score for a single artifact."""
     s_summary = score_summary(artifact.get("summary", ""))
     s_keywords = score_keywords(artifact.get("keywords", "[]"))
@@ -133,7 +135,7 @@ def compute_quality_score(artifact: Dict[str, Any]) -> Dict[str, Any]:
         + config.QUALITY_WEIGHT_COMPLETENESS * s_completeness
     )
 
-    issues: List[str] = []
+    issues: list[str] = []
     if s_summary < 0.5:
         issues.append("summary_weak" if s_summary > 0 else "summary_missing")
     if s_keywords < 0.5:
@@ -161,7 +163,7 @@ def compute_quality_score(artifact: Dict[str, Any]) -> Dict[str, Any]:
 
 def _store_quality_scores(
     neo4j_driver,
-    scores: List[Dict[str, Any]],
+    scores: list[dict[str, Any]],
 ) -> int:
     """Batch-update quality_score on Artifact nodes. Returns count updated."""
     if not scores:
@@ -206,6 +208,9 @@ async def _generate_synopsis(
     model: str,
     max_input_chars: int,
     max_tokens: int,
+    *,
+    filename: str = "",
+    domain: str = "",
 ) -> str:
     """Call Bifrost LLM to generate a concise synopsis. Returns empty string on failure.
 
@@ -213,30 +218,47 @@ async def _generate_synopsis(
     are limited to ~8 RPM, so the caller must also throttle between calls.
     """
     snippet = text[:max_input_chars]
+    context = ""
+    if filename or domain:
+        parts = []
+        if filename:
+            parts.append(f"Filename: {filename}")
+        if domain:
+            parts.append(f"Domain: {domain}")
+        context = " | ".join(parts) + "\n"
     prompt = (
-        "Write a concise 1-2 sentence synopsis of this document. "
-        "Focus on what the document is about and its key content. "
-        "Do not start with 'This document'. Just state the content directly.\n\n"
-        f"{snippet}"
+        "Answer: What is this document about? Write 1-2 concise sentences.\n"
+        "Rules:\n"
+        "- State the specific subject matter and key content directly.\n"
+        "- Do NOT start with 'This document' or 'This is'.\n"
+        "- Include the most distinguishing detail (e.g. topic, date range, technology).\n\n"
+        f"{context}"
+        f"Content:\n{snippet}"
     )
+
+    breaker = get_breaker("bifrost-synopsis")
+
+    async def _bifrost_synopsis() -> dict:
+        async with httpx.AsyncClient(timeout=config.BIFROST_TIMEOUT, headers=tracing_headers()) as client:
+            resp = await client.post(
+                f"{bifrost_url}/chat/completions",
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.3,
+                    "max_tokens": max_tokens,
+                },
+            )
+            if resp.status_code == 429:
+                raise httpx.HTTPStatusError(
+                    "Rate limited", request=resp.request, response=resp
+                )
+            resp.raise_for_status()
+            return resp.json()
+
     for attempt in range(2):
         try:
-            async with httpx.AsyncClient(timeout=config.BIFROST_TIMEOUT) as client:
-                resp = await client.post(
-                    f"{bifrost_url}/chat/completions",
-                    json={
-                        "model": model,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.3,
-                        "max_tokens": max_tokens,
-                    },
-                )
-                if resp.status_code == 429 and attempt == 0:
-                    logger.info("Rate limited (429), waiting 60s before retry")
-                    await asyncio.sleep(60)
-                    continue
-                resp.raise_for_status()
-                data = resp.json()
+            data = await breaker.call(_bifrost_synopsis)
             content = data["choices"][0]["message"]["content"].strip()
             # Strip markdown code fences if present
             if content.startswith("```"):
@@ -244,11 +266,17 @@ async def _generate_synopsis(
             if content.endswith("```"):
                 content = content.rsplit("```", 1)[0]
             return content.strip()
-        except Exception as e:
-            if attempt == 0 and "429" in str(e):
-                logger.info("Rate limited, waiting 60s before retry")
+        except CircuitOpenError:
+            logger.warning("Bifrost synopsis circuit open, skipping synopsis generation")
+            return ""
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429 and attempt == 0:
+                logger.info("Rate limited (429), waiting 60s before retry")
                 await asyncio.sleep(60)
                 continue
+            logger.warning(f"Synopsis generation failed: {e}")
+            return ""
+        except Exception as e:
             logger.warning(f"Synopsis generation failed: {e}")
             return ""
     return ""
@@ -262,9 +290,9 @@ def estimate_synopsis_run(
     neo4j_driver,
     chroma_client,
     model: str,
-    domains: Optional[List[str]] = None,
+    domains: list[str] | None = None,
     max_artifacts: int = 200,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Count synopsis candidates and estimate cost/time for a given model."""
     target_domains = domains or config.DOMAINS
     candidate_count = 0
@@ -319,12 +347,12 @@ def estimate_synopsis_run(
 async def curate(
     neo4j_driver,
     mode: str = "audit",
-    domains: Optional[List[str]] = None,
+    domains: list[str] | None = None,
     max_artifacts: int = 200,
     chroma_client=None,
     generate_synopses: bool = False,
-    synopsis_model: Optional[str] = None,
-) -> Dict[str, Any]:
+    synopsis_model: str | None = None,
+) -> dict[str, Any]:
     """Score artifact quality across the knowledge base.
 
     Args:
@@ -337,9 +365,9 @@ async def curate(
     """
     target_domains = domains or config.DOMAINS
 
-    all_scores: List[Dict[str, Any]] = []
+    all_scores: list[dict[str, Any]] = []
     # Collect artifacts by domain for synopsis pass
-    artifacts_by_domain: Dict[str, List[Dict[str, Any]]] = {}
+    artifacts_by_domain: dict[str, list[dict[str, Any]]] = {}
 
     for domain in target_domains:
         try:
@@ -409,6 +437,8 @@ async def curate(
                     effective_model,
                     config.SYNOPSIS_MAX_INPUT_CHARS,
                     config.SYNOPSIS_MAX_TOKENS,
+                    filename=artifact.get("filename", ""),
+                    domain=domain,
                 )
                 if synopsis:
                     try:

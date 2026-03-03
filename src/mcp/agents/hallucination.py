@@ -14,11 +14,13 @@ import asyncio
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import httpx
 
 import config
+from middleware.request_id import tracing_headers
+from utils.circuit_breaker import CircuitOpenError, get_breaker
 from utils.llm_parsing import parse_llm_json
 from utils.time import utcnow_iso
 
@@ -33,7 +35,7 @@ REDIS_HALLUCINATION_TTL = 86400 * 7  # 7 days
 # Concurrency gate for external verification — defense-in-depth against
 # bursts even on high-RPM models.  Lazily initialised because asyncio
 # requires a running event loop for Semaphore().
-_ext_verify_semaphore: Optional[asyncio.Semaphore] = None
+_ext_verify_semaphore: asyncio.Semaphore | None = None
 
 
 def _get_ext_verify_semaphore() -> asyncio.Semaphore:
@@ -193,7 +195,7 @@ def _is_ignorance_admission(claim: str) -> bool:
     return any(p.search(claim) for p in _IGNORANCE_ADMISSION_PATTERNS)
 
 
-def _invert_ignorance_verdict(verdict: Dict[str, Any]) -> Dict[str, Any]:
+def _invert_ignorance_verdict(verdict: dict[str, Any]) -> dict[str, Any]:
     """Invert a verification verdict for an ignorance-admitting claim.
 
     When a model says "I don't know about X" and the verifier confirms X
@@ -345,7 +347,7 @@ _PERCENT_RE = re.compile(r"\b(\d+(?:\.\d+)?%)")
 # Heuristic claim extraction (fallback when LLM extraction fails)
 # ---------------------------------------------------------------------------
 
-def _extract_claims_heuristic(response_text: str) -> List[str]:
+def _extract_claims_heuristic(response_text: str) -> list[str]:
     """Extract likely factual sentences using regex patterns.
 
     Used as a fallback when LLM-based extraction fails or returns empty.
@@ -370,11 +372,11 @@ def _extract_claims_heuristic(response_text: str) -> List[str]:
 
     sentences = _SENTENCE_RE.split(text)
     # Also split on newlines that look like separate statements
-    expanded: List[str] = []
+    expanded: list[str] = []
     for s in sentences:
         expanded.extend(line.strip() for line in s.split("\n") if line.strip())
 
-    claims: List[str] = []
+    claims: list[str] = []
     for sentence in expanded:
         # Skip very short or very long sentences
         if len(sentence) < 20 or len(sentence) > 300:
@@ -406,7 +408,7 @@ def _extract_claims_heuristic(response_text: str) -> List[str]:
 # LLM-based claim extraction
 # ---------------------------------------------------------------------------
 
-async def extract_claims(response_text: str) -> Tuple[List[str], str]:
+async def extract_claims(response_text: str) -> tuple[list[str], str]:
     """Extract factual claims from an LLM response.
 
     Returns a tuple of (claims, method) where method is one of:
@@ -434,7 +436,7 @@ async def extract_claims(response_text: str) -> Tuple[List[str], str]:
     return [], "none"
 
 
-async def _extract_claims_llm(response_text: str, max_claims: int) -> List[str]:
+async def _extract_claims_llm(response_text: str, max_claims: int) -> list[str]:
     """Extract factual claims using the verification LLM model."""
     user_prompt = (
         f"Extract up to {max_claims} verifiable factual claims from the text below.\n"
@@ -447,8 +449,10 @@ async def _extract_claims_llm(response_text: str, max_claims: int) -> List[str]:
         "JSON array:"
     )
 
-    try:
-        async with httpx.AsyncClient(timeout=config.BIFROST_TIMEOUT) as client:
+    breaker = get_breaker("bifrost-claims")
+
+    async def _bifrost_extract() -> dict:
+        async with httpx.AsyncClient(timeout=config.BIFROST_TIMEOUT, headers=tracing_headers()) as client:
             resp = await client.post(
                 f"{config.BIFROST_URL}/chat/completions",
                 json={
@@ -462,18 +466,24 @@ async def _extract_claims_llm(response_text: str, max_claims: int) -> List[str]:
                 },
             )
             resp.raise_for_status()
-            content = resp.json()["choices"][0]["message"]["content"].strip()
-            raw = parse_llm_json(content)
-            if isinstance(raw, list):
-                # Handle both plain strings and structured {"claim": ..., "type": ...}
-                claims: List[str] = []
-                for item in raw[:max_claims]:
-                    if isinstance(item, dict):
-                        claims.append(str(item.get("claim", item.get("text", str(item)))))
-                    else:
-                        claims.append(str(item))
-                return claims
-            logger.warning("LLM claim extraction returned non-list: %s", type(raw).__name__)
+            return resp.json()
+
+    try:
+        data = await breaker.call(_bifrost_extract)
+        content = data["choices"][0]["message"]["content"].strip()
+        raw = parse_llm_json(content)
+        if isinstance(raw, list):
+            # Handle both plain strings and structured {"claim": ..., "type": ...}
+            claims: list[str] = []
+            for item in raw[:max_claims]:
+                if isinstance(item, dict):
+                    claims.append(str(item.get("claim", item.get("text", str(item)))))
+                else:
+                    claims.append(str(item))
+            return claims
+        logger.warning("LLM claim extraction returned non-list: %s", type(raw).__name__)
+    except CircuitOpenError:
+        logger.warning("Bifrost claims circuit open, skipping LLM claim extraction")
     except httpx.HTTPStatusError as e:
         logger.warning("Claim extraction HTTP error: %s %s", e.response.status_code, e.response.text[:200])
     except Exception as e:
@@ -488,7 +498,7 @@ async def _extract_claims_llm(response_text: str, max_claims: int) -> List[str]:
 
 def _check_numeric_alignment(
     claim: str,
-    top_result: Dict[str, Any],
+    top_result: dict[str, Any],
 ) -> float:
     """Check if specific numbers/dates/percentages in the claim match the source.
 
@@ -546,7 +556,7 @@ def _check_numeric_alignment(
 
 def _compute_adjusted_confidence(
     claim: str,
-    top_results: List[Dict[str, Any]],
+    top_results: list[dict[str, Any]],
     raw_similarity: float,
 ) -> float:
     """Adjust confidence based on multi-result triangulation and snippet analysis.
@@ -589,13 +599,13 @@ def _compute_adjusted_confidence(
 
 def _build_verification_details(
     claim: str,
-    top_results: List[Dict[str, Any]],
-) -> Dict[str, Any]:
+    top_results: list[dict[str, Any]],
+) -> dict[str, Any]:
     """Build verification detail metadata for transparency and analytics."""
     scores = [r.get("relevance", 0.0) for r in top_results]
     domains = [r.get("domain", "") for r in top_results]
 
-    details: Dict[str, Any] = {
+    details: dict[str, Any] = {
         "result_count": len(top_results),
         "top_scores": [round(s, 3) for s in scores],
         "domains_found": list(set(d for d in domains if d)),
@@ -634,7 +644,7 @@ async def _query_memories(
     claim: str,
     chroma_client,
     top_k: int = 2,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Query the conversations collection for matching user-confirmed memories.
 
     Filters to memory_type artifacts to avoid matching feedback-ingested
@@ -687,7 +697,7 @@ def _model_family(model_id: str) -> str:
     return parts[1] if len(parts) >= 3 else parts[0]
 
 
-def _pick_verification_model(generating_model: Optional[str]) -> str:
+def _pick_verification_model(generating_model: str | None) -> str:
     """Select a non-rate-limited verification model from a different family.
 
     Strategy: model diversity prevents the verifier from reproducing
@@ -729,7 +739,7 @@ def _is_current_event_claim(claim: str) -> bool:
     return matches >= 2
 
 
-def _parse_verification_verdict(raw: str) -> Dict[str, Any]:
+def _parse_verification_verdict(raw: str) -> dict[str, Any]:
     """Parse structured JSON verdict from a direct verification model response.
 
     Expected format: {"verdict": "supported"|"refuted"|"insufficient_info",
@@ -841,9 +851,9 @@ async def _llm_call_with_retry(
 
 async def _verify_claim_externally(
     claim: str,
-    generating_model: Optional[str] = None,
+    generating_model: str | None = None,
     force_web_search: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Direct structured cross-model verification for a single claim.
 
     Strategy: send the claim directly to a model from a *different family*
@@ -956,22 +966,28 @@ async def _verify_claim_externally(
             # Increase timeout for web-search calls — they take longer
             timeout = config.BIFROST_TIMEOUT * 2 if is_current_event else config.BIFROST_TIMEOUT
 
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await _llm_call_with_retry(client, url, payload)
-                raw_message = resp.json()["choices"][0]["message"]
-                raw_answer = raw_message.get("content", "").strip()
+            breaker = get_breaker("bifrost-verify")
 
-                # Extract source URLs from OpenRouter URL citation annotations
-                # (present when using :online suffix models like Grok)
-                annotations = raw_message.get("annotations", [])
-                source_urls: List[str] = []
-                seen_urls: set = set()
-                for a in annotations:
-                    if a.get("type") == "url_citation":
-                        url_str = a.get("url_citation", {}).get("url", "")
-                        if url_str and url_str not in seen_urls:
-                            source_urls.append(url_str)
-                            seen_urls.add(url_str)
+            async def _bifrost_verify() -> dict:
+                async with httpx.AsyncClient(timeout=timeout, headers=tracing_headers()) as client:
+                    resp = await _llm_call_with_retry(client, url, payload)
+                    return resp.json()
+
+            data = await breaker.call(_bifrost_verify)
+            raw_message = data["choices"][0]["message"]
+            raw_answer = raw_message.get("content", "").strip()
+
+            # Extract source URLs from OpenRouter URL citation annotations
+            # (present when using :online suffix models like Grok)
+            annotations = raw_message.get("annotations", [])
+            source_urls: list[str] = []
+            seen_urls: set = set()
+            for a in annotations:
+                if a.get("type") == "url_citation":
+                    url_str = a.get("url_citation", {}).get("url", "")
+                    if url_str and url_str not in seen_urls:
+                        source_urls.append(url_str)
+                        seen_urls.add(url_str)
 
             # Parse structured verdict directly — no regex comparison needed
             verdict = _parse_verification_verdict(raw_answer)
@@ -1022,6 +1038,15 @@ async def _verify_claim_externally(
                 "source_urls": source_urls,
             }
 
+        except CircuitOpenError:
+            logger.warning("Bifrost verify circuit open for '%s...'", claim[:50])
+            return {
+                "status": "uncertain",
+                "confidence": 0.3,
+                "reason": "Verification service temporarily unavailable",
+                "verification_method": "circuit_open",
+                "source_urls": [],
+            }
         except Exception as e:
             logger.warning("External verification failed for '%s...': %s", claim[:50], e)
             return {
@@ -1043,8 +1068,8 @@ async def verify_claim(
     neo4j_driver,
     redis_client,
     threshold: float = None,
-    model: Optional[str] = None,
-) -> Dict[str, Any]:
+    model: str | None = None,
+) -> dict[str, Any]:
     """Verify a single claim against the knowledge base and user memories.
 
     Uses multi-result triangulation, numeric contradiction detection,
@@ -1179,9 +1204,9 @@ async def check_hallucinations(
     chroma_client,
     neo4j_driver,
     redis_client,
-    threshold: Optional[float] = None,
-    model: Optional[str] = None,
-) -> Dict[str, Any]:
+    threshold: float | None = None,
+    model: str | None = None,
+) -> dict[str, Any]:
     """Extract claims, verify each against KB, and store results in Redis."""
     if threshold is None:
         threshold = config.HALLUCINATION_THRESHOLD
@@ -1264,8 +1289,8 @@ async def verify_response_streaming(
     chroma_client,
     neo4j_driver,
     redis_client,
-    threshold: Optional[float] = None,
-    model: Optional[str] = None,
+    threshold: float | None = None,
+    model: str | None = None,
 ):
     """Streaming verification generator — yields claim results as they are verified.
 
@@ -1316,9 +1341,9 @@ async def verify_response_streaming(
     uncertain_count = 0
     assessed_confidence = 0.0  # Only accumulate for verified/unverified
     assessed_count = 0
-    collected_results: List[Optional[Dict[str, Any]]] = [None] * len(claims)
+    collected_results: list[dict[str, Any] | None] = [None] * len(claims)
 
-    async def _verify_indexed(idx: int, claim_text: str) -> Tuple[int, Dict[str, Any]]:
+    async def _verify_indexed(idx: int, claim_text: str) -> tuple[int, dict[str, Any]]:
         result = await verify_claim(
             claim_text, chroma_client, neo4j_driver, redis_client, threshold, model=model
         )
@@ -1418,7 +1443,7 @@ async def verify_response_streaming(
 def get_hallucination_report(
     redis_client,
     conversation_id: str,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Retrieve a previously stored hallucination report."""
     try:
         key = f"{REDIS_HALLUCINATION_PREFIX}{conversation_id}"

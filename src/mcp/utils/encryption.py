@@ -9,11 +9,10 @@ import hashlib
 import logging
 import os
 import threading
-from typing import Optional
 
 logger = logging.getLogger("ai-companion.encryption")
 
-_encryptor: Optional["FieldEncryptor"] = None
+_encryptor: FieldEncryptor | None = None
 _initialized = False
 
 ENCRYPTED_PREFIX = "enc:v1:"
@@ -104,7 +103,7 @@ class FieldEncryptor:
 _encryptor_lock = threading.Lock()
 
 
-def get_encryptor() -> Optional[FieldEncryptor]:
+def get_encryptor() -> FieldEncryptor | None:
     """Get the singleton encryptor instance (None if not configured)."""
     global _encryptor, _initialized
 

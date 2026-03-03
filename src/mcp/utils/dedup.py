@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import config
 
@@ -22,7 +22,7 @@ def check_semantic_duplicate(
     chroma_client: Any,
     exclude_artifact_id: str = "",
     threshold: float = NEAR_DUPLICATE_THRESHOLD,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """Check for near-duplicates in the same domain via ChromaDB embedding similarity."""
     if not text or not text.strip():
         return None
@@ -79,22 +79,3 @@ def check_semantic_duplicate(
         logger.warning(f"Semantic dedup check failed (non-blocking): {e}")
 
     return None
-
-
-def check_semantic_duplicate_batch(
-    texts: List[str],
-    domains: List[str],
-    chroma_client: Any,
-    threshold: float = NEAR_DUPLICATE_THRESHOLD,
-) -> List[Optional[Dict[str, Any]]]:
-    """Batch semantic duplicate check — one result per input."""
-    results = []
-    for text, domain in zip(texts, domains):
-        result = check_semantic_duplicate(
-            text=text,
-            domain=domain,
-            chroma_client=chroma_client,
-            threshold=threshold,
-        )
-        results.append(result)
-    return results
