@@ -1,8 +1,8 @@
 # Cerid AI — Issues & Backlog
 
 > **Created:** 2026-02-25
-> **Last updated:** 2026-03-02
-> **Status:** Phase 20A-B complete + codebase audit. 54 resolved, 1 open (D2). 808+ Python tests, 130+ frontend tests. Next: Phase 21.
+> **Last updated:** 2026-03-04
+> **Status:** Phase 22 complete. 57 resolved, 1 open (D2). 847 Python tests, 271 frontend tests.
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21 roadmap)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](COMPLETED_PHASES.md)
 > **Purpose:** Track known bugs, feature gaps, structural issues, and architecture evaluations for upcoming phases.
@@ -476,16 +476,49 @@ Added bundle size check step in frontend CI job — fails if any JS chunk exceed
 - `src/mcp/agents/hallucination.py` (ignorance patterns, `_is_ignorance_admission()`, `_invert_ignorance_verdict()`, `_SYSTEM_IGNORANCE_VERIFICATION`, modified `_verify_claim_externally()`)
 - `src/mcp/tests/test_hallucination.py` (23 new tests, 125 total)
 
+### H6. Verification Always Returns "Uncertain" — Missing External Fallback
+
+**Severity:** High
+**Status:** Resolved (2026-03-04)
+
+**Resolution:** `verify_claim()` only attempted external (cross-model/web-search) verification when KB similarity was below `EXTERNAL_VERIFY_KB_THRESHOLD` (0.3). Since the KB almost always returns results above 0.3 for any query, claims landed in the "uncertain" band (0.4–0.75) and never triggered external verification.
+
+Added two new fallback levels to `verify_claim()`:
+- **Fallback 3 (unverified):** When KB similarity < `HALLUCINATION_UNVERIFIED_THRESHOLD` (0.4), try external verification. Use external result if it returns a definitive "verified" or "unverified" verdict; otherwise fall back to KB-only "unverified".
+- **Fallback 4 (uncertain):** When KB similarity is in the uncertain band (0.4–0.75), try external verification. Use external result if definitive; otherwise return KB-only "uncertain" with source context.
+
+The `verify_claim()` docstring now documents all 4 fallback levels. Only KB-verified claims (similarity ≥ threshold) skip external verification.
+
+**Files changed:**
+- `src/mcp/agents/hallucination.py` (added Fallback 3 + 4, updated docstring)
+
+### H7. UI Polish — KB Card Overflow, Dashboard Data Loss, Icon Colors, Verification Labels
+
+**Severity:** Medium
+**Status:** Resolved (2026-03-04)
+
+**Resolution:** Four UI fixes from user testing:
+
+1. **KB artifact card overflow:** Cards with long filenames or many tags could overflow their container. Added `max-w-full` constraint, text truncation on filenames, and switched to icon-only action buttons (Eye/Syringe/Move) with tooltips.
+
+2. **Chat dashboard data loss:** Single-row condensing removed provider name, token counts, "session" label, last message cost, and "injected" label. Restored all data with `hidden xl:inline` responsive classes for progressive disclosure at ≥1280px viewport.
+
+3. **Inconsistent icon colors:** Status indicators used mixed green shades. Standardized to `text-green-500` across status bar and chat panel.
+
+4. **Verification "unassessed" label:** Renamed to "uncertain" for consistency with backend status enum. Updated display logic in hallucination panel, verification status bar, and verification utils.
+
+**Files changed:**
+- `src/web/src/components/kb/artifact-card.tsx`, `knowledge-pane.tsx`
+- `src/web/src/components/chat/chat-dashboard.tsx`, `chat-panel.tsx`
+- `src/web/src/lib/verification-utils.ts`
+- `src/web/src/components/audit/hallucination-panel.tsx`, `verification-status-bar.tsx`
+
 ---
 
 ## Priority Order
 
 ### Open Items (1)
-1. **D2** — Conversation fork/branch UI (exploratory) — deferred to Phase 17+
+1. **D2** — Conversation fork/branch UI (exploratory) — deferred
 
-### Forward Plan
-See [Development Plan Phase 16-18](plans/DEVELOPMENT_PLAN_PHASE16-18.md) for full details:
-- **Phase 21A-D** — Knowledge sync infrastructure, sync GUI, drag-drop ingestion, storage mode options
-
-### Resolved (54 items)
-All items from sections A-H above marked with ✅ are resolved. Phases 10A-16H addressed all critical, high, and medium severity findings from the holistic audit. See [COMPLETED_PHASES.md](COMPLETED_PHASES.md) for full history.
+### Resolved (57 items)
+All items from sections A-H above marked with ✅ or "Resolved" are resolved. Phases 10A-22 addressed all critical, high, and medium severity findings. See [COMPLETED_PHASES.md](COMPLETED_PHASES.md) for full history.

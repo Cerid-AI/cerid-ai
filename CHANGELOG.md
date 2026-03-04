@@ -14,6 +14,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - ENV_CONVENTIONS.md — env var naming inventory, grouping rules, recommendations for new variables
 - 28 new Self-RAG Python tests, 132 new frontend tests
 
+### Fixed
+- Verification fallback to external for uncertain/unverified claims — `verify_claim()` now has 4 fallback levels: (1) no KB results, (2) very low KB similarity, (3) KB says "unverified", (4) KB says "uncertain". Previously only levels 1-2 existed, causing claims with moderate KB similarity to stay "uncertain" without external cross-model/web-search verification
+- UI polish: KB artifact card overflow (constrained width, icon-only action buttons), chat dashboard single-row responsive layout with `hidden xl:inline` progressive disclosure, consistent green icon colors across status indicators, "unassessed" → "uncertain" label rename in verification display
+
 ## [0.8.0] - 2026-03-03
 
 ### Added

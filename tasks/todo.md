@@ -399,6 +399,11 @@
 - [x] Frontend component tests — 139 → 271 tests (13 new test files across Tier 1 components, Tier 2 hooks, Tier 3 secondary)
 - [x] Self-RAG validation loop — `agents/self_rag.py`, claims-as-queries retrieval refinement, `ENABLE_SELF_RAG` toggle, per-request override, 28 tests
 
+### Post-Phase 22: Bug Fixes & UI Polish ✅
+- [x] H6 — Verification fallback to external for uncertain/unverified claims (4-level fallback chain in `verify_claim()`)
+- [x] H7 — UI polish: KB card overflow, dashboard responsive data, icon colors, verification label rename
+- [x] Chat dashboard restored inline data with `hidden xl:inline` progressive disclosure
+
 ### Deferred
 - [ ] D2: Conversation fork/branch UI (40-60 hrs, exploratory)
 

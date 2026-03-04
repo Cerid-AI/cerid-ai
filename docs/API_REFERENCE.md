@@ -28,7 +28,7 @@
 - `POST /agent/maintain` — Maintenance routines (health, stale detection, collection analysis, orphan cleanup)
 
 **Phase 7 endpoints:**
-- `POST /agent/hallucination` — Check LLM response for hallucinations against KB
+- `POST /agent/hallucination` — Check LLM response for hallucinations against KB with 4-level verification fallback (KB-only → external cross-model/web-search for unverified/uncertain claims)
 - `GET /agent/hallucination/{conversation_id}` — Retrieve stored hallucination report
 - `POST /agent/memory/extract` — Extract and store memories from conversation
 - `POST /agent/memory/archive` — Archive old conversation memories
