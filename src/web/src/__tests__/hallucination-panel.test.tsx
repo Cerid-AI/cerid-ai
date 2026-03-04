@@ -60,7 +60,7 @@ describe("HallucinationPanel", () => {
     render(
       <HallucinationPanel report={makeReport()} loading={false} featureEnabled={true} />,
     )
-    // Summary renders counts like "1 verified", "1 unverified", "1 unassessed"
+    // Summary renders counts like "1 verified", "1 unverified", "1 uncertain"
     expect(screen.getByText(/1 verified/)).toBeInTheDocument()
   })
 

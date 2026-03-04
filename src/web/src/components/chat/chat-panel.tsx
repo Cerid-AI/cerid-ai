@@ -302,7 +302,7 @@ export function ChatPanel() {
               <Button
                 variant="ghost"
                 size="icon"
-                className={cn("h-8 w-8", showKB && "text-primary")}
+                className={cn("h-8 w-8", showKB && "text-green-500")}
                 onClick={() => setShowKB(!showKB)}
                 aria-label={showKB ? "Hide knowledge context" : "Show knowledge context"}
               >
@@ -338,7 +338,7 @@ export function ChatPanel() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className={cn("h-8 w-8", feedbackLoop && "text-primary")}
+                    className={cn("h-8 w-8", feedbackLoop && "text-green-500")}
                     onClick={toggleFeedbackLoop}
                     aria-label={feedbackLoop ? "Disable feedback loop" : "Enable feedback loop"}
                   >
@@ -354,7 +354,7 @@ export function ChatPanel() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className={cn("h-8 w-8", showDashboard && "text-primary")}
+                    className={cn("h-8 w-8", showDashboard && "text-green-500")}
                     onClick={toggleDashboard}
                     aria-label={showDashboard ? "Hide metrics dashboard" : "Show metrics dashboard"}
                   >
@@ -370,7 +370,7 @@ export function ChatPanel() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className={cn("h-8 w-8", autoModelSwitch && "text-primary")}
+                    className={cn("h-8 w-8", autoModelSwitch && "text-green-500")}
                     onClick={toggleAutoModelSwitch}
                     aria-label={autoModelSwitch ? "Disable smart model routing" : "Enable smart model routing"}
                   >
@@ -393,21 +393,21 @@ export function ChatPanel() {
               </PopoverTrigger>
               <PopoverContent className="w-48">
                 <button
-                  className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent", feedbackLoop && "text-primary")}
+                  className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent", feedbackLoop && "text-green-500")}
                   onClick={toggleFeedbackLoop}
                 >
                   <Rss className="h-4 w-4" />
                   {feedbackLoop ? "Feedback: ON" : "Feedback: OFF"}
                 </button>
                 <button
-                  className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent", showDashboard && "text-primary")}
+                  className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent", showDashboard && "text-green-500")}
                   onClick={toggleDashboard}
                 >
                   <LayoutDashboard className="h-4 w-4" />
                   {showDashboard ? "Dashboard: ON" : "Dashboard: OFF"}
                 </button>
                 <button
-                  className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent", autoModelSwitch && "text-primary")}
+                  className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent", autoModelSwitch && "text-green-500")}
                   onClick={toggleAutoModelSwitch}
                 >
                   <Zap className="h-4 w-4" />

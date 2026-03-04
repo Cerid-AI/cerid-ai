@@ -12,11 +12,11 @@ import { getClaimDisplayStatus, type ClaimDisplayStatus } from "@/lib/verificati
 import { cn } from "@/lib/utils"
 
 /** Display-status color map for badge backgrounds */
-const DISPLAY_STATUS_COLORS: Record<ClaimDisplayStatus | "pending" | "error", string> = {
+const DISPLAY_STATUS_COLORS: Record<ClaimDisplayStatus | "error", string> = {
   verified: "bg-green-500/20 text-green-400 border-green-500/30",
   refuted: "bg-red-500/20 text-red-400 border-red-500/30",
   unverified: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
-  unassessed: "bg-muted/50 text-muted-foreground border-border",
+  uncertain: "bg-muted/50 text-muted-foreground border-border",
   pending: "bg-muted text-muted-foreground border-border",
   error: "bg-muted text-muted-foreground",
 }
@@ -152,7 +152,7 @@ function StreamingClaimBadge({ claim }: { claim: StreamingClaim }) {
     <div className="flex items-start gap-2 rounded-lg border p-3">
       <Badge
         variant="outline"
-        className={`shrink-0 ${DISPLAY_STATUS_COLORS[displayStatus] ?? DISPLAY_STATUS_COLORS.pending}`}
+        className={`shrink-0 ${DISPLAY_STATUS_COLORS[displayStatus] ?? DISPLAY_STATUS_COLORS.uncertain}`}
       >
         {displayStatus === "pending" ? (
           <span className="flex items-center gap-1">
@@ -317,7 +317,7 @@ export function HallucinationPanel({
           <span className="text-yellow-400">{softUnverifiedCount} unverified</span>
         )}
         {uncertain > 0 && (
-          <span className="text-muted-foreground">{uncertain} unassessed</span>
+          <span className="text-muted-foreground">{uncertain} uncertain</span>
         )}
       </div>
       <ScrollArea className="min-h-0 flex-1 px-4 pb-3">

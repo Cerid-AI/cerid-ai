@@ -12,7 +12,7 @@
  * This mapping is frontend-only — zero backend changes needed.
  */
 
-export type ClaimDisplayStatus = "verified" | "refuted" | "unverified" | "unassessed" | "pending"
+export type ClaimDisplayStatus = "verified" | "refuted" | "unverified" | "uncertain" | "pending"
 
 /**
  * Derive the user-facing display status from backend status + verification method.
@@ -20,7 +20,7 @@ export type ClaimDisplayStatus = "verified" | "refuted" | "unverified" | "unasse
  * - verified → verified (green)
  * - unverified + cross_model/web_search → refuted (red, actively wrong)
  * - unverified + kb/none → unverified (yellow, no evidence)
- * - uncertain → unassessed (gray)
+ * - uncertain → uncertain (gray, checked but inconclusive)
  * - pending → pending (gray, spinning)
  */
 export function getClaimDisplayStatus(
@@ -34,7 +34,7 @@ export function getClaimDisplayStatus(
   )
     return "refuted" // actively found wrong by another model
   if (status === "unverified") return "unverified" // no KB evidence (softer)
-  if (status === "uncertain") return "unassessed"
+  if (status === "uncertain") return "uncertain"
   if (status === "pending") return "pending"
-  return "unassessed"
+  return "uncertain"
 }

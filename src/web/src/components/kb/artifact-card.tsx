@@ -55,7 +55,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
     <Card
       ref={cardRef}
       className={cn(
-        "min-w-0 cursor-pointer overflow-hidden transition-colors",
+        "w-full min-w-0 max-w-full cursor-pointer overflow-hidden transition-colors",
         isSelected && "ring-2 ring-primary",
       )}
       role="button"
@@ -170,60 +170,62 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
         )}
 
         {/* Actions */}
-        <div className="mt-2 flex items-center gap-1">
+        <div className="mt-2 flex items-center gap-0.5">
           {cleanContent.length > 150 && (
             <Button
               variant="ghost"
-              size="xs"
+              size="icon"
+              className="h-6 w-6"
               onClick={toggleExpand}
+              title={expanded ? "Show less" : "Show more"}
             >
               {expanded ? (
-                <><ChevronUp className="mr-1 h-3 w-3" />Less</>
+                <ChevronUp className="h-3 w-3" />
               ) : (
-                <><ChevronDown className="mr-1 h-3 w-3" />More</>
+                <ChevronDown className="h-3 w-3" />
               )}
             </Button>
           )}
           {domains && onRecategorize && (
             <Button
               variant="ghost"
-              size="xs"
+              size="icon"
+              className="h-6 w-6"
               onClick={(e) => {
                 e.stopPropagation()
                 setShowRecategorize(!showRecategorize)
               }}
               title="Move to another domain"
             >
-              <ArrowRightLeft className="mr-1 h-3 w-3" />
-              Move
+              <ArrowRightLeft className="h-3 w-3" />
             </Button>
           )}
           {onPreview && (
             <Button
               variant="ghost"
-              size="xs"
+              size="icon"
+              className="h-6 w-6"
               onClick={(e) => {
                 e.stopPropagation()
                 onPreview(result.artifact_id)
               }}
               title="Preview content"
             >
-              <Eye className="mr-1 h-3 w-3" />
-              Preview
+              <Eye className="h-3 w-3" />
             </Button>
           )}
           <div className="flex-1" />
           <Button
             variant="ghost"
-            size="xs"
-            className="text-primary"
+            size="icon"
+            className="h-6 w-6 text-primary"
             onClick={(e) => {
               e.stopPropagation()
               onInject()
             }}
+            title="Inject into chat context"
           >
-            <PlusCircle className="mr-1 h-3 w-3" />
-            Inject
+            <PlusCircle className="h-3 w-3" />
           </Button>
         </div>
       </CardContent>

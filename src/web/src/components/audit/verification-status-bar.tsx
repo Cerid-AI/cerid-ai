@@ -42,7 +42,7 @@ function ClaimStatusIcon({ displayStatus }: { displayStatus: ClaimDisplayStatus 
       return <AlertTriangle className="h-3 w-3 shrink-0 text-yellow-400" />
     case "pending":
       return <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" />
-    case "unassessed":
+    case "uncertain":
     default:
       return <Circle className="h-3 w-3 shrink-0 text-muted-foreground" />
   }
@@ -54,7 +54,7 @@ function claimStatusColor(displayStatus: ClaimDisplayStatus): string {
     case "verified": return "text-green-400"
     case "refuted": return "text-red-400"
     case "unverified": return "text-yellow-400"
-    case "unassessed": return "text-muted-foreground"
+    case "uncertain": return "text-muted-foreground"
     default: return "text-muted-foreground"
   }
 }
@@ -220,7 +220,7 @@ export function VerificationStatusBar({
       >
         <ShieldIcon className={cn("h-3 w-3 shrink-0", shieldColor)} />
 
-        {/* Claim count — show assessed vs total when some are unassessed */}
+        {/* Claim count — show assessed vs total when some are uncertain */}
         <span className="text-muted-foreground">
           {uncertain > 0 ? `${verified + unverified} of ${total}` : `${total}`} claims assessed
         </span>
@@ -235,7 +235,7 @@ export function VerificationStatusBar({
           <span className="text-yellow-400">{softUnverifiedCount} unverified</span>
         )}
         {uncertain > 0 && (
-          <span className="text-muted-foreground/60">{uncertain} unassessed</span>
+          <span className="text-muted-foreground/60">{uncertain} uncertain</span>
         )}
 
         <div className="h-3 w-px shrink-0 bg-border" />
