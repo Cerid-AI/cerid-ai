@@ -19,8 +19,8 @@
 - `GET /artifacts` — List ingested artifacts (filter by domain)
 - `GET /ingest_log` — View audit trail from Redis
 
-**Agent endpoints (Phase 2):**
-- `POST /agent/query` — Multi-domain query with LLM reranking and context assembly
+**Agent endpoints (Phase 2+):**
+- `POST /agent/query` — Multi-domain query with LLM reranking, context assembly, and optional Self-RAG validation
 - `POST /agent/triage` — LangGraph-powered file triage (validate → parse → categorize → chunk)
 - `POST /agent/triage/batch` — Batch triage with per-file error recovery
 - `POST /agent/rectify` — Knowledge base health checks (duplicates, stale, orphans, distribution)
@@ -33,9 +33,18 @@
 - `POST /agent/memory/extract` — Extract and store memories from conversation
 - `POST /agent/memory/archive` — Archive old conversation memories
 
+**Artifact detail & feedback (Phase 16G, 19E):**
+- `GET /artifacts/{artifact_id}` — Full artifact detail (Neo4j metadata + reassembled ChromaDB chunks)
+- `POST /artifacts/{artifact_id}/feedback` — Submit quality feedback (inject/dismiss signals)
+
+**Sync endpoints (Phase 21A):**
+- `POST /sync/export` — Trigger incremental or full export to sync directory
+- `POST /sync/import` — Trigger merge import from sync directory
+- `GET /sync/status` — Compare local DB counts against sync directory manifest
+
 **Settings & memories:**
-- `GET /settings` — Server configuration and feature flags
-- `PATCH /settings` — Partial settings update
+- `GET /settings` — Server configuration and feature flags (includes `enable_self_rag`)
+- `PATCH /settings` — Partial settings update (supports `enable_self_rag`)
 - `GET /memories` — List/filter memories (type, conversation_id, limit, offset)
 - `PATCH /memories/{id}` — Update memory summary
 - `DELETE /memories/{id}` — Delete a memory
@@ -140,7 +149,17 @@ Multi-domain search with LLM-powered reranking and intelligent context assembly.
 curl -X POST http://localhost:8888/agent/query \
   -H "Content-Type: application/json" \
   -d '{"query": "tax deductions", "domains": ["finance", "general"], "top_k": 5}'
+
+# With Self-RAG validation (requires response_text):
+curl -X POST http://localhost:8888/agent/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "tax deductions", "response_text": "LLM response to validate...", "enable_self_rag": true}'
 ```
+
+**Self-RAG fields (optional):**
+- `response_text` — LLM response text to validate against KB (triggers Self-RAG when provided)
+- `model` — Generating model name (for metadata tracking)
+- `enable_self_rag` — Override server-side `ENABLE_SELF_RAG` toggle (null = use server config)
 
 **Key Functions:**
 - `multi_domain_query()` — Parallel ChromaDB queries across domains
@@ -148,6 +167,7 @@ curl -X POST http://localhost:8888/agent/query \
 - `rerank_results()` — LLM-based relevance reranking via Bifrost (falls back to embedding sort)
 - `assemble_context()` — Build context within token budget
 - `agent_query()` — Main orchestration function
+- `self_rag_enhance()` — Iterative claim verification and targeted retrieval refinement (in `agents/self_rag.py`)
 
 ### Triage Agent (`agents/triage.py`)
 
@@ -243,7 +263,7 @@ curl -X POST http://localhost:8888/agent/maintain \
 
 ### Agent Dependencies
 
-LangGraph >=0.3.0, langchain-core, langchain-openai
+LangGraph >=0.3.0 (pulls langchain-core transitively)
 
 ---
 
@@ -335,6 +355,27 @@ python3 scripts/cerid-sync.py status
 ```
 
 **Auto-import on startup:** When MCP starts with an empty Neo4j database and a valid `manifest.json` in the sync directory, it automatically imports all data. This enables zero-config bootstrap on a new machine.
+
+**REST API (Phase 21A):**
+```bash
+# Trigger incremental export (auto-reads last_exported_at from manifest)
+curl -X POST http://localhost:8888/sync/export \
+  -H "Content-Type: application/json" \
+  -d '{}'
+
+# Export specific domains since a timestamp
+curl -X POST http://localhost:8888/sync/export \
+  -H "Content-Type: application/json" \
+  -d '{"since": "2026-03-01T00:00:00Z", "domains": ["coding", "finance"]}'
+
+# Import with conflict strategy
+curl -X POST http://localhost:8888/sync/import \
+  -H "Content-Type: application/json" \
+  -d '{"conflict_strategy": "remote_wins"}'
+
+# Check sync status
+curl http://localhost:8888/sync/status
+```
 
 **Sync directory structure:**
 ```

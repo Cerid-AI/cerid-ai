@@ -1,7 +1,7 @@
 # Cerid AI — Completed Phases
 
 > Full history of completed development phases. For current status and next steps, see [CLAUDE.md](../CLAUDE.md).
-> **Last updated:** 2026-03-02
+> **Last updated:** 2026-03-04
 
 ---
 
@@ -61,3 +61,10 @@
 - **Phase 18 (Complete):** Network Access & Demo Deployment — LAN auto-IP detection (`CERID_HOST`), `VITE_MCP_URL` runtime injection via docker-entrypoint.sh, optional Caddy HTTPS gateway (`stacks/gateway/`, `CERID_GATEWAY=true`), optional Cloudflare Tunnel (`stacks/tunnel/`, `CLOUDFLARE_TUNNEL_TOKEN`), OPERATIONS.md LAN/demo docs
 - **Phase 19 (Complete):** Expert Orchestration & Validation — circuit breakers on all 5 Bifrost call sites (rerank, claims, verify, synopsis, memory), distributed request tracing (contextvars + httpx headers + Redis audit + frontend UUID), semantic chunking (paragraph-aware with contextual headers), eval enhancement (latency P50/P95/P99, per-domain breakdowns, A/B comparison), adaptive quality feedback (`POST /artifacts/{id}/feedback`)
 - **Phase 20 (Complete):** Smart Tags & Artifact Quality — per-domain tag vocabulary (`TAG_VOCABULARY` in `config/taxonomy.py`), taxonomy-constrained tag generation with provenance tracking, tag quality scoring (vocabulary match, domain relevance, generic penalty, diversity bonus), typeahead tag UI, tag suggest endpoint, improved synopsis prompt ("What is this?") with filename/domain context, sentence-aware summary extraction, batch re-tagging support
+- **Codebase Audit (Post-20) (Complete):** Critical bug fixes (Neo4j rollback, unbound vars, fragile URLs), dead code removal, typing modernization (`Dict`→`dict` across 30+ files), frontend cleanup, test deduplication, lint cleanup. 808 Python tests, 130 frontend tests.
+- **Phase 21A (Complete):** Incremental Knowledge Sync — delta-only export based on `last_exported_at`, tombstone support (record/export/apply/purge), conflict detection & resolution (4 strategies: remote_wins, local_wins, keep_both, manual_review), scheduled sync via APScheduler + export-on-ingest hook, selective sync (domain/date-range filtering), REST endpoints (`POST /sync/export`, `POST /sync/import`, `GET /sync/status`), CLI flags (`--since`, `--domains`, `--force`, `--conflict-strategy`)
+- **Repository Audit (Complete):** Dependency cleanup (removed langchain-openai CVE, httpx-sse, python-dotenv; added requests; widened ceilings), JS cleanup (removed unused react-router, devtools), fixed hardcoded MCP hostname, deleted stale custom_router files, expanded Dependabot Docker coverage, documentation updates, .gitignore fix for BM25 runtime data
+- **Phase 21B (Complete):** Sync GUI Integration — SyncSection component in settings pane (local vs sync count comparison, export/import buttons, conflict strategy selector, result summaries), sync types/API in frontend, 9 new frontend tests
+- **Phase 21C (Complete):** Drag-Drop Ingestion — drop zone on Knowledge pane with visual overlay, pre-upload UploadDialog (domain picker, categorization mode, file list), multi-file batch support, touch-compatible
+- **Phase 21D (Complete):** Storage Options — `CERID_STORAGE_MODE` config (extract_only/archive), archive mode copies files to `archive/{domain}/`, `GET /archive/files` endpoint, storage mode selector in settings, 11 new Python tests
+- **Phase 22 (Complete):** Deferred Items — retroactive CHANGELOG.md, ENV_CONVENTIONS.md naming standardization doc, mypy type checking with CI integration (`[tool.mypy]` in pyproject.toml, mypy step in CI), frontend component tests expanded from 139 to 271 (13 new test files across 3 tiers: components, hooks, secondary), Self-RAG validation loop (`agents/self_rag.py` — iterative claim-based retrieval refinement, claims-as-queries, lightweight KB assessment, disabled by default, per-request override, 28 new tests). Final counts: 847 Python tests, 271 frontend tests.

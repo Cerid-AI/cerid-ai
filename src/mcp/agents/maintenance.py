@@ -9,7 +9,6 @@ import json
 import logging
 from typing import Any
 
-import chromadb
 import httpx
 
 import config
@@ -26,11 +25,11 @@ logger = logging.getLogger("ai-companion.maintenance")
 
 def check_system_health(
     neo4j_driver,
-    chroma_client: chromadb.HttpClient,
+    chroma_client: Any,
     redis_client,
 ) -> dict[str, Any]:
     """Comprehensive health check — data integrity, collection counts, Bifrost reachability."""
-    health = {
+    health: dict[str, Any] = {
         "timestamp": utcnow_iso(),
         "services": {},
         "data": {},
@@ -127,7 +126,7 @@ async def check_bifrost_health() -> str:
 
 def purge_artifacts(
     neo4j_driver,
-    chroma_client: chromadb.HttpClient,
+    chroma_client: Any,
     artifact_ids: list[str],
     redis_client=None,
 ) -> dict[str, Any]:
@@ -203,7 +202,7 @@ def purge_artifacts(
 # ---------------------------------------------------------------------------
 
 def analyze_collections(
-    chroma_client: chromadb.HttpClient,
+    chroma_client: Any,
 ) -> dict[str, Any]:
     """Analyze ChromaDB collection health and size distribution."""
     collections = chroma_client.list_collections()
@@ -247,7 +246,7 @@ def analyze_collections(
 
 async def maintain(
     neo4j_driver,
-    chroma_client: chromadb.HttpClient,
+    chroma_client: Any,
     redis_client,
     actions: list[str] | None = None,
     stale_days: int = 90,
@@ -258,7 +257,7 @@ async def maintain(
     if actions is None:
         actions = list(all_actions)
 
-    report = {
+    report: dict[str, Any] = {
         "timestamp": utcnow_iso(),
         "actions_run": actions,
         "auto_purge": auto_purge,

@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+import config
 from deps import get_chroma, get_neo4j, get_redis
 from services.ingestion import ingest_content, validate_file_path
 
@@ -24,6 +25,9 @@ class AgentQueryRequest(BaseModel):
     top_k: int = Field(10, ge=1, le=100)
     use_reranking: bool = True
     conversation_messages: list[dict[str, str]] | None = None
+    response_text: str | None = Field(None, description="LLM response text for Self-RAG validation")
+    model: str | None = Field(None, description="Generating model (for Self-RAG metadata)")
+    enable_self_rag: bool | None = Field(None, description="Override Self-RAG toggle (None = use server config)")
 
 
 class TriageFileRequest(BaseModel):
@@ -109,6 +113,20 @@ async def agent_query_endpoint(req: AgentQueryRequest):
             redis_client=get_redis(),
             neo4j_driver=get_neo4j(),
         )
+
+        # Self-RAG: validate claims and refine retrieval if enabled
+        use_self_rag = req.enable_self_rag if req.enable_self_rag is not None else config.ENABLE_SELF_RAG
+        if use_self_rag and req.response_text:
+            from agents.self_rag import self_rag_enhance
+            result = await self_rag_enhance(
+                query_result=result,
+                response_text=req.response_text,
+                chroma_client=get_chroma(),
+                neo4j_driver=get_neo4j(),
+                redis_client=get_redis(),
+                model=req.model,
+            )
+
         if not has_context:
             set_cached(req.query, domain_key, req.top_k, result)
         return result

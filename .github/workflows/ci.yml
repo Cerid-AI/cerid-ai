@@ -18,6 +18,17 @@ jobs:
       - run: pip install ruff==0.15.4
       - run: ruff check src/mcp/
 
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r src/mcp/requirements.txt -r src/mcp/requirements-dev.txt
+      - run: cd src/mcp && python -m mypy . --config-file ../../pyproject.toml
+
   test:
     runs-on: ubuntu-latest
     steps:

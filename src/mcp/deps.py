@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 import threading
 import time as _time
+from typing import Any
 from urllib.parse import urlparse
 
 import chromadb
@@ -56,7 +57,7 @@ _redis_lock = threading.Lock()
 _neo4j_lock = threading.Lock()
 
 
-def get_chroma() -> chromadb.HttpClient:
+def get_chroma() -> Any:
     global _chroma
     if _chroma is None:
         with _chroma_lock:

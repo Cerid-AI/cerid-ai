@@ -1,12 +1,12 @@
 # Cerid AI — Task Tracker
 
-> **Last updated:** 2026-03-02
-> **Current status:** Phase 20A-B complete + codebase audit. 808+ Python tests, 130+ frontend tests. Next: Phase 21 (Knowledge Sync & Multi-Computer Parity).
+> **Last updated:** 2026-03-04
+> **Current status:** Phase 22 complete. 847 Python tests, 271 frontend tests. All deferred items shipped except D2 conversation fork.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md)
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](../docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
 
-## Current: Phase 10 — Commercial & Open-Source Readiness
+## Current: Phase 22 — Deferred Items (Complete)
 
 ### 10A: Production Quality ✅
 - [x] A1 — Chat viewport overflow fix (CSS `min-h-0` cascade)
@@ -355,37 +355,52 @@
 
 ### Phase 21: Knowledge Sync & Multi-Computer Parity (Medium)
 
-#### 21A: Sync Infrastructure
-- [ ] Incremental export (delta-only based on last_exported_at)
-- [ ] Tombstone support (propagate deletions)
-- [ ] Conflict detection & resolution strategies
-- [ ] Scheduled sync (APScheduler, export-on-ingest)
-- [ ] Selective sync (domain/date-range filtering)
+#### 21A: Sync Infrastructure ✅
+- [x] Incremental export (delta-only based on last_exported_at)
+- [x] Tombstone support (propagate deletions across machines)
+- [x] Conflict detection & resolution strategies (remote_wins, local_wins, keep_both, manual_review)
+- [x] Scheduled sync (APScheduler cron, export-on-ingest hook)
+- [x] Selective sync (domain/date-range filtering)
+- [x] REST endpoints: POST /sync/export, POST /sync/import, GET /sync/status
+- [x] CLI flags: --since, --domains, --force, --conflict-strategy
 
-#### 21B: Sync GUI Integration
-- [ ] Sync status dashboard in settings
-- [ ] Export/Import/Status action buttons with progress
-- [ ] Sync history + conflict resolution dialog
+#### 21B: Sync GUI Integration ✅
+- [x] Sync types (SyncStatus, SyncExportResult, SyncImportResult, ConflictStrategy) in types.ts
+- [x] Sync API functions (fetchSyncStatus, triggerSyncExport, triggerSyncImport) in api.ts
+- [x] SyncSection component — collapsible section in settings pane with:
+  - Local vs sync count comparison table (artifacts, domains, relations, chunks by domain)
+  - Last export timestamp and source machine from manifest
+  - Export button with inline success/error feedback
+  - Import button with conflict strategy selector (remote_wins, local_wins, keep_both, manual_review)
+  - Result summaries showing artifacts created/updated/skipped/conflicts
+- [x] 9 new frontend tests (fetchSyncStatus, triggerSyncExport, triggerSyncImport, fetchArchiveFiles)
 
-#### 21C: Drag-Drop Ingestion
-- [ ] Drop zone on Knowledge pane (touch-compatible)
-- [ ] Upload progress with pipeline status
-- [ ] Pre-upload options dialog
-- [ ] Backend batch upload + storage_mode
+#### 21C: Drag-Drop Ingestion ✅
+- [x] Drop zone on Knowledge pane — drag enter/leave/over/drop handlers with counter-based tracking
+- [x] Visual overlay during drag (dashed primary border, "Drop files to ingest" label, z-50)
+- [x] Pre-upload options dialog (UploadDialog component) — domain picker (auto-detect + all domains), categorization mode (manual/smart/pro), file list with sizes, batch support
+- [x] Single and multi-file drag-drop to options dialog flow
+- [x] Touch-compatible — drag-drop works on desktop, existing upload button for touch
 
-#### 21D: Storage Options
-- [ ] Storage mode: extract-only vs curate files
-- [ ] Managed file archive (domain/sub_category folders)
-- [ ] Archive sync strategy
-- [ ] GUI file management (view/open/re-ingest)
+#### 21D: Storage Options ✅
+- [x] CERID_STORAGE_MODE config (extract_only | archive), default extract_only
+- [x] Archive mode copies uploaded files to archive/{domain}/ with collision-safe naming
+- [x] GET /archive/files endpoint — lists files by domain, skips hidden/system dirs, includes size
+- [x] Storage mode selector in settings pane (Ingestion section)
+- [x] fetchArchiveFiles() API function with domain filter
+- [x] storage_mode exposed via GET /settings and PATCH /settings
+- [x] CERID_STORAGE_MODE added to .env.example
+- [x] 11 new Python tests (_archive_file helper, archive listing, storage mode config)
+
+### Phase 22: Deferred Items ✅
+- [x] CHANGELOG.md — retroactive from git history, Keep a Changelog format, Phases 0-21
+- [x] Env var naming standardization doc — `docs/ENV_CONVENTIONS.md`, current inventory + naming rules
+- [x] mypy type checking — `[tool.mypy]` in pyproject.toml, `types-redis` stub, CI step in `.github/workflows/ci.yml`
+- [x] Frontend component tests — 139 → 271 tests (13 new test files across Tier 1 components, Tier 2 hooks, Tier 3 secondary)
+- [x] Self-RAG validation loop — `agents/self_rag.py`, claims-as-queries retrieval refinement, `ENABLE_SELF_RAG` toggle, per-request override, 28 tests
 
 ### Deferred
 - [ ] D2: Conversation fork/branch UI (40-60 hrs, exploratory)
-- [ ] Frontend component tests (40+ untested, 20-30 hrs)
-- [ ] CHANGELOG.md (retroactive from git history)
-- [ ] Env var naming standardization doc
-- [ ] mypy/pyright type checking
-- [ ] Self-RAG validation loop (8-12 hrs)
 
 ## Completed Phases
 

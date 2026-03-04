@@ -48,3 +48,27 @@ updates:
       interval: monthly
     commit-message:
       prefix: "deps(docker):"
+
+  # Docker — Infrastructure (Neo4j, ChromaDB, Redis)
+  - package-ecosystem: docker
+    directory: /stacks/infrastructure
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "deps(docker):"
+
+  # Docker — Gateway (Caddy)
+  - package-ecosystem: docker
+    directory: /stacks/gateway
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "deps(docker):"
+
+  # Docker — Tunnel (Cloudflare)
+  - package-ecosystem: docker
+    directory: /stacks/tunnel
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "deps(docker):"

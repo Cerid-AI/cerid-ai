@@ -10,8 +10,6 @@ import logging
 from datetime import timedelta
 from typing import Any
 
-import chromadb
-
 import config
 from utils.cache import log_event
 from utils.time import utcnow, utcnow_iso
@@ -25,7 +23,7 @@ logger = logging.getLogger("ai-companion.rectify")
 
 def find_duplicate_artifacts(
     neo4j_driver,
-    chroma_client: chromadb.HttpClient | None = None,
+    chroma_client: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Find artifacts sharing the same content_hash across different domains."""
     with neo4j_driver.session() as session:
@@ -54,7 +52,7 @@ def find_duplicate_artifacts(
 def find_similar_artifacts(
     query_text: str,
     domain: str,
-    chroma_client: chromadb.HttpClient,
+    chroma_client: Any,
     threshold: float = 0.15,
     top_k: int = 5,
 ) -> list[dict[str, Any]]:
@@ -127,7 +125,7 @@ def find_stale_artifacts(
 
 def find_orphaned_chunks(
     neo4j_driver,
-    chroma_client: chromadb.HttpClient,
+    chroma_client: Any,
 ) -> dict[str, Any]:
     """Find ChromaDB chunks without corresponding Neo4j artifact records."""
     with neo4j_driver.session() as session:
@@ -169,7 +167,7 @@ def find_orphaned_chunks(
 
 def resolve_duplicates(
     neo4j_driver,
-    chroma_client: chromadb.HttpClient,
+    chroma_client: Any,
     content_hash: str,
     keep_artifact_id: str,
     redis_client=None,
@@ -239,7 +237,7 @@ def resolve_duplicates(
 
 
 def cleanup_orphaned_chunks(
-    chroma_client: chromadb.HttpClient,
+    chroma_client: Any,
     orphaned: dict[str, list[dict[str, str]]],
 ) -> dict[str, int]:
     """Remove orphaned chunks from ChromaDB."""
@@ -304,7 +302,7 @@ def analyze_domain_distribution(neo4j_driver) -> dict[str, Any]:
 
 async def rectify(
     neo4j_driver,
-    chroma_client: chromadb.HttpClient,
+    chroma_client: Any,
     redis_client=None,
     checks: list[str] | None = None,
     auto_fix: bool = False,
@@ -315,7 +313,7 @@ async def rectify(
     if checks is None:
         checks = list(all_checks)
 
-    report = {
+    report: dict[str, Any] = {
         "timestamp": utcnow_iso(),
         "checks_run": checks,
         "auto_fix": auto_fix,

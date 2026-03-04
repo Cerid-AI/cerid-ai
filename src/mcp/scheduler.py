@@ -119,6 +119,55 @@ async def _run_stale_detection() -> None:
         logger.error(f"Scheduled stale detection failed: {e}")
 
 
+async def _run_sync_export() -> None:
+    """Scheduled incremental export to sync directory."""
+    start = time.time()
+    try:
+        from sync.export import export_all
+        from sync.manifest import read_manifest
+
+        # Read last_exported_at from existing manifest for incremental filter
+        since = None
+        try:
+            manifest = read_manifest(config.SYNC_DIR)
+            since = manifest.get("last_exported_at")
+        except (FileNotFoundError, ValueError):
+            pass
+
+        result = export_all(
+            driver=get_neo4j(),
+            chroma_url=config.CHROMA_URL,
+            redis_client=get_redis(),
+            sync_dir=config.SYNC_DIR,
+            machine_id=config.MACHINE_ID,
+            since=since,
+        )
+        neo4j_count = result.get("neo4j", {}).get("artifacts", 0)
+        duration = time.time() - start
+        _log_execution("sync_export", "success", duration, f"{neo4j_count} artifacts")
+        logger.info("Scheduled sync export: %d artifacts in %.1fs", neo4j_count, duration)
+    except Exception as e:
+        duration = time.time() - start
+        _log_execution("sync_export", "error", duration, str(e))
+        logger.error("Scheduled sync export failed: %s", e)
+
+
+async def _run_tombstone_purge() -> None:
+    """Weekly purge of expired tombstone records."""
+    start = time.time()
+    try:
+        from sync.tombstones import purge_expired
+        result = purge_expired(sync_dir=config.SYNC_DIR)
+        purged = result.get("purged", 0)
+        duration = time.time() - start
+        _log_execution("tombstone_purge", "success", duration, f"{purged} purged")
+        logger.info("Scheduled tombstone purge: %d expired in %.1fs", purged, duration)
+    except Exception as e:
+        duration = time.time() - start
+        _log_execution("tombstone_purge", "error", duration, str(e))
+        logger.error("Scheduled tombstone purge failed: %s", e)
+
+
 def start_scheduler() -> AsyncIOScheduler:
     """Create and start the scheduler with configured jobs."""
     global _scheduler
@@ -146,6 +195,25 @@ def start_scheduler() -> AsyncIOScheduler:
         CronTrigger.from_crontab(config.SCHEDULE_STALE_DETECTION),
         id="stale_detection",
         name="Weekly stale detection",
+        replace_existing=True,
+    )
+
+    # Sync export (optional — empty SCHEDULE_SYNC_EXPORT disables)
+    if getattr(config, "SCHEDULE_SYNC_EXPORT", ""):
+        _scheduler.add_job(
+            _run_sync_export,
+            CronTrigger.from_crontab(config.SCHEDULE_SYNC_EXPORT),
+            id="sync_export",
+            name="Incremental sync export",
+            replace_existing=True,
+        )
+
+    # Weekly tombstone purge (always active — negligible cost)
+    _scheduler.add_job(
+        _run_tombstone_purge,
+        CronTrigger.from_crontab("0 5 * * 0"),  # Sunday 5 AM
+        id="tombstone_purge",
+        name="Weekly tombstone purge",
         replace_existing=True,
     )
 

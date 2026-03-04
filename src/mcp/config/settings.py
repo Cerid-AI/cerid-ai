@@ -137,6 +137,14 @@ EXTERNAL_VERIFY_RETRY_ATTEMPTS = 3
 EXTERNAL_VERIFY_RETRY_BASE_DELAY = 2.0  # seconds — defense-in-depth (1000 RPM models)
 
 # ---------------------------------------------------------------------------
+# Self-RAG (retrieval-augmented generation validation loop)
+# ---------------------------------------------------------------------------
+SELF_RAG_MAX_ITERATIONS = int(os.getenv("SELF_RAG_MAX_ITERATIONS", "2"))
+SELF_RAG_WEAK_CLAIM_THRESHOLD = float(os.getenv("SELF_RAG_WEAK_CLAIM_THRESHOLD", "0.5"))
+SELF_RAG_MAX_REFINED_QUERIES = int(os.getenv("SELF_RAG_MAX_REFINED_QUERIES", "3"))
+SELF_RAG_REFINED_TOP_K = int(os.getenv("SELF_RAG_REFINED_TOP_K", "5"))
+
+# ---------------------------------------------------------------------------
 # Auto-Injection
 # ---------------------------------------------------------------------------
 AUTO_INJECT_THRESHOLD = float(os.getenv("AUTO_INJECT_THRESHOLD", "0.82"))
@@ -241,11 +249,23 @@ REDIS_INGEST_LOG = "ingest:log"
 REDIS_LOG_MAX = 10_000
 
 # ---------------------------------------------------------------------------
+# Storage
+# ---------------------------------------------------------------------------
+# "extract_only" = parse text and discard the original file (default)
+# "archive"      = copy uploaded files to archive/{domain}/ for Dropbox sync
+STORAGE_MODE = os.getenv("CERID_STORAGE_MODE", "extract_only")
+
+# ---------------------------------------------------------------------------
 # Sync
 # ---------------------------------------------------------------------------
 SYNC_DIR = os.path.expanduser(os.getenv("CERID_SYNC_DIR", "~/Dropbox/cerid-sync"))
 MACHINE_ID = os.getenv("CERID_MACHINE_ID", os.uname().nodename.split(".")[0])
 SYNC_BACKEND = os.getenv("CERID_SYNC_BACKEND", "local")
+SCHEDULE_SYNC_EXPORT = os.getenv("SCHEDULE_SYNC_EXPORT", "")  # cron string, empty = disabled
+SYNC_EXPORT_ON_INGEST = os.getenv("SYNC_EXPORT_ON_INGEST", "false").lower() == "true"
+SYNC_CONFLICT_STRATEGY = os.getenv("CERID_CONFLICT_STRATEGY", "remote_wins")
+TOMBSTONE_TTL_DAYS = int(os.getenv("TOMBSTONE_TTL_DAYS", "90"))
+TOMBSTONE_LOG_PATH = os.path.join(os.getenv("DATA_DIR", "data"), "tombstones.jsonl")
 
 # ---------------------------------------------------------------------------
 # Startup validation — normalize and warn on unrecognized values

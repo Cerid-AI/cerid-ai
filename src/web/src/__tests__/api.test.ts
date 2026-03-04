@@ -9,8 +9,10 @@ vi.stubEnv("VITE_BIFROST_URL", "http://test-bifrost:8080")
 vi.stubEnv("VITE_CERID_API_KEY", "test-key-123")
 
 // Must import after env stubbing
-const { fetchHealth, fetchArtifacts, queryKB, fetchSettings } =
-  await import("@/lib/api")
+const {
+  fetchHealth, fetchArtifacts, queryKB, fetchSettings,
+  fetchSyncStatus, triggerSyncExport, triggerSyncImport, fetchArchiveFiles,
+} = await import("@/lib/api")
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -185,5 +187,102 @@ describe("fetchSettings", () => {
   it("throws on non-OK response", async () => {
     vi.stubGlobal("fetch", mockFetch({}, 401))
     await expect(fetchSettings()).rejects.toThrow("Settings fetch failed: 401")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Sync API (Phase 21B)
+// ---------------------------------------------------------------------------
+
+describe("fetchSyncStatus", () => {
+  it("calls /sync/status", async () => {
+    const statusData = { sync_dir: "/sync", manifest: null, local: {}, sync: {}, diff: {} }
+    vi.stubGlobal("fetch", mockFetch(statusData))
+
+    const result = await fetchSyncStatus()
+    expect(result).toEqual(statusData)
+    expect(fetch).toHaveBeenCalledWith(
+      "http://test-mcp:8888/sync/status",
+      expect.objectContaining({
+        headers: expect.objectContaining({ "X-API-Key": "test-key-123" }),
+      }),
+    )
+  })
+
+  it("throws on error", async () => {
+    vi.stubGlobal("fetch", mockFetch({ detail: "No sync dir" }, 500))
+    await expect(fetchSyncStatus()).rejects.toThrow("No sync dir")
+  })
+})
+
+describe("triggerSyncExport", () => {
+  it("sends POST to /sync/export", async () => {
+    const exportResult = { neo4j: { artifacts: 10 }, chroma: {}, bm25: {}, redis: 5, tombstones: 0, manifest: {} }
+    vi.stubGlobal("fetch", mockFetch(exportResult))
+
+    const result = await triggerSyncExport({ domains: ["coding"] })
+    expect(result).toEqual(exportResult)
+    expect(fetch).toHaveBeenCalledWith(
+      "http://test-mcp:8888/sync/export",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ domains: ["coding"] }),
+      }),
+    )
+  })
+
+  it("sends empty body when no options", async () => {
+    vi.stubGlobal("fetch", mockFetch({}))
+
+    await triggerSyncExport()
+    const body = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body
+    expect(body).toBe("{}")
+  })
+})
+
+describe("triggerSyncImport", () => {
+  it("sends POST with conflict strategy", async () => {
+    const importResult = { neo4j: { artifacts_created: 5 }, chroma: {}, bm25: {}, redis: 0, tombstones: 0, consistency_warnings: [] }
+    vi.stubGlobal("fetch", mockFetch(importResult))
+
+    await triggerSyncImport({ conflict_strategy: "local_wins" })
+    const body = JSON.parse((fetch as ReturnType<typeof vi.fn>).mock.calls[0][1].body)
+    expect(body.conflict_strategy).toBe("local_wins")
+  })
+
+  it("throws on error", async () => {
+    vi.stubGlobal("fetch", mockFetch({ detail: "Merge conflict" }, 500))
+    await expect(triggerSyncImport()).rejects.toThrow("Merge conflict")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Archive API (Phase 21D)
+// ---------------------------------------------------------------------------
+
+describe("fetchArchiveFiles", () => {
+  it("calls /archive/files without domain filter", async () => {
+    const data = { files: [], total: 0, storage_mode: "extract_only" }
+    vi.stubGlobal("fetch", mockFetch(data))
+
+    const result = await fetchArchiveFiles()
+    expect(result).toEqual(data)
+    expect(fetch).toHaveBeenCalledWith(
+      "http://test-mcp:8888/archive/files",
+      expect.anything(),
+    )
+  })
+
+  it("includes domain filter in URL", async () => {
+    vi.stubGlobal("fetch", mockFetch({ files: [], total: 0, storage_mode: "archive" }))
+
+    await fetchArchiveFiles("coding")
+    const url = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
+    expect(url).toContain("domain=coding")
+  })
+
+  it("throws on error", async () => {
+    vi.stubGlobal("fetch", mockFetch({ detail: "Not found" }, 404))
+    await expect(fetchArchiveFiles()).rejects.toThrow("Not found")
   })
 })

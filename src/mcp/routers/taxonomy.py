@@ -107,7 +107,7 @@ async def create_subcategory_endpoint(req: CreateSubCategoryRequest):
         result = graph.create_sub_category(driver, domain=domain, label=label)
         # Update runtime TAXONOMY
         if domain in config.TAXONOMY:
-            subs = config.TAXONOMY[domain].get("sub_categories", [])
+            subs = list(config.TAXONOMY[domain].get("sub_categories", []))
             if label not in subs:
                 subs.append(label)
                 config.TAXONOMY[domain]["sub_categories"] = subs

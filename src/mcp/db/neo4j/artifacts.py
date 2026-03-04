@@ -47,7 +47,8 @@ def create_artifact(
                 chunk_count: $chunk_count,
                 chunk_ids: $chunk_ids_json,
                 content_hash: $content_hash,
-                ingested_at: $ingested_at
+                ingested_at: $ingested_at,
+                updated_at: $ingested_at
             })
             CREATE (a)-[:BELONGS_TO]->(d)
             RETURN a.id AS id
@@ -142,7 +143,8 @@ def update_artifact(
                 a.chunk_count = $chunk_count,
                 a.chunk_ids = $chunk_ids_json,
                 a.content_hash = $content_hash,
-                a.modified_at = $modified_at
+                a.modified_at = $modified_at,
+                a.updated_at = $modified_at
             """,
             artifact_id=artifact_id,
             keywords_json=keywords_json,
@@ -274,16 +276,58 @@ def update_artifact_summary(
     summary: str,
 ) -> bool:
     """Update an artifact's summary text. Returns True if the artifact was found."""
+    now = utcnow_iso()
     with driver.session() as session:
         result = session.run(
             "MATCH (a:Artifact {id: $aid}) "
-            "SET a.summary = $summary, a.modified_at = $now "
+            "SET a.summary = $summary, a.modified_at = $now, a.updated_at = $now "
             "RETURN a.id AS id",
             aid=artifact_id,
             summary=summary,
-            now=utcnow_iso(),
+            now=now,
         )
         return result.single() is not None
+
+
+def delete_artifact(
+    driver,
+    artifact_id: str,
+) -> dict[str, Any]:
+    """Delete an artifact and all its relationships. Returns deletion details."""
+    with driver.session() as session:
+        # Fetch chunk_ids before deletion (needed for tombstone + ChromaDB cleanup)
+        result = session.run(
+            "MATCH (a:Artifact {id: $id}) "
+            "RETURN a.chunk_ids AS chunk_ids, a.domain AS domain, a.filename AS filename",
+            id=artifact_id,
+        )
+        record = result.single()
+        if not record:
+            return {"deleted": False, "reason": "not_found"}
+
+        chunk_ids_raw = record["chunk_ids"] or "[]"
+        try:
+            chunk_ids = json.loads(chunk_ids_raw) if isinstance(chunk_ids_raw, str) else chunk_ids_raw
+        except (json.JSONDecodeError, TypeError):
+            chunk_ids = []
+
+        domain = record["domain"] or ""
+        filename = record["filename"] or ""
+
+        # Delete the artifact and all relationships
+        session.run(
+            "MATCH (a:Artifact {id: $id}) DETACH DELETE a",
+            id=artifact_id,
+        )
+
+    logger.info("Deleted artifact %s (%s)", artifact_id[:8], filename)
+    return {
+        "deleted": True,
+        "artifact_id": artifact_id,
+        "domain": domain,
+        "filename": filename,
+        "chunk_ids": chunk_ids,
+    }
 
 
 def recategorize_artifact(
@@ -300,7 +344,8 @@ def recategorize_artifact(
             MERGE (new:Domain {name: $new_domain})
             CREATE (a)-[:BELONGS_TO]->(new)
             SET a.domain = $new_domain,
-                a.recategorized_at = $now
+                a.recategorized_at = $now,
+                a.updated_at = $now
             RETURN old.name AS old_domain, new.name AS new_domain
             """,
             artifact_id=artifact_id,

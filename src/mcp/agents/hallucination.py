@@ -1067,7 +1067,7 @@ async def verify_claim(
     chroma_client,
     neo4j_driver,
     redis_client,
-    threshold: float = None,
+    threshold: float | None = None,
     model: str | None = None,
 ) -> dict[str, Any]:
     """Verify a single claim against the knowledge base and user memories.

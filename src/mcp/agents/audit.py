@@ -52,7 +52,7 @@ def get_activity_summary(
     event_counts = Counter(e.get("event", "unknown") for e in recent)
     domain_counts = Counter(e.get("domain", "unknown") for e in recent)
 
-    hourly = defaultdict(int)
+    hourly: dict[str, int] = defaultdict(int)
     hourly_by_type: dict[str, Counter] = defaultdict(Counter)
     for e in recent:
         ts = e.get("timestamp", "")
@@ -91,7 +91,7 @@ def get_ingestion_stats(
     recategorizations = [e for e in entries if e.get("event") == "recategorize"]
 
     domain_dist = Counter(e.get("domain", "unknown") for e in ingests)
-    ext_dist = Counter()
+    ext_dist: Counter[str] = Counter()
     for e in ingests:
         filename = e.get("filename", "")
         if "." in filename:
@@ -178,7 +178,7 @@ def get_query_patterns(
     entries = get_log(redis_client, limit=limit)
     queries = [e for e in entries if e.get("event") in ("query", "agent_query")]
 
-    domain_freq = Counter()
+    domain_freq: Counter[str] = Counter()
     for q in queries:
         domain_val = q.get("domain", "")
         if "," in domain_val:
@@ -372,7 +372,7 @@ async def audit(
     if reports is None:
         reports = list(all_reports)
 
-    result = {
+    result: dict[str, Any] = {
         "timestamp": utcnow_iso(),
         "reports_generated": reports,
     }

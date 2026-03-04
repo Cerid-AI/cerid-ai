@@ -224,6 +224,23 @@ def search_bm25(
     return idx.search(query, top_k)
 
 
+def rebuild_all() -> int:
+    """Reload all BM25 indexes from disk (including newly synced domains)."""
+    rebuilt = 0
+    for domain in config.DOMAINS:
+        if domain in _indexes:
+            idx = _indexes[domain]
+            idx._texts.clear()
+            idx._doc_ids.clear()
+            idx._doc_id_set.clear()
+            idx._retriever = None
+            idx._load()
+        else:
+            _indexes[domain] = BM25Index(domain, config.BM25_DATA_DIR)
+        rebuilt += 1
+    return rebuilt
+
+
 def is_available() -> bool:
     """Check if BM25 is available (bm25s installed)."""
     return _bm25s_available

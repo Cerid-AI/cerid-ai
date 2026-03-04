@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -84,6 +85,10 @@ async def upload_file_endpoint(
         # Override filename in result with the original upload name
         result["filename"] = file.filename
 
+        # Archive mode: copy the file to archive/{domain}/ for Dropbox sync
+        if config.STORAGE_MODE == "archive" and tmp_path:
+            _archive_file(tmp_path, file.filename, result.get("domain", domain or "general"))
+
         return result
 
     except FileNotFoundError as e:
@@ -111,3 +116,61 @@ async def supported_extensions_endpoint():
         "extensions": sorted(config.SUPPORTED_EXTENSIONS),
         "count": len(config.SUPPORTED_EXTENSIONS),
     }
+
+
+@router.get("/archive/files")
+async def list_archive_files(
+    domain: str = Query("", description="Filter by domain folder (empty = all)"),
+):
+    """List files in the archive directory, grouped by domain folder."""
+    archive_root = Path(config.ARCHIVE_PATH)
+    if not archive_root.exists():
+        return {"files": [], "total": 0, "storage_mode": config.STORAGE_MODE}
+
+    files: list[dict[str, str | int]] = []
+    scan_dirs = [archive_root / domain] if domain else [
+        d for d in sorted(archive_root.iterdir())
+        if d.is_dir() and not d.name.startswith(("_", "."))
+    ]
+
+    for domain_dir in scan_dirs:
+        if not domain_dir.is_dir():
+            continue
+        domain_name = domain_dir.name
+        for entry in sorted(domain_dir.iterdir()):
+            if entry.is_file() and not entry.name.startswith("."):
+                files.append({
+                    "filename": entry.name,
+                    "domain": domain_name,
+                    "size": entry.stat().st_size,
+                    "path": str(entry.relative_to(archive_root)),
+                })
+
+    return {
+        "files": files,
+        "total": len(files),
+        "storage_mode": config.STORAGE_MODE,
+    }
+
+
+def _archive_file(tmp_path: str, original_filename: str, domain: str) -> None:
+    """Copy an uploaded file to archive/{domain}/ for persistent storage."""
+    archive_root = Path(config.ARCHIVE_PATH)
+    dest_dir = archive_root / domain
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / original_filename
+
+    # Avoid overwriting — add numeric suffix if file exists
+    if dest.exists():
+        stem = dest.stem
+        suffix = dest.suffix
+        counter = 1
+        while dest.exists():
+            dest = dest_dir / f"{stem}_{counter}{suffix}"
+            counter += 1
+
+    try:
+        shutil.copy2(tmp_path, str(dest))
+        logger.info(f"Archived upload: {original_filename} -> {dest}")
+    except OSError as e:
+        logger.warning(f"Failed to archive {original_filename}: {e}")

@@ -168,7 +168,7 @@ async def artifact_detail_endpoint(artifact_id: str):
 
             raw_chunks.sort(key=lambda c: c["index"])
             chunks = raw_chunks
-            total_content = "\n\n".join(c["text"] for c in raw_chunks)
+            total_content = "\n\n".join(str(c["text"]) for c in raw_chunks)
 
         return {
             "artifact_id": artifact["id"],

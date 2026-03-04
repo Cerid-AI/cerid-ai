@@ -57,7 +57,7 @@ def parse_pdf(file_path: str) -> dict[str, Any]:
                     try:
                         filtered = page
                         for bbox in table_bboxes:
-                            filtered = filtered.outside_bounding_box(bbox)
+                            filtered = filtered.outside_bounding_box(bbox)  # type: ignore[attr-defined]
                         plain_text = filtered.extract_text()
                     except Exception:
                         plain_text = page.extract_text()

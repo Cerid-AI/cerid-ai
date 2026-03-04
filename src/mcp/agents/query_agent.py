@@ -10,7 +10,6 @@ import re
 from collections import defaultdict
 from typing import Any
 
-import chromadb
 import httpx
 
 import config
@@ -181,7 +180,7 @@ async def multi_domain_query(
     query: str,
     domains: list[str] | None = None,
     top_k: int = 10,
-    chroma_client: chromadb.HttpClient | None = None
+    chroma_client: Any | None = None
 ) -> list[dict[str, Any]]:
     """Query multiple ChromaDB collections in parallel and aggregate results."""
     if domains is None:
@@ -299,7 +298,7 @@ def deduplicate_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
 async def graph_expand_results(
     results: list[dict[str, Any]],
     query: str,
-    chroma_client: chromadb.HttpClient | None = None,
+    chroma_client: Any | None = None,
     neo4j_driver: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Expand results by traversing the knowledge graph for related artifacts."""
@@ -688,7 +687,7 @@ async def agent_query(
     top_k: int = 10,
     use_reranking: bool = True,
     conversation_messages: list[dict[str, str]] | None = None,
-    chroma_client: chromadb.HttpClient | None = None,
+    chroma_client: Any | None = None,
     redis_client: Any | None = None,
     neo4j_driver: Any | None = None,
 ) -> dict[str, Any]:

@@ -22,6 +22,11 @@ __all__ = [
     "write_manifest", "read_manifest",
     # Status
     "compare_status",
+    # Tombstones
+    "record_tombstone", "export_tombstones", "apply_tombstones", "purge_expired",
+    # Conflicts
+    "ConflictStrategy", "ConflictRecord", "detect_conflicts",
+    "resolve_conflicts", "write_conflict_log",
 ]
 
 from sync._helpers import (  # noqa: F401,E402
@@ -42,6 +47,13 @@ from sync._helpers import (  # noqa: F401,E402
     _sha256_file,
     _write_jsonl,
 )
+from sync.conflicts import (  # noqa: F401,E402
+    ConflictRecord,
+    ConflictStrategy,
+    detect_conflicts,
+    resolve_conflicts,
+    write_conflict_log,
+)
 from sync.export import (  # noqa: F401,E402
     export_all,
     export_bm25,
@@ -61,3 +73,9 @@ from sync.import_ import (  # noqa: F401,E402
 )
 from sync.manifest import read_manifest, write_manifest  # noqa: F401,E402
 from sync.status import compare_status  # noqa: F401,E402
+from sync.tombstones import (  # noqa: F401,E402
+    apply_tombstones,
+    export_tombstones,
+    purge_expired,
+    record_tombstone,
+)

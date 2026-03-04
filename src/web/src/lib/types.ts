@@ -439,6 +439,7 @@ export interface ServerSettings {
     icon: string
     sub_categories: string[]
   }>
+  storage_mode: string
   sync_backend: string
   machine_id: string
   version: string
@@ -461,6 +462,7 @@ export interface SettingsUpdate {
   cost_sensitivity?: string
   enable_auto_inject?: boolean
   auto_inject_threshold?: number
+  storage_mode?: string
 }
 
 export interface Memory {
@@ -507,4 +509,70 @@ export interface LiveMetrics {
   messageCost: number
   messagesCount: number
 }
+
+// -- Sync types (Phase 21B) --------------------------------------------------
+
+export interface SyncManifest {
+  machine_id: string
+  timestamp: string
+  sync_format_version: number
+  last_exported_at: string
+  is_incremental: boolean
+  domains: string[]
+  files: Record<string, { exists: boolean; count?: number; sha256: string }>
+}
+
+export interface SyncCounts {
+  neo4j_artifacts: number
+  neo4j_domains: number
+  neo4j_relationships: number
+  chroma_chunks: Record<string, number>
+  redis_entries: number
+}
+
+export interface SyncStatus {
+  sync_dir: string
+  manifest: SyncManifest | null
+  local: SyncCounts
+  sync: SyncCounts
+  diff: SyncCounts
+}
+
+export interface SyncExportResult {
+  neo4j: { artifacts: number; domains: number; relationships: number }
+  chroma: Record<string, number>
+  bm25: Record<string, number>
+  redis: number
+  tombstones: number
+  manifest: SyncManifest
+}
+
+export interface SyncImportResult {
+  neo4j: {
+    artifacts_created: number
+    artifacts_updated: number
+    artifacts_skipped: number
+    artifacts_conflict: number
+    conflicts: Array<{
+      artifact_id: string
+      filename: string
+      domain: string
+      resolution: string
+    }>
+  }
+  chroma: Record<string, number>
+  bm25: Record<string, number>
+  redis: number
+  tombstones: number
+  consistency_warnings: string[]
+}
+
+export type ConflictStrategy = "remote_wins" | "local_wins" | "keep_both" | "manual_review"
+
+export const CONFLICT_STRATEGIES: { value: ConflictStrategy; label: string; description: string }[] = [
+  { value: "remote_wins", label: "Remote Wins", description: "Remote version replaces local on conflict" },
+  { value: "local_wins", label: "Local Wins", description: "Keep local version on conflict" },
+  { value: "keep_both", label: "Keep Both", description: "Create duplicate entries for conflicts" },
+  { value: "manual_review", label: "Manual Review", description: "Flag conflicts for manual resolution" },
+]
 

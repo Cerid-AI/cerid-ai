@@ -22,6 +22,7 @@ from sync._helpers import (
     NEO4J_SUBDIR,
     REDIS_SUBDIR,
     RELATIONSHIPS_JSONL,
+    TOMBSTONES_JSONL,
     _count_jsonl_lines,
     _default_sync_dir,
     _sha256_file,
@@ -34,6 +35,8 @@ logger = logging.getLogger("ai-companion.sync")
 def write_manifest(
     sync_dir: str | None = None,
     machine_id: str | None = None,
+    is_incremental: bool = False,
+    last_exported_at: str | None = None,
 ) -> dict[str, Any]:
     """
     Write manifest.json to sync_dir root with:
@@ -58,6 +61,7 @@ def write_manifest(
         (f"{NEO4J_SUBDIR}/{DOMAINS_JSONL}",       str(sync_path / NEO4J_SUBDIR / DOMAINS_JSONL)),
         (f"{NEO4J_SUBDIR}/{RELATIONSHIPS_JSONL}", str(sync_path / NEO4J_SUBDIR / RELATIONSHIPS_JSONL)),
         (f"{REDIS_SUBDIR}/{AUDIT_LOG_JSONL}",     str(sync_path / REDIS_SUBDIR / AUDIT_LOG_JSONL)),
+        (f"{NEO4J_SUBDIR}/{TOMBSTONES_JSONL}",     str(sync_path / NEO4J_SUBDIR / TOMBSTONES_JSONL)),
     ]
 
     # Add per-domain Chroma files
@@ -85,10 +89,13 @@ def write_manifest(
             entry["count"] = count
         file_entries[rel_path] = entry
 
+    now = utcnow_iso()
     manifest = {
         "machine_id": machine_id,
-        "timestamp": utcnow_iso(),
-        "sync_format_version": 1,
+        "timestamp": now,
+        "sync_format_version": 2,
+        "last_exported_at": last_exported_at or now,
+        "is_incremental": is_incremental,
         "domains": config.DOMAINS,
         "files": file_entries,
     }

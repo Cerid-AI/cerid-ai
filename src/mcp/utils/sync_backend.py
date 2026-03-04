@@ -156,7 +156,7 @@ def get_sync_backend(
     """Get the active sync backend singleton (thread-safe)."""
     global _active_backend
 
-    backend_type = backend_type or os.getenv("CERID_SYNC_BACKEND", "local")
+    resolved_type = backend_type if backend_type else os.getenv("CERID_SYNC_BACKEND", "local")
 
     if _active_backend is not None and not sync_dir:
         return _active_backend
@@ -165,14 +165,14 @@ def get_sync_backend(
         if _active_backend is not None and not sync_dir:
             return _active_backend
 
-        backend_cls = _BACKENDS.get(backend_type)
+        backend_cls = _BACKENDS.get(resolved_type)
         if backend_cls is None:
             available = ", ".join(_BACKENDS.keys())
             raise ValueError(
-                f"Unknown sync backend: {backend_type}. Available: {available}"
+                f"Unknown sync backend: {resolved_type}. Available: {available}"
             )
 
-        if backend_type == "local":
+        if resolved_type == "local":
             _active_backend = backend_cls(sync_dir=sync_dir)
         else:
             _active_backend = backend_cls()

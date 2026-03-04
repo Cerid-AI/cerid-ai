@@ -54,17 +54,17 @@ def parse_eml(file_path: str) -> dict[str, Any]:
 
             if content_type == "text/plain" and not body:
                 payload = part.get_payload(decode=True)
-                if payload:
+                if isinstance(payload, bytes):
                     body = payload.decode("utf-8", errors="replace")
             elif content_type == "text/html" and not body:
                 payload = part.get_payload(decode=True)
-                if payload:
+                if isinstance(payload, bytes):
                     html = payload.decode("utf-8", errors="replace")
                     body = _strip_html_tags(html)
     else:
         content_type = msg.get_content_type()
         payload = msg.get_payload(decode=True)
-        if payload:
+        if isinstance(payload, bytes):
             raw_text = payload.decode("utf-8", errors="replace")
             if content_type == "text/html":
                 body = _strip_html_tags(raw_text)
@@ -102,7 +102,7 @@ def parse_mbox(file_path: str) -> dict[str, Any]:
             f"File may not be a valid .mbox file."
         ) from e
 
-    messages = []
+    messages: list[str] = []
     max_messages = 100
     total_count = 0
 
@@ -120,12 +120,12 @@ def parse_mbox(file_path: str) -> dict[str, Any]:
             for part in msg.walk():
                 if part.get_content_type() == "text/plain":
                     payload = part.get_payload(decode=True)
-                    if payload:
+                    if isinstance(payload, bytes):
                         body = payload.decode("utf-8", errors="replace")
                         break
         else:
             payload = msg.get_payload(decode=True)
-            if payload:
+            if isinstance(payload, bytes):
                 body = payload.decode("utf-8", errors="replace")
 
         header = f"From: {from_addr}\nDate: {date}\nSubject: {subject}"

@@ -30,6 +30,12 @@ from sync._helpers import (
     _ensure_dir,
     _iter_jsonl,
 )
+from sync.conflicts import (
+    ConflictStrategy,
+    detect_conflicts,
+    resolve_conflicts,
+    write_conflict_log,
+)
 from utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.sync")
@@ -39,6 +45,8 @@ def import_neo4j(
     driver,
     sync_dir: str | None = None,
     force: bool = False,
+    conflict_strategy: str = "remote_wins",
+    last_sync_at: str | None = None,
 ) -> dict[str, Any]:
     """
     Merge Neo4j data from sync_dir into the local graph.
@@ -47,6 +55,9 @@ def import_neo4j(
     Artifact nodes:     MERGE by id. If the remote ingested_at is newer (or force=True),
                         all properties are updated. Relationships follow the artifact.
     Relationships:      MERGE by (source_id, target_id, rel_type). Properties set on CREATE only.
+
+    *conflict_strategy*: how to handle artifacts modified on both machines.
+    *last_sync_at*: ISO timestamp from manifest for conflict window detection.
     """
     sync_dir = sync_dir or _default_sync_dir()
     neo4j_dir = Path(sync_dir) / NEO4J_SUBDIR
@@ -55,7 +66,43 @@ def import_neo4j(
     artifacts_created = 0
     artifacts_updated = 0
     artifacts_skipped = 0
+    artifacts_conflict = 0
     relationships_merged = 0
+
+    # --- Conflict Detection ---
+    skip_ids: set[str] = set()  # artifact IDs to skip due to conflict resolution
+    conflict_records: list[Any] = []
+    try:
+        strategy = ConflictStrategy(conflict_strategy)
+    except ValueError:
+        strategy = ConflictStrategy.REMOTE_WINS
+
+    if last_sync_at and strategy != ConflictStrategy.REMOTE_WINS:
+        artifacts_path_pre = str(neo4j_dir / ARTIFACTS_JSONL)
+        remote_rows = list(_iter_jsonl(artifacts_path_pre))
+        conflict_records = detect_conflicts(driver, remote_rows, last_sync_at)
+        if conflict_records:
+            resolutions = resolve_conflicts(conflict_records, strategy)
+            for aid, res in resolutions.items():
+                if res in (
+                    ConflictStrategy.LOCAL_WINS,
+                    ConflictStrategy.KEEP_BOTH,
+                    ConflictStrategy.MANUAL_REVIEW,
+                ):
+                    skip_ids.add(aid)
+            if strategy == ConflictStrategy.KEEP_BOTH:
+                logger.warning(
+                    "KEEP_BOTH strategy: %d conflicts deferred to manual review "
+                    "(automatic ID-cloning not yet implemented)",
+                    len(conflict_records),
+                )
+            # Write conflict log for manual_review / keep_both entries
+            review_conflicts = [
+                c for c in conflict_records
+                if c.resolution in ("manual_review", "keep_both")
+            ]
+            if review_conflicts:
+                write_conflict_log(review_conflicts, sync_dir=sync_dir)
 
     # --- Domains ---
     domains_path = str(neo4j_dir / DOMAINS_JSONL)
@@ -78,22 +125,33 @@ def import_neo4j(
             if not artifact_id:
                 continue
 
+            # Skip artifacts flagged by conflict resolution (local_wins / manual_review)
+            if artifact_id in skip_ids:
+                artifacts_conflict += 1
+                continue
+
             try:
                 existing = session.run(
-                    "MATCH (a:Artifact {id: $id}) RETURN a.ingested_at AS ingested_at",
+                    "MATCH (a:Artifact {id: $id}) "
+                    "RETURN a.updated_at AS updated_at, a.ingested_at AS ingested_at",
                     id=artifact_id,
                 ).single()
 
-                remote_ingested_at = row.get("ingested_at") or ""
-                local_ingested_at = existing["ingested_at"] if existing else None
+                remote_updated = row.get("updated_at") or row.get("ingested_at") or ""
+                local_updated = (
+                    (existing["updated_at"] or existing["ingested_at"])
+                    if existing else None
+                )
 
                 should_update = (
                     force
-                    or local_ingested_at is None
-                    or remote_ingested_at > local_ingested_at
+                    or local_updated is None
+                    or remote_updated > local_updated
                 )
 
-                if local_ingested_at is None:
+                remote_ingested_at = row.get("ingested_at") or ""
+
+                if local_updated is None:
                     session.run(
                         """
                         MERGE (d:Domain {name: $domain})
@@ -108,7 +166,8 @@ def import_neo4j(
                             content_hash:     $content_hash,
                             ingested_at:      $ingested_at,
                             modified_at:      $modified_at,
-                            recategorized_at: $recategorized_at
+                            recategorized_at: $recategorized_at,
+                            updated_at:       $updated_at
                         })
                         MERGE (a)-[:BELONGS_TO]->(d)
                         """,
@@ -123,6 +182,7 @@ def import_neo4j(
                         ingested_at=remote_ingested_at,
                         modified_at=row.get("modified_at"),
                         recategorized_at=row.get("recategorized_at"),
+                        updated_at=row.get("updated_at") or remote_ingested_at,
                     )
                     artifacts_created += 1
 
@@ -139,7 +199,8 @@ def import_neo4j(
                             a.content_hash     = $content_hash,
                             a.ingested_at      = $ingested_at,
                             a.modified_at      = $modified_at,
-                            a.recategorized_at = $recategorized_at
+                            a.recategorized_at = $recategorized_at,
+                            a.updated_at       = $updated_at
                         WITH a
                         MATCH (a)-[r:BELONGS_TO]->(:Domain)
                         DELETE r
@@ -158,6 +219,7 @@ def import_neo4j(
                         ingested_at=remote_ingested_at,
                         modified_at=row.get("modified_at"),
                         recategorized_at=row.get("recategorized_at"),
+                        updated_at=row.get("updated_at") or remote_ingested_at,
                     )
                     artifacts_updated += 1
 
@@ -204,15 +266,21 @@ def import_neo4j(
                 )
 
     logger.info(
-        "Neo4j import complete: %d domains, %d artifacts created, %d updated, "
-        "%d skipped, %d relationships",
-        domains_merged, artifacts_created, artifacts_updated, artifacts_skipped, relationships_merged,
+        "Neo4j import complete: %d domains, %d created, %d updated, "
+        "%d skipped, %d conflicts, %d relationships",
+        domains_merged, artifacts_created, artifacts_updated,
+        artifacts_skipped, artifacts_conflict, relationships_merged,
     )
     return {
         "domains_merged": domains_merged,
         "artifacts_created": artifacts_created,
         "artifacts_updated": artifacts_updated,
         "artifacts_skipped": artifacts_skipped,
+        "artifacts_conflict": artifacts_conflict,
+        "conflicts": [
+            {"artifact_id": c.artifact_id, "resolution": c.resolution}
+            for c in conflict_records
+        ] if conflict_records else [],
         "relationships_merged": relationships_merged,
     }
 
@@ -229,7 +297,7 @@ def import_chroma(
     sync_dir = sync_dir or _default_sync_dir()
     chroma_dir = Path(sync_dir) / CHROMA_SUBDIR
 
-    domain_stats: dict[str, dict[str, int]] = {}
+    domain_stats: dict[str, dict[str, int | str]] = {}
     total_added = 0
     total_skipped = 0
 
@@ -525,6 +593,7 @@ def import_all(
     redis_client=None,
     sync_dir: str | None = None,
     force: bool = False,
+    conflict_strategy: str = "remote_wins",
 ) -> dict[str, Any]:
     """Run all import steps in sequence."""
     chroma_url = chroma_url or config.CHROMA_URL
@@ -532,7 +601,27 @@ def import_all(
 
     logger.info("Starting full import from %s (force=%s)", sync_dir, force)
 
-    neo4j_result = import_neo4j(driver, sync_dir=sync_dir, force=force)
+    # Read manifest for last_sync_at (used in conflict detection)
+    last_sync_at: str | None = None
+    try:
+        from sync.manifest import read_manifest
+        manifest = read_manifest(sync_dir)
+        last_sync_at = manifest.get("last_exported_at")
+    except (FileNotFoundError, ValueError):
+        pass
+
+    # Apply tombstones first (delete remote-deleted artifacts before importing new data)
+    tombstone_result: dict[str, Any] = {"deleted": 0}
+    try:
+        from sync.tombstones import apply_tombstones
+        tombstone_result = apply_tombstones(driver, chroma_url, sync_dir=sync_dir)
+    except Exception as exc:
+        logger.warning("Tombstone application failed (non-blocking): %s", exc)
+
+    neo4j_result = import_neo4j(
+        driver, sync_dir=sync_dir, force=force,
+        conflict_strategy=conflict_strategy, last_sync_at=last_sync_at,
+    )
     chroma_result = import_chroma(chroma_url=chroma_url, sync_dir=sync_dir, force=force)
     bm25_result = import_bm25(sync_dir=sync_dir)
 
@@ -547,7 +636,7 @@ def import_all(
     try:
         neo4j_created = neo4j_result.get("artifacts_created", 0)
         neo4j_updated = neo4j_result.get("artifacts_updated", 0)
-        chroma_imported = chroma_result.get("collections_imported", 0)
+        chroma_imported = chroma_result.get("total_added", 0)
 
         if (neo4j_created + neo4j_updated) > 0 and chroma_imported == 0:
             consistency_warnings.append(
@@ -568,11 +657,22 @@ def import_all(
     except Exception as exc:
         logger.warning("Post-import consistency check failed: %s", exc)
 
+    # Rebuild BM25 in-memory indexes after importing new corpus files
+    bm25_chunks_added = bm25_result.get("chunks_added", 0) if isinstance(bm25_result, dict) else 0
+    if bm25_chunks_added > 0:
+        try:
+            from utils.bm25 import rebuild_all as bm25_rebuild_all
+            rebuilt = bm25_rebuild_all()
+            logger.info("BM25 indexes rebuilt for %d domains after import", rebuilt)
+        except Exception as exc:
+            logger.warning("BM25 index rebuild failed after import: %s", exc)
+
     logger.info("Full import complete from %s", sync_dir)
     return {
         "neo4j": neo4j_result,
         "chroma": chroma_result,
         "bm25": bm25_result,
         "redis": redis_result,
+        "tombstones": tombstone_result,
         "consistency_warnings": consistency_warnings,
     }

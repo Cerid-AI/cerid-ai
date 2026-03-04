@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import uuid
 
 from fastapi import APIRouter, Request, Response
@@ -49,7 +50,7 @@ async def build_response(msg_id, method: str, params: dict) -> dict:
     elif method == "tools/list":
         return {"jsonrpc": "2.0", "id": msg_id, "result": {"tools": MCP_TOOLS}}
     elif method == "tools/call":
-        tool_name = params.get("name")
+        tool_name = params.get("name", "")
         tool_args = params.get("arguments", {})
         try:
             result = await execute_tool(tool_name, tool_args)
@@ -93,7 +94,8 @@ async def mcp_sse_endpoint(request: Request):
 
     async def event_stream():
         try:
-            endpoint_url = f"http://ai-companion-mcp:8888/mcp/messages?sessionId={session_id}"
+            mcp_host = os.getenv("MCP_EXTERNAL_HOST", "ai-companion-mcp:8888")
+            endpoint_url = f"http://{mcp_host}/mcp/messages?sessionId={session_id}"
             yield f"event: endpoint\ndata: {endpoint_url}\n\n"
             logger.info(f"[MCP] Sent endpoint: {endpoint_url}")
             count = 0

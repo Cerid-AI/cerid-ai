@@ -26,7 +26,7 @@ logger = logging.getLogger("ai-companion.metadata")
 _ENCODING = tiktoken.get_encoding("cl100k_base")
 
 # Cache spaCy model — load once, reuse across all calls
-_nlp = None
+_nlp: Any = None
 
 
 def _get_nlp():

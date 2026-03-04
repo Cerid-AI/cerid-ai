@@ -110,7 +110,7 @@ async def categorize_node(state: TriageStateDict) -> TriageStateDict:
 
     ai_result = await ai_categorize(text, filename, mode)
 
-    updates = {}
+    updates: dict[str, Any] = {}
     if ai_result.get("suggested_domain"):
         updates["domain"] = ai_result["suggested_domain"]
     if ai_result.get("keywords"):
@@ -119,16 +119,16 @@ async def categorize_node(state: TriageStateDict) -> TriageStateDict:
             "keywords": json.dumps(ai_result["keywords"]),
         }
     if ai_result.get("summary"):
-        meta = updates.get("metadata", state.get("metadata", {}))
+        meta = dict(updates.get("metadata") or state.get("metadata") or {})
         meta["summary"] = ai_result["summary"]
         updates["metadata"] = meta
 
     if ai_result.get("sub_category"):
-        meta = updates.get("metadata", state.get("metadata", {}))
+        meta = dict(updates.get("metadata") or state.get("metadata") or {})
         meta["sub_category"] = ai_result["sub_category"]
         updates["metadata"] = meta
     if ai_result.get("tags"):
-        meta = updates.get("metadata", state.get("metadata", {}))
+        meta = dict(updates.get("metadata") or state.get("metadata") or {})
         meta["tags_json"] = json.dumps(ai_result["tags"])
         updates["metadata"] = meta
 
@@ -277,7 +277,7 @@ async def triage_file(
     tags: str = "",
 ) -> dict[str, Any]:
     """Run a single file through the triage pipeline, returning prepared state."""
-    initial_state = {
+    initial_state: dict[str, Any] = {
         "file_path": file_path,
         "filename": Path(file_path).name,
         "domain": domain,

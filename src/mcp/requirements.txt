@@ -1,11 +1,11 @@
 # Core framework
-fastapi>=0.100,<0.125
-uvicorn[standard]
+fastapi>=0.100,<0.130
+uvicorn[standard]>=0.20,<1
 pydantic>=2.0,<3
 
 # HTTP client
-httpx>=0.24,<0.28
-httpx-sse>=0.3,<0.5
+httpx>=0.24,<0.29
+requests>=2.28,<3
 
 # Databases
 chromadb>=0.5,<0.6
@@ -14,14 +14,12 @@ redis>=4.0,<6
 
 # AI / NLP
 spacy>=3.5,<3.9
-tiktoken
+tiktoken>=0.5,<1
 langgraph>=0.3.0,<0.4
-langchain-core>=0.3.0,<0.4
-langchain-openai>=0.3.0,<0.4
 
 # File parsing
 pdfplumber>=0.10,<0.12
-python-docx
+python-docx>=0.8,<2
 openpyxl>=3.1,<4
 pandas>=2.0,<2.3
 
@@ -33,6 +31,5 @@ PyStemmer>=2.2
 apscheduler>=3.10,<4
 
 # Utilities
-cryptography>=42,<47
-python-dotenv
+cryptography>=42,<48
 python-multipart

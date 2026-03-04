@@ -242,8 +242,8 @@ def ingest_content(
             logger.info(f"Concurrent duplicate detected via constraint: {base_meta.get('filename', '?')}")
             try:
                 collection.delete(ids=chunk_ids)
-            except Exception as e:
-                logger.warning(f"Failed to clean up chunks after concurrent duplicate: {e}")
+            except Exception as cleanup_err:
+                logger.warning(f"Failed to clean up chunks after concurrent duplicate: {cleanup_err}")
             return {
                 "status": "duplicate",
                 "artifact_id": artifact_id,

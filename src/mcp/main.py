@@ -17,7 +17,20 @@ from deps import close_chroma, close_neo4j, close_redis, get_neo4j
 from middleware.auth import APIKeyMiddleware
 from middleware.rate_limit import RateLimitMiddleware
 from middleware.request_id import RequestIDMiddleware
-from routers import agents, artifacts, digest, health, ingestion, mcp_sse, memories, query, settings, taxonomy, upload
+from routers import (
+    agents,
+    artifacts,
+    digest,
+    health,
+    ingestion,
+    mcp_sse,
+    memories,
+    query,
+    settings,
+    sync,
+    taxonomy,
+    upload,
+)
 from scheduler import start_scheduler, stop_scheduler
 from utils import graph
 
@@ -37,9 +50,12 @@ async def lifespan(app: FastAPI):
             "verification, memory extraction) will fail"
         )
 
-    # Startup: initialize Neo4j schema
+    # Startup: initialize Neo4j schema + run migrations
     try:
-        graph.init_schema(get_neo4j())
+        driver = get_neo4j()
+        graph.init_schema(driver)
+        from db.neo4j.migrations import backfill_updated_at
+        backfill_updated_at(driver)
     except Exception as e:
         logger.warning(f"Neo4j schema init failed (will retry on first use): {e}")
 
@@ -111,6 +127,7 @@ _api_routers = [
     settings.router,
     upload.router,
     memories.router,
+    sync.router,
 ]
 for r in _api_routers:
     app.include_router(r)

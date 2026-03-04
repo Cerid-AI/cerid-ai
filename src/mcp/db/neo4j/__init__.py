@@ -7,9 +7,9 @@ __all__ = [
     # schema
     "init_schema",
     # artifacts
-    "create_artifact", "find_artifact_by_filename", "update_artifact",
-    "get_artifact", "get_quality_scores", "list_artifacts", "recategorize_artifact",
-    "update_artifact_summary",
+    "create_artifact", "delete_artifact", "find_artifact_by_filename",
+    "update_artifact", "get_artifact", "get_quality_scores", "list_artifacts",
+    "recategorize_artifact", "update_artifact_summary",
     # relationships
     "create_relationship", "find_related_artifacts",
     "discover_relationships", "_parse_keywords", "_extract_references",
@@ -20,6 +20,7 @@ __all__ = [
 
 from db.neo4j.artifacts import (  # noqa: F401,E402
     create_artifact,
+    delete_artifact,
     find_artifact_by_filename,
     get_artifact,
     get_quality_scores,

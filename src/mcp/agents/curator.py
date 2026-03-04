@@ -308,12 +308,12 @@ def estimate_synopsis_run(
         ][:50]
         candidate_count += len(candidates)
 
-    model_info = config.SYNOPSIS_MODEL_OPTIONS.get(model, {})
+    model_info: dict[str, Any] = config.SYNOPSIS_MODEL_OPTIONS.get(model, {})
     throttle = model_info.get("throttle", 8.0)
     rpm = model_info.get("rpm", 8)
     label = model_info.get("label", model.split("/")[-1])
-    input_per_1m = model_info.get("input_per_1m", 0.0)
-    output_per_1m = model_info.get("output_per_1m", 0.0)
+    input_per_1m = float(model_info.get("input_per_1m", 0.0))
+    output_per_1m = float(model_info.get("output_per_1m", 0.0))
 
     # Cost estimate: ~500 input tokens + ~80 output tokens per synopsis
     avg_input_tokens = 500
@@ -323,7 +323,7 @@ def estimate_synopsis_run(
         + (candidate_count * avg_output_tokens / 1_000_000) * output_per_1m
     )
 
-    estimated_seconds = candidate_count * throttle
+    estimated_seconds = candidate_count * float(throttle)
     if estimated_seconds < 60:
         time_display = f"~{int(estimated_seconds)}s"
     else:
@@ -401,8 +401,8 @@ async def curate(
     # Synopsis generation pass
     synopses_generated = 0
     effective_model = synopsis_model or config.SYNOPSIS_MODEL
-    model_info = config.SYNOPSIS_MODEL_OPTIONS.get(effective_model, {})
-    throttle_delay = model_info.get("throttle", 8.0)
+    model_info_2: dict[str, Any] = config.SYNOPSIS_MODEL_OPTIONS.get(effective_model, {})
+    throttle_delay = float(model_info_2.get("throttle", 8.0))
 
     if generate_synopses and chroma_client:
         for domain, artifacts in artifacts_by_domain.items():
@@ -447,7 +447,7 @@ async def curate(
                     except Exception as e:
                         logger.warning(f"Failed to store synopsis for {artifact['id'][:8]}: {e}")
                 # Adaptive throttle based on model rate limits
-                await asyncio.sleep(throttle_delay)
+                await asyncio.sleep(float(throttle_delay))
 
         if synopses_generated:
             logger.info(f"Generated {synopses_generated} AI synopses")

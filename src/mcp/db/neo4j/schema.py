@@ -62,6 +62,10 @@ def init_schema(driver) -> None:
             "CREATE INDEX artifact_quality_idx IF NOT EXISTS "
             "FOR (a:Artifact) ON (a.quality_score)"
         )
+        session.run(
+            "CREATE INDEX artifact_updated_at_idx IF NOT EXISTS "
+            "FOR (a:Artifact) ON (a.updated_at)"
+        )
 
         # --- Seed Domain + SubCategory nodes ---
         now = utcnow_iso()

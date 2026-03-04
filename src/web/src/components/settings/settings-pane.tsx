@@ -32,16 +32,18 @@ import {
   Info,
   ChevronDown,
   ChevronRight,
+  FolderSync,
 } from "lucide-react"
+import { SyncSection } from "./sync-section"
 
 type LoadState = "loading" | "error" | "ready"
 
-type SectionKey = "connection" | "ingestion" | "features" | "knowledge" | "taxonomy" | "encryption" | "flags"
+type SectionKey = "connection" | "ingestion" | "features" | "knowledge" | "taxonomy" | "encryption" | "sync" | "flags"
 
 function readSectionState(): Record<SectionKey, boolean> {
   const defaults: Record<SectionKey, boolean> = {
     connection: true, ingestion: true, features: true, knowledge: true,
-    taxonomy: true, encryption: true, flags: true,
+    taxonomy: true, encryption: true, sync: true, flags: true,
   }
   try {
     const raw = localStorage.getItem("cerid-settings-sections")
@@ -188,6 +190,21 @@ export default function SettingsPane() {
                     value={`${settings.chunk_max_tokens} tokens / ${settings.chunk_overlap} overlap`}
                     info="Max tokens per chunk and overlap between chunks for embedding"
                   />
+                  <div className="flex items-center justify-between">
+                    <LabelWithInfo label="Storage Mode" info="Extract-only parses text and discards the file. Archive keeps a copy in the sync directory." />
+                    <Select
+                      value={settings.storage_mode}
+                      onValueChange={(v) => patch({ storage_mode: v })}
+                    >
+                      <SelectTrigger size="sm" className="w-32">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="extract_only">Extract Only</SelectItem>
+                        <SelectItem value="archive">Archive</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </CardContent>
               </Card>
             )}
@@ -346,6 +363,10 @@ export default function SettingsPane() {
                 </CardContent>
               </Card>
             )}
+
+            {/* Sync */}
+            <SectionHeading icon={FolderSync} label="Sync" open={sections.sync} onToggle={() => toggleSection("sync")} />
+            {sections.sync && <SyncSection />}
 
             {/* Feature Flags */}
             <SectionHeading icon={Layers} label="Feature Flags" open={sections.flags} onToggle={() => toggleSection("flags")} />

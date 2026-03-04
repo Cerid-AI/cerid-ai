@@ -87,6 +87,6 @@ async def notify_health_warning(status: str, detail: str = "") -> None:
     await fire_event("health.warning", {"status": status, "detail": detail})
 
 
-async def notify_rectify_findings(findings: int, detail: dict[str, Any] = None) -> None:
+async def notify_rectify_findings(findings: int, detail: dict[str, Any] | None = None) -> None:
     """Fire rectify.findings event."""
     await fire_event("rectify.findings", {"total_findings": findings, **(detail or {})})

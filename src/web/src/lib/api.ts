@@ -569,3 +569,68 @@ export async function summarizeConversation(
 
   return summary
 }
+
+// -- Sync API (Phase 21B) ----------------------------------------------------
+
+export async function fetchSyncStatus(): Promise<import("./types").SyncStatus> {
+  const res = await fetch(`${MCP_BASE}/sync/status`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to fetch sync status"))
+  return res.json()
+}
+
+export async function triggerSyncExport(options?: {
+  since?: string
+  domains?: string[]
+}): Promise<import("./types").SyncExportResult> {
+  const res = await fetch(`${MCP_BASE}/sync/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...mcpHeaders() },
+    body: JSON.stringify(options ?? {}),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Sync export failed"))
+  return res.json()
+}
+
+export async function triggerSyncImport(options?: {
+  force?: boolean
+  conflict_strategy?: string
+}): Promise<import("./types").SyncImportResult> {
+  const res = await fetch(`${MCP_BASE}/sync/import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...mcpHeaders() },
+    body: JSON.stringify(options ?? {}),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Sync import failed"))
+  return res.json()
+}
+
+async function extractError(res: Response, fallback: string): Promise<string> {
+  try {
+    const body = await res.json()
+    return body.detail ?? fallback
+  } catch {
+    return fallback
+  }
+}
+
+// -- Archive API (Phase 21D) -------------------------------------------------
+
+export interface ArchiveFile {
+  filename: string
+  domain: string
+  size: number
+  path: string
+}
+
+export interface ArchiveFilesResponse {
+  files: ArchiveFile[]
+  total: number
+  storage_mode: string
+}
+
+export async function fetchArchiveFiles(domain?: string): Promise<ArchiveFilesResponse> {
+  const params = domain ? `?domain=${encodeURIComponent(domain)}` : ""
+  const res = await fetch(`${MCP_BASE}/archive/files${params}`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to list archive files"))
+  return res.json()
+}

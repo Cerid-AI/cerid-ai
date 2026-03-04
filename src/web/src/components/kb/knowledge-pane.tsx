@@ -12,6 +12,7 @@ import { Search, X, Loader2, AlertCircle, RefreshCcw, Upload, CheckCircle, Tag }
 import { ArtifactCard } from "./artifact-card"
 import { TaxonomyTree } from "./taxonomy-tree"
 import { GraphPreview } from "./graph-preview"
+import { UploadDialog } from "./upload-dialog"
 import { fetchArtifacts, queryKB, uploadFile, recategorizeArtifact } from "@/lib/api"
 import { useKBInjection } from "@/contexts/kb-injection-context"
 import type { KBQueryResult, Artifact } from "@/lib/types"
@@ -71,17 +72,24 @@ export function KnowledgePane() {
   const [previewArtifactId, setPreviewArtifactId] = useState<string | null>(null)
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "success" | "error">("idle")
   const [uploadMessage, setUploadMessage] = useState("")
+  const [isDragOver, setIsDragOver] = useState(false)
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  const dragCounterRef = useRef(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const queryClient = useQueryClient()
 
   const activeDomain = taxonomyFilter.domain
 
-  const handleFileUpload = useCallback(async (file: File) => {
+  const handleFileUpload = useCallback(async (
+    file: File,
+    options?: { domain?: string; categorize_mode?: string },
+  ) => {
     setUploadStatus("uploading")
     setUploadMessage("")
     try {
-      const domain = activeDomain ?? undefined
-      const result = await uploadFile(file, { domain })
+      const domain = options?.domain ?? activeDomain ?? undefined
+      const categorize_mode = options?.categorize_mode
+      const result = await uploadFile(file, { domain, categorizeMode: categorize_mode })
       setUploadStatus("success")
       setUploadMessage(`${result.filename} ingested (${result.chunks} chunks)`)
       queryClient.invalidateQueries({ queryKey: ["artifacts"] })
@@ -92,6 +100,55 @@ export function KnowledgePane() {
       setTimeout(() => setUploadStatus("idle"), 5000)
     }
   }, [activeDomain, queryClient])
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounterRef.current++
+    if (e.dataTransfer.types.includes("Files")) {
+      setIsDragOver(true)
+    }
+  }, [])
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounterRef.current--
+    if (dragCounterRef.current === 0) {
+      setIsDragOver(false)
+    }
+  }, [])
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+  }, [])
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(false)
+    dragCounterRef.current = 0
+    const files = Array.from(e.dataTransfer.files)
+    if (files.length === 0) return
+    if (files.length === 1) {
+      // Single file — open options dialog
+      setPendingFiles(files)
+    } else {
+      // Multiple files — open options dialog for batch
+      setPendingFiles(files)
+    }
+  }, [])
+
+  const handleUploadConfirm = useCallback(async (
+    options: { domain?: string; categorize_mode?: string },
+  ) => {
+    const files = pendingFiles
+    setPendingFiles([])
+    for (const file of files) {
+      await handleFileUpload(file, options)
+    }
+  }, [pendingFiles, handleFileUpload])
 
   const {
     data: artifacts,
@@ -178,7 +235,22 @@ export function KnowledgePane() {
   }, [])
 
   return (
-    <div className="flex h-full min-w-0 flex-col overflow-hidden">
+    <div
+      className="relative flex h-full min-w-0 flex-col overflow-hidden"
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+      {/* Drag overlay */}
+      {isDragOver && (
+        <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center rounded-lg border-2 border-dashed border-primary bg-primary/10">
+          <div className="flex flex-col items-center gap-2 text-primary">
+            <Upload className="h-8 w-8" />
+            <span className="text-sm font-medium">Drop files to ingest</span>
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div className="border-b px-4 py-3">
         <div className="flex items-center justify-between">
@@ -358,6 +430,13 @@ export function KnowledgePane() {
           />
         </Suspense>
       )}
+
+      <UploadDialog
+        files={pendingFiles}
+        defaultDomain={activeDomain}
+        onConfirm={handleUploadConfirm}
+        onCancel={() => setPendingFiles([])}
+      />
     </div>
   )
 }

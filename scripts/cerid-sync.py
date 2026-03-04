@@ -8,10 +8,13 @@ Cerid AI - Knowledge Base Sync CLI
 Sync knowledge base data between machines via Dropbox/iCloud.
 
 Usage:
-    python scripts/cerid-sync.py export          # export to sync dir
-    python scripts/cerid-sync.py import          # non-destructive import
-    python scripts/cerid-sync.py import --force  # overwrite local data
-    python scripts/cerid-sync.py status          # compare local vs sync
+    python scripts/cerid-sync.py export                          # full export
+    python scripts/cerid-sync.py export --since 2026-03-01       # incremental export
+    python scripts/cerid-sync.py export --domains code finance   # selective domains
+    python scripts/cerid-sync.py import                          # non-destructive merge
+    python scripts/cerid-sync.py import --force                  # overwrite local data
+    python scripts/cerid-sync.py import --conflict-strategy local_wins
+    python scripts/cerid-sync.py status                          # compare local vs sync
 """
 
 import argparse
@@ -77,7 +80,8 @@ def connect_neo4j(password: str):
     uri = "bolt://localhost:7687"
     driver = neo4j.GraphDatabase.driver(uri, auth=("neo4j", password))
     try:
-        driver.verify_connectivity()
+        with driver.session() as session:
+            session.run("RETURN 1")
     except Exception as exc:
         raise ConnectionError(f"Neo4j unreachable at {uri}: {exc}") from exc
     return driver
@@ -109,10 +113,28 @@ def check_chroma():
 # Subcommand: export
 # ---------------------------------------------------------------------------
 
-def cmd_export(sync_dir: str, machine_id: str) -> int:
-    """Export all knowledge-base data to sync_dir. Returns exit code."""
-    header(f"Exporting knowledge base to: {sync_dir}")
+def cmd_export(
+    sync_dir: str,
+    machine_id: str,
+    since: str | None = None,
+    domains: list[str] | None = None,
+) -> int:
+    """Export knowledge-base data to sync_dir. Returns exit code."""
+    # Auto-read last_exported_at from manifest for incremental default
+    if since is None:
+        try:
+            manifest = cerid_sync_lib.read_manifest(sync_dir=sync_dir)
+            since = manifest.get("last_exported_at")
+        except (FileNotFoundError, ValueError):
+            pass
+
+    mode = "incremental" if since else "full"
+    header(f"Exporting knowledge base to: {sync_dir}  [{mode}]")
     print(f"  machine_id : {machine_id}")
+    if since:
+        print(f"  since      : {since}")
+    if domains:
+        print(f"  domains    : {', '.join(domains)}")
 
     neo4j_password = os.getenv("NEO4J_PASSWORD", "")
 
@@ -147,11 +169,15 @@ def cmd_export(sync_dir: str, machine_id: str) -> int:
 
     # --- Neo4j ---
     header("Exporting Neo4j artifacts...")
+    artifact_ids = None
     try:
         result = cerid_sync_lib.export_neo4j(
             driver=neo4j_driver,
             sync_dir=sync_dir,
+            since=since,
+            domains=domains,
         )
+        artifact_ids = result.get("artifact_ids")
         ok(f"Neo4j: {result.get('artifacts', 0)} artifacts, {result.get('domains', 0)} domains, {result.get('relationships', 0)} relationships")
     except Exception as exc:
         err(f"Neo4j export failed: {exc}")
@@ -163,10 +189,21 @@ def cmd_export(sync_dir: str, machine_id: str) -> int:
         result = cerid_sync_lib.export_chroma(
             chroma_url=CHROMA_HOST_URL,
             sync_dir=sync_dir,
+            artifact_ids=artifact_ids,
+            filter_domains=domains,
         )
         ok(f"ChromaDB: {result.get('total_chunks', 0)} chunks across {len(result.get('domains', {}))} domains")
     except Exception as exc:
         err(f"ChromaDB export failed: {exc}")
+        exit_code = 1
+
+    # --- Tombstones ---
+    header("Exporting tombstones...")
+    try:
+        result = cerid_sync_lib.export_tombstones(sync_dir=sync_dir)
+        ok(f"Tombstones: {result.get('tombstones_exported', 0)} entries ({result.get('new_entries', 0)} new, {result.get('purged_expired', 0)} purged)")
+    except Exception as exc:
+        err(f"Tombstone export failed: {exc}")
         exit_code = 1
 
     # --- BM25 ---
@@ -197,6 +234,7 @@ def cmd_export(sync_dir: str, machine_id: str) -> int:
             cerid_sync_lib.write_manifest(
                 sync_dir=sync_dir,
                 machine_id=machine_id,
+                is_incremental=since is not None,
             )
             ok(f"Manifest written to {sync_dir}/manifest.json")
         except Exception as exc:
@@ -218,11 +256,17 @@ def cmd_export(sync_dir: str, machine_id: str) -> int:
 # Subcommand: import
 # ---------------------------------------------------------------------------
 
-def cmd_import(sync_dir: str, machine_id: str, force: bool) -> int:
+def cmd_import(
+    sync_dir: str,
+    machine_id: str,
+    force: bool,
+    conflict_strategy: str = "remote_wins",
+) -> int:
     """Import knowledge-base data from sync_dir. Returns exit code."""
     mode_label = "force (overwrite)" if force else "non-destructive (merge)"
     header(f"Importing knowledge base from: {sync_dir}  [{mode_label}]")
     print(f"  machine_id : {machine_id}")
+    print(f"  conflicts  : {conflict_strategy}")
 
     if not os.path.isdir(sync_dir):
         err(f"Sync directory not found: {sync_dir}")
@@ -234,7 +278,7 @@ def cmd_import(sync_dir: str, machine_id: str, force: bool) -> int:
         manifest = cerid_sync_lib.read_manifest(sync_dir=sync_dir)
         ok(
             f"Manifest found — exported by '{manifest.get('machine_id', 'unknown')}' "
-            f"at {manifest.get('exported_at', 'unknown')}"
+            f"at {manifest.get('last_exported_at', manifest.get('timestamp', 'unknown'))}"
         )
     except Exception as exc:
         err(f"Cannot read manifest from {sync_dir}: {exc}")
@@ -269,6 +313,21 @@ def cmd_import(sync_dir: str, machine_id: str, force: bool) -> int:
 
     exit_code = 0
 
+    # --- Tombstones (before import, so deleted artifacts aren't re-imported) ---
+    header("Applying tombstones...")
+    try:
+        last_sync_at = manifest.get("last_exported_at")
+        tomb_result = cerid_sync_lib.apply_tombstones(
+            driver=neo4j_driver,
+            chroma_url=CHROMA_HOST_URL,
+            sync_dir=sync_dir,
+        )
+        ok(f"Tombstones: {tomb_result.get('deleted', 0)} deleted, {tomb_result.get('skipped_own_machine', 0)} skipped (own machine)")
+    except Exception as exc:
+        err(f"Tombstone apply failed: {exc}")
+        exit_code = 1
+        last_sync_at = None
+
     # --- Neo4j ---
     header("Importing Neo4j artifacts...")
     try:
@@ -276,8 +335,17 @@ def cmd_import(sync_dir: str, machine_id: str, force: bool) -> int:
             driver=neo4j_driver,
             sync_dir=sync_dir,
             force=force,
+            conflict_strategy=conflict_strategy,
+            last_sync_at=last_sync_at,
         )
-        ok(f"Neo4j: {result.get('artifacts_created', 0)} created, {result.get('artifacts_updated', 0)} updated, {result.get('artifacts_skipped', 0)} skipped")
+        created = result.get("artifacts_created", 0)
+        updated = result.get("artifacts_updated", 0)
+        skipped = result.get("artifacts_skipped", 0)
+        conflicts = result.get("artifacts_conflict", 0)
+        msg = f"Neo4j: {created} created, {updated} updated, {skipped} skipped"
+        if conflicts:
+            msg += f", {conflicts} conflicts ({conflict_strategy})"
+        ok(msg)
     except Exception as exc:
         err(f"Neo4j import failed: {exc}")
         exit_code = 1
@@ -485,6 +553,34 @@ def build_parser() -> argparse.ArgumentParser:
             "Default: system hostname."
         ),
     )
+    parser.add_argument(
+        "--since",
+        default=None,
+        help=(
+            "(export only) ISO-8601 timestamp for incremental export. "
+            "Only artifacts updated after this time are exported. "
+            "If omitted, reads last_exported_at from manifest (or does full export)."
+        ),
+    )
+    parser.add_argument(
+        "--domains",
+        nargs="+",
+        default=None,
+        help=(
+            "(export only) Limit export to specific domains. "
+            "Example: --domains code finance"
+        ),
+    )
+    parser.add_argument(
+        "--conflict-strategy",
+        dest="conflict_strategy",
+        choices=["remote_wins", "local_wins", "keep_both", "manual_review"],
+        default="remote_wins",
+        help=(
+            "(import only) How to resolve conflicts when the same artifact "
+            "was modified on both machines. Default: remote_wins."
+        ),
+    )
     return parser
 
 
@@ -518,9 +614,19 @@ def main() -> int:
             pass
 
     if args.command == "export":
-        return cmd_export(sync_dir=sync_dir, machine_id=machine_id)
+        return cmd_export(
+            sync_dir=sync_dir,
+            machine_id=machine_id,
+            since=args.since,
+            domains=args.domains,
+        )
     elif args.command == "import":
-        return cmd_import(sync_dir=sync_dir, machine_id=machine_id, force=args.force)
+        return cmd_import(
+            sync_dir=sync_dir,
+            machine_id=machine_id,
+            force=args.force,
+            conflict_strategy=args.conflict_strategy,
+        )
     elif args.command == "status":
         return cmd_status(sync_dir=sync_dir, machine_id=machine_id)
     else:

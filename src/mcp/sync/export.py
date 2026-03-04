@@ -34,23 +34,49 @@ from sync.manifest import write_manifest
 logger = logging.getLogger("ai-companion.sync")
 
 
-def export_neo4j(driver, sync_dir: str | None = None) -> dict[str, Any]:
+def export_neo4j(
+    driver,
+    sync_dir: str | None = None,
+    since: str | None = None,
+    domains: list[str] | None = None,
+) -> dict[str, Any]:
     """
-    Export all Artifact nodes, Domain nodes, and inter-artifact relationships
+    Export Artifact nodes, Domain nodes, and inter-artifact relationships
     from Neo4j to JSONL files under {sync_dir}/neo4j/.
+
+    If *since* is given (ISO-8601), only artifacts with updated_at > since
+    are exported (incremental). If *domains* is given, only matching artifacts.
     """
     sync_dir = sync_dir or _default_sync_dir()
     out_dir = _ensure_dir(os.path.join(sync_dir, NEO4J_SUBDIR))
 
     artifacts: list[dict[str, Any]] = []
-    domains: list[dict[str, Any]] = []
+    artifact_ids: set[str] = set()
+    domains_list: list[dict[str, Any]] = []
     relationships: list[dict[str, Any]] = []
 
     try:
         with driver.session() as session:
+            # Build dynamic WHERE clause for incremental/selective export
+            where_parts: list[str] = []
+            params: dict[str, Any] = {}
+            if since:
+                where_parts.append(
+                    "coalesce(a.updated_at, a.ingested_at) > $since"
+                )
+                params["since"] = since
+            if domains:
+                where_parts.append("a.domain IN $filter_domains")
+                params["filter_domains"] = domains
+
+            where_clause = ""
+            if where_parts:
+                where_clause = "WHERE " + " AND ".join(where_parts)
+
             result = session.run(
-                """
+                f"""
                 MATCH (a:Artifact)
+                {where_clause}
                 RETURN
                     a.id            AS id,
                     a.filename      AS filename,
@@ -62,18 +88,22 @@ def export_neo4j(driver, sync_dir: str | None = None) -> dict[str, Any]:
                     a.content_hash  AS content_hash,
                     a.ingested_at   AS ingested_at,
                     a.modified_at   AS modified_at,
-                    a.recategorized_at AS recategorized_at
+                    a.recategorized_at AS recategorized_at,
+                    a.updated_at    AS updated_at
                 ORDER BY a.ingested_at ASC
-                """
+                """,
+                **params,
             )
             for record in result:
-                artifacts.append(dict(record))
+                row = dict(record)
+                artifacts.append(row)
+                artifact_ids.add(row["id"])
 
             result = session.run(
                 "MATCH (d:Domain) RETURN d.name AS name ORDER BY d.name"
             )
             for record in result:
-                domains.append(dict(record))
+                domains_list.append(dict(record))
 
             rel_types = "|".join(config.GRAPH_RELATIONSHIP_TYPES)
             result = session.run(
@@ -97,25 +127,35 @@ def export_neo4j(driver, sync_dir: str | None = None) -> dict[str, Any]:
         return {"error": str(exc), "artifacts": 0, "domains": 0, "relationships": 0}
 
     a_count = _write_jsonl(str(out_dir / ARTIFACTS_JSONL), artifacts)
-    d_count = _write_jsonl(str(out_dir / DOMAINS_JSONL), domains)
+    d_count = _write_jsonl(str(out_dir / DOMAINS_JSONL), domains_list)
     r_count = _write_jsonl(str(out_dir / RELATIONSHIPS_JSONL), relationships)
 
+    mode = "incremental" if since else "full"
     logger.info(
-        "Neo4j export complete: %d artifacts, %d domains, %d relationships → %s",
-        a_count, d_count, r_count, out_dir,
+        "Neo4j export (%s): %d artifacts, %d domains, %d relationships → %s",
+        mode, a_count, d_count, r_count, out_dir,
     )
     return {
         "artifacts": a_count,
         "domains": d_count,
         "relationships": r_count,
+        "artifact_ids": artifact_ids,
+        "is_incremental": since is not None,
         "output_dir": str(out_dir),
     }
 
 
-def export_chroma(chroma_url: str | None = None, sync_dir: str | None = None) -> dict[str, Any]:
+def export_chroma(
+    chroma_url: str | None = None,
+    sync_dir: str | None = None,
+    artifact_ids: set[str] | None = None,
+    filter_domains: list[str] | None = None,
+) -> dict[str, Any]:
     """
-    Export all ChromaDB collections (one per domain) to per-domain JSONL files
-    under {sync_dir}/chroma/.
+    Export ChromaDB collections to per-domain JSONL files under {sync_dir}/chroma/.
+
+    If *artifact_ids* is given, only chunks belonging to those artifacts are exported
+    (for incremental sync). If *filter_domains* is given, only those domains.
     """
     chroma_url = chroma_url or config.CHROMA_URL
     sync_dir = sync_dir or _default_sync_dir()
@@ -123,8 +163,9 @@ def export_chroma(chroma_url: str | None = None, sync_dir: str | None = None) ->
 
     domain_counts: dict[str, int] = {}
     total_chunks = 0
+    target_domains = filter_domains or config.DOMAINS
 
-    for domain in config.DOMAINS:
+    for domain in target_domains:
         coll_name = config.collection_name(domain)
         out_path = str(out_dir / f"{coll_name}.jsonl")
         chunk_count = 0
@@ -167,10 +208,16 @@ def export_chroma(chroma_url: str | None = None, sync_dir: str | None = None) ->
                     embeddings: list[list[float]] = batch.get("embeddings", [])
 
                     for i, chunk_id in enumerate(ids):
+                        meta = metadatas[i] if i < len(metadatas) else {}
+                        # Incremental filter: skip chunks not in the delta set
+                        if artifact_ids is not None:
+                            chunk_artifact = meta.get("artifact_id", "")
+                            if chunk_artifact not in artifact_ids:
+                                continue
                         row = {
                             "id": chunk_id,
                             "document": documents[i] if i < len(documents) else "",
-                            "metadata": metadatas[i] if i < len(metadatas) else {},
+                            "metadata": meta,
                             "embedding": embeddings[i] if i < len(embeddings) else [],
                         }
                         fh.write(json.dumps(row) + "\n")
@@ -271,15 +318,33 @@ def export_all(
     redis_client=None,
     sync_dir: str | None = None,
     machine_id: str | None = None,
+    since: str | None = None,
+    domains: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Run all export steps in sequence and write a manifest."""
+    """Run all export steps in sequence and write a manifest.
+
+    If *since* is given (ISO-8601), performs an incremental export of only
+    artifacts modified after that timestamp. If *domains* is given, limits
+    to those domains.
+    """
+    from utils.time import utcnow_iso as _utcnow
+
     chroma_url = chroma_url or config.CHROMA_URL
     sync_dir = sync_dir or _default_sync_dir()
+    mode = "incremental" if since else "full"
+    export_start = _utcnow()  # capture before queries to avoid TOCTOU gaps
 
-    logger.info("Starting full export to %s", sync_dir)
+    logger.info("Starting %s export to %s", mode, sync_dir)
 
-    neo4j_result = export_neo4j(driver, sync_dir=sync_dir)
-    chroma_result = export_chroma(chroma_url=chroma_url, sync_dir=sync_dir)
+    neo4j_result = export_neo4j(driver, sync_dir=sync_dir, since=since, domains=domains)
+    # Pass artifact_ids from neo4j delta to ChromaDB for filtered export
+    delta_ids = neo4j_result.get("artifact_ids")
+    chroma_result = export_chroma(
+        chroma_url=chroma_url,
+        sync_dir=sync_dir,
+        artifact_ids=delta_ids if since else None,
+        filter_domains=domains,
+    )
     bm25_result = export_bm25(sync_dir=sync_dir)
 
     redis_result: dict[str, Any] = {"entries_exported": 0, "skipped": True}
@@ -288,13 +353,27 @@ def export_all(
     else:
         logger.warning("No Redis client provided — skipping Redis export")
 
-    manifest = write_manifest(sync_dir=sync_dir, machine_id=machine_id)
+    # Export tombstones (merge local → sync dir, purge expired)
+    tombstone_result: dict[str, Any] = {"tombstones_exported": 0}
+    try:
+        from sync.tombstones import export_tombstones
+        tombstone_result = export_tombstones(sync_dir=sync_dir)
+    except Exception as exc:
+        logger.warning("Tombstone export failed (non-blocking): %s", exc)
 
-    logger.info("Full export complete to %s", sync_dir)
+    manifest = write_manifest(
+        sync_dir=sync_dir,
+        machine_id=machine_id,
+        is_incremental=since is not None,
+        last_exported_at=export_start,
+    )
+
+    logger.info("%s export complete to %s", mode.capitalize(), sync_dir)
     return {
         "neo4j": neo4j_result,
         "chroma": chroma_result,
         "bm25": bm25_result,
         "redis": redis_result,
+        "tombstones": tombstone_result,
         "manifest": manifest,
     }
