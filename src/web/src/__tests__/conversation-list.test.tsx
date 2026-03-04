@@ -65,7 +65,7 @@ describe("ConversationList", () => {
     render(
       <ConversationList conversations={mockConversations} activeId={null} onSelect={onSelect} onDelete={vi.fn()} />,
     )
-    const item = screen.getByText("First conversation").closest("[role='button']")!
+    const item = screen.getByText("First conversation").closest("[role='button']") as HTMLElement
     item.focus()
     await user.keyboard("{Enter}")
     expect(onSelect).toHaveBeenCalledWith("c1")
