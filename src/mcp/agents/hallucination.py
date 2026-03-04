@@ -1075,8 +1075,15 @@ async def verify_claim(
     Uses multi-result triangulation, numeric contradiction detection,
     and memory authority to produce calibrated confidence scores.
 
-    Falls back to cross-model external verification when the KB has no
-    relevant content (prevents false negatives on valid factual claims).
+    Falls back to cross-model external verification when the KB cannot
+    provide a definitive answer:
+    - Fallback 1: No KB results at all
+    - Fallback 2: Very low KB similarity (< ext_kb_threshold)
+    - Fallback 3: KB says "unverified" — external may provide a verdict
+    - Fallback 4: KB says "uncertain" — external may resolve ambiguity
+
+    Only KB-verified claims (similarity >= threshold) skip external
+    verification, since the KB provides strong positive evidence.
     """
     from agents.query_agent import agent_query
 
@@ -1162,6 +1169,18 @@ async def verify_claim(
                 "verification_method": "kb",
             }
         elif similarity < unverified_threshold:
+            # --- Fallback 3: KB says "unverified" → try external ---
+            ext_result = await _verify_claim_externally(claim, model)
+            if ext_result.get("status") in ("verified", "unverified"):
+                return {
+                    "claim": claim,
+                    "status": ext_result["status"],
+                    "similarity": ext_result["confidence"],
+                    "reason": ext_result["reason"],
+                    "verification_method": ext_result.get("verification_method", "none"),
+                    "verification_model": ext_result.get("verification_model"),
+                    "source_urls": ext_result.get("source_urls", []),
+                }
             return {
                 "claim": claim,
                 "status": "unverified",
@@ -1171,6 +1190,20 @@ async def verify_claim(
                 "verification_method": "kb",
             }
         else:
+            # --- Fallback 4: KB says "uncertain" → try external for a
+            # definitive answer before falling back to KB-only uncertain ---
+            ext_result = await _verify_claim_externally(claim, model)
+            if ext_result.get("status") in ("verified", "unverified"):
+                return {
+                    "claim": claim,
+                    "status": ext_result["status"],
+                    "similarity": ext_result["confidence"],
+                    "reason": ext_result["reason"],
+                    "verification_method": ext_result.get("verification_method", "none"),
+                    "verification_model": ext_result.get("verification_model"),
+                    "source_urls": ext_result.get("source_urls", []),
+                }
+            # External also uncertain — return KB result with context
             return {
                 "claim": claim,
                 "status": "uncertain",
