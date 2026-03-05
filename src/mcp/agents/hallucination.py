@@ -33,16 +33,13 @@ REDIS_HALLUCINATION_PREFIX = "hall:"
 REDIS_HALLUCINATION_TTL = 86400 * 7  # 7 days
 
 # Concurrency gate for external verification — defense-in-depth against
-# bursts even on high-RPM models.  Lazily initialised because asyncio
-# requires a running event loop for Semaphore().
-_ext_verify_semaphore: asyncio.Semaphore | None = None
+# bursts even on high-RPM models.  Python 3.10+ asyncio primitives no
+# longer require a running event loop at creation time.
+_ext_verify_semaphore = asyncio.Semaphore(config.EXTERNAL_VERIFY_MAX_CONCURRENT)
 
 
 def _get_ext_verify_semaphore() -> asyncio.Semaphore:
-    """Return (and lazily create) the external-verification semaphore."""
-    global _ext_verify_semaphore
-    if _ext_verify_semaphore is None:
-        _ext_verify_semaphore = asyncio.Semaphore(config.EXTERNAL_VERIFY_MAX_CONCURRENT)
+    """Return the external-verification semaphore."""
     return _ext_verify_semaphore
 
 

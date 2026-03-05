@@ -56,7 +56,7 @@ def _check_duplicate(content_hash: str, domain: str) -> dict | None:
                 "RETURN a.id AS id, a.filename AS filename, d.name AS domain",
                 hash=content_hash,
             )
-            record = result.single()
+            record = result.single(strict=False)
             if record:
                 return {
                     "id": record["id"],

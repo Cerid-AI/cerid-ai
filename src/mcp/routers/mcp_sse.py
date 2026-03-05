@@ -83,7 +83,7 @@ async def mcp_sse_head():
 async def mcp_sse_endpoint(request: Request):
     """SSE endpoint — responses to POSTs come through here."""
     session_id = str(uuid.uuid4())
-    queue: asyncio.Queue = asyncio.Queue()
+    queue: asyncio.Queue = asyncio.Queue(maxsize=100)
     # Evict oldest session if at capacity
     if len(_sessions) >= _MAX_SESSIONS:
         oldest_key = next(iter(_sessions))

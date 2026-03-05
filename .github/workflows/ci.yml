@@ -10,6 +10,7 @@ jobs:
   # Python backend
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -20,6 +21,7 @@ jobs:
 
   typecheck:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -31,12 +33,14 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
+          cache-dependency-path: src/mcp/requirements.lock
       - run: pip install -r src/mcp/requirements.txt
       - run: pip install pytest pytest-asyncio httpx pytest-cov
       - name: Run tests with coverage
@@ -44,6 +48,7 @@ jobs:
 
   security:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
         with:
@@ -99,6 +104,7 @@ jobs:
 
   lock-sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # Use same Python image as Dockerfile to ensure identical pip-compile output
     container: python:3.11-slim
     steps:
@@ -113,6 +119,7 @@ jobs:
   # Frontend
   frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: src/web
@@ -152,8 +159,19 @@ jobs:
   # Docker
   docker:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
+      - name: Lint Dockerfiles (hadolint)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: src/mcp/Dockerfile
+          ignore: DL3008,DL3013
+      - name: Lint Web Dockerfile (hadolint)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: src/web/Dockerfile
+          ignore: DL3008,DL3018
       - run: docker build -t cerid-mcp-test src/mcp/
       - run: docker build -t cerid-web-test src/web/
       - name: Create Trivy ignore file

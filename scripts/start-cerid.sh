@@ -26,6 +26,13 @@ done
 
 echo "=== Starting Cerid AI Stack ==="
 
+# Verify Docker Compose V2 is available
+if ! docker compose version >/dev/null 2>&1; then
+    echo "Error: Docker Compose V2 is required (docker compose, not docker-compose)."
+    echo "Install: https://docs.docker.com/compose/install/"
+    exit 1
+fi
+
 # Auto-decrypt .env if missing but .env.age exists
 if [ ! -f "$ENV_FILE" ] && [ -f "$CERID_ROOT/.env.age" ]; then
     echo "[env] Decrypting secrets..."
@@ -96,8 +103,29 @@ if [ -n "${TUNNEL_TOKEN}" ] && [ "${TUNNEL_TOKEN}" != "" ]; then
 fi
 
 echo ""
-echo "Waiting 30s for services to initialize..."
-sleep 30
+echo "Waiting for services to initialize..."
+
+wait_for_service() {
+    local name="$1" url="$2" max_wait="${3:-60}" interval="${4:-3}"
+    local elapsed=0
+    while [ "$elapsed" -lt "$max_wait" ]; do
+        if curl -sf -o /dev/null "$url" 2>/dev/null; then
+            return 0
+        fi
+        sleep "$interval"
+        elapsed=$((elapsed + interval))
+    done
+    return 1
+}
+
+echo -n "  Neo4j..."
+wait_for_service "Neo4j" "http://127.0.0.1:7474" 60 && echo " ready" || echo " timeout"
+echo -n "  ChromaDB..."
+wait_for_service "ChromaDB" "http://127.0.0.1:8001/api/v1/heartbeat" 30 && echo " ready" || echo " timeout"
+echo -n "  MCP..."
+wait_for_service "MCP" "http://localhost:8888/health" 90 && echo " ready" || echo " timeout"
+echo -n "  React GUI..."
+wait_for_service "React GUI" "http://localhost:3000" 60 && echo " ready" || echo " timeout"
 
 echo ""
 echo "=== Service Status ==="
@@ -112,7 +140,8 @@ echo -n "Bifrost:   " && curl -s -o /dev/null -w "%{http_code}" http://localhost
 echo -n "Dashboard: " && curl -s -o /dev/null -w "%{http_code}" http://localhost:8501/_stcore/health && echo " OK" || echo "FAILED"
 echo -n "Neo4j:     " && curl -s -o /dev/null -w "%{http_code}" http://localhost:7474 && echo " OK" || echo "FAILED"
 echo -n "ChromaDB:  " && curl -s -o /dev/null -w "%{http_code}" http://localhost:8001/api/v1/heartbeat && echo " OK" || echo "FAILED"
-echo -n "Redis:     " && redis-cli -p 6379 ping 2>/dev/null || echo "FAILED"
+REDIS_PASS=$(grep -s '^REDIS_PASSWORD=' "$ENV_FILE" | cut -d'=' -f2- || echo "")
+echo -n "Redis:     " && redis-cli -p 6379 ${REDIS_PASS:+-a "$REDIS_PASS"} ping 2>/dev/null || echo "FAILED"
 
 echo ""
 echo "=== Access URLs ==="

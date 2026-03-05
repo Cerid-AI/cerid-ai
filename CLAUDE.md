@@ -9,9 +9,9 @@
 
 Cerid AI is a self-hosted, privacy-first Personal AI Knowledge Companion. It unifies multi-domain knowledge bases (code, finance, projects, artifacts) into a context-aware LLM interface with RAG-powered retrieval and intelligent agents. All data stays local; only LLM API calls go external.
 
-**Status:** Phase 22 complete. 847 Python tests, 271 frontend tests. 8 agents + Self-RAG module, 18 MCP tools, hybrid BM25s+vector search with semantic chunking, circuit breakers on all Bifrost calls, distributed request tracing, adaptive quality feedback, per-domain tag vocabulary with typeahead UI, improved synopsis generation, streaming verification, Self-RAG validation loop, incremental knowledge sync with tombstones and conflict resolution, sync GUI with export/import/status dashboard, drag-drop ingestion with pre-upload options dialog, archive storage mode, mypy type checking in CI, React GUI with iPad/tablet responsive touch UX, LAN access with auto-IP detection, optional Caddy HTTPS gateway and Cloudflare Tunnel for demos. CI/CD 6-job pipeline. See [`docs/COMPLETED_PHASES.md`](docs/COMPLETED_PHASES.md) for history.
+**Status:** Phase 23 complete. 877 Python tests, 271 frontend tests. 8 agents + Self-RAG module, 18 MCP tools, hybrid BM25s+vector search with semantic chunking, circuit breakers on all Bifrost + Neo4j calls, distributed request tracing, adaptive quality feedback, per-domain tag vocabulary with typeahead UI, improved synopsis generation, streaming verification, Self-RAG validation loop, incremental knowledge sync with tombstones and conflict resolution, sync GUI with export/import/status dashboard, drag-drop ingestion with pre-upload options dialog, archive storage mode, mypy type checking in CI, React GUI with iPad/tablet responsive touch UX, LAN access with auto-IP detection, optional Caddy HTTPS gateway and Cloudflare Tunnel for demos. Infrastructure security hardened (Redis/MongoDB auth, port binding, resource limits, security headers). CI/CD 7-job pipeline with timeouts. See [`docs/COMPLETED_PHASES.md`](docs/COMPLETED_PHASES.md) for history.
 
-**Next:** D2 conversation fork/branch UI only. See [`tasks/todo.md`](tasks/todo.md).
+**Next:** Phase 24 (RAG Evolution) or D2 conversation fork/branch UI. See [`tasks/todo.md`](tasks/todo.md).
 
 **Open issues:** [`docs/ISSUES.md`](docs/ISSUES.md) (1 open: D2 conversation fork).
 

@@ -1,6 +1,6 @@
 services:
   cloudflared:
-    image: cloudflare/cloudflared:latest
+    image: cloudflare/cloudflared:2025.4.2
     container_name: cerid-tunnel
     command: tunnel --no-autoupdate run
     environment:

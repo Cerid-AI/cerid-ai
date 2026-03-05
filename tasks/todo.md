@@ -1,7 +1,7 @@
 # Cerid AI — Task Tracker
 
 > **Last updated:** 2026-03-04
-> **Current status:** Phase 22 complete. 847 Python tests, 271 frontend tests. All deferred items shipped except D2 conversation fork.
+> **Current status:** Phase 23 complete. 877 Python tests, 271 frontend tests. Production hardening shipped.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md)
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](../docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
@@ -403,6 +403,39 @@
 - [x] H6 — Verification fallback to external for uncertain/unverified claims (4-level fallback chain in `verify_claim()`)
 - [x] H7 — UI polish: KB card overflow, dashboard responsive data, icon colors, verification label rename
 - [x] Chat dashboard restored inline data with `hidden xl:inline` progressive disclosure
+
+### Phase 23: Production Hardening ✅
+
+#### 23A: Infrastructure Security ✅
+- [x] Redis authentication — `--requirepass` + `REDIS_PASSWORD` env var with backward-compatible defaults
+- [x] ChromaDB `ALLOW_RESET=false` — disable reset endpoint
+- [x] MongoDB authentication — `MONGO_INITDB_ROOT_*` env vars, auth-enabled connection strings
+- [x] Caddy security headers — HSTS, X-Content-Type-Options, X-Frame-Options, CSP, Referrer-Policy, Server header removal
+- [x] Port binding restrictions — Neo4j/Redis/ChromaDB bound to `127.0.0.1`
+- [x] Container resource limits — CPU/memory deploy limits for Neo4j, ChromaDB, Redis
+
+#### 23B: CI/CD Improvements ✅
+- [x] Job timeouts — all 7 CI jobs have timeout-minutes (5–45 min)
+- [x] Pip caching — `cache: pip` + `cache-dependency-path` on test job
+- [x] Dockerfile linting — hadolint for MCP and Web Dockerfiles
+- [x] Cloudflare Tunnel image pinned to `2025.4.2`
+
+#### 23C: Backend Concurrency Fixes ✅
+- [x] Semaphore race condition fix in `hallucination.py` — module-level initialization
+- [x] Bounded MCP session queues (`maxsize=100`) + oldest-session eviction
+- [x] Configurable `NEAR_DUPLICATE_THRESHOLD` env var
+- [x] Neo4j `.single(strict=False)` in ingestion — safe on 0 results
+- [x] Neo4j circuit breaker with `call_sync()` for synchronous operations
+
+#### 23D: Operational Improvements ✅
+- [x] Smart health check polling — `wait_for_service()` replaces fixed `sleep 30`
+- [x] Docker Compose V2 version check in startup script
+- [x] `.env.example` — required/optional header, infrastructure auth section
+
+#### 23E: Test Coverage Quick Wins ✅
+- [x] Router health tests (7) — `/health`, `/collections`, `/scheduler`, `/plugins`
+- [x] Router settings tests (11) — `GET /settings`, `PATCH /settings` with validation
+- [x] MCP SSE protocol tests (12) — JSON-RPC methods, session management, queue bounds, eviction
 
 ### Deferred
 - [ ] D2: Conversation fork/branch UI (40-60 hrs, exploratory)

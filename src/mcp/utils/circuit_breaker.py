@@ -134,6 +134,60 @@ class AsyncCircuitBreaker:
                     self.name, self._failure_count, self.failure_threshold, exc,
                 )
 
+    def call_sync(
+        self,
+        fn: Callable[..., T],
+        *args: Any,
+        **kwargs: Any,
+    ) -> T:
+        """Execute a synchronous `fn` through the circuit breaker."""
+        current_state = self.state
+
+        if current_state == CircuitState.OPEN:
+            remaining = self.recovery_timeout - (time.monotonic() - self._last_failure_time)
+            raise CircuitOpenError(self.name, max(0, remaining))
+
+        try:
+            result = fn(*args, **kwargs)
+        except Exception as exc:
+            if isinstance(exc, self.excluded_exceptions):
+                raise
+            self._on_failure_sync(exc)
+            raise
+        else:
+            self._on_success_sync()
+            return result
+
+    def _on_success_sync(self) -> None:
+        if self._state in (CircuitState.HALF_OPEN, CircuitState.CLOSED):
+            self._failure_count = 0
+            if self._state == CircuitState.HALF_OPEN:
+                logger.info("Circuit '%s' recovered → CLOSED", self.name)
+            self._state = CircuitState.CLOSED
+
+    def _on_failure_sync(self, exc: Exception) -> None:
+        self._failure_count += 1
+        self._last_failure_time = time.monotonic()
+
+        if self._state == CircuitState.HALF_OPEN:
+            self._state = CircuitState.OPEN
+            logger.warning(
+                "Circuit '%s' probe failed → OPEN (recovery in %.0fs): %s",
+                self.name, self.recovery_timeout, exc,
+            )
+        elif self._failure_count >= self.failure_threshold:
+            self._state = CircuitState.OPEN
+            logger.warning(
+                "Circuit '%s' threshold reached (%d/%d) → OPEN (recovery in %.0fs): %s",
+                self.name, self._failure_count, self.failure_threshold,
+                self.recovery_timeout, exc,
+            )
+        else:
+            logger.info(
+                "Circuit '%s' failure %d/%d: %s",
+                self.name, self._failure_count, self.failure_threshold, exc,
+            )
+
     def reset(self) -> None:
         """Manually reset the circuit to CLOSED."""
         self._state = CircuitState.CLOSED
@@ -160,6 +214,7 @@ _bifrost_claims = AsyncCircuitBreaker("bifrost-claims", failure_threshold=3, rec
 _bifrost_verify = AsyncCircuitBreaker("bifrost-verify", failure_threshold=5, recovery_timeout=90)
 _bifrost_synopsis = AsyncCircuitBreaker("bifrost-synopsis", failure_threshold=3, recovery_timeout=60)
 _bifrost_memory = AsyncCircuitBreaker("bifrost-memory", failure_threshold=3, recovery_timeout=60)
+_neo4j = AsyncCircuitBreaker("neo4j", failure_threshold=5, recovery_timeout=30)
 
 
 def get_breaker(name: str) -> AsyncCircuitBreaker:
@@ -170,6 +225,7 @@ def get_breaker(name: str) -> AsyncCircuitBreaker:
         "bifrost-verify": _bifrost_verify,
         "bifrost-synopsis": _bifrost_synopsis,
         "bifrost-memory": _bifrost_memory,
+        "neo4j": _neo4j,
     }
     breaker = _breakers.get(name)
     if breaker is None:

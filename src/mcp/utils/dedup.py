@@ -6,13 +6,14 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 import config
 
 logger = logging.getLogger("ai-companion.dedup")
 
-NEAR_DUPLICATE_THRESHOLD = 0.92
+NEAR_DUPLICATE_THRESHOLD = float(os.getenv("NEAR_DUPLICATE_THRESHOLD", "0.92"))
 _MAX_EMBED_CHARS = 2000
 
 

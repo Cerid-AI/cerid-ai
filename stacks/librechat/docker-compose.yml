@@ -18,7 +18,7 @@ services:
       - "host.docker.internal:host-gateway"
     environment:
       - HOST=0.0.0.0
-      - MONGO_URI=mongodb://chat-mongodb:27017/LibreChat  # Fixed: Use container_name
+      - MONGO_URI=mongodb://${MONGO_USER:-cerid}:${MONGO_PASSWORD:-cerid-dev}@chat-mongodb:27017/LibreChat?authSource=admin
       - MEILI_HOST=http://chat-meilisearch:7700  # Fixed: Use container_name
       - RAG_PORT=${RAG_PORT:-8000}
       - RAG_API_URL=http://rag_api:${RAG_PORT:-8000}
@@ -40,11 +40,13 @@ services:
     container_name: chat-mongodb
     image: mongo:8.0.17
     restart: always
-    command: mongod --noauth --bind_ip_all  # Allow all connections
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_USER:-cerid}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASSWORD:-cerid-dev}
     volumes:
       - ./data-node:/data/db
     healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      test: echo 'db.runCommand("ping").ok' | mongosh -u $$MONGO_INITDB_ROOT_USERNAME -p $$MONGO_INITDB_ROOT_PASSWORD --authenticationDatabase admin localhost:27017/test --quiet
       interval: 10s
       timeout: 10s
       retries: 5

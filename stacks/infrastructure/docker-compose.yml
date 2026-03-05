@@ -5,8 +5,8 @@ services:
     container_name: ai-companion-neo4j
     image: neo4j:5.26.21-community
     ports:
-      - "7474:7474"
-      - "7687:7687"
+      - "127.0.0.1:7474:7474"
+      - "127.0.0.1:7687:7687"
     volumes:
       - ./data/neo4j:/data
       - ./data/neo4j-logs:/logs
@@ -18,6 +18,11 @@ services:
     networks:
       - llm-network
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 2G
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:7474 || exit 1"]
       interval: 30s
@@ -29,18 +34,23 @@ services:
     container_name: ai-companion-chroma
     image: chromadb/chroma:0.5.23
     ports:
-      - "8001:8000"
+      - "127.0.0.1:8001:8000"
     volumes:
       - ./data/chroma:/chroma/chroma
     environment:
       - ANONYMIZED_TELEMETRY=false
       - CHROMA_ANONYMIZED_TELEMETRY=false
-      - ALLOW_RESET=true
+      - ALLOW_RESET=false
       - IS_PERSISTENT=true
       - LOG_LEVEL=WARNING
     networks:
       - llm-network
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
       interval: 30s
@@ -52,15 +62,22 @@ services:
     container_name: ai-companion-redis
     image: redis:7.4.8-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - ./data/redis:/data
-    command: redis-server --appendonly yes
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-cerid-dev}
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-cerid-dev}
     networks:
       - llm-network
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3

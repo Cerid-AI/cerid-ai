@@ -3,6 +3,29 @@
 All notable changes to Cerid AI are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.10.0] - 2026-03-04
+
+### Added
+- **Phase 23:** Production Hardening — infrastructure security, CI/CD improvements, concurrency fixes, operational improvements, test coverage
+- Redis authentication (`--requirepass` + `REDIS_PASSWORD` env var with backward-compatible default)
+- MongoDB authentication (`MONGO_INITDB_ROOT_*` env vars, auth-enabled connection strings)
+- ChromaDB `ALLOW_RESET=false` (prevents accidental/malicious DB wipe)
+- Caddy security headers (HSTS, X-Content-Type-Options, X-Frame-Options, CSP, Referrer-Policy)
+- Port binding restrictions — Neo4j, Redis, ChromaDB bound to `127.0.0.1` (not `0.0.0.0`)
+- Container resource limits — Neo4j (4CPU/2GB), ChromaDB (2CPU/1GB), Redis (1CPU/512MB)
+- CI job timeouts on all 7 jobs (5-45 min), pip caching for test job, hadolint Dockerfile linting
+- Neo4j circuit breaker with `call_sync()` for synchronous operations
+- Smart health check polling in `start-cerid.sh` (`wait_for_service()` replaces fixed `sleep 30`)
+- Docker Compose V2 version check in startup script
+- 30 new Python tests: router health (7), router settings (11), MCP SSE protocol (12)
+- Cloudflare Tunnel image pinned to `2025.4.2` (was `latest`)
+
+### Fixed
+- Semaphore race condition in `hallucination.py` — changed lazy initialization to module-level (safe in Python 3.10+)
+- Bounded MCP session queues (`maxsize=100`) with oldest-session eviction at capacity (`_MAX_SESSIONS=100`)
+- Neo4j `.single()` → `.single(strict=False)` in ingestion — returns None instead of raising on 0 results
+- Configurable `NEAR_DUPLICATE_THRESHOLD` env var (was hardcoded `0.92`)
+
 ## [0.9.0] - 2026-03-04
 
 ### Added
