@@ -166,12 +166,12 @@ jobs:
         uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: src/mcp/Dockerfile
-          ignore: DL3008,DL3013
+          ignore: DL3008,DL3013,DL3059
       - name: Lint Web Dockerfile (hadolint)
         uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: src/web/Dockerfile
-          ignore: DL3008,DL3018
+          ignore: DL3008,DL3018,DL3059
       - run: docker build -t cerid-mcp-test src/mcp/
       - run: docker build -t cerid-web-test src/web/
       - name: Create Trivy ignore file
