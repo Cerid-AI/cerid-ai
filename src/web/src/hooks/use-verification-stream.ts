@@ -61,8 +61,12 @@ export function useVerificationStream(
   enabled: boolean,
   /** Increment to re-trigger verification for the same conversation. */
   triggerKey: number,
-  /** Model ID for analytics tracking. */
+  /** Model ID that generated the response (from message.model, not dropdown). */
   model?: string,
+  /** Original user query for evasion detection. */
+  userQuery?: string,
+  /** Prior assistant messages for history consistency checking. */
+  conversationHistory?: Array<{ role: string; content: string }>,
 ): UseVerificationStreamReturn {
   const [claims, setClaims] = useState<StreamingClaim[]>([])
   const [phase, setPhase] = useState<VerificationPhase>("idle")
@@ -71,6 +75,8 @@ export function useVerificationStream(
   const abortRef = useRef<(() => void) | null>(null)
   const modelRef = useRef(model)
   modelRef.current = model
+  const historyRef = useRef(conversationHistory)
+  historyRef.current = conversationHistory
 
   // Accumulated session metrics (persist across verification runs, reset on page reload)
   const sessionRef = useRef({ claimsChecked: 0, estCost: 0 })
@@ -98,7 +104,7 @@ export function useVerificationStream(
     setSummary(null)
     setExtractionMethod(null)
 
-    const { response, abort } = streamVerification(responseText, conversationId, undefined, modelRef.current)
+    const { response, abort } = streamVerification(responseText, conversationId, undefined, modelRef.current, userQuery, historyRef.current)
     abortRef.current = abort
 
     let cancelled = false
@@ -147,6 +153,7 @@ export function useVerificationStream(
                     ...prev,
                     {
                       claim: event.claim,
+                      claim_type: event.claim_type,
                       index: event.index,
                       status: "pending",
                     },
@@ -162,6 +169,7 @@ export function useVerificationStream(
                         ? {
                             ...c,
                             claim: event.claim || c.claim,
+                            claim_type: event.claim_type || c.claim_type,
                             status: event.status,
                             confidence: event.confidence,
                             source: event.source,
@@ -195,6 +203,21 @@ export function useVerificationStream(
                   setPhase("done")
                   break
 
+                case "consistency_check":
+                  // Update claims with consistency issues found
+                  if (Array.isArray(event.issues)) {
+                    setClaims((prev) =>
+                      prev.map((c) => {
+                        const issue = (event.issues as Array<{ claim_index: number; contradiction: string; type: string }>)
+                          .find((iss) => iss.claim_index === c.index)
+                        return issue
+                          ? { ...c, consistency_issue: issue.contradiction }
+                          : c
+                      }),
+                    )
+                  }
+                  break
+
                 case "error":
                   setPhase("error")
                   break
@@ -218,7 +241,7 @@ export function useVerificationStream(
       abort()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- model tracked via ref
-  }, [responseText, conversationId, enabled, triggerKey])
+  }, [responseText, conversationId, enabled, triggerKey, userQuery])
 
   const verifiedCount = claims.filter((c) => c.status && c.status !== "pending").length
   const totalClaims = claims.length
@@ -233,6 +256,7 @@ export function useVerificationStream(
           extraction_method: summary.extractionMethod,
           claims: claims.map((c) => ({
             claim: c.claim,
+            claim_type: c.claim_type,
             status: (c.status === "pending" ? "uncertain" : c.status) as "verified" | "unverified" | "uncertain" | "error",
             similarity: c.confidence ?? 0,
             source_filename: c.source || undefined,
@@ -243,6 +267,7 @@ export function useVerificationStream(
             reason: c.reason || undefined,
             verification_method: c.verification_method,
             verification_model: c.verification_model,
+            consistency_issue: c.consistency_issue,
           })),
           summary: {
             total: summary.total,

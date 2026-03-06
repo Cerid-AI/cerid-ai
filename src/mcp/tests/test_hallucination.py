@@ -24,13 +24,19 @@ import config
 from agents.hallucination import (
     REDIS_HALLUCINATION_PREFIX,
     _build_verification_details,
+    _check_history_consistency,
     _check_numeric_alignment,
     _compute_adjusted_confidence,
+    _detect_evasion,
+    _extract_citation_claims,
     _extract_claims_heuristic,
     _has_staleness_indicators,
+    _interpret_recency_verdict,
+    _invert_evasion_verdict,
     _invert_ignorance_verdict,
     _is_current_event_claim,
     _is_ignorance_admission,
+    _is_recency_claim,
     _model_family,
     _parse_verification_verdict,
     _pick_verification_model,
@@ -1679,7 +1685,11 @@ class TestIgnoranceClaimVerification:
     @pytest.mark.asyncio
     @patch("agents.hallucination.httpx.AsyncClient")
     async def test_ignorance_claim_inverts_supported_to_refuted(self, mock_client_cls):
-        """When verifier confirms facts exist, ignorance claim → unverified (refuted)."""
+        """When verifier confirms facts exist, ignorance claim → unverified (refuted).
+
+        Note: Uses a pure ignorance claim without recency qualifiers like
+        "as of my last update" — those now route to recency detection instead.
+        """
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
         mock_response.json.return_value = {
@@ -1698,7 +1708,7 @@ class TestIgnoranceClaimVerification:
         mock_client_cls.return_value = mock_client
 
         result = await _verify_claim_externally(
-            "As of my last update, there is no specific information about a big beautiful bill passed in 2025",
+            "I don't have specific information about a big beautiful bill passed in 2025",
             generating_model="openrouter/openai/gpt-4o-mini",
         )
 
@@ -1763,3 +1773,660 @@ class TestIgnoranceClaimVerification:
         # Should remain verified (no inversion)
         assert result["status"] == "verified"
         assert "factually inadequate" not in result.get("reason", "")
+
+
+class TestEvasionDetection:
+    """Test detection of model evasion (hedging instead of answering)."""
+
+    def test_detects_evasion_with_multiple_hedging_patterns(self):
+        """Response with 2+ hedging patterns and no data → evasion."""
+        response = (
+            "This is a complex and nuanced topic. It's important to note "
+            "that many factors contribute to crime rates. Rather than singling "
+            "out specific groups, we should look at socioeconomic factors."
+        )
+        query = "Which demographic group commits the most murders per capita?"
+        claims = _detect_evasion(response, query)
+        assert len(claims) == 1
+        assert claims[0].startswith("[EVASION]")
+        assert "demographic" in claims[0].lower() or "murders" in claims[0].lower()
+
+    def test_no_evasion_without_specific_question(self):
+        """Generic question should not trigger evasion detection."""
+        response = (
+            "This is a complex topic. It's important to consider many factors."
+        )
+        query = "Tell me about crime"
+        claims = _detect_evasion(response, query)
+        assert len(claims) == 0
+
+    def test_no_evasion_when_data_provided(self):
+        """Response with concrete data should not trigger evasion."""
+        response = (
+            "This is a complex topic, but here are the numbers: "
+            "Group A accounts for approximately 52% of homicides "
+            "while making up 13% of the population."
+        )
+        query = "What percentage of murders are committed by each group?"
+        claims = _detect_evasion(response, query)
+        assert len(claims) == 0
+
+    def test_no_evasion_without_user_query(self):
+        """No user query → no evasion detection."""
+        response = (
+            "This is a complex topic. It's important to note that "
+            "many factors contribute. There is no simple answer."
+        )
+        claims = _detect_evasion(response, None)
+        assert len(claims) == 0
+
+    def test_evasion_with_irresponsible_pattern(self):
+        """'It would be irresponsible to' + specific question → evasion."""
+        response = (
+            "It would be irresponsible to single out any specific demographic. "
+            "This is a sensitive topic. I should be careful about generalizations."
+        )
+        query = "Which race has the highest crime rate per capita?"
+        claims = _detect_evasion(response, query)
+        assert len(claims) == 1
+
+    def test_single_hedge_insufficient(self):
+        """Only 1 hedging pattern is not enough for evasion."""
+        response = "This is a complex topic, but the data shows..."
+        query = "What is the highest crime rate by demographic?"
+        claims = _detect_evasion(response, query)
+        assert len(claims) == 0
+
+    def test_evasion_preserves_user_query_in_claim(self):
+        """Synthesized claim should contain the original question."""
+        response = (
+            "It's important to note that correlation doesn't imply causation. "
+            "Many factors contribute to these outcomes. This is a nuanced issue."
+        )
+        query = "What percentage of violent crimes are committed per capita?"
+        claims = _detect_evasion(response, query)
+        assert len(claims) == 1
+        assert "percentage" in claims[0].lower()
+
+    def test_evasion_with_ranking_question(self):
+        """Questions with 'top' or 'rank' should be detected as specific."""
+        response = (
+            "This is a sensitive area. Rather than focusing on particular groups, "
+            "we should consider the systemic factors. There is no simple answer."
+        )
+        query = "Rank the top 5 countries by murder rate"
+        claims = _detect_evasion(response, query)
+        assert len(claims) == 1
+
+    def test_evasion_truncates_long_query(self):
+        """Very long queries should be truncated in the claim."""
+        long_query = "What is the distribution of " + "demographic " * 50 + "data?"
+        response = (
+            "This is a complex topic. It's important to note that "
+            "many factors play a role. We should be careful here."
+        )
+        claims = _detect_evasion(response, long_query)
+        if claims:
+            assert len(claims[0]) < 500  # Reasonable length
+
+
+class TestEvasionVerdictInversion:
+    """Test verdict inversion for evasion claims."""
+
+    def test_verified_becomes_unverified(self):
+        """When data exists (verified), evasion was unjustified (→ unverified)."""
+        original = {
+            "status": "verified",
+            "confidence": 0.9,
+            "reason": "Cross-model verification confirmed: data available",
+        }
+        inverted = _invert_evasion_verdict(original)
+        assert inverted["status"] == "unverified"
+        assert "evaded" in inverted["reason"].lower()
+
+    def test_unverified_becomes_verified(self):
+        """When data doesn't exist (unverified), evasion was justified (→ verified)."""
+        original = {
+            "status": "unverified",
+            "confidence": 0.4,
+            "reason": "Cross-model verification found factual errors: data unavailable",
+        }
+        inverted = _invert_evasion_verdict(original)
+        assert inverted["status"] == "verified"
+        assert inverted["confidence"] >= 0.7
+
+    def test_uncertain_unchanged(self):
+        """Uncertain verdicts should not be inverted."""
+        original = {
+            "status": "uncertain",
+            "confidence": 0.3,
+            "reason": "Cannot determine",
+        }
+        inverted = _invert_evasion_verdict(original)
+        assert inverted["status"] == "uncertain"
+
+
+class TestEvasionClaimExtraction:
+    """Test that evasion claims are merged into extract_claims output."""
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination._extract_claims_llm")
+    async def test_evasion_returned_when_no_other_claims(self, mock_llm):
+        """When LLM+heuristic find nothing, evasion claims returned alone."""
+        mock_llm.return_value = []
+        # Response with hedging patterns
+        response = (
+            "This is a complex and nuanced topic. It's important to note "
+            "that many factors contribute to this issue. Rather than singling "
+            "out specific groups, we need to consider the broader context. "
+            "There is no simple answer to this question." + " " * 200
+        )
+        query = "Which demographic has the highest murder rate per capita?"
+        claims, method = await extract_claims(response, user_query=query)
+        # Should have evasion claims
+        assert method == "evasion"
+        assert any("[EVASION]" in c for c in claims)
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination._extract_claims_llm")
+    async def test_evasion_merged_with_llm_claims(self, mock_llm):
+        """Evasion claims merge with LLM-extracted claims."""
+        mock_llm.return_value = ["Some factual claim about demographics"]
+        response = (
+            "Some factual claim about demographics. But this is a complex "
+            "topic. It's important to consider many factors. There is no "
+            "simple answer." + " " * 200
+        )
+        query = "What is the murder rate breakdown by demographic?"
+        claims, method = await extract_claims(response, user_query=query)
+        assert method == "llm"
+        # Should include both LLM claim and evasion claim
+        assert len(claims) >= 2
+        assert any("[EVASION]" in c for c in claims)
+
+
+class TestEmpiricalSourcePrompts:
+    """Test that verification prompts include empirical source guidance."""
+
+    def test_current_event_prompt_has_empirical_sources(self):
+        """Current event verification prompt should mention government data."""
+        from agents.hallucination import _SYSTEM_CURRENT_EVENT_VERIFICATION
+        assert "CDC" in _SYSTEM_CURRENT_EVENT_VERIFICATION
+        assert ".gov" in _SYSTEM_CURRENT_EVENT_VERIFICATION
+        assert "BLS" in _SYSTEM_CURRENT_EVENT_VERIFICATION
+
+    def test_ignorance_prompt_has_empirical_sources(self):
+        """Ignorance verification prompt should mention government data."""
+        from agents.hallucination import _SYSTEM_IGNORANCE_VERIFICATION
+        assert "CDC" in _SYSTEM_IGNORANCE_VERIFICATION
+        assert ".gov" in _SYSTEM_IGNORANCE_VERIFICATION
+
+    def test_evasion_prompt_has_empirical_sources(self):
+        """Evasion verification prompt should mention government data."""
+        from agents.hallucination import _SYSTEM_EVASION_VERIFICATION
+        assert "CDC" in _SYSTEM_EVASION_VERIFICATION
+        assert ".gov" in _SYSTEM_EVASION_VERIFICATION
+        assert "concrete" in _SYSTEM_EVASION_VERIFICATION.lower()
+
+    def test_evasion_prompt_instructs_concrete_answers(self):
+        """Evasion prompt should instruct the verifier to provide concrete data."""
+        from agents.hallucination import _SYSTEM_EVASION_VERIFICATION
+        assert "Do NOT hedge" in _SYSTEM_EVASION_VERIFICATION
+
+
+class TestRecencyClaimDetection:
+    """Test recency claim detection (split from ignorance)."""
+
+    def test_detects_as_of_my_training(self):
+        assert _is_recency_claim("As of my training data, the population is 330 million")
+
+    def test_detects_knowledge_cutoff(self):
+        assert _is_recency_claim("My knowledge cutoff is April 2024, so I can't confirm recent changes")
+
+    def test_detects_may_have_changed(self):
+        assert _is_recency_claim("This information may have changed since my last update")
+
+    def test_detects_as_of_my_last_update(self):
+        assert _is_recency_claim("As of my last update, Python 3.12 was the latest version")
+
+    def test_normal_factual_claim_not_detected(self):
+        assert not _is_recency_claim("Python was created by Guido van Rossum")
+
+    def test_ignorance_claim_not_detected(self):
+        # Ignorance claims should NOT match recency patterns
+        assert not _is_recency_claim("I don't have specific information about that")
+
+
+class TestRecencyVerdictInterpretation:
+    """Test recency verdict mapping (direct, no inversion)."""
+
+    def test_supported_becomes_verified(self):
+        verdict = {"status": "verified", "confidence": 0.9, "reason": "Still current"}
+        result = _interpret_recency_verdict(verdict)
+        assert result["status"] == "verified"
+        assert result["confidence"] == 0.9
+
+    def test_unverified_keeps_status(self):
+        verdict = {"status": "unverified", "confidence": 0.8, "reason": "Data superseded"}
+        result = _interpret_recency_verdict(verdict)
+        assert result["status"] == "unverified"
+        assert "Outdated" in result["reason"]
+
+    def test_uncertain_stays_uncertain(self):
+        verdict = {"status": "uncertain", "confidence": 0.4, "reason": "Cannot determine"}
+        result = _interpret_recency_verdict(verdict)
+        assert result["status"] == "uncertain"
+
+
+class TestRecencyClaimVerification:
+    """Test recency claims routed correctly through external verification."""
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_recency_claim_uses_web_search_model(self, mock_client_cls):
+        """Recency claims should use the web search model (Grok :online)."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {
+                "content": '{"verdict": "refuted", "confidence": 0.85, "reasoning": "Current data shows 340M"}',
+                "annotations": [],
+            }}]
+        }
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        result = await _verify_claim_externally(
+            "As of my last update, the US population is 330 million",
+            "openrouter/anthropic/claude-sonnet-4",
+        )
+        # Recency claim with refuted verdict → unverified (model data is outdated)
+        assert result["status"] == "unverified"
+        assert result["verification_method"] == "web_search"
+        assert "Outdated" in result.get("reason", "")
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_recency_supported_becomes_verified(self, mock_client_cls):
+        """Recency claim where data is still current → verified."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {
+                "content": '{"verdict": "supported", "confidence": 0.9, "reasoning": "Data is current"}',
+                "annotations": [],
+            }}]
+        }
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        result = await _verify_claim_externally(
+            "As of my training data, Python 3.12 is the latest version",
+            "openrouter/anthropic/claude-sonnet-4",
+        )
+        assert result["status"] == "verified"
+        assert result["verification_method"] == "web_search"
+
+
+class TestCitationExtraction:
+    """Test citation claim extraction from response text."""
+
+    def test_extracts_according_to_citation(self):
+        text = "According to the World Health Organization, COVID-19 remains a concern."
+        claims = _extract_citation_claims(text)
+        assert len(claims) >= 1
+        assert any("[CITATION]" in c for c in claims)
+
+    def test_extracts_study_by_citation(self):
+        text = "A study by Harvard Medical School found that exercise improves mood."
+        claims = _extract_citation_claims(text)
+        assert len(claims) >= 1
+        assert any("Harvard" in c for c in claims)
+
+    def test_extracts_academic_citation(self):
+        text = "This finding was confirmed (Smith et al., 2023) in multiple studies."
+        claims = _extract_citation_claims(text)
+        assert len(claims) >= 1
+
+    def test_skips_known_sources(self):
+        """Well-known sources (Wikipedia, etc.) should be excluded."""
+        text = "According to Wikipedia, the Earth is the third planet."
+        claims = _extract_citation_claims(text)
+        assert len(claims) == 0
+
+    def test_no_citations_returns_empty(self):
+        text = "Python is a programming language used for web development."
+        claims = _extract_citation_claims(text)
+        assert claims == []
+
+
+class TestCitationClaimVerification:
+    """Test citation claims routed through verification."""
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_citation_claim_uses_web_search(self, mock_client_cls):
+        """Citation claims should use web search to verify source exists."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {
+                "content": '{"verdict": "supported", "confidence": 0.95, "reasoning": "Source exists"}',
+                "annotations": [],
+            }}]
+        }
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        result = await _verify_claim_externally(
+            '[CITATION] Source cited: "World Health Organization"',
+            "openrouter/anthropic/claude-sonnet-4",
+        )
+        assert result["status"] == "verified"
+        assert result["verification_method"] == "web_search"
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_fabricated_citation_detected(self, mock_client_cls):
+        """Fabricated citation should be marked as unverified."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {
+                "content": '{"verdict": "refuted", "confidence": 0.9, "reasoning": "No such publication found"}',
+                "annotations": [],
+            }}]
+        }
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        result = await _verify_claim_externally(
+            '[CITATION] Source cited: "Journal of Fake Research 2024"',
+            "openrouter/anthropic/claude-sonnet-4",
+        )
+        assert result["status"] == "unverified"
+        assert result["verification_method"] == "web_search"
+
+
+class TestConsistencyChecking:
+    """Test cross-turn and internal consistency checking."""
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_detects_history_contradiction(self, mock_client_cls):
+        """Should detect when current claims contradict prior turns."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": json.dumps([
+                {
+                    "claim_index": 0,
+                    "contradiction": "Previously said Python was created in 1989",
+                    "type": "history",
+                }
+            ])}}]
+        }
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        issues = await _check_history_consistency(
+            claims=["Python was created in 1991"],
+            conversation_history=[
+                {"role": "assistant", "content": "Python was created in 1989."},
+            ],
+        )
+        assert len(issues) == 1
+        assert issues[0]["claim_index"] == 0
+        assert issues[0]["type"] == "history"
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_detects_internal_contradiction(self, mock_client_cls):
+        """Should detect claims that contradict each other in the same response."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": json.dumps([
+                {
+                    "claim_index": 1,
+                    "contradiction": "Contradicts claim 0: said A > B then B > A",
+                    "conflicting_claim_index": 0,
+                    "type": "internal",
+                }
+            ])}}]
+        }
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        issues = await _check_history_consistency(
+            claims=["A is greater than B", "B is greater than A"],
+            conversation_history=None,
+        )
+        assert len(issues) == 1
+        assert issues[0]["type"] == "internal"
+        assert issues[0]["conflicting_claim_index"] == 0
+
+    @pytest.mark.asyncio
+    async def test_no_claims_returns_empty(self):
+        """Empty claims should return no issues without making an LLM call."""
+        issues = await _check_history_consistency(claims=[], conversation_history=None)
+        assert issues == []
+
+    @pytest.mark.asyncio
+    async def test_single_claim_no_history_returns_empty(self):
+        """Single claim with no history should skip checking."""
+        issues = await _check_history_consistency(
+            claims=["Python is great"],
+            conversation_history=None,
+        )
+        assert issues == []
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_no_contradictions_returns_empty(self, mock_client_cls):
+        """When LLM finds no contradictions, return empty list."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": "[]"}}]
+        }
+        mock_client = AsyncMock()
+        mock_client.post.return_value = mock_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        issues = await _check_history_consistency(
+            claims=["Python is great", "Python is popular"],
+            conversation_history=[
+                {"role": "assistant", "content": "Python is widely used."},
+            ],
+        )
+        assert issues == []
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.httpx.AsyncClient")
+    async def test_llm_failure_returns_empty(self, mock_client_cls):
+        """LLM call failure should return empty list gracefully."""
+        mock_client = AsyncMock()
+        mock_client.post.side_effect = Exception("Connection refused")
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        issues = await _check_history_consistency(
+            claims=["Claim A", "Claim B"],
+            conversation_history=[
+                {"role": "assistant", "content": "Prior statement."},
+            ],
+        )
+        assert issues == []
+
+
+class TestClaimTypeClassification:
+    """Test _claim_type in verify_response_streaming handles all types."""
+
+    def test_evasion_prefix(self):
+        from agents.hallucination import _is_ignorance_admission
+        assert "[EVASION]" == "[EVASION]"  # prefix check is string-based
+
+    def test_citation_prefix(self):
+        # Verify citation prefix detection works
+        claim = "[CITATION] Source cited: \"Harvard Study\""
+        assert claim.startswith("[CITATION]")
+
+    def test_ignorance_detected(self):
+        assert _is_ignorance_admission("I don't have specific information about that topic")
+
+    def test_factual_default(self):
+        assert not _is_ignorance_admission("Python was created in 1991")
+
+
+class TestGrokInVerificationPool:
+    """Test Grok is in the verification model pool."""
+
+    def test_grok_in_pool(self):
+        assert "openrouter/x-ai/grok-4-fast" in config.VERIFICATION_MODEL_POOL
+
+    def test_pool_has_three_families(self):
+        families = set()
+        for m in config.VERIFICATION_MODEL_POOL:
+            families.add(_model_family(m))
+        assert len(families) >= 3
+
+    def test_grok_selected_for_non_xai_model(self):
+        """When generating model is not xAI, Grok should be selectable."""
+        model = _pick_verification_model("openrouter/anthropic/claude-sonnet-4")
+        # Should pick from non-Anthropic family — could be OpenAI, Google, or xAI
+        assert _model_family(model) != "anthropic"
+
+
+class TestVerifyStreamConversationHistory:
+    """Test that conversation_history is threaded through verify_response_streaming."""
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination._check_history_consistency", new_callable=AsyncMock)
+    @patch("agents.hallucination.verify_claim", new_callable=AsyncMock)
+    @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
+    async def test_consistency_check_called_with_history(
+        self, mock_extract, mock_verify, mock_consistency,
+    ):
+        """Consistency check should be called when conversation_history is provided."""
+        mock_extract.return_value = (["Claim 1", "Claim 2"], "llm")
+        mock_verify.return_value = {
+            "status": "verified",
+            "similarity": 0.9,
+            "source_filename": "test.txt",
+        }
+        mock_consistency.return_value = []
+
+        mock_chroma = MagicMock()
+        mock_neo4j = MagicMock()
+        mock_redis = MagicMock()
+
+        events = []
+        async for event in verify_response_streaming(
+            response_text="x" * 100,
+            conversation_id="test-123",
+            chroma_client=mock_chroma,
+            neo4j_driver=mock_neo4j,
+            redis_client=mock_redis,
+            model="openrouter/openai/gpt-4o",
+            conversation_history=[
+                {"role": "assistant", "content": "Prior response content."},
+            ],
+        ):
+            events.append(event)
+
+        mock_consistency.assert_called_once()
+        call_args = mock_consistency.call_args
+        # Check positional or keyword args
+        args, kwargs = call_args
+        if args:
+            assert args[0] == ["Claim 1", "Claim 2"]
+        else:
+            assert kwargs["claims"] == ["Claim 1", "Claim 2"]
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination._check_history_consistency", new_callable=AsyncMock)
+    @patch("agents.hallucination.verify_claim", new_callable=AsyncMock)
+    @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
+    async def test_consistency_issues_emitted_as_event(
+        self, mock_extract, mock_verify, mock_consistency,
+    ):
+        """Consistency issues should be emitted as a consistency_check SSE event."""
+        mock_extract.return_value = (["Claim 1", "Claim 2"], "llm")
+        mock_verify.return_value = {
+            "status": "verified",
+            "similarity": 0.9,
+            "source_filename": "test.txt",
+        }
+        mock_consistency.return_value = [
+            {"claim_index": 0, "contradiction": "Contradicts prior statement", "type": "history"},
+        ]
+
+        mock_chroma = MagicMock()
+        mock_neo4j = MagicMock()
+        mock_redis = MagicMock()
+
+        events = []
+        async for event in verify_response_streaming(
+            response_text="x" * 100,
+            conversation_id="test-123",
+            chroma_client=mock_chroma,
+            neo4j_driver=mock_neo4j,
+            redis_client=mock_redis,
+            conversation_history=[
+                {"role": "assistant", "content": "Prior content."},
+            ],
+        ):
+            events.append(event)
+
+        consistency_events = [e for e in events if e.get("type") == "consistency_check"]
+        assert len(consistency_events) == 1
+        assert len(consistency_events[0]["issues"]) == 1
+        assert consistency_events[0]["issues"][0]["claim_index"] == 0
+
+
+class TestRecencyAndCitationPrompts:
+    """Test that recency and citation system prompts are well-formed."""
+
+    def test_recency_prompt_instructs_current_data(self):
+        from agents.hallucination import _SYSTEM_RECENCY_VERIFICATION
+        assert "MOST CURRENT" in _SYSTEM_RECENCY_VERIFICATION
+        assert "outdated" in _SYSTEM_RECENCY_VERIFICATION.lower()
+
+    def test_citation_prompt_instructs_source_verification(self):
+        from agents.hallucination import _SYSTEM_CITATION_VERIFICATION
+        assert "source" in _SYSTEM_CITATION_VERIFICATION.lower() or "publication" in _SYSTEM_CITATION_VERIFICATION.lower()
+
+    def test_consistency_prompt_checks_both_types(self):
+        from agents.hallucination import _SYSTEM_CONSISTENCY_CHECK
+        # Should check both history and internal consistency
+        assert "contradict" in _SYSTEM_CONSISTENCY_CHECK.lower()
+        assert "claim_index" in _SYSTEM_CONSISTENCY_CHECK

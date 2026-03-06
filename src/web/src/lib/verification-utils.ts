@@ -12,11 +12,13 @@
  * This mapping is frontend-only — zero backend changes needed.
  */
 
-export type ClaimDisplayStatus = "verified" | "refuted" | "unverified" | "uncertain" | "pending"
+export type ClaimDisplayStatus = "verified" | "refuted" | "unverified" | "uncertain" | "pending" | "evasion" | "citation"
 
 /**
  * Derive the user-facing display status from backend status + verification method.
  *
+ * - evasion claim_type → evasion (orange, model deflected)
+ * - citation claim_type → citation (purple, source verification)
  * - verified → verified (green)
  * - unverified + cross_model/web_search → refuted (red, actively wrong)
  * - unverified + kb/none → unverified (yellow, no evidence)
@@ -26,7 +28,12 @@ export type ClaimDisplayStatus = "verified" | "refuted" | "unverified" | "uncert
 export function getClaimDisplayStatus(
   status: string,
   verificationMethod?: string,
+  claimType?: string,
 ): ClaimDisplayStatus {
+  // Evasion claims get special orange treatment regardless of verification outcome
+  if (claimType === "evasion") return "evasion"
+  // Citation verification gets purple treatment
+  if (claimType === "citation") return "citation"
   if (status === "verified") return "verified"
   if (
     status === "unverified" &&

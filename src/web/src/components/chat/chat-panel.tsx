@@ -92,13 +92,41 @@ export function ChatPanel() {
     return activeMessages.filter((m) => m.role === "assistant").length
   }, [activeMessages, isStreaming])
 
+  // Last user message for evasion detection
+  const latestUserQuery = useMemo(() => {
+    if (!activeMessages) return undefined
+    const userMsgs = activeMessages.filter((m) => m.role === "user")
+    return userMsgs.length > 0 ? userMsgs[userMsgs.length - 1].content : undefined
+  }, [activeMessages])
+
+  // Actual model that generated the latest assistant response (not the dropdown selection)
+  const latestAssistantModel = useMemo(() => {
+    if (!activeMessages) return undefined
+    const assistantMsgs = activeMessages.filter((m) => m.role === "assistant")
+    return assistantMsgs.length > 0 ? assistantMsgs[assistantMsgs.length - 1].model : undefined
+  }, [activeMessages])
+
+  // Prior assistant context for history consistency checking (last 3 prior responses)
+  const priorAssistantContext = useMemo(() => {
+    if (!activeMessages) return undefined
+    const assistantMsgs = activeMessages.filter((m) => m.role === "assistant")
+    if (assistantMsgs.length < 2) return undefined
+    // Exclude the latest (being verified), take up to 3 prior, truncate each
+    return assistantMsgs.slice(-4, -1).map((m) => ({
+      role: "assistant" as const,
+      content: m.content.slice(0, 2000),
+    }))
+  }, [activeMessages])
+
   // Streaming verification hook
   const verification = useVerificationStream(
     latestAssistantText,
     activeId ?? null,
     hallucinationEnabled,
     streamTriggerKey,
-    selectedModel,
+    latestAssistantModel,
+    latestUserQuery,
+    priorAssistantContext,
   )
 
   // Fetch saved report when switching to a conversation (fallback)

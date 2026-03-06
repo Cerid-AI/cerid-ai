@@ -334,6 +334,7 @@ export interface CurateResponse {
 
 export interface HallucinationClaim {
   claim: string
+  claim_type?: "factual" | "evasion" | "ignorance" | "citation"
   status: "verified" | "unverified" | "uncertain" | "error"
   similarity: number
   source_artifact_id?: string
@@ -345,10 +346,12 @@ export interface HallucinationClaim {
   user_feedback?: "correct" | "incorrect"
   verification_method?: "kb" | "cross_model" | "cross_model_failed" | "web_search" | "web_search_failed" | "none"
   verification_model?: string
+  consistency_issue?: string
 }
 
 export interface StreamingClaim {
   claim: string
+  claim_type?: "factual" | "evasion" | "ignorance" | "citation"
   index: number
   status?: "verified" | "unverified" | "uncertain" | "error" | "pending"
   confidence?: number
@@ -360,6 +363,7 @@ export interface StreamingClaim {
   reason?: string
   verification_method?: "kb" | "cross_model" | "cross_model_failed" | "web_search" | "web_search_failed" | "none"
   verification_model?: string
+  consistency_issue?: string
 }
 
 export interface HallucinationReport {

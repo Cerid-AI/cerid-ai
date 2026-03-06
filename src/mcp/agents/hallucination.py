@@ -110,7 +110,7 @@ _CURRENT_EVENT_PATTERNS = [
 # When detected alongside a "supported" verdict for a current-event claim, the
 # claim should be escalated to a web-search model for a second opinion.
 _STALE_KNOWLEDGE_PATTERNS = [
-    re.compile(r"as of (?:my|the) (?:last |latest )?(?:training|knowledge|data)", re.I),
+    re.compile(r"as of (?:my|the) (?:last |latest )?(?:training|knowledge|data|update)", re.I),
     re.compile(r"(?:I |my )(?:training|knowledge) (?:cutoff|cut-off|only goes|ends|stops)", re.I),
     re.compile(r"I (?:don'?t|do not) have (?:information|data|knowledge) (?:after|beyond|past)", re.I),
     re.compile(r"(?:may have|might have|could have) changed since", re.I),
@@ -122,6 +122,16 @@ _STALE_KNOWLEDGE_PATTERNS = [
 def _has_staleness_indicators(text: str) -> bool:
     """Detect if a verification response admits knowledge staleness."""
     return any(p.search(text) for p in _STALE_KNOWLEDGE_PATTERNS)
+
+
+def _is_recency_claim(claim: str) -> bool:
+    """Detect if a claim explicitly references potentially outdated training data.
+
+    Distinguishes from pure ignorance: recency claims contain actual facts that
+    may be stale (e.g., "As of my last update, the population is 330M"), whereas
+    ignorance claims say "I don't have information about X".
+    """
+    return any(p.search(claim) for p in _STALE_KNOWLEDGE_PATTERNS)
 
 
 # Patterns that detect when a claim is an *admission of ignorance* by the
@@ -255,6 +265,107 @@ def _invert_ignorance_verdict(verdict: dict[str, Any]) -> dict[str, Any]:
     return verdict
 
 
+def _invert_evasion_verdict(verdict: dict[str, Any]) -> dict[str, Any]:
+    """Invert a verification verdict for an evasion claim.
+
+    When a model evades answering and Grok finds the actual data
+    (verdict = "verified"/supported), the model's evasion was unjustified
+    → mark as "unverified" (refuted in the UI).
+
+    If Grok confirms the data genuinely doesn't exist ("unverified"/refuted),
+    the model's caution was justified → mark as "verified".
+    """
+    status = verdict["status"]
+    reasoning = verdict.get("reason", "")
+
+    if status == "verified":
+        # Data exists — model's evasion was unjustified
+        clean_reason = reasoning
+        for prefix in (
+            "Cross-model verification confirmed: ",
+            "Cross-model verification confirmed",
+        ):
+            if clean_reason.startswith(prefix):
+                clean_reason = clean_reason[len(prefix):]
+                break
+        return {
+            **verdict,
+            "status": "unverified",
+            "reason": (
+                f"Model evaded answering — data is available: {clean_reason}"
+            ).rstrip(": "),
+        }
+
+    if status == "unverified":
+        # Data genuinely unavailable — evasion was justified
+        clean_reason = reasoning
+        for prefix in (
+            "Cross-model verification found factual errors: ",
+            "Cross-model verification found factual errors",
+        ):
+            if clean_reason.startswith(prefix):
+                clean_reason = clean_reason[len(prefix):]
+                break
+        return {
+            **verdict,
+            "status": "verified",
+            "confidence": max(verdict.get("confidence", 0.5), 0.7),
+            "reason": (
+                f"Model's caution was justified — data is unavailable: "
+                f"{clean_reason}"
+            ).rstrip(": "),
+        }
+
+    # uncertain / error — keep as-is
+    return verdict
+
+
+def _interpret_recency_verdict(verdict: dict[str, Any]) -> dict[str, Any]:
+    """Interpret a verification verdict for a recency/staleness claim.
+
+    Unlike ignorance inversion, recency verdicts map directly:
+    - "supported" → model's data is still current → "verified"
+    - "refuted" → model's data is outdated → "unverified" with current data
+    - "uncertain" → keep as-is
+    """
+    status = verdict["status"]
+    reasoning = verdict.get("reason", "")
+
+    if status == "verified":
+        # Model's data confirmed as current
+        clean_reason = reasoning
+        for prefix in (
+            "Cross-model verification confirmed: ",
+            "Cross-model verification confirmed",
+        ):
+            if clean_reason.startswith(prefix):
+                clean_reason = clean_reason[len(prefix):]
+                break
+        return {
+            **verdict,
+            "status": "verified",
+            "reason": f"Data confirmed current: {clean_reason}".rstrip(": "),
+        }
+
+    if status == "unverified":
+        # Model's data is outdated — newer data available
+        clean_reason = reasoning
+        for prefix in (
+            "Cross-model verification found factual errors: ",
+            "Cross-model verification found factual errors",
+        ):
+            if clean_reason.startswith(prefix):
+                clean_reason = clean_reason[len(prefix):]
+                break
+        return {
+            **verdict,
+            "status": "unverified",
+            "reason": f"Outdated: {clean_reason}".rstrip(": "),
+        }
+
+    return verdict
+
+
 # ---------------------------------------------------------------------------
 # System prompts for verification LLM calls
 # ---------------------------------------------------------------------------
@@ -266,6 +377,9 @@ _SYSTEM_CLAIM_EXTRACTION = (
     "external sources — including dates, numbers, statistics, named entities, "
     "causal relationships, comparisons, attributions, and technical specifications. "
     "Do NOT extract opinions, greetings, questions, or code examples. "
+    "DO extract statements about knowledge cutoffs, data availability, and "
+    "admissions of lacking information — these are verifiable claims about "
+    "the model's capabilities and the existence of underlying data. "
     "Return ONLY a JSON array of objects, each with:\n"
     '  {"claim": "<the factual statement>", "type": "<category>"}\n'
     "Valid types: date, statistic, attribution, comparison, technical, "
@@ -290,13 +404,23 @@ _SYSTEM_DIRECT_VERIFICATION = (
     "- confidence: 0.0 = no idea, 1.0 = certain"
 )
 
+_EMPIRICAL_SOURCE_GUIDANCE = (
+    "\n\nPrioritize these empirical source types (in order):\n"
+    "1. Government data (.gov): CDC, BLS, Census Bureau, FBI UCR/NIBRS, DOJ, WHO, EPA\n"
+    "2. Academic databases: PubMed, Google Scholar, JSTOR, peer-reviewed journals\n"
+    "3. Official statistics portals: data.gov, FRED, World Bank Data, OECD\n"
+    "4. Authoritative encyclopedic sources: Wikipedia (with citations), Britannica\n"
+    "5. Reputable news with primary sourcing: Reuters, AP, verified reporting\n"
+    "Cite the specific source and dataset when available."
+)
+
 _SYSTEM_CURRENT_EVENT_VERIFICATION = (
     "You are a factual claim verifier with access to real-time web search. "
     "You are verifying a claim made by a different AI model. Your job is to "
     "independently assess accuracy using web sources — do not assume the claim "
     "is correct just because another AI generated it.\n\n"
-    "Search the web for authoritative sources to confirm or refute the claim. "
-    "Prioritize official sources, reputable news outlets, and primary documents.\n\n"
+    "Search the web for authoritative sources to confirm or refute the claim."
+    f"{_EMPIRICAL_SOURCE_GUIDANCE}\n\n"
     "Respond with ONLY a JSON object — no other text:\n"
     '{"verdict": "supported"|"refuted"|"insufficient_info", '
     '"confidence": 0.0-1.0, '
@@ -305,8 +429,8 @@ _SYSTEM_CURRENT_EVENT_VERIFICATION = (
     "- \"supported\": Web sources confirm the claim is accurate\n"
     "- \"refuted\": Web sources show the claim contains factual errors\n"
     "- \"insufficient_info\": Cannot find reliable sources to verify\n"
-    "- Always cite the source in your reasoning (e.g., \"per Reuters...\", "
-    "\"according to the official docs...\")\n"
+    "- Always cite the source in your reasoning (e.g., \"per CDC data...\", "
+    "\"according to FBI UCR...\", \"per BLS statistics...\")\n"
     "- confidence: 0.0 = no sources found, 1.0 = multiple authoritative sources agree"
 )
 
@@ -318,7 +442,8 @@ _SYSTEM_IGNORANCE_VERIFICATION = (
     "Do NOT evaluate whether the model is being honest about its limitations. "
     "Instead, search the web for authoritative sources about the UNDERLYING "
     "TOPIC — the facts, events, or information the model says it cannot "
-    "provide.\n\n"
+    "provide."
+    f"{_EMPIRICAL_SOURCE_GUIDANCE}\n\n"
     "Respond with ONLY a JSON object — no other text:\n"
     '{"verdict": "supported"|"refuted"|"insufficient_info", '
     '"confidence": 0.0-1.0, '
@@ -332,6 +457,96 @@ _SYSTEM_IGNORANCE_VERIFICATION = (
     "- Always cite sources in your reasoning\n"
     "- confidence: 0.0 = no sources found, 1.0 = multiple authoritative "
     "sources confirm"
+)
+
+_SYSTEM_EVASION_VERIFICATION = (
+    "You are a factual claim verifier with access to real-time web search. "
+    "A different AI model was asked a specific factual question but evaded "
+    "answering with concrete data — instead giving hedging language, "
+    "deflections, or generic disclaimers about complexity.\n\n"
+    "Your job is to find and provide the actual factual answer using "
+    "authoritative empirical sources. Search for the specific data the user "
+    "requested. Do NOT hedge or deflect — provide concrete numbers, "
+    "statistics, and facts with source citations."
+    f"{_EMPIRICAL_SOURCE_GUIDANCE}\n\n"
+    "Respond with ONLY a JSON object — no other text:\n"
+    '{"verdict": "supported"|"refuted"|"insufficient_info", '
+    '"confidence": 0.0-1.0, '
+    '"reasoning": "Concrete answer with source citations"}\n\n'
+    "Rules:\n"
+    "- \"supported\": The data exists and you found concrete answers — "
+    "the model's evasion was unjustified\n"
+    "- \"refuted\": The specific data genuinely does not exist or is "
+    "legitimately impossible to determine\n"
+    "- \"insufficient_info\": Cannot find authoritative sources for this "
+    "specific question\n"
+    "- Include specific numbers, percentages, or data points in your "
+    "reasoning when available\n"
+    "- confidence: 0.0 = no data found, 1.0 = authoritative data with "
+    "clear answer"
+)
+
+_SYSTEM_RECENCY_VERIFICATION = (
+    "You are a factual claim verifier with access to real-time web search. "
+    "An AI model made a claim that may be based on outdated training data. "
+    "Your job is to search for the MOST CURRENT data on this topic and "
+    "determine whether the model's information is still accurate or has been "
+    "superseded by newer data.\n\n"
+    "If the claim contains specific numbers, dates, or facts, search for "
+    "the latest available data and compare. Report whether the model's "
+    "information is current or outdated, citing the most recent source."
+    f"{_EMPIRICAL_SOURCE_GUIDANCE}\n\n"
+    "Respond with ONLY a JSON object — no other text:\n"
+    '{"verdict": "supported"|"refuted"|"insufficient_info", '
+    '"confidence": 0.0-1.0, '
+    '"reasoning": "1-2 sentence explanation comparing model data vs current data"}\n\n'
+    "Rules:\n"
+    "- \"supported\": The model's data is still current and accurate\n"
+    "- \"refuted\": The model's data is outdated — newer data is available. "
+    "State what the current data shows.\n"
+    "- \"insufficient_info\": Cannot find current authoritative sources to compare\n"
+    "- Always state the most recent data point and its source\n"
+    "- confidence: 0.0 = no sources found, 1.0 = clear current data with source"
+)
+
+_SYSTEM_CITATION_VERIFICATION = (
+    "You are a source verification specialist with access to real-time web search. "
+    "An AI model cited a specific source (publication, study, report, or "
+    "organization) in its response. Your job is to verify whether this cited "
+    "source actually exists.\n\n"
+    "Search the web for the exact source name. Check if it is a real "
+    "publication, study, report, dataset, or organization.\n\n"
+    "Respond with ONLY a JSON object — no other text:\n"
+    '{"verdict": "supported"|"refuted"|"insufficient_info", '
+    '"confidence": 0.0-1.0, '
+    '"reasoning": "1-2 sentence explanation"}\n\n'
+    "Rules:\n"
+    "- \"supported\": The cited source exists and is real\n"
+    "- \"refuted\": The source appears to be fabricated — no evidence it exists\n"
+    "- \"insufficient_info\": Cannot definitively confirm or deny existence\n"
+    "- confidence: 0.0 = no info, 1.0 = source clearly exists (or clearly doesn't)"
+)
+
+_SYSTEM_CONSISTENCY_CHECK = (
+    "You are a logical consistency analyzer. Given a list of claims from an "
+    "AI model's latest response and (optionally) prior conversation context, "
+    "identify any logical contradictions.\n\n"
+    "Check for:\n"
+    "1. Claims in the latest response that contradict EACH OTHER "
+    "(inconsistent numbers, conflicting statements, logical non-sequiturs)\n"
+    "2. Claims in the latest response that contradict statements from "
+    "prior conversation turns\n\n"
+    "Respond with ONLY a JSON array — no other text. Each element:\n"
+    '{"claim_index": <int>, "contradiction": "<description>", '
+    '"conflicting_claim_index": <int or null>, '
+    '"type": "internal"|"history"}\n\n'
+    "Rules:\n"
+    "- claim_index: 0-based index of the claim in the current response\n"
+    "- conflicting_claim_index: index of the other contradicting claim "
+    "(null for history contradictions)\n"
+    "- type: \"internal\" for within-response, \"history\" for cross-turn\n"
+    "- Only flag CLEAR contradictions, not subtle differences or evolving context\n"
+    "- Return [] if no contradictions found"
 )
 
 # Numeric extraction patterns for contradiction detection
@@ -405,12 +620,230 @@ def _extract_claims_heuristic(response_text: str) -> list[str]:
 # LLM-based claim extraction
 # ---------------------------------------------------------------------------
 
-async def extract_claims(response_text: str) -> tuple[list[str], str]:
+def _extract_ignorance_claims(response_text: str) -> list[str]:
+    """Pre-extraction pass: surface ignorance admissions and recency limitations.
+
+    The LLM extraction prompt excludes "meta-commentary" and the heuristic
+    ``_NON_FACTUAL_PATTERNS`` blocks sentences starting with "I ".  This
+    means legitimate ignorance admissions ("I don't have access to data from
+    2025") and knowledge-cutoff statements ("As of my last update in October
+    2023") are silently dropped before ``_IGNORANCE_ADMISSION_PATTERNS`` in
+    ``_verify_claim_externally`` can ever see them.
+
+    This function runs *before* LLM/heuristic extraction and pulls these
+    claims directly from the response so they reach downstream verification.
+    """
+    text = response_text[:5000]
+    sentences = _SENTENCE_RE.split(text)
+    expanded: list[str] = []
+    for s in sentences:
+        expanded.extend(line.strip() for line in s.split("\n") if line.strip())
+
+    claims: list[str] = []
+    seen: set[str] = set()
+    for sentence in expanded:
+        if len(sentence) < 20 or len(sentence) > 300:
+            continue
+        if _is_ignorance_admission(sentence):
+            clean = sentence.rstrip(".,;: ")
+            if clean and clean not in seen:
+                claims.append(clean)
+                seen.add(clean)
+        # Also catch knowledge-cutoff / staleness statements that aren't
+        # phrased as ignorance admissions (e.g. "As of my last update...")
+        elif any(p.search(sentence) for p in _STALE_KNOWLEDGE_PATTERNS):
+            clean = sentence.rstrip(".,;: ")
+            if clean and clean not in seen:
+                claims.append(clean)
+                seen.add(clean)
+    return claims
+
+
+# ---------------------------------------------------------------------------
+# Evasion detection — model hedges instead of answering specific questions
+# ---------------------------------------------------------------------------
+
+# Patterns that indicate the model is deflecting/hedging instead of answering
+_EVASION_PATTERNS = [
+    re.compile(
+        r"(?:it'?s|this is) (?:important|crucial|worth|essential) to "
+        r"(?:note|consider|remember|understand|recognize|acknowledge)",
+        re.I,
+    ),
+    re.compile(
+        r"(?:I |it'?s )(?:not (?:appropriate|possible|accurate|helpful)|"
+        r"difficult|challenging) to (?:provide|give|make|single out|pinpoint|"
+        r"attribute|assign)",
+        re.I,
+    ),
+    re.compile(
+        r"(?:many|various|multiple|several|numerous|a (?:wide |complex )?range of) "
+        r"factors (?:contribute|play|are involved|influence|affect)",
+        re.I,
+    ),
+    re.compile(
+        r"this is a (?:complex|nuanced|multifaceted|sensitive|"
+        r"deeply complex|highly nuanced) (?:topic|issue|question|area|subject)",
+        re.I,
+    ),
+    re.compile(
+        r"(?:I |we )(?:should|must|need to) "
+        r"(?:be careful|avoid|refrain from|be cautious about)",
+        re.I,
+    ),
+    re.compile(
+        r"(?:would be|it'?s) (?:irresponsible|misleading|oversimplistic|"
+        r"reductive|inaccurate|unfair) to",
+        re.I,
+    ),
+    re.compile(
+        r"(?:rather than|instead of) (?:singling out|focusing on|pointing to|"
+        r"isolating|attributing.*to) (?:specific|particular|any one|a single)",
+        re.I,
+    ),
+    re.compile(
+        r"there (?:is no|isn'?t a?) (?:simple|straightforward|easy|single|"
+        r"one-size-fits-all) answer",
+        re.I,
+    ),
+    re.compile(
+        r"(?:correlation|association) (?:does not|doesn'?t) (?:imply|mean|equal) "
+        r"causation",
+        re.I,
+    ),
+]
+
+# Patterns that indicate the user asked a specific quantitative/factual question
+_SPECIFIC_QUESTION_PATTERNS = [
+    re.compile(r"\b(?:how many|how much|what percentage|what proportion|what fraction)\b", re.I),
+    re.compile(r"\b(?:which (?:group|demographic|category|country|state|city|race|ethnicity))\b", re.I),
+    re.compile(r"\b(?:who (?:has|leads|commits|is|are|does|did|was|were))\b", re.I),
+    re.compile(r"\b(?:what (?:is|are|was|were) the (?:rate|number|count|total|amount|figure|ratio))\b", re.I),
+    re.compile(r"\b(?:rank|top|most|least|highest|lowest|leading|largest|smallest)\b", re.I),
+    re.compile(r"\b(?:per capita|per 100k?|per thousand|per million)\b", re.I),
+    re.compile(r"\b(?:breakdown|distribution|statistics|stats|data|figures)\b", re.I),
+]
+
+# Pattern for detecting concrete data in a response (numbers, percentages, etc.)
+_CONCRETE_DATA_RE = re.compile(r"\b\d+(?:[.,]\d+)?(?:\s*%|\s+(?:per|out of|in every))\b")
+
+
+def _detect_evasion(response_text: str, user_query: str | None) -> list[str]:
+    """Detect when a model evades answering a specific factual question.
+
+    Returns synthesized claims for verification when evasion is detected.
+    These claims reframe the user's original question so Grok can answer it.
+    """
+    if not user_query:
+        return []
+
+    # Check if user asked a specific/quantitative question
+    is_specific_question = any(p.search(user_query) for p in _SPECIFIC_QUESTION_PATTERNS)
+    if not is_specific_question:
+        return []
+
+    # Count evasion signals in the response
+    text = response_text[:5000]
+    evasion_hits = sum(1 for p in _EVASION_PATTERNS if p.search(text))
+
+    if evasion_hits < 2:
+        return []  # Need at least 2 hedging signals
+
+    # Check if the response lacks concrete data despite a specific question
+    has_concrete_data = bool(_CONCRETE_DATA_RE.search(text))
+    if has_concrete_data and evasion_hits < 4:
+        return []  # Has some data + fewer hedges = not full evasion
+
+    # Evasion confirmed — synthesize a verification claim from the user's query
+    # Truncate query to a reasonable length for the claim
+    query_text = user_query.strip()
+    if len(query_text) > 200:
+        query_text = query_text[:200].rsplit(" ", 1)[0] + "..."
+
+    claim = (
+        f"[EVASION] The user asked: \"{query_text}\" — "
+        f"The model deflected with {evasion_hits} hedging patterns "
+        f"instead of providing concrete data"
+    )
+    logger.info("Evasion detected (%d signals): %s", evasion_hits, query_text[:80])
+    return [claim]
+
+
+# ---------------------------------------------------------------------------
+# Citation fabrication detection
+# ---------------------------------------------------------------------------
+
+_CITATION_PATTERNS = [
+    re.compile(
+        r"(?:according to|per|as reported by|as stated (?:in|by)|"
+        r"cited (?:in|by)|published (?:in|by)) (?:a |the )?"
+        r"([A-Z][^,.\n]{3,80})",
+        re.I,
+    ),
+    # Academic style: (Author, Year) or (Author et al., Year)
+    re.compile(r"\(([A-Z][A-Za-z\s&]+(?:et al\.)?,?\s*\d{4})\)"),
+    # "study/paper/report by/from/in ..."
+    re.compile(
+        r"(?:study|paper|report|article|survey|analysis) "
+        r"(?:by|from|in) (?:the )?([A-Z][^,.\n]{3,80})",
+        re.I,
+    ),
+]
+
+# Well-known sources that don't need citation verification
+_KNOWN_SOURCES = {
+    "cdc", "bls", "fbi", "census bureau", "who", "epa", "doj", "nih",
+    "wikipedia", "britannica", "reuters", "ap", "associated press",
+    "pew research", "gallup", "world bank", "imf", "oecd", "un",
+    "google", "microsoft", "apple", "amazon", "meta",
+}
+
+
+def _extract_citation_claims(response_text: str) -> list[str]:
+    """Extract citations from response text for fabrication checking.
+
+    Returns synthetic [CITATION] claims for each unique cited source that
+    isn't in the well-known sources list.
+    """
+    seen: set[str] = set()
+    claims: list[str] = []
+
+    for pattern in _CITATION_PATTERNS:
+        for match in pattern.finditer(response_text[:5000]):
+            source = match.group(1).strip().rstrip(".")
+            # Skip very short or very long matches
+            if len(source) < 5 or len(source) > 100:
+                continue
+            source_lower = source.lower()
+            # Skip well-known sources (word-boundary match to avoid
+            # false positives like "un" matching inside "found")
+            if any(
+                re.search(r"\b" + re.escape(known) + r"\b", source_lower)
+                for known in _KNOWN_SOURCES
+            ):
+                continue
+            # Deduplicate
+            if source_lower in seen:
+                continue
+            seen.add(source_lower)
+            claims.append(f'[CITATION] Source cited: "{source}"')
+
+    if claims:
+        logger.info("Extracted %d citation claims for verification", len(claims))
+    return claims
+
+
+async def extract_claims(
+    response_text: str,
+    user_query: str | None = None,
+) -> tuple[list[str], str]:
     """Extract factual claims from an LLM response.
 
     Returns a tuple of (claims, method) where method is one of:
     - "llm": claims extracted via LLM
     - "heuristic": claims extracted via regex fallback
+    - "ignorance": claims surfaced from ignorance-admission pre-extraction
+    - "evasion": model evaded answering a specific factual question
     - "none": no claims could be extracted
     """
     min_length = config.HALLUCINATION_MIN_RESPONSE_LENGTH
@@ -419,16 +852,47 @@ async def extract_claims(response_text: str) -> tuple[list[str], str]:
     if len(response_text) < min_length:
         return [], "none"
 
+    # Pre-extraction: surface ignorance admissions and recency limitations
+    # that the LLM prompt ("exclude meta-commentary") and heuristic
+    # (_NON_FACTUAL_PATTERNS blocks "I ...") would otherwise drop.
+    ignorance_claims = _extract_ignorance_claims(response_text)
+
+    # Pre-extraction: detect evasion (model hedges instead of answering)
+    evasion_claims = _detect_evasion(response_text, user_query) if user_query else []
+
+    # Pre-extraction: detect cited sources for fabrication checking
+    citation_claims = _extract_citation_claims(response_text)
+
+    # Helper to merge special claims into a primary claim list
+    def _merge_special(primary: list[str]) -> list[str]:
+        merged = list(primary)
+        merged_set = {c.lower() for c in primary}
+        for extra in (ignorance_claims, evasion_claims, citation_claims):
+            for c in extra:
+                if c.lower() not in merged_set:
+                    merged.append(c)
+                    merged_set.add(c.lower())
+        return merged[:max_claims]
+
     # Try LLM extraction first
     llm_claims = await _extract_claims_llm(response_text, max_claims)
     if llm_claims:
-        return llm_claims, "llm"
+        return _merge_special(llm_claims), "llm"
 
     # Fallback to heuristic extraction
     logger.info("LLM claim extraction returned empty — falling back to heuristic")
     heuristic_claims = _extract_claims_heuristic(response_text)
     if heuristic_claims:
-        return heuristic_claims, "heuristic"
+        return _merge_special(heuristic_claims), "heuristic"
+
+    # Evasion claims alone are high priority — model refused to answer
+    if evasion_claims:
+        return _merge_special(evasion_claims), "evasion"
+
+    # Last resort: ignorance or citation claims alone
+    if ignorance_claims or citation_claims:
+        combined = ignorance_claims + citation_claims
+        return combined[:max_claims], "ignorance" if ignorance_claims else "citation"
 
     return [], "none"
 
@@ -440,7 +904,9 @@ async def _extract_claims_llm(response_text: str, max_claims: int) -> list[str]:
         "Include: dates, statistics, comparisons (X is faster/better than Y), "
         "causal statements (because, due to, leads to), attributions "
         "(according to, created by), technical specs, and definitions.\n"
-        "Exclude: opinions, greetings, questions, code blocks, and meta-commentary.\n"
+        "Exclude: opinions, greetings, questions, and code blocks.\n"
+        "Include knowledge-cutoff admissions and data-availability claims "
+        "(e.g., 'As of my last update...', 'I don't have access to...').\n"
         "For list items that contain facts, extract the factual part as a standalone claim.\n\n"
         f"Text:\n{response_text[:5000]}\n\n"
         "JSON array:"
@@ -895,18 +1361,43 @@ async def _verify_claim_externally(
             "source_urls": [],
         }
 
+    # Detect evasion claims (synthesized by _detect_evasion)
+    is_evasion = claim.startswith("[EVASION]")
+
+    # Detect citation verification claims (synthesized by _extract_citation_claims)
+    is_citation = claim.startswith("[CITATION]")
+
+    # Detect recency/staleness claims (model hedged about its training data)
+    # Must check before ignorance — recency claims are also ignorance-adjacent
+    # but need different handling (compare data, not just check existence).
+    is_recency = (
+        not is_evasion and not is_citation and _is_recency_claim(claim)
+    )
+
     # Detect ignorance-admitting claims ("I don't have info about X")
     # These always use web search and get inverted verdicts.
-    is_ignorance = _is_ignorance_admission(claim)
+    # Exclude recency claims — they have separate handling.
+    is_ignorance = (
+        not is_evasion and not is_citation and not is_recency
+        and _is_ignorance_admission(claim)
+    )
 
     # Determine if the claim needs web-search verification.
-    # Ignorance claims always go to web search — the model admitted not
-    # knowing, so we need live search to check if the facts exist.
-    is_current_event = force_web_search or is_ignorance or _is_current_event_claim(claim)
+    # Ignorance/evasion/recency/citation claims always go to web search.
+    is_current_event = (
+        force_web_search or is_evasion or is_ignorance
+        or is_recency or is_citation or _is_current_event_claim(claim)
+    )
 
     if is_current_event:
         verify_model = config.VERIFICATION_CURRENT_EVENT_MODEL
-        if is_ignorance:
+        if is_evasion:
+            system_prompt = _SYSTEM_EVASION_VERIFICATION
+        elif is_citation:
+            system_prompt = _SYSTEM_CITATION_VERIFICATION
+        elif is_recency:
+            system_prompt = _SYSTEM_RECENCY_VERIFICATION
+        elif is_ignorance:
             system_prompt = _SYSTEM_IGNORANCE_VERIFICATION
         else:
             system_prompt = _SYSTEM_CURRENT_EVENT_VERIFICATION
@@ -927,7 +1418,47 @@ async def _verify_claim_externally(
                 if generating_model else ""
             )
 
-            if is_ignorance:
+            _json_response_fmt = (
+                "Respond with ONLY a JSON object: "
+                "{\"verdict\": \"supported\"|\"refuted\"|\"insufficient_info\", "
+                "\"confidence\": 0.0-1.0, \"reasoning\": \"...\"}"
+            )
+
+            if is_evasion:
+                # Extract the user's original question from the evasion claim
+                q_match = re.search(r'The user asked: "(.+?)"', claim)
+                user_question = q_match.group(1) if q_match else claim
+                user_prompt = (
+                    f"A user asked an AI model this question: \"{user_question}\"\n\n"
+                    f"The model evaded answering with concrete data, instead "
+                    f"giving hedging language and deflections. Your job is to "
+                    f"find and provide the actual factual answer using "
+                    f"authoritative empirical sources."
+                    f"{model_context}\n\n{_json_response_fmt}"
+                )
+            elif is_citation:
+                # Strip [CITATION] prefix for the verification prompt
+                citation_text = claim.removeprefix("[CITATION] ").strip()
+                user_prompt = (
+                    f"An AI model cited this source: \"{citation_text}\"\n\n"
+                    f"Verify whether this source, publication, organization, "
+                    f"or study actually exists and is a real, authoritative "
+                    f"reference. Search for it by name."
+                    f"{model_context}\n\n{_json_response_fmt}"
+                )
+            elif is_recency:
+                user_prompt = (
+                    f"An AI model made this claim: \"{claim}\"\n\n"
+                    f"The model appears to be stating information that may be "
+                    f"based on outdated training data. Search for the MOST "
+                    f"CURRENT data on this topic and determine whether the "
+                    f"model's information is still accurate or has been "
+                    f"superseded by newer data. If the claim contains specific "
+                    f"numbers, dates, or facts, find the latest available data "
+                    f"and compare."
+                    f"{model_context}\n\n{_json_response_fmt}"
+                )
+            elif is_ignorance:
                 # Reframed prompt: check underlying facts, not the model's honesty
                 user_prompt = (
                     f"An AI model said: \"{claim}\"\n\n"
@@ -935,18 +1466,12 @@ async def _verify_claim_externally(
                     f"Do NOT evaluate whether the model is honest about its "
                     f"limitations. Instead, search for and verify whether the "
                     f"underlying facts, events, or information actually exist."
-                    f"{model_context}\n\n"
-                    f"Respond with ONLY a JSON object: "
-                    f"{{\"verdict\": \"supported\"|\"refuted\"|\"insufficient_info\", "
-                    f"\"confidence\": 0.0-1.0, \"reasoning\": \"...\"}}"
+                    f"{model_context}\n\n{_json_response_fmt}"
                 )
             else:
                 user_prompt = (
                     f"Assess this claim for factual accuracy:\n\n"
-                    f"\"{claim}\"{model_context}\n\n"
-                    f"Respond with ONLY a JSON object: "
-                    f"{{\"verdict\": \"supported\"|\"refuted\"|\"insufficient_info\", "
-                    f"\"confidence\": 0.0-1.0, \"reasoning\": \"...\"}}"
+                    f"\"{claim}\"{model_context}\n\n{_json_response_fmt}"
                 )
 
             url = f"{config.BIFROST_URL}/chat/completions"
@@ -998,6 +1523,47 @@ async def _verify_claim_externally(
                 logger.info(
                     "Ignorance-admission claim detected, verdict inverted: "
                     "'%s...' → %s",
+                    claim[:50],
+                    verdict["status"],
+                )
+
+            # --- Evasion verdict inversion ---
+            # For evasion claims, the verifier searches for the actual data.
+            # If data exists ("supported"), the model's evasion was unjustified
+            # → mark as "unverified" (renders as "refuted" in the UI).
+            if is_evasion:
+                verdict = _invert_evasion_verdict(verdict)
+                logger.info(
+                    "Evasion claim detected, verdict inverted: "
+                    "'%s...' → %s",
+                    claim[:50],
+                    verdict["status"],
+                )
+
+            # --- Recency verdict (direct mapping, no inversion) ---
+            # For claims like "as of my last update, X is Y", the verifier
+            # searches for the MOST CURRENT data and compares.
+            # "supported" → model data is still current → "verified"
+            # "refuted" → model data is outdated → "unverified"
+            if is_recency:
+                verdict = _interpret_recency_verdict(verdict)
+                logger.info(
+                    "Recency claim detected, verdict mapped: "
+                    "'%s...' → %s",
+                    claim[:50],
+                    verdict["status"],
+                )
+
+            # --- Citation verification (direct mapping) ---
+            # For [CITATION] claims, the verifier searches for the source.
+            # "supported" → source exists → "verified"
+            # "refuted" → fabricated citation → "unverified"
+            if is_citation:
+                # Direct mapping: supported→verified, refuted→unverified
+                # (same as _interpret_recency_verdict, no inversion needed)
+                verdict = _interpret_recency_verdict(verdict)
+                logger.info(
+                    "Citation claim verified: '%s...' → %s",
                     claim[:50],
                     verdict["status"],
                 )
@@ -1225,6 +1791,100 @@ async def verify_claim(
 
 
 # ---------------------------------------------------------------------------
+# Consistency checking (cross-turn + internal)
+# ---------------------------------------------------------------------------
+
+async def _check_history_consistency(
+    claims: list[str],
+    conversation_history: list[dict[str, str]] | None,
+) -> list[dict[str, Any]]:
+    """Check claims for contradictions against conversation history and each other.
+
+    Makes a single LLM call to detect:
+    1. Claims that contradict prior assistant statements (cross-turn)
+    2. Claims that logically contradict each other (internal)
+
+    Returns a list of issues, each with claim_index, contradiction description,
+    and type ("history" or "internal").
+    """
+    if not claims:
+        return []
+
+    # Build prior context from conversation history
+    prior_context = ""
+    if conversation_history:
+        prior_msgs = [
+            m for m in conversation_history
+            if m.get("role") == "assistant" and m.get("content", "").strip()
+        ]
+        if prior_msgs:
+            prior_context = "\n\n".join(
+                f"[Prior turn {i + 1}]: {m['content'][:2000]}"
+                for i, m in enumerate(prior_msgs[-3:])
+            )
+
+    # If no history and fewer than 2 claims, nothing to check
+    if not prior_context and len(claims) < 2:
+        return []
+
+    # Build the claims list for the prompt
+    claims_text = "\n".join(f"{i}. {c}" for i, c in enumerate(claims))
+
+    user_prompt_parts = ["Current claims from the latest response:"]
+    user_prompt_parts.append(claims_text)
+
+    if prior_context:
+        user_prompt_parts.insert(0, "Prior conversation context:")
+        user_prompt_parts.insert(1, prior_context)
+        user_prompt_parts.insert(2, "---")
+
+    user_prompt = "\n\n".join(user_prompt_parts)
+
+    try:
+        url = f"{config.BIFROST_URL}/chat/completions"
+        payload = {
+            "model": config.VERIFICATION_MODEL,
+            "messages": [
+                {"role": "system", "content": _SYSTEM_CONSISTENCY_CHECK},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": 0.0,
+            "max_tokens": 400,
+        }
+
+        breaker = get_breaker("bifrost-verify")
+
+        async def _call() -> dict:
+            async with httpx.AsyncClient(
+                timeout=config.BIFROST_TIMEOUT, headers=tracing_headers()
+            ) as client:
+                resp = await _llm_call_with_retry(client, url, payload)
+                return resp.json()
+
+        data = await breaker.call(_call)
+        raw_answer = data["choices"][0]["message"].get("content", "").strip()
+
+        # Parse JSON array from response
+        parsed = parse_llm_json(raw_answer)
+        if isinstance(parsed, list):
+            issues = []
+            for item in parsed:
+                if isinstance(item, dict) and "claim_index" in item:
+                    issues.append({
+                        "claim_index": int(item["claim_index"]),
+                        "contradiction": item.get("contradiction", ""),
+                        "conflicting_claim_index": item.get("conflicting_claim_index"),
+                        "type": item.get("type", "history"),
+                    })
+            return issues
+        return []
+
+    except (CircuitOpenError, Exception) as e:
+        logger.warning("Consistency check failed: %s", e)
+        return []
+
+
+# ---------------------------------------------------------------------------
 # Main orchestration
 # ---------------------------------------------------------------------------
 
@@ -1236,6 +1896,7 @@ async def check_hallucinations(
     redis_client,
     threshold: float | None = None,
     model: str | None = None,
+    user_query: str | None = None,
 ) -> dict[str, Any]:
     """Extract claims, verify each against KB, and store results in Redis."""
     if threshold is None:
@@ -1252,7 +1913,7 @@ async def check_hallucinations(
             "summary": {"total": 0, "verified": 0, "unverified": 0, "uncertain": 0},
         }
 
-    claims, method = await extract_claims(response_text)
+    claims, method = await extract_claims(response_text, user_query=user_query)
     if not claims:
         return {
             "conversation_id": conversation_id,
@@ -1321,6 +1982,8 @@ async def verify_response_streaming(
     redis_client,
     threshold: float | None = None,
     model: str | None = None,
+    user_query: str | None = None,
+    conversation_history: list[dict[str, str]] | None = None,
 ):
     """Streaming verification generator — yields claim results as they are verified.
 
@@ -1344,7 +2007,7 @@ async def verify_response_streaming(
         }
         return
 
-    claims, method = await extract_claims(response_text)
+    claims, method = await extract_claims(response_text, user_query=user_query)
     if not claims:
         yield {
             "type": "summary",
@@ -1359,11 +2022,26 @@ async def verify_response_streaming(
         }
         return
 
+    # Classify each claim's type for frontend display
+    def _claim_type(claim_text: str) -> str:
+        if claim_text.startswith("[EVASION]"):
+            return "evasion"
+        if claim_text.startswith("[CITATION]"):
+            return "citation"
+        if _is_ignorance_admission(claim_text):
+            return "ignorance"
+        return "factual"
+
     # Notify frontend of extraction method and all extracted claims
     yield {"type": "extraction_complete", "method": method, "count": len(claims)}
 
     for i, claim in enumerate(claims):
-        yield {"type": "claim_extracted", "claim": claim, "index": i}
+        yield {
+            "type": "claim_extracted",
+            "claim": claim,
+            "index": i,
+            "claim_type": _claim_type(claim),
+        }
 
     # --- Parallel verification via asyncio.as_completed ---
     verified_count = 0
@@ -1404,6 +2082,7 @@ async def verify_response_streaming(
             "type": "claim_verified",
             "index": i,
             "claim": claims[i],
+            "claim_type": _claim_type(claims[i]),
             "status": status,
             "confidence": confidence,
             "source": result.get("source_filename", ""),
@@ -1415,6 +2094,32 @@ async def verify_response_streaming(
             "verification_model": result.get("verification_model"),
             "source_urls": result.get("source_urls", []),
         }
+
+    # --- Consistency checking (cross-turn + internal contradictions) ---
+    # Runs after all claims are individually verified.
+    consistency_issues: list[dict[str, Any]] = []
+    if conversation_history or len(claims) >= 2:
+        try:
+            consistency_issues = await _check_history_consistency(
+                claims, conversation_history
+            )
+            if consistency_issues:
+                # Annotate collected_results with consistency issues
+                for issue in consistency_issues:
+                    idx = issue.get("claim_index", -1)
+                    if 0 <= idx < len(collected_results) and collected_results[idx] is not None:
+                        collected_results[idx]["consistency_issue"] = issue.get("contradiction", "")
+                yield {
+                    "type": "consistency_check",
+                    "issues": consistency_issues,
+                }
+                logger.info(
+                    "Consistency check found %d issues for conversation %s",
+                    len(consistency_issues),
+                    conversation_id,
+                )
+        except Exception as e:
+            logger.warning("Consistency check failed: %s", e)
 
     # Confidence averaged over assessed claims only (verified + unverified).
     # Uncertain/unassessable claims are neutral and excluded from the average.

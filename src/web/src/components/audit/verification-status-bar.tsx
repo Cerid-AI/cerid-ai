@@ -38,6 +38,10 @@ function ClaimStatusIcon({ displayStatus }: { displayStatus: ClaimDisplayStatus 
       return <CheckCircle2 className="h-3 w-3 shrink-0 text-green-400" />
     case "refuted":
       return <XOctagon className="h-3 w-3 shrink-0 text-red-400" />
+    case "evasion":
+      return <AlertTriangle className="h-3 w-3 shrink-0 text-orange-400" />
+    case "citation":
+      return <Circle className="h-3 w-3 shrink-0 text-purple-400" />
     case "unverified":
       return <AlertTriangle className="h-3 w-3 shrink-0 text-yellow-400" />
     case "pending":
@@ -53,6 +57,8 @@ function claimStatusColor(displayStatus: ClaimDisplayStatus): string {
   switch (displayStatus) {
     case "verified": return "text-green-400"
     case "refuted": return "text-red-400"
+    case "evasion": return "text-orange-400"
+    case "citation": return "text-purple-400"
     case "unverified": return "text-yellow-400"
     case "uncertain": return "text-muted-foreground"
     default: return "text-muted-foreground"
@@ -101,13 +107,19 @@ export function VerificationStatusBar({
           <div className="border-t border-border/50 px-4 py-1.5">
             <ul className="space-y-0.5">
               {streamingClaims.map((c) => {
-                const ds = getClaimDisplayStatus(c.status ?? "pending", c.verification_method)
+                const ds = getClaimDisplayStatus(c.status ?? "pending", c.verification_method, c.claim_type)
                 return (
                   <li key={c.index} className="flex items-start gap-1.5 text-xs">
                     <ClaimStatusIcon displayStatus={ds} />
                     <span className={cn("flex-1 leading-tight", claimStatusColor(ds))}>
                       {c.claim}
                     </span>
+                    {c.claim_type === "evasion" && (
+                      <span className="shrink-0 rounded bg-orange-500/15 px-1 text-[10px] text-orange-400">evasion</span>
+                    )}
+                    {c.claim_type === "citation" && (
+                      <span className="shrink-0 rounded bg-purple-500/15 px-1 text-[10px] text-purple-400">citation</span>
+                    )}
                     {c.verification_method === "cross_model" && (
                       <span className="shrink-0 rounded bg-purple-500/15 px-1 text-[10px] text-purple-400">cross-model</span>
                     )}
@@ -193,9 +205,11 @@ export function VerificationStatusBar({
   const refutedCount = report.claims.filter(
     (c) =>
       c.status === "unverified" &&
+      c.claim_type !== "evasion" &&
       (c.verification_method === "cross_model" || c.verification_method === "web_search"),
   ).length
-  const softUnverifiedCount = unverified - refutedCount
+  const evasionCount = report.claims.filter((c) => c.claim_type === "evasion").length
+  const softUnverifiedCount = unverified - refutedCount - evasionCount
 
   // Accuracy: only refuted claims count as failures (not soft unverified)
   const denominator = verified + refutedCount
@@ -230,6 +244,9 @@ export function VerificationStatusBar({
         )}
         {refutedCount > 0 && (
           <span className="text-red-400">{refutedCount} refuted</span>
+        )}
+        {evasionCount > 0 && (
+          <span className="text-orange-400">{evasionCount} evaded</span>
         )}
         {softUnverifiedCount > 0 && (
           <span className="text-yellow-400">{softUnverifiedCount} unverified</span>
@@ -292,7 +309,7 @@ export function VerificationStatusBar({
         <div className="border-t border-border/50 px-4 py-1.5">
           <ul className="space-y-1">
             {report.claims.map((c, i) => {
-              const ds = getClaimDisplayStatus(c.status, c.verification_method)
+              const ds = getClaimDisplayStatus(c.status, c.verification_method, c.claim_type)
               return (
                 <li key={i} className="flex flex-col gap-0.5 text-xs">
                   <div className="flex items-start gap-1.5">

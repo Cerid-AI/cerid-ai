@@ -327,6 +327,10 @@ class VerifyStreamRequest(BaseModel):
     conversation_id: str
     threshold: float | None = Field(None, ge=0.0, le=1.0)
     model: str | None = None
+    user_query: str | None = Field(None, description="Original user query for evasion detection")
+    conversation_history: list[dict[str, str]] | None = Field(
+        None, description="Prior conversation messages for consistency checking"
+    )
 
 
 @router.post("/agent/verify-stream")
@@ -345,6 +349,8 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
                 redis_client=get_redis(),
                 threshold=req.threshold,
                 model=req.model,
+                user_query=req.user_query,
+                conversation_history=req.conversation_history,
             ):
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception as e:

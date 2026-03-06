@@ -318,6 +318,8 @@ export function streamVerification(
   conversationId: string,
   threshold?: number,
   model?: string,
+  userQuery?: string,
+  conversationHistory?: Array<{ role: string; content: string }>,
 ): { response: Promise<Response>; abort: () => void } {
   const controller = new AbortController()
   const response = fetch(`${MCP_BASE}/agent/verify-stream`, {
@@ -328,6 +330,8 @@ export function streamVerification(
       conversation_id: conversationId,
       ...(threshold !== undefined && { threshold }),
       ...(model && { model }),
+      ...(userQuery && { user_query: userQuery }),
+      ...(conversationHistory?.length && { conversation_history: conversationHistory }),
     }),
     signal: controller.signal,
   })

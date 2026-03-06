@@ -5,7 +5,7 @@ import { useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { ShieldOff, Shield, ShieldCheck, Loader2, ThumbsUp, ThumbsDown, ExternalLink } from "lucide-react"
+import { ShieldOff, Shield, ShieldCheck, Loader2, ThumbsUp, ThumbsDown, ExternalLink, AlertTriangle } from "lucide-react"
 import { submitClaimFeedback } from "@/lib/api"
 import type { HallucinationReport, HallucinationClaim, StreamingClaim } from "@/lib/types"
 import { getClaimDisplayStatus, type ClaimDisplayStatus } from "@/lib/verification-utils"
@@ -16,6 +16,8 @@ const DISPLAY_STATUS_COLORS: Record<ClaimDisplayStatus | "error", string> = {
   verified: "bg-green-500/20 text-green-400 border-green-500/30",
   refuted: "bg-red-500/20 text-red-400 border-red-500/30",
   unverified: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
+  evasion: "bg-orange-500/20 text-orange-400 border-orange-500/30",
+  citation: "bg-purple-500/20 text-purple-400 border-purple-500/30",
   uncertain: "bg-muted/50 text-muted-foreground border-border",
   pending: "bg-muted text-muted-foreground border-border",
   error: "bg-muted text-muted-foreground",
@@ -53,7 +55,7 @@ function ClaimBadge({
     claim.user_feedback ?? null,
   )
 
-  const displayStatus = getClaimDisplayStatus(claim.status, claim.verification_method)
+  const displayStatus = getClaimDisplayStatus(claim.status, claim.verification_method, claim.claim_type)
 
   const handleFeedback = async (correct: boolean) => {
     if (!conversationId || feedback) return
@@ -105,6 +107,12 @@ function ClaimBadge({
         {claim.reason && !claim.source_filename && (
           <p className="mt-1 text-xs text-muted-foreground">{claim.reason}</p>
         )}
+        {claim.consistency_issue && (
+          <div className="mt-1 flex items-start gap-1 text-xs text-amber-400">
+            <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+            <span>{claim.consistency_issue}</span>
+          </div>
+        )}
       </div>
       {conversationId && (
         <div className="flex shrink-0 gap-0.5">
@@ -145,8 +153,8 @@ function ClaimBadge({
 function StreamingClaimBadge({ claim }: { claim: StreamingClaim }) {
   const rawStatus = claim.status ?? "pending"
   const displayStatus = rawStatus === "pending"
-    ? "pending" as const
-    : getClaimDisplayStatus(rawStatus, claim.verification_method)
+    ? (claim.claim_type === "evasion" ? "evasion" as const : "pending" as const)
+    : getClaimDisplayStatus(rawStatus, claim.verification_method, claim.claim_type)
 
   return (
     <div className="flex items-start gap-2 rounded-lg border p-3">
@@ -193,6 +201,12 @@ function StreamingClaimBadge({ claim }: { claim: StreamingClaim }) {
         )}
         {claim.reason && !claim.source && (
           <p className="mt-1 text-xs text-muted-foreground">{claim.reason}</p>
+        )}
+        {claim.consistency_issue && (
+          <div className="mt-1 flex items-start gap-1 text-xs text-amber-400">
+            <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+            <span>{claim.consistency_issue}</span>
+          </div>
         )}
       </div>
     </div>
@@ -299,9 +313,11 @@ export function HallucinationPanel({
   const refutedCount = report.claims.filter(
     (c) =>
       c.status === "unverified" &&
+      c.claim_type !== "evasion" &&
       (c.verification_method === "cross_model" || c.verification_method === "web_search"),
   ).length
-  const softUnverifiedCount = unverified - refutedCount
+  const evasionCount = report.claims.filter((c) => c.claim_type === "evasion").length
+  const softUnverifiedCount = unverified - refutedCount - evasionCount
 
   return (
     <div className="flex h-full flex-col">
@@ -312,6 +328,9 @@ export function HallucinationPanel({
         )}
         {refutedCount > 0 && (
           <span className="text-red-400">{refutedCount} refuted</span>
+        )}
+        {evasionCount > 0 && (
+          <span className="text-orange-400">{evasionCount} evaded</span>
         )}
         {softUnverifiedCount > 0 && (
           <span className="text-yellow-400">{softUnverifiedCount} unverified</span>

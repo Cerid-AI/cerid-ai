@@ -119,6 +119,7 @@ VERIFICATION_MODEL = os.getenv("VERIFICATION_MODEL", "openrouter/openai/gpt-4o-m
 VERIFICATION_MODEL_POOL = [
     "openrouter/openai/gpt-4o-mini",       # OpenAI — 1000 RPM, $0.15/$0.60
     "openrouter/google/gemini-2.5-flash",   # Google — 1000 RPM, $0.15/$0.60
+    "openrouter/x-ai/grok-4-fast",          # xAI — strong reasoning, diverse family
 ]
 
 # Model with live web search for current-event claim verification.
