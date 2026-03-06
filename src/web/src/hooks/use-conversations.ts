@@ -130,6 +130,22 @@ export function useConversations() {
     })
   }, [debouncedSave])
 
+  const updateLastMessageModel = useCallback((convoId: string, model: string) => {
+    setConversations((prev) => {
+      const next = prev.map((c) => {
+        if (c.id !== convoId) return c
+        const messages = [...c.messages]
+        const last = messages[messages.length - 1]
+        if (last?.role === "assistant") {
+          messages[messages.length - 1] = { ...last, model }
+        }
+        return { ...c, messages, updatedAt: Date.now() }
+      })
+      debouncedSave(next)
+      return next
+    })
+  }, [debouncedSave])
+
   const updateModel = useCallback((convoId: string, model: string) => {
     setConversations((prev) => {
       const next = prev.map((c) =>
@@ -175,7 +191,7 @@ export function useConversations() {
 
   return {
     conversations, active, activeId, setActiveId,
-    create, addMessage, updateLastMessage, updateModel, remove,
+    create, addMessage, updateLastMessage, updateLastMessageModel, updateModel, remove,
     replaceMessages, clearMessages,
   }
 }

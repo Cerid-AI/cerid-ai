@@ -30,6 +30,16 @@ export interface Conversation {
   updatedAt: number
 }
 
+export interface ModelCapabilities {
+  reasoning: number     // 0-100: logical reasoning, math, analysis
+  coding: number        // 0-100: code generation, debugging, review
+  creative: number      // 0-100: writing, brainstorming, storytelling
+  factual: number       // 0-100: knowledge accuracy, recall
+  webSearch: boolean    // native web search (e.g. Grok :online)
+  vision: boolean       // image understanding
+  knowledgeCutoff: string  // YYYY-MM approximate training data cutoff
+}
+
 export interface ModelOption {
   id: string
   label: string
@@ -37,16 +47,31 @@ export interface ModelOption {
   contextWindow: number
   inputCostPer1M: number   // USD per 1M input tokens
   outputCostPer1M: number  // USD per 1M output tokens
+  capabilities?: ModelCapabilities
 }
 
 export const MODELS: ModelOption[] = [
-  { id: "openrouter/anthropic/claude-sonnet-4", label: "Claude Sonnet", provider: "Anthropic", contextWindow: 200_000, inputCostPer1M: 3.0, outputCostPer1M: 15.0 },
-  { id: "openrouter/openai/gpt-4o", label: "GPT-4o", provider: "OpenAI", contextWindow: 128_000, inputCostPer1M: 2.5, outputCostPer1M: 10.0 },
-  { id: "openrouter/openai/gpt-4o-mini", label: "GPT-4o Mini", provider: "OpenAI", contextWindow: 128_000, inputCostPer1M: 0.15, outputCostPer1M: 0.6 },
-  { id: "openrouter/google/gemini-2.5-flash", label: "Gemini Flash", provider: "Google", contextWindow: 1_000_000, inputCostPer1M: 0.15, outputCostPer1M: 0.6 },
-  { id: "openrouter/x-ai/grok-4-fast", label: "Grok", provider: "xAI", contextWindow: 131_072, inputCostPer1M: 3.0, outputCostPer1M: 15.0 },
-  { id: "openrouter/deepseek/deepseek-chat-v3-0324", label: "DeepSeek", provider: "DeepSeek", contextWindow: 128_000, inputCostPer1M: 0.27, outputCostPer1M: 1.10 },
-  { id: "openrouter/meta-llama/llama-3.3-70b-instruct", label: "Llama 3.3", provider: "Meta", contextWindow: 131_072, inputCostPer1M: 0.12, outputCostPer1M: 0.3 },
+  // --- Tier S: Frontier models ---
+  { id: "openrouter/anthropic/claude-sonnet-4.6", label: "Claude Sonnet 4.6", provider: "Anthropic", contextWindow: 1_000_000, inputCostPer1M: 3.0, outputCostPer1M: 15.0,
+    capabilities: { reasoning: 90, coding: 95, creative: 85, factual: 88, webSearch: false, vision: true, knowledgeCutoff: "2026-01" } },
+  { id: "openrouter/anthropic/claude-opus-4.6", label: "Claude Opus 4.6", provider: "Anthropic", contextWindow: 1_000_000, inputCostPer1M: 5.0, outputCostPer1M: 25.0,
+    capabilities: { reasoning: 95, coding: 93, creative: 92, factual: 93, webSearch: false, vision: true, knowledgeCutoff: "2026-01" } },
+  { id: "openrouter/x-ai/grok-4.1-fast", label: "Grok 4.1", provider: "xAI", contextWindow: 2_000_000, inputCostPer1M: 0.20, outputCostPer1M: 0.50,
+    capabilities: { reasoning: 88, coding: 82, creative: 78, factual: 90, webSearch: true, vision: true, knowledgeCutoff: "2026-03" } },
+  // --- Tier A: Strong general-purpose ---
+  { id: "openrouter/openai/o3-mini", label: "o3-mini", provider: "OpenAI", contextWindow: 200_000, inputCostPer1M: 1.10, outputCostPer1M: 4.40,
+    capabilities: { reasoning: 92, coding: 85, creative: 65, factual: 80, webSearch: false, vision: false, knowledgeCutoff: "2025-10" } },
+  { id: "openrouter/google/gemini-3-flash-preview", label: "Gemini 3 Flash", provider: "Google", contextWindow: 1_048_576, inputCostPer1M: 0.50, outputCostPer1M: 3.0,
+    capabilities: { reasoning: 82, coding: 85, creative: 78, factual: 84, webSearch: false, vision: true, knowledgeCutoff: "2025-11" } },
+  { id: "openrouter/deepseek/deepseek-chat-v3-0324", label: "DeepSeek V3", provider: "DeepSeek", contextWindow: 163_840, inputCostPer1M: 0.20, outputCostPer1M: 0.77,
+    capabilities: { reasoning: 80, coding: 88, creative: 72, factual: 78, webSearch: false, vision: false, knowledgeCutoff: "2025-03" } },
+  // --- Tier B: Budget / legacy ---
+  { id: "openrouter/openai/gpt-4o-mini", label: "GPT-4o Mini", provider: "OpenAI", contextWindow: 128_000, inputCostPer1M: 0.15, outputCostPer1M: 0.60,
+    capabilities: { reasoning: 70, coding: 72, creative: 75, factual: 78, webSearch: false, vision: true, knowledgeCutoff: "2024-10" } },
+  { id: "openrouter/google/gemini-2.5-flash", label: "Gemini 2.5 Flash", provider: "Google", contextWindow: 1_048_576, inputCostPer1M: 0.30, outputCostPer1M: 2.50,
+    capabilities: { reasoning: 78, coding: 80, creative: 75, factual: 82, webSearch: false, vision: true, knowledgeCutoff: "2025-06" } },
+  { id: "openrouter/meta-llama/llama-3.3-70b-instruct", label: "Llama 3.3", provider: "Meta", contextWindow: 131_072, inputCostPer1M: 0.10, outputCostPer1M: 0.32,
+    capabilities: { reasoning: 75, coding: 78, creative: 72, factual: 75, webSearch: false, vision: false, knowledgeCutoff: "2024-12" } },
 ]
 
 export const PROVIDER_COLORS: Record<string, string> = {
@@ -501,8 +526,8 @@ export interface SynopsisEstimate {
 export const SYNOPSIS_MODELS = [
   { id: "openrouter/meta-llama/llama-3.3-70b-instruct:free", label: "Llama 3.3 (Free)" },
   { id: "openrouter/openai/gpt-4o-mini", label: "GPT-4o Mini" },
-  { id: "openrouter/google/gemini-2.5-flash", label: "Gemini Flash" },
-  { id: "openrouter/anthropic/claude-sonnet-4", label: "Claude Sonnet" },
+  { id: "openrouter/google/gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+  { id: "openrouter/anthropic/claude-sonnet-4.6", label: "Claude Sonnet 4.6" },
 ] as const
 
 export interface LiveMetrics {

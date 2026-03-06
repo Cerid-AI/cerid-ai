@@ -20,6 +20,7 @@ from middleware.request_id import RequestIDMiddleware
 from routers import (
     agents,
     artifacts,
+    chat,
     digest,
     health,
     ingestion,
@@ -122,6 +123,7 @@ _api_routers = [
     ingestion.router,
     artifacts.router,
     agents.router,
+    chat.router,
     digest.router,
     taxonomy.router,
     settings.router,

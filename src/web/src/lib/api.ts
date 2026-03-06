@@ -466,16 +466,22 @@ export async function uploadFile(
 
 // --- Chat ---
 
+export interface ChatModelInfo {
+  requested_model: string
+  resolved_model: string
+}
+
 export async function streamChat(
   messages: Pick<ChatMessage, "role" | "content">[],
   model: string,
   onChunk: (text: string) => void,
   signal?: AbortSignal,
+  onModelInfo?: (info: ChatModelInfo) => void,
 ): Promise<void> {
-  const url = `${BIFROST_BASE}/v1/chat/completions`
+  const url = `${MCP_BASE}/chat/stream`
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({
       model,
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
@@ -513,10 +519,21 @@ export async function streamChat(
 
         try {
           const parsed = JSON.parse(data)
+          if (parsed.cerid_meta) {
+            onModelInfo?.(parsed.cerid_meta as ChatModelInfo)
+            continue
+          }
+          if (parsed.error) {
+            throw new Error(parsed.error.message || "Upstream error")
+          }
           const content = parsed.choices?.[0]?.delta?.content
           if (content) onChunk(content)
-        } catch {
-          console.warn("[streamChat] malformed SSE chunk:", data)
+        } catch (e) {
+          if (e instanceof SyntaxError) {
+            console.warn("[streamChat] malformed SSE chunk:", data)
+          } else {
+            throw e
+          }
         }
       }
     }
@@ -529,8 +546,10 @@ export async function streamChat(
         if (data !== "[DONE]") {
           try {
             const parsed = JSON.parse(data)
-            const content = parsed.choices?.[0]?.delta?.content
-            if (content) onChunk(content)
+            if (!parsed.cerid_meta && !parsed.error) {
+              const content = parsed.choices?.[0]?.delta?.content
+              if (content) onChunk(content)
+            }
           } catch { /* malformed trailing chunk */ }
         }
       }

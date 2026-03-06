@@ -24,7 +24,7 @@ CATEGORIZE_MODE = os.getenv("CATEGORIZE_MODE", "smart")
 
 CATEGORIZE_MODELS = {
     "smart": "openrouter/meta-llama/llama-3.3-70b-instruct:free",
-    "pro": "openrouter/anthropic/claude-sonnet-4-5-20250929",
+    "pro": "openrouter/anthropic/claude-sonnet-4.6",
 }
 
 # Max chars of document text sent to AI for classification (~400 tokens).
@@ -117,18 +117,18 @@ VERIFICATION_MODEL = os.getenv("VERIFICATION_MODEL", "openrouter/openai/gpt-4o-m
 # _pick_verification_model() picks from this pool, preferring a different
 # model family than the generator to avoid correlated hallucinations.
 VERIFICATION_MODEL_POOL = [
-    "openrouter/openai/gpt-4o-mini",       # OpenAI — 1000 RPM, $0.15/$0.60
-    "openrouter/google/gemini-2.5-flash",   # Google — 1000 RPM, $0.15/$0.60
-    "openrouter/x-ai/grok-4-fast",          # xAI — strong reasoning, diverse family
+    "openrouter/openai/gpt-4o-mini",       # OpenAI — $0.15/$0.60
+    "openrouter/google/gemini-2.5-flash",   # Google — $0.30/$2.50
+    "openrouter/x-ai/grok-4.1-fast",       # xAI — $0.20/$0.50, web search capable
 ]
 
 # Model with live web search for current-event claim verification.
 # The `:online` suffix enables OpenRouter's native web search plugin
 # which uses xAI's built-in web_search tool for Grok models.
-# Grok 4 Fast: $0.20/$0.50 per 1M tokens, web search currently free.
+# Grok 4.1 Fast: $0.20/$0.50 per 1M tokens, web search currently free.
 VERIFICATION_CURRENT_EVENT_MODEL = os.getenv(
     "VERIFICATION_CURRENT_EVENT_MODEL",
-    "openrouter/x-ai/grok-4-fast:online",
+    "openrouter/x-ai/grok-4.1-fast:online",
 )
 
 # ---------------------------------------------------------------------------
@@ -210,14 +210,14 @@ SYNOPSIS_MODEL_OPTIONS = {
         "throttle": 0.5,
     },
     "openrouter/google/gemini-2.5-flash": {
-        "label": "Gemini Flash",
-        "input_per_1m": 0.15,
-        "output_per_1m": 0.60,
+        "label": "Gemini 2.5 Flash",
+        "input_per_1m": 0.30,
+        "output_per_1m": 2.50,
         "rpm": 1000,
         "throttle": 0.5,
     },
-    "openrouter/anthropic/claude-sonnet-4": {
-        "label": "Claude Sonnet",
+    "openrouter/anthropic/claude-sonnet-4.6": {
+        "label": "Claude Sonnet 4.6",
         "input_per_1m": 3.0,
         "output_per_1m": 15.0,
         "rpm": 1000,

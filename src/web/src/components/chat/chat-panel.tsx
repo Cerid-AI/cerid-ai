@@ -49,6 +49,7 @@ export function ChatPanel() {
     create,
     addMessage,
     updateLastMessage,
+    updateLastMessageModel,
     updateModel,
     replaceMessages,
     clearMessages,
@@ -66,6 +67,7 @@ export function ChatPanel() {
   const { send, stop, isStreaming } = useChat({
     onMessageStart: (convoId, msg) => addMessage(convoId, msg),
     onMessageUpdate: (convoId, content) => updateLastMessage(convoId, content),
+    onModelResolved: (convoId, model) => updateLastMessageModel(convoId, model),
     feedbackEnabled: feedbackLoop,
   })
 

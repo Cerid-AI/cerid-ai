@@ -11,7 +11,7 @@ providers:
 
 routing:
   strategy: semantic-intent
-  classifier_model: meta-llama/llama-3.3-70b-instruct   # Free-tier model for classification
+  classifier_model: meta-llama/llama-3.3-70b-instruct   # Free-tier, used only for intent classification
   classifier_prompt: >-
     Classify this prompt into exactly one category: 
     - coding (technical scripting, algorithms, code writing/debugging, config changes, implementation, programming-related tasks)
@@ -40,17 +40,19 @@ routing:
     
     Prompt: {prompt}
 
+  # NOTE: Bifrost is now used only for internal backend LLM calls (agents, verification, etc).
+  # User chat goes through MCP /chat/stream proxy → OpenRouter directly.
   intent_categories:
     - name: coding
-      target_model: anthropic/claude-sonnet-4
+      target_model: anthropic/claude-sonnet-4.6
     - name: research
-      target_model: x-ai/grok-4
+      target_model: x-ai/grok-4.1-fast
     - name: simple
-      target_model: meta-llama/llama-3.3-70b-instruct
+      target_model: google/gemini-2.5-flash
     - name: general
       target_model: openai/gpt-4o-mini
 
-  fallback_models: ["openai/gpt-4o-mini", "meta-llama/llama-3.3-70b-instruct"]
+  fallback_models: ["openai/gpt-4o-mini", "google/gemini-2.5-flash"]
 
 observability:
   enabled: true

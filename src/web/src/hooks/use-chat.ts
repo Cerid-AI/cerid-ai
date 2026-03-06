@@ -9,10 +9,11 @@ import type { ChatMessage, SourceRef } from "@/lib/types"
 interface UseChatOptions {
   onMessageStart: (convoId: string, message: ChatMessage) => void
   onMessageUpdate: (convoId: string, content: string) => void
+  onModelResolved?: (convoId: string, model: string) => void
   feedbackEnabled?: boolean
 }
 
-export function useChat({ onMessageStart, onMessageUpdate, feedbackEnabled }: UseChatOptions) {
+export function useChat({ onMessageStart, onMessageUpdate, onModelResolved, feedbackEnabled }: UseChatOptions) {
   const [isStreaming, setIsStreaming] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
 
@@ -33,12 +34,16 @@ export function useChat({ onMessageStart, onMessageUpdate, feedbackEnabled }: Us
 
       let accumulated = ""
       let aborted = false
+      let resolvedModel = model
 
       try {
         await streamChat(messages, model, (chunk) => {
           accumulated += chunk
           onMessageUpdate(convoId, accumulated)
-        }, abortRef.current.signal)
+        }, abortRef.current.signal, (info) => {
+          resolvedModel = `openrouter/${info.resolved_model}`
+          onModelResolved?.(convoId, resolvedModel)
+        })
         if (accumulated.length === 0) {
           accumulated = "\u26A0 No response received. Check your connection or try a different model."
           onMessageUpdate(convoId, accumulated)
@@ -58,7 +63,7 @@ export function useChat({ onMessageStart, onMessageUpdate, feedbackEnabled }: Us
         if (feedbackEnabled && !aborted && accumulated.length > 100) {
           const lastUserMsg = [...messages].reverse().find((m) => m.role === "user")
           if (lastUserMsg) {
-            ingestFeedback(lastUserMsg.content, accumulated, model, convoId)
+            ingestFeedback(lastUserMsg.content, accumulated, resolvedModel, convoId)
               .catch((err) => console.warn("[feedback-loop]", err))
           }
         }
@@ -66,12 +71,12 @@ export function useChat({ onMessageStart, onMessageUpdate, feedbackEnabled }: Us
         // Memory extraction: auto-trigger after 3+ user messages (≈6+ total messages)
         const userMessages = messages.filter((m) => m.role === "user")
         if (!aborted && accumulated.length > 100 && userMessages.length >= 3) {
-          extractMemories(accumulated, convoId, model)
+          extractMemories(accumulated, convoId, resolvedModel)
             .catch((err) => console.warn("[memory-extract]", err))
         }
       }
     },
-    [onMessageStart, onMessageUpdate, feedbackEnabled],
+    [onMessageStart, onMessageUpdate, onModelResolved, feedbackEnabled],
   )
 
   const stop = useCallback(() => {

@@ -17,6 +17,12 @@ import type { ChatMessage, ModelOption } from "@/lib/types"
 // ---------------------------------------------------------------------------
 
 describe("scoreQueryComplexity", () => {
+  it("returns 'simple' for empty/whitespace queries", () => {
+    expect(scoreQueryComplexity("", 0, 0)).toBe("simple")
+    expect(scoreQueryComplexity("   ", 0, 0)).toBe("simple")
+    expect(scoreQueryComplexity("\n\t", 0, 0)).toBe("simple")
+  })
+
   it("returns 'simple' for greetings", () => {
     expect(scoreQueryComplexity("hello", 0, 0)).toBe("simple")
     expect(scoreQueryComplexity("hi there", 0, 0)).toBe("simple")

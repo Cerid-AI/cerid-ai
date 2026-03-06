@@ -40,6 +40,9 @@ export function scoreQueryComplexity(
   messageCount: number,
   kbInjectionCount: number,
 ): Complexity {
+  // Empty or whitespace-only queries are simple
+  if (!query.trim()) return "simple"
+
   // Long conversations tend to be more complex
   if (messageCount > 20) return "complex"
 
@@ -81,21 +84,22 @@ export function estimateTurnCost(
 
 const TIER_MODELS: Record<Complexity, string[]> = {
   simple: [
-    "openrouter/google/gemini-2.5-flash",
-    "openrouter/openai/gpt-4o-mini",
-    "openrouter/meta-llama/llama-3.3-70b-instruct",
-    "openrouter/deepseek/deepseek-chat-v3-0324",
+    "openrouter/x-ai/grok-4.1-fast",           // $0.20/$0.50 — best value, 2M ctx
+    "openrouter/openai/gpt-4o-mini",            // $0.15/$0.60 — cheapest input
+    "openrouter/meta-llama/llama-3.3-70b-instruct", // $0.10/$0.32 — cheapest overall
+    "openrouter/deepseek/deepseek-chat-v3-0324", // $0.20/$0.77 — strong coding
   ],
   medium: [
-    "openrouter/openai/gpt-4o-mini",
-    "openrouter/deepseek/deepseek-chat-v3-0324",
-    "openrouter/openai/gpt-4o",
-    "openrouter/anthropic/claude-sonnet-4",
+    "openrouter/google/gemini-3-flash-preview",  // $0.50/$3.00 — good balance
+    "openrouter/google/gemini-2.5-flash",        // $0.30/$2.50 — 1M context
+    "openrouter/deepseek/deepseek-chat-v3-0324", // $0.20/$0.77 — strong coding
+    "openrouter/anthropic/claude-sonnet-4.6",    // $3.00/$15.00 — frontier
   ],
   complex: [
-    "openrouter/anthropic/claude-sonnet-4",
-    "openrouter/openai/gpt-4o",
-    "openrouter/x-ai/grok-4-fast",
+    "openrouter/anthropic/claude-sonnet-4.6",    // $3.00/$15.00 — best coding
+    "openrouter/anthropic/claude-opus-4.6",      // $5.00/$25.00 — deepest reasoning
+    "openrouter/openai/o3-mini",                 // $1.10/$4.40 — reasoning specialist
+    "openrouter/x-ai/grok-4.1-fast",            // $0.20/$0.50 — web search + huge ctx
   ],
 }
 
@@ -109,13 +113,15 @@ export function recommendModel(
   const complexity = scoreQueryComplexity(query, conversationMessages.length, kbInjections)
 
   const candidateIds = TIER_MODELS[complexity]
-  const sensitivityMultiplier = costSensitivity === "high" ? 0.3 : costSensitivity === "low" ? 3.0 : 1.0
 
   const contextChars = conversationMessages.reduce((sum, m) => sum + m.content.length, 0) + query.length
   const estimatedOutput = complexity === "simple" ? 200 : complexity === "medium" ? 500 : 1000
 
+  const currentCost = estimateTurnCost(currentModel, contextChars, estimatedOutput)
+
+  // Find the cheapest viable candidate from the tier
   let bestModel = currentModel
-  let bestCost = estimateTurnCost(currentModel, contextChars, estimatedOutput)
+  let bestCost = currentCost
 
   for (const candidateId of candidateIds) {
     const candidate = MODELS.find((m) => m.id === candidateId)
@@ -129,15 +135,22 @@ export function recommendModel(
 
     const candidateCost = estimateTurnCost(candidate, contextChars, estimatedOutput)
 
-    // High sensitivity (0.3): bestCost * 0.3 = low threshold, eagerly switch to cheaper
-    // Low sensitivity (3.0): bestCost * 3.0 = high threshold, reluctant to switch
-    if (candidateCost < bestCost * sensitivityMultiplier) {
+    if (candidateCost < bestCost) {
       bestModel = candidate
       bestCost = candidateCost
     }
   }
 
-  const currentCost = estimateTurnCost(currentModel, contextChars, estimatedOutput)
+  // Apply sensitivity: only switch if savings exceed threshold
+  // High: switch for small savings (>5%), Medium: moderate (>20%), Low: large (>50%)
+  const minSavingsRatio = costSensitivity === "high" ? 0.05 : costSensitivity === "low" ? 0.5 : 0.2
+  const savingsRatio = currentCost > 0 ? (currentCost - bestCost) / currentCost : 0
+
+  if (savingsRatio < minSavingsRatio) {
+    bestModel = currentModel
+    bestCost = currentCost
+  }
+
   const savings = currentCost - bestCost
 
   let reasoning: string

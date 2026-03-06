@@ -187,7 +187,8 @@ describe("useConversations", () => {
 
     const { result } = renderHook(() => useConversations())
 
-    expect(result.current.conversations[0].model).toBe("openrouter/anthropic/claude-sonnet-4")
+    // claude-sonnet-4 no longer exists in MODELS, so migration remaps to default
+    expect(result.current.conversations[0].model).toBe(MODELS[0].id)
   })
 
   it("replaces all messages for a conversation", () => {

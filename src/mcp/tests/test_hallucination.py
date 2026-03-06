@@ -2311,7 +2311,7 @@ class TestGrokInVerificationPool:
     """Test Grok is in the verification model pool."""
 
     def test_grok_in_pool(self):
-        assert "openrouter/x-ai/grok-4-fast" in config.VERIFICATION_MODEL_POOL
+        assert "openrouter/x-ai/grok-4.1-fast" in config.VERIFICATION_MODEL_POOL
 
     def test_pool_has_three_families(self):
         families = set()
