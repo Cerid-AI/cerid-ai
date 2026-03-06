@@ -3,6 +3,7 @@
 
 import { useState, useRef, useCallback } from "react"
 import { streamChat, ingestFeedback, extractMemories } from "@/lib/api"
+import { uuid } from "@/lib/utils"
 import type { ChatMessage, SourceRef } from "@/lib/types"
 
 interface UseChatOptions {
@@ -21,7 +22,7 @@ export function useChat({ onMessageStart, onMessageUpdate, feedbackEnabled }: Us
       abortRef.current = new AbortController()
 
       const assistantMsg: ChatMessage = {
-        id: crypto.randomUUID(),
+        id: uuid(),
         role: "assistant",
         content: "",
         model,

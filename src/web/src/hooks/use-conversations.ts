@@ -4,6 +4,7 @@
 import { useState, useCallback, useRef, useEffect } from "react"
 import type { Conversation, ChatMessage } from "@/lib/types"
 import { MODELS } from "@/lib/types"
+import { uuid } from "@/lib/utils"
 
 const STORAGE_KEY = "cerid-conversations"
 const MAX_CONVERSATIONS = 50
@@ -83,7 +84,7 @@ export function useConversations() {
 
   const create = useCallback((model: string) => {
     const convo: Conversation = {
-      id: crypto.randomUUID(),
+      id: uuid(),
       title: "New conversation",
       messages: [],
       model,

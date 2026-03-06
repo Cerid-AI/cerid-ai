@@ -4,6 +4,7 @@
 import { useState, useCallback } from "react"
 import { buildSwitchOptions } from "@/lib/model-router"
 import { summarizeConversation } from "@/lib/api"
+import { uuid } from "@/lib/utils"
 import { MODELS } from "@/lib/types"
 import type { ChatMessage, ModelOption, ModelSwitchOptions, SwitchStrategy } from "@/lib/types"
 
@@ -61,7 +62,7 @@ export function useModelSwitch({
               currentModel.id,
             )
             const summaryMessage: ChatMessage = {
-              id: crypto.randomUUID(),
+              id: uuid(),
               role: "system",
               content: `[Conversation summary from ${currentModel.label}]\n\n${summary}`,
               timestamp: Date.now(),

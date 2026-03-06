@@ -109,6 +109,16 @@
 
 ---
 
+## Frontend / Web APIs
+
+### `crypto.randomUUID()` requires a secure context
+**When:** Using `crypto.randomUUID()` in a web app accessed via LAN IP over plain HTTP.
+**Problem:** `crypto.randomUUID()` is only available in [secure contexts](https://developer.mozilla.org/en-US/docs/Web/API/Crypto/randomUUID) (HTTPS or `localhost`). Accessing via `http://192.168.x.x` makes `crypto.randomUUID` `undefined`, causing `TypeError` on every call. This silently breaks all API calls using request ID headers, causing React Query to enter error state.
+**Fix:** Use a shared `uuid()` helper that falls back to `crypto.getRandomValues()` (available in all contexts) to construct a UUID v4 manually. Export from `utils.ts` and use everywhere instead of `crypto.randomUUID()`.
+**Reference:** `src/web/src/lib/utils.ts:uuid()`, used by `api.ts`, `use-chat.ts`, `use-conversations.ts`, `use-model-switch.ts`, `chat-panel.tsx`.
+
+---
+
 ## Frontend / Bundle Size
 
 ### PrismLight vs full Prism for bundle size

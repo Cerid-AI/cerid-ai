@@ -31,7 +31,7 @@ import { useVerificationStream } from "@/hooks/use-verification-stream"
 import { fetchHallucinationReport } from "@/lib/api"
 import type { ChatMessage, SourceRef, HallucinationReport } from "@/lib/types"
 import { MODELS } from "@/lib/types"
-import { cn } from "@/lib/utils"
+import { cn, uuid } from "@/lib/utils"
 
 const NARROW_MQ = "(max-width: 1024px)"
 const narrowSubscribe = (cb: () => void) => {
@@ -222,7 +222,7 @@ export function ChatPanel() {
       }
 
       const userMsg: ChatMessage = {
-        id: crypto.randomUUID(),
+        id: uuid(),
         role: "user",
         content,
         timestamp: Date.now(),
