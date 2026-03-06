@@ -2292,7 +2292,6 @@ class TestClaimTypeClassification:
     """Test _claim_type in verify_response_streaming handles all types."""
 
     def test_evasion_prefix(self):
-        from agents.hallucination import _is_ignorance_admission
         assert "[EVASION]" == "[EVASION]"  # prefix check is string-based
 
     def test_citation_prefix(self):

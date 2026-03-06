@@ -11,7 +11,7 @@ import httpx
 
 import config.settings as config
 from middleware.request_id import tracing_headers
-from utils.circuit_breaker import CircuitOpenError, get_breaker
+from utils.circuit_breaker import get_breaker
 
 logger = logging.getLogger("ai-companion.bifrost")
 

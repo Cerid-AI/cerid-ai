@@ -176,6 +176,9 @@ export interface KBQueryResult {
   quality_score?: number
 }
 
+/** Lightweight alias used by kb-utils for dedup/formatting (subset of KBQueryResult). */
+export type KBResult = KBQueryResult
+
 export interface AgentQueryResponse {
   query: string
   domains_queried: string[]
