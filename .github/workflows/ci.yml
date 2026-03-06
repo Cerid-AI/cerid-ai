@@ -96,11 +96,13 @@ jobs:
           # CVE-2026-26013: SSRF in ChatOpenAI image token counting — we use Bifrost proxy, not ChatOpenAI
           # CVE-2025-64439: RCE in JsonPlusSerializer — we control all LangGraph inputs, no untrusted data
           # CVE-2026-27794: RCE via pickle fallback — internal caching only, no untrusted pickle
+          # CVE-2026-28277: msgpack deserialization in LangGraph checkpointer — we don't use persistent checkpointers
           # Migration planned for Phase 11
           pip-audit --desc \
             --ignore-vuln CVE-2026-26013 \
             --ignore-vuln CVE-2025-64439 \
-            --ignore-vuln CVE-2026-27794
+            --ignore-vuln CVE-2026-27794 \
+            --ignore-vuln CVE-2026-28277
 
   lock-sync:
     runs-on: ubuntu-latest

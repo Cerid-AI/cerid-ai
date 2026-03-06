@@ -176,8 +176,18 @@ export interface KBQueryResult {
   quality_score?: number
 }
 
-/** Lightweight alias used by kb-utils for dedup/formatting (subset of KBQueryResult). */
-export type KBResult = KBQueryResult
+/** Lightweight KB result used by kb-utils for dedup/formatting. */
+export interface KBResult {
+  artifact_id: string
+  filename: string
+  domain: string
+  sub_category?: string
+  content: string
+  relevance: number
+  chunk_index: number
+  tags?: string[]
+  quality_score?: number
+}
 
 export interface AgentQueryResponse {
   query: string
