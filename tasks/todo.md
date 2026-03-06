@@ -491,6 +491,41 @@
 - [x] Makefile frontend targets (lint, test, typecheck, build, check-all, help)
 - [x] 950 Python tests, 320 frontend tests
 
+### Phase 26: User Review — Verification Logic, UX Fixes, and Backlog
+
+#### Sprint 1 — Immediate Fixes
+- [ ] V9: Clear stale verification status when new response streams (30 min)
+- [ ] V5: Touch-visible trash icon on conversation list (15 min)
+- [ ] V8: Remove KBOperations duplicate from audit tab (15 min)
+- [ ] V12: Add tooltips on confidence bars and quality badges (45 min)
+- [ ] V7: KB auto-inject toggle in KB context pane (30 min)
+
+#### Sprint 2 — Quick Wins
+- [ ] V17: Injection badge detail popover (artifact names, domains, snippets) (45 min)
+- [ ] V4: Investigate + fix settings pane scroll issue (45 min)
+
+#### Sprint 3 — Medium Tasks
+- [ ] V11: Compute quality_score during ingestion (fix Q50 uniformity) (1 hr)
+- [ ] V1a: Surface found data in ignorance verification (show actual answer from Grok) (1.5 hrs)
+- [ ] V2: Verification source URL click-through (KB artifact links) (1.5 hrs)
+- [ ] V16: Show artifact summary instead of raw chunk on knowledge cards (2 hrs)
+
+#### Sprint 4 — Persistence + Investigation
+- [ ] V15: Persist verification state across tab switches (store in ConversationsContext) (2 hrs)
+- [ ] V10: Audit model switch cost calculation (verify expensive→cheap is correct) (1 hr)
+- [ ] V18: Investigate injection perception issue (debug logging + improve V17) (1 hr)
+
+#### Backlog (future phases)
+- [ ] V1b: Proactive model switch recommendation when verification detects ignorance (4 hrs)
+- [ ] V6: Right-click context menus on toolbar icons (4-5 hrs)
+- [ ] V14: Infrastructure/account settings in UI (Bifrost URL, API keys) (4-5 hrs)
+- [ ] V19: Drag-drop to KB context pane for import + inject (3-4 hrs)
+- [ ] V20: Drag-drop to chat input for file ingest + inject (3 hrs)
+- [ ] V22: Inline verification markups in chat response (highlight verified/unverified spans) (5-6 hrs)
+- [ ] V3: Quick-access memory extraction toggle (30 min, after V6)
+- [ ] V13: Configurable feature tier (1 hr)
+- [ ] V21: Advanced response re-formatting/cleanup (8+ hrs)
+
 ### Deferred
 - [ ] D2: Conversation fork/branch UI (40-60 hrs, exploratory)
 

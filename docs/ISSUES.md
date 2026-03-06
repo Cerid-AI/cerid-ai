@@ -2,7 +2,7 @@
 
 > **Created:** 2026-02-25
 > **Last updated:** 2026-03-05
-> **Status:** Phase 25 + production audit complete. 57 resolved, 1 open (D2). 950 Python tests, 320 frontend tests.
+> **Status:** Phase 25 + production audit complete. Phase 26 user review logged (22 items). 57 resolved, 23 open (D2 + V1–V22). 950 Python tests, 320 frontend tests.
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21 roadmap)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](COMPLETED_PHASES.md)
 > **Purpose:** Track known bugs, feature gaps, structural issues, and architecture evaluations for upcoming phases.
@@ -515,10 +515,292 @@ The `verify_claim()` docstring now documents all 4 fallback levels. Only KB-veri
 
 ---
 
+## I. Phase 26 — User Review: Verification Logic, UX Fixes, and Backlog
+
+Post-Phase 25 + production audit user review surfaced **22 items** spanning verification logic flaws, UX gaps, missing tooltips, tab persistence issues, and deferred features. Items are categorized by sprint priority. See `tasks/todo.md` for sprint grouping.
+
+### I1. V1a — Surface Found Data in Ignorance Verification
+
+**Severity:** High
+**Status:** Open (Sprint 3)
+
+When model says "I don't have access to real-time data", verification confirms the limitation as accurate instead of showing the actual answer. Backend sends to Grok for web search and inverts the verdict (`hallucination.py` lines 1509-1519), but the `verification_answer` (raw Grok response with actual data) is NOT included in the SSE `claim_verified` event — only truncated `reason` is sent.
+
+**Fix:** Add `verification_answer` field to SSE event payload. Add to `StreamingClaim` TypeScript type. In `verification-status-bar.tsx`, render expandable "Found answer" section when `claim_type === "ignorance"` and status is `"unverified"`.
+
+**Files:** `src/mcp/agents/hallucination.py`, `src/web/src/lib/types.ts`, `src/web/src/hooks/use-verification-stream.ts`, `src/web/src/components/audit/verification-status-bar.tsx`
+
+### I2. V1b — Proactive Model Switch for Real-Time Queries
+
+**Severity:** Medium
+**Status:** Open (Backlog)
+
+Smart routing gives +10 bonus for `webSearch` models when `CURRENT_INFO_RE` matches (`model-router.ts` line 130), but doesn't proactively trigger when verification finds the model deflected. After verification detects ignorance on a real-time query, should surface recommendation to switch to Grok.
+
+**Fix:** Post-verification feedback loop in `chat-panel.tsx`: when verification finds unverified ignorance claims, call `recommendModel()` with boosted `webSearch` weight, show "Switch to Grok for real-time data?" banner.
+
+**Files:** `src/web/src/components/chat/chat-panel.tsx`, `src/web/src/lib/model-router.ts`, `src/web/src/hooks/use-verification-stream.ts`
+
+### I3. V2 — Verification Source URLs Not Clickable
+
+**Severity:** Medium
+**Status:** Open (Sprint 3)
+
+Backend sends `source_urls` and `source_domain` in `claim_verified` events. Frontend renders `ExternalLink` icons when URLs exist, but KB-verified claims have no URLs and no click-through to the artifact.
+
+**Fix:** For KB-verified claims, generate an artifact link (click to focus in KB pane). Make `source_urls` links more prominent with domain label.
+
+**Files:** `src/web/src/components/audit/verification-status-bar.tsx`, `src/web/src/components/chat/chat-panel.tsx`
+
+### I4. V3 — Quick-Access Toggles for Memory Extraction
+
+**Severity:** Low
+**Status:** Open (Backlog — deferred until V6)
+
+Memory extraction toggle only accessible via Settings. Should be in a right-click context menu or overflow popover on toolbar icon.
+
+### I5. V4 — Settings Pane Scroll Issue
+
+**Severity:** Medium
+**Status:** Open (Sprint 2 — investigation required)
+
+Settings pane may not scroll properly. Code uses `<ScrollArea className="flex-1">` inside `<div className="flex h-full min-h-0 flex-col">` which looks correct. Needs browser DevTools inspection — may be ancestor missing `overflow: hidden` or `h-full`.
+
+**Files:** `src/web/src/components/settings/settings-pane.tsx`, parent layout
+
+### I6. V5 — Trash Icon Invisible on Touch Devices
+
+**Severity:** Medium
+**Status:** Open (Sprint 1)
+
+`conversation-list.tsx` line 46: `opacity-0 group-hover:opacity-100`. iPad/touch has no hover state.
+
+**Fix:** Add `[@media(pointer:coarse)]:opacity-60` matching existing touch-visibility pattern from Phase 17.
+
+**Files:** `src/web/src/components/chat/conversation-list.tsx`
+
+### I7. V6 — Right-Click Context Menus on Toolbar Icons
+
+**Severity:** Low
+**Status:** Open (Backlog)
+
+No context menu infrastructure exists. User wants right-click on model router icon → routing mode switch, right-click on KB icon → auto-inject toggle, etc.
+
+**Fix:** Install shadcn/ui `ContextMenu` (`@radix-ui/react-context-menu`). Add menus to model router icon, KB toggle, hallucination shield.
+
+**Files:** `src/web/src/components/ui/context-menu.tsx` (new), `src/web/src/components/chat/chat-panel.tsx`
+
+### I8. V7 — KB Auto-Inject Toggle in KB Context Pane
+
+**Severity:** Medium
+**Status:** Open (Sprint 1)
+
+Auto-inject toggle only in Settings > Knowledge. Users want it in the KB context pane for quick access.
+
+**Fix:** Add a small `Switch` + label in `kb-context-panel.tsx` header bar. Wire to `useSettings()` hook (`autoInject` / `patch({ enable_auto_inject })`).
+
+**Files:** `src/web/src/components/kb/kb-context-panel.tsx`
+
+### I9. V8 — Monitoring/Audit Tab Overlap
+
+**Severity:** Low
+**Status:** Open (Sprint 1)
+
+Both `monitoring-pane.tsx` (line 61) and `audit-pane.tsx` (line 92) render `<KBOperations />`. Monitoring = operations + real-time health. Audit = analytics + historical reports.
+
+**Fix:** Remove `KBOperations` from `audit-pane.tsx`.
+
+**Files:** `src/web/src/components/audit/audit-pane.tsx`
+
+### I10. V9 — Stale Verification Status Between Responses
+
+**Severity:** High
+**Status:** Open (Sprint 1)
+
+When a new assistant response streams in, the previous "x/x verified" status bar persists until the new verification starts. Should clear immediately.
+
+**Root cause:** `use-verification-stream.ts` resets on `conversationId` change but not on new `responseText` arrival within the same conversation.
+
+**Fix:** Set `savedReport = null` when `isStreaming` is true. Add `useEffect` that clears claims/summary when `responseText` changes to a shorter string.
+
+**Files:** `src/web/src/hooks/use-verification-stream.ts`, `src/web/src/components/chat/chat-panel.tsx`
+
+### I11. V10 — Model Switch Cost Comparison Logic
+
+**Severity:** Low
+**Status:** Open (Sprint 4 — investigation required)
+
+In `model-router.ts`, switching FROM expensive TO cheap can show `replayCost < summarizeCost`. This may be correct behavior (cheap target processes full history cheaper than expensive current model produces a summary). Needs unit tests to confirm.
+
+**Fix:** Add unit tests with specific model pairs (expensive→cheap, cheap→expensive, same model).
+
+**Files:** `src/web/src/__tests__/model-router.test.ts`
+
+### I12. V11 — All Knowledge Cards Show Q50
+
+**Severity:** High
+**Status:** Open (Sprint 3)
+
+Quality badges uniformly show Q50 because `quality_score` is never set during ingestion. `get_quality_scores()` defaults unscored artifacts to 0.5. Curator agent computes real scores but only runs on-demand.
+
+**Fix:** Compute basic quality signal during ingestion: has_summary (0.2), has_tags (0.15), chunk_count > 1 (0.15), parsed_size > 500 chars (0.15), domain_set (0.1), sub_category_set (0.1), dedup_passed (0.15). Write to Neo4j Artifact node on CREATE.
+
+**Files:** `src/mcp/services/ingestion.py`, `src/mcp/db/neo4j/artifacts.py`
+
+### I13. V12 — Missing Tooltips on Confidence Bars and Quality Badges
+
+**Severity:** Medium
+**Status:** Open (Sprint 1)
+
+Relevance bar, quality badge, and confidence bar have no hover explanation.
+
+**Fix:** Wrap each in `<Tooltip>` from shadcn/ui. Texts: "Relevance: {pct}% match to query", "Quality: Q{score}", "Confidence: {pct}% retrieval confidence".
+
+**Files:** `src/web/src/components/kb/artifact-card.tsx`, `src/web/src/components/kb/kb-context-panel.tsx`
+
+### I14. V13 — Feature Tier Not Configurable
+
+**Severity:** Low
+**Status:** Open (Backlog)
+
+Feature tier is server-determined (`config/settings.py`), displayed read-only. For self-hosted personal tool, tier system may be simplified or made a `.env` config.
+
+### I15. V14 — Infrastructure/Account Settings in UI
+
+**Severity:** Medium
+**Status:** Open (Backlog)
+
+Bifrost URL, OpenRouter API key, etc. only in `.env`. Not configurable from Settings.
+
+**Fix:** New "Infrastructure" section in settings-pane with Bifrost URL (read-only display), OpenRouter API key (masked input, update via API), MCP URL.
+
+**Files:** `src/mcp/config/settings.py`, `src/mcp/routers/settings.py`, `src/web/src/components/settings/settings-pane.tsx`
+
+### I16. V15 — Verification State Lost on Tab Switch
+
+**Severity:** High
+**Status:** Open (Sprint 4)
+
+Switching to monitoring/audit tab and back causes `conversationId` to reset → stream aborted → state cleared. Redis fallback fetches saved report but with visible loading flash.
+
+**Fix:** Store completed `HallucinationReport` per conversation ID in `ConversationsContext`. On tab return, read stored report immediately without re-fetching.
+
+**Files:** `src/web/src/contexts/conversations-context.tsx`, `src/web/src/components/chat/chat-panel.tsx`, `src/web/src/hooks/use-verification-stream.ts`
+
+### I17. V16 — Knowledge Card Summaries Show Raw Data
+
+**Severity:** Medium
+**Status:** Open (Sprint 3)
+
+`artifact-card.tsx` shows `result.content` (raw ChromaDB chunk text), not the generated summary. The `summary` field exists on Neo4j Artifact nodes but isn't returned in query results.
+
+**Fix:** Include artifact-level `summary` from Neo4j in query results. Prefer `result.summary` over `result.content` in browse mode.
+
+**Files:** `src/mcp/agents/query.py`, `src/web/src/lib/types.ts`, `src/web/src/components/kb/artifact-card.tsx`
+
+### I18. V17 — KB Injection Badge Shows Count but No Detail
+
+**Severity:** Medium
+**Status:** Open (Sprint 2)
+
+`chat-input.tsx` shows `<Badge>{N} source(s)</Badge>` with no information about what was injected.
+
+**Fix:** Wrap in `<Popover>` showing injected artifact names, domains, and content snippet preview.
+
+**Files:** `src/web/src/components/chat/chat-input.tsx`, `src/web/src/components/chat/chat-panel.tsx`
+
+### I19. V18 — Model Doesn't Appear to Receive Injected Data
+
+**Severity:** Medium
+**Status:** Open (Sprint 4 — investigation required)
+
+Code confirms KB IS injected as system message (`chat-panel.tsx` lines 309-325). Likely perception issue — model receives context but doesn't explicitly reference it. Improving V17 (injection detail popover) will help verify what was sent.
+
+**Fix:** Add debug logging on Bifrost side. Add "Show prompt" debug mode in dev. Improve V17 first for visibility.
+
+**Files:** `src/web/src/components/chat/chat-panel.tsx`, Bifrost logs
+
+### I20. V19 — Drag-Drop to KB Context Pane
+
+**Severity:** Low
+**Status:** Open (Backlog)
+
+KB context split-pane doesn't accept file drops. Knowledge-pane has drag-drop for ingestion but the context pane doesn't.
+
+**Fix:** Add drag-drop handlers to `kb-context-panel.tsx`. File drop → ingest + auto-inject. Internal artifact drag → add to injection queue.
+
+**Files:** `src/web/src/components/kb/kb-context-panel.tsx`, `src/web/src/components/kb/artifact-card.tsx`
+
+### I21. V20 — Drag-Drop to Chat Input
+
+**Severity:** Low
+**Status:** Open (Backlog)
+
+No drag-drop on chat input. Want: drop file → ingest + add to context, or drop artifact → inject.
+
+**Files:** `src/web/src/components/chat/chat-input.tsx`, `src/web/src/components/chat/chat-panel.tsx`
+
+### I22. V21 — Advanced Response Re-Formatting
+
+**Severity:** Low
+**Status:** Open (Backlog)
+
+Only basic markdown + PrismLight code highlighting. No post-processing cleanup. Scope unclear — needs specific pain points.
+
+**Files:** `src/web/src/components/chat/message-bubble.tsx`
+
+### I23. V22 — Inline Verification Markups in Chat Response
+
+**Severity:** Medium
+**Status:** Open (Backlog)
+
+Verification results only appear in the status bar and hallucination panel sidebar. Claims are not visually linked to specific text in the response.
+
+**Fix:** Add optional inline annotations to `message-bubble.tsx`: highlight verified claims in green, unverified in red/orange, uncertain in yellow. Fuzzy match claim text to locate spans in rendered markdown. Toggle via settings (default off).
+
+**Files:** `src/web/src/components/chat/message-bubble.tsx`, `src/web/src/hooks/use-verification-stream.ts`, `src/web/src/hooks/use-settings.ts`, `src/web/src/lib/verification-utils.ts`
+
+---
+
 ## Priority Order
 
-### Open Items (1)
-1. **D2** — Conversation fork/branch UI (exploratory) — deferred
+### Open Items (23)
+
+**Sprint 1 — Immediate Fixes (~2 hrs):**
+1. **V9** (I10) — Clear stale verification status on new response (30 min)
+2. **V5** (I6) — Touch-visible trash icon (15 min)
+3. **V8** (I9) — Remove KBOperations from audit tab (15 min)
+4. **V12** (I13) — Tooltips on confidence bars + quality badges (45 min)
+5. **V7** (I8) — Auto-inject toggle in KB pane (30 min)
+
+**Sprint 2 — Quick Wins (~1.5 hrs):**
+6. **V17** (I18) — Injection badge detail popover (45 min)
+7. **V4** (I5) — Investigate + fix settings scroll (45 min)
+
+**Sprint 3 — Medium Tasks (~7 hrs):**
+8. **V11** (I12) — Quality score during ingestion (1 hr)
+9. **V1a** (I1) — Surface found data in ignorance verification (1.5 hrs)
+10. **V2** (I3) — Verification source click-through (1.5 hrs)
+11. **V16** (I17) — Knowledge card summaries (2 hrs)
+
+**Sprint 4 — Persistence + Investigation (~4 hrs):**
+12. **V15** (I16) — Verification persistence across tabs (2 hrs)
+13. **V10** (I11) — Audit model switch cost calculation (1 hr)
+14. **V18** (I19) — Investigate injection perception (1 hr)
+
+**Backlog (future phases):**
+15. **V1b** (I2) — Proactive model switch for real-time queries (4 hrs)
+16. **V6** (I7) — Right-click context menus (4–5 hrs)
+17. **V14** (I15) — Infrastructure/account settings (4–5 hrs)
+18. **V19** (I20) — Drag-drop to KB context pane (3–4 hrs)
+19. **V20** (I21) — Drag-drop to chat input (3 hrs)
+20. **V22** (I23) — Inline verification markups in chat (5–6 hrs)
+21. **V3** (I4) — Quick-access memory toggle (30 min, after V6)
+22. **V13** (I14) — Configurable feature tier (1 hr)
+23. **V21** (I22) — Advanced response formatting (8+ hrs)
+
+**Deferred (pre-Phase 26):**
+24. **D2** — Conversation fork/branch UI (exploratory)
 
 ### Resolved (57 items)
-All items from sections A-H above marked with ✅ or "Resolved" are resolved. Phases 10A-22 addressed all critical, high, and medium severity findings. See [COMPLETED_PHASES.md](COMPLETED_PHASES.md) for full history.
+All items from sections A-H above marked with ✅ or "Resolved" are resolved. Phases 10A-25 addressed all critical, high, and medium severity findings. See [COMPLETED_PHASES.md](COMPLETED_PHASES.md) for full history.
