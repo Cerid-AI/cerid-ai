@@ -4,7 +4,7 @@
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { lazy, Suspense, useState, useCallback, useRef, useEffect } from "react"
-import { Copy, Check, User, Bot, ShieldCheck, ShieldAlert, Loader2 } from "lucide-react"
+import { Copy, Check, User, Bot, ShieldCheck, ShieldAlert, Loader2, Pencil, Shield } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -126,8 +126,17 @@ function VerificationBadge({ status }: { status: MessageVerificationStatus }) {
   )
 }
 
-export function MessageBubble({ message, verificationStatus }: { message: ChatMessage; verificationStatus?: MessageVerificationStatus }) {
+interface MessageBubbleProps {
+  message: ChatMessage
+  verificationStatus?: MessageVerificationStatus
+  onCorrect?: (messageId: string, correction: string) => void
+  onVerify?: (messageId: string) => void
+}
+
+export function MessageBubble({ message, verificationStatus, onCorrect, onVerify }: MessageBubbleProps) {
   const isUser = message.role === "user"
+  const [correcting, setCorrecting] = useState(false)
+  const [correctionText, setCorrectionText] = useState("")
 
   return (
     <div className={cn("group flex gap-3 py-4", isUser && "flex-row-reverse")}>
@@ -168,8 +177,77 @@ export function MessageBubble({ message, verificationStatus }: { message: ChatMe
         </div>
 
         {!isUser && message.content && (
-          <div className="opacity-0 transition-opacity group-hover:opacity-100">
+          <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
             <CopyButton text={message.content} />
+            {onCorrect && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                aria-label="Correct this response"
+                onClick={() => setCorrecting(true)}
+              >
+                <Pencil className="h-3 w-3" />
+              </Button>
+            )}
+            {onVerify && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                aria-label="Verify this response"
+                onClick={() => onVerify(message.id)}
+              >
+                <Shield className="h-3 w-3" />
+              </Button>
+            )}
+          </div>
+        )}
+
+        {correcting && (
+          <div className="flex items-center gap-2 rounded-lg border bg-background p-2">
+            <input
+              type="text"
+              className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+              placeholder="What should be corrected?"
+              value={correctionText}
+              onChange={(e) => setCorrectionText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && correctionText.trim()) {
+                  onCorrect?.(message.id, correctionText.trim())
+                  setCorrecting(false)
+                  setCorrectionText("")
+                }
+                if (e.key === "Escape") {
+                  setCorrecting(false)
+                  setCorrectionText("")
+                }
+              }}
+              autoFocus
+            />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 text-xs"
+              disabled={!correctionText.trim()}
+              onClick={() => {
+                if (correctionText.trim()) {
+                  onCorrect?.(message.id, correctionText.trim())
+                  setCorrecting(false)
+                  setCorrectionText("")
+                }
+              }}
+            >
+              Submit
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 text-xs"
+              onClick={() => { setCorrecting(false); setCorrectionText("") }}
+            >
+              Cancel
+            </Button>
           </div>
         )}
 

@@ -84,6 +84,86 @@ class TestChatStreamEndpoint:
                 assert meta["cerid_meta"]["resolved_model"] == "anthropic/claude-sonnet-4.6"
 
 
+    def test_emits_cerid_meta_update_when_model_differs(self):
+        """When OpenRouter returns a different model, emit cerid_meta_update."""
+        mock_response = AsyncMock()
+        mock_response.status_code = 200
+
+        async def fake_aiter():
+            # OpenRouter returns a different model than requested
+            yield b'data: {"model":"anthropic/claude-3.7-sonnet","choices":[{"delta":{"content":"Hi"}}]}\n\n'
+            yield b"data: [DONE]\n\n"
+
+        mock_response.aiter_bytes = fake_aiter
+
+        with patch("routers.chat.OPENROUTER_API_KEY", "sk-test"):
+            app = _make_app()
+            client = TestClient(app)
+
+            with patch("routers.chat.httpx.AsyncClient") as mock_client_cls:
+                mock_client = AsyncMock()
+                mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+                mock_stream_ctx = AsyncMock()
+                mock_stream_ctx.__aenter__ = AsyncMock(return_value=mock_response)
+                mock_stream_ctx.__aexit__ = AsyncMock(return_value=False)
+                mock_client.stream = MagicMock(return_value=mock_stream_ctx)
+
+                resp = client.post("/chat/stream", json={
+                    "model": "openrouter/anthropic/claude-sonnet-4.6",
+                    "messages": [{"role": "user", "content": "hello"}],
+                })
+
+                assert resp.status_code == 200
+                body = resp.text
+                events = [
+                    line.removeprefix("data: ")
+                    for line in body.split("\n")
+                    if line.startswith("data: ") and line.strip() != "data: [DONE]"
+                ]
+
+                # Should have: cerid_meta, cerid_meta_update, content chunk
+                meta_update_events = [
+                    json.loads(e) for e in events if "cerid_meta_update" in e
+                ]
+                assert len(meta_update_events) == 1
+                assert meta_update_events[0]["cerid_meta_update"]["actual_model"] == "anthropic/claude-3.7-sonnet"
+
+    def test_no_cerid_meta_update_when_model_matches(self):
+        """No cerid_meta_update when upstream model matches the request."""
+        mock_response = AsyncMock()
+        mock_response.status_code = 200
+
+        async def fake_aiter():
+            yield b'data: {"model":"anthropic/claude-sonnet-4.6","choices":[{"delta":{"content":"Hi"}}]}\n\n'
+            yield b"data: [DONE]\n\n"
+
+        mock_response.aiter_bytes = fake_aiter
+
+        with patch("routers.chat.OPENROUTER_API_KEY", "sk-test"):
+            app = _make_app()
+            client = TestClient(app)
+
+            with patch("routers.chat.httpx.AsyncClient") as mock_client_cls:
+                mock_client = AsyncMock()
+                mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+                mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+                mock_stream_ctx = AsyncMock()
+                mock_stream_ctx.__aenter__ = AsyncMock(return_value=mock_response)
+                mock_stream_ctx.__aexit__ = AsyncMock(return_value=False)
+                mock_client.stream = MagicMock(return_value=mock_stream_ctx)
+
+                resp = client.post("/chat/stream", json={
+                    "model": "openrouter/anthropic/claude-sonnet-4.6",
+                    "messages": [{"role": "user", "content": "hello"}],
+                })
+
+                body = resp.text
+                assert "cerid_meta_update" not in body
+
+
 class TestStripPrefix:
     """Unit tests for _strip_prefix helper."""
 

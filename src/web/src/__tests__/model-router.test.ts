@@ -8,6 +8,8 @@ import {
   recommendModel,
   calculateSwitchCost,
   buildSwitchOptions,
+  scoreModelForQuery,
+  detectIntentWeights,
 } from "@/lib/model-router"
 import { MODELS } from "@/lib/types"
 import type { ChatMessage, ModelOption } from "@/lib/types"
@@ -144,9 +146,9 @@ describe("recommendModel", () => {
     expect(result.savingsVsCurrent).toBeGreaterThanOrEqual(0)
   })
 
-  it("reasoning contains complexity level", () => {
+  it("reasoning contains score or optimal note", () => {
     const result = recommendModel("hello", defaultModel, emptyMessages, 0)
-    expect(result.reasoning).toMatch(/simple|medium|complex/)
+    expect(result.reasoning).toMatch(/score|optimal/)
   })
 
   it("recommends the same model when already optimal", () => {
@@ -172,6 +174,102 @@ describe("recommendModel", () => {
 
   it("estimated cost is positive for non-free models", () => {
     const result = recommendModel("explain algorithms", defaultModel, emptyMessages, 0)
+    expect(result.estimatedCost).toBeGreaterThanOrEqual(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// recommendModel — boundary cases
+// ---------------------------------------------------------------------------
+
+describe("recommendModel boundary cases", () => {
+  const emptyMessages: ChatMessage[] = []
+
+  it("handles zero-cost current model", () => {
+    const freeModel: ModelOption = {
+      id: "test/free",
+      label: "Free",
+      provider: "test",
+      contextWindow: 128_000,
+      inputCostPer1M: 0,
+      outputCostPer1M: 0,
+    }
+    const result = recommendModel("hello", freeModel, emptyMessages, 0)
+    // Free model can't save more — should stay or switch to similarly free
+    expect(result.savingsVsCurrent).toBe(0)
+    expect(result.reasoning).toContain("already optimal")
+  })
+
+  it("handles identical cost models in candidates", () => {
+    // Two MODELS with identical pricing — recommendation should still work
+    const model = MODELS[0]
+    const result = recommendModel("explain this code", model, emptyMessages, 0)
+    expect(result.model).toBeDefined()
+    expect(result.estimatedCost).toBeGreaterThanOrEqual(0)
+  })
+
+  it("handles very long conversation history", () => {
+    const longHistory: ChatMessage[] = Array.from({ length: 50 }, (_, i) => ({
+      id: `msg-${i}`,
+      role: i % 2 === 0 ? "user" : "assistant",
+      content: "x".repeat(500),
+      timestamp: Date.now(),
+    }))
+    const model = MODELS[0]
+    // Should not throw; complexity should be "complex" due to 50 messages
+    const result = recommendModel("next?", model, longHistory, 0)
+    expect(result).toBeDefined()
+    // Should switch to a cheaper model with enough capability for this query
+    expect(result).toBeDefined()
+    expect(result.reasoning).toMatch(/score|optimal|task/)
+  })
+
+  it("handles model with undefined costPer1M as zero", () => {
+    const noCostModel: ModelOption = {
+      id: "test/no-cost",
+      label: "NoCost",
+      provider: "test",
+      contextWindow: 128_000,
+      inputCostPer1M: undefined as unknown as number,
+      outputCostPer1M: undefined as unknown as number,
+    }
+    // Should not throw
+    const result = recommendModel("hello", noCostModel, emptyMessages, 0)
+    expect(result).toBeDefined()
+  })
+
+  it("all candidates exceed context window", () => {
+    // Create a model with a tiny context window
+    const tinyModel: ModelOption = {
+      id: "openrouter/openai/gpt-4o-mini",
+      label: "GPT-4o Mini",
+      provider: "OpenAI",
+      contextWindow: 128_000,
+      inputCostPer1M: 0.15,
+      outputCostPer1M: 0.60,
+    }
+    // Create massive history that would exceed all candidate windows
+    const hugeHistory: ChatMessage[] = Array.from({ length: 100 }, (_, i) => ({
+      id: `msg-${i}`,
+      role: i % 2 === 0 ? "user" : "assistant",
+      content: "x".repeat(20_000),
+      timestamp: Date.now(),
+    }))
+    // 100 msgs * 20k chars = 2M chars = ~500k tokens — exceeds most context windows
+    const result = recommendModel("next", tinyModel, hugeHistory, 0)
+    // Should still return a valid result (fallback to current model)
+    expect(result.model).toBeDefined()
+  })
+
+  it("empty query with high sensitivity still returns valid result", () => {
+    const result = recommendModel("", MODELS[0], emptyMessages, 0, "high")
+    expect(result).toBeDefined()
+    expect(result.model).toBeDefined()
+  })
+
+  it("single-character query returns valid result", () => {
+    const result = recommendModel("?", MODELS[0], emptyMessages, 0)
+    expect(result.model).toBeDefined()
     expect(result.estimatedCost).toBeGreaterThanOrEqual(0)
   })
 })
@@ -336,5 +434,142 @@ describe("buildSwitchOptions", () => {
   it("returns the target model in the result", () => {
     const result = buildSwitchOptions(modelB, modelA, makeMessages(2))
     expect(result.targetModel.id).toBe(modelB.id)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// detectIntentWeights
+// ---------------------------------------------------------------------------
+
+describe("detectIntentWeights", () => {
+  it("returns normalized weights that sum to ~1.0", () => {
+    const weights = detectIntentWeights("explain this code")
+    const sum = Object.values(weights).reduce((a, b) => a + b, 0)
+    expect(sum).toBeCloseTo(1.0, 2)
+  })
+
+  it("detects coding intent for code queries", () => {
+    const weights = detectIntentWeights("debug this function")
+    expect(weights.coding).toBeGreaterThan(weights.creative)
+  })
+
+  it("detects creative intent for writing queries", () => {
+    const weights = detectIntentWeights("write a poem about nature")
+    expect(weights.creative).toBeGreaterThan(weights.coding)
+  })
+
+  it("detects reasoning intent for analytical queries", () => {
+    const weights = detectIntentWeights("analyze the trade-offs between approaches")
+    expect(weights.reasoning).toBeGreaterThan(weights.factual)
+  })
+
+  it("detects factual intent for definitional queries", () => {
+    const weights = detectIntentWeights("what is a REST API")
+    expect(weights.factual).toBeGreaterThan(weights.creative)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// scoreModelForQuery
+// ---------------------------------------------------------------------------
+
+describe("scoreModelForQuery", () => {
+  it("returns 50 for models without capabilities", () => {
+    const noCaps: ModelOption = {
+      id: "test/no-caps",
+      label: "NoCaps",
+      provider: "test",
+      contextWindow: 128_000,
+      inputCostPer1M: 0.15,
+      outputCostPer1M: 0.60,
+    }
+    expect(scoreModelForQuery(noCaps, "explain code")).toBe(50)
+  })
+
+  it("scores higher for coding models on coding queries", () => {
+    const codingModel: ModelOption = {
+      id: "test/coder",
+      label: "Coder",
+      provider: "test",
+      contextWindow: 128_000,
+      inputCostPer1M: 0.15,
+      outputCostPer1M: 0.60,
+      capabilities: { reasoning: 70, coding: 95, creative: 50, factual: 60, webSearch: false, vision: false, knowledgeCutoff: "2025-01" },
+    }
+    const genericModel: ModelOption = {
+      id: "test/generic",
+      label: "Generic",
+      provider: "test",
+      contextWindow: 128_000,
+      inputCostPer1M: 0.15,
+      outputCostPer1M: 0.60,
+      capabilities: { reasoning: 70, coding: 60, creative: 70, factual: 70, webSearch: false, vision: false, knowledgeCutoff: "2025-01" },
+    }
+    const codingScore = scoreModelForQuery(codingModel, "debug this typescript function")
+    const genericScore = scoreModelForQuery(genericModel, "debug this typescript function")
+    expect(codingScore).toBeGreaterThan(genericScore)
+  })
+
+  it("gives bonus for web search on current-info queries", () => {
+    const withSearch: ModelOption = {
+      id: "test/search",
+      label: "Search",
+      provider: "test",
+      contextWindow: 128_000,
+      inputCostPer1M: 0.15,
+      outputCostPer1M: 0.60,
+      capabilities: { reasoning: 70, coding: 70, creative: 70, factual: 70, webSearch: true, vision: false, knowledgeCutoff: "2025-01" },
+    }
+    const noSearch: ModelOption = {
+      ...withSearch,
+      id: "test/no-search",
+      capabilities: { ...withSearch.capabilities!, webSearch: false },
+    }
+    const withScore = scoreModelForQuery(withSearch, "what is the latest news today")
+    const withoutScore = scoreModelForQuery(noSearch, "what is the latest news today")
+    expect(withScore).toBeGreaterThan(withoutScore)
+  })
+
+  it("returns score capped at 100", () => {
+    const superModel: ModelOption = {
+      id: "test/super",
+      label: "Super",
+      provider: "test",
+      contextWindow: 128_000,
+      inputCostPer1M: 0.15,
+      outputCostPer1M: 0.60,
+      capabilities: { reasoning: 99, coding: 99, creative: 99, factual: 99, webSearch: true, vision: true, knowledgeCutoff: "2026-03" },
+    }
+    const score = scoreModelForQuery(superModel, "latest image analysis of code to explain")
+    expect(score).toBeLessThanOrEqual(100)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Cost sensitivity interaction
+// ---------------------------------------------------------------------------
+
+describe("cost sensitivity interaction with scoring", () => {
+  const emptyMessages: ChatMessage[] = []
+
+  it("low sensitivity requires large savings to switch", () => {
+    // With low sensitivity (50% threshold), switching only happens for big cost differences
+    const cheapest = MODELS.reduce((a, b) =>
+      a.inputCostPer1M + a.outputCostPer1M < b.inputCostPer1M + b.outputCostPer1M ? a : b,
+    )
+    const result = recommendModel("hello", cheapest, emptyMessages, 0, "low")
+    // Cheapest model can't save more — should stay
+    expect(result.model.id).toBe(cheapest.id)
+  })
+
+  it("high sensitivity prefers cheaper model for simple queries", () => {
+    const expensive = MODELS.reduce((a, b) =>
+      a.inputCostPer1M + a.outputCostPer1M > b.inputCostPer1M + b.outputCostPer1M ? a : b,
+    )
+    const result = recommendModel("hello", expensive, emptyMessages, 0, "high")
+    // High sensitivity switches easily — should find something cheaper
+    expect(result.estimatedCost).toBeLessThanOrEqual(
+      estimateTurnCost(expensive, "hello".length, 200),
+    )
   })
 })

@@ -3,6 +3,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react"
 import { fetchSettings, updateSettings } from "@/lib/api"
+import type { RoutingMode } from "@/lib/types"
 
 function readBool(key: string): boolean {
   try { return localStorage.getItem(key) === "true" } catch { return false }
@@ -23,7 +24,17 @@ function persist(key: string, value: string): void {
 export function useSettings() {
   const [feedbackLoop, setFeedbackLoop] = useState(() => readBool("cerid-feedback-loop"))
   const [showDashboard, setShowDashboard] = useState(() => readBool("cerid-show-dashboard"))
-  const [autoModelSwitch, setAutoModelSwitch] = useState(() => readBool("cerid-auto-model-switch"))
+  const [routingMode, setRoutingModeState] = useState<RoutingMode>(() => {
+    try {
+      // New key takes precedence
+      const v = localStorage.getItem("cerid-routing-mode")
+      if (v === "manual" || v === "recommend" || v === "auto") return v
+      // Migrate from old boolean key
+      const old = localStorage.getItem("cerid-auto-model-switch")
+      if (old === "true") return "recommend"
+    } catch { /* noop */ }
+    return "manual"
+  })
   const [autoInject, setAutoInject] = useState(() => readBool("cerid-auto-inject"))
   const [autoInjectThreshold, setAutoInjectThresholdState] = useState(() => readFloat("cerid-auto-inject-threshold", 0.82))
   const [hallucinationEnabled, setHallucinationEnabled] = useState(() => readBool("cerid-hallucination-check"))
@@ -66,8 +77,13 @@ export function useSettings() {
           persist("cerid-hallucination-check", String(s.enable_hallucination_check))
         }
         if (s.enable_model_router !== undefined) {
-          setAutoModelSwitch(s.enable_model_router)
-          persist("cerid-auto-model-switch", String(s.enable_model_router))
+          // Server bool maps to recommend/manual; preserve "auto" if user set it
+          const current = localStorage.getItem("cerid-routing-mode")
+          if (current !== "auto") {
+            const mode: RoutingMode = s.enable_model_router ? "recommend" : "manual"
+            setRoutingModeState(mode)
+            persist("cerid-routing-mode", mode)
+          }
         }
       })
       .catch(() => { /* Server unavailable — use localStorage values */ })
@@ -90,11 +106,18 @@ export function useSettings() {
     })
   }, [])
 
-  const toggleAutoModelSwitch = useCallback(() => {
-    setAutoModelSwitch((prev) => {
-      const next = !prev
-      persist("cerid-auto-model-switch", String(next))
-      updateSettings({ enable_model_router: next }).catch(() => { /* noop */ })
+  const setRoutingMode = useCallback((mode: RoutingMode) => {
+    setRoutingModeState(mode)
+    persist("cerid-routing-mode", mode)
+    // Sync to server as boolean (manual=off, recommend/auto=on)
+    updateSettings({ enable_model_router: mode !== "manual" }).catch(() => { /* noop */ })
+  }, [])
+
+  const cycleRoutingMode = useCallback(() => {
+    setRoutingModeState((prev) => {
+      const next: RoutingMode = prev === "manual" ? "recommend" : prev === "recommend" ? "auto" : "manual"
+      persist("cerid-routing-mode", next)
+      updateSettings({ enable_model_router: next !== "manual" }).catch(() => { /* noop */ })
       return next
     })
   }, [])
@@ -132,7 +155,7 @@ export function useSettings() {
   return {
     feedbackLoop, toggleFeedbackLoop,
     showDashboard, toggleDashboard,
-    autoModelSwitch, toggleAutoModelSwitch,
+    routingMode, setRoutingMode, cycleRoutingMode,
     autoInject, toggleAutoInject,
     autoInjectThreshold, setAutoInjectThreshold,
     costSensitivity, updateCostSensitivity,

@@ -25,7 +25,7 @@ describe("useSettings", () => {
     const { result } = renderHook(() => useSettings())
     expect(result.current.feedbackLoop).toBe(false)
     expect(result.current.showDashboard).toBe(false)
-    expect(result.current.autoModelSwitch).toBe(false)
+    expect(result.current.routingMode).toBe("manual")
     expect(result.current.autoInject).toBe(false)
     expect(result.current.autoInjectThreshold).toBe(0.82)
     expect(result.current.costSensitivity).toBe("medium")
@@ -61,11 +61,25 @@ describe("useSettings", () => {
     expect(localStorage.getItem("cerid-show-dashboard")).toBe("true")
   })
 
-  it("toggles autoModelSwitch", () => {
+  it("cycles routingMode through manual → recommend → auto → manual", () => {
     const { result } = renderHook(() => useSettings())
-    act(() => { result.current.toggleAutoModelSwitch() })
-    expect(result.current.autoModelSwitch).toBe(true)
-    expect(localStorage.getItem("cerid-auto-model-switch")).toBe("true")
+    expect(result.current.routingMode).toBe("manual")
+
+    act(() => { result.current.cycleRoutingMode() })
+    expect(result.current.routingMode).toBe("recommend")
+    expect(localStorage.getItem("cerid-routing-mode")).toBe("recommend")
+
+    act(() => { result.current.cycleRoutingMode() })
+    expect(result.current.routingMode).toBe("auto")
+
+    act(() => { result.current.cycleRoutingMode() })
+    expect(result.current.routingMode).toBe("manual")
+  })
+
+  it("migrates old autoModelSwitch boolean to routingMode", () => {
+    localStorage.setItem("cerid-auto-model-switch", "true")
+    const { result } = renderHook(() => useSettings())
+    expect(result.current.routingMode).toBe("recommend")
   })
 
   it("toggles autoInject", () => {
@@ -116,7 +130,7 @@ describe("useSettings", () => {
     })
     expect(result.current.hallucinationEnabled).toBe(true)
     expect(result.current.costSensitivity).toBe("high")
-    expect(result.current.autoModelSwitch).toBe(true)
+    expect(result.current.routingMode).toBe("recommend")
     expect(result.current.autoInject).toBe(true)
     expect(result.current.autoInjectThreshold).toBe(0.88)
   })

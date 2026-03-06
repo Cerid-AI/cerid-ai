@@ -2,7 +2,42 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "vitest"
-import { tokenCost, getAccuracyTier, parseTags, getFileRenderMode, getLanguageFromFilename } from "@/lib/utils"
+import { tokenCost, getAccuracyTier, parseTags, getFileRenderMode, getLanguageFromFilename, formatCost } from "@/lib/utils"
+
+// ---------------------------------------------------------------------------
+// formatCost
+// ---------------------------------------------------------------------------
+
+describe("formatCost", () => {
+  it("returns $0.00 for zero", () => {
+    expect(formatCost(0)).toBe("$0.00")
+  })
+
+  it("returns $0.00 for negative values", () => {
+    expect(formatCost(-0.05)).toBe("$0.00")
+  })
+
+  it("returns 4 decimal places for sub-mill costs", () => {
+    expect(formatCost(0.0001)).toBe("$0.0001")
+    expect(formatCost(0.0009)).toBe("$0.0009")
+  })
+
+  it("returns 3 decimal places for mill-to-cent costs", () => {
+    expect(formatCost(0.005)).toBe("$0.005")
+    expect(formatCost(0.001)).toBe("$0.001")
+  })
+
+  it("returns 2 decimal places for cent+ costs", () => {
+    expect(formatCost(0.05)).toBe("$0.05")
+    expect(formatCost(1.23)).toBe("$1.23")
+    expect(formatCost(0.01)).toBe("$0.01")
+  })
+
+  it("handles typical model costs", () => {
+    expect(formatCost(0.0003)).toBe("$0.0003")
+    expect(formatCost(0.05)).toBe("$0.05")
+  })
+})
 
 // ---------------------------------------------------------------------------
 // tokenCost

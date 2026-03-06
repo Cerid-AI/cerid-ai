@@ -3,10 +3,10 @@
 
 import { useState, useCallback, useMemo } from "react"
 import { recommendModel } from "@/lib/model-router"
-import { MODELS, type ModelOption, type ChatMessage, type ModelRecommendation } from "@/lib/types"
+import { MODELS, type ModelOption, type ChatMessage, type ModelRecommendation, type RoutingMode } from "@/lib/types"
 
 interface UseModelRouterOptions {
-  enabled: boolean
+  routingMode: RoutingMode
   costSensitivity: "low" | "medium" | "high"
   currentModel: ModelOption
   messages: ChatMessage[]
@@ -14,7 +14,7 @@ interface UseModelRouterOptions {
 }
 
 export function useModelRouter({
-  enabled,
+  routingMode,
   costSensitivity,
   currentModel,
   messages,
@@ -23,7 +23,7 @@ export function useModelRouter({
   const [dismissed, setDismissed] = useState(false)
 
   const recommendation = useMemo<ModelRecommendation | null>(() => {
-    if (!enabled || dismissed) return null
+    if (routingMode === "manual" || dismissed) return null
     // Only recommend on the next message (use last user message as proxy)
     const lastUserMsg = messages.findLast((m) => m.role === "user")
     if (!lastUserMsg) return null
@@ -40,7 +40,7 @@ export function useModelRouter({
     if (rec.model.id === currentModel.id) return null
     if (rec.savingsVsCurrent < 0.0001) return null
     return rec
-  }, [enabled, dismissed, messages, currentModel, kbInjections, costSensitivity])
+  }, [routingMode, dismissed, messages, currentModel, kbInjections, costSensitivity])
 
   const dismiss = useCallback(() => setDismissed(true), [])
 

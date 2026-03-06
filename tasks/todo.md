@@ -1,7 +1,7 @@
 # Cerid AI — Task Tracker
 
-> **Last updated:** 2026-03-04
-> **Current status:** Phase 23 complete. 877 Python tests, 271 frontend tests. Production hardening shipped.
+> **Last updated:** 2026-03-05
+> **Current status:** Phase 25 complete. 939 Python tests, 320 frontend tests. Smart routing + context-aware chat shipped.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md)
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](../docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
@@ -436,6 +436,49 @@
 - [x] Router health tests (7) — `/health`, `/collections`, `/scheduler`, `/plugins`
 - [x] Router settings tests (11) — `GET /settings`, `PATCH /settings` with validation
 - [x] MCP SSE protocol tests (12) — JSON-RPC methods, session management, queue bounds, eviction
+
+### Phase 24: RAG Evolution — Expanded Verification ✅
+- [x] Evasion claim detection — model hedging on factual questions (dedicated system prompt)
+- [x] Citation claim detection — fabricated source verification
+- [x] Recency claim detection — stale data identification
+- [x] Ignorance claim detection — knowledge gap awareness
+- [x] Verdict inversion logic for each new claim type
+- [x] Frontend rendering (orange for evasion, purple for citation)
+- [x] Streaming pipeline accepts user_query and conversation_history for context-aware verification
+- [x] 931 Python tests, 281 frontend tests
+
+### Phase 25: Smart Routing & Context-Aware Chat ✅
+
+#### 25A: Direct-to-OpenRouter Chat Proxy ✅
+- [x] New `/chat/stream` endpoint in MCP server (FastAPI + httpx SSE proxy)
+- [x] `cerid_meta` SSE event for model confirmation
+- [x] Frontend `streamChat()` rerouted from Bifrost to MCP proxy
+- [x] Model catalog updated to 9 models with March 2026 pricing/capabilities
+- [x] Model IDs aligned across frontend, backend, and Bifrost config
+- [x] Model router algorithm fixed: sensitivity gates switching threshold
+- [x] Bifrost retained for internal agent/verification LLM calls only
+- [x] `cerid_meta_update` SSE event parses actual model from OpenRouter stream
+- [x] `formatCost()` utility with precision tiers ($0.00, <$0.01, $X.XX)
+- [x] Boundary tests for model router edge cases
+
+#### 25B: Intelligent Model Selection ✅
+- [x] Capability-based model scoring (`scoreModelForQuery()`) with intent detection weights
+- [x] Three-way routing mode (`RoutingMode: "manual" | "recommend" | "auto"`) replacing boolean `autoModelSwitch`
+- [x] Enhanced recommendation reasoning with capability %, cost delta, detected intent
+- [x] Auto-routing: silent model switch at send time with toast indicator
+- [x] Settings pane three-way selector (Manual / Recommend / Auto)
+- [x] Model dropdown capability badges (code/reason/create/facts) + cost-per-turn estimate
+- [x] 51 model-router tests (scoring, intent detection, cost sensitivity)
+
+#### 25C: Context-Aware Chat ✅
+- [x] User correction injection — truncate at corrected message, inject `[Correction]` prefix, re-generate
+- [x] Token-budget KB injection — context-window-aware chunk fitting (replaces hardcoded `slice(0, 3)`)
+- [x] Semantic dedup — Jaccard word-set similarity removes overlapping KB chunks before injection
+- [x] Domain headers — structured `--- domain > sub_category | filename ---` prefix on KB chunks
+- [x] Inline verification trigger — per-message verify button, manual bump state
+- [x] `kb-utils.ts` utilities: `jaccardSimilarity()`, `deduplicateChunks()`, `formatChunkWithHeader()`
+- [x] 13 KB utils tests, correction flow integrated
+- [x] 939 Python tests, 320 frontend tests (24 test files)
 
 ### Deferred
 - [ ] D2: Conversation fork/branch UI (40-60 hrs, exploratory)

@@ -232,12 +232,25 @@ export default function SettingsPane() {
                     onToggle={(v) => patch({ enable_memory_extraction: v })}
                     info="Extracts key facts and preferences from conversations into long-term memory"
                   />
-                  <ToggleRow
-                    label="Model Router"
-                    enabled={settings.enable_model_router}
-                    onToggle={(v) => patch({ enable_model_router: v })}
-                    info="Automatically selects the best model based on query complexity and cost sensitivity"
-                  />
+                  <div className="flex items-center justify-between">
+                    <LabelWithInfo label="Model Router" info="Manual: no suggestions. Recommend: shows switch banner. Auto: silently picks the best model." />
+                    <Select
+                      value={settings.enable_model_router ? "recommend" : "manual"}
+                      onValueChange={(v) => {
+                        patch({ enable_model_router: v !== "manual" })
+                        try { localStorage.setItem("cerid-routing-mode", v) } catch { /* noop */ }
+                      }}
+                    >
+                      <SelectTrigger size="sm" className="w-32">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="manual">Manual</SelectItem>
+                        <SelectItem value="recommend">Recommend</SelectItem>
+                        <SelectItem value="auto">Auto</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
 
                   <div className="my-1 h-px bg-border" />
 

@@ -501,6 +501,7 @@ export async function streamChat(
 
   const decoder = new TextDecoder()
   let buffer = ""
+  let lastModelInfo: ChatModelInfo | undefined
 
   try {
     while (true) {
@@ -520,7 +521,17 @@ export async function streamChat(
         try {
           const parsed = JSON.parse(data)
           if (parsed.cerid_meta) {
-            onModelInfo?.(parsed.cerid_meta as ChatModelInfo)
+            lastModelInfo = parsed.cerid_meta as ChatModelInfo
+            onModelInfo?.(lastModelInfo)
+            continue
+          }
+          // OpenRouter may substitute a different model — update if so
+          if (parsed.cerid_meta_update) {
+            const updated: ChatModelInfo = {
+              requested_model: lastModelInfo?.requested_model ?? "",
+              resolved_model: parsed.cerid_meta_update.actual_model,
+            }
+            onModelInfo?.(updated)
             continue
           }
           if (parsed.error) {

@@ -112,7 +112,27 @@ async def _proxy_stream(req: ChatRequest, request_id: str) -> AsyncGenerator[byt
                     yield f"data: {err}\n\ndata: [DONE]\n\n".encode()
                     return
 
+                actual_model_emitted = False
                 async for chunk in response.aiter_bytes():
+                    # Parse actual model from the first upstream data event.
+                    # OpenRouter may substitute a different model than requested.
+                    if not actual_model_emitted:
+                        try:
+                            text = chunk.decode(errors="replace")
+                            for line in text.split("\n"):
+                                stripped = line.strip()
+                                if stripped.startswith("data: ") and stripped != "data: [DONE]":
+                                    payload = json.loads(stripped[6:])
+                                    actual = payload.get("model")
+                                    if actual and actual != bare_model:
+                                        update = json.dumps(
+                                            {"cerid_meta_update": {"actual_model": actual}}
+                                        )
+                                        yield f"data: {update}\n\n".encode()
+                                    actual_model_emitted = True
+                                    break
+                        except (json.JSONDecodeError, UnicodeDecodeError):
+                            pass
                     yield chunk
     except httpx.ConnectError as exc:
         logger.error("OpenRouter connection error: %s", exc)

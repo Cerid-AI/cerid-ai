@@ -422,6 +422,8 @@ export interface MemoryExtractionResult {
   }[]
 }
 
+export type RoutingMode = "manual" | "recommend" | "auto"
+
 export interface ModelRecommendation {
   model: ModelOption
   estimatedCost: number

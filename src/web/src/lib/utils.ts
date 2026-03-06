@@ -46,6 +46,16 @@ export function tokenCost(tokens: number, costPer1M: number): number {
 }
 
 /**
+ * Format a dollar cost for display.
+ * $0.00 for zero, <$0.01 for sub-cent, $X.XX otherwise (up to 4 decimal places for tiny costs).
+ */
+export function formatCost(dollars: number): string {
+  if (dollars <= 0) return "$0.00"
+  if (dollars < 0.01) return dollars < 0.001 ? `$${dollars.toFixed(4)}` : `$${dollars.toFixed(3)}`
+  return `$${dollars.toFixed(2)}`
+}
+
+/**
  * Accuracy tier: text color, bar color, and label based on accuracy (0–1 range).
  * Thresholds: ≥0.8 = High (green), ≥0.5 = Medium (yellow), <0.5 = Low (red).
  */

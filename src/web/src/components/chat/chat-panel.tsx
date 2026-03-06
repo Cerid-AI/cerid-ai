@@ -31,6 +31,8 @@ import { useVerificationStream } from "@/hooks/use-verification-stream"
 import { fetchHallucinationReport } from "@/lib/api"
 import type { ChatMessage, SourceRef, HallucinationReport } from "@/lib/types"
 import { MODELS } from "@/lib/types"
+import { recommendModel } from "@/lib/model-router"
+import { deduplicateChunks, formatChunkWithHeader } from "@/lib/kb-utils"
 import { cn, uuid } from "@/lib/utils"
 
 const NARROW_MQ = "(max-width: 1024px)"
@@ -58,7 +60,7 @@ export function ChatPanel() {
   const {
     feedbackLoop, toggleFeedbackLoop,
     showDashboard, toggleDashboard,
-    autoModelSwitch, toggleAutoModelSwitch,
+    routingMode, cycleRoutingMode,
     autoInject, autoInjectThreshold,
     costSensitivity,
     hallucinationEnabled, toggleHallucinationEnabled,
@@ -75,6 +77,8 @@ export function ChatPanel() {
   const [selectedModel, setSelectedModel] = useState(MODELS[0].id)
   const [showKB, setShowKB] = useState(() => window.innerWidth >= 1024)
   const [lastAutoInjectCount, setLastAutoInjectCount] = useState(0)
+  const [autoRouteNotice, setAutoRouteNotice] = useState<string | null>(null)
+  const [manualVerifyBump, setManualVerifyBump] = useState(0)
 
   // --- Verification (streaming + fallback) ---
   const [savedReport, setSavedReport] = useState<HallucinationReport | null>(null)
@@ -125,7 +129,7 @@ export function ChatPanel() {
     latestAssistantText,
     activeId ?? null,
     hallucinationEnabled,
-    streamTriggerKey,
+    streamTriggerKey + manualVerifyBump,
     latestAssistantModel,
     latestUserQuery,
     priorAssistantContext,
@@ -196,7 +200,7 @@ export function ChatPanel() {
 
   const currentModelObj = useMemo(() => MODELS.find((m) => m.id === selectedModel) ?? MODELS[0], [selectedModel])
   const { recommendation, dismiss: dismissRec, resetDismiss } = useModelRouter({
-    enabled: autoModelSwitch,
+    routingMode,
     costSensitivity,
     currentModel: currentModelObj,
     messages: active?.messages ?? [],
@@ -246,9 +250,22 @@ export function ChatPanel() {
 
   const handleSend = useCallback(
     (content: string) => {
+      // Auto-routing: silently switch model if recommendation exists
+      let modelToUse = selectedModel
+      if (routingMode === "auto") {
+        const currentObj = MODELS.find((m) => m.id === selectedModel) ?? MODELS[0]
+        const rec = recommendModel(content, currentObj, active?.messages ?? [], kbContext.injectedContext.length, costSensitivity)
+        if (rec.model.id !== selectedModel && rec.savingsVsCurrent > 0.0001) {
+          modelToUse = rec.model.id
+          setSelectedModel(modelToUse)
+          setAutoRouteNotice(`Switched to ${rec.model.label}`)
+          setTimeout(() => setAutoRouteNotice(null), 4000)
+        }
+      }
+
       let convoId = activeId
       if (!convoId) {
-        convoId = create(selectedModel)
+        convoId = create(modelToUse)
       }
 
       const userMsg: ChatMessage = {
@@ -263,22 +280,34 @@ export function ChatPanel() {
       const manuallyInjected = [...injectedContext]
       const injectedIds = new Set(manuallyInjected.map((r) => r.artifact_id))
 
-      // Auto-inject high-confidence KB results at send time
+      // Auto-inject high-confidence KB results, limited by token budget
       let autoInjectedCount = 0
       if (autoInject && kbContext.results.length > 0) {
+        const modelObj = MODELS.find((m) => m.id === modelToUse) ?? MODELS[0]
+        // Reserve budget: conversation history + user message + response (~1000 tokens) + system overhead (~200)
+        const historyTokens = (active?.messages ?? []).reduce((sum, m) => sum + Math.ceil(m.content.length / 4), 0)
+        const userTokens = Math.ceil(content.length / 4)
+        const manualTokens = manuallyInjected.reduce((sum, r) => sum + Math.ceil(r.content.length / 4), 0)
+        const reservedTokens = historyTokens + userTokens + manualTokens + 1200
+        let remainingBudget = Math.floor(modelObj.contextWindow * 0.8) - reservedTokens
+
         const candidates = kbContext.results
           .filter((r) => r.relevance >= autoInjectThreshold && !injectedIds.has(r.artifact_id))
-          .slice(0, 3)
         for (const c of candidates) {
+          const chunkTokens = Math.ceil(c.content.length / 4)
+          if (chunkTokens > remainingBudget) break
           manuallyInjected.push(c)
+          remainingBudget -= chunkTokens
           autoInjectedCount++
         }
       }
 
       let sourcesForAssistant: SourceRef[] | undefined
       const allMessages: Pick<ChatMessage, "role" | "content">[] = []
-      if (manuallyInjected.length > 0) {
-        sourcesForAssistant = manuallyInjected.map((r) => ({
+      // Deduplicate overlapping chunks and format with domain headers
+      const dedupedSources = deduplicateChunks(manuallyInjected)
+      if (dedupedSources.length > 0) {
+        sourcesForAssistant = dedupedSources.map((r) => ({
           artifact_id: r.artifact_id,
           filename: r.filename,
           domain: r.domain,
@@ -289,9 +318,7 @@ export function ChatPanel() {
           quality_score: r.quality_score,
         }))
 
-        const contextParts = manuallyInjected.map(
-          (r) => `--- Source: ${r.filename} (${r.domain}) ---\n${r.content}`,
-        )
+        const contextParts = dedupedSources.map(formatChunkWithHeader)
         allMessages.push({
           role: "system",
           content: `The user's knowledge base contains the following relevant context. Use it to inform your response:\n\n${contextParts.join("\n\n")}`,
@@ -304,16 +331,51 @@ export function ChatPanel() {
       }
 
       allMessages.push(...(active?.messages ?? []), userMsg)
-      send(convoId, allMessages, selectedModel, sourcesForAssistant)
+      send(convoId, allMessages, modelToUse, sourcesForAssistant)
+      if (modelToUse !== selectedModel && activeId) updateModel(activeId, modelToUse)
     },
-    [activeId, active, selectedModel, addMessage, create, send, injectedContext, clearInjected, autoInject, autoInjectThreshold, kbContext.results],
+    [activeId, active, selectedModel, addMessage, create, send, injectedContext, clearInjected, autoInject, autoInjectThreshold, kbContext.results, routingMode, costSensitivity, kbContext.injectedContext.length, updateModel],
   )
+
+  const handleVerifyMessage = useCallback(() => {
+    // Re-trigger verification for the latest assistant message
+    setManualVerifyBump((prev) => prev + 1)
+  }, [])
 
   const handleModelChange = useCallback(
     (newModel: string) => {
       initSwitch(newModel)
     },
     [initSwitch],
+  )
+
+  const handleCorrection = useCallback(
+    (messageId: string, correction: string) => {
+      if (!activeId || !active) return
+      const msgs = active.messages
+      const idx = msgs.findIndex((m) => m.id === messageId)
+      if (idx < 0) return
+
+      // Truncate conversation at the corrected message (remove it and everything after)
+      const truncated = msgs.slice(0, idx)
+      replaceMessages(activeId, truncated)
+
+      // Create a correction user message and re-send
+      const correctionMsg: ChatMessage = {
+        id: uuid(),
+        role: "user",
+        content: `[Correction] ${correction}`,
+        timestamp: Date.now(),
+      }
+      addMessage(activeId, correctionMsg)
+
+      const allMessages: Pick<ChatMessage, "role" | "content">[] = [
+        ...truncated,
+        correctionMsg,
+      ]
+      send(activeId, allMessages, selectedModel)
+    },
+    [activeId, active, replaceMessages, addMessage, send, selectedModel],
   )
 
   const chatArea = (
@@ -400,15 +462,15 @@ export function ChatPanel() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className={cn("h-8 w-8", autoModelSwitch && "text-green-500")}
-                    onClick={toggleAutoModelSwitch}
-                    aria-label={autoModelSwitch ? "Disable smart model routing" : "Enable smart model routing"}
+                    className={cn("h-8 w-8", routingMode !== "manual" && "text-green-500")}
+                    onClick={cycleRoutingMode}
+                    aria-label={`Smart routing: ${routingMode}`}
                   >
                     <Zap className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  {autoModelSwitch ? "Smart model routing: ON" : "Smart model routing: OFF"}
+                  {routingMode === "manual" ? "Smart routing: OFF" : routingMode === "recommend" ? "Smart routing: Recommend" : "Smart routing: Auto"}
                 </TooltipContent>
               </Tooltip>
             </>
@@ -437,11 +499,11 @@ export function ChatPanel() {
                   {showDashboard ? "Dashboard: ON" : "Dashboard: OFF"}
                 </button>
                 <button
-                  className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent", autoModelSwitch && "text-green-500")}
-                  onClick={toggleAutoModelSwitch}
+                  className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent", routingMode !== "manual" && "text-green-500")}
+                  onClick={cycleRoutingMode}
                 >
                   <Zap className="h-4 w-4" />
-                  {autoModelSwitch ? "Smart route: ON" : "Smart route: OFF"}
+                  {routingMode === "manual" ? "Routing: Off" : routingMode === "recommend" ? "Routing: Suggest" : "Routing: Auto"}
                 </button>
               </PopoverContent>
             </Popover>
@@ -459,8 +521,8 @@ export function ChatPanel() {
         />
       )}
 
-      {/* Model recommendation banner */}
-      {recommendation && (
+      {/* Model recommendation banner (only in recommend mode, auto mode switches silently) */}
+      {recommendation && routingMode === "recommend" && (
         <div className="flex items-center gap-2 border-b bg-muted/50 px-4 py-1.5 text-xs">
           <Zap className="h-3.5 w-3.5 text-yellow-500" />
           <span className="flex-1">{recommendation.reasoning}</span>
@@ -529,6 +591,8 @@ export function ChatPanel() {
                 <MessageBubble
                   message={msg}
                   verificationStatus={msg.id === lastAssistantMsgId ? verificationStatusForMsg : undefined}
+                  onCorrect={msg.role === "assistant" && !isStreaming ? handleCorrection : undefined}
+                  onVerify={msg.role === "assistant" && !isStreaming && hallucinationEnabled && msg.id === lastAssistantMsgId ? handleVerifyMessage : undefined}
                 />
               </div>
             )
@@ -569,6 +633,14 @@ export function ChatPanel() {
         sessionClaimsChecked={verification.sessionClaimsChecked}
         sessionEstCost={verification.sessionEstCost}
       />
+
+      {/* Auto-route notice */}
+      {autoRouteNotice && (
+        <div className="flex items-center gap-1.5 border-t bg-yellow-500/10 px-4 py-1">
+          <Zap className="h-3 w-3 shrink-0 text-yellow-500" />
+          <span className="text-xs text-muted-foreground">{autoRouteNotice}</span>
+        </div>
+      )}
 
       {/* Auto-inject indicator */}
       {lastAutoInjectCount > 0 && isStreaming && (

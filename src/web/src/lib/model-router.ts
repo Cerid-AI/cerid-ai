@@ -17,6 +17,7 @@ import {
   type SwitchStrategy,
   type ModelSwitchOptions,
 } from "./types"
+import { formatCost } from "./utils"
 
 // ---------------------------------------------------------------------------
 // Complexity scoring
@@ -79,29 +80,69 @@ export function estimateTurnCost(
 }
 
 // ---------------------------------------------------------------------------
-// Model recommendation
+// Intent detection & capability scoring
 // ---------------------------------------------------------------------------
 
-const TIER_MODELS: Record<Complexity, string[]> = {
-  simple: [
-    "openrouter/x-ai/grok-4.1-fast",           // $0.20/$0.50 — best value, 2M ctx
-    "openrouter/openai/gpt-4o-mini",            // $0.15/$0.60 — cheapest input
-    "openrouter/meta-llama/llama-3.3-70b-instruct", // $0.10/$0.32 — cheapest overall
-    "openrouter/deepseek/deepseek-chat-v3-0324", // $0.20/$0.77 — strong coding
-  ],
-  medium: [
-    "openrouter/google/gemini-3-flash-preview",  // $0.50/$3.00 — good balance
-    "openrouter/google/gemini-2.5-flash",        // $0.30/$2.50 — 1M context
-    "openrouter/deepseek/deepseek-chat-v3-0324", // $0.20/$0.77 — strong coding
-    "openrouter/anthropic/claude-sonnet-4.6",    // $3.00/$15.00 — frontier
-  ],
-  complex: [
-    "openrouter/anthropic/claude-sonnet-4.6",    // $3.00/$15.00 — best coding
-    "openrouter/anthropic/claude-opus-4.6",      // $5.00/$25.00 — deepest reasoning
-    "openrouter/openai/o3-mini",                 // $1.10/$4.40 — reasoning specialist
-    "openrouter/x-ai/grok-4.1-fast",            // $0.20/$0.50 — web search + huge ctx
-  ],
+const CODING_RE = /\b(code|function|class|algorithm|debug|refactor|implement|api|schema|typescript|python|javascript|react|sql|program|variable|loop|bug|compile|syntax|regex|endpoint)\b/i
+const REASONING_RE = /\b(explain|analyze|compare|evaluate|why|how does|trade-?offs?|reason|logic|math|calculate|prove|solve|think|step.by.step)\b/i
+const CREATIVE_RE = /\b(write|story|brainstorm|creative|poem|essay|draft|blog|article|copy|narrative|imagine|rewrite|rephrase)\b/i
+const FACTUAL_RE = /\b(what is|define|when|where|list|name|who|facts|history|date|capital|population|tell me about)\b/i
+const CURRENT_INFO_RE = /\b(latest|current|today|recent|news|2026|now|this week|this month)\b/i
+const VISION_RE = /\b(image|photo|picture|screenshot|diagram|chart|graph|visual)\b/i
+
+/**
+ * Detect query intent as weighted capability dimensions (sum ≈ 1.0).
+ */
+export function detectIntentWeights(query: string): Record<string, number> {
+  const coding = CODING_RE.test(query) ? 0.5 : 0.1
+  const reasoning = REASONING_RE.test(query) ? 0.5 : 0.15
+  const creative = CREATIVE_RE.test(query) ? 0.4 : 0.1
+  const factual = FACTUAL_RE.test(query) ? 0.3 : 0.15
+
+  const total = coding + reasoning + creative + factual
+  return {
+    coding: coding / total,
+    reasoning: reasoning / total,
+    creative: creative / total,
+    factual: factual / total,
+  }
 }
+
+/**
+ * Score a model's fitness for a query based on its capabilities and the
+ * detected query intent. Returns 0–100.
+ */
+export function scoreModelForQuery(
+  model: ModelOption,
+  query: string,
+): number {
+  const caps = model.capabilities
+  if (!caps) return 50
+
+  const weights = detectIntentWeights(query)
+  let score =
+    weights.coding * caps.coding +
+    weights.reasoning * caps.reasoning +
+    weights.creative * caps.creative +
+    weights.factual * caps.factual
+
+  // Bonus for special capabilities relevant to the query
+  if (caps.webSearch && CURRENT_INFO_RE.test(query)) score += 10
+  if (caps.vision && VISION_RE.test(query)) score += 5
+
+  return Math.min(100, score)
+}
+
+// Minimum capability score by complexity tier
+const MIN_SCORE: Record<Complexity, number> = {
+  simple: 60,
+  medium: 70,
+  complex: 80,
+}
+
+// ---------------------------------------------------------------------------
+// Model recommendation
+// ---------------------------------------------------------------------------
 
 export function recommendModel(
   query: string,
@@ -111,30 +152,27 @@ export function recommendModel(
   costSensitivity: "low" | "medium" | "high" = "medium",
 ): ModelRecommendation {
   const complexity = scoreQueryComplexity(query, conversationMessages.length, kbInjections)
-
-  const candidateIds = TIER_MODELS[complexity]
+  const minScore = MIN_SCORE[complexity]
 
   const contextChars = conversationMessages.reduce((sum, m) => sum + m.content.length, 0) + query.length
   const estimatedOutput = complexity === "simple" ? 200 : complexity === "medium" ? 500 : 1000
+  const estimatedInputTokens = Math.ceil(contextChars / 4)
 
   const currentCost = estimateTurnCost(currentModel, contextChars, estimatedOutput)
+  const currentScore = scoreModelForQuery(currentModel, query)
 
-  // Find the cheapest viable candidate from the tier
+  // Find the cheapest model that meets the quality threshold
   let bestModel = currentModel
   let bestCost = currentCost
 
-  for (const candidateId of candidateIds) {
-    const candidate = MODELS.find((m) => m.id === candidateId)
-    if (!candidate) continue
-
+  for (const candidate of MODELS) {
     // Skip if context would exceed model's window
-    const estimatedInputTokens = Math.ceil(
-      (conversationMessages.map((m) => m.content).join("") + query).length / 4,
-    )
     if (estimatedInputTokens > candidate.contextWindow * 0.8) continue
 
-    const candidateCost = estimateTurnCost(candidate, contextChars, estimatedOutput)
+    const score = scoreModelForQuery(candidate, query)
+    if (score < minScore) continue
 
+    const candidateCost = estimateTurnCost(candidate, contextChars, estimatedOutput)
     if (candidateCost < bestCost) {
       bestModel = candidate
       bestCost = candidateCost
@@ -152,12 +190,15 @@ export function recommendModel(
   }
 
   const savings = currentCost - bestCost
+  const bestScore = scoreModelForQuery(bestModel, query)
+  const detectedIntent = detectIntentWeights(query)
+  const topIntent = Object.entries(detectedIntent).sort((a, b) => b[1] - a[1])[0][0]
 
   let reasoning: string
   if (bestModel.id === currentModel.id) {
-    reasoning = `${currentModel.label} is already optimal for this ${complexity} query`
+    reasoning = `${currentModel.label} is already optimal for this ${complexity} query (score: ${Math.round(currentScore)})`
   } else {
-    reasoning = `${bestModel.label} is recommended for ${complexity} queries — saves ~$${savings.toFixed(4)}/turn`
+    reasoning = `${bestModel.label} scores ${Math.round(bestScore)} for this ${topIntent} task — saves ~${formatCost(savings)}/turn`
   }
 
   return {
