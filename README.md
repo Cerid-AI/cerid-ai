@@ -4,7 +4,7 @@
 
 A privacy-first, local-first workspace that unifies multi-domain knowledge bases (code, finance, projects, personal artifacts) into a context-aware LLM interface with RAG-powered retrieval, file ingestion, and intelligent agents.
 
-[![Status](https://img.shields.io/badge/Status-Phase%2010E%20Complete-green)]()
+[![Status](https://img.shields.io/badge/Status-Phase%2025%20Complete-green)]()
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue)](LICENSE)
 
 ---
@@ -17,8 +17,8 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 
 - **React GUI** at port 3000 — streaming chat, knowledge browser, monitoring & audit dashboards
 - **Multi-Provider LLM Access** via Bifrost gateway (Claude, GPT, Grok, Gemini, DeepSeek, Llama)
-- **7 Intelligent Agents** — Query (LLM reranking), Triage (LangGraph), Rectification, Audit, Maintenance, Hallucination Detection, Memory Extraction
-- **15 MCP Tools** for knowledge base operations from LibreChat chat UI
+- **9 Intelligent Agents** — Query (LLM reranking), Triage (LangGraph), Rectification, Audit, Maintenance, Hallucination Detection, Memory Extraction, Curation, Self-RAG
+- **18 MCP Tools** for knowledge base operations from LibreChat chat UI
 - **Hallucination Detection** — claim extraction + KB verification with per-message truth audit
 - **Memory Extraction** — facts, decisions, preferences extracted from conversations and stored as KB artifacts
 - **Smart Model Router** — complexity scoring, cost sensitivity, auto-switch recommendations
@@ -33,7 +33,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 - **Multi-Machine Sync** via Dropbox — JSONL export/import with auto-import on startup
 - **Source Attribution** — collapsible source references with relevance scores on chat responses
 - **Model Context Breaks** — provider-colored model badges, switch dividers between model changes
-- **GitHub Actions CI/CD** with 658 tests (564 pytest + 94 vitest)
+- **GitHub Actions CI/CD** with 1,270 tests (950 pytest + 320 vitest)
 - **Three-Tier AI Categorization** (manual, smart, pro) via Bifrost
 - **Obsidian Vault Integration** — auto-sync vault notes into knowledge base
 - **Reproducible Builds** — pip-compile lock files with hashes, pinned Docker images, Dependabot
@@ -73,7 +73,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 │          /agent/audit           │    │   Grok, DeepSeek, etc.)  │
 │          /agent/maintain        │    └──────────────────────────┘
 │  SSE:   /mcp/sse /mcp/messages  │
-│  Tools: 15 MCP tools (pkb_*)   │
+│  Tools: 18 MCP tools (pkb_*)   │
 │  Search: Hybrid BM25 + vector   │
 │  Middleware: auth, rate-limit    │
 │  Scheduler: APScheduler         │
@@ -132,7 +132,7 @@ mkdir -p ~/cerid-archive/{coding,finance,projects,personal,general,inbox}
 ### 3. Start Services
 
 ```bash
-# Start all 4 service groups (Infrastructure → Bifrost → MCP → LibreChat)
+# Start all 5 service groups (Infrastructure → Bifrost → MCP → React GUI → LibreChat)
 ./scripts/start-cerid.sh
 
 # Validate the environment
@@ -306,14 +306,20 @@ curl http://localhost:8888/ingest_log?limit=10
 | GET | `/agent/hallucination/{id}` | Retrieve stored hallucination report |
 | POST | `/agent/memory/extract` | Extract and store memories from conversation |
 | POST | `/agent/memory/archive` | Archive old conversation memories |
+| POST | `/agent/curate` | Score artifact quality (4 dimensions) |
+| POST | `/chat/stream` | Direct-to-OpenRouter chat proxy (SSE) |
 | GET | `/memories` | List extracted memories |
 | GET | `/taxonomy` | Hierarchical taxonomy tree (domains, sub-categories, tags) |
 | GET | `/settings` | Server settings and feature flags |
 | PATCH | `/settings` | Update server settings |
+| POST | `/sync/export` | Export knowledge base (incremental) |
+| POST | `/sync/import` | Import knowledge base (with conflict resolution) |
+| GET | `/sync/status` | Compare local vs sync snapshot |
+| GET | `/archive/files` | List archived files by domain |
 
 **MCP SSE:** `/mcp/sse` (SSE stream) + `/mcp/messages` (JSON-RPC 2.0)
 
-**MCP Tools (15):** `pkb_query`, `pkb_ingest`, `pkb_ingest_file`, `pkb_health`, `pkb_collections`, `pkb_agent_query`, `pkb_artifacts`, `pkb_recategorize`, `pkb_triage`, `pkb_rectify`, `pkb_audit`, `pkb_maintain`, `pkb_check_hallucinations`, `pkb_memory_extract`, `pkb_memory_archive`
+**MCP Tools (18):** `pkb_query`, `pkb_ingest`, `pkb_ingest_file`, `pkb_health`, `pkb_collections`, `pkb_agent_query`, `pkb_artifacts`, `pkb_recategorize`, `pkb_triage`, `pkb_rectify`, `pkb_audit`, `pkb_maintain`, `pkb_curate`, `pkb_digest`, `pkb_scheduler_status`, `pkb_check_hallucinations`, `pkb_memory_extract`, `pkb_memory_archive`
 
 **Authentication (Phase 6D, opt-in):** Set `CERID_API_KEY` env var to enable. Requests require `X-API-Key` header. Exempt: `/health`, `/mcp/*`, `/docs`.
 **Rate Limiting:** `/agent/*` (20 req/min), `/ingest*` (10 req/min), `/recategorize*` (10 req/min) per client IP.
@@ -338,19 +344,19 @@ cerid-ai/
 ├── data -> src/mcp/data
 │
 ├── .github/
-│   ├── workflows/ci.yml              # 6-job CI (lint, test, security, lock-sync, frontend, docker)
+│   ├── workflows/ci.yml              # 7-job CI (lint, test, security, lock-sync, frontend, docker, codeql)
 │   └── dependabot.yml                # Weekly grouped PRs (pip, npm, actions, docker)
 │
 ├── docs/
 │   ├── CERID_AI_PROJECT_REFERENCE.md  # Detailed technical reference
 │   ├── DEPENDENCY_COUPLING.md         # Cross-service version constraints
-│   ├── ISSUES.md                      # Issue tracker (5 open)
+│   ├── ISSUES.md                      # Issue tracker (1 open)
 │   ├── OPERATIONS.md                  # API keys, secrets, rate limits, CI
 │   ├── PHASE4_PLAN.md
 │   └── plans/                         # Implementation plans (6 docs)
 │
 ├── scripts/
-│   ├── start-cerid.sh                 # One-command 4-step startup
+│   ├── start-cerid.sh                 # One-command 5-step startup
 │   ├── validate-env.sh                # Pre-flight validation (--quick, --fix)
 │   ├── cerid-sync.py                  # Knowledge base sync CLI
 │   ├── env-lock.sh                    # Encrypt .env → .env.age
@@ -368,7 +374,7 @@ cerid-ai/
 │   │   └── features.py                # Feature flags, tier constants
 │   ├── deps.py                        # DB singletons, retry wrappers, auth validation
 │   ├── scheduler.py                   # APScheduler maintenance engine
-│   ├── tools.py                       # MCP tool registry + dispatcher (17 tools)
+│   ├── tools.py                       # MCP tool registry + dispatcher (18 tools)
 │   ├── sync_check.py                  # Auto-import on startup
 │   ├── Dockerfile                     # python:3.11.14-slim, non-root user
 │   ├── docker-compose.yml             # MCP + Dashboard + React GUI
@@ -377,23 +383,26 @@ cerid-ai/
 │   ├── requirements-dev.txt           # Test dependencies
 │   ├── requirements-dev.lock          # Dev lock file with hashes
 │   │
-│   ├── routers/                       # FastAPI routers (11 modules)
+│   ├── routers/                       # FastAPI routers (13 modules)
 │   │   ├── health.py, query.py, ingestion.py, artifacts.py
-│   │   ├── agents.py, digest.py, mcp_sse.py, taxonomy.py
-│   │   ├── settings.py, upload.py, memories.py
+│   │   ├── agents.py, chat.py, digest.py, mcp_sse.py
+│   │   ├── taxonomy.py, settings.py, upload.py
+│   │   ├── sync.py, memories.py
 │   │   └── __init__.py
 │   │
 │   ├── services/                      # Service layer
 │   │   └── ingestion.py               # Core ingest pipeline (extracted from router)
 │   │
-│   ├── agents/                        # 7 Agent modules
+│   ├── agents/                        # 9 Agent modules
 │   │   ├── query_agent.py             # Multi-domain + LLM reranking
 │   │   ├── triage.py                  # LangGraph triage pipeline
 │   │   ├── rectify.py                 # KB health checks + auto-fix
 │   │   ├── audit.py                   # Usage analytics + conversation costs
 │   │   ├── maintenance.py             # System health + cleanup
 │   │   ├── hallucination.py           # Claim extraction + KB verification
-│   │   └── memory.py                  # Memory extraction + archival
+│   │   ├── memory.py                  # Memory extraction + archival
+│   │   ├── curator.py                 # Artifact quality scoring + synopsis
+│   │   └── self_rag.py                # Self-RAG validation loop
 │   │
 │   ├── db/                            # Database layer
 │   │   └── neo4j/                     # Neo4j CRUD package
@@ -438,7 +447,7 @@ cerid-ai/
 │   │   ├── rate_limit.py              # Sliding window rate limiter + headers
 │   │   └── request_id.py             # X-Request-ID middleware
 │   │
-│   └── tests/                         # 564 pytest tests (27 test files)
+│   └── tests/                         # 950 pytest tests (36 test files)
 │
 ├── src/web/                           # React GUI (Phase 6+)
 │   ├── .nvmrc                         # Node version source of truth (22)
@@ -454,7 +463,7 @@ cerid-ai/
 │       │                              # use-model-router, use-model-switch,
 │       │                              # use-smart-suggestions, use-live-metrics
 │       ├── contexts/                  # KB injection context provider
-│       ├── __tests__/                 # 94 vitest tests (7 test files)
+│       ├── __tests__/                 # 320 vitest tests (24 test files)
 │       └── components/
 │           ├── layout/                # Sidebar, status bar, split-pane
 │           ├── chat/                  # Chat panel, input, bubbles, dashboard,
@@ -497,7 +506,7 @@ cerid-ai/
 | `scripts/cerid-sync.py` | Knowledge base sync CLI (export/import/status) |
 | `Makefile` | lock-python, install-hooks, deps-check targets |
 | `docs/DEPENDENCY_COUPLING.md` | Cross-service version constraints |
-| `docs/ISSUES.md` | Open issues and backlog (5 open) |
+| `docs/ISSUES.md` | Open issues and backlog (1 open) |
 | `docs/OPERATIONS.md` | API keys, secrets rotation, rate limits, CI reference |
 
 ### Secrets Management
@@ -560,7 +569,7 @@ See `docs/DEPENDENCY_COUPLING.md` for constraints that span files (ChromaDB clie
 ### Start / Stop
 
 ```bash
-# Start (4-step: Infrastructure → Bifrost → MCP → LibreChat)
+# Start (5-step: Infrastructure → Bifrost → MCP → React GUI → LibreChat)
 ./scripts/start-cerid.sh
 
 # Start with rebuild (after pulling code changes)
@@ -580,7 +589,7 @@ cd ~/cerid-ai/stacks/infrastructure && docker compose down
 cd ~/cerid-ai/src/mcp && docker compose up -d --build mcp-server
 
 # Rebuild React GUI only
-cd ~/cerid-ai/src/mcp && docker compose up -d --build cerid-web
+cd ~/cerid-ai/src/web && docker compose up -d --build cerid-web
 ```
 
 ### View Logs
@@ -727,24 +736,58 @@ Auto-import on startup: when MCP starts with an empty Neo4j database and a valid
 - [x] **9C:** 3 feature enhancements — file upload, sub-category/tag display, tag browsing
 - [x] **9D:** Neo4j auth hardening — docker-compose env var fix, Cypher auth validation
 
-### Phase 10: Commercial & Open-Source Readiness (In Progress)
-- [x] **10A:** Production quality — Apache-2.0 copyright headers (132 files), source attribution in chat, frontend test suite (68 vitest tests), CI hardening (6-job pipeline)
-- [x] **10B:** UX polish — model switch dividers, provider-colored model badges (Anthropic amber, OpenAI emerald, Google blue)
-- [x] **Codebase Audit:** Dependency purge (~700MB Docker savings), Docker security hardening (non-root user, pinned images), dead code removal, logic consolidation, error handling overhaul (`except: pass` → logged), input validation (Pydantic response models), accessibility fixes (33 across 14 components), type safety, CI hardening (security scanning, coverage thresholds, Docker image scanning), frontend test expansion (34 → 68 tests)
-- [x] **Dependency Management:** Node version standardized to 22, pip-compile lock files with hashes, pinned CI tool versions, pinned Docker image tags, Dependabot config (weekly grouped PRs), pre-commit hook (lock file sync), cross-service coupling docs, CI lock-sync job, Makefile targets
-- [x] **Modularity Assessment:** Identified 4 structural splits needed, test coverage gaps across 10 modules, secondary cleanup items
-- [x] **10C:** Structural splits — service layer extraction, middleware hardening, MCP tool registry, config split, Neo4j data layer package, sync library package, parsers package
-- [x] **10D:** Test coverage + CI hardening — 564 backend tests (75% coverage), coverage threshold 55%, bundle size monitoring
-- [x] **10E:** Smart routing intelligence — token estimation, context replay cost, summarize-and-switch, model switch dialog with cost estimates, color-coded context gauge
+### Phase 10: Commercial & Open-Source Readiness ✅
+- [x] **10A-10E:** Production quality, UX polish, structural splits, 564 backend tests, smart model switching
 
-### Phase 11: Knowledge Intelligence
-- [ ] Interactive audit controls, taxonomy tree sidebar, knowledge curation agent design, operations documentation
+### Phase 11: Knowledge Intelligence ✅
+- [x] Interactive audit controls, taxonomy tree sidebar, curation agent design, operations documentation
 
-### Phase 12: RAG & Retrieval Excellence
-- [ ] Embedding model evaluation, BM25 replacement, hybrid retrieval weight tuning
+### Phase 12: RAG & Retrieval Excellence ✅
+- [x] BM25s replacement (stemming, stopwords, 500x faster), configurable retrieval weights, eval harness
 
-### Phase 13: Content & UX Polish
-- [ ] Artifact preview, conversation fork UI, frontend component tests
+### Phase 13: Conversation Intelligence ✅
+- [x] Conversation-aware KB queries, auto-injection with confidence gate, context budget optimization
+
+### Phase 14: Artifact Quality ✅
+- [x] Curation agent (4-dimension scoring), quality-weighted retrieval, metadata boost, AI synopses
+
+### Phase 15: Realtime Accuracy Watcher ✅
+- [x] Streaming verification via SSE, accuracy dashboard, claim feedback, model accuracy comparison
+
+### Phase 16: Quality, Cleanup & Polish ✅
+- [x] **16A-16H:** Security hardening, dead code cleanup, code quality, dependency optimization, feature wiring, artifact preview, documentation
+
+### Phase 17: iPad & Responsive Touch UX ✅
+- [x] Touch visibility, tablet layout, bottom sheet drawer, 44px touch targets, iOS safe area insets
+
+### Phase 18: Network Access & Demo Deployment ✅
+- [x] LAN auto-IP, Caddy HTTPS gateway, Cloudflare Tunnel for demos
+
+### Phase 19: Expert Orchestration & Validation ✅
+- [x] Circuit breakers, distributed tracing, semantic chunking, eval enhancements, adaptive quality feedback
+
+### Phase 20: Smart Tags & Artifact Quality ✅
+- [x] Per-domain tag vocabulary, typeahead UI, tag quality scoring, improved synopsis generation
+
+### Phase 21: Knowledge Sync & Multi-Computer Parity ✅
+- [x] **21A-21D:** Incremental sync, sync GUI, drag-drop ingestion, storage options
+
+### Phase 22: Deferred Items ✅
+- [x] CHANGELOG.md, ENV_CONVENTIONS.md, mypy type checking, frontend tests (271), Self-RAG validation loop
+
+### Phase 23: Production Hardening ✅
+- [x] Redis/MongoDB/ChromaDB auth, port binding, resource limits, CI timeouts, concurrency fixes
+
+### Phase 24: RAG Evolution — Expanded Verification ✅
+- [x] Four new claim type detectors (evasion, citation, recency, ignorance), verdict inversion, context-aware streaming
+
+### Phase 25: Smart Routing & Context-Aware Chat ✅
+- [x] **25A:** Direct-to-OpenRouter chat proxy, model catalog (9 models), `cerid_meta` SSE events
+- [x] **25B:** Capability-based scoring, three-way routing mode, auto-routing, capability badges
+- [x] **25C:** User corrections, token-budget KB injection, semantic dedup, domain headers, inline verification
+
+### Production Audit ✅
+- [x] Shared Bifrost utility, narrowed exception handling, nginx hardening, Docker resource limits, frontend consolidation
 
 ---
 

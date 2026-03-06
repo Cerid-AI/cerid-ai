@@ -3,6 +3,37 @@
 All notable changes to Cerid AI are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.12.0] - 2026-03-05
+
+### Changed
+- **Production Audit:** Consolidated 7 inline Bifrost httpx+circuit-breaker+tracing patterns into shared `utils/bifrost.py` utility across 4 agents (memory, query_agent, curator, hallucination)
+- Narrowed `except Exception` catches to specific types (`json.JSONDecodeError`, `KeyError`, `httpx.HTTPStatusError`, `ValueError`) in all 4 agent modules
+- Frontend API error handling consolidated via `extractError()` helper (eliminated 4 inline patterns)
+- Extracted `useSyncedToggle()` factory for 3 server-synced settings toggles in `use-settings.ts`
+
+### Added
+- nginx security headers (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`), SSE proxy timeouts (300s), `gzip_comp_level 4`
+- Docker container resource limits: MCP (4cpu/2G), Dashboard (1cpu/512M), Web (1cpu/256M), Bifrost (2cpu/1G)
+- Vite production sourcemaps disabled (`sourcemap: false`)
+- Makefile frontend targets (`lint-frontend`, `test-frontend`, `typecheck-frontend`, `build-frontend`, `check-all`, `help`)
+- 9 new Bifrost utility tests
+- Final counts: 950 Python tests, 320 frontend tests
+
+## [0.11.0] - 2026-03-05
+
+### Added
+- **Phase 24:** Expanded Verification — four new claim type detectors in hallucination agent: evasion (model hedging on factual questions), citation (fabricated sources), recency (stale data), ignorance (knowledge gaps). Each type has dedicated system prompts, verdict inversion logic, and frontend rendering (orange for evasion, purple for citation). Streaming pipeline accepts `user_query` and `conversation_history` for context-aware verification
+- **Phase 25A:** Direct-to-OpenRouter Chat Proxy — new `/chat/stream` MCP endpoint bypasses Bifrost for user chat, `cerid_meta`/`cerid_meta_update` SSE events for model confirmation, model catalog updated to 9 models with March 2026 pricing, `formatCost()` utility
+- **Phase 25B:** Intelligent Model Selection — capability-based `scoreModelForQuery()` with intent detection, three-way routing mode (`manual`/`recommend`/`auto`), enhanced recommendation reasoning, auto-routing with toast indicator, model dropdown capability badges
+- **Phase 25C:** Context-Aware Chat — user correction injection, token-budget KB injection (replaces hardcoded `slice(0, 3)`), semantic dedup via Jaccard similarity, domain headers on KB chunks, inline verification trigger
+- New utilities: `kb-utils.ts` (`jaccardSimilarity`, `deduplicateChunks`, `formatChunkWithHeader`), `verification-utils.ts` (`getClaimDisplayStatus`)
+- Copyright standardization across all source files
+- UUID fallback for insecure contexts (LAN access over plain HTTP)
+- 51 model-router tests, 13 KB utils tests, expanded hallucination tests
+
+### Fixed
+- `crypto.randomUUID()` breaks on LAN (non-secure context) — migrated all call sites to `uuid()` helper with `crypto.getRandomValues()` fallback
+
 ## [0.10.0] - 2026-03-04
 
 ### Added

@@ -42,6 +42,12 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 env/
 venv/
 .venv/

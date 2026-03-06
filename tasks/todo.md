@@ -1,12 +1,12 @@
 # Cerid AI — Task Tracker
 
 > **Last updated:** 2026-03-05
-> **Current status:** Phase 25 complete. 939 Python tests, 320 frontend tests. Smart routing + context-aware chat shipped.
+> **Current status:** Phase 25 + production audit complete. 950 Python tests, 320 frontend tests. Smart routing + context-aware chat shipped.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md)
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](../docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
 
-## Current: Phase 22 — Deferred Items (Complete)
+## Current: Phase 25 + Production Audit Complete
 
 ### 10A: Production Quality ✅
 - [x] A1 — Chat viewport overflow fix (CSS `min-h-0` cascade)
@@ -479,6 +479,17 @@
 - [x] `kb-utils.ts` utilities: `jaccardSimilarity()`, `deduplicateChunks()`, `formatChunkWithHeader()`
 - [x] 13 KB utils tests, correction flow integrated
 - [x] 939 Python tests, 320 frontend tests (24 test files)
+
+### Production Audit (Post-Phase 25) ✅
+- [x] Shared Bifrost call utility (`utils/bifrost.py`) — consolidated 7 inline httpx+circuit-breaker+tracing patterns
+- [x] Narrowed exception handling — replaced `except Exception` with specific types in 4 agents
+- [x] nginx security headers (X-Content-Type-Options, X-Frame-Options, Referrer-Policy) + SSE timeouts (300s)
+- [x] Docker resource limits on all services (MCP 4cpu/2G, Dashboard 1cpu/512M, Web 1cpu/256M, Bifrost 2cpu/1G)
+- [x] Vite production sourcemaps disabled
+- [x] Frontend API error handling consolidated (`extractError()` in 4 call sites)
+- [x] Settings toggle factory (`useSyncedToggle()` for 3 server-synced toggles)
+- [x] Makefile frontend targets (lint, test, typecheck, build, check-all, help)
+- [x] 950 Python tests, 320 frontend tests
 
 ### Deferred
 - [ ] D2: Conversation fork/branch UI (40-60 hrs, exploratory)
