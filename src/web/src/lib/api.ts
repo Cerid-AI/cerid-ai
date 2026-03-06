@@ -8,10 +8,21 @@ const MCP_BASE = _env?.VITE_MCP_URL || import.meta.env.VITE_MCP_URL || "http://l
 const BIFROST_BASE = _env?.VITE_BIFROST_URL || import.meta.env.VITE_BIFROST_URL || "/api/bifrost"
 const API_KEY = _env?.VITE_CERID_API_KEY || import.meta.env.VITE_CERID_API_KEY || ""
 
+/** Generate a UUID v4, with fallback for insecure contexts (plain HTTP on LAN). */
+function uuid(): string {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID()
+  // Fallback: crypto.getRandomValues is available in all contexts
+  const bytes = crypto.getRandomValues(new Uint8Array(16))
+  bytes[6] = (bytes[6] & 0x0f) | 0x40 // version 4
+  bytes[8] = (bytes[8] & 0x3f) | 0x80 // variant 1
+  const hex = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("")
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
 function mcpHeaders(extra: Record<string, string> = {}): Record<string, string> {
   const headers: Record<string, string> = { ...extra }
   if (API_KEY) headers["X-API-Key"] = API_KEY
-  headers["X-Request-ID"] = crypto.randomUUID()
+  headers["X-Request-ID"] = uuid()
   return headers
 }
 
