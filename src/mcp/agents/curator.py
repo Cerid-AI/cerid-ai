@@ -24,8 +24,8 @@ import httpx
 
 import config
 from db.neo4j.artifacts import list_artifacts, update_artifact_summary
-from middleware.request_id import tracing_headers
-from utils.circuit_breaker import CircuitOpenError, get_breaker
+from utils.bifrost import call_bifrost, extract_content
+from utils.circuit_breaker import CircuitOpenError
 from utils.time import utcnow, utcnow_iso
 
 logger = logging.getLogger("ai-companion.curator")
@@ -204,7 +204,6 @@ def _is_truncated_summary(summary: str) -> bool:
 
 async def _generate_synopsis(
     text: str,
-    bifrost_url: str,
     model: str,
     max_input_chars: int,
     max_tokens: int,
@@ -236,30 +235,16 @@ async def _generate_synopsis(
         f"Content:\n{snippet}"
     )
 
-    breaker = get_breaker("bifrost-synopsis")
-
-    async def _bifrost_synopsis() -> dict:
-        async with httpx.AsyncClient(timeout=config.BIFROST_TIMEOUT, headers=tracing_headers()) as client:
-            resp = await client.post(
-                f"{bifrost_url}/chat/completions",
-                json={
-                    "model": model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.3,
-                    "max_tokens": max_tokens,
-                },
-            )
-            if resp.status_code == 429:
-                raise httpx.HTTPStatusError(
-                    "Rate limited", request=resp.request, response=resp
-                )
-            resp.raise_for_status()
-            return resp.json()
-
     for attempt in range(2):
         try:
-            data = await breaker.call(_bifrost_synopsis)
-            content = data["choices"][0]["message"]["content"].strip()
+            data = await call_bifrost(
+                [{"role": "user", "content": prompt}],
+                breaker_name="bifrost-synopsis",
+                model=model,
+                temperature=0.3,
+                max_tokens=max_tokens,
+            )
+            content = extract_content(data)
             # Strip markdown code fences if present
             if content.startswith("```"):
                 content = content.split("\n", 1)[-1]
@@ -276,8 +261,8 @@ async def _generate_synopsis(
                 continue
             logger.warning(f"Synopsis generation failed: {e}")
             return ""
-        except Exception as e:
-            logger.warning(f"Synopsis generation failed: {e}")
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.warning("Synopsis generation failed: %s", e)
             return ""
     return ""
 
@@ -433,7 +418,6 @@ async def curate(
 
                 synopsis = await _generate_synopsis(
                     text,
-                    config.BIFROST_URL,
                     effective_model,
                     config.SYNOPSIS_MAX_INPUT_CHARS,
                     config.SYNOPSIS_MAX_TOKENS,

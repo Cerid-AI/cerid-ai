@@ -19,6 +19,15 @@ function mcpHeaders(extra: Record<string, string> = {}): Record<string, string> 
 
 import { parseTags } from "@/lib/utils"
 
+async function extractError(res: Response, fallback: string): Promise<string> {
+  try {
+    const body = await res.json()
+    return body.detail ?? fallback
+  } catch {
+    return fallback
+  }
+}
+
 import type {
   HealthResponse,
   ChatMessage,
@@ -118,10 +127,7 @@ export async function createDomain(
     headers: mcpHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ name, description, icon, sub_categories: subCategories }),
   })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: `Create domain failed: ${res.status}` }))
-    throw new Error(err.detail || `Create domain failed: ${res.status}`)
-  }
+  if (!res.ok) throw new Error(await extractError(res, `Create domain failed: ${res.status}`))
   return res.json()
 }
 
@@ -134,10 +140,7 @@ export async function createSubCategory(
     headers: mcpHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ domain, name }),
   })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: `Create sub-category failed: ${res.status}` }))
-    throw new Error(err.detail || `Create sub-category failed: ${res.status}`)
-  }
+  if (!res.ok) throw new Error(await extractError(res, `Create sub-category failed: ${res.status}`))
   return res.json()
 }
 
@@ -152,10 +155,7 @@ export async function recategorizeArtifact(
     headers: mcpHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ artifact_id: artifactId, new_domain: newDomain, sub_category: subCategory, tags }),
   })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: `Recategorize failed: ${res.status}` }))
-    throw new Error(err.detail || `Recategorize failed: ${res.status}`)
-  }
+  if (!res.ok) throw new Error(await extractError(res, `Recategorize failed: ${res.status}`))
   return res.json()
 }
 
@@ -457,10 +457,7 @@ export async function uploadFile(
     headers: mcpHeaders(),
     body: formData,
   })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: `Upload failed: ${res.status}` }))
-    throw new Error(err.detail || `Upload failed: ${res.status}`)
-  }
+  if (!res.ok) throw new Error(await extractError(res, `Upload failed: ${res.status}`))
   return res.json()
 }
 
@@ -638,15 +635,6 @@ export async function triggerSyncImport(options?: {
   })
   if (!res.ok) throw new Error(await extractError(res, "Sync import failed"))
   return res.json()
-}
-
-async function extractError(res: Response, fallback: string): Promise<string> {
-  try {
-    const body = await res.json()
-    return body.detail ?? fallback
-  } catch {
-    return fallback
-  }
 }
 
 // -- Archive API (Phase 21D) -------------------------------------------------

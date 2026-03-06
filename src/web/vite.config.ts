@@ -20,6 +20,7 @@ export default defineConfig({
     include: ["src/**/*.test.{ts,tsx}"],
   },
   build: {
+    sourcemap: false,
     chunkSizeWarningLimit: 800,
     rollupOptions: {
       output: {

@@ -20,6 +20,7 @@ import httpx
 
 import config
 from middleware.request_id import tracing_headers
+from utils.bifrost import call_bifrost, extract_content
 from utils.circuit_breaker import CircuitOpenError, get_breaker
 from utils.llm_parsing import parse_llm_json
 from utils.time import utcnow_iso
@@ -912,28 +913,18 @@ async def _extract_claims_llm(response_text: str, max_claims: int) -> list[str]:
         "JSON array:"
     )
 
-    breaker = get_breaker("bifrost-claims")
-
-    async def _bifrost_extract() -> dict:
-        async with httpx.AsyncClient(timeout=config.BIFROST_TIMEOUT, headers=tracing_headers()) as client:
-            resp = await client.post(
-                f"{config.BIFROST_URL}/chat/completions",
-                json={
-                    "model": config.VERIFICATION_MODEL,
-                    "messages": [
-                        {"role": "system", "content": _SYSTEM_CLAIM_EXTRACTION},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    "temperature": 0.1,
-                    "max_tokens": 1200,
-                },
-            )
-            resp.raise_for_status()
-            return resp.json()
-
     try:
-        data = await breaker.call(_bifrost_extract)
-        content = data["choices"][0]["message"]["content"].strip()
+        data = await call_bifrost(
+            [
+                {"role": "system", "content": _SYSTEM_CLAIM_EXTRACTION},
+                {"role": "user", "content": user_prompt},
+            ],
+            breaker_name="bifrost-claims",
+            model=config.VERIFICATION_MODEL,
+            temperature=0.1,
+            max_tokens=1200,
+        )
+        content = extract_content(data)
         raw = parse_llm_json(content)
         if isinstance(raw, list):
             # Handle both plain strings and structured {"claim": ..., "type": ...}
@@ -949,7 +940,7 @@ async def _extract_claims_llm(response_text: str, max_claims: int) -> list[str]:
         logger.warning("Bifrost claims circuit open, skipping LLM claim extraction")
     except httpx.HTTPStatusError as e:
         logger.warning("Claim extraction HTTP error: %s %s", e.response.status_code, e.response.text[:200])
-    except Exception as e:
+    except (json.JSONDecodeError, KeyError) as e:
         logger.warning("Claim extraction failed: %s", e)
 
     return []

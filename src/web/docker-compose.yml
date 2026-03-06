@@ -11,6 +11,11 @@ services:
     networks:
       - llm-network
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 256M
     healthcheck:
       test: ["CMD", "wget", "-qO/dev/null", "http://127.0.0.1:80/"]
       interval: 30s

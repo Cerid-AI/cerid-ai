@@ -27,6 +27,11 @@ services:
     networks:
       - llm-network
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 2G
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8888/health"]
       interval: 30s
@@ -44,6 +49,11 @@ services:
     networks:
       - llm-network
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
     depends_on:
       mcp-server:
         condition: service_healthy

@@ -7,6 +7,7 @@ import asyncio
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 # test_hallucination.py may inject a stub agents.query_agent with only
@@ -274,22 +275,16 @@ class TestRerankResults:
         assert len(reranked) == 1
         assert reranked[0]["relevance"] == 0.5
 
-    @patch("agents.query_agent.httpx")
-    @patch("agents.query_agent.parse_llm_json")
+    @patch("agents.query_agent.call_bifrost", new_callable=AsyncMock)
     @patch("agents.query_agent.config")
-    def test_llm_rerank_fallback_on_error(self, mock_config, mock_parse, mock_httpx):
+    def test_llm_rerank_fallback_on_error(self, mock_config, mock_call_bifrost):
         """When LLM reranking fails, falls back to embedding sort."""
         mock_config.QUERY_RERANK_CANDIDATES = 15
-        mock_config.BIFROST_TIMEOUT = 30
-        mock_config.BIFROST_URL = "http://bifrost:8080/v1"
-        mock_config.LLM_INTERNAL_MODEL = "meta-llama/llama-3.3-70b-instruct"
 
-        # Make the async client raise
-        mock_client = AsyncMock()
-        mock_client.post.side_effect = Exception("Connection refused")
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_httpx.AsyncClient.return_value = mock_client
+        # Make the Bifrost call raise
+        mock_call_bifrost.side_effect = httpx.HTTPStatusError(
+            "Connection refused", request=MagicMock(), response=MagicMock(status_code=502)
+        )
 
         results = [
             _make_result(relevance=0.3, artifact_id="a1"),

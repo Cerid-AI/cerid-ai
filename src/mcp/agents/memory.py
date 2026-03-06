@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import timedelta
 from typing import Any
@@ -12,9 +13,9 @@ from typing import Any
 import httpx
 
 import config
-from middleware.request_id import tracing_headers
+from utils.bifrost import call_bifrost, extract_content
 from utils.cache import log_event
-from utils.circuit_breaker import CircuitOpenError, get_breaker
+from utils.circuit_breaker import CircuitOpenError
 from utils.llm_parsing import parse_llm_json
 from utils.time import utcnow, utcnow_iso
 
@@ -52,25 +53,14 @@ async def extract_memories(
         "JSON array:"
     )
 
-    breaker = get_breaker("bifrost-memory")
-
-    async def _bifrost_memory() -> dict:
-        async with httpx.AsyncClient(timeout=config.BIFROST_TIMEOUT, headers=tracing_headers()) as client:
-            resp = await client.post(
-                f"{config.BIFROST_URL}/chat/completions",
-                json={
-                    "model": config.LLM_INTERNAL_MODEL,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.1,
-                    "max_tokens": 1000,
-                },
-            )
-            resp.raise_for_status()
-            return resp.json()
-
     try:
-        data = await breaker.call(_bifrost_memory)
-        content = data["choices"][0]["message"]["content"].strip()
+        data = await call_bifrost(
+            [{"role": "user", "content": prompt}],
+            breaker_name="bifrost-memory",
+            temperature=0.1,
+            max_tokens=1000,
+        )
+        content = extract_content(data)
         memories = parse_llm_json(content)
         if not isinstance(memories, list):
             return []
@@ -92,8 +82,8 @@ async def extract_memories(
     except CircuitOpenError:
         logger.warning("Bifrost memory circuit open, skipping memory extraction")
         return []
-    except Exception as e:
-        logger.warning(f"Memory extraction LLM call failed: {e}")
+    except (httpx.HTTPStatusError, json.JSONDecodeError, KeyError) as e:
+        logger.warning("Memory extraction LLM call failed: %s", e)
         return []
 
 
@@ -172,8 +162,8 @@ async def extract_and_store_memories(
                                 memory_id=result["artifact_id"],
                                 convo_id=conversation_id,
                             )
-                    except Exception as e:
-                        logger.warning(f"Failed to create EXTRACTED_FROM relationship: {e}")
+                    except Exception as e:  # Neo4j driver exceptions vary by version
+                        logger.warning("Failed to create EXTRACTED_FROM relationship: %s", e)
 
             results.append({
                 "memory_type": mem["memory_type"],
@@ -232,8 +222,8 @@ async def archive_old_memories(
             "cutoff_date": cutoff,
             "archived_count": archived_count,
         }
-    except Exception as e:
-        logger.error(f"Memory archival failed: {e}")
+    except Exception as e:  # Neo4j driver exceptions vary by version
+        logger.error("Memory archival failed: %s", e)
         return {
             "timestamp": utcnow_iso(),
             "retention_days": retention_days,

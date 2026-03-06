@@ -17,6 +17,11 @@ services:
     networks:
       - llm-network
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
     healthcheck:
       test: ["CMD", "wget", "-qO/dev/null", "http://localhost:8080/api/providers"]
       interval: 30s

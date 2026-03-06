@@ -13,11 +13,11 @@ from typing import Any
 import httpx
 
 import config
-from config import BIFROST_URL, DOMAINS
+from config import DOMAINS
 from deps import get_chroma
-from middleware.request_id import tracing_headers
+from utils.bifrost import call_bifrost, extract_content
 from utils.cache import log_event
-from utils.circuit_breaker import CircuitOpenError, get_breaker
+from utils.circuit_breaker import CircuitOpenError
 from utils.llm_parsing import parse_llm_json
 
 logger = logging.getLogger("ai-companion.query_agent")
@@ -425,26 +425,15 @@ async def rerank_results(
         + f"\n\nRespond with ONLY a JSON array like [2, 0, 5, 1, ...] containing all indices 0-{len(candidates)-1}."
     )
 
-    breaker = get_breaker("bifrost-rerank")
-
-    async def _bifrost_rerank() -> dict:
-        async with httpx.AsyncClient(timeout=config.BIFROST_TIMEOUT, headers=tracing_headers()) as client:
-            resp = await client.post(
-                f"{BIFROST_URL}/chat/completions",
-                json={
-                    "model": config.LLM_INTERNAL_MODEL,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.0,
-                    "max_tokens": 200,
-                },
-            )
-            resp.raise_for_status()
-            return resp.json()
-
     try:
-        data = await breaker.call(_bifrost_rerank)
+        data = await call_bifrost(
+            [{"role": "user", "content": prompt}],
+            breaker_name="bifrost-rerank",
+            temperature=0.0,
+            max_tokens=200,
+        )
 
-        content = data["choices"][0]["message"]["content"].strip()
+        content = extract_content(data)
         ranking = parse_llm_json(content)
 
         if not isinstance(ranking, list):
@@ -477,8 +466,8 @@ async def rerank_results(
     except CircuitOpenError:
         logger.warning("Bifrost rerank circuit open, falling back to embedding sort")
         return sorted(results, key=lambda x: x["relevance"], reverse=True)
-    except Exception as e:
-        logger.warning(f"LLM reranking failed, falling back to embedding sort: {e}")
+    except (httpx.HTTPStatusError, json.JSONDecodeError, KeyError, ValueError) as e:
+        logger.warning("LLM reranking failed, falling back to embedding sort: %s", e)
         return sorted(results, key=lambda x: x["relevance"], reverse=True)
 
 
