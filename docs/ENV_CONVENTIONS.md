@@ -1,6 +1,6 @@
 # Environment Variable Conventions
 
-> **Last updated:** 2026-03-03
+> **Last updated:** 2026-03-07
 > **Reference:** `.env.example` (template), `src/mcp/config/settings.py` (reader)
 
 ## Naming Rules for New Variables
@@ -11,6 +11,7 @@
 4. **Cron schedules** use `SCHEDULE_` prefix: `SCHEDULE_RECTIFY`, `SCHEDULE_SYNC_EXPORT`
 5. **Tuning parameters** are bare descriptive names: `HYBRID_VECTOR_WEIGHT`, `HALLUCINATION_THRESHOLD`
 6. **Secrets** are bare service names: `NEO4J_PASSWORD`, `OPENROUTER_API_KEY`, `CERID_API_KEY`
+7. **Port overrides** use `CERID_PORT_` prefix: `CERID_PORT_GUI`, `CERID_PORT_MCP`
 
 ## Known Inconsistencies
 
@@ -46,6 +47,23 @@ These exist for historical reasons and should **not** be renamed (would break ex
 | `POSTGRES_DB` | `mydatabase` | PostgreSQL database name |
 | `REDIS_PASSWORD` | *(empty)* | Redis auth password |
 | `MEILI_MASTER_KEY` | *(empty)* | Meilisearch master key |
+
+### Port Overrides (optional)
+
+All services use sensible default ports. Override only when you have port conflicts or need custom port assignments (e.g., running multiple instances or behind a reverse proxy).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CERID_PORT_GUI` | `3000` | React GUI (host-side) |
+| `CERID_PORT_MCP` | `8888` | MCP Server API (host-side) |
+| `CERID_PORT_BIFROST` | `8080` | Bifrost LLM Gateway (host-side) |
+| `CERID_PORT_NEO4J` | `7474` | Neo4j HTTP browser (host-side, bound to 127.0.0.1) |
+| `CERID_PORT_NEO4J_BOLT` | `7687` | Neo4j Bolt protocol (host-side, bound to 127.0.0.1) |
+| `CERID_PORT_CHROMA` | `8001` | ChromaDB (host-side, bound to 127.0.0.1) |
+| `CERID_PORT_REDIS` | `6379` | Redis (host-side, bound to 127.0.0.1) |
+| `CERID_PORT_DASHBOARD` | `8501` | Streamlit Dashboard (host-side) |
+
+Port overrides affect the host-side port mapping only. Container-internal ports remain unchanged. The `start-cerid.sh` script exports these with defaults and uses them in preflight checks, health checks, and access URL output.
 
 ### Network & Access (optional)
 

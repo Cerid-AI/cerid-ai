@@ -5,8 +5,8 @@ services:
     container_name: ai-companion-neo4j
     image: neo4j:5.26.21-community
     ports:
-      - "127.0.0.1:7474:7474"
-      - "127.0.0.1:7687:7687"
+      - "127.0.0.1:${CERID_PORT_NEO4J:-7474}:7474"
+      - "127.0.0.1:${CERID_PORT_NEO4J_BOLT:-7687}:7687"
     volumes:
       - ./data/neo4j:/data
       - ./data/neo4j-logs:/logs
@@ -34,7 +34,7 @@ services:
     container_name: ai-companion-chroma
     image: chromadb/chroma:0.5.23
     ports:
-      - "127.0.0.1:8001:8000"
+      - "127.0.0.1:${CERID_PORT_CHROMA:-8001}:8000"
     volumes:
       - ./data/chroma:/chroma/chroma
     environment:
@@ -62,7 +62,7 @@ services:
     container_name: ai-companion-redis
     image: redis:7.4.8-alpine
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:${CERID_PORT_REDIS:-6379}:6379"
     volumes:
       - ./data/redis:/data
     environment:

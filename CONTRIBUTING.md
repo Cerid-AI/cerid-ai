@@ -22,7 +22,7 @@ cd cerid-ai
 # Or manually:
 cp .env.example .env          # Edit with your API keys
 docker network create llm-network
-./scripts/start-cerid.sh      # Starts all 4 service groups
+./scripts/start-cerid.sh      # Starts all 5 service groups
 ```
 
 **Services after startup:**
@@ -79,11 +79,11 @@ src/mcp/
   deps.py           — Database client singletons
   scheduler.py      — APScheduler background jobs
   routers/          — FastAPI endpoint modules
-  agents/           — LangGraph agent workflows (7 agents)
+  agents/           — LangGraph agent workflows (9 agents)
   utils/            — Shared utilities (graph, BM25, parsers, features, etc.)
   plugins/          — Plugin system (loader, base classes)
   middleware/       — Auth + rate limiting
-  tests/            — pytest test suite (59 tests)
+  tests/            — pytest test suite (950 tests)
 
 src/web/
   src/components/   — React components (layout, chat, kb, monitoring, audit, ui)

@@ -1,7 +1,7 @@
 # Cerid AI — Task Tracker
 
-> **Last updated:** 2026-03-05
-> **Current status:** Phase 25 + production audit complete. 950 Python tests, 320 frontend tests. Smart routing + context-aware chat shipped.
+> **Last updated:** 2026-03-07
+> **Current status:** Phase 27 complete. 950 Python tests, 320 frontend tests. Configuration hardening for open-source readiness shipped.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md)
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](../docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
@@ -525,6 +525,36 @@
 - [ ] V3: Quick-access memory extraction toggle (30 min, after V6)
 - [ ] V13: Configurable feature tier (1 hr)
 - [ ] V21: Advanced response re-formatting/cleanup (8+ hrs)
+
+### Phase 27: Configuration Hardening (Open-Source Readiness) ✅
+
+#### 27A: Robust Host Detection ✅
+- [x] `detect_lan_ip()` function — iterates en0–en5, ifconfig scan, Linux hostname -I, with source logging
+- [x] Force-recreate cerid-web when VITE_MCP_URL changes (prevents stale IP bug)
+
+#### 27B: Pre-flight Validation ✅
+- [x] `preflight_checks()` function — port conflict detection, required env var validation, disk space warning
+- [x] `--force` flag to bypass pre-flight checks
+- [x] Own-container skip (don't flag our running containers as conflicts)
+
+#### 27C: Post-startup Reachability Validation ✅
+- [x] Bifrost added to health wait chain
+- [x] LAN MCP URL reachability check with actionable diagnostics
+- [x] Structured colored health output via `check_health()` helper
+- [x] Exit code 2 for partial start (critical services unreachable)
+
+#### 27D: First-Run Experience ✅
+- [x] `setup.sh` rewritten as guided 7-step installer (delegates to start-cerid.sh)
+- [x] Interactive API key prompt + auto-generate NEO4J_PASSWORD
+- [x] Idempotent — safe to re-run
+- [x] `.env.example` inline `# REQUIRED` markers with signup URLs
+- [x] `CONTRIBUTING.md` Quick Start + stale counts updated
+
+#### 27E: Configuration Flexibility ✅
+- [x] `CERID_PORT_*` env vars (8 ports) in 4 docker-compose files
+- [x] `start-cerid.sh` exports port defaults, uses them in preflight/health/URLs
+- [x] `.env.example` Port Overrides section
+- [x] `docs/ENV_CONVENTIONS.md` Port Overrides table + naming rule
 
 ### Deferred
 - [ ] D2: Conversation fork/branch UI (40-60 hrs, exploratory)

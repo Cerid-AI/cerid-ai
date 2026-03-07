@@ -5,7 +5,7 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8888:8888"
+      - "${CERID_PORT_MCP:-8888}:8888"
     volumes:
       - .:/app
       - ~/cerid-archive:/archive:ro
@@ -45,7 +45,7 @@ services:
       context: ../gui
       dockerfile: Dockerfile
     ports:
-      - "8501:8501"
+      - "${CERID_PORT_DASHBOARD:-8501}:8501"
     networks:
       - llm-network
     restart: unless-stopped
