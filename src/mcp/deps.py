@@ -57,16 +57,57 @@ _redis_lock = threading.Lock()
 _neo4j_lock = threading.Lock()
 
 
+class _EmbeddingAwareClient:
+    """Thin proxy that injects the configured embedding function automatically.
+
+    When ``EMBEDDING_MODEL`` differs from ChromaDB's built-in default,
+    the client-side ONNX embedding function is passed to every
+    ``get_or_create_collection`` / ``get_collection`` call so callers
+    don't need any changes.
+    """
+
+    __slots__ = ("_client", "_ef")
+
+    def __init__(self, client: Any) -> None:
+        object.__setattr__(self, "_client", client)
+        object.__setattr__(self, "_ef", None)
+
+    def _embedding_function(self) -> Any:
+        ef = object.__getattribute__(self, "_ef")
+        if ef is not None:
+            return ef
+        from utils.embeddings import get_embedding_function
+        ef = get_embedding_function()
+        object.__setattr__(self, "_ef", ef)
+        return ef
+
+    def get_or_create_collection(self, **kwargs: Any) -> Any:
+        ef = self._embedding_function()
+        if ef is not None and "embedding_function" not in kwargs:
+            kwargs["embedding_function"] = ef
+        return object.__getattribute__(self, "_client").get_or_create_collection(**kwargs)
+
+    def get_collection(self, **kwargs: Any) -> Any:
+        ef = self._embedding_function()
+        if ef is not None and "embedding_function" not in kwargs:
+            kwargs["embedding_function"] = ef
+        return object.__getattribute__(self, "_client").get_collection(**kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(object.__getattribute__(self, "_client"), name)
+
+
 def get_chroma() -> Any:
     global _chroma
     if _chroma is None:
         with _chroma_lock:
             if _chroma is None:
                 host, port = parse_chroma_url()
-                _chroma = chromadb.HttpClient(
+                raw = chromadb.HttpClient(
                     host=host, port=port, settings=ChromaSettings(anonymized_telemetry=False)
                 )
-                _retry(_chroma.heartbeat, "ChromaDB")
+                _retry(raw.heartbeat, "ChromaDB")
+                _chroma = _EmbeddingAwareClient(raw)
                 logger.info("ChromaDB connected")
     return _chroma
 

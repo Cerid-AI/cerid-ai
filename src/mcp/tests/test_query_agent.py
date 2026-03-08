@@ -262,7 +262,7 @@ class TestRerankResults:
             _make_result(relevance=0.6, artifact_id="a3"),
         ]
         reranked = asyncio.get_event_loop().run_until_complete(
-            rerank_results(results, "test", use_llm=False)
+            rerank_results(results, "test", use_reranking=False)
         )
         assert reranked[0]["relevance"] >= reranked[1]["relevance"]
         assert reranked[1]["relevance"] >= reranked[2]["relevance"]
@@ -270,7 +270,7 @@ class TestRerankResults:
     def test_single_candidate_skips_rerank(self):
         results = [_make_result(relevance=0.5)]
         reranked = asyncio.get_event_loop().run_until_complete(
-            rerank_results(results, "test", use_llm=True)
+            rerank_results(results, "test", use_reranking=True)
         )
         assert len(reranked) == 1
         assert reranked[0]["relevance"] == 0.5
@@ -279,6 +279,7 @@ class TestRerankResults:
     @patch("agents.query_agent.config")
     def test_llm_rerank_fallback_on_error(self, mock_config, mock_call_bifrost):
         """When LLM reranking fails, falls back to embedding sort."""
+        mock_config.RERANK_MODE = "llm"
         mock_config.QUERY_RERANK_CANDIDATES = 15
 
         # Make the Bifrost call raise
@@ -291,10 +292,150 @@ class TestRerankResults:
             _make_result(relevance=0.9, artifact_id="a2"),
         ]
         reranked = asyncio.get_event_loop().run_until_complete(
-            rerank_results(results, "test", use_llm=True)
+            rerank_results(results, "test", use_reranking=True)
         )
         # Fallback: sorted by relevance descending
         assert reranked[0]["relevance"] >= reranked[1]["relevance"]
+
+    @patch("agents.query_agent.config")
+    def test_cross_encoder_rerank(self, mock_config):
+        """Cross-encoder mode dispatches to utils.reranker and blends scores."""
+        mock_config.RERANK_MODE = "cross_encoder"
+        mock_config.QUERY_RERANK_CANDIDATES = 15
+        mock_config.RERANK_CE_WEIGHT = 0.6
+        mock_config.RERANK_ORIGINAL_WEIGHT = 0.4
+
+        results = [
+            _make_result(relevance=0.3, artifact_id="a1", content="Python tutorial"),
+            _make_result(relevance=0.9, artifact_id="a2", content="Java guide"),
+            _make_result(relevance=0.6, artifact_id="a3", content="Python best practices"),
+        ]
+
+        # Mock the cross-encoder reranker to return controlled scores
+        def fake_rerank(query, results_arg):
+            # Simulate: reorder by cross-encoder (Python chunks score higher)
+            for r in results_arg:
+                if "Python" in r["content"]:
+                    ce = 0.95
+                else:
+                    ce = 0.2
+                original = r["relevance"]
+                r["relevance"] = round(0.6 * ce + 0.4 * original, 4)
+            results_arg.sort(key=lambda x: x["relevance"], reverse=True)
+            return results_arg
+
+        with patch("utils.reranker.rerank", side_effect=fake_rerank):
+            reranked = asyncio.get_event_loop().run_until_complete(
+                rerank_results(results, "Python programming", use_reranking=True)
+            )
+
+        # Python content should rank higher despite lower original score
+        assert reranked[0]["artifact_id"] in ("a1", "a3")
+
+    @patch("agents.query_agent.config")
+    def test_cross_encoder_fallback_to_llm(self, mock_config):
+        """When cross-encoder fails, falls back to LLM reranking."""
+        mock_config.RERANK_MODE = "cross_encoder"
+        mock_config.QUERY_RERANK_CANDIDATES = 15
+
+        results = [
+            _make_result(relevance=0.3, artifact_id="a1"),
+            _make_result(relevance=0.9, artifact_id="a2"),
+        ]
+
+        with patch("utils.reranker.rerank", side_effect=RuntimeError("model not found")):
+            with patch("agents.query_agent._rerank_llm", new_callable=AsyncMock) as mock_llm:
+                mock_llm.return_value = sorted(
+                    results, key=lambda x: x["relevance"], reverse=True,
+                )
+                reranked = asyncio.get_event_loop().run_until_complete(
+                    rerank_results(results, "test", use_reranking=True)
+                )
+                mock_llm.assert_called_once()
+        assert reranked[0]["relevance"] >= reranked[1]["relevance"]
+
+    def test_rerank_mode_none_skips_reranking(self):
+        """RERANK_MODE=none returns results in original sorted order."""
+        results = [
+            _make_result(relevance=0.3, artifact_id="a1"),
+            _make_result(relevance=0.9, artifact_id="a2"),
+        ]
+
+        with patch("agents.query_agent.config") as mock_config:
+            mock_config.RERANK_MODE = "none"
+            reranked = asyncio.get_event_loop().run_until_complete(
+                rerank_results(results, "test", use_reranking=True)
+            )
+        # mode=none: pre-sorted by relevance but no reranking applied
+        assert reranked[0]["relevance"] == 0.9
+        assert reranked[1]["relevance"] == 0.3
+
+
+# ---------------------------------------------------------------------------
+# Tests: cross-encoder reranker module
+# ---------------------------------------------------------------------------
+
+class TestRerankerModule:
+    def test_rerank_empty_returns_empty(self):
+        from utils.reranker import rerank
+        assert rerank("test", []) == []
+
+    def test_rerank_single_returns_unchanged(self):
+        from utils.reranker import rerank
+        results = [_make_result(relevance=0.5)]
+        reranked = rerank("test", results)
+        assert len(reranked) == 1
+        assert reranked[0]["relevance"] == 0.5
+
+    def test_sigmoid_clipping(self):
+        import numpy as np
+
+        from utils.reranker import _sigmoid
+        # Extreme values should not overflow
+        assert _sigmoid(np.array([100.0]))[0] == pytest.approx(1.0, abs=1e-6)
+        assert _sigmoid(np.array([-100.0]))[0] == pytest.approx(0.0, abs=1e-6)
+        assert _sigmoid(np.array([0.0]))[0] == pytest.approx(0.5, abs=1e-6)
+
+    @patch("utils.reranker._load_model")
+    def test_rerank_blends_scores(self, mock_load):
+        """Verify score blending formula: CE_WEIGHT * ce + ORIGINAL_WEIGHT * original."""
+        import numpy as np
+
+        from utils.reranker import rerank
+
+        # Mock ONNX session that returns known logits
+        mock_session = MagicMock()
+        # 3 candidates, logits where sigmoid gives ~0.73, ~0.27, ~0.95
+        logits = np.array([[0.0, 1.0], [0.0, -1.0], [0.0, 3.0]], dtype=np.float32)
+        mock_session.run.return_value = [logits]
+        mock_session.get_inputs.return_value = [
+            MagicMock(name="input_ids"),
+            MagicMock(name="attention_mask"),
+            MagicMock(name="token_type_ids"),
+        ]
+
+        mock_tokenizer = MagicMock()
+        encoding = MagicMock()
+        encoding.ids = [101, 2003, 102, 2023, 102]
+        encoding.attention_mask = [1, 1, 1, 1, 1]
+        encoding.type_ids = [0, 0, 0, 1, 1]
+        mock_tokenizer.encode_batch.return_value = [encoding, encoding, encoding]
+
+        mock_load.return_value = (mock_session, mock_tokenizer)
+
+        results = [
+            _make_result(relevance=0.8, artifact_id="a1", content="doc A"),
+            _make_result(relevance=0.5, artifact_id="a2", content="doc B"),
+            _make_result(relevance=0.3, artifact_id="a3", content="doc C"),
+        ]
+
+        reranked = rerank("test query", results)
+        assert len(reranked) == 3
+        # All scores should be blended (not raw originals)
+        for r in reranked:
+            assert r["relevance"] != 0.8
+            assert r["relevance"] != 0.5
+            assert r["relevance"] != 0.3
 
 
 # ---------------------------------------------------------------------------

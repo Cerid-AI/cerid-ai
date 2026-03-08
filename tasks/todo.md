@@ -1,12 +1,44 @@
 # Cerid AI — Task Tracker
 
 > **Last updated:** 2026-03-08
-> **Current status:** Phase 31 complete. 950 Python tests, 347 frontend tests. Phase 30 deferred items resolved (type consolidation, hook extraction).
+> **Current status:** Phase 32 complete. 977 Python tests, 347 frontend tests. Core retrieval quality uplift (cross-encoder reranker, embedding model upgrade, contextual chunking).
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md) — 0 open
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](../docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
 
-## Current: Phase 31 — Deferred Item Resolution Complete
+## Current: Phase 32 — Core Retrieval Quality Uplift Complete
+
+### Cross-Encoder Reranker (P0) ✅
+- [x] Create `utils/reranker.py` — ONNX cross-encoder inference (`cross-encoder/ms-marco-MiniLM-L-6-v2`)
+- [x] Add `RERANK_MODE` config (cross_encoder/llm/none) with score blending weights
+- [x] Refactor `rerank_results()` in query_agent.py — three-mode dispatch with auto-fallback
+- [x] Pre-download model in Dockerfile (~91 MB baked into image)
+- [x] 7 new tests (cross-encoder rerank, fallback, none mode, reranker module)
+
+### Embedding Model Upgrade (P0) ✅
+- [x] Create `utils/embeddings.py` — ONNX embedding function (mean pooling, L2 norm, Matryoshka truncation)
+- [x] Create `_EmbeddingAwareClient` proxy in `deps.py` — auto-injects embedding function into all ChromaDB calls
+- [x] Add `EMBEDDING_MODEL`, `EMBEDDING_DIMENSIONS`, `EMBEDDING_ONNX_FILENAME` config
+- [x] Zero call-site changes — backward compatible when using server default model
+- [x] 9 new tests (embedding function, get_embedding_function, aware client)
+
+### Contextual Chunking (P1) ✅
+- [x] Create `utils/contextual.py` — LLM-generated situational summaries per chunk
+- [x] Add `ENABLE_CONTEXTUAL_CHUNKS` feature flag + `CONTEXTUAL_CHUNKS_MODEL` config
+- [x] Integrate into both ingest and re-ingest paths in `services/ingestion.py`
+- [x] Graceful failure — original chunks unchanged on any error
+- [x] 11 new tests (disabled, empty, enrichment, batching, errors, code blocks, metadata, truncation)
+
+#### New Files Created
+- `src/mcp/utils/reranker.py`
+- `src/mcp/utils/embeddings.py`
+- `src/mcp/utils/contextual.py`
+- `src/mcp/tests/test_embeddings.py`
+- `src/mcp/tests/test_contextual.py`
+
+---
+
+## Phase 31 — Deferred Item Resolution Complete
 
 ### Type Consolidation ✅
 - [x] Remove KBResult type — replaced with KBQueryResult (strict subset, 3 files: types.ts, kb-utils.ts, kb-utils.test.ts)

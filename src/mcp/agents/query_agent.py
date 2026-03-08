@@ -398,14 +398,47 @@ async def graph_expand_results(
 async def rerank_results(
     results: list[dict[str, Any]],
     query: str,
-    use_llm: bool = True
+    use_reranking: bool = True,
 ) -> list[dict[str, Any]]:
-    """Rerank results via Bifrost LLM. Falls back to embedding sort on failure."""
-    if not use_llm or len(results) == 0:
+    """Rerank results using the configured strategy.
+
+    Dispatches to cross-encoder (fast local ONNX) or Bifrost LLM based on
+    ``config.RERANK_MODE``.  Falls back to relevance sort on any failure.
+    """
+    if not use_reranking or len(results) == 0:
         return sorted(results, key=lambda x: x["relevance"], reverse=True)
 
     results = sorted(results, key=lambda x: x["relevance"], reverse=True)
 
+    mode = config.RERANK_MODE
+    if mode == "cross_encoder":
+        return await _rerank_cross_encoder(results, query)
+    if mode == "llm":
+        return await _rerank_llm(results, query)
+    # mode == "none" or unknown
+    return results
+
+
+async def _rerank_cross_encoder(
+    results: list[dict[str, Any]],
+    query: str,
+) -> list[dict[str, Any]]:
+    """Rerank via local cross-encoder model (ONNX, ~50 ms for 15 candidates)."""
+    try:
+        from utils.reranker import rerank as ce_rerank
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, ce_rerank, query, results)
+    except Exception as e:
+        logger.warning("Cross-encoder reranking failed, falling back to LLM: %s", e)
+        return await _rerank_llm(results, query)
+
+
+async def _rerank_llm(
+    results: list[dict[str, Any]],
+    query: str,
+) -> list[dict[str, Any]]:
+    """Rerank via Bifrost LLM call (legacy path)."""
     candidates = results[:config.QUERY_RERANK_CANDIDATES]
     remainder = results[config.QUERY_RERANK_CANDIDATES:]
 
@@ -440,7 +473,7 @@ async def rerank_results(
             raise ValueError("Expected a list of indices")
 
         valid_indices = set(range(len(candidates)))
-        seen = set()
+        seen: set[int] = set()
         reranked = []
         for idx in ranking:
             if isinstance(idx, int) and idx in valid_indices and idx not in seen:
@@ -451,7 +484,6 @@ async def rerank_results(
             if i not in seen:
                 reranked.append(r)
 
-        # Blend LLM rank score with original embedding score
         for rank_pos, result in enumerate(reranked):
             llm_score = 1.0 - (rank_pos / len(reranked))
             original_score = result["relevance"]
@@ -788,7 +820,7 @@ async def agent_query(
     results = await rerank_results(
         results=results,
         query=query,
-        use_llm=use_reranking,
+        use_reranking=use_reranking,
     )
 
     # Step 5.5: Quality boost — quality score multiplier after reranking

@@ -93,6 +93,15 @@ def _reingest_artifact(
         content, max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP,
         context_header=ctx_header,
     )
+
+    # Contextual enrichment — LLM-generated situational summaries per chunk
+    if config.ENABLE_CONTEXTUAL_CHUNKS:
+        try:
+            from utils.contextual import contextualize_chunks
+            chunks = contextualize_chunks(chunks, content, metadata)
+        except Exception as e:
+            logger.warning("Contextual enrichment skipped (re-ingest): %s", e)
+
     base_meta = {"domain": domain, "artifact_id": artifact_id, "ingested_at": utcnow_iso()}
     if metadata:
         base_meta.update(metadata)
@@ -223,6 +232,15 @@ def ingest_content(
         content, max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP,
         context_header=ctx_header,
     )
+
+    # Contextual enrichment — LLM-generated situational summaries per chunk
+    if config.ENABLE_CONTEXTUAL_CHUNKS:
+        try:
+            from utils.contextual import contextualize_chunks
+            chunks = contextualize_chunks(chunks, content, metadata)
+        except Exception as e:
+            logger.warning("Contextual enrichment skipped: %s", e)
+
     ingested_at = utcnow_iso()
     base_meta = {"domain": domain, "artifact_id": artifact_id, "ingested_at": ingested_at}
     if metadata:

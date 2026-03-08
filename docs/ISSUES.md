@@ -2,7 +2,7 @@
 
 > **Created:** 2026-02-25
 > **Last updated:** 2026-03-08
-> **Status:** Phase 31 complete. Phase 30 deferred items resolved (type consolidation, hook extraction). 73 resolved, 0 open. 950 Python tests, 347 frontend tests.
+> **Status:** Phase 32 complete. Core retrieval quality uplift (cross-encoder reranker, embedding model upgrade, contextual chunking). 73 resolved, 0 open. 977 Python tests, 347 frontend tests.
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21 roadmap)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](COMPLETED_PHASES.md)
 > **Purpose:** Track known bugs, feature gaps, structural issues, and architecture evaluations for upcoming phases.

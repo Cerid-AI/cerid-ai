@@ -16,6 +16,12 @@ RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 RUN useradd -m -u 1000 cerid && chown -R cerid:cerid /app
 USER cerid
 
+# Pre-download cross-encoder reranker model (baked into image, ~91 MB)
+RUN python -c "\
+from huggingface_hub import hf_hub_download; \
+hf_hub_download('cross-encoder/ms-marco-MiniLM-L-6-v2', 'onnx/model.onnx'); \
+hf_hub_download('cross-encoder/ms-marco-MiniLM-L-6-v2', 'tokenizer.json')"
+
 COPY --chown=cerid:cerid . .
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8888"]

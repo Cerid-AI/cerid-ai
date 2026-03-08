@@ -14,6 +14,10 @@ CHUNK_MAX_TOKENS = 512
 CHUNK_OVERLAP = 0.2  # 20% overlap between chunks
 CHUNKING_MODE = os.getenv("CHUNKING_MODE", "semantic")  # "token" or "semantic"
 
+# Contextual chunking — LLM-generated situational summaries prepended to each chunk.
+# Uses a lightweight model via Bifrost during ingestion.  Toggle: ENABLE_CONTEXTUAL_CHUNKS.
+CONTEXTUAL_CHUNKS_MODEL = os.getenv("CONTEXTUAL_CHUNKS_MODEL", "openrouter/meta-llama/llama-3.3-70b-instruct:free")
+
 # ---------------------------------------------------------------------------
 # Categorization tiers
 #   manual = domain from folder name only, no AI call
@@ -73,8 +77,24 @@ HYBRID_VECTOR_WEIGHT = float(os.getenv("HYBRID_VECTOR_WEIGHT", "0.6"))
 HYBRID_KEYWORD_WEIGHT = float(os.getenv("HYBRID_KEYWORD_WEIGHT", "0.4"))
 BM25_DATA_DIR = os.path.join(os.getenv("DATA_DIR", "data"), "bm25")
 QUERY_CONTEXT_MAX_CHARS = 14_000    # max chars assembled for LLM context
-QUERY_RERANK_CANDIDATES = 15        # max candidates sent to LLM reranker
+QUERY_RERANK_CANDIDATES = 15        # max candidates sent to reranker
 QUERY_CONTEXT_MESSAGES = 5          # max conversation messages used for query enrichment
+
+# Rerank mode: "cross_encoder" (fast local ONNX), "llm" (Bifrost), "none"
+RERANK_MODE = os.getenv("RERANK_MODE", "cross_encoder")
+
+# Cross-encoder model (HuggingFace repo ID)
+RERANK_CROSS_ENCODER_MODEL = os.getenv(
+    "RERANK_CROSS_ENCODER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2",
+)
+# ONNX filename within the repo — use quantized variants for faster inference:
+#   onnx/model.onnx            (91 MB, float32, any CPU)
+#   onnx/model_quint8_avx2.onnx (23 MB, int8, requires AVX2)
+RERANK_ONNX_FILENAME = os.getenv("RERANK_ONNX_FILENAME", "onnx/model.onnx")
+RERANK_MODEL_CACHE_DIR = os.getenv("RERANK_MODEL_CACHE_DIR", "")
+
+# Score blending weights (cross-encoder or LLM score vs original hybrid score)
+RERANK_CE_WEIGHT = float(os.getenv("RERANK_CE_WEIGHT", "0.6"))
 RERANK_LLM_WEIGHT = float(os.getenv("RERANK_LLM_WEIGHT", "0.6"))
 RERANK_ORIGINAL_WEIGHT = float(os.getenv("RERANK_ORIGINAL_WEIGHT", "0.4"))
 
@@ -95,8 +115,16 @@ GRAPH_RELATIONSHIP_TYPES = [
 # ---------------------------------------------------------------------------
 # Embedding Model
 # ---------------------------------------------------------------------------
+# HuggingFace repo ID.  "all-MiniLM-L6-v2" uses ChromaDB's built-in server-side
+# embedding (backward compatible, no migration needed).  Any other model triggers
+# client-side ONNX embedding via utils/embeddings.py.
+# Recommended upgrade: "Snowflake/snowflake-arctic-embed-m-v1.5" (768d, 8192 ctx)
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
-EMBEDDING_DIMENSIONS = int(os.getenv("EMBEDDING_DIMENSIONS", "384"))
+# Target dimensions (0 = use model's native output).  Matryoshka-capable models
+# support truncation (e.g. 768→256 for speed).
+EMBEDDING_DIMENSIONS = int(os.getenv("EMBEDDING_DIMENSIONS", "0"))
+EMBEDDING_ONNX_FILENAME = os.getenv("EMBEDDING_ONNX_FILENAME", "onnx/model.onnx")
+EMBEDDING_MODEL_CACHE_DIR = os.getenv("EMBEDDING_MODEL_CACHE_DIR", "")
 
 # ---------------------------------------------------------------------------
 # Hallucination Detection
