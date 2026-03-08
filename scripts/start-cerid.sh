@@ -57,7 +57,6 @@ export CERID_PORT_NEO4J="${CERID_PORT_NEO4J:-7474}"
 export CERID_PORT_NEO4J_BOLT="${CERID_PORT_NEO4J_BOLT:-7687}"
 export CERID_PORT_CHROMA="${CERID_PORT_CHROMA:-8001}"
 export CERID_PORT_REDIS="${CERID_PORT_REDIS:-6379}"
-export CERID_PORT_DASHBOARD="${CERID_PORT_DASHBOARD:-8501}"
 
 # --- Pre-flight checks (27B) ---
 preflight_checks() {
@@ -74,7 +73,7 @@ preflight_checks() {
     done
 
     # Check port conflicts (skip ports owned by our containers)
-    local our_containers="ai-companion-mcp|ai-companion-neo4j|ai-companion-chroma|ai-companion-redis|bifrost|cerid-web|LibreChat"
+    local our_containers="ai-companion-mcp|ai-companion-neo4j|ai-companion-chroma|ai-companion-redis|bifrost|cerid-web"
     check_port() {
         local port=$1 service=$2
         local pid
@@ -190,20 +189,17 @@ if [ -n "$BUILD_FLAG" ]; then
 fi
 
 # Start in dependency order — all stacks read .env from repo root
-echo "[1/5] Starting Infrastructure (Neo4j, ChromaDB, Redis)..."
+echo "[1/4] Starting Infrastructure (Neo4j, ChromaDB, Redis)..."
 docker compose -f "$CERID_ROOT/stacks/infrastructure/docker-compose.yml" --env-file "$ENV_FILE" up -d
 
-echo "[2/5] Starting Bifrost (LLM Gateway)..."
+echo "[2/4] Starting Bifrost (LLM Gateway)..."
 docker compose -f "$CERID_ROOT/stacks/bifrost/docker-compose.yml" --env-file "$ENV_FILE" up -d
 
-echo "[3/5] Starting MCP Services (MCP + Dashboard)..."
+echo "[3/4] Starting MCP Server..."
 docker compose -f "$CERID_ROOT/src/mcp/docker-compose.yml" --env-file "$ENV_FILE" up -d $BUILD_FLAG
 
-echo "[4/5] Starting React GUI..."
+echo "[4/4] Starting React GUI..."
 docker compose -f "$CERID_ROOT/src/web/docker-compose.yml" --env-file "$ENV_FILE" up -d $BUILD_FLAG $WEB_RECREATE
-
-echo "[5/5] Starting LibreChat..."
-docker compose -f "$CERID_ROOT/stacks/librechat/docker-compose.yml" --env-file "$ENV_FILE" up -d
 
 # Optional: Caddy reverse proxy for local HTTPS
 GATEWAY_ENABLED=$(grep -s '^CERID_GATEWAY=true' "$ENV_FILE" 2>/dev/null || echo "")
@@ -287,8 +283,6 @@ check_health() {
 check_health "MCP" "http://localhost:${CERID_PORT_MCP}/health"
 check_health "React GUI" "http://localhost:${CERID_PORT_GUI}"
 check_health "Bifrost" "http://localhost:${CERID_PORT_BIFROST}"
-check_health "LibreChat" "http://localhost:3080"
-check_health "Dashboard" "http://localhost:${CERID_PORT_DASHBOARD}/_stcore/health"
 check_health "Neo4j" "http://localhost:${CERID_PORT_NEO4J}"
 check_health "ChromaDB" "http://localhost:${CERID_PORT_CHROMA}/api/v1/heartbeat"
 REDIS_PASS=$(grep -s '^REDIS_PASSWORD=' "$ENV_FILE" | cut -d'=' -f2- || echo "")
@@ -301,9 +295,7 @@ fi
 
 echo ""
 echo "=== Access URLs ==="
-echo "React GUI: http://localhost:${CERID_PORT_GUI}  (primary)"
-echo "LibreChat: http://localhost:3080"
-echo "Dashboard: http://localhost:${CERID_PORT_DASHBOARD}"
+echo "React GUI: http://localhost:${CERID_PORT_GUI}"
 echo "MCP Docs:  http://localhost:${CERID_PORT_MCP}/docs"
 echo "Bifrost:   http://localhost:${CERID_PORT_BIFROST}"
 if [ "$CERID_HOST" != "localhost" ]; then

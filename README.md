@@ -18,7 +18,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 - **React GUI** at port 3000 — streaming chat, knowledge browser, monitoring & audit dashboards
 - **Multi-Provider LLM Access** via Bifrost gateway (Claude, GPT, Grok, Gemini, DeepSeek, Llama)
 - **9 Intelligent Agents** — Query (LLM reranking), Triage (LangGraph), Rectification, Audit, Maintenance, Hallucination Detection, Memory Extraction, Curation, Self-RAG
-- **18 MCP Tools** for knowledge base operations from LibreChat chat UI
+- **18 MCP Tools** for knowledge base operations via MCP protocol
 - **Hallucination Detection** — claim extraction + KB verification with per-message truth audit
 - **Memory Extraction** — facts, decisions, preferences extracted from conversations and stored as KB artifacts
 - **Smart Model Router** — complexity scoring, cost sensitivity, auto-switch recommendations
@@ -48,8 +48,6 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         USER BROWSER                                │
 │  http://localhost:3000  (React GUI — primary)                       │
-│  http://localhost:3080  (LibreChat — legacy)                        │
-│  http://localhost:8501  (Streamlit Dashboard — legacy admin)        │
 └────────────────┬────────────────────────────────────────────────────┘
                  │
     ┌────────────▼────────────┐
@@ -91,11 +89,6 @@ Host Processes (outside Docker):
 ├── watch_obsidian.py → Monitors Obsidian vault, POSTs to :8888
 └── ingest_cli.py     → Batch CLI tool, POSTs to :8888
 
-Supporting Services (LibreChat stack):
-├── MongoDB (27017) — LibreChat data storage
-├── Meilisearch (7700) — Search indexing
-├── PostgreSQL+pgvector (5432) — RAG vector store
-└── RAG API (8000) — Document processing
 ```
 
 ---
@@ -132,7 +125,7 @@ mkdir -p ~/cerid-archive/{coding,finance,projects,personal,general,inbox}
 ### 3. Start Services
 
 ```bash
-# Start all 5 service groups (Infrastructure → Bifrost → MCP → React GUI → LibreChat)
+# Start all 4 service groups (Infrastructure → Bifrost → MCP → React GUI)
 ./scripts/start-cerid.sh
 
 # Validate the environment
@@ -152,8 +145,6 @@ curl -s http://localhost:8888/health | python3 -m json.tool
 | Service | URL | Purpose |
 |---------|-----|---------|
 | **React GUI** | http://localhost:3000 | **Primary UI** — chat, KB, monitoring, audit |
-| LibreChat | http://localhost:3080 | Legacy chat interface (MCP tools) |
-| Dashboard | http://localhost:8501 | Legacy Streamlit admin UI |
 | MCP API | http://localhost:8888 | Knowledge base API |
 | API Docs | http://localhost:8888/docs | Swagger/OpenAPI docs |
 | Bifrost | http://localhost:8080 | LLM gateway dashboard |
@@ -209,7 +200,7 @@ On first startup with an empty Neo4j database, the MCP server auto-imports knowl
 After pulling new code, rebuild containers that use local Dockerfiles:
 
 ```bash
-./scripts/start-cerid.sh --build    # rebuilds MCP, Dashboard, React GUI
+./scripts/start-cerid.sh --build    # rebuilds MCP, React GUI
 ```
 
 ---
@@ -356,7 +347,7 @@ cerid-ai/
 │   └── plans/                         # Implementation plans (6 docs)
 │
 ├── scripts/
-│   ├── start-cerid.sh                 # One-command 5-step startup
+│   ├── start-cerid.sh                 # One-command 4-step startup
 │   ├── validate-env.sh                # Pre-flight validation (--quick, --fix)
 │   ├── cerid-sync.py                  # Knowledge base sync CLI
 │   ├── env-lock.sh                    # Encrypt .env → .env.age
@@ -377,7 +368,7 @@ cerid-ai/
 │   ├── tools.py                       # MCP tool registry + dispatcher (18 tools)
 │   ├── sync_check.py                  # Auto-import on startup
 │   ├── Dockerfile                     # python:3.11.14-slim, non-root user
-│   ├── docker-compose.yml             # MCP + Dashboard + React GUI
+│   ├── docker-compose.yml             # MCP server service
 │   ├── requirements.txt               # Human-editable dependency ranges
 │   ├── requirements.lock              # pip-compile with hashes (reproducible)
 │   ├── requirements-dev.txt           # Test dependencies
@@ -477,17 +468,11 @@ cerid-ai/
 │           ├── settings/              # Settings pane (server-synced)
 │           └── ui/                    # shadcn/ui primitives (14 components)
 │
-├── src/gui/                           # Streamlit Dashboard (legacy)
-│   ├── app.py
-│   ├── Dockerfile
-│   └── requirements.txt
-│
 └── stacks/
     ├── infrastructure/                # Neo4j, ChromaDB, Redis (pinned versions)
     │   ├── docker-compose.yml
     │   └── data/                      # Persistent DB data (.gitignored)
-    ├── bifrost/                       # LLM Gateway
-    └── librechat/                     # Chat UI
+    └── bifrost/                       # LLM Gateway
 ```
 
 ---
@@ -501,7 +486,6 @@ cerid-ai/
 | `.env` | All secrets (root, encrypted as `.env.age` with age) |
 | `src/mcp/config/` | Domains, file extensions, AI tiers, taxonomy, DB URLs |
 | `stacks/bifrost/data/config.json` | LLM routing, provider config |
-| `stacks/librechat/librechat.yaml` | MCP servers, endpoints, model list |
 | `scripts/validate-env.sh` | Pre-flight environment validation (14 checks) |
 | `scripts/cerid-sync.py` | Knowledge base sync CLI (export/import/status) |
 | `Makefile` | lock-python, install-hooks, deps-check targets |
@@ -569,14 +553,13 @@ See `docs/DEPENDENCY_COUPLING.md` for constraints that span files (ChromaDB clie
 ### Start / Stop
 
 ```bash
-# Start (5-step: Infrastructure → Bifrost → MCP → React GUI → LibreChat)
+# Start (4-step: Infrastructure → Bifrost → MCP → React GUI)
 ./scripts/start-cerid.sh
 
 # Start with rebuild (after pulling code changes)
 ./scripts/start-cerid.sh --build
 
 # Stop all stacks
-cd ~/cerid-ai/stacks/librechat && docker compose down
 cd ~/cerid-ai/src/mcp && docker compose down
 cd ~/cerid-ai/stacks/bifrost && docker compose down
 cd ~/cerid-ai/stacks/infrastructure && docker compose down
@@ -596,8 +579,6 @@ cd ~/cerid-ai/src/web && docker compose up -d --build cerid-web
 
 ```bash
 docker logs ai-companion-mcp --tail 50 -f
-docker logs ai-companion-dashboard --tail 50 -f
-docker logs LibreChat --tail 50 -f
 docker logs bifrost --tail 50 -f
 ```
 
@@ -656,18 +637,12 @@ Auto-import on startup: when MCP starts with an empty Neo4j database and a valid
 | Port | Service | Container | Image | Purpose |
 |------|---------|-----------|-------|---------|
 | 3000 | **React GUI** | cerid-web | node:22 → nginx:1.27 | **Primary UI** |
-| 3080 | LibreChat | LibreChat | librechat-dev | Legacy Chat UI |
 | 8080 | Bifrost | bifrost | bifrost | LLM Gateway |
 | 8888 | MCP Server | ai-companion-mcp | python:3.11.14 | Knowledge Base API |
-| 8501 | Dashboard | ai-companion-dashboard | python:3.11 | Legacy Admin UI |
-| 8000 | RAG API | rag_api | librechat-rag-api | Document Processing |
 | 8001 | ChromaDB | ai-companion-chroma | chroma:0.5.23 | Vector Store |
 | 7474 | Neo4j HTTP | ai-companion-neo4j | neo4j:5.26.21 | Graph DB Browser |
 | 7687 | Neo4j Bolt | ai-companion-neo4j | neo4j:5.26.21 | Graph DB Protocol |
 | 6379 | Redis | ai-companion-redis | redis:7.4.8-alpine | Cache + Audit |
-| 5432 | PostgreSQL | vectordb | pgvector | RAG Vector Store |
-| 27017 | MongoDB | chat-mongodb | mongo:8.0.17 | LibreChat Data |
-| 7700 | Meilisearch | chat-meilisearch | meilisearch:v1.12.3 | Search Index |
 
 ---
 
@@ -675,8 +650,8 @@ Auto-import on startup: when MCP starts with an empty Neo4j database and a valid
 
 ### Phase 0: Infrastructure ✅
 - [x] Docker stacks deployed on `llm-network`
-- [x] LibreChat + Bifrost + MCP integration
-- [x] MCP SSE transport — tools discoverable from LibreChat UI
+- [x] Bifrost + MCP integration
+- [x] MCP SSE transport — tools discoverable via MCP protocol
 
 ### Phase 1: Core Ingestion ✅
 - [x] File parsing (PDF, DOCX, XLSX, CSV, HTML, 30+ formats)
@@ -694,8 +669,7 @@ Auto-import on startup: when MCP starts with an empty Neo4j database and a valid
 - [x] Triage Agent (LangGraph), Rectification, Audit, Maintenance agents
 - [x] 15 MCP tools total
 
-### Phase 3: Dashboard & Integrations ✅
-- [x] Streamlit admin dashboard (5 panes)
+### Phase 3: Integrations ✅
 - [x] Obsidian vault watcher
 
 ### Phase 4: Optimization & Polish ✅
@@ -706,7 +680,7 @@ Auto-import on startup: when MCP starts with an empty Neo4j database and a valid
 
 ### Phase 5: Multi-Machine Sync ✅
 - [x] Infrastructure compose (Neo4j, ChromaDB, Redis in `stacks/infrastructure/`)
-- [x] 4-step startup script, environment validation (`validate-env.sh`)
+- [x] Startup script, environment validation (`validate-env.sh`)
 - [x] Knowledge base sync CLI (`cerid-sync.py`) — JSONL export/import via Dropbox
 - [x] Auto-import on startup for empty databases
 

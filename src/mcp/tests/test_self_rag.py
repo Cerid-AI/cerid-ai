@@ -428,14 +428,14 @@ class TestSelfRagEnhance:
 # ---------------------------------------------------------------------------
 
 class TestSelfRagConfig:
-    def test_enable_self_rag_default_false(self):
-        """ENABLE_SELF_RAG should default to False."""
+    def test_enable_self_rag_default_true(self):
+        """ENABLE_SELF_RAG should default to True."""
         import os
         saved = os.environ.get("ENABLE_SELF_RAG")
         try:
             os.environ.pop("ENABLE_SELF_RAG", None)
-            result = os.getenv("ENABLE_SELF_RAG", "false").lower() == "true"
-            assert result is False
+            result = os.getenv("ENABLE_SELF_RAG", "true").lower() == "true"
+            assert result is True
         finally:
             if saved is not None:
                 os.environ["ENABLE_SELF_RAG"] = saved

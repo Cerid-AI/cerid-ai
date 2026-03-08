@@ -34,7 +34,7 @@ AI_SNIPPET_MAX_CHARS = 1500
 # Bifrost / LLM Gateway
 # ---------------------------------------------------------------------------
 BIFROST_URL = os.getenv("BIFROST_URL", "http://bifrost:8080/v1")
-BIFROST_TIMEOUT = float(os.getenv("BIFROST_TIMEOUT", "30.0"))
+BIFROST_TIMEOUT = float(os.getenv("BIFROST_TIMEOUT", "20.0"))
 
 # Default model for internal LLM calls (reranking, hallucination, memory extraction)
 LLM_INTERNAL_MODEL = CATEGORIZE_MODELS["smart"]
@@ -83,7 +83,7 @@ RERANK_ORIGINAL_WEIGHT = float(os.getenv("RERANK_ORIGINAL_WEIGHT", "0.4"))
 # ---------------------------------------------------------------------------
 GRAPH_TRAVERSAL_DEPTH = 2                     # max hops when traversing relationships
 GRAPH_MAX_RELATED = 5                         # max related artifacts returned per query
-GRAPH_RELATED_SCORE_FACTOR = 0.4              # score multiplier for graph-sourced results (vs direct hits)
+GRAPH_RELATED_SCORE_FACTOR = 0.6              # score multiplier for graph-sourced results (vs direct hits)
 GRAPH_MIN_KEYWORD_OVERLAP = 2                 # min shared keywords to create RELATES_TO
 GRAPH_RELATIONSHIP_TYPES = [
     "RELATES_TO",       # shared metadata / same directory
@@ -173,8 +173,8 @@ QUALITY_SUMMARY_MIN_CHARS = 50      # below this: linear ramp to 0
 QUALITY_SUMMARY_MAX_CHARS = 500     # above this: gentle penalty
 QUALITY_KEYWORDS_OPTIMAL = 5        # keyword count for max score
 
-QUALITY_BOOST_FACTOR = 0.2          # max relevance multiplier from quality
-QUALITY_BOOST_BASE = 0.8            # base multiplier (score=0 artifact gets 0.8x)
+QUALITY_BOOST_FACTOR = 0.4          # max relevance multiplier from quality
+QUALITY_BOOST_BASE = 0.8            # base multiplier (score=0 → 0.8x, score=0.5 → 1.0x, score=1.0 → 1.2x)
 
 QUALITY_METADATA_TAG_BOOST = 0.05   # per-matching-tag relevance boost
 QUALITY_METADATA_SUBCAT_BOOST = 0.08  # sub_category match relevance boost

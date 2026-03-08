@@ -48,7 +48,7 @@ def _get_ext_verify_semaphore() -> asyncio.Semaphore:
 _MEMORY_TYPES = ["fact", "decision", "preference", "action_item"]
 
 # Authority boost for memory-sourced results (user-confirmed content)
-_MEMORY_AUTHORITY_BOOST = 0.05
+_MEMORY_AUTHORITY_BOOST = 0.15
 
 # Sentence-ending pattern for heuristic extraction
 _SENTENCE_RE = re.compile(
@@ -1219,7 +1219,7 @@ def _parse_verification_verdict(raw: str) -> dict[str, Any]:
         confidence = max(0.0, min(1.0, confidence))
         reasoning = str(parsed.get("reasoning", ""))
 
-        if verdict == "supported" and confidence >= 0.6:
+        if verdict == "supported" and confidence >= 0.5:
             status = "verified"
         elif verdict == "refuted":
             status = "unverified"
@@ -1674,8 +1674,10 @@ async def verify_claim(
         all_results.sort(key=lambda x: x.get("relevance", 0.0), reverse=True)
 
         # --- Fallback 1: No KB results at all → try external verification ---
+        # With zero KB evidence, cross-model guessing is unreliable —
+        # force web search so the verifier can look up authoritative sources.
         if not all_results:
-            ext_result = await _verify_claim_externally(claim, model)
+            ext_result = await _verify_claim_externally(claim, model, force_web_search=True)
             return {
                 "claim": claim,
                 "status": ext_result["status"],

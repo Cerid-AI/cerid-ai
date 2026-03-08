@@ -163,16 +163,7 @@ fi
 
 if [ "$QUICK" = false ]; then
 
-    # ── Check 7: Dashboard container ─────────────────────────────────────────
-    dash_status="$(docker inspect --format '{{.State.Status}}' ai-companion-dashboard 2>/dev/null || echo "missing")"
-
-    if [ "$dash_status" = "running" ]; then
-        pass "Container ai-companion-dashboard is running"
-    else
-        warn "Container ai-companion-dashboard is not running (status: $dash_status)"
-    fi
-
-    # ── Check 8: Data directories ─────────────────────────────────────────────
+    # ── Check 7: Data directories ─────────────────────────────────────────────
     DATA_ROOT="$CERID_ROOT/stacks/infrastructure/data"
     if [ -d "$DATA_ROOT" ]; then
         pass "Data directory exists at stacks/infrastructure/data/"

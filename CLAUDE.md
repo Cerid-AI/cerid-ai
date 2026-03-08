@@ -23,17 +23,11 @@ Microservices architecture with Docker Compose orchestration on a shared `llm-ne
 
 | Service | Port | Stack Path | Tech |
 |---------|------|------------|------|
-| LibreChat (UI) | 3080 | `stacks/librechat/` | Node.js/React |
 | MCP Server (API) | 8888 | `src/mcp/` | FastAPI / Python 3.11 |
 | Bifrost (LLM Gateway) | 8080 | `stacks/bifrost/` | Semantic intent routing |
 | ChromaDB (Vectors) | 8001 | `stacks/infrastructure/` | Vector DB |
 | Neo4j (Graph) | 7474/7687 | `stacks/infrastructure/` | Graph DB |
 | Redis (Cache) | 6379 | `stacks/infrastructure/` | Cache + audit log |
-| MongoDB (Chat) | 27017 | via `stacks/librechat/` | LibreChat persistence |
-| PostgreSQL+pgvector | 5432 | via `stacks/librechat/` | RAG vector storage |
-| Meilisearch | 7700 | via `stacks/librechat/` | Full-text search |
-| RAG API | 8000 | via `stacks/librechat/` | Document processing |
-| Dashboard (legacy) | 8501 | `src/gui/` | Streamlit admin UI |
 | React GUI | 3000 | `src/web/` | React 19 + Vite + nginx |
 
 ### Key Data Flow
@@ -41,8 +35,6 @@ Microservices architecture with Docker Compose orchestration on a shared `llm-ne
 ```
 User → React GUI (3000) → Bifrost (8080) → OpenRouter → LLM Provider
                         → MCP Server (8888) → ChromaDB/Neo4j (RAG context)
-
-Legacy: User → LibreChat (3080) → Bifrost (8080) → OpenRouter → LLM Provider
 
 File Ingestion:
 ~/cerid-archive/ → Watcher → POST /ingest_file → Parse → Dedup → Chunk → ChromaDB + Neo4j + Redis
@@ -81,8 +73,7 @@ React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly
 │   ├── src/contexts/            # SettingsContext, KBInjectionContext, ConversationsContext
 │   ├── src/components/          # layout/, chat/, kb/, monitoring/, audit/, memories/, settings/, ui/
 │   └── src/__tests__/           # 347 vitest tests (25 test files)
-├── src/gui/                     # Streamlit dashboard (legacy)
-├── stacks/                      # infrastructure/ (Neo4j, ChromaDB, Redis), bifrost/, librechat/
+├── stacks/                      # infrastructure/ (Neo4j, ChromaDB, Redis), bifrost/
 ├── artifacts/ → ~/Dropbox/AI-Artifacts (symlink)
 └── data/ → src/mcp/data (symlink)
 ```
@@ -103,11 +94,11 @@ Single `.env` file at repo root, encrypted with `age`. Key at `~/.config/cerid/a
 ### Starting the Stack
 
 ```bash
-./scripts/start-cerid.sh            # start all 5 service groups
+./scripts/start-cerid.sh            # start all 4 service groups
 ./scripts/start-cerid.sh --build    # rebuild images after code changes
 ```
 
-Startup order: `[1/5]` Infrastructure (Neo4j, ChromaDB, Redis) → `[2/5]` Bifrost → `[3/5]` MCP + Dashboard → `[4/5]` React GUI → `[5/5]` LibreChat.
+Startup order: `[1/4]` Infrastructure (Neo4j, ChromaDB, Redis) → `[2/4]` Bifrost → `[3/4]` MCP → `[4/4]` React GUI.
 
 ### Environment Validation
 
@@ -144,7 +135,6 @@ Cross-service version constraints: see `docs/DEPENDENCY_COUPLING.md`.
 - `.env` (repo root) — All secrets. Encrypted as `.env.age`. Never committed in plaintext.
 - `src/mcp/config/settings.py` — Domains, tiers, URLs, sync, model IDs
 - `stacks/bifrost/config.yaml` — Intent classification, model routing, budget
-- `stacks/librechat/librechat.yaml` — MCP servers, endpoints, model list
 
 ### Verification
 

@@ -13,7 +13,6 @@ neo4j>=5.0,<6
 redis>=4.0,<6
 
 # AI / NLP
-spacy>=3.5,<3.9
 tiktoken>=0.5,<1
 langgraph>=0.3.0,<0.4
 

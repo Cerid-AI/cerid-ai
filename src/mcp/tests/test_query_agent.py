@@ -704,30 +704,30 @@ class TestApplyQualityBoost:
 
     @patch("db.neo4j.artifacts.get_quality_scores")
     def test_basic_multiplier_quality_1(self, mock_scores):
-        """quality=1.0 → multiplier = 0.8 + 0.2*1.0 = 1.0 (no change)."""
+        """quality=1.0 → multiplier = 0.8 + 0.4*1.0 = 1.2 (20% boost)."""
         mock_scores.return_value = {"art-1": 1.0}
         results = [_make_result(relevance=0.8, artifact_id="art-1")]
         boosted = apply_quality_boost(results, neo4j_driver=MagicMock())
-        # 0.8 * (0.8 + 0.2 * 1.0) = 0.8 * 1.0 = 0.8
-        assert boosted[0]["relevance"] == round(0.8 * 1.0, 4)
+        # 0.8 * (0.8 + 0.4 * 1.0) = 0.8 * 1.2 = 0.96
+        assert boosted[0]["relevance"] == round(0.8 * 1.2, 4)
 
     @patch("db.neo4j.artifacts.get_quality_scores")
     def test_basic_multiplier_quality_0(self, mock_scores):
-        """quality=0.0 → multiplier = 0.8 + 0.2*0.0 = 0.8 (20% penalty)."""
+        """quality=0.0 → multiplier = 0.8 + 0.4*0.0 = 0.8 (20% penalty)."""
         mock_scores.return_value = {"art-1": 0.0}
         results = [_make_result(relevance=0.8, artifact_id="art-1")]
         boosted = apply_quality_boost(results, neo4j_driver=MagicMock())
-        # 0.8 * (0.8 + 0.2 * 0.0) = 0.8 * 0.8 = 0.64
+        # 0.8 * (0.8 + 0.4 * 0.0) = 0.8 * 0.8 = 0.64
         assert boosted[0]["relevance"] == round(0.8 * 0.8, 4)
 
     @patch("db.neo4j.artifacts.get_quality_scores")
     def test_basic_multiplier_quality_half(self, mock_scores):
-        """quality=0.5 → multiplier = 0.8 + 0.2*0.5 = 0.9."""
+        """quality=0.5 → multiplier = 0.8 + 0.4*0.5 = 1.0 (neutral)."""
         mock_scores.return_value = {"art-1": 0.5}
         results = [_make_result(relevance=0.8, artifact_id="art-1")]
         boosted = apply_quality_boost(results, neo4j_driver=MagicMock())
-        # 0.8 * (0.8 + 0.2 * 0.5) = 0.8 * 0.9 = 0.72
-        assert boosted[0]["relevance"] == round(0.8 * 0.9, 4)
+        # 0.8 * (0.8 + 0.4 * 0.5) = 0.8 * 1.0 = 0.8
+        assert boosted[0]["relevance"] == round(0.8 * 1.0, 4)
 
     @patch("db.neo4j.artifacts.get_quality_scores")
     def test_unscored_default(self, mock_scores):
@@ -735,9 +735,9 @@ class TestApplyQualityBoost:
         mock_scores.return_value = {}  # No scores returned
         results = [_make_result(relevance=0.8, artifact_id="art-1")]
         boosted = apply_quality_boost(results, neo4j_driver=MagicMock())
-        # Default quality = 0.5 → multiplier = 0.8 + 0.2 * 0.5 = 0.9
-        # 0.8 * 0.9 = 0.72
-        assert boosted[0]["relevance"] == round(0.8 * 0.9, 4)
+        # Default quality = 0.5 → multiplier = 0.8 + 0.4 * 0.5 = 1.0
+        # 0.8 * 1.0 = 0.8
+        assert boosted[0]["relevance"] == round(0.8 * 1.0, 4)
         assert boosted[0]["quality_score"] == 0.5
 
     @patch("db.neo4j.artifacts.get_quality_scores")

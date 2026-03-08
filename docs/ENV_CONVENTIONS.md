@@ -38,16 +38,6 @@ These exist for historical reasons and should **not** be renamed (would break ex
 | `OPENROUTER_API_KEY` | `.env` | *(none)* | OpenRouter API key for LLM access |
 | `OPENAI_API_KEY` | `.env` | *(none)* | OpenAI API key (embeddings) |
 
-### LibreChat Stack Credentials (optional)
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `POSTGRES_USER` | `myuser` | PostgreSQL username |
-| `POSTGRES_PASSWORD` | `mypassword` | PostgreSQL password |
-| `POSTGRES_DB` | `mydatabase` | PostgreSQL database name |
-| `REDIS_PASSWORD` | *(empty)* | Redis auth password |
-| `MEILI_MASTER_KEY` | *(empty)* | Meilisearch master key |
-
 ### Port Overrides (optional)
 
 All services use sensible default ports. Override only when you have port conflicts or need custom port assignments (e.g., running multiple instances or behind a reverse proxy).
@@ -61,7 +51,6 @@ All services use sensible default ports. Override only when you have port confli
 | `CERID_PORT_NEO4J_BOLT` | `7687` | Neo4j Bolt protocol (host-side, bound to 127.0.0.1) |
 | `CERID_PORT_CHROMA` | `8001` | ChromaDB (host-side, bound to 127.0.0.1) |
 | `CERID_PORT_REDIS` | `6379` | Redis (host-side, bound to 127.0.0.1) |
-| `CERID_PORT_DASHBOARD` | `8501` | Streamlit Dashboard (host-side) |
 
 Port overrides affect the host-side port mapping only. Container-internal ports remain unchanged. The `start-cerid.sh` script exports these with defaults and uses them in preflight checks, health checks, and access URL output.
 

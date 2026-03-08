@@ -267,23 +267,6 @@ LangGraph >=0.3.0 (pulls langchain-core transitively)
 
 ---
 
-## Streamlit Dashboard (Legacy)
-
-Admin and monitoring UI at `http://localhost:8501` (container: `ai-companion-dashboard`).
-
-**Panes:**
-- **Overview** — System health, domain distribution charts, collection listing
-- **Artifacts** — Browse/filter artifacts by domain, recategorize from UI
-- **Query** — Interactive multi-domain search with result visualization
-- **Audit** — Activity timeline, ingestion stats, cost estimates, query patterns
-- **Maintenance** — Health checks, stale detection, collection analysis, orphan cleanup
-
-**Stack:** Streamlit + Plotly + Pandas, communicates with MCP server REST API.
-
-**Start:** `cd src/mcp && docker compose up -d` (dashboard service included via `depends_on: mcp-server`)
-
----
-
 ## Adding a New Domain
 
 1. Edit `src/mcp/config/settings.py` → add to `DOMAINS` list
@@ -311,7 +294,6 @@ curl -X POST http://localhost:8888/recategorize \
 - `.env` (repo root) — All secrets. Encrypted as `.env.age`. Never committed in plaintext.
 - `src/mcp/config/settings.py` — Domains, extensions, categorization tiers, DB URLs
 - `stacks/bifrost/config.yaml` — Intent classification, model routing, budget
-- `stacks/librechat/librechat.yaml` — MCP servers, endpoints, model list
 
 **Key env vars (docker-compose.yml):**
 - `CATEGORIZE_MODE=smart` — Default tier (manual/smart/pro)
