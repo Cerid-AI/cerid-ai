@@ -342,6 +342,11 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
   const [correctionText, setCorrectionText] = useState("")
   const [headings, setHeadings] = useState<TOCEntry[]>([])
   const proseRef = useRef<HTMLDivElement>(null)
+  const [proseContainer, setProseContainer] = useState<HTMLDivElement | null>(null)
+  const proseCallbackRef = useCallback((node: HTMLDivElement | null) => {
+    proseRef.current = node
+    setProseContainer(node)
+  }, [])
 
   // Memoize claim span matching — used by both inline markup effect and ClaimOverlay
   const claimSpans = useMemo(
@@ -462,7 +467,7 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
               <span className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50" style={{ animationDelay: "300ms" }} />
             </div>
           ) : (
-            <div ref={proseRef} className="prose prose-sm dark:prose-invert max-w-none">
+            <div ref={proseCallbackRef} className="prose prose-sm dark:prose-invert max-w-none">
               {headings.length >= 3 && <MessageTOC headings={headings} />}
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
@@ -476,7 +481,7 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
 
         {!isUser && inlineMarkups && verificationClaims && verificationClaims.length > 0 && (
           <ClaimOverlay
-            container={proseRef.current}
+            container={proseContainer}
             claims={verificationClaims}
             claimSpans={claimSpans}
             onArtifactClick={onArtifactClick}
