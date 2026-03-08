@@ -87,11 +87,6 @@ export function findModel(modelId: string): ModelOption | undefined {
   return MODELS.find((m) => m.id === modelId)
 }
 
-export interface ArtifactChunk {
-  index: number
-  text: string
-}
-
 export interface ArtifactDetail {
   artifact_id: string
   title: string
@@ -100,7 +95,7 @@ export interface ArtifactDetail {
   source_type: string
   chunk_count: number
   total_content: string
-  chunks: ArtifactChunk[]
+  chunks: { index: number; text: string }[]
   metadata: Record<string, unknown>
 }
 
@@ -116,7 +111,6 @@ export interface HealthResponse {
 export type Theme = "dark" | "light"
 
 export const DOMAINS = ["coding", "finance", "projects", "personal", "general", "conversations"] as const
-export type Domain = (typeof DOMAINS)[number]
 
 export interface TaxonomySubCategory {
   name: string
@@ -132,11 +126,6 @@ export interface TaxonomyDomain {
 
 export interface TaxonomyResponse {
   domains: Record<string, TaxonomyDomain>
-}
-
-export interface TagInfo {
-  name: string
-  count: number
 }
 
 export interface TagSuggestion {
@@ -174,6 +163,7 @@ export interface KBQueryResult {
   relationship_type?: string
   cross_domain?: boolean
   quality_score?: number
+  summary?: string
 }
 
 /** Lightweight KB result used by kb-utils for dedup/formatting. */
@@ -210,11 +200,6 @@ export interface RelatedArtifact {
   relationship_type: string
   relationship_depth: number
   relationship_reason: string | null
-}
-
-export interface CollectionsResponse {
-  total: number
-  collections: string[]
 }
 
 export interface MaintenanceHealth {
@@ -384,6 +369,7 @@ export interface HallucinationClaim {
   user_feedback?: "correct" | "incorrect"
   verification_method?: "kb" | "cross_model" | "cross_model_failed" | "web_search" | "web_search_failed" | "none"
   verification_model?: string
+  verification_answer?: string
   consistency_issue?: string
 }
 
@@ -401,6 +387,7 @@ export interface StreamingClaim {
   reason?: string
   verification_method?: "kb" | "cross_model" | "cross_model_failed" | "web_search" | "web_search_failed" | "none"
   verification_model?: string
+  verification_answer?: string
   consistency_issue?: string
 }
 
@@ -494,6 +481,21 @@ export interface ServerSettings {
     storage_domain: string
     extraction_model: string
   }
+  // Infrastructure (read-only)
+  bifrost_url?: string
+  bifrost_timeout?: number
+  chroma_url?: string
+  neo4j_uri?: string
+  redis_url?: string
+  archive_path?: string
+  chunking_mode?: string
+  // Search tuning (read-write)
+  hybrid_vector_weight?: number
+  hybrid_keyword_weight?: number
+  rerank_llm_weight?: number
+  rerank_original_weight?: number
+  temporal_half_life_days?: number
+  temporal_recency_weight?: number
 }
 
 export interface SettingsUpdate {
@@ -507,6 +509,10 @@ export interface SettingsUpdate {
   enable_auto_inject?: boolean
   auto_inject_threshold?: number
   storage_mode?: string
+  hybrid_vector_weight?: number
+  hybrid_keyword_weight?: number
+  rerank_llm_weight?: number
+  rerank_original_weight?: number
 }
 
 export interface Memory {

@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { EmptyState } from "@/components/ui/empty-state"
 import { Activity } from "lucide-react"
 import type { AuditActivity } from "@/lib/types"
+import { CHART_TOOLTIP_STYLE } from "@/lib/constants"
 
 /** Color palette for event types (stacked areas). */
 const EVENT_COLORS: Record<string, string> = {
@@ -96,15 +97,7 @@ export function ActivityChart({ activity }: ActivityChartProps) {
             <AreaChart data={data}>
               <XAxis dataKey="hour" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
               <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
-              <Tooltip
-                contentStyle={{
-                  fontSize: 12,
-                  borderRadius: 8,
-                  backgroundColor: "hsl(var(--popover))",
-                  color: "hsl(var(--popover-foreground))",
-                  border: "1px solid hsl(var(--border))",
-                }}
-              />
+              <Tooltip contentStyle={CHART_TOOLTIP_STYLE} />
               {hasTypedData ? (
                 eventTypes.map((evt) => (
                   <Area

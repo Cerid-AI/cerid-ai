@@ -5,8 +5,9 @@ import { useState, useRef, useCallback } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { ChevronDown, ChevronUp, PlusCircle, GitBranch, Globe, ArrowRightLeft, Loader2, X, Eye } from "lucide-react"
-import { DomainBadge } from "./domain-filter"
+import { DomainBadge } from "@/components/ui/domain-badge"
 import type { KBQueryResult } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -105,22 +106,34 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
               </div>
             )}
           </div>
-          <div className="flex flex-col items-end gap-1">
-            {showRelevance && (
-              <>
-                <span className="text-xs font-medium tabular-nums">{relevancePct}%</span>
-                <div className="h-1.5 w-12 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full rounded-full bg-primary transition-all"
-                    style={{ width: `${relevancePct}%` }}
-                  />
-                </div>
-              </>
-            )}
-            {result.quality_score != null && (
-              <QualityBadge score={result.quality_score} />
-            )}
-          </div>
+          <TooltipProvider delayDuration={0}>
+            <div className="flex flex-col items-end gap-1">
+              {showRelevance && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="flex flex-col items-end gap-0.5">
+                      <span className="text-xs font-medium tabular-nums">{relevancePct}%</span>
+                      <div className="h-1.5 w-12 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full bg-primary transition-all"
+                          style={{ width: `${relevancePct}%` }}
+                        />
+                      </div>
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent>Relevance: {relevancePct}% match to query</TooltipContent>
+                </Tooltip>
+              )}
+              {result.quality_score != null && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span><QualityBadge score={result.quality_score} /></span>
+                  </TooltipTrigger>
+                  <TooltipContent>Quality: Q{Math.round(result.quality_score * 100)} — higher is better</TooltipContent>
+                </Tooltip>
+              )}
+            </div>
+          </TooltipProvider>
         </div>
 
         {/* Content */}
@@ -129,7 +142,11 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
             "mt-2 text-xs leading-relaxed text-muted-foreground [overflow-wrap:anywhere]",
             !expanded && "line-clamp-2",
           )}>
-            {expanded ? result.content : cleanContent}
+            {expanded ? result.content : (result.summary || cleanContent)}
+          </p>
+        ) : result.summary ? (
+          <p className="mt-2 text-xs leading-relaxed text-muted-foreground line-clamp-2 [overflow-wrap:anywhere]">
+            {result.summary}
           </p>
         ) : isBrowseMode ? (
           <p className="mt-2 text-xs italic text-muted-foreground/60">

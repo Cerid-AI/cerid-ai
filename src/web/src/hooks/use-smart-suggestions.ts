@@ -5,6 +5,8 @@ import { useState, useRef, useCallback, useEffect } from "react"
 import { queryKB } from "@/lib/api"
 import type { KBQueryResult } from "@/lib/types"
 
+const MIN_SUGGESTION_LENGTH = 10
+
 interface UseSmartSuggestionsOptions {
   enabled: boolean
   injectedArtifactIds: string[]
@@ -36,7 +38,7 @@ export function useSmartSuggestions({
 
   const search = useCallback(
     async (text: string) => {
-      if (!enabledRef.current || text.length < 10) {
+      if (!enabledRef.current || text.length < MIN_SUGGESTION_LENGTH) {
         setSuggestions([])
         return
       }

@@ -16,7 +16,6 @@ import { IngestionStats } from "./ingestion-stats"
 import { RecentFailures } from "./recent-failures"
 import { ConversationStats } from "./conversation-stats"
 import { AccuracyDashboard } from "./accuracy-dashboard"
-import { KBOperations } from "@/components/monitoring/kb-operations"
 import { fetchAudit } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
@@ -83,18 +82,6 @@ export function AuditPane() {
 
       <ScrollArea className="min-h-0 flex-1">
         <div className="space-y-6 p-4">
-          {/* ── Operations ──────────────────────────────── */}
-          <section>
-            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Operations
-            </h3>
-            <PaneErrorBoundary label="KB Operations">
-              <KBOperations />
-            </PaneErrorBoundary>
-          </section>
-
-          <Separator />
-
           {/* ── Analytics ───────────────────────────────── */}
           <section className="space-y-4">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">

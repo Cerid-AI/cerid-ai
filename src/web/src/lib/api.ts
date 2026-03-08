@@ -53,7 +53,7 @@ import type {
 
 export async function fetchHealth(): Promise<HealthResponse> {
   const res = await fetch(`${MCP_BASE}/health`, { headers: mcpHeaders() })
-  if (!res.ok) throw new Error(`Health check failed: ${res.status}`)
+  if (!res.ok) throw new Error(await extractError(res, `Health check failed: ${res.status}`))
   return res.json()
 }
 
@@ -76,7 +76,7 @@ export async function queryKB(
       conversation_messages: conversationMessages ?? null,
     }),
   })
-  if (!res.ok) throw new Error(`KB query failed: ${res.status}`)
+  if (!res.ok) throw new Error(await extractError(res, `KB query failed: ${res.status}`))
   return res.json()
 }
 
@@ -85,7 +85,7 @@ export async function fetchArtifacts(domain?: string, limit = 50): Promise<Artif
   if (domain) params.set("domain", domain)
   params.set("limit", String(limit))
   const res = await fetch(`${MCP_BASE}/artifacts?${params}`, { headers: mcpHeaders() })
-  if (!res.ok) throw new Error(`Artifacts fetch failed: ${res.status}`)
+  if (!res.ok) throw new Error(await extractError(res, `Artifacts fetch failed: ${res.status}`))
   const artifacts: Artifact[] = await res.json()
   return artifacts.map((a) => ({ ...a, tags: parseTags(a.tags) }))
 }
@@ -97,13 +97,13 @@ export async function fetchRelatedArtifacts(
 ): Promise<RelatedArtifact[]> {
   const params = new URLSearchParams({ depth: String(depth), max_results: String(maxResults) })
   const res = await fetch(`${MCP_BASE}/artifacts/${artifactId}/related?${params}`, { headers: mcpHeaders() })
-  if (!res.ok) throw new Error(`Related artifacts fetch failed: ${res.status}`)
+  if (!res.ok) throw new Error(await extractError(res, `Related artifacts fetch failed: ${res.status}`))
   return res.json()
 }
 
 export async function fetchArtifactDetail(artifactId: string): Promise<ArtifactDetail> {
   const res = await fetch(`${MCP_BASE}/artifacts/${artifactId}`, { headers: mcpHeaders() })
-  if (!res.ok) throw new Error(`Artifact detail fetch failed: ${res.status}`)
+  if (!res.ok) throw new Error(await extractError(res, `Artifact detail fetch failed: ${res.status}`))
   return res.json()
 }
 
@@ -111,7 +111,7 @@ export async function fetchArtifactDetail(artifactId: string): Promise<ArtifactD
 
 export async function fetchTaxonomy(): Promise<TaxonomyResponse> {
   const res = await fetch(`${MCP_BASE}/taxonomy`, { headers: mcpHeaders() })
-  if (!res.ok) throw new Error(`Taxonomy fetch failed: ${res.status}`)
+  if (!res.ok) throw new Error(await extractError(res, `Taxonomy fetch failed: ${res.status}`))
   return res.json()
 }
 
@@ -168,7 +168,7 @@ export async function fetchTagSuggestions(
   if (prefix) params.set("prefix", prefix)
   params.set("limit", String(limit))
   const res = await fetch(`${MCP_BASE}/tags/suggest?${params}`, { headers: mcpHeaders() })
-  if (!res.ok) throw new Error(`Tag suggestions failed: ${res.status}`)
+  if (!res.ok) throw new Error(await extractError(res, `Tag suggestions failed: ${res.status}`))
   return res.json()
 }
 
@@ -187,7 +187,7 @@ export async function fetchMaintenance(
       auto_purge: opts.auto_purge ?? false,
     }),
   })
-  if (!res.ok) throw new Error(`Maintenance fetch failed: ${res.status}`)
+  if (!res.ok) throw new Error(await extractError(res, `Maintenance fetch failed: ${res.status}`))
   return res.json()
 }
 
@@ -204,7 +204,7 @@ export async function fetchRectify(
       stale_days: opts.stale_days ?? 90,
     }),
   })
-  if (!res.ok) throw new Error(`Rectify failed: ${res.status}`)
+  if (!res.ok) throw new Error(await extractError(res, `Rectify failed: ${res.status}`))
   return res.json()
 }
 
@@ -225,7 +225,7 @@ export async function fetchCurate(
       ...(synopsisModel && { synopsis_model: synopsisModel }),
     }),
   })
-  if (!res.ok) throw new Error(`Curate failed: ${res.status}`)
+  if (!res.ok) throw new Error(await extractError(res, `Curate failed: ${res.status}`))
   return res.json()
 }
 
@@ -243,19 +243,19 @@ export async function fetchSynopsisEstimate(
       max_artifacts: maxArtifacts,
     }),
   })
-  if (!res.ok) throw new Error(`Synopsis estimate failed: ${res.status}`)
+  if (!res.ok) throw new Error(await extractError(res, `Synopsis estimate failed: ${res.status}`))
   return res.json()
 }
 
 export async function fetchSchedulerStatus(): Promise<SchedulerStatus> {
   const res = await fetch(`${MCP_BASE}/scheduler`, { headers: mcpHeaders() })
-  if (!res.ok) throw new Error(`Scheduler status failed: ${res.status}`)
+  if (!res.ok) throw new Error(await extractError(res, `Scheduler status failed: ${res.status}`))
   return res.json()
 }
 
 export async function fetchIngestLog(limit = 100): Promise<IngestLogResponse> {
   const res = await fetch(`${MCP_BASE}/ingest_log?limit=${limit}`, { headers: mcpHeaders() })
-  if (!res.ok) throw new Error(`Ingest log failed: ${res.status}`)
+  if (!res.ok) throw new Error(await extractError(res, `Ingest log failed: ${res.status}`))
   return res.json()
 }
 
@@ -268,7 +268,7 @@ export async function fetchAudit(
     headers: mcpHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ reports, hours }),
   })
-  if (!res.ok) throw new Error(`Audit fetch failed: ${res.status}`)
+  if (!res.ok) throw new Error(await extractError(res, `Audit fetch failed: ${res.status}`))
   return res.json()
 }
 
@@ -296,7 +296,7 @@ export async function ingestFeedback(
       latency_ms: latencyMs,
     }),
   })
-  if (!res.ok) throw new Error(`Feedback ingest failed: ${res.status}`)
+  if (!res.ok) throw new Error(await extractError(res, `Feedback ingest failed: ${res.status}`))
 }
 
 // --- Hallucination Detection ---
@@ -308,7 +308,7 @@ export async function fetchHallucinationReport(
     headers: mcpHeaders(),
   })
   if (res.status === 404) return null
-  if (!res.ok) throw new Error(`Hallucination report fetch failed: ${res.status}`)
+  if (!res.ok) throw new Error(await extractError(res, `Hallucination report fetch failed: ${res.status}`))
   return res.json()
 }
 
@@ -351,14 +351,14 @@ export async function submitClaimFeedback(
       correct,
     }),
   })
-  if (!res.ok) throw new Error(`Claim feedback failed: ${res.status}`)
+  if (!res.ok) throw new Error(await extractError(res, `Claim feedback failed: ${res.status}`))
 }
 
 // --- Settings ---
 
 export async function fetchSettings(): Promise<ServerSettings> {
   const res = await fetch(`${MCP_BASE}/settings`, { headers: mcpHeaders() })
-  if (!res.ok) throw new Error(`Settings fetch failed: ${res.status}`)
+  if (!res.ok) throw new Error(await extractError(res, `Settings fetch failed: ${res.status}`))
   return res.json()
 }
 
@@ -368,7 +368,7 @@ export async function updateSettings(settings: SettingsUpdate): Promise<{ status
     headers: mcpHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(settings),
   })
-  if (!res.ok) throw new Error(`Settings update failed: ${res.status}`)
+  if (!res.ok) throw new Error(await extractError(res, `Settings update failed: ${res.status}`))
   return res.json()
 }
 
@@ -388,7 +388,7 @@ export async function extractMemories(
       model,
     }),
   })
-  if (!res.ok) throw new Error(`Memory extraction failed: ${res.status}`)
+  if (!res.ok) throw new Error(await extractError(res, `Memory extraction failed: ${res.status}`))
   return res.json()
 }
 
@@ -400,7 +400,7 @@ export async function archiveMemories(
     headers: mcpHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ retention_days: retentionDays }),
   })
-  if (!res.ok) throw new Error(`Memory archive failed: ${res.status}`)
+  if (!res.ok) throw new Error(await extractError(res, `Memory archive failed: ${res.status}`))
   return res.json()
 }
 
@@ -415,7 +415,7 @@ export async function fetchMemories(
   if (opts.limit !== undefined) params.set("limit", String(opts.limit))
   if (opts.offset !== undefined) params.set("offset", String(opts.offset))
   const res = await fetch(`${MCP_BASE}/memories?${params}`, { headers: mcpHeaders() })
-  if (!res.ok) throw new Error(`Memories fetch failed: ${res.status}`)
+  if (!res.ok) throw new Error(await extractError(res, `Memories fetch failed: ${res.status}`))
   return res.json()
 }
 
@@ -425,7 +425,7 @@ export async function updateMemory(memoryId: string, summary: string): Promise<M
     headers: mcpHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ summary }),
   })
-  if (!res.ok) throw new Error(`Memory update failed: ${res.status}`)
+  if (!res.ok) throw new Error(await extractError(res, `Memory update failed: ${res.status}`))
   return res.json()
 }
 
@@ -434,7 +434,7 @@ export async function deleteMemory(memoryId: string): Promise<void> {
     method: "DELETE",
     headers: mcpHeaders(),
   })
-  if (!res.ok) throw new Error(`Memory delete failed: ${res.status}`)
+  if (!res.ok) throw new Error(await extractError(res, `Memory delete failed: ${res.status}`))
 }
 
 // --- File Upload ---
@@ -462,7 +462,7 @@ export async function uploadFile(
 
 // --- Chat ---
 
-export interface ChatModelInfo {
+interface ChatModelInfo {
   requested_model: string
   resolved_model: string
 }
@@ -636,8 +636,9 @@ export async function triggerSyncImport(options?: {
   return res.json()
 }
 
-// -- Archive API (Phase 21D) -------------------------------------------------
+// -- Archive API (Phase 21D) — @internal: no UI consumer, tested in api.test.ts
 
+/** @internal — no frontend consumer. Retained for test coverage. */
 export interface ArchiveFile {
   filename: string
   domain: string
@@ -645,12 +646,14 @@ export interface ArchiveFile {
   path: string
 }
 
+/** @internal — no frontend consumer. Retained for test coverage. */
 export interface ArchiveFilesResponse {
   files: ArchiveFile[]
   total: number
   storage_mode: string
 }
 
+/** @internal — no frontend consumer. Retained for test coverage. */
 export async function fetchArchiveFiles(domain?: string): Promise<ArchiveFilesResponse> {
   const params = domain ? `?domain=${encodeURIComponent(domain)}` : ""
   const res = await fetch(`${MCP_BASE}/archive/files${params}`, { headers: mcpHeaders() })

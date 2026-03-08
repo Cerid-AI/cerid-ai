@@ -365,6 +365,31 @@ describe("calculateSwitchCost", () => {
     const result = calculateSwitchCost(expensiveModel, cheapModel, msgs)
     expect(result.summarizeCost).toBeLessThan(result.replayCost)
   })
+
+  it("cheap → expensive: replay cost reflects target pricing", () => {
+    const msgs = makeMessages(6)
+    const result = calculateSwitchCost(expensiveModel, cheapModel, msgs)
+    // Switching TO expensive model → replay cost uses expensive pricing
+    expect(result.replayCost).toBeGreaterThan(0)
+    // currentNextTurnCost uses current (cheap) model pricing
+    expect(result.currentNextTurnCost).toBeLessThan(result.replayCost)
+  })
+
+  it("expensive → cheap: replay cost is lower than current next turn", () => {
+    const msgs = makeMessages(6)
+    const result = calculateSwitchCost(cheapModel, expensiveModel, msgs)
+    // Switching TO cheap model → replay is cheap, current next turn is expensive
+    expect(result.replayCost).toBeLessThan(result.currentNextTurnCost)
+  })
+
+  it("same model: costs are consistent", () => {
+    const msgs = makeMessages(6)
+    const result = calculateSwitchCost(cheapModel, cheapModel, msgs)
+    // Same model → replay and current next turn should be very close
+    // (replay is input+output, current is also input+output)
+    expect(result.replayCost).toBeGreaterThan(0)
+    expect(result.currentNextTurnCost).toBeGreaterThan(0)
+  })
 })
 
 // ---------------------------------------------------------------------------

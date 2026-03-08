@@ -4,7 +4,8 @@
 import { describe, it, expect, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { DomainFilter, DomainBadge } from "@/components/kb/domain-filter"
+import { DomainFilter } from "@/components/kb/domain-filter"
+import { DomainBadge } from "@/components/ui/domain-badge"
 import { DOMAINS } from "@/lib/types"
 
 describe("DomainFilter", () => {

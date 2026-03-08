@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Justin Michaels. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useEffect, lazy, Suspense } from "react"
+import { lazy, Suspense } from "react"
+import { useQuery } from "@tanstack/react-query"
 import {
   Dialog,
   DialogContent,
@@ -13,10 +14,9 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Loader2, AlertCircle, FileText, Code2, Table2, FileType } from "lucide-react"
-import { DomainBadge } from "./domain-filter"
+import { DomainBadge } from "@/components/ui/domain-badge"
 import { fetchArtifactDetail } from "@/lib/api"
 import { getFileRenderMode, getLanguageFromFilename } from "@/lib/utils"
-import type { ArtifactDetail } from "@/lib/types"
 
 const SyntaxHighlighter = lazy(() =>
   import("@/lib/syntax-highlighter").then((mod) => ({
@@ -42,21 +42,14 @@ const MODE_ICONS = {
 } as const
 
 export function ArtifactPreview({ artifactId, open, onClose }: ArtifactPreviewProps) {
-  const [detail, setDetail] = useState<ArtifactDetail | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const { data: detail, isLoading: loading, error: queryError } = useQuery({
+    queryKey: ["artifact-detail", artifactId],
+    queryFn: () => fetchArtifactDetail(artifactId),
+    enabled: open && !!artifactId,
+    staleTime: 60_000,
+  })
 
-  useEffect(() => {
-    if (!open || !artifactId) return
-    setLoading(true)
-    setError(null)
-    setDetail(null)
-
-    fetchArtifactDetail(artifactId)
-      .then(setDetail)
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load artifact"))
-      .finally(() => setLoading(false))
-  }, [open, artifactId])
+  const error = queryError ? (queryError instanceof Error ? queryError.message : "Failed to load artifact") : null
 
   const renderMode = detail ? getFileRenderMode(detail.filename) : "text"
   const language = detail ? getLanguageFromFilename(detail.filename) : "text"

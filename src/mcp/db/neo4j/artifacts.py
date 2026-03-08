@@ -27,6 +27,7 @@ def create_artifact(
     content_hash: str = "",
     sub_category: str = "",
     tags_json: str = "[]",
+    quality_score: float = 0.5,
 ) -> str:
     """Create an Artifact node and link it to its Domain (and optionally SubCategory/Tags)."""
     sub_cat = sub_category or config.DEFAULT_SUB_CATEGORY
@@ -47,6 +48,7 @@ def create_artifact(
                 chunk_count: $chunk_count,
                 chunk_ids: $chunk_ids_json,
                 content_hash: $content_hash,
+                quality_score: $quality_score,
                 ingested_at: $ingested_at,
                 updated_at: $ingested_at
             })
@@ -63,6 +65,7 @@ def create_artifact(
             chunk_count=chunk_count,
             chunk_ids_json=chunk_ids_json,
             content_hash=content_hash,
+            quality_score=quality_score,
             ingested_at=now,
         )
         record = result.single()
@@ -132,11 +135,11 @@ def update_artifact(
     chunk_count: int,
     chunk_ids_json: str,
     content_hash: str,
+    quality_score: float | None = None,
 ) -> None:
     """Update an existing artifact's content fields on re-ingestion."""
     with driver.session() as session:
-        session.run(
-            """
+        query = """
             MATCH (a:Artifact {id: $artifact_id})
             SET a.keywords = $keywords_json,
                 a.summary = $summary,
@@ -145,15 +148,20 @@ def update_artifact(
                 a.content_hash = $content_hash,
                 a.modified_at = $modified_at,
                 a.updated_at = $modified_at
-            """,
-            artifact_id=artifact_id,
-            keywords_json=keywords_json,
-            summary=summary,
-            chunk_count=chunk_count,
-            chunk_ids_json=chunk_ids_json,
-            content_hash=content_hash,
-            modified_at=utcnow_iso(),
-        )
+            """
+        params: dict[str, Any] = {
+            "artifact_id": artifact_id,
+            "keywords_json": keywords_json,
+            "summary": summary,
+            "chunk_count": chunk_count,
+            "chunk_ids_json": chunk_ids_json,
+            "content_hash": content_hash,
+            "modified_at": utcnow_iso(),
+        }
+        if quality_score is not None:
+            query += ", a.quality_score = $quality_score"
+            params["quality_score"] = quality_score
+        session.run(query, **params)
     logger.info(f"Updated artifact {artifact_id[:8]} (re-ingestion)")
 
 
@@ -267,6 +275,27 @@ def get_quality_scores(
         return {
             record["id"]: record["score"] if record["score"] is not None else 0.5
             for record in result
+        }
+
+
+def get_artifact_summaries(
+    driver,
+    artifact_ids: list[str],
+) -> dict[str, str]:
+    """Batch-fetch summary for artifact IDs. Returns {id: summary}."""
+    if not artifact_ids:
+        return {}
+    with driver.session() as session:
+        result = session.run(
+            "UNWIND $ids AS aid "
+            "MATCH (a:Artifact {id: aid}) "
+            "RETURN a.id AS id, a.summary AS summary",
+            ids=artifact_ids,
+        )
+        return {
+            record["id"]: record["summary"]
+            for record in result
+            if record["summary"]
         }
 
 

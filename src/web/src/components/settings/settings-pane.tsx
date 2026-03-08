@@ -33,17 +33,19 @@ import {
   ChevronDown,
   ChevronRight,
   FolderSync,
+  Wrench,
+  SearchIcon,
 } from "lucide-react"
 import { SyncSection } from "./sync-section"
 
 type LoadState = "loading" | "error" | "ready"
 
-type SectionKey = "connection" | "ingestion" | "features" | "knowledge" | "taxonomy" | "encryption" | "sync" | "flags"
+type SectionKey = "connection" | "ingestion" | "features" | "knowledge" | "taxonomy" | "encryption" | "infrastructure" | "search" | "sync" | "flags"
 
 function readSectionState(): Record<SectionKey, boolean> {
   const defaults: Record<SectionKey, boolean> = {
     connection: true, ingestion: true, features: true, knowledge: true,
-    taxonomy: true, encryption: true, sync: true, flags: true,
+    taxonomy: true, encryption: true, infrastructure: false, search: false, sync: true, flags: true,
   }
   try {
     const raw = localStorage.getItem("cerid-settings-sections")
@@ -155,7 +157,7 @@ export default function SettingsPane() {
                   <Row label="Server Version" value={settings.version} info="Current MCP server version" />
                   <Row label="Machine ID" value={settings.machine_id} mono info="Unique identifier for this server instance" />
                   <div className="flex items-center justify-between">
-                    <LabelWithInfo label="Feature Tier" info="Determines available features and rate limits" />
+                    <LabelWithInfo label="Feature Tier" info="Community: taxonomy, file upload, encryption, truth audit, live metrics. Pro: OCR, audio transcription, image understanding, semantic dedup, advanced analytics, multi-user. Set via CERID_TIER env var." />
                     <Badge variant={settings.feature_tier === "pro" ? "default" : "secondary"}>
                       {settings.feature_tier}
                     </Badge>
@@ -373,6 +375,119 @@ export default function SettingsPane() {
                     </Badge>
                   </div>
                   <Row label="Sync Backend" value={settings.sync_backend} info="Storage backend for cross-device sync" />
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Infrastructure */}
+            <SectionHeading icon={Wrench} label="Infrastructure" open={sections.infrastructure} onToggle={() => toggleSection("infrastructure")} />
+            {sections.infrastructure && (
+              <Card className="mb-4">
+                <CardContent className="grid gap-3 pt-4">
+                  <Row label="Bifrost URL" value={settings.bifrost_url ?? "—"} mono info="LLM gateway endpoint" />
+                  <Row label="Bifrost Timeout" value={settings.bifrost_timeout ? `${settings.bifrost_timeout}s` : "—"} info="Request timeout for LLM calls" />
+                  <Row label="ChromaDB" value={settings.chroma_url ?? "—"} mono info="Vector database endpoint" />
+                  <Row label="Neo4j" value={settings.neo4j_uri ?? "—"} mono info="Graph database endpoint" />
+                  <Row label="Redis" value={settings.redis_url ?? "—"} mono info="Cache and BM25 index (password redacted)" />
+                  <Row label="Archive Path" value={settings.archive_path ?? "—"} mono info="File archive mount path" />
+                  <Row label="Chunking Mode" value={settings.chunking_mode ?? "—"} info="Token-based or semantic chunking" />
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Search Tuning */}
+            <SectionHeading icon={SearchIcon} label="Search Tuning" open={sections.search} onToggle={() => toggleSection("search")} />
+            {sections.search && (
+              <Card className="mb-4">
+                <CardContent className="grid gap-4 pt-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <LabelWithInfo
+                        label={`Vector Weight: ${(settings.hybrid_vector_weight ?? 0.6).toFixed(2)}`}
+                        info="Weight for vector similarity in hybrid search (0–1)"
+                      />
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={settings.hybrid_vector_weight ?? 0.6}
+                      onChange={(e) => patch({ hybrid_vector_weight: parseFloat(e.target.value) })}
+                      className="h-1.5 w-32 cursor-pointer accent-primary"
+                      aria-label="Hybrid vector weight"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <LabelWithInfo
+                        label={`Keyword Weight: ${(settings.hybrid_keyword_weight ?? 0.4).toFixed(2)}`}
+                        info="Weight for BM25 keyword matching in hybrid search (0–1)"
+                      />
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={settings.hybrid_keyword_weight ?? 0.4}
+                      onChange={(e) => patch({ hybrid_keyword_weight: parseFloat(e.target.value) })}
+                      className="h-1.5 w-32 cursor-pointer accent-primary"
+                      aria-label="Hybrid keyword weight"
+                    />
+                  </div>
+
+                  <div className="my-1 h-px bg-border" />
+
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <LabelWithInfo
+                        label={`Rerank LLM Weight: ${(settings.rerank_llm_weight ?? 0.6).toFixed(2)}`}
+                        info="Weight for LLM-based reranking score (0–1)"
+                      />
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={settings.rerank_llm_weight ?? 0.6}
+                      onChange={(e) => patch({ rerank_llm_weight: parseFloat(e.target.value) })}
+                      className="h-1.5 w-32 cursor-pointer accent-primary"
+                      aria-label="Rerank LLM weight"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <LabelWithInfo
+                        label={`Rerank Original Weight: ${(settings.rerank_original_weight ?? 0.4).toFixed(2)}`}
+                        info="Weight for original relevance score in reranking (0–1)"
+                      />
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={settings.rerank_original_weight ?? 0.4}
+                      onChange={(e) => patch({ rerank_original_weight: parseFloat(e.target.value) })}
+                      className="h-1.5 w-32 cursor-pointer accent-primary"
+                      aria-label="Rerank original weight"
+                    />
+                  </div>
+
+                  <div className="my-1 h-px bg-border" />
+
+                  <Row
+                    label="Temporal Half-life"
+                    value={settings.temporal_half_life_days ? `${settings.temporal_half_life_days} days` : "—"}
+                    info="Days until temporal recency boost decays by half"
+                  />
+                  <Row
+                    label="Recency Weight"
+                    value={(settings.temporal_recency_weight ?? 0.1).toFixed(2)}
+                    info="Maximum boost from document recency"
+                  />
                 </CardContent>
               </Card>
             )}

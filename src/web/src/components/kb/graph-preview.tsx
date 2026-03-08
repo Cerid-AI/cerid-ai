@@ -4,7 +4,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { fetchRelatedArtifacts } from "@/lib/api"
-import { DomainBadge } from "./domain-filter"
+import { DomainBadge } from "@/components/ui/domain-badge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { GitBranch, Loader2, ArrowLeft } from "lucide-react"

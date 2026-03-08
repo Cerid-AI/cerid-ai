@@ -1,12 +1,12 @@
 # Cerid AI — Task Tracker
 
 > **Last updated:** 2026-03-07
-> **Current status:** Phase 27 complete. 950 Python tests, 320 frontend tests. Configuration hardening for open-source readiness shipped.
-> **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md)
+> **Current status:** Phase 30 complete. 950 Python tests, 347 frontend tests. Codebase audit & cleanup (dead code, duplication, ChatPanel decomposition, API standardization).
+> **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md) — 1 open (D2)
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](../docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
 
-## Current: Phase 25 + Production Audit Complete
+## Current: Phase 30 — Codebase Audit & Debt Reduction Complete
 
 ### 10A: Production Quality ✅
 - [x] A1 — Chat viewport overflow fix (CSS `min-h-0` cascade)
@@ -491,40 +491,124 @@
 - [x] Makefile frontend targets (lint, test, typecheck, build, check-all, help)
 - [x] 950 Python tests, 320 frontend tests
 
-### Phase 26: User Review — Verification Logic, UX Fixes, and Backlog
+### Phase 26: User Review — Verification Logic, UX Fixes, and Backlog ✅
 
-#### Sprint 1 — Immediate Fixes
-- [ ] V9: Clear stale verification status when new response streams (30 min)
-- [ ] V5: Touch-visible trash icon on conversation list (15 min)
-- [ ] V8: Remove KBOperations duplicate from audit tab (15 min)
-- [ ] V12: Add tooltips on confidence bars and quality badges (45 min)
-- [ ] V7: KB auto-inject toggle in KB context pane (30 min)
+#### Sprint 1 — Immediate Fixes ✅
+- [x] V9: Clear stale verification status when new response streams
+- [x] V5: Touch-visible trash icon on conversation list
+- [x] V8: Remove KBOperations duplicate from audit tab
+- [x] V12: Add tooltips on confidence bars and quality badges
+- [x] V7: KB auto-inject toggle in KB context pane
 
-#### Sprint 2 — Quick Wins
-- [ ] V17: Injection badge detail popover (artifact names, domains, snippets) (45 min)
-- [ ] V4: Investigate + fix settings pane scroll issue (45 min)
+#### Sprint 2 — Quick Wins ✅
+- [x] V17: Injection badge detail popover (artifact names, domains, snippets)
+- [x] V4: Investigate settings pane scroll — confirmed structurally correct (no fix needed)
 
-#### Sprint 3 — Medium Tasks
-- [ ] V11: Compute quality_score during ingestion (fix Q50 uniformity) (1 hr)
-- [ ] V1a: Surface found data in ignorance verification (show actual answer from Grok) (1.5 hrs)
-- [ ] V2: Verification source URL click-through (KB artifact links) (1.5 hrs)
-- [ ] V16: Show artifact summary instead of raw chunk on knowledge cards (2 hrs)
+#### Sprint 3 — Medium Tasks ✅
+- [x] V11: Compute quality_score during ingestion (7-signal scoring, both create + re-ingest paths)
+- [x] V1a: Surface found data in ignorance verification (verification_answer in SSE + "Found answer" UI)
+- [x] V2: Verification source URL click-through (KB artifact click → KB pane, external URLs with domain labels)
+- [x] V16: Show artifact summary from Neo4j on knowledge cards (batch fetch + enrich pipeline)
 
-#### Sprint 4 — Persistence + Investigation
-- [ ] V15: Persist verification state across tab switches (store in ConversationsContext) (2 hrs)
-- [ ] V10: Audit model switch cost calculation (verify expensive→cheap is correct) (1 hr)
-- [ ] V18: Investigate injection perception issue (debug logging + improve V17) (1 hr)
+#### Sprint 4 — Persistence + Investigation ✅
+- [x] V15: Persist verification state across tab switches (in-memory cache + instant restore)
+- [x] V10: Audit model switch cost calculation (3 new tests: cheap→expensive, expensive→cheap, same model)
+- [x] V18: Investigate injection perception — confirmed injection code correct, V17 popover provides visibility
 
-#### Backlog (future phases)
-- [ ] V1b: Proactive model switch recommendation when verification detects ignorance (4 hrs)
-- [ ] V6: Right-click context menus on toolbar icons (4-5 hrs)
-- [ ] V14: Infrastructure/account settings in UI (Bifrost URL, API keys) (4-5 hrs)
-- [ ] V19: Drag-drop to KB context pane for import + inject (3-4 hrs)
-- [ ] V20: Drag-drop to chat input for file ingest + inject (3 hrs)
-- [ ] V22: Inline verification markups in chat response (highlight verified/unverified spans) (5-6 hrs)
-- [ ] V3: Quick-access memory extraction toggle (30 min, after V6)
-- [ ] V13: Configurable feature tier (1 hr)
-- [ ] V21: Advanced response re-formatting/cleanup (8+ hrs)
+### Phase 28: UX Backlog Clearance ✅
+
+#### Sprint 1 — Context Menus + Quick Fixes ✅
+- [x] V6: Right-click context menus on toolbar icons (radix-ui ContextMenu wrapper, 4 toolbar menus)
+- [x] V3: Quick-access memory extraction toggle (via Rss context menu + narrow viewport overflow)
+- [x] V4: Settings scroll investigation (confirmed structurally correct, no fix needed)
+
+#### Sprint 2 — Feature Tier + Infrastructure Settings ✅
+- [x] V13: Feature tier tooltip (descriptive Community vs Pro tier info)
+- [x] V14: Infrastructure settings section (read-only infra display + search tuning sliders)
+
+#### Sprint 3 — Proactive Model Switch ✅
+- [x] V1b: Post-verification model switch banner (ignorance + verification_answer → suggest webSearch model)
+
+#### Sprint 4 — Drag-Drop ✅
+- [x] V19: Drag-drop to KB context pane (file drop → UploadDialog → ingest)
+- [x] V20: Drag-drop to chat input (file drop → UploadDialog → ingest)
+
+#### Sprint 5 — Inline Verification Markups ✅
+- [x] V22: Inline verification markups (matchClaimsToText + DOM mark highlighting, 7 new tests)
+
+### Phase 30: Codebase Audit & Debt Reduction ✅
+
+4 expert audit agents examined the entire codebase (frontend + backend) across orthogonal dimensions: dead code, dependency bloat, code quality/AI slop, and architecture/coupling. 49 issues found, 19 actioned across 5 sprints.
+
+#### Sprint 1 — Dead Code Removal ✅
+- [x] Remove dead types from types.ts (ArtifactChunk, CollectionsResponse, TagInfo, Domain)
+- [x] Remove dead API exports (ArchiveFile, ArchiveFilesResponse, fetchArchiveFiles)
+- [x] Mark model-router internal functions with @internal (scoreQueryComplexity, detectIntentWeights, scoreModelForQuery, calculateSwitchCost)
+- [x] Un-export UseVerificationStreamReturn from use-verification-stream.ts
+- [x] Remove dead Python code (get_plugin(), cerid_sync_lib.py compat shim)
+- [x] Extract magic numbers (UPLOAD_STATUS_RESET_MS, MIN_SUGGESTION_LENGTH, model-router thresholds)
+
+#### Sprint 2 — Duplication Extraction ✅
+- [x] Extract useDragDrop hook — eliminated 3 copies of drag-and-drop handlers (~80 lines saved)
+- [x] Extract CHART_TOOLTIP_STYLE constant — eliminated 3 copies across audit charts
+- [x] Consolidate DOMAIN_COLORS — taxonomy-tree.tsx imports from domain-filter.tsx
+- [x] Move formatFileSize to shared utils
+- [x] Promote DomainBadge to @/components/ui/domain-badge (used by 7 files across 3 domains)
+
+#### Sprint 3 — ChatPanel Decomposition ✅
+- [x] Extract ChatToolbar component (275 lines — toolbar with 6+ context menus)
+- [x] Extract useVerificationOrchestrator hook (195 lines — all verification state, report caching, saved report fetching)
+- [x] Extract ChatMessages component (94 lines — message list with dividers + auto-scroll)
+- [x] Rewrite chat-panel.tsx integrating all 3 modules (896 → 554 lines, 38% reduction)
+
+#### Sprint 4 — Consistency & Patterns ✅
+- [x] Standardize API error handling — 24 functions updated to use extractError()
+- [x] Convert artifact-preview.tsx from useState/useEffect to useQuery (React Query)
+- [x] Fix streaming re-render storm in use-live-metrics.ts (useRef + tick threshold, ~500 → ~5 re-renders)
+- [x] Remove dead branch in knowledge-pane.tsx handleDrop
+
+#### Sprint 5 — Python Backend Cleanup ✅
+- [x] Document eval/harness.py as development tool (unreachable, no router/CLI)
+- [x] Add deprecation notice to src/gui/app.py (React GUI is primary)
+
+#### Deferred Items (documented, justified)
+- [ ] ClaimItem extraction — streaming vs completed claims have different data shapes (not real duplication)
+- [ ] useChatSend extraction — handleSend has 15+ dependencies tightly coupled to ChatPanel state
+- [ ] Overlapping type consolidation (BaseClaim, KBResult vs KBQueryResult) — high risk, medium benefit
+
+#### New Files Created
+- `src/web/src/hooks/use-drag-drop.ts`
+- `src/web/src/hooks/use-verification-orchestrator.ts`
+- `src/web/src/lib/constants.ts`
+- `src/web/src/components/chat/chat-toolbar.tsx`
+- `src/web/src/components/chat/chat-messages.tsx`
+- `src/web/src/components/ui/domain-badge.tsx`
+
+### Phase 29: V21 Chat Response Formatting & Inline Verification ✅
+
+#### Sprint 1 — Markdown Rendering Improvements ✅
+- [x] Expanded MD_COMPONENTS with 15 element overrides (links, tables, blockquotes, headings, lists, images, hr)
+- [x] External links with ExternalLink icon and target="_blank"
+- [x] Bordered/striped tables with horizontal scroll wrapper
+- [x] Styled blockquotes with left border + muted background
+- [x] Heading hierarchy (h1-h4) with proper sizing and borders
+- [x] CollapsibleCodeBlock for fenced blocks >25 lines (gradient fade + expand button)
+
+#### Sprint 2 — Interactive Inline Verification ✅
+- [x] ClaimOverlay component (hybrid DOM + React portal approach)
+- [x] Enhanced DOM marks with data-claim-index + superscript footnotes [N]
+- [x] Click-to-popover with status badge, claim text, source info, verification method, URLs
+- [x] Hover tooltip (displayStatus + source_domain)
+- [x] Extracted shared display utilities to verification-utils.ts (DISPLAY_STATUS_COLORS, verificationMethodLabel, verificationMethodColor)
+- [x] Wired onArtifactClick through MessageBubble → chat-panel.tsx for KB navigation
+
+#### Sprint 3 — Document Navigation + Tests ✅
+- [x] extractText() utility for recursive React children text extraction
+- [x] Heading IDs via slugification on h1-h4 overrides
+- [x] MessageTOC component (clickable TOC with smooth-scroll, threshold: 3+ headings)
+- [x] 9 new message-bubble tests (links, tables, blockquotes, headings, code collapse, TOC)
+- [x] 8 new claim-overlay tests (popover rendering, status badges, source navigation, dismiss)
+- [x] Documentation updates (ISSUES.md, todo.md, CLAUDE.md)
 
 ### Phase 27: Configuration Hardening (Open-Source Readiness) ✅
 

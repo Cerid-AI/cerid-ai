@@ -106,6 +106,15 @@ export function getLanguageFromFilename(filename: string): string {
 }
 
 /**
+ * Format a byte count for human display (B / KB / MB).
+ */
+export function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/**
  * Parse a value that may be a JSON-encoded string array, a native array, or undefined.
  * Returns a clean `string[]` regardless of input shape.
  */

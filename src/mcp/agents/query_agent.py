@@ -615,6 +615,33 @@ def apply_quality_boost(
     return results
 
 
+def _enrich_summaries(
+    results: list[dict[str, Any]],
+    neo4j_driver: Any | None = None,
+) -> list[dict[str, Any]]:
+    """Attach artifact-level summaries from Neo4j to query results."""
+    if neo4j_driver is None or not results:
+        return results
+
+    artifact_ids = list({r["artifact_id"] for r in results if r.get("artifact_id")})
+    if not artifact_ids:
+        return results
+
+    try:
+        from db.neo4j.artifacts import get_artifact_summaries
+        summaries = get_artifact_summaries(neo4j_driver, artifact_ids)
+    except Exception as e:
+        logger.warning(f"Summary lookup failed (skipping): {e}")
+        return results
+
+    for r in results:
+        s = summaries.get(r.get("artifact_id", ""))
+        if s:
+            r["summary"] = s
+
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Context assembly
 # ---------------------------------------------------------------------------
@@ -766,6 +793,7 @@ async def agent_query(
 
     # Step 5.5: Quality boost — quality score multiplier after reranking
     results = apply_quality_boost(results, neo4j_driver=neo4j_driver)
+    results = _enrich_summaries(results, neo4j_driver=neo4j_driver)
     results = sorted(results, key=lambda x: x["relevance"], reverse=True)
 
     # Step 5.6: Filter low-relevance results below minimum threshold

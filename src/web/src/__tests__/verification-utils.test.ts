@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest"
-import { getClaimDisplayStatus } from "@/lib/verification-utils"
+import { getClaimDisplayStatus, matchClaimsToText } from "@/lib/verification-utils"
 
 describe("getClaimDisplayStatus", () => {
   it("returns verified for verified status", () => {
@@ -50,5 +50,64 @@ describe("getClaimDisplayStatus", () => {
     expect(getClaimDisplayStatus("unverified", "web_search", "citation")).toBe("citation")
     expect(getClaimDisplayStatus("uncertain", undefined, "citation")).toBe("citation")
     expect(getClaimDisplayStatus("pending", undefined, "citation")).toBe("citation")
+  })
+})
+
+describe("matchClaimsToText", () => {
+  it("returns empty for empty inputs", () => {
+    expect(matchClaimsToText("", [])).toEqual([])
+    expect(matchClaimsToText("hello", [])).toEqual([])
+    expect(matchClaimsToText("", [{ claim: "foo", status: "verified" }])).toEqual([])
+  })
+
+  it("matches exact substring", () => {
+    const text = "The capital of France is Paris. It is a beautiful city."
+    const claims = [{ claim: "The capital of France is Paris", status: "verified" }]
+    const spans = matchClaimsToText(text, claims)
+    expect(spans).toHaveLength(1)
+    expect(spans[0].start).toBe(0)
+    expect(spans[0].end).toBe(30)
+    expect(spans[0].displayStatus).toBe("verified")
+  })
+
+  it("matches case-insensitively", () => {
+    const text = "THE EARTH IS ROUND."
+    const claims = [{ claim: "the earth is round", status: "verified" }]
+    const spans = matchClaimsToText(text, claims)
+    expect(spans).toHaveLength(1)
+  })
+
+  it("falls back to 5-word prefix match", () => {
+    const text = "Machine learning models require large datasets for effective training."
+    const claims = [{ claim: "Machine learning models require large amounts of computation", status: "unverified" }]
+    const spans = matchClaimsToText(text, claims)
+    expect(spans).toHaveLength(1)
+    expect(spans[0].displayStatus).toBe("unverified")
+  })
+
+  it("returns no match when claim is not in text", () => {
+    const text = "The sky is blue on clear days."
+    const claims = [{ claim: "Water freezes at zero degrees", status: "verified" }]
+    const spans = matchClaimsToText(text, claims)
+    expect(spans).toHaveLength(0)
+  })
+
+  it("de-overlaps spans keeping first", () => {
+    const text = "The quick brown fox jumps over the lazy dog."
+    const claims = [
+      { claim: "quick brown fox", status: "verified" },
+      { claim: "brown fox jumps", status: "unverified" },
+    ]
+    const spans = matchClaimsToText(text, claims)
+    expect(spans).toHaveLength(1)
+    expect(spans[0].claim).toBe("quick brown fox")
+  })
+
+  it("maps evasion claim_type correctly", () => {
+    const text = "I cannot access real-time data."
+    const claims = [{ claim: "I cannot access real-time data", status: "unverified", claim_type: "evasion" }]
+    const spans = matchClaimsToText(text, claims)
+    expect(spans).toHaveLength(1)
+    expect(spans[0].displayStatus).toBe("evasion")
   })
 })

@@ -15,9 +15,12 @@ import { GraphPreview } from "./graph-preview"
 import { UploadDialog } from "./upload-dialog"
 import { fetchArtifacts, queryKB, uploadFile, recategorizeArtifact } from "@/lib/api"
 import { useKBInjection } from "@/contexts/kb-injection-context"
+import { useDragDrop } from "@/hooks/use-drag-drop"
 import type { KBQueryResult, Artifact } from "@/lib/types"
 
 const ArtifactPreview = lazy(() => import("./artifact-preview"))
+
+const UPLOAD_STATUS_RESET_MS = 4000
 
 function parseJsonArray(json: string | undefined): string[] {
   if (!json) return []
@@ -72,9 +75,8 @@ export function KnowledgePane() {
   const [previewArtifactId, setPreviewArtifactId] = useState<string | null>(null)
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "success" | "error">("idle")
   const [uploadMessage, setUploadMessage] = useState("")
-  const [isDragOver, setIsDragOver] = useState(false)
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
-  const dragCounterRef = useRef(0)
+  const { isDragOver, dragHandlers } = useDragDrop(setPendingFiles)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const queryClient = useQueryClient()
 
@@ -93,52 +95,13 @@ export function KnowledgePane() {
       setUploadStatus("success")
       setUploadMessage(`${result.filename} ingested (${result.chunks} chunks)`)
       queryClient.invalidateQueries({ queryKey: ["artifacts"] })
-      setTimeout(() => setUploadStatus("idle"), 4000)
+      setTimeout(() => setUploadStatus("idle"), UPLOAD_STATUS_RESET_MS)
     } catch (err) {
       setUploadStatus("error")
       setUploadMessage(err instanceof Error ? err.message : "Upload failed")
-      setTimeout(() => setUploadStatus("idle"), 5000)
+      setTimeout(() => setUploadStatus("idle"), UPLOAD_STATUS_RESET_MS)
     }
   }, [activeDomain, queryClient])
-
-  const handleDragEnter = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    dragCounterRef.current++
-    if (e.dataTransfer.types.includes("Files")) {
-      setIsDragOver(true)
-    }
-  }, [])
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    dragCounterRef.current--
-    if (dragCounterRef.current === 0) {
-      setIsDragOver(false)
-    }
-  }, [])
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-  }, [])
-
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setIsDragOver(false)
-    dragCounterRef.current = 0
-    const files = Array.from(e.dataTransfer.files)
-    if (files.length === 0) return
-    if (files.length === 1) {
-      // Single file — open options dialog
-      setPendingFiles(files)
-    } else {
-      // Multiple files — open options dialog for batch
-      setPendingFiles(files)
-    }
-  }, [])
 
   const handleUploadConfirm = useCallback(async (
     options: { domain?: string; categorize_mode?: string },
@@ -237,10 +200,7 @@ export function KnowledgePane() {
   return (
     <div
       className="relative flex h-full min-w-0 flex-col overflow-hidden"
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
-      onDragOver={handleDragOver}
-      onDrop={handleDrop}
+      {...dragHandlers}
     >
       {/* Drag overlay */}
       {isDragOver && (

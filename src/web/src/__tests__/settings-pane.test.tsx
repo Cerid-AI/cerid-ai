@@ -98,7 +98,7 @@ describe("SettingsPane", () => {
     vi.stubGlobal("fetch", mockFetch({ detail: "Server error" }, 500))
     render(<SettingsPane />)
     await waitFor(() => {
-      expect(screen.getByText(/failed/i)).toBeInTheDocument()
+      expect(screen.getByText(/server error/i)).toBeInTheDocument()
     })
   })
 

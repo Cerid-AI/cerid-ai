@@ -5,7 +5,7 @@ import { useState } from "react"
 import { Collapsible } from "radix-ui"
 import { ChevronRight, FileText } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { DomainBadge } from "@/components/kb/domain-filter"
+import { DomainBadge } from "@/components/ui/domain-badge"
 import { cn } from "@/lib/utils"
 import type { SourceRef } from "@/lib/types"
 

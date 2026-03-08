@@ -29,6 +29,8 @@ interface VerificationStatusBarProps {
   sessionClaimsChecked?: number
   /** Accumulated session-wide estimated verification cost in USD. */
   sessionEstCost?: number
+  /** Callback when a KB artifact source is clicked. */
+  onArtifactClick?: (artifactId: string) => void
 }
 
 /** Status icon for a single claim using display status */
@@ -70,6 +72,7 @@ export function VerificationStatusBar({
   streamPhase, verifiedCount = 0, totalClaims = 0,
   extractionMethod, streamingClaims,
   sessionClaimsChecked = 0, sessionEstCost = 0,
+  onArtifactClick,
 }: VerificationStatusBarProps) {
   const [expanded, setExpanded] = useState(false)
 
@@ -109,36 +112,44 @@ export function VerificationStatusBar({
               {streamingClaims.map((c) => {
                 const ds = getClaimDisplayStatus(c.status ?? "pending", c.verification_method, c.claim_type)
                 return (
-                  <li key={c.index} className="flex items-start gap-1.5 text-xs">
-                    <ClaimStatusIcon displayStatus={ds} />
-                    <span className={cn("flex-1 leading-tight", claimStatusColor(ds))}>
-                      {c.claim}
-                    </span>
-                    {c.claim_type === "evasion" && (
-                      <span className="shrink-0 rounded bg-orange-500/15 px-1 text-[10px] text-orange-400">evasion</span>
-                    )}
-                    {c.claim_type === "citation" && (
-                      <span className="shrink-0 rounded bg-purple-500/15 px-1 text-[10px] text-purple-400">citation</span>
-                    )}
-                    {c.verification_method === "cross_model" && (
-                      <span className="shrink-0 rounded bg-purple-500/15 px-1 text-[10px] text-purple-400">cross-model</span>
-                    )}
-                    {c.verification_method === "web_search" && (
-                      <span className="shrink-0 rounded bg-blue-500/15 px-1 text-[10px] text-blue-400">web search</span>
-                    )}
-                    {(c.source_urls?.length ?? 0) > 0 && (
-                      <a
-                        href={c.source_urls![0]}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="shrink-0 text-blue-400 hover:text-blue-300"
-                        title={c.source_urls![0]}
-                      >
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
-                    )}
-                    {c.source_domain && (
-                      <span className="shrink-0 rounded bg-muted px-1 text-[10px] text-muted-foreground">{c.source_domain}</span>
+                  <li key={c.index} className="flex flex-col gap-0.5 text-xs">
+                    <div className="flex items-start gap-1.5">
+                      <ClaimStatusIcon displayStatus={ds} />
+                      <span className={cn("flex-1 leading-tight", claimStatusColor(ds))}>
+                        {c.claim}
+                      </span>
+                      {c.claim_type === "evasion" && (
+                        <span className="shrink-0 rounded bg-orange-500/15 px-1 text-[10px] text-orange-400">evasion</span>
+                      )}
+                      {c.claim_type === "citation" && (
+                        <span className="shrink-0 rounded bg-purple-500/15 px-1 text-[10px] text-purple-400">citation</span>
+                      )}
+                      {c.verification_method === "cross_model" && (
+                        <span className="shrink-0 rounded bg-purple-500/15 px-1 text-[10px] text-purple-400">cross-model</span>
+                      )}
+                      {c.verification_method === "web_search" && (
+                        <span className="shrink-0 rounded bg-blue-500/15 px-1 text-[10px] text-blue-400">web search</span>
+                      )}
+                      {(c.source_urls?.length ?? 0) > 0 && (
+                        <a
+                          href={c.source_urls![0]}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="shrink-0 text-blue-400 hover:text-blue-300"
+                          title={c.source_urls![0]}
+                        >
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      )}
+                      {c.source_domain && (
+                        <span className="shrink-0 rounded bg-muted px-1 text-[10px] text-muted-foreground">{c.source_domain}</span>
+                      )}
+                    </div>
+                    {c.claim_type === "ignorance" && c.status === "unverified" && c.verification_answer && (
+                      <div className="ml-[18px] rounded bg-green-500/10 px-2 py-1">
+                        <span className="text-[10px] font-medium text-green-400">Found answer: </span>
+                        <span className="text-[10px] leading-tight text-green-300/80">{c.verification_answer.slice(0, 300)}</span>
+                      </div>
                     )}
                   </li>
                 )
@@ -323,23 +334,36 @@ export function VerificationStatusBar({
                     {c.verification_method === "web_search" && (
                       <span className="shrink-0 rounded bg-blue-500/15 px-1 text-[10px] text-blue-400">web search</span>
                     )}
-                    {(c.source_urls?.length ?? 0) > 0 && (
-                      <a
-                        href={c.source_urls![0]}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="shrink-0 text-blue-400 hover:text-blue-300"
-                        title={c.source_urls![0]}
-                      >
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
-                    )}
-                    {c.source_domain && (
+                    {(c.source_urls?.length ?? 0) > 0 && c.source_urls!.slice(0, 2).map((url, ui) => {
+                      let domain: string
+                      try { domain = new URL(url).hostname.replace(/^www\./, "") } catch { domain = "link" }
+                      return (
+                        <a
+                          key={ui}
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex shrink-0 items-center gap-0.5 rounded bg-blue-500/15 px-1 text-[10px] text-blue-400 hover:text-blue-300"
+                          title={url}
+                        >
+                          <ExternalLink className="h-2.5 w-2.5" />
+                          {domain}
+                        </a>
+                      )
+                    })}
+                    {c.source_domain && !c.source_urls?.length && (
                       <span className="shrink-0 rounded bg-muted px-1 text-[10px] text-muted-foreground">{c.source_domain}</span>
                     )}
-                    {c.source_filename && (
+                    {c.source_filename && c.source_artifact_id && onArtifactClick ? (
+                      <button
+                        className="shrink-0 text-primary/70 hover:text-primary underline decoration-dotted"
+                        onClick={() => onArtifactClick(c.source_artifact_id!)}
+                      >
+                        {c.source_filename}
+                      </button>
+                    ) : c.source_filename ? (
                       <span className="shrink-0 text-muted-foreground/60">{c.source_filename}</span>
-                    )}
+                    ) : null}
                     {c.similarity > 0 && (
                       <span className="shrink-0 tabular-nums text-muted-foreground/60">
                         {Math.round(c.similarity * 100)}%
@@ -350,6 +374,12 @@ export function VerificationStatusBar({
                     <p className="ml-[18px] line-clamp-2 leading-tight text-muted-foreground/60 italic">
                       &ldquo;{c.source_snippet.slice(0, 150)}&rdquo;
                     </p>
+                  )}
+                  {c.claim_type === "ignorance" && c.status === "unverified" && c.verification_answer && (
+                    <div className="ml-[18px] mt-0.5 rounded bg-green-500/10 px-2 py-1">
+                      <span className="text-[10px] font-medium text-green-400">Found answer: </span>
+                      <span className="text-[10px] leading-tight text-green-300/80">{c.verification_answer.slice(0, 300)}</span>
+                    </div>
                   )}
                 </li>
               )

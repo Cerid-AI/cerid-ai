@@ -4,7 +4,17 @@
 import { useState, useRef, useCallback, type KeyboardEvent } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Send, Square } from "lucide-react"
+import { DomainBadge } from "@/components/ui/domain-badge"
+import { useDragDrop } from "@/hooks/use-drag-drop"
+import { cn } from "@/lib/utils"
+
+interface InjectedSource {
+  filename: string
+  domain: string
+  content: string
+}
 
 interface ChatInputProps {
   onSend: (content: string) => void
@@ -12,12 +22,17 @@ interface ChatInputProps {
   isStreaming: boolean
   disabled?: boolean
   injectedCount?: number
+  injectedSources?: InjectedSource[]
   onInputChange?: (text: string) => void
+  onFileDrop?: (files: File[]) => void
 }
 
-export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount = 0, onInputChange }: ChatInputProps) {
+export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount = 0, injectedSources, onInputChange, onFileDrop }: ChatInputProps) {
   const [input, setInput] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  const handleFiles = useCallback((files: File[]) => onFileDrop?.(files), [onFileDrop])
+  const { isDragOver, dragHandlers } = useDragDrop(handleFiles)
 
   const handleSend = useCallback(() => {
     const trimmed = input.trim()
@@ -47,7 +62,10 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount
   }, [])
 
   return (
-    <div className="flex items-end gap-2 border-t bg-background p-4">
+    <div
+      className={cn("flex items-end gap-2 border-t bg-background p-4", isDragOver && "ring-2 ring-primary ring-inset")}
+      {...dragHandlers}
+    >
       <textarea
         ref={textareaRef}
         value={input}
@@ -64,9 +82,32 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount
         className="flex-1 resize-none rounded-lg border bg-muted/50 px-4 py-2.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
       />
       {injectedCount > 0 && (
-        <Badge variant="secondary" className="mb-1.5 text-xs">
-          {injectedCount} source{injectedCount !== 1 ? "s" : ""}
-        </Badge>
+        <Popover>
+          <PopoverTrigger asChild>
+            <Badge variant="secondary" className="mb-1.5 cursor-pointer text-xs hover:bg-accent">
+              {injectedCount} source{injectedCount !== 1 ? "s" : ""}
+            </Badge>
+          </PopoverTrigger>
+          <PopoverContent className="w-72 p-2" align="end">
+            <p className="mb-2 text-xs font-medium text-muted-foreground">Injected context</p>
+            <div className="space-y-2">
+              {injectedSources?.map((src, i) => (
+                <div key={i} className="rounded border p-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate text-xs font-medium">{src.filename}</span>
+                    <DomainBadge domain={src.domain} />
+                  </div>
+                  <p className="mt-1 line-clamp-2 text-[10px] text-muted-foreground">
+                    {src.content.slice(0, 120)}{src.content.length > 120 ? "..." : ""}
+                  </p>
+                </div>
+              ))}
+              {(!injectedSources || injectedSources.length === 0) && (
+                <p className="text-xs text-muted-foreground">{injectedCount} source{injectedCount !== 1 ? "s" : ""} ready</p>
+              )}
+            </div>
+          </PopoverContent>
+        </Popover>
       )}
       {isStreaming ? (
         <Button variant="destructive" size="icon" aria-label="Stop generation" onClick={onStop}>

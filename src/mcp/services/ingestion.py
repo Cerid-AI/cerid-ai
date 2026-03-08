@@ -108,6 +108,30 @@ def _reingest_artifact(
     except Exception as e:
         logger.debug(f"BM25 indexing failed during re-ingest (non-blocking): {e}")
 
+    # Compute quality_score for re-ingested content
+    _summary = base_meta.get("summary", "")
+    _tags = base_meta.get("tags_json", "[]")
+    _sub_cat = base_meta.get("sub_category", "")
+    _qscore = 0.0
+    if _summary and _summary != content[:200]:
+        _qscore += 0.20
+    try:
+        _tag_list = json.loads(_tags) if _tags else []
+    except (json.JSONDecodeError, TypeError):
+        _tag_list = []
+    if _tag_list:
+        _qscore += 0.15
+    if len(chunks) > 1:
+        _qscore += 0.15
+    if len(content) > 500:
+        _qscore += 0.15
+    if domain:
+        _qscore += 0.10
+    if _sub_cat and _sub_cat != config.DEFAULT_SUB_CATEGORY:
+        _qscore += 0.10
+    _qscore += 0.15  # dedup passed
+    quality_score = round(min(_qscore, 1.0), 2)
+
     # Update Neo4j artifact (preserves relationships)
     try:
         graph.update_artifact(
@@ -118,6 +142,7 @@ def _reingest_artifact(
             chunk_count=len(chunks),
             chunk_ids_json=json.dumps(chunk_ids),
             content_hash=content_hash,
+            quality_score=quality_score,
         )
     except Exception as e:
         logger.error(f"Failed to update artifact in Neo4j during re-ingest: {e}")
@@ -219,6 +244,30 @@ def ingest_content(
     except Exception as e:
         logger.warning(f"BM25 indexing failed (non-blocking): {e}")
 
+    # Compute quality_score based on available metadata signals
+    _summary = base_meta.get("summary", "")
+    _tags = base_meta.get("tags_json", "[]")
+    _sub_cat = base_meta.get("sub_category", "")
+    _qscore = 0.0
+    if _summary and _summary != content[:200]:
+        _qscore += 0.20  # has a real summary, not just truncated content
+    try:
+        _tag_list = json.loads(_tags) if _tags else []
+    except (json.JSONDecodeError, TypeError):
+        _tag_list = []
+    if _tag_list:
+        _qscore += 0.15
+    if len(chunks) > 1:
+        _qscore += 0.15
+    if len(content) > 500:
+        _qscore += 0.15
+    if domain:
+        _qscore += 0.10
+    if _sub_cat and _sub_cat != config.DEFAULT_SUB_CATEGORY:
+        _qscore += 0.10
+    _qscore += 0.15  # dedup passed (we got this far)
+    quality_score = round(min(_qscore, 1.0), 2)
+
     artifact_created = False
     try:
         driver = get_neo4j()
@@ -234,6 +283,7 @@ def ingest_content(
             content_hash=content_hash,
             sub_category=base_meta.get("sub_category", config.DEFAULT_SUB_CATEGORY),
             tags_json=base_meta.get("tags_json", "[]"),
+            quality_score=quality_score,
         )
         artifact_created = True
     except Exception as e:

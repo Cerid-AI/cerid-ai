@@ -135,3 +135,33 @@
 **When:** Creating ambient module declarations for a library's ESM sub-paths (e.g., `react-syntax-highlighter/dist/esm/prism-light`).
 **Problem:** If a `.d.ts` file has the same basename as a `.ts` file in the same directory (e.g., `syntax-highlighter.d.ts` alongside `syntax-highlighter.ts`), TypeScript treats the `.d.ts` as the type declaration for that specific `.ts` module rather than as ambient module declarations. The ambient `declare module` statements are ignored.
 **Fix:** Name the `.d.ts` file distinctly from any `.ts` module (e.g., `react-syntax-highlighter.d.ts` instead of `syntax-highlighter.d.ts`).
+
+---
+
+## Refactoring (Phase 30)
+
+### `extractError()` changes error messages — update test assertions
+**When:** Standardizing API error handling to use `extractError()` across all functions.
+**Problem:** `extractError()` parses the response body for a `detail` field (FastAPI convention) and surfaces the server's message instead of the generic fallback. Tests that assert on the fallback message (e.g., `expect(screen.getByText(/failed/i))`) break because the actual error text changes.
+**Fix:** After standardizing error handling, audit tests that mock non-OK responses. Update assertions to match the new error messages.
+**Reference:** `settings-pane.test.tsx` — changed from `/failed/i` to `/server error/i` after Sprint 4.1.
+
+### `@internal` annotation vs un-exporting for test-accessed internals
+**When:** Cleaning up exports that are only used by tests.
+**Problem:** Un-exporting test-accessed functions forces rewriting all tests to go through the public API. This loses granular unit test coverage and risks introducing subtle bugs.
+**Rule:** If a function has 10+ direct test cases, keep it exported with `@internal` JSDoc annotation. The test coverage value outweighs the encapsulation benefit.
+**Reference:** `model-router.ts` — 4 functions with 45 total test cases kept as `@internal`.
+
+### useRef + tick threshold pattern for controlled re-renders
+**When:** A value changes frequently (e.g., every SSE chunk during streaming) but the derived display only needs periodic updates.
+**Pattern:** Store the raw value in a `useRef`, maintain a `useState` "tick" counter, and only call `setTick()` when the ref crosses a meaningful threshold (e.g., every ~100 estimated tokens).
+**Benefit:** Reduces re-renders from ~500 per response to ~5 while maintaining smooth UI updates.
+**Reference:** `use-live-metrics.ts` — `CHARS_PER_TICK = 400`, `streamingCharsRef` + `streamingTick`.
+
+### Re-export bridge pattern for component promotion
+**When:** Moving a component from a domain-specific module to shared UI (e.g., `kb/domain-filter.tsx` → `ui/domain-badge.tsx`).
+**Pattern:**
+1. Create the new file at the canonical location
+2. Update all consumers to import from the new path
+3. Leave a re-export in the old location for backward compatibility: `export { DomainBadge } from "@/components/ui/domain-badge"`
+**Benefit:** Zero risk of breakage from missed imports, serves as documentation for anyone reading the old module.

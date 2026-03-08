@@ -9,15 +9,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { ChevronRight, ChevronDown, FolderOpen, Folder, Loader2, Plus, X } from "lucide-react"
 import { fetchTaxonomy, createDomain, createSubCategory } from "@/lib/api"
 import { cn } from "@/lib/utils"
-
-const DOMAIN_COLORS: Record<string, string> = {
-  coding: "text-blue-600 dark:text-blue-400",
-  finance: "text-green-600 dark:text-green-400",
-  projects: "text-purple-600 dark:text-purple-400",
-  personal: "text-orange-600 dark:text-orange-400",
-  general: "text-zinc-600 dark:text-zinc-400",
-  conversations: "text-cyan-600 dark:text-cyan-400",
-}
+import { DOMAIN_TEXT_COLORS } from "@/lib/constants"
 
 interface TaxonomyFilter {
   domain: string | null
@@ -215,9 +207,9 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts }: Taxonom
                       )}
                     </span>
                     {isExpanded ? (
-                      <FolderOpen className={cn("h-3.5 w-3.5 shrink-0", DOMAIN_COLORS[domain])} />
+                      <FolderOpen className={cn("h-3.5 w-3.5 shrink-0", DOMAIN_TEXT_COLORS[domain])} />
                     ) : (
-                      <Folder className={cn("h-3.5 w-3.5 shrink-0", DOMAIN_COLORS[domain])} />
+                      <Folder className={cn("h-3.5 w-3.5 shrink-0", DOMAIN_TEXT_COLORS[domain])} />
                     )}
                     <span className="flex-1 truncate capitalize">{domain}</span>
                     {domainCount !== undefined && (

@@ -2084,6 +2084,7 @@ async def verify_response_streaming(
             "verification_method": result.get("verification_method", "kb"),
             "verification_model": result.get("verification_model"),
             "source_urls": result.get("source_urls", []),
+            "verification_answer": result.get("verification_answer", ""),
         }
 
     # --- Consistency checking (cross-turn + internal contradictions) ---

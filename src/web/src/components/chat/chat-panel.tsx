@@ -1,19 +1,15 @@
 // Copyright (c) 2026 Justin Michaels. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useRef, useEffect, useCallback, useState, useMemo, useSyncExternalStore } from "react"
+import { useEffect, useCallback, useState, useMemo, useSyncExternalStore } from "react"
 import { Group, Panel, Separator as PanelSeparator } from "react-resizable-panels"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
-import { Plus, Database, Rss, LayoutDashboard, Zap, Sparkles, Shield, MoreVertical } from "lucide-react"
-import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover"
 import { Badge } from "@/components/ui/badge"
-import { MessageBubble, type MessageVerificationStatus } from "./message-bubble"
-import { ModelSwitchDivider } from "./model-switch-divider"
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
+import { Database, Zap, Sparkles } from "lucide-react"
+import { ChatToolbar } from "./chat-toolbar"
+import { ChatMessages } from "./chat-messages"
 import { ChatInput } from "./chat-input"
-import { ModelSelect } from "./model-select"
 import { SplitPane } from "@/components/layout/split-pane"
 import { KBContextPanel } from "@/components/kb/kb-context-panel"
 import { HallucinationPanel } from "@/components/audit/hallucination-panel"
@@ -27,13 +23,14 @@ import { useSettings } from "@/hooks/use-settings"
 import { useModelRouter } from "@/hooks/use-model-router"
 import { useModelSwitch } from "@/hooks/use-model-switch"
 import { useSmartSuggestions } from "@/hooks/use-smart-suggestions"
-import { useVerificationStream } from "@/hooks/use-verification-stream"
-import { fetchHallucinationReport } from "@/lib/api"
-import type { ChatMessage, SourceRef, HallucinationReport } from "@/lib/types"
+import { useVerificationOrchestrator } from "@/hooks/use-verification-orchestrator"
+import { UploadDialog } from "@/components/kb/upload-dialog"
+import { uploadFile } from "@/lib/api"
+import type { ChatMessage, SourceRef } from "@/lib/types"
 import { MODELS } from "@/lib/types"
 import { recommendModel } from "@/lib/model-router"
 import { deduplicateChunks, formatChunkWithHeader } from "@/lib/kb-utils"
-import { cn, uuid } from "@/lib/utils"
+import { uuid } from "@/lib/utils"
 
 const NARROW_MQ = "(max-width: 1024px)"
 const narrowSubscribe = (cb: () => void) => {
@@ -60,10 +57,12 @@ export function ChatPanel() {
   const {
     feedbackLoop, toggleFeedbackLoop,
     showDashboard, toggleDashboard,
-    routingMode, cycleRoutingMode,
-    autoInject, autoInjectThreshold,
+    routingMode, setRoutingMode, cycleRoutingMode,
+    autoInject, toggleAutoInject, autoInjectThreshold, setAutoInjectThreshold,
     costSensitivity,
     hallucinationEnabled, toggleHallucinationEnabled,
+    memoryExtraction, toggleMemoryExtraction,
+    inlineMarkups, toggleInlineMarkups,
   } = useSettings()
 
   const { send, stop, isStreaming } = useChat({
@@ -73,89 +72,33 @@ export function ChatPanel() {
     feedbackEnabled: feedbackLoop,
   })
 
-  const scrollRef = useRef<HTMLDivElement>(null)
   const [selectedModel, setSelectedModel] = useState(MODELS[0].id)
   const [showKB, setShowKB] = useState(() => window.innerWidth >= 1024)
   const [lastAutoInjectCount, setLastAutoInjectCount] = useState(0)
   const [autoRouteNotice, setAutoRouteNotice] = useState<string | null>(null)
-  const [manualVerifyBump, setManualVerifyBump] = useState(0)
+  const [pendingChatFiles, setPendingChatFiles] = useState<File[]>([])
 
-  // --- Verification (streaming + fallback) ---
-  const [savedReport, setSavedReport] = useState<HallucinationReport | null>(null)
-  const [savedReportLoading, setSavedReportLoading] = useState(false)
+  const currentModelObj = useMemo(() => MODELS.find((m) => m.id === selectedModel) ?? MODELS[0], [selectedModel])
 
-  // Get the latest assistant response text for streaming verification (uses `messages` defined below)
-  const activeMessages = active?.messages
-  const latestAssistantText = useMemo(() => {
-    if (!activeMessages) return null
-    const assistantMsgs = activeMessages.filter((m) => m.role === "assistant")
-    return assistantMsgs.length > 0 ? assistantMsgs[assistantMsgs.length - 1].content : null
-  }, [activeMessages])
-
-  // Trigger key: increments each time a new assistant message finishes streaming
-  const streamTriggerKey = useMemo(() => {
-    if (!activeMessages || isStreaming) return 0
-    return activeMessages.filter((m) => m.role === "assistant").length
-  }, [activeMessages, isStreaming])
-
-  // Last user message for evasion detection
-  const latestUserQuery = useMemo(() => {
-    if (!activeMessages) return undefined
-    const userMsgs = activeMessages.filter((m) => m.role === "user")
-    return userMsgs.length > 0 ? userMsgs[userMsgs.length - 1].content : undefined
-  }, [activeMessages])
-
-  // Actual model that generated the latest assistant response (not the dropdown selection)
-  const latestAssistantModel = useMemo(() => {
-    if (!activeMessages) return undefined
-    const assistantMsgs = activeMessages.filter((m) => m.role === "assistant")
-    return assistantMsgs.length > 0 ? assistantMsgs[assistantMsgs.length - 1].model : undefined
-  }, [activeMessages])
-
-  // Prior assistant context for history consistency checking (last 3 prior responses)
-  const priorAssistantContext = useMemo(() => {
-    if (!activeMessages) return undefined
-    const assistantMsgs = activeMessages.filter((m) => m.role === "assistant")
-    if (assistantMsgs.length < 2) return undefined
-    // Exclude the latest (being verified), take up to 3 prior, truncate each
-    return assistantMsgs.slice(-4, -1).map((m) => ({
-      role: "assistant" as const,
-      content: m.content.slice(0, 2000),
-    }))
-  }, [activeMessages])
-
-  // Streaming verification hook
-  const verification = useVerificationStream(
-    latestAssistantText,
-    activeId ?? null,
+  // --- Verification orchestrator ---
+  const {
+    halReport,
+    halLoading,
+    verification,
+    lastAssistantMsgId,
+    verificationStatusForMsg,
+    verificationRecBanner,
+    setVerificationRecBanner,
+    handleVerifyMessage,
+  } = useVerificationOrchestrator({
+    activeMessages: active?.messages,
+    activeId: activeId ?? null,
+    isStreaming,
     hallucinationEnabled,
-    streamTriggerKey + manualVerifyBump,
-    latestAssistantModel,
-    latestUserQuery,
-    priorAssistantContext,
-  )
+    currentModel: currentModelObj,
+  })
 
-  // Fetch saved report when switching to a conversation (fallback)
-  useEffect(() => {
-    if (!activeId || !hallucinationEnabled) {
-      setSavedReport(null)
-      return
-    }
-    // Only fetch saved report if streaming hasn't started
-    if (verification.phase !== "idle") return
-
-    let cancelled = false
-    setSavedReportLoading(true)
-    fetchHallucinationReport(activeId)
-      .then((r) => { if (!cancelled) { setSavedReport(r); setSavedReportLoading(false) } })
-      .catch(() => { if (!cancelled) setSavedReportLoading(false) })
-    return () => { cancelled = true }
-  }, [activeId, hallucinationEnabled]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Unified report: prefer streaming report when available, fallback to saved
-  const halReport = verification.report ?? savedReport
-  const halLoading = verification.loading || savedReportLoading
-
+  // --- KB context ---
   const messages = active?.messages
   const latestUserMessage = useMemo(() => {
     if (!messages) return ""
@@ -163,7 +106,6 @@ export function ChatPanel() {
     return userMsgs.length > 0 ? userMsgs[userMsgs.length - 1].content : ""
   }, [messages])
 
-  // Recent conversation messages for KB query enrichment (last 5 user messages)
   const recentMessages = useMemo(() => {
     if (!messages || messages.length === 0) return undefined
     const userMsgs = messages
@@ -176,29 +118,7 @@ export function ChatPanel() {
   const kbContext = useKBContext(latestUserMessage, recentMessages)
   const { injectedContext, clearInjected } = kbContext
 
-  // Compute per-message verification status for the latest assistant message
-  const lastAssistantMsgId = useMemo(() => {
-    if (!activeMessages) return null
-    const assistantMsgs = activeMessages.filter((m) => m.role === "assistant" && m.content)
-    return assistantMsgs.length > 0 ? assistantMsgs[assistantMsgs.length - 1].id : null
-  }, [activeMessages])
-
-  const verificationStatusForMsg = useMemo((): MessageVerificationStatus => {
-    if (!hallucinationEnabled || !lastAssistantMsgId) return null
-    if (verification.loading) return { state: "loading" }
-    if (halReport && !halReport.skipped && halReport.summary.total > 0) {
-      return {
-        state: "done",
-        verified: halReport.summary.verified,
-        unverified: halReport.summary.unverified,
-        uncertain: halReport.summary.uncertain,
-        total: halReport.summary.total,
-      }
-    }
-    return null
-  }, [hallucinationEnabled, lastAssistantMsgId, verification.loading, halReport])
-
-  const currentModelObj = useMemo(() => MODELS.find((m) => m.id === selectedModel) ?? MODELS[0], [selectedModel])
+  // --- Model routing ---
   const { recommendation, dismiss: dismissRec, resetDismiss } = useModelRouter({
     routingMode,
     costSensitivity,
@@ -228,8 +148,10 @@ export function ChatPanel() {
   useEffect(() => {
     if (activeModel) setSelectedModel(activeModel)
     resetDismiss()
-  }, [activeId, activeModel, resetDismiss])
+    setVerificationRecBanner(null)
+  }, [activeId, activeModel, resetDismiss, setVerificationRecBanner])
 
+  // --- Smart suggestions ---
   const injectedArtifactIds = useMemo(
     () => injectedContext.map((r) => r.artifact_id),
     [injectedContext],
@@ -239,17 +161,10 @@ export function ChatPanel() {
     injectedArtifactIds,
   })
 
-  useEffect(() => {
-    const viewport = scrollRef.current?.querySelector<HTMLDivElement>(
-      "[data-radix-scroll-area-viewport]",
-    )
-    if (viewport) {
-      viewport.scrollTop = viewport.scrollHeight
-    }
-  }, [active?.messages])
-
+  // --- Callbacks ---
   const handleSend = useCallback(
     (content: string) => {
+      setVerificationRecBanner(null)
       // Auto-routing: silently switch model if recommendation exists
       let modelToUse = selectedModel
       if (routingMode === "auto") {
@@ -334,19 +249,31 @@ export function ChatPanel() {
       send(convoId, allMessages, modelToUse, sourcesForAssistant)
       if (modelToUse !== selectedModel && activeId) updateModel(activeId, modelToUse)
     },
-    [activeId, active, selectedModel, addMessage, create, send, injectedContext, clearInjected, autoInject, autoInjectThreshold, kbContext.results, routingMode, costSensitivity, kbContext.injectedContext.length, updateModel],
+    [activeId, active, selectedModel, addMessage, create, send, injectedContext, clearInjected, autoInject, autoInjectThreshold, kbContext.results, routingMode, costSensitivity, kbContext.injectedContext.length, updateModel, setVerificationRecBanner],
   )
-
-  const handleVerifyMessage = useCallback(() => {
-    // Re-trigger verification for the latest assistant message
-    setManualVerifyBump((prev) => prev + 1)
-  }, [])
 
   const handleModelChange = useCallback(
     (newModel: string) => {
       initSwitch(newModel)
     },
     [initSwitch],
+  )
+
+  const handleChatFileDrop = useCallback((files: File[]) => {
+    setPendingChatFiles(files)
+  }, [])
+
+  const handleChatFileUpload = useCallback(
+    async (options: { domain?: string; categorize_mode?: string }) => {
+      const files = [...pendingChatFiles]
+      setPendingChatFiles([])
+      for (const file of files) {
+        try {
+          await uploadFile(file, { domain: options.domain, categorizeMode: options.categorize_mode })
+        } catch { /* upload errors handled by API */ }
+      }
+    },
+    [pendingChatFiles],
   )
 
   const handleCorrection = useCallback(
@@ -378,139 +305,35 @@ export function ChatPanel() {
     [activeId, active, replaceMessages, addMessage, send, selectedModel],
   )
 
+  // --- Render ---
   const chatArea = (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      {/* Toolbar */}
-      <div className="flex items-center gap-2 border-b px-4 py-2">
-        <Button variant="ghost" size="sm" onClick={() => create(selectedModel)}>
-          <Plus className="mr-1 h-4 w-4" />
-          {!isNarrow && "New chat"}
-        </Button>
-        <div className="flex-1" />
-        <TooltipProvider delayDuration={0}>
-          {/* Always visible: KB toggle */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className={cn("h-8 w-8", showKB && "text-green-500")}
-                onClick={() => setShowKB(!showKB)}
-                aria-label={showKB ? "Hide knowledge context" : "Show knowledge context"}
-              >
-                <Database className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {showKB ? "Hide knowledge context" : "Show knowledge context"}
-            </TooltipContent>
-          </Tooltip>
-          {/* Always visible: Verification */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className={cn("h-8 w-8", hallucinationEnabled && "text-green-500")}
-                onClick={toggleHallucinationEnabled}
-                aria-label={hallucinationEnabled ? "Disable response verification" : "Enable response verification"}
-              >
-                <Shield className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {hallucinationEnabled ? "Response verification: ON" : "Response verification: OFF"}
-            </TooltipContent>
-          </Tooltip>
-          {/* Wide viewport: show all buttons inline */}
-          {!isNarrow && (
-            <>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className={cn("h-8 w-8", feedbackLoop && "text-green-500")}
-                    onClick={toggleFeedbackLoop}
-                    aria-label={feedbackLoop ? "Disable feedback loop" : "Enable feedback loop"}
-                  >
-                    <Rss className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {feedbackLoop ? "Feedback loop: ON (responses saved to KB)" : "Feedback loop: OFF"}
-                </TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className={cn("h-8 w-8", showDashboard && "text-green-500")}
-                    onClick={toggleDashboard}
-                    aria-label={showDashboard ? "Hide metrics dashboard" : "Show metrics dashboard"}
-                  >
-                    <LayoutDashboard className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {showDashboard ? "Hide metrics dashboard" : "Show metrics dashboard"}
-                </TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className={cn("h-8 w-8", routingMode !== "manual" && "text-green-500")}
-                    onClick={cycleRoutingMode}
-                    aria-label={`Smart routing: ${routingMode}`}
-                  >
-                    <Zap className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {routingMode === "manual" ? "Smart routing: OFF" : routingMode === "recommend" ? "Smart routing: Recommend" : "Smart routing: Auto"}
-                </TooltipContent>
-              </Tooltip>
-            </>
-          )}
-          {/* Narrow viewport: overflow menu */}
-          {isNarrow && (
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="More options">
-                  <MoreVertical className="h-4 w-4" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-48">
-                <button
-                  className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent", feedbackLoop && "text-green-500")}
-                  onClick={toggleFeedbackLoop}
-                >
-                  <Rss className="h-4 w-4" />
-                  {feedbackLoop ? "Feedback: ON" : "Feedback: OFF"}
-                </button>
-                <button
-                  className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent", showDashboard && "text-green-500")}
-                  onClick={toggleDashboard}
-                >
-                  <LayoutDashboard className="h-4 w-4" />
-                  {showDashboard ? "Dashboard: ON" : "Dashboard: OFF"}
-                </button>
-                <button
-                  className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent", routingMode !== "manual" && "text-green-500")}
-                  onClick={cycleRoutingMode}
-                >
-                  <Zap className="h-4 w-4" />
-                  {routingMode === "manual" ? "Routing: Off" : routingMode === "recommend" ? "Routing: Suggest" : "Routing: Auto"}
-                </button>
-              </PopoverContent>
-            </Popover>
-          )}
-        </TooltipProvider>
-        <ModelSelect value={selectedModel} onChange={handleModelChange} />
-      </div>
+      <ChatToolbar
+        isNarrow={isNarrow}
+        showKB={showKB}
+        onToggleKB={() => setShowKB(!showKB)}
+        autoInject={autoInject}
+        toggleAutoInject={toggleAutoInject}
+        autoInjectThreshold={autoInjectThreshold}
+        setAutoInjectThreshold={setAutoInjectThreshold}
+        hallucinationEnabled={hallucinationEnabled}
+        toggleHallucinationEnabled={toggleHallucinationEnabled}
+        inlineMarkups={inlineMarkups}
+        toggleInlineMarkups={toggleInlineMarkups}
+        onVerifyMessage={handleVerifyMessage}
+        feedbackLoop={feedbackLoop}
+        toggleFeedbackLoop={toggleFeedbackLoop}
+        memoryExtraction={memoryExtraction}
+        toggleMemoryExtraction={toggleMemoryExtraction}
+        showDashboard={showDashboard}
+        toggleDashboard={toggleDashboard}
+        routingMode={routingMode}
+        setRoutingMode={setRoutingMode}
+        cycleRoutingMode={cycleRoutingMode}
+        selectedModel={selectedModel}
+        onModelChange={handleModelChange}
+        onNewChat={() => create(selectedModel)}
+      />
 
       {/* Dashboard metrics bar */}
       {showDashboard && (
@@ -543,6 +366,28 @@ export function ChatPanel() {
         </div>
       )}
 
+      {/* V1b: Proactive switch banner after verification detects ignorance with real-time answers */}
+      {verificationRecBanner && (
+        <div className="flex items-center gap-2 border-b bg-blue-500/10 px-4 py-1.5 text-xs">
+          <Zap className="h-3.5 w-3.5 text-blue-500" />
+          <span className="flex-1">{verificationRecBanner.reason}</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 text-xs"
+            onClick={() => {
+              initSwitch(verificationRecBanner.model.id)
+              setVerificationRecBanner(null)
+            }}
+          >
+            Switch
+          </Button>
+          <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setVerificationRecBanner(null)}>
+            Dismiss
+          </Button>
+        </div>
+      )}
+
       {/* Model switch options dialog */}
       {pendingSwitch && (
         <ModelSwitchDialog
@@ -562,43 +407,21 @@ export function ChatPanel() {
       )}
 
       {/* Messages */}
-      <ScrollArea className="min-h-0 flex-1 px-4" ref={scrollRef}>
-        <div className="mx-auto max-w-4xl py-4">
-          {(!active || active.messages.length === 0) && (
-            <div className="flex items-center justify-center py-20 text-muted-foreground">
-              <p>Start a conversation...</p>
-            </div>
-          )}
-          {active?.messages.map((msg, i) => {
-            let divider: React.ReactNode = null
-            if (msg.role === "assistant" && msg.model) {
-              const prevAssistant = active.messages
-                .slice(0, i)
-                .findLast((m) => m.role === "assistant" && m.model)
-              if (prevAssistant?.model && prevAssistant.model !== msg.model) {
-                divider = (
-                  <ModelSwitchDivider
-                    key={`switch-${msg.id}`}
-                    fromModelId={prevAssistant.model}
-                    toModelId={msg.model}
-                  />
-                )
-              }
-            }
-            return (
-              <div key={msg.id}>
-                {divider}
-                <MessageBubble
-                  message={msg}
-                  verificationStatus={msg.id === lastAssistantMsgId ? verificationStatusForMsg : undefined}
-                  onCorrect={msg.role === "assistant" && !isStreaming ? handleCorrection : undefined}
-                  onVerify={msg.role === "assistant" && !isStreaming && hallucinationEnabled && msg.id === lastAssistantMsgId ? handleVerifyMessage : undefined}
-                />
-              </div>
-            )
-          })}
-        </div>
-      </ScrollArea>
+      <ChatMessages
+        messages={active?.messages ?? []}
+        isStreaming={isStreaming}
+        lastAssistantMsgId={lastAssistantMsgId}
+        verificationStatusForMsg={verificationStatusForMsg}
+        halReport={halReport}
+        hallucinationEnabled={hallucinationEnabled}
+        inlineMarkups={inlineMarkups}
+        onCorrect={handleCorrection}
+        onVerify={handleVerifyMessage}
+        onArtifactClick={(artifactId) => {
+          kbContext.setSelectedArtifactId(artifactId)
+          setShowKB(true)
+        }}
+      />
 
       {/* Smart KB suggestions */}
       {smartSuggestions.suggestions.length > 0 && !isStreaming && (
@@ -632,6 +455,10 @@ export function ChatPanel() {
         streamingClaims={verification.phase !== "idle" && verification.phase !== "done" ? verification.claims : undefined}
         sessionClaimsChecked={verification.sessionClaimsChecked}
         sessionEstCost={verification.sessionEstCost}
+        onArtifactClick={(artifactId) => {
+          kbContext.setSelectedArtifactId(artifactId)
+          setShowKB(true)
+        }}
       />
 
       {/* Auto-route notice */}
@@ -652,6 +479,14 @@ export function ChatPanel() {
         </div>
       )}
 
+      {/* Chat file drop dialog */}
+      <UploadDialog
+        files={pendingChatFiles}
+        defaultDomain={null}
+        onConfirm={handleChatFileUpload}
+        onCancel={() => setPendingChatFiles([])}
+      />
+
       {/* Input */}
       <ChatInput
         onSend={(content) => {
@@ -661,10 +496,16 @@ export function ChatPanel() {
         onStop={stop}
         isStreaming={isStreaming}
         injectedCount={kbContext.injectedContext.length}
+        injectedSources={kbContext.injectedContext.map((r) => ({
+          filename: r.filename,
+          domain: r.domain,
+          content: r.content,
+        }))}
         onInputChange={(text) => {
           smartSuggestions.debouncedSearch(text)
           if (lastAutoInjectCount > 0) setLastAutoInjectCount(0)
         }}
+        onFileDrop={handleChatFileDrop}
       />
     </div>
   )

@@ -4,6 +4,10 @@
 """
 Cerid AI Dashboard - Streamlit-based administration and monitoring UI.
 
+DEPRECATED: The React GUI (src/web/) is now the primary user interface.
+This Streamlit dashboard is retained for quick administrative tasks but
+receives no new feature development.  It may be removed in a future phase.
+
 Panes:
 - Overview: system health, domain distribution, quick stats
 - Artifacts: browse, filter, recategorize ingested files

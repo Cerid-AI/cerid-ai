@@ -28,7 +28,7 @@ function estimateVerificationCost(claimCount: number): number {
   return extractionCost + claimCount * perClaimCost
 }
 
-export interface UseVerificationStreamReturn {
+interface UseVerificationStreamReturn {
   /** Claims discovered and verified so far. */
   claims: StreamingClaim[]
   /** Current phase of the verification process. */
@@ -90,6 +90,18 @@ export function useVerificationStream(
     setSummary(null)
     setExtractionMethod(null)
   }, [conversationId])
+
+  // Clear stale verification state when a new response starts streaming (triggerKey resets to 0)
+  const prevTriggerKey = useRef(triggerKey)
+  useEffect(() => {
+    if (prevTriggerKey.current !== 0 && triggerKey === 0) {
+      setClaims([])
+      setPhase("idle")
+      setSummary(null)
+      setExtractionMethod(null)
+    }
+    prevTriggerKey.current = triggerKey
+  }, [triggerKey])
 
   useEffect(() => {
     if (!responseText || !conversationId || !enabled || triggerKey === 0) {
@@ -180,6 +192,7 @@ export function useVerificationStream(
                             reason: event.reason,
                             verification_method: event.verification_method,
                             verification_model: event.verification_model,
+                            verification_answer: event.verification_answer || undefined,
                           }
                         : c,
                     ),
@@ -267,6 +280,7 @@ export function useVerificationStream(
             reason: c.reason || undefined,
             verification_method: c.verification_method,
             verification_model: c.verification_model,
+            verification_answer: c.verification_answer,
             consistency_issue: c.consistency_issue,
           })),
           summary: {

@@ -5,6 +5,7 @@ import { useMemo } from "react"
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import type { AuditVerification } from "@/lib/types"
+import { CHART_TOOLTIP_STYLE } from "@/lib/constants"
 
 interface ModelAccuracyChartProps {
   verification: AuditVerification | undefined
@@ -52,13 +53,7 @@ export function ModelAccuracyChart({ verification }: ModelAccuracyChartProps) {
               tick={{ fontSize: 10 }}
             />
             <Tooltip
-              contentStyle={{
-                fontSize: 12,
-                borderRadius: 8,
-                backgroundColor: "hsl(var(--popover))",
-                color: "hsl(var(--popover-foreground))",
-                border: "1px solid hsl(var(--border))",
-              }}
+              contentStyle={CHART_TOOLTIP_STYLE}
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               formatter={(value: any, _name: any, entry: any) => [
                 `${value}% (${entry?.payload?.checks ?? 0} checks)`,

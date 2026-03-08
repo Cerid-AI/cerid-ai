@@ -43,7 +43,7 @@ export function ConversationList({ conversations, activeId, onSelect, onDelete }
               variant="ghost"
               size="icon"
               aria-label="Delete conversation"
-              className="h-6 w-6 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+              className="h-6 w-6 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 [@media(pointer:coarse)]:opacity-60"
               onClick={(e) => {
                 e.stopPropagation()
                 onDelete(convo.id)

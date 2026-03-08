@@ -8,35 +8,14 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { ShieldOff, Shield, ShieldCheck, Loader2, ThumbsUp, ThumbsDown, ExternalLink, AlertTriangle } from "lucide-react"
 import { submitClaimFeedback } from "@/lib/api"
 import type { HallucinationReport, HallucinationClaim, StreamingClaim } from "@/lib/types"
-import { getClaimDisplayStatus, type ClaimDisplayStatus } from "@/lib/verification-utils"
+import { getClaimDisplayStatus, DISPLAY_STATUS_COLORS, verificationMethodLabel, verificationMethodColor } from "@/lib/verification-utils"
 import { cn } from "@/lib/utils"
 
-/** Display-status color map for badge backgrounds */
-const DISPLAY_STATUS_COLORS: Record<ClaimDisplayStatus | "error", string> = {
-  verified: "bg-green-500/20 text-green-400 border-green-500/30",
-  refuted: "bg-red-500/20 text-red-400 border-red-500/30",
-  unverified: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
-  evasion: "bg-orange-500/20 text-orange-400 border-orange-500/30",
-  citation: "bg-purple-500/20 text-purple-400 border-purple-500/30",
-  uncertain: "bg-muted/50 text-muted-foreground border-border",
-  pending: "bg-muted text-muted-foreground border-border",
-  error: "bg-muted text-muted-foreground",
-}
-
 function VerificationMethodBadge({ method, model }: { method?: string; model?: string }) {
-  if (!method || method === "kb") return null
-  const label = method === "cross_model" ? "cross-model"
-    : method === "web_search" ? "web search"
-    : method === "cross_model_failed" ? "cross-model (failed)"
-    : method === "web_search_failed" ? "web search (failed)"
-    : method
-  const color = method === "cross_model"
-    ? "bg-purple-500/15 text-purple-400 border-purple-500/30"
-    : method === "web_search"
-    ? "bg-blue-500/15 text-blue-400 border-blue-500/30"
-    : "bg-muted text-muted-foreground border-border"
+  const label = verificationMethodLabel(method)
+  if (!label) return null
   return (
-    <Badge variant="outline" className={`text-[10px] px-1 py-0 ${color}`} title={model ? `Verified by ${model}` : undefined}>
+    <Badge variant="outline" className={`text-[10px] px-1 py-0 ${verificationMethodColor(method)}`} title={model ? `Verified by ${model}` : undefined}>
       {label}
     </Badge>
   )

@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -16,6 +17,11 @@ logger = logging.getLogger("ai-companion.settings")
 
 # Version constant (single source of truth for the API)
 _VERSION = "0.8.0"
+
+
+def _redact_url(url: str) -> str:
+    """Redact password from a connection URL (e.g. redis://:pass@host → redis://***@host)."""
+    return re.sub(r"://([^@]*?)@", "://***@", url) if "@" in url else url
 
 
 # ── Pydantic models ──────────────────────────────────────────────────────────
@@ -56,6 +62,18 @@ class SettingsUpdateRequest(BaseModel):
     enable_self_rag: bool | None = Field(
         None, description="Toggle Self-RAG validation loop for retrieval refinement"
     )
+    hybrid_vector_weight: float | None = Field(
+        None, ge=0.0, le=1.0, description="Weight for vector similarity in hybrid search"
+    )
+    hybrid_keyword_weight: float | None = Field(
+        None, ge=0.0, le=1.0, description="Weight for keyword matching in hybrid search"
+    )
+    rerank_llm_weight: float | None = Field(
+        None, ge=0.0, le=1.0, description="Weight for LLM-based reranking score"
+    )
+    rerank_original_weight: float | None = Field(
+        None, ge=0.0, le=1.0, description="Weight for original relevance score in reranking"
+    )
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -92,6 +110,21 @@ async def get_settings_endpoint():
             "storage_domain": "conversations",
             "extraction_model": "Llama 3.3 (free tier)",
         },
+        # Infrastructure (read-only)
+        "bifrost_url": config.BIFROST_URL,
+        "bifrost_timeout": config.BIFROST_TIMEOUT,
+        "chroma_url": config.CHROMA_URL,
+        "neo4j_uri": config.NEO4J_URI,
+        "redis_url": _redact_url(config.REDIS_URL),
+        "archive_path": config.ARCHIVE_PATH,
+        "chunking_mode": config.CHUNKING_MODE,
+        # Search tuning (read-write)
+        "hybrid_vector_weight": config.HYBRID_VECTOR_WEIGHT,
+        "hybrid_keyword_weight": config.HYBRID_KEYWORD_WEIGHT,
+        "rerank_llm_weight": config.RERANK_LLM_WEIGHT,
+        "rerank_original_weight": config.RERANK_ORIGINAL_WEIGHT,
+        "temporal_half_life_days": config.TEMPORAL_HALF_LIFE_DAYS,
+        "temporal_recency_weight": config.TEMPORAL_RECENCY_WEIGHT,
     }
 
 
@@ -165,6 +198,22 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
         config.ENABLE_SELF_RAG = req.enable_self_rag  # type: ignore[assignment]
         updated["enable_self_rag"] = req.enable_self_rag
 
+    if req.hybrid_vector_weight is not None:
+        config.HYBRID_VECTOR_WEIGHT = req.hybrid_vector_weight  # type: ignore[assignment]
+        updated["hybrid_vector_weight"] = req.hybrid_vector_weight
+
+    if req.hybrid_keyword_weight is not None:
+        config.HYBRID_KEYWORD_WEIGHT = req.hybrid_keyword_weight  # type: ignore[assignment]
+        updated["hybrid_keyword_weight"] = req.hybrid_keyword_weight
+
+    if req.rerank_llm_weight is not None:
+        config.RERANK_LLM_WEIGHT = req.rerank_llm_weight  # type: ignore[assignment]
+        updated["rerank_llm_weight"] = req.rerank_llm_weight
+
+    if req.rerank_original_weight is not None:
+        config.RERANK_ORIGINAL_WEIGHT = req.rerank_original_weight  # type: ignore[assignment]
+        updated["rerank_original_weight"] = req.rerank_original_weight
+
     if not updated:
         raise HTTPException(
             status_code=400,
@@ -172,7 +221,8 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
             "categorize_mode, enable_feedback_loop, enable_hallucination_check, "
             "enable_memory_extraction, hallucination_threshold, cost_sensitivity, "
             "enable_auto_inject, auto_inject_threshold, enable_model_router, "
-            "storage_mode, enable_self_rag",
+            "storage_mode, enable_self_rag, hybrid_vector_weight, "
+            "hybrid_keyword_weight, rerank_llm_weight, rerank_original_weight",
         )
 
     logger.info(f"Settings updated: {updated}")

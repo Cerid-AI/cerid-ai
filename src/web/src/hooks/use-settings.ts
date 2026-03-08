@@ -56,6 +56,9 @@ export function useSettings() {
   const [hallucinationEnabled, toggleHallucinationEnabled, hydrateHallucination] = useSyncedToggle(
     "cerid-hallucination-check", "enable_hallucination_check",
   )
+  const [memoryExtraction, toggleMemoryExtraction, hydrateMemory] = useSyncedToggle(
+    "cerid-memory-extraction", "enable_memory_extraction",
+  )
 
   const [showDashboard, setShowDashboard] = useState(() => readBool("cerid-show-dashboard"))
   const [routingMode, setRoutingModeState] = useState<RoutingMode>(() => {
@@ -68,6 +71,15 @@ export function useSettings() {
     return "manual"
   })
   const [autoInjectThreshold, setAutoInjectThresholdState] = useState(() => readFloat("cerid-auto-inject-threshold", 0.82))
+
+  const [inlineMarkups, setInlineMarkupsState] = useState(() => readBool("cerid-inline-markups"))
+  const toggleInlineMarkups = useCallback(() => {
+    setInlineMarkupsState((prev) => {
+      const next = !prev
+      persist("cerid-inline-markups", String(next))
+      return next
+    })
+  }, [])
 
   const [costSensitivity, setCostSensitivity] = useState<"low" | "medium" | "high">(() => {
     try {
@@ -97,6 +109,7 @@ export function useSettings() {
           persist("cerid-auto-inject-threshold", String(s.auto_inject_threshold))
         }
         if (s.enable_hallucination_check !== undefined) hydrateHallucination(s.enable_hallucination_check)
+        if (s.enable_memory_extraction !== undefined) hydrateMemory(s.enable_memory_extraction)
         if (s.enable_model_router !== undefined) {
           const current = localStorage.getItem("cerid-routing-mode")
           if (current !== "auto") {
@@ -107,7 +120,7 @@ export function useSettings() {
         }
       })
       .catch(() => { /* Server unavailable — use localStorage values */ })
-  }, [hydrateFeedback, hydrateAutoInject, hydrateHallucination])
+  }, [hydrateFeedback, hydrateAutoInject, hydrateHallucination, hydrateMemory])
 
   const toggleDashboard = useCallback(() => {
     setShowDashboard((prev) => {
@@ -152,5 +165,7 @@ export function useSettings() {
     autoInjectThreshold, setAutoInjectThreshold,
     costSensitivity, updateCostSensitivity,
     hallucinationEnabled, toggleHallucinationEnabled,
+    memoryExtraction, toggleMemoryExtraction,
+    inlineMarkups, toggleInlineMarkups,
   }
 }

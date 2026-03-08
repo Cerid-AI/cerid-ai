@@ -36,6 +36,7 @@ const SIMPLE_INDICATORS = [
   /\b(what is|define|list|name|when)\b/i,
 ]
 
+/** @internal — exported for test access only. Use `recommendModel` for public API. */
 export function scoreQueryComplexity(
   query: string,
   messageCount: number,
@@ -92,6 +93,7 @@ const VISION_RE = /\b(image|photo|picture|screenshot|diagram|chart|graph|visual)
 
 /**
  * Detect query intent as weighted capability dimensions (sum ≈ 1.0).
+ * @internal — exported for test access only. Used internally by `recommendModel`.
  */
 export function detectIntentWeights(query: string): Record<string, number> {
   const coding = CODING_RE.test(query) ? 0.5 : 0.1
@@ -111,6 +113,7 @@ export function detectIntentWeights(query: string): Record<string, number> {
 /**
  * Score a model's fitness for a query based on its capabilities and the
  * detected query intent. Returns 0–100.
+ * @internal — exported for test access only.
  */
 export function scoreModelForQuery(
   model: ModelOption,
@@ -131,6 +134,13 @@ export function scoreModelForQuery(
   if (caps.vision && VISION_RE.test(query)) score += 5
 
   return Math.min(100, score)
+}
+
+// Minimum savings ratio to trigger model switch per sensitivity level
+const SAVINGS_THRESHOLD: Record<string, number> = {
+  high: 0.05,   // Switch for small savings (>5%)
+  medium: 0.2,  // Switch for moderate savings (>20%)
+  low: 0.5,     // Switch only for large savings (>50%)
 }
 
 // Minimum capability score by complexity tier
@@ -180,8 +190,7 @@ export function recommendModel(
   }
 
   // Apply sensitivity: only switch if savings exceed threshold
-  // High: switch for small savings (>5%), Medium: moderate (>20%), Low: large (>50%)
-  const minSavingsRatio = costSensitivity === "high" ? 0.05 : costSensitivity === "low" ? 0.5 : 0.2
+  const minSavingsRatio = SAVINGS_THRESHOLD[costSensitivity] ?? SAVINGS_THRESHOLD.medium
   const savingsRatio = currentCost > 0 ? (currentCost - bestCost) / currentCost : 0
 
   if (savingsRatio < minSavingsRatio) {
@@ -216,6 +225,7 @@ export function recommendModel(
 /**
  * Calculate costs of switching to a different model, accounting for
  * full history replay, summarization, and context window fit.
+ * @internal — exported for test access only. Use `buildSwitchOptions` for public API.
  */
 export function calculateSwitchCost(
   targetModel: ModelOption,

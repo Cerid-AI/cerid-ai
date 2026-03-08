@@ -219,8 +219,3 @@ def get_loaded_plugins() -> dict[str, dict[str, Any]]:
         name: {k: v for k, v in info.items() if k != "module"}
         for name, info in _loaded_plugins.items()
     }
-
-
-def get_plugin(name: str) -> dict[str, Any] | None:
-    """Get a specific loaded plugin by name."""
-    return _loaded_plugins.get(name)

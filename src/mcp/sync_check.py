@@ -42,7 +42,7 @@ def auto_import_if_empty():
     try:
         import redis as redis_lib
 
-        from cerid_sync_lib import (
+        from sync import (
             import_bm25,
             import_chroma,
             import_neo4j,
