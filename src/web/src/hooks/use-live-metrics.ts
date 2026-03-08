@@ -21,7 +21,9 @@ export function useLiveMetrics(model: string, messages: ChatMessage[]) {
   const metrics: LiveMetrics = useMemo(() => {
     const { input: inputTokens, output: baseOutputTokens } = estimateTokens(messages)
 
-    const outputTokens = baseOutputTokens + Math.ceil(streamingCharsRef.current / 4)
+    // Derive streaming tokens from the tick counter (not the ref) to avoid ref-during-render.
+    // Each tick ≈ CHARS_PER_TICK chars ≈ CHARS_PER_TICK/4 tokens.
+    const outputTokens = baseOutputTokens + streamingTick * Math.ceil(CHARS_PER_TICK / 4)
 
     const contextWindow = modelInfo?.contextWindow ?? 128_000
     const totalTokens = inputTokens + outputTokens
