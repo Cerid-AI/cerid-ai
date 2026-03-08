@@ -1,12 +1,29 @@
 # Cerid AI — Task Tracker
 
-> **Last updated:** 2026-03-07
-> **Current status:** Phase 30 complete. 950 Python tests, 347 frontend tests. Codebase audit & cleanup (dead code, duplication, ChatPanel decomposition, API standardization).
-> **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md) — 1 open (D2)
+> **Last updated:** 2026-03-08
+> **Current status:** Phase 31 complete. 950 Python tests, 347 frontend tests. Phase 30 deferred items resolved (type consolidation, hook extraction).
+> **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md) — 0 open
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](../docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
 
-## Current: Phase 30 — Codebase Audit & Debt Reduction Complete
+## Current: Phase 31 — Deferred Item Resolution Complete
+
+### Type Consolidation ✅
+- [x] Remove KBResult type — replaced with KBQueryResult (strict subset, 3 files: types.ts, kb-utils.ts, kb-utils.test.ts)
+- [x] Extract BaseClaim interface — 11 shared fields, HallucinationClaim + StreamingClaim extend it
+- [x] Rename StreamingClaim.confidence → similarity — aligns with HallucinationClaim naming (3 files)
+
+### Hook Extraction ✅
+- [x] Extract useChatSend hook from ChatPanel (chat-panel.tsx 554 → 481 lines, 13% reduction)
+- [x] Fix stale-closure bug — kbContext.results missing from handleSend deps, now explicit param
+- [x] Add resetAutoInjectCount callback for ChatInput onInputChange
+
+#### New Files Created
+- `src/web/src/hooks/use-chat-send.ts`
+
+---
+
+## Phase 30 — Codebase Audit & Debt Reduction Complete
 
 ### 10A: Production Quality ✅
 - [x] A1 — Chat viewport overflow fix (CSS `min-h-0` cascade)
@@ -571,10 +588,10 @@
 - [x] Document eval/harness.py as development tool (unreachable, no router/CLI)
 - [x] Add deprecation notice to src/gui/app.py (React GUI is primary)
 
-#### Deferred Items (documented, justified)
-- [ ] ClaimItem extraction — streaming vs completed claims have different data shapes (not real duplication)
-- [ ] useChatSend extraction — handleSend has 15+ dependencies tightly coupled to ChatPanel state
-- [ ] Overlapping type consolidation (BaseClaim, KBResult vs KBQueryResult) — high risk, medium benefit
+#### Deferred Items (resolved in Phase 31)
+- [x] ClaimItem extraction — confirmed not real duplication; extracted BaseClaim, renamed confidence → similarity
+- [x] useChatSend extraction — extracted to hook, fixed stale-closure bug (ChatPanel 554 → 481 lines)
+- [x] Overlapping type consolidation — KBResult removed (subset of KBQueryResult), BaseClaim extracted
 
 #### New Files Created
 - `src/web/src/hooks/use-drag-drop.ts`
@@ -640,8 +657,8 @@
 - [x] `.env.example` Port Overrides section
 - [x] `docs/ENV_CONVENTIONS.md` Port Overrides table + naming rule
 
-### Deferred
-- [ ] D2: Conversation fork/branch UI (40-60 hrs, exploratory)
+### Dropped
+- [x] ~~D2: Conversation fork/branch UI~~ — Dropped (2026-03-08). Core model-switch UX complete; fork UI has unclear ROI for 40-60 hrs
 
 ## Completed Phases
 

@@ -1,7 +1,7 @@
 # Cerid AI — Completed Phases
 
 > Full history of completed development phases. For current status and next steps, see [CLAUDE.md](../CLAUDE.md).
-> **Last updated:** 2026-03-05
+> **Last updated:** 2026-03-08
 
 ---
 
@@ -75,3 +75,7 @@
   - **25B (Complete):** Intelligent Model Selection — capability-based `scoreModelForQuery()` with intent detection weights, three-way `RoutingMode` ("manual"/"recommend"/"auto") replacing boolean toggle, enhanced recommendation reasoning (capability %, cost delta, detected intent), auto-routing with silent model switch and toast indicator, settings pane three-way selector, model dropdown capability badges + cost-per-turn estimates. 51 model-router tests.
   - **25C (Complete):** Context-Aware Chat — user correction injection (truncate + `[Correction]` prefix + re-generate), token-budget KB injection (context-window-aware chunk fitting replacing hardcoded `slice(0, 3)`), semantic dedup via Jaccard word-set similarity, domain headers (`--- domain > sub_category | filename ---`), inline verification trigger (per-message verify button). New `kb-utils.ts` with `jaccardSimilarity()`, `deduplicateChunks()`, `formatChunkWithHeader()`. Final counts: 939 Python tests, 320 frontend tests.
 - **Production Audit (Complete):** Consolidated 7 inline Bifrost httpx+circuit-breaker+tracing patterns into shared `utils/bifrost.py` utility (4 agents refactored). Narrowed `except Exception` to specific types in all agent modules. nginx security headers + SSE timeouts. Docker resource limits on all services. Vite production sourcemaps disabled. Frontend API error handling consolidated (`extractError()`), settings toggle factory (`useSyncedToggle()`). Makefile frontend targets. Final counts: 950 Python tests, 320 frontend tests.
+- **Phase 27 (Complete):** Configuration Hardening (Open-Source Readiness) — robust host detection (`detect_lan_ip()` en0-en5 iteration), pre-flight validation (port conflicts, env vars, disk space), post-startup reachability checks, guided `setup.sh` installer, configurable `CERID_PORT_*` overrides for 8 ports. LibreChat & Streamlit deprecated (5 services removed, ~1.2GB RAM freed).
+- **Phase 29 (Complete):** Chat Response Formatting & Inline Verification — 15 MD component overrides (links, tables, blockquotes, headings), CollapsibleCodeBlock for >25 lines, ClaimOverlay (click-to-popover inline verification with footnote markers, source navigation), MessageTOC for long responses.
+- **Phase 30 (Complete):** Codebase Audit & Debt Reduction — ChatPanel decomposition (896→554 lines), dead code removal, duplication extraction (useDragDrop hook, shared constants, DomainBadge promotion), API error handling standardization (24 handlers → extractError()), React Query migration, streaming re-render optimization (~500→~5 re-renders). 347 frontend tests across 25 files.
+- **Phase 31 (Complete):** Deferred Item Resolution — type consolidation (KBResult removed, BaseClaim extracted with 11 shared fields, StreamingClaim.confidence→similarity), useChatSend hook extraction (ChatPanel 554→481 lines), stale-closure bug fix (kbContext.results missing from deps). Repo cleanup: removed deprecated LibreChat/Streamlit directories (521MB), stale .env.example entries, stale CI exclusions, broken data symlink, 7.3GB deprecated Docker images. D2 conversation fork UI formally dropped.

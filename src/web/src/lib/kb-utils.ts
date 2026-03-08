@@ -5,7 +5,7 @@
  * KB context utilities — semantic dedup + domain headers for LLM injection.
  */
 
-import type { KBResult } from "./types"
+import type { KBQueryResult } from "./types"
 
 /**
  * Word-set Jaccard similarity between two texts.
@@ -30,10 +30,10 @@ export function jaccardSimilarity(a: string, b: string): number {
  * Keeps the first occurrence (higher relevance, since results are pre-sorted).
  */
 export function deduplicateChunks(
-  sources: KBResult[],
+  sources: KBQueryResult[],
   threshold = 0.7,
-): KBResult[] {
-  const kept: KBResult[] = []
+): KBQueryResult[] {
+  const kept: KBQueryResult[] = []
   for (const source of sources) {
     const isDuplicate = kept.some(
       (existing) => jaccardSimilarity(existing.content, source.content) >= threshold,
@@ -46,7 +46,7 @@ export function deduplicateChunks(
 /**
  * Format a KB chunk with a domain/filename header prefix for LLM context.
  */
-export function formatChunkWithHeader(source: KBResult): string {
+export function formatChunkWithHeader(source: KBQueryResult): string {
   const parts: string[] = []
   if (source.domain) parts.push(source.domain)
   if (source.sub_category) parts.push(source.sub_category)

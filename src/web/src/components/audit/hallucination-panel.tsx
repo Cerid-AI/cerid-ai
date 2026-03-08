@@ -171,7 +171,7 @@ function StreamingClaimBadge({ claim }: { claim: StreamingClaim }) {
               <ExternalLink className="h-3 w-3" />
             </a>
           )}
-          {claim.confidence != null && claim.confidence > 0 && <span>({Math.round(claim.confidence * 100)}% match)</span>}
+          {claim.similarity != null && claim.similarity > 0 && <span>({Math.round(claim.similarity * 100)}% match)</span>}
         </div>
         {claim.source_snippet && (
           <p className="mt-1 line-clamp-2 text-xs text-muted-foreground/70 italic leading-relaxed">

@@ -166,19 +166,6 @@ export interface KBQueryResult {
   summary?: string
 }
 
-/** Lightweight KB result used by kb-utils for dedup/formatting. */
-export interface KBResult {
-  artifact_id: string
-  filename: string
-  domain: string
-  sub_category?: string
-  content: string
-  relevance: number
-  chunk_index: number
-  tags?: string[]
-  quality_score?: number
-}
-
 export interface AgentQueryResponse {
   query: string
   domains_queried: string[]
@@ -355,40 +342,33 @@ export interface CurateResponse {
   }[]
 }
 
-export interface HallucinationClaim {
+/** Shared fields across streaming and completed claim types. */
+export interface BaseClaim {
   claim: string
   claim_type?: "factual" | "evasion" | "ignorance" | "citation"
-  status: "verified" | "unverified" | "uncertain" | "error"
-  similarity: number
   source_artifact_id?: string
-  source_filename?: string
   source_domain?: string
   source_snippet?: string
   source_urls?: string[]
   reason?: string
-  user_feedback?: "correct" | "incorrect"
   verification_method?: "kb" | "cross_model" | "cross_model_failed" | "web_search" | "web_search_failed" | "none"
   verification_model?: string
   verification_answer?: string
   consistency_issue?: string
 }
 
-export interface StreamingClaim {
-  claim: string
-  claim_type?: "factual" | "evasion" | "ignorance" | "citation"
+export interface HallucinationClaim extends BaseClaim {
+  status: "verified" | "unverified" | "uncertain" | "error"
+  similarity: number
+  source_filename?: string
+  user_feedback?: "correct" | "incorrect"
+}
+
+export interface StreamingClaim extends BaseClaim {
   index: number
   status?: "verified" | "unverified" | "uncertain" | "error" | "pending"
-  confidence?: number
+  similarity?: number
   source?: string
-  source_artifact_id?: string
-  source_domain?: string
-  source_snippet?: string
-  source_urls?: string[]
-  reason?: string
-  verification_method?: "kb" | "cross_model" | "cross_model_failed" | "web_search" | "web_search_failed" | "none"
-  verification_model?: string
-  verification_answer?: string
-  consistency_issue?: string
 }
 
 export interface HallucinationReport {

@@ -1,8 +1,8 @@
 # Cerid AI — Issues & Backlog
 
 > **Created:** 2026-02-25
-> **Last updated:** 2026-03-07
-> **Status:** Phase 30 complete. Codebase audit & cleanup (dead code removal, duplication extraction, ChatPanel decomposition, API standardization). 72 resolved, 1 open (D2). 950 Python tests, 347 frontend tests.
+> **Last updated:** 2026-03-08
+> **Status:** Phase 31 complete. Phase 30 deferred items resolved (type consolidation, hook extraction). 73 resolved, 0 open. 950 Python tests, 347 frontend tests.
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21 roadmap)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](COMPLETED_PHASES.md)
 > **Purpose:** Track known bugs, feature gaps, structural issues, and architecture evaluations for upcoming phases.
@@ -125,7 +125,7 @@ No agent exists for improving artifact quality. Current artifact cards show raw 
 ### D2. Chat Model Switch UX
 
 **Severity:** Medium
-**Status:** Mostly Resolved (Phase 10E, 2026-02-28)
+**Status:** ✅ Resolved (Phase 10E + dropped remaining, 2026-03-08)
 
 **Resolved items:**
 - ✅ Per-message model badge with provider colors (always visible) — Phase 10B
@@ -133,8 +133,8 @@ No agent exists for improving artifact quality. Current artifact cards show raw 
 - ✅ Context summary on switch (summarize-and-switch strategy) — Phase 10E
 - ✅ "Start fresh" option (clear history and switch) — Phase 10E
 
-**Remaining (deferred):**
-- [ ] Conversation fork/branch UI (exploratory — Phase 13)
+**Remaining:**
+- ~~Conversation fork/branch UI~~ — **Dropped** (2026-03-08). Exploratory 40-60 hr effort with unclear ROI. All core model-switch UX (badges, dividers, summarize-and-switch, start fresh) already shipped.
 
 **Files:** Same as B3 + D1.
 
@@ -777,11 +777,11 @@ Verification results only appear in the status bar and hallucination panel sideb
 
 ## Priority Order
 
-### Open Items (1)
+### Open Items (0)
 
-1. **D2** — Conversation fork/branch UI (exploratory, 40-60 hrs)
+None. All items resolved or formally dropped.
 
-### Resolved (72 items)
+### Resolved (73 items)
 
 **Phase 30** (0 new issues): Codebase audit & cleanup — no new issues filed; structural debt reduced
 **Phase 29** (1 item): V21 (advanced response formatting + inline verification)

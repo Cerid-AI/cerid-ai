@@ -3,7 +3,7 @@
 
 import { describe, it, expect } from "vitest"
 import { jaccardSimilarity, deduplicateChunks, formatChunkWithHeader } from "@/lib/kb-utils"
-import type { KBResult } from "@/lib/types"
+import type { KBQueryResult } from "@/lib/types"
 
 // ---------------------------------------------------------------------------
 // jaccardSimilarity
@@ -41,7 +41,7 @@ describe("jaccardSimilarity", () => {
 // deduplicateChunks
 // ---------------------------------------------------------------------------
 
-function makeKBResult(content: string, id = "art-1"): KBResult {
+function makeKBResult(content: string, id = "art-1"): KBQueryResult {
   return {
     artifact_id: id,
     filename: "test.txt",
@@ -50,6 +50,8 @@ function makeKBResult(content: string, id = "art-1"): KBResult {
     content,
     relevance: 0.9,
     chunk_index: 0,
+    collection: "domain_test",
+    ingested_at: "2026-01-01T00:00:00Z",
     tags: [],
     quality_score: 1,
   }

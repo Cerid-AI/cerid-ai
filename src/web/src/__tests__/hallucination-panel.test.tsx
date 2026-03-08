@@ -108,7 +108,7 @@ describe("HallucinationPanel", () => {
 
   it("renders streaming claims when provided", () => {
     const streamingClaims: StreamingClaim[] = [
-      { claim: "Streaming claim 1", index: 0, status: "verified", confidence: 0.9 },
+      { claim: "Streaming claim 1", index: 0, status: "verified", similarity: 0.9 },
       { claim: "Streaming claim 2", index: 1, status: "pending" },
     ]
     render(

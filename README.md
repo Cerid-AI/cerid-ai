@@ -4,7 +4,7 @@
 
 A privacy-first, local-first workspace that unifies multi-domain knowledge bases (code, finance, projects, personal artifacts) into a context-aware LLM interface with RAG-powered retrieval, file ingestion, and intelligent agents.
 
-[![Status](https://img.shields.io/badge/Status-Phase%2025%20Complete-green)]()
+[![Status](https://img.shields.io/badge/Status-Phase%2030%20Complete-green)]()
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue)](LICENSE)
 
 ---
@@ -33,7 +33,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 - **Multi-Machine Sync** via Dropbox — JSONL export/import with auto-import on startup
 - **Source Attribution** — collapsible source references with relevance scores on chat responses
 - **Model Context Breaks** — provider-colored model badges, switch dividers between model changes
-- **GitHub Actions CI/CD** with 1,270 tests (950 pytest + 320 vitest)
+- **GitHub Actions CI/CD** with 1,297 tests (950 pytest + 347 vitest)
 - **Three-Tier AI Categorization** (manual, smart, pro) via Bifrost
 - **Obsidian Vault Integration** — auto-sync vault notes into knowledge base
 - **Reproducible Builds** — pip-compile lock files with hashes, pinned Docker images, Dependabot
@@ -438,7 +438,7 @@ cerid-ai/
 │   │   ├── rate_limit.py              # Sliding window rate limiter + headers
 │   │   └── request_id.py             # X-Request-ID middleware
 │   │
-│   └── tests/                         # 950 pytest tests (36 test files)
+│   └── tests/                         # 950 pytest tests (27 test files)
 │
 ├── src/web/                           # React GUI (Phase 6+)
 │   ├── .nvmrc                         # Node version source of truth (22)
@@ -454,7 +454,7 @@ cerid-ai/
 │       │                              # use-model-router, use-model-switch,
 │       │                              # use-smart-suggestions, use-live-metrics
 │       ├── contexts/                  # KB injection context provider
-│       ├── __tests__/                 # 320 vitest tests (24 test files)
+│       ├── __tests__/                 # 347 vitest tests (25 test files)
 │       └── components/
 │           ├── layout/                # Sidebar, status bar, split-pane
 │           ├── chat/                  # Chat panel, input, bubbles, dashboard,

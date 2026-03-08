@@ -66,9 +66,7 @@ jobs:
             --exclude-files 'package-lock\.json$' \
             --exclude-files '\.github/workflows/' \
             --exclude-files 'src/mcp/docs/inventory/' \
-            --exclude-files 'src/mcp/librechat-logs\.txt$' \
             --exclude-files 'scripts/env-lock\.sh$' \
-            --exclude-files 'stacks/librechat/librechat\.yaml$' \
             --exclude-files 'docs/CERID_AI_PROJECT_REFERENCE\.md$' \
             --exclude-files 'src/mcp/tests/test_middleware_auth\.py$' \
             > /tmp/secrets.json

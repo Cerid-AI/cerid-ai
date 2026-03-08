@@ -7,7 +7,6 @@ src/mcp/requirements-dev.lock
 
 # Runtime data volumes (gitignored but may exist locally)
 stacks/infrastructure/data/
-stacks/librechat/data-node/
 data/
 logs/
 
@@ -47,5 +46,3 @@ archive/
 # Historical planning docs (keep DEVELOPMENT_PLAN_PHASE16-18.md accessible)
 docs/plans/2026-02-2*
 
-# LibreChat stack (third-party, not actively developed)
-stacks/librechat/
