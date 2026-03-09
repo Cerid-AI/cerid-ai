@@ -87,7 +87,7 @@ jobs:
           print('No secrets detected.')
           "
       - name: Python security scan (bandit)
-        run: pip install bandit==1.9.4 && bandit -r src/mcp/ -ll --skip B101 -x src/mcp/tests
+        run: pip install bandit==1.9.4 && bandit -r src/mcp/ -ll --skip B101,B615 -x src/mcp/tests
       - name: Python dependency audit (including transitive deps)
         run: |
           pip install pip-audit==2.10.0

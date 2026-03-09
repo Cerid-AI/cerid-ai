@@ -17,7 +17,6 @@ import pytest
 class TestJWTHelpers:
     """Test JWT create/decode functions."""
 
-    @patch("config.features.CERID_JWT_SECRET", "test-secret-key-for-jwt")
     def test_create_and_decode_token(self):
         from middleware.jwt_auth import create_access_token, decode_access_token
 
@@ -33,7 +32,6 @@ class TestJWTHelpers:
         assert decoded["tenant_id"] == "tenant-456"
         assert decoded["role"] == "admin"
 
-    @patch("config.features.CERID_JWT_SECRET", "test-secret")
     def test_decode_invalid_token(self):
         import jwt as pyjwt
 
@@ -42,7 +40,6 @@ class TestJWTHelpers:
         with pytest.raises(pyjwt.PyJWTError):
             decode_access_token("not-a-valid-token", secret="test-secret")
 
-    @patch("config.features.CERID_JWT_SECRET", "test-secret")
     def test_decode_expired_token(self):
         import jwt as pyjwt
 
@@ -57,7 +54,6 @@ class TestJWTHelpers:
         with pytest.raises(pyjwt.ExpiredSignatureError):
             decode_access_token(token, secret="test-secret")
 
-    @patch("config.features.CERID_JWT_SECRET", "test-secret")
     def test_decode_wrong_secret(self):
         import jwt as pyjwt
 
@@ -122,19 +118,23 @@ class TestUserCRUD:
 
     def test_create_tenant(self, mock_neo4j):
         driver, session = mock_neo4j
+        session.run.return_value.single.return_value = {
+            "tenant": {"id": "t1", "name": "Test Tenant"},
+        }
+
         from db.neo4j.users import create_tenant
 
-        create_tenant(driver, "t1", "Test Tenant")
+        result = create_tenant(driver, name="Test Tenant", tenant_id="t1")
         session.run.assert_called_once()
         call_args = session.run.call_args
-        assert "MERGE" in call_args[0][0]
-        assert call_args[1]["tenant_id"] == "t1"
+        assert "CREATE" in call_args[0][0]
+        assert result["id"] == "t1"
 
     def test_get_tenant(self, mock_neo4j):
         driver, session = mock_neo4j
-        record = MagicMock()
-        record.data.return_value = {"id": "t1", "name": "Test"}
-        session.run.return_value.single.return_value = record
+        session.run.return_value.single.return_value = {
+            "tenant": {"id": "t1", "name": "Test"},
+        }
 
         from db.neo4j.users import get_tenant
         result = get_tenant(driver, "t1")
@@ -151,11 +151,14 @@ class TestUserCRUD:
 
     def test_create_user(self, mock_neo4j):
         driver, session = mock_neo4j
+        session.run.return_value.single.return_value = {
+            "user": {"id": "auto-uuid", "email": "test@example.com"},
+        }
+
         from db.neo4j.users import create_user
 
-        create_user(
+        result = create_user(
             driver,
-            user_id="u1",
             email="test@example.com",
             hashed_password="$2b$12$xxx",
             display_name="Test User",
@@ -166,12 +169,13 @@ class TestUserCRUD:
         call_args = session.run.call_args
         assert "CREATE" in call_args[0][0]
         assert "MEMBER_OF" in call_args[0][0]
+        assert result["email"] == "test@example.com"
 
     def test_get_user_by_email(self, mock_neo4j):
         driver, session = mock_neo4j
-        record = MagicMock()
-        record.data.return_value = {"id": "u1", "email": "test@example.com"}
-        session.run.return_value.single.return_value = record
+        session.run.return_value.single.return_value = {
+            "user": {"id": "u1", "email": "test@example.com"},
+        }
 
         from db.neo4j.users import get_user_by_email
         result = get_user_by_email(driver, "test@example.com")
@@ -187,9 +191,9 @@ class TestUserCRUD:
 
     def test_get_user_by_id(self, mock_neo4j):
         driver, session = mock_neo4j
-        record = MagicMock()
-        record.data.return_value = {"id": "u1", "email": "test@example.com"}
-        session.run.return_value.single.return_value = record
+        session.run.return_value.single.return_value = {
+            "user": {"id": "u1", "email": "test@example.com"},
+        }
 
         from db.neo4j.users import get_user_by_id
         result = get_user_by_id(driver, "u1")
@@ -197,6 +201,10 @@ class TestUserCRUD:
 
     def test_update_user(self, mock_neo4j):
         driver, session = mock_neo4j
+        session.run.return_value.single.return_value = {
+            "user": {"id": "u1", "display_name": "New Name"},
+        }
+
         from db.neo4j.users import update_user
 
         update_user(driver, "u1", display_name="New Name", role="admin")
@@ -215,10 +223,8 @@ class TestUserCRUD:
 
     def test_list_users(self, mock_neo4j):
         driver, session = mock_neo4j
-        record1 = MagicMock()
-        record1.data.return_value = {"id": "u1"}
-        record2 = MagicMock()
-        record2.data.return_value = {"id": "u2"}
+        record1 = {"user": {"id": "u1"}}
+        record2 = {"user": {"id": "u2"}}
         session.run.return_value = [record1, record2]
 
         from db.neo4j.users import list_users
@@ -236,6 +242,10 @@ class TestUserCRUD:
 
     def test_ensure_default_tenant_creates_new(self, mock_neo4j):
         driver, session = mock_neo4j
+        session.run.return_value.single.return_value = {
+            "tenant": {"id": "default", "name": "Default"},
+        }
+
         from db.neo4j.users import ensure_default_tenant
 
         ensure_default_tenant(driver, "default")
@@ -364,7 +374,7 @@ class TestPasswordHashing:
 class TestAuthHelpers:
     """Test auth router helper functions."""
 
-    @patch("config.features.CERID_JWT_SECRET", "test-secret-key")
+    @patch("middleware.jwt_auth.CERID_JWT_SECRET", "test-secret-key")
     def test_build_access_token(self):
         from middleware.jwt_auth import decode_access_token
         from routers.auth import _build_access_token
@@ -378,7 +388,7 @@ class TestAuthHelpers:
         assert "exp" in payload
         assert "iat" in payload
 
-    @patch("config.features.CERID_JWT_SECRET", "test-secret-key")
+    @patch("middleware.jwt_auth.CERID_JWT_SECRET", "test-secret-key")
     def test_build_refresh_token(self):
         from middleware.jwt_auth import decode_access_token
         from routers.auth import _build_refresh_token
@@ -462,8 +472,9 @@ class TestChatApiKeyResolution:
         request = MagicMock()
         request.state.user_id = "user-123"
 
-        with patch("routers.chat.get_neo4j"), \
-             patch("routers.chat.get_user_by_id") as mock_get:
+        with patch("deps.get_neo4j") as mock_get_neo4j, \
+             patch("db.neo4j.users.get_user_by_id") as mock_get:
+            mock_get_neo4j.return_value = MagicMock()
             mock_get.return_value = {"id": "user-123", "openrouter_api_key_encrypted": ""}
             result = _resolve_api_key(request)
             # Should fall back to global key

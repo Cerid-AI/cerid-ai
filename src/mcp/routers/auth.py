@@ -165,27 +165,26 @@ def register(body: RegisterRequest):
     # Determine tenant
     if body.tenant_name:
         tenant_id = uuid.uuid4().hex
-        create_tenant(driver, tenant_id, body.tenant_name)
+        create_tenant(driver, name=body.tenant_name, tenant_id=tenant_id)
         role = "admin"  # First user of a new tenant is admin
     else:
         tenant_id = DEFAULT_TENANT_ID
         # Ensure default tenant exists
         if not get_tenant(driver, tenant_id):
-            create_tenant(driver, tenant_id, "Default")
+            create_tenant(driver, name="Default", tenant_id=tenant_id)
         role = "member"
 
     # Create user
-    user_id = uuid.uuid4().hex
     hashed = _hash_password(body.password)
-    create_user(
+    user_record = create_user(
         driver,
-        user_id=user_id,
         email=body.email,
         hashed_password=hashed,
         display_name=body.display_name or body.email.split("@")[0],
         role=role,
         tenant_id=tenant_id,
     )
+    user_id = user_record["id"]
 
     update_last_login(driver, user_id)
 
