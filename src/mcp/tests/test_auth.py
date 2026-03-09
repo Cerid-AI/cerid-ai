@@ -374,13 +374,22 @@ class TestPasswordHashing:
 class TestAuthHelpers:
     """Test auth router helper functions."""
 
-    @patch("middleware.jwt_auth.CERID_JWT_SECRET", "test-secret-key")
     def test_build_access_token(self):
-        from middleware.jwt_auth import decode_access_token
-        from routers.auth import _build_access_token
+        import jwt as pyjwt
 
-        token = _build_access_token("u1", "t1", "admin")
-        payload = decode_access_token(token, secret="test-secret-key")
+        # Patch create_access_token where _build_access_token references it
+        # (routers.auth imports it at the top, so patch that reference)
+        with patch(
+            "routers.auth.create_access_token",
+            side_effect=lambda payload, secret="test-key": pyjwt.encode(
+                payload, "test-key", algorithm="HS256"
+            ),
+        ):
+            from routers.auth import _build_access_token
+
+            token = _build_access_token("u1", "t1", "admin")
+
+        payload = pyjwt.decode(token, "test-key", algorithms=["HS256"])
 
         assert payload["sub"] == "u1"
         assert payload["tenant_id"] == "t1"
@@ -388,13 +397,20 @@ class TestAuthHelpers:
         assert "exp" in payload
         assert "iat" in payload
 
-    @patch("middleware.jwt_auth.CERID_JWT_SECRET", "test-secret-key")
     def test_build_refresh_token(self):
-        from middleware.jwt_auth import decode_access_token
-        from routers.auth import _build_refresh_token
+        import jwt as pyjwt
 
-        token = _build_refresh_token("u1")
-        payload = decode_access_token(token, secret="test-secret-key")
+        with patch(
+            "routers.auth.create_access_token",
+            side_effect=lambda payload, secret="test-key": pyjwt.encode(
+                payload, "test-key", algorithm="HS256"
+            ),
+        ):
+            from routers.auth import _build_refresh_token
+
+            token = _build_refresh_token("u1")
+
+        payload = pyjwt.decode(token, "test-key", algorithms=["HS256"])
 
         assert payload["sub"] == "u1"
         assert payload["type"] == "refresh"
