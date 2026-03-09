@@ -11,6 +11,7 @@ from collections import defaultdict
 from typing import Any
 
 import httpx
+import numpy as np
 
 import config
 from config import DOMAINS
@@ -746,7 +747,24 @@ async def agent_query(
         ENABLE_LATE_INTERACTION,
         ENABLE_MMR_DIVERSITY,
         ENABLE_QUERY_DECOMPOSITION,
+        ENABLE_SEMANTIC_CACHE,
     )
+
+    # Semantic cache early-return — check before any retrieval work
+    _query_embedding: np.ndarray | None = None
+    if ENABLE_SEMANTIC_CACHE and redis_client:
+        try:
+            from utils.embeddings import get_embedding_function
+            from utils.semantic_cache import cache_lookup
+            _ef = get_embedding_function()
+            if _ef is not None:
+                _query_embedding = np.asarray(_ef([query])[0])
+                cached = cache_lookup(_query_embedding, redis_client)
+                if cached is not None:
+                    cached["semantic_cache_hit"] = True
+                    return cached
+        except Exception as e:
+            logger.debug("Semantic cache lookup skipped: %s", e)
 
     search_query = query
     if conversation_messages:
@@ -760,7 +778,7 @@ async def agent_query(
     effective_top_k = top_k
     if ENABLE_ADAPTIVE_RETRIEVAL:
         from utils.retrieval_gate import classify_retrieval_need
-        decision = classify_retrieval_need(query, conversation_messages)
+        decision = classify_retrieval_need(query)
         if decision.action == "skip":
             logger.info("Retrieval gate: skip (%s)", decision.reason)
             return {
@@ -876,9 +894,9 @@ async def agent_query(
     # Step 5.1: Late interaction refinement — ColBERT-style MaxSim on top candidates
     if ENABLE_LATE_INTERACTION and results:
         try:
+            from utils.embeddings import get_embedding_function
             from utils.late_interaction import late_interaction_rerank
-            _chroma = chroma_client or get_chroma()
-            _ef = getattr(_chroma, "_embedding_function", None)
+            _ef = get_embedding_function()
             if _ef is not None:
                 results = late_interaction_rerank(
                     results=results, query=query, embed_fn=_ef,
@@ -939,7 +957,7 @@ async def agent_query(
         except Exception as e:
             logger.warning(f"Failed to log query: {e}")
 
-    return {
+    result_dict = {
         "context": context,
         "sources": sources,
         "confidence": round(confidence, 4),
@@ -949,3 +967,13 @@ async def agent_query(
         "graph_results": graph_results_added,
         "results": results,
     }
+
+    # Semantic cache store — persist result for similar future queries
+    if ENABLE_SEMANTIC_CACHE and redis_client and _query_embedding is not None:
+        try:
+            from utils.semantic_cache import cache_store
+            cache_store(query, _query_embedding, result_dict, redis_client)
+        except Exception as e:
+            logger.debug("Semantic cache store failed: %s", e)
+
+    return result_dict

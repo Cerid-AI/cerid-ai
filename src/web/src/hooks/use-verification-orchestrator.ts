@@ -147,7 +147,7 @@ export function useVerificationOrchestrator({
       })
       .catch(() => { if (!cancelled) setSavedReportLoading(false) })
     return () => { cancelled = true }
-  }, [activeId, hallucinationEnabled]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeId, hallucinationEnabled, verification.phase])
 
   // Proactive web-model switch banner
   useEffect(() => {

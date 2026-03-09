@@ -10,14 +10,12 @@ on stemmed term sets — no additional model required.
 from __future__ import annotations
 
 import logging
-import os
 import re
 from typing import Any
 
-logger = logging.getLogger("ai-companion.diversity")
+from config.features import MMR_LAMBDA
 
-ENABLE_MMR_DIVERSITY = os.getenv("ENABLE_MMR_DIVERSITY", "false").lower() == "true"
-MMR_LAMBDA = float(os.getenv("MMR_LAMBDA", "0.7"))
+logger = logging.getLogger("ai-companion.diversity")
 
 # Common English stopwords for term extraction
 _STOPWORDS = frozenset({
@@ -101,12 +99,8 @@ def mmr_reorder(
     query_terms = _extract_terms(query)
     doc_terms = [_extract_terms(r.get("content", "")) for r in results]
 
-    # Query similarity scores (normalized to [0, 1] using existing relevance)
-    max_relevance = max(r.get("relevance", 0) for r in results)
-    query_sims = [
-        r.get("relevance", 0) / max_relevance if max_relevance > 0 else 0.0
-        for r in results
-    ]
+    # Use calibrated relevance scores directly — already boosted/reranked upstream
+    query_sims = [r.get("relevance", 0.0) for r in results]
 
     selected_indices: list[int] = []
     remaining = set(range(len(results)))

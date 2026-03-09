@@ -12,16 +12,13 @@ No new model needed — reuses OnnxEmbeddingFunction from embeddings.py.
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 import numpy as np
 
-logger = logging.getLogger("ai-companion.late_interaction")
+from config.features import LATE_INTERACTION_BLEND_WEIGHT, LATE_INTERACTION_TOP_N
 
-ENABLE_LATE_INTERACTION = os.getenv("ENABLE_LATE_INTERACTION", "false").lower() == "true"
-LATE_INTERACTION_TOP_N = int(os.getenv("LATE_INTERACTION_TOP_N", "8"))
-LATE_INTERACTION_BLEND_WEIGHT = float(os.getenv("LATE_INTERACTION_BLEND_WEIGHT", "0.15"))
+logger = logging.getLogger("ai-companion.late_interaction")
 
 # Sliding window parameters
 _WINDOW_SIZE = 3  # words per window
@@ -42,13 +39,9 @@ def _sliding_windows(text: str, window_size: int = _WINDOW_SIZE, stride: int = _
 
 
 def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
-    """Compute cosine similarity between two vectors."""
-    dot = float(np.dot(a, b))
-    norm_a = float(np.linalg.norm(a))
-    norm_b = float(np.linalg.norm(b))
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    return dot / (norm_a * norm_b)
+    """Cosine similarity between two vectors. Returns 0 if either is zero-norm."""
+    na, nb = float(np.linalg.norm(a)), float(np.linalg.norm(b))
+    return float(np.dot(a, b)) / (na * nb) if na and nb else 0.0
 
 
 def compute_maxsim(

@@ -12,13 +12,10 @@ Returns coverage metadata (facets_total, facets_covered, coverage_ratio).
 from __future__ import annotations
 
 import logging
-import os
 import re
 from typing import Any
 
 logger = logging.getLogger("ai-companion.context_assembler")
-
-ENABLE_INTELLIGENT_ASSEMBLY = os.getenv("ENABLE_INTELLIGENT_ASSEMBLY", "false").lower() == "true"
 
 # Minimum meaningful facet length
 _MIN_FACET_LENGTH = 8

@@ -111,7 +111,7 @@ export default function SettingsPane() {
     })
   }
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoadState("loading")
     setError("")
     try {
@@ -122,17 +122,9 @@ export default function SettingsPane() {
       setError(e instanceof Error ? e.message : "Failed to fetch settings")
       setLoadState("error")
     }
-  }
-
-  useEffect(() => {
-    let cancelled = false
-    setLoadState("loading")
-    setError("")
-    fetchSettings()
-      .then((data) => { if (!cancelled) { setSettings(data); setLoadState("ready") } })
-      .catch((e) => { if (!cancelled) { setError(e instanceof Error ? e.message : "Failed to fetch settings"); setLoadState("error") } })
-    return () => { cancelled = true }
   }, [])
+
+  useEffect(() => { load() }, [load])
 
   const patch = async (update: SettingsUpdate) => {
     if (!settings) return
@@ -616,7 +608,7 @@ export default function SettingsPane() {
                       size="sm"
                       className="text-xs"
                       disabled={kbAction !== null}
-                      onClick={() => runKBAction("rescore", () => adminRescore())}
+                      onClick={() => runKBAction("rescore", adminRescore)}
                     >
                       {kbAction === "rescore" && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
                       Rescore All
@@ -626,7 +618,7 @@ export default function SettingsPane() {
                       size="sm"
                       className="text-xs"
                       disabled={kbAction !== null}
-                      onClick={() => runKBAction("summaries", () => adminRegenerateSummaries())}
+                      onClick={() => runKBAction("summaries", adminRegenerateSummaries)}
                     >
                       {kbAction === "summaries" && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
                       Regenerate Summaries

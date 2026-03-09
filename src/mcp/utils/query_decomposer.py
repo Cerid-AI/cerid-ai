@@ -12,14 +12,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import re
 from typing import Any
 
-logger = logging.getLogger("ai-companion.query_decomposer")
+from config.features import QUERY_DECOMPOSITION_MAX_SUBQUERIES
 
-ENABLE_QUERY_DECOMPOSITION = os.getenv("ENABLE_QUERY_DECOMPOSITION", "false").lower() == "true"
-QUERY_DECOMPOSITION_MAX_SUBQUERIES = int(os.getenv("QUERY_DECOMPOSITION_MAX_SUBQUERIES", "4"))
+logger = logging.getLogger("ai-companion.query_decomposer")
 
 # Heuristic patterns for multi-part queries
 _CONJUNCTION_SPLIT = re.compile(
@@ -27,7 +25,7 @@ _CONJUNCTION_SPLIT = re.compile(
     re.IGNORECASE,
 )
 _COMPARISON_PATTERN = re.compile(
-    r"\b(\w+)\s+(?:vs\.?|versus|compared?\s+(?:to|with)|difference\s+between)\s+(\w+)",
+    r"\b(\w+(?:\s+\w+){0,2}?)\s+(?:vs\.?|versus|compared?\s+(?:to|with)|difference\s+between)\s+(\w+(?:\s+\w+){0,2})",
     re.IGNORECASE,
 )
 _MULTI_QUESTION = re.compile(r"\?\s*(?:and|also|additionally|plus|what|how|why|when)", re.IGNORECASE)

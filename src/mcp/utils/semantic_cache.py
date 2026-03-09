@@ -14,18 +14,17 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
-import time
 from typing import Any
 
 import numpy as np
 
-logger = logging.getLogger("ai-companion.semantic_cache")
+from config.features import (
+    SEMANTIC_CACHE_MAX_ENTRIES,
+    SEMANTIC_CACHE_THRESHOLD,
+    SEMANTIC_CACHE_TTL,
+)
 
-ENABLE_SEMANTIC_CACHE = os.getenv("ENABLE_SEMANTIC_CACHE", "false").lower() == "true"
-SEMANTIC_CACHE_THRESHOLD = float(os.getenv("SEMANTIC_CACHE_THRESHOLD", "0.92"))
-SEMANTIC_CACHE_TTL = int(os.getenv("SEMANTIC_CACHE_TTL", "600"))  # 10 min default
-SEMANTIC_CACHE_MAX_ENTRIES = int(os.getenv("SEMANTIC_CACHE_MAX_ENTRIES", "500"))
+logger = logging.getLogger("ai-companion.semantic_cache")
 
 _CACHE_PREFIX = "semcache:"
 _INDEX_KEY = _CACHE_PREFIX + "index"
@@ -56,13 +55,9 @@ def _dequantize_int8(data: bytes, scale: float, zero_point: float) -> np.ndarray
 
 
 def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
-    """Compute cosine similarity between two vectors."""
-    dot = float(np.dot(a, b))
-    norm_a = float(np.linalg.norm(a))
-    norm_b = float(np.linalg.norm(b))
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    return dot / (norm_a * norm_b)
+    """Cosine similarity between two vectors. Returns 0 if either is zero-norm."""
+    na, nb = float(np.linalg.norm(a)), float(np.linalg.norm(b))
+    return float(np.dot(a, b)) / (na * nb) if na and nb else 0.0
 
 
 def _entry_key(entry_id: str) -> str:
@@ -127,9 +122,7 @@ def cache_store(
     max_e = max_entries if max_entries is not None else SEMANTIC_CACHE_MAX_ENTRIES
 
     try:
-        entry_id = hashlib.sha256(
-            f"{query}:{time.time()}".encode()
-        ).hexdigest()[:16]
+        entry_id = hashlib.sha256(query.encode()).hexdigest()[:16]
 
         emb_bytes, scale, zero_point = _quantize_int8(query_embedding)
 

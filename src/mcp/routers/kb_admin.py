@@ -7,11 +7,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 import config
 from agents.curator import _is_truncated_summary, curate
+from config.features import CERID_MULTI_USER
 from db.neo4j.artifacts import delete_artifact, list_artifacts
 from deps import get_chroma, get_neo4j
 from utils.bm25 import rebuild_all as rebuild_bm25_all
@@ -19,7 +20,17 @@ from utils.query_cache import invalidate_cache_non_blocking
 
 logger = logging.getLogger("ai-companion.kb-admin")
 
-router = APIRouter(tags=["kb-admin"])
+
+def _require_admin(request: Request) -> None:
+    """Block non-admin users in multi-user mode. No-op in single-user."""
+    if not CERID_MULTI_USER:
+        return
+    is_admin = getattr(request.state, "is_admin", False)
+    if not is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+
+router = APIRouter(tags=["kb-admin"], dependencies=[Depends(_require_admin)])
 
 
 # ---------------------------------------------------------------------------
@@ -46,6 +57,12 @@ class RegenerateSummariesRequest(BaseModel):
     domains: list[str] | None = Field(None, description="Domains to regenerate (None = all)")
     max_artifacts: int = Field(200, ge=1, le=1000, description="Max artifacts per domain")
     model: str | None = Field(None, description="Model override for synopsis generation")
+
+
+class RegenerateSummariesResponse(BaseModel):
+    synopses_generated: int
+    artifacts_scored: int
+    message: str
 
 
 class ClearDomainRequest(BaseModel):
@@ -110,7 +127,7 @@ async def rescore_artifacts(req: RescoreRequest | None = None):
         raise HTTPException(status_code=500, detail=f"Failed to rescore: {e}")
 
 
-@router.post("/admin/kb/regenerate-summaries")
+@router.post("/admin/kb/regenerate-summaries", response_model=RegenerateSummariesResponse)
 async def regenerate_summaries(req: RegenerateSummariesRequest | None = None):
     """Regenerate AI synopses for artifacts with raw/truncated summaries."""
     domains = req.domains if req else None
@@ -156,15 +173,8 @@ async def clear_domain(domain: str, req: ClearDomainRequest):
         deleted_count = 0
         chunks_removed = 0
 
-        # Delete ChromaDB collection for the domain
-        coll_name = config.collection_name(domain)
-        try:
-            chroma.delete_collection(name=coll_name)
-            logger.info("Deleted ChromaDB collection: %s", coll_name)
-        except Exception as e:
-            logger.warning("Failed to delete collection %s: %s", coll_name, e)
-
-        # Delete Neo4j artifacts
+        # Delete Neo4j artifacts first — safer ordering avoids split-brain
+        # if the process crashes between the two phases
         for artifact in artifacts:
             try:
                 result = delete_artifact(neo4j, artifact["id"])
@@ -173,6 +183,14 @@ async def clear_domain(domain: str, req: ClearDomainRequest):
                     chunks_removed += len(result.get("chunk_ids", []))
             except Exception as e:
                 logger.warning("Failed to delete artifact %s: %s", artifact["id"][:8], e)
+
+        # Delete ChromaDB collection for the domain
+        coll_name = config.collection_name(domain)
+        try:
+            chroma.delete_collection(name=coll_name)
+            logger.info("Deleted ChromaDB collection: %s", coll_name)
+        except Exception as e:
+            logger.warning("Failed to delete collection %s: %s", coll_name, e)
 
         await invalidate_cache_non_blocking()
 

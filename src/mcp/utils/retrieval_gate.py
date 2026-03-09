@@ -10,14 +10,12 @@ to reduce unnecessary retrieval overhead.
 from __future__ import annotations
 
 import logging
-import os
 import re
 from dataclasses import dataclass
 
-logger = logging.getLogger("ai-companion.retrieval_gate")
+from config.features import ADAPTIVE_RETRIEVAL_LIGHT_TOP_K
 
-ENABLE_ADAPTIVE_RETRIEVAL = os.getenv("ENABLE_ADAPTIVE_RETRIEVAL", "false").lower() == "true"
-ADAPTIVE_RETRIEVAL_LIGHT_TOP_K = int(os.getenv("ADAPTIVE_RETRIEVAL_LIGHT_TOP_K", "3"))
+logger = logging.getLogger("ai-companion.retrieval_gate")
 
 
 @dataclass
@@ -53,14 +51,8 @@ _FULL_PATTERNS = [
 ]
 
 
-def classify_retrieval_need(
-    query: str,
-    conversation_messages: list[dict[str, str]] | None = None,
-) -> RetrievalDecision:
-    """Classify whether a query needs KB retrieval.
-
-    Returns a RetrievalDecision with action, top_k, and reason.
-    """
+def classify_retrieval_need(query: str) -> RetrievalDecision:
+    """Classify whether a query needs KB retrieval."""
     if not query or not query.strip():
         return RetrievalDecision(action="skip", top_k=0, reason="empty_query")
 
