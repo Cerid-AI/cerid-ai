@@ -1,8 +1,8 @@
 # Cerid AI — Issues & Backlog
 
 > **Created:** 2026-02-25
-> **Last updated:** 2026-03-08
-> **Status:** Phase 33 complete. Multi-user auth foundations + marketing website. 73 resolved, 0 open. 1018 Python tests, 371 frontend tests.
+> **Last updated:** 2026-03-09
+> **Status:** Phase 34 complete. UX audit & fixes + advanced RAG pipeline. 73 resolved, 0 open. 1129 Python tests, 367 frontend tests.
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21 roadmap)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](COMPLETED_PHASES.md)
 > **Purpose:** Track known bugs, feature gaps, structural issues, and architecture evaluations for upcoming phases.
