@@ -56,8 +56,27 @@ def _strip_prefix(model_id: str) -> str:
     return model_id.removeprefix("openrouter/")
 
 
-async def _proxy_stream(req: ChatRequest, request_id: str) -> AsyncGenerator[bytes, None]:
+def _resolve_api_key(request: Request) -> str:
+    """Resolve the OpenRouter API key — per-user key if available, else global."""
+    user_id = getattr(request.state, "user_id", None) if hasattr(request, "state") else None
+    if user_id:
+        try:
+            from db.neo4j.users import get_user_by_id
+            from deps import get_neo4j
+            from utils.encryption import decrypt_field
+            user = get_user_by_id(get_neo4j(), user_id)
+            if user and user.get("openrouter_api_key_encrypted"):
+                decrypted = decrypt_field(user["openrouter_api_key_encrypted"])
+                if decrypted:
+                    return decrypted
+        except Exception:
+            logger.debug("Failed to resolve per-user API key, falling back to global")
+    return OPENROUTER_API_KEY
+
+
+async def _proxy_stream(req: ChatRequest, request_id: str, api_key: str = "") -> AsyncGenerator[bytes, None]:
     """Stream chat completion from OpenRouter, prepending a metadata event."""
+    effective_key = api_key or OPENROUTER_API_KEY
     bare_model = _strip_prefix(req.model)
 
     # Emit metadata event so the frontend knows the resolved model
@@ -79,7 +98,7 @@ async def _proxy_stream(req: ChatRequest, request_id: str) -> AsyncGenerator[byt
         payload["max_tokens"] = req.max_tokens
 
     headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Authorization": f"Bearer {effective_key}",
         "Content-Type": "application/json",
         "HTTP-Referer": "https://cerid.ai",
         "X-Title": "Cerid AI",
@@ -155,7 +174,9 @@ async def _proxy_stream(req: ChatRequest, request_id: str) -> AsyncGenerator[byt
 @router.post("/chat/stream")
 async def chat_stream(req: ChatRequest, request: Request):
     """Stream chat completion directly via OpenRouter."""
-    if not OPENROUTER_API_KEY:
+    api_key = _resolve_api_key(request)
+
+    if not api_key:
         return StreamingResponse(
             iter([
                 b'data: {"error":{"message":"OPENROUTER_API_KEY not configured","type":"config_error"}}\n\n'
@@ -169,7 +190,7 @@ async def chat_stream(req: ChatRequest, request: Request):
     logger.info("Chat proxy: model=%s request_id=%s", req.model, request_id)
 
     return StreamingResponse(
-        _proxy_stream(req, request_id),
+        _proxy_stream(req, request_id, api_key=api_key),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

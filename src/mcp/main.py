@@ -13,10 +13,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from config.features import CERID_MULTI_USER
 from deps import close_chroma, close_neo4j, close_redis, get_neo4j
 from middleware.auth import APIKeyMiddleware
 from middleware.rate_limit import RateLimitMiddleware
 from middleware.request_id import RequestIDMiddleware
+from middleware.tenant_context import TenantContextMiddleware
 from routers import (
     agents,
     artifacts,
@@ -59,6 +61,21 @@ async def lifespan(app: FastAPI):
         backfill_updated_at(driver)
     except Exception as e:
         logger.warning(f"Neo4j schema init failed (will retry on first use): {e}")
+
+    # Ensure default tenant exists (for multi-user mode migration safety)
+    try:
+        import config as _cfg
+        if _cfg.CERID_MULTI_USER:
+            from db.neo4j.users import ensure_default_tenant
+            ensure_default_tenant(driver, _cfg.DEFAULT_TENANT_ID)
+            logger.info("Multi-user mode enabled — default tenant ensured")
+            if not _cfg.CERID_JWT_SECRET:
+                logger.error(
+                    "CERID_JWT_SECRET is required when CERID_MULTI_USER=true. "
+                    "Generate with: python -c \"import secrets; print(secrets.token_urlsafe(64))\""
+                )
+    except Exception as e:
+        logger.warning(f"Multi-user startup check failed: {e}")
 
     # Auto-import from sync directory if DB is empty
     try:
@@ -113,7 +130,13 @@ app.add_middleware(
 app.add_middleware(RateLimitMiddleware)
 # 3. API key auth (added third, runs first among auth/rate — rejects unauthenticated before rate check)
 app.add_middleware(APIKeyMiddleware)
-# 4. Request ID (added last, runs first — sets X-Request-ID for all subsequent middleware)
+# 4. JWT auth (only active when CERID_MULTI_USER=true — validates Bearer tokens, sets request.state)
+if CERID_MULTI_USER:
+    from middleware.jwt_auth import JWTAuthMiddleware
+    app.add_middleware(JWTAuthMiddleware)
+# 5. Tenant context (sets tenant_id/user_id contextvars from request.state for downstream code)
+app.add_middleware(TenantContextMiddleware)
+# 6. Request ID (added last, runs first — sets X-Request-ID for all subsequent middleware)
 app.add_middleware(RequestIDMiddleware)
 
 # Register routers at root (backward compatibility) and /api/v1/ prefix
@@ -137,6 +160,12 @@ for r in _api_routers:
 
 # MCP transport stays at root only (not versioned)
 app.include_router(mcp_sse.router)
+
+# Auth router (only when multi-user mode is enabled)
+if CERID_MULTI_USER:
+    from routers import auth as auth_router
+    app.include_router(auth_router.router)
+    app.include_router(auth_router.router, prefix="/api/v1")
 
 
 @app.get("/")

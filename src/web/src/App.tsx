@@ -1,12 +1,15 @@
 // Copyright (c) 2026 Justin Michaels. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { lazy, Suspense } from "react"
+import { lazy, Suspense, useEffect, useState } from "react"
 import { Loader2 } from "lucide-react"
 import { AppLayout } from "@/components/layout/app-layout"
 import { ChatPanel } from "@/components/chat/chat-panel"
 import { KBInjectionProvider } from "@/contexts/kb-injection-context"
 import { ConversationsProvider } from "@/contexts/conversations-context"
+import { AuthProvider } from "@/contexts/auth-context"
+import { ProtectedRoute } from "@/components/auth/protected-route"
+import { fetchSettings } from "@/lib/api"
 
 const KnowledgePane = lazy(() => import("@/components/kb/knowledge-pane"))
 const MonitoringPane = lazy(() => import("@/components/monitoring/monitoring-pane"))
@@ -24,7 +27,17 @@ function PaneLoader() {
 }
 
 export default function App() {
+  const [multiUser, setMultiUser] = useState(false)
+
+  useEffect(() => {
+    fetchSettings()
+      .then((s) => setMultiUser(!!s.multi_user))
+      .catch(() => {})
+  }, [])
+
   return (
+    <AuthProvider>
+    <ProtectedRoute multiUser={multiUser}>
     <ConversationsProvider>
     <KBInjectionProvider>
     <AppLayout>
@@ -51,5 +64,7 @@ export default function App() {
     </AppLayout>
     </KBInjectionProvider>
     </ConversationsProvider>
+    </ProtectedRoute>
+    </AuthProvider>
   )
 }

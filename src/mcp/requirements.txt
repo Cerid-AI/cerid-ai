@@ -29,6 +29,10 @@ PyStemmer>=2.2
 # Scheduling
 apscheduler>=3.10,<4
 
+# Auth
+PyJWT>=2.8,<3
+bcrypt>=4.0,<5
+
 # Utilities
 cryptography>=42,<48
 python-multipart

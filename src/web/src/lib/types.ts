@@ -461,6 +461,7 @@ export interface ServerSettings {
     storage_domain: string
     extraction_model: string
   }
+  multi_user?: boolean
   // Infrastructure (read-only)
   bifrost_url?: string
   bifrost_timeout?: number
@@ -595,6 +596,35 @@ export interface SyncImportResult {
   redis: number
   tombstones: number
   consistency_warnings: string[]
+}
+
+// -- Auth types (Phase 31) ---------------------------------------------------
+
+export interface AuthUser {
+  id: string
+  email: string
+  display_name: string
+  role: string
+  tenant_id: string
+  has_api_key: boolean
+  usage_queries: number
+  usage_ingestions: number
+  created_at: string
+  last_login: string | null
+}
+
+export interface AuthTokens {
+  access_token: string
+  refresh_token: string
+  token_type: string
+  expires_in: number
+  user: AuthUser
+}
+
+export interface UsageInfo {
+  queries: number
+  ingestions: number
+  month: string
 }
 
 export type ConflictStrategy = "remote_wins" | "local_wins" | "keep_both" | "manual_review"

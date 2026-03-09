@@ -37,6 +37,10 @@ artifacts/
 # Node
 node_modules/
 
+# Next.js / Vercel build artifacts
+.next/
+.vercel/
+
 # Python / build
 __pycache__/
 *.pyc

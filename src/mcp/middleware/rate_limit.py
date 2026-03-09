@@ -79,11 +79,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        client_ip = get_client_ip(request)
+        # Use user_id (if authenticated) for rate limiting; fall back to IP
+        user_id = getattr(request.state, "user_id", None) if hasattr(request, "state") else None
+        client_key = f"user:{user_id}" if user_id else get_client_ip(request)
 
         for prefix, (max_req, window) in RATE_LIMITS.items():
             if path.startswith(prefix):
-                key = f"{client_ip}:{prefix}"
+                key = f"{client_key}:{prefix}"
                 async with self._locks[key]:
                     now = time.time()
                     self._hits[key] = [t for t in self._hits[key] if now - t < window]

@@ -19,10 +19,12 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from config.features import DEFAULT_TENANT_ID
+
 logger = logging.getLogger("ai-companion.auth")
 
 EXEMPT_PATHS = {"/health", "/api/v1/health", "/", "/docs", "/openapi.json", "/redoc"}
-EXEMPT_PREFIXES = ("/mcp/",)
+EXEMPT_PREFIXES = ("/mcp/", "/auth/")
 
 
 def _redact_ip(ip: str) -> str:
@@ -60,3 +62,14 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             )
 
         return await call_next(request)
+
+
+def get_current_user(request: Request) -> tuple[str | None, str]:
+    """Extract (user_id, tenant_id) from request state.
+
+    Returns (None, DEFAULT_TENANT_ID) when no user is authenticated
+    (single-user mode or unauthenticated request).
+    """
+    user_id = getattr(request.state, "user_id", None)
+    tenant_id = getattr(request.state, "tenant_id", DEFAULT_TENANT_ID)
+    return user_id, tenant_id

@@ -20,6 +20,15 @@ PLUGIN_DIR = os.getenv("CERID_PLUGIN_DIR", os.path.join(os.path.dirname(os.path.
 _enabled_plugins_raw = os.getenv("CERID_ENABLED_PLUGINS", "")
 ENABLED_PLUGINS = [p.strip() for p in _enabled_plugins_raw.split(",") if p.strip()] if _enabled_plugins_raw else []
 
+# ---------------------------------------------------------------------------
+# Multi-User Auth
+# ---------------------------------------------------------------------------
+CERID_MULTI_USER = os.getenv("CERID_MULTI_USER", "false").lower() == "true"
+CERID_JWT_SECRET = os.getenv("CERID_JWT_SECRET", "")
+CERID_JWT_ACCESS_TTL = int(os.getenv("CERID_JWT_ACCESS_TTL", "900"))   # 15 min
+CERID_JWT_REFRESH_TTL = int(os.getenv("CERID_JWT_REFRESH_TTL", "604800"))  # 7 days
+DEFAULT_TENANT_ID = os.getenv("CERID_DEFAULT_TENANT", "default")
+
 # Feature flags: controls what's available per tier
 # Community features are always enabled; pro features require CERID_TIER=pro
 FEATURE_FLAGS = {
@@ -29,7 +38,7 @@ FEATURE_FLAGS = {
     "image_understanding": FEATURE_TIER == "pro",
     "semantic_dedup":      FEATURE_TIER == "pro",
     "advanced_analytics":  FEATURE_TIER == "pro",
-    "multi_user":          FEATURE_TIER == "pro",
+    "multi_user":          CERID_MULTI_USER or FEATURE_TIER == "pro",
     # Community features (always enabled)
     "hierarchical_taxonomy": True,
     "file_upload_gui":       True,

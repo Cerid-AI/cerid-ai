@@ -97,6 +97,7 @@ async def get_settings_endpoint():
         "cost_sensitivity": config.COST_SENSITIVITY,
         "feature_tier": config.FEATURE_TIER,
         "feature_flags": config.FEATURE_FLAGS,
+        "multi_user": config.CERID_MULTI_USER,
         "domains": config.DOMAINS,
         "taxonomy": config.TAXONOMY,
         "storage_mode": config.STORAGE_MODE,

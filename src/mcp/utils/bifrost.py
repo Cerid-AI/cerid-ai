@@ -25,6 +25,7 @@ async def call_bifrost(
     max_tokens: int = 2000,
     timeout: float | None = None,
     extra_payload: dict | None = None,
+    api_key: str | None = None,
 ) -> dict:
     """Make a chat/completions call to Bifrost with circuit breaker + tracing.
 
@@ -46,8 +47,11 @@ async def call_bifrost(
         payload.update(extra_payload)
 
     async def _call() -> dict:
+        headers = tracing_headers()
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         async with httpx.AsyncClient(
-            timeout=effective_timeout, headers=tracing_headers()
+            timeout=effective_timeout, headers=headers
         ) as client:
             resp = await client.post(
                 f"{config.BIFROST_URL}/chat/completions",

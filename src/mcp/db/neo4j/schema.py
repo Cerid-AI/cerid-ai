@@ -45,6 +45,20 @@ def init_schema(driver) -> None:
             "FOR (t:Tag) REQUIRE t.name IS UNIQUE"
         )
 
+        # --- Multi-user constraints (always created, only populated when enabled) ---
+        session.run(
+            "CREATE CONSTRAINT user_id IF NOT EXISTS "
+            "FOR (u:User) REQUIRE u.id IS UNIQUE"
+        )
+        session.run(
+            "CREATE CONSTRAINT user_email IF NOT EXISTS "
+            "FOR (u:User) REQUIRE u.email IS UNIQUE"
+        )
+        session.run(
+            "CREATE CONSTRAINT tenant_id IF NOT EXISTS "
+            "FOR (t:Tenant) REQUIRE t.id IS UNIQUE"
+        )
+
         # --- Indexes ---
         session.run(
             "CREATE INDEX artifact_domain_idx IF NOT EXISTS "

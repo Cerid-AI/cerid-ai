@@ -13,6 +13,11 @@ function mcpHeaders(extra: Record<string, string> = {}): Record<string, string> 
   const headers: Record<string, string> = { ...extra }
   if (API_KEY) headers["X-API-Key"] = API_KEY
   headers["X-Request-ID"] = uuid()
+  // Add JWT Bearer token if authenticated (multi-user mode)
+  try {
+    const token = localStorage.getItem("cerid-access-token")
+    if (token) headers["Authorization"] = `Bearer ${token}`
+  } catch { /* noop */ }
   return headers
 }
 
@@ -658,5 +663,87 @@ export async function fetchArchiveFiles(domain?: string): Promise<ArchiveFilesRe
   const params = domain ? `?domain=${encodeURIComponent(domain)}` : ""
   const res = await fetch(`${MCP_BASE}/archive/files${params}`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, "Failed to list archive files"))
+  return res.json()
+}
+
+// -- Auth API (Phase 31 — multi-user) ----------------------------------------
+
+import type { AuthTokens, AuthUser, UsageInfo } from "./types"
+
+export async function authRegister(
+  email: string,
+  password: string,
+  displayName = "",
+  tenantName = "",
+): Promise<AuthTokens> {
+  const res = await fetch(`${MCP_BASE}/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password, display_name: displayName, tenant_name: tenantName }),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Registration failed: ${res.status}`))
+  return res.json()
+}
+
+export async function authLogin(email: string, password: string): Promise<AuthTokens> {
+  const res = await fetch(`${MCP_BASE}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Login failed: ${res.status}`))
+  return res.json()
+}
+
+export async function authRefresh(refreshToken: string): Promise<{ access_token: string }> {
+  const res = await fetch(`${MCP_BASE}/auth/refresh`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Token refresh failed"))
+  return res.json()
+}
+
+export async function authLogout(refreshToken: string): Promise<void> {
+  await fetch(`${MCP_BASE}/auth/logout`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  })
+}
+
+export async function authMe(): Promise<AuthUser> {
+  const res = await fetch(`${MCP_BASE}/auth/me`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, "Not authenticated"))
+  return res.json()
+}
+
+export async function authSetApiKey(apiKey: string): Promise<void> {
+  const res = await fetch(`${MCP_BASE}/auth/me/api-key`, {
+    method: "PUT",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ api_key: apiKey }),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to save API key"))
+}
+
+export async function authDeleteApiKey(): Promise<void> {
+  const res = await fetch(`${MCP_BASE}/auth/me/api-key`, {
+    method: "DELETE",
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to remove API key"))
+}
+
+export async function authApiKeyStatus(): Promise<{ has_key: boolean }> {
+  const res = await fetch(`${MCP_BASE}/auth/me/api-key/status`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to check API key status"))
+  return res.json()
+}
+
+export async function authUsage(): Promise<UsageInfo> {
+  const res = await fetch(`${MCP_BASE}/auth/me/usage`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to fetch usage"))
   return res.json()
 }
