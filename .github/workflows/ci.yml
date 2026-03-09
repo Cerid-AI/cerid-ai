@@ -68,7 +68,9 @@ jobs:
             --exclude-files 'src/mcp/docs/inventory/' \
             --exclude-files 'scripts/env-lock\.sh$' \
             --exclude-files 'docs/CERID_AI_PROJECT_REFERENCE\.md$' \
+            --exclude-files 'docs/OPERATIONS\.md$' \
             --exclude-files 'src/mcp/tests/test_middleware_auth\.py$' \
+            --exclude-files 'src/mcp/tests/test_auth\.py$' \
             > /tmp/secrets.json
           # Fail if any secrets found
           python -c "

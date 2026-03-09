@@ -19,7 +19,6 @@ from pydantic import BaseModel, Field
 from config.features import (
     CERID_JWT_ACCESS_TTL,
     CERID_JWT_REFRESH_TTL,
-    CERID_JWT_SECRET,
     DEFAULT_TENANT_ID,
 )
 from db.neo4j.users import (
@@ -33,7 +32,7 @@ from db.neo4j.users import (
 from deps import get_neo4j, get_redis
 from middleware.jwt_auth import create_access_token, decode_access_token
 from models.user import UserPublic
-from utils.encryption import decrypt_field, encrypt_field
+from utils.encryption import encrypt_field
 
 logger = logging.getLogger("ai-companion.auth")
 

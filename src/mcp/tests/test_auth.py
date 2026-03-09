@@ -462,7 +462,7 @@ class TestChatApiKeyResolution:
         request = MagicMock()
         request.state.user_id = "user-123"
 
-        with patch("routers.chat.get_neo4j") as mock_neo4j, \
+        with patch("routers.chat.get_neo4j"), \
              patch("routers.chat.get_user_by_id") as mock_get:
             mock_get.return_value = {"id": "user-123", "openrouter_api_key_encrypted": ""}
             result = _resolve_api_key(request)

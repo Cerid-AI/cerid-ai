@@ -25,7 +25,7 @@ interface UseChatSendOptions {
 
   // Routing settings
   routingMode: string
-  costSensitivity: number
+  costSensitivity: "low" | "medium" | "high"
 
   // Auto-inject settings
   autoInject: boolean

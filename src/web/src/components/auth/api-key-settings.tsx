@@ -4,7 +4,6 @@
 import { useState, useCallback, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { authSetApiKey, authDeleteApiKey, authApiKeyStatus, authUsage } from "@/lib/api"
 import { Key, Trash2, Loader2, CheckCircle2 } from "lucide-react"
 import type { UsageInfo } from "@/lib/types"
