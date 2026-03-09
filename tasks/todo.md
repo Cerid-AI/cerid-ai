@@ -1,12 +1,53 @@
 # Cerid AI — Task Tracker
 
 > **Last updated:** 2026-03-08
-> **Current status:** Phase 32 complete. 977 Python tests, 347 frontend tests. Core retrieval quality uplift (cross-encoder reranker, embedding model upgrade, contextual chunking).
+> **Current status:** Phase 33 complete. 1018 Python tests, 371 frontend tests. Multi-user auth foundations (opt-in JWT, tenant context, per-user API keys, usage metering) + marketing website at cerid.ai.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md) — 0 open
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](../docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
 
-## Current: Phase 32 — Core Retrieval Quality Uplift Complete
+## Current: Phase 33 — Multi-User Auth Foundations + Marketing Website Complete
+
+### Multi-User Authentication (opt-in) ✅
+- [x] Create `models/user.py` — User/Tenant Pydantic schemas (52 lines)
+- [x] Create `routers/auth.py` — 9 auth endpoints: register, login, refresh, logout, me, API key CRUD, usage (362 lines)
+- [x] Create `middleware/jwt_auth.py` — JWT Bearer validation with access/refresh token flow (94 lines)
+- [x] Create `middleware/tenant_context.py` — ContextVar tenant/user propagation (55 lines)
+- [x] Create `db/neo4j/users.py` — User/Tenant Neo4j CRUD (177 lines)
+- [x] Create `utils/usage.py` — Redis per-user usage metering (51 lines)
+- [x] Update `config/features.py` — `CERID_MULTI_USER` flag + JWT settings
+- [x] Update `main.py` — conditional middleware/router registration
+- [x] Update `middleware/auth.py` + `rate_limit.py` — per-user keying when multi-user enabled
+- [x] Update `routers/chat.py` + `settings.py` — per-user API key resolution
+- [x] 41 new Python tests (test_auth.py, 488 lines)
+
+### Frontend Auth Integration ✅
+- [x] Create `contexts/auth-context.tsx` — React auth state with JWT token management (152 lines)
+- [x] Create `components/auth/login-page.tsx` — Login/Register UI (126 lines)
+- [x] Create `components/auth/protected-route.tsx` — Auth guard component (38 lines)
+- [x] Create `components/auth/api-key-settings.tsx` — API key management UI (99 lines)
+- [x] Update `App.tsx` — ProtectedRoute wrapper
+- [x] Update `lib/api.ts` — 8 auth API functions + token interceptor (87 lines)
+- [x] Update `lib/types.ts` — AuthUser + auth request/response types (30 lines)
+- [x] 24 new frontend tests (auth-api.test.ts, 184 lines)
+
+### Marketing Website ✅
+- [x] Create `packages/marketing/` — Next.js 16 static site with shadcn/ui
+- [x] 4 pages: Home, Features, Pricing, Security
+- [x] Deploy to Vercel (CLI, production build)
+- [x] Configure custom domain: cerid.ai + www.cerid.ai with SSL
+
+#### New Files Created
+- `src/mcp/models/user.py`, `src/mcp/routers/auth.py`, `src/mcp/middleware/jwt_auth.py`
+- `src/mcp/middleware/tenant_context.py`, `src/mcp/db/neo4j/users.py`, `src/mcp/utils/usage.py`
+- `src/mcp/tests/test_auth.py`
+- `src/web/src/contexts/auth-context.tsx`, `src/web/src/components/auth/`
+- `src/web/src/__tests__/auth-api.test.ts`
+- `packages/marketing/` (entire Next.js site)
+
+---
+
+## Phase 32 — Core Retrieval Quality Uplift Complete
 
 ### Cross-Encoder Reranker (P0) ✅
 - [x] Create `utils/reranker.py` — ONNX cross-encoder inference (`cross-encoder/ms-marco-MiniLM-L-6-v2`)
@@ -28,13 +69,6 @@
 - [x] Integrate into both ingest and re-ingest paths in `services/ingestion.py`
 - [x] Graceful failure — original chunks unchanged on any error
 - [x] 11 new tests (disabled, empty, enrichment, batching, errors, code blocks, metadata, truncation)
-
-#### New Files Created
-- `src/mcp/utils/reranker.py`
-- `src/mcp/utils/embeddings.py`
-- `src/mcp/utils/contextual.py`
-- `src/mcp/tests/test_embeddings.py`
-- `src/mcp/tests/test_contextual.py`
 
 ---
 

@@ -158,6 +158,32 @@
 **Benefit:** Reduces re-renders from ~500 per response to ~5 while maintaining smooth UI updates.
 **Reference:** `use-live-metrics.ts` — `CHARS_PER_TICK = 400`, `streamingCharsRef` + `streamingTick`.
 
+---
+
+## Vercel & Domain Deployment (Phase 33)
+
+### Vercel GitHub App: configure repository access explicitly
+**When:** Importing a private GitHub repo into Vercel via the dashboard.
+**Problem:** Even with "All repositories" access on the GitHub App, Vercel may fail with "could not access the repository" error.
+**Fix:** Use the Vercel CLI (`npx vercel deploy --prod`) as a fallback. Requires `npx vercel login` (device code flow) then `npx vercel link --scope <team>` before deploy.
+
+### Vercel CLI requires team scope for non-interactive deploy
+**When:** Running `npx vercel deploy --yes` in a CI/CD or automated context.
+**Problem:** Without a linked project, the CLI prompts interactively. The `--yes` flag skips prompts but fails with `missing_scope` if no team is configured.
+**Fix:** Run `npx vercel link --yes --scope <team-slug>` first to create `.vercel/project.json`, then `npx vercel deploy --yes --prod`.
+
+### DNS propagation: CNAME faster than A records
+**When:** Setting up custom domains on Vercel (or any CDN/hosting provider).
+**Problem:** A records take longer to propagate (60s+) than CNAME records (~30s) because CNAME delegation is simpler for DNS resolvers to update.
+**Fix:** Use `dig @8.8.8.8 cerid.ai` for non-cached DNS checks during propagation. Don't rely on the browser — Chrome caches DNS aggressively and may show stale results even after propagation completes.
+
+### Chrome DNS cache vs curl for DNS verification
+**When:** Verifying a domain change has propagated.
+**Problem:** Chrome holds DNS cache even after global propagation. `curl -sI https://cerid.ai` returns HTTP/2 200 while Chrome still shows an error page.
+**Fix:** Use `curl` for reliable DNS verification. If browser testing is needed, use Safari or `chrome://net-internals/#dns` to clear Chrome's DNS cache.
+
+---
+
 ### Re-export bridge pattern for component promotion
 **When:** Moving a component from a domain-specific module to shared UI (e.g., `kb/domain-filter.tsx` → `ui/domain-badge.tsx`).
 **Pattern:**

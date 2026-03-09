@@ -65,6 +65,67 @@ All secrets live in `.env` (git-ignored) and are encrypted as `.env.age` (commit
 
 ---
 
+## Multi-User Authentication (Phase 33)
+
+Multi-user JWT auth is **opt-in**. When enabled, all non-exempt endpoints require a Bearer token. Users register, login, and manage per-user API keys.
+
+### Enable
+
+```bash
+# In .env
+CERID_MULTI_USER=true
+CERID_JWT_SECRET=$(openssl rand -hex 64)
+```
+
+Rebuild MCP after setting: `./scripts/start-cerid.sh --build`
+
+### JWT Token Flow
+
+1. **Register:** `POST /auth/register` → returns `access_token` + `refresh_token`
+2. **Login:** `POST /auth/login` → returns `access_token` + `refresh_token`
+3. **Access:** Include `Authorization: Bearer <access_token>` on all requests
+4. **Refresh:** `POST /auth/refresh` with `refresh_token` → new `access_token`
+5. **Logout:** `POST /auth/logout` → blacklists refresh token in Redis
+
+### Token TTLs
+
+| Token | Default | Env Var |
+|-------|---------|---------|
+| Access | 30 minutes | `CERID_JWT_ACCESS_TTL` |
+| Refresh | 7 days | `CERID_JWT_REFRESH_TTL` |
+
+### JWT Secret Rotation
+
+1. Generate new secret: `openssl rand -hex 64`
+2. Update `CERID_JWT_SECRET` in `.env`
+3. Re-encrypt: `./scripts/env-lock.sh`
+4. Restart MCP: `./scripts/start-cerid.sh --build`
+5. **Note:** All existing tokens are immediately invalidated. Users must re-login.
+
+### Per-User API Keys
+
+Users can generate personal API keys via `PUT /auth/me/api-key`. Keys are encrypted with Fernet (`CERID_ENCRYPTION_KEY`) before storage in Neo4j. When multi-user is enabled, the `X-API-Key` header resolves to the owning user for rate limiting and audit logging.
+
+### Usage Metering
+
+Redis tracks per-user request counts with hourly buckets:
+- Key pattern: `usage:{user_id}:{YYYY-MM-DD-HH}`
+- Query via `GET /auth/me/usage` (returns last 24h + totals)
+- TTL: 90 days auto-expiry
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| `middleware/jwt_auth.py` | JWT creation/validation, Bearer extraction |
+| `middleware/tenant_context.py` | ContextVar propagation (tenant_id, user_id) |
+| `routers/auth.py` | 9 auth endpoints |
+| `models/user.py` | User/Tenant Pydantic schemas |
+| `db/neo4j/users.py` | User/Tenant Neo4j CRUD |
+| `utils/usage.py` | Redis usage metering |
+
+---
+
 ## Rate Limiting
 
 In-memory sliding window rate limiter, per client IP.
@@ -94,7 +155,7 @@ Set `TRUSTED_PROXIES` (comma-separated CIDRs) to extract real client IP from `X-
 
 - **In-memory only:** Rate limit state is lost on container restart. No warm-up period — limits reset to zero.
 - **Single instance:** No distributed rate limiting. If running multiple MCP instances behind a load balancer, each tracks limits independently.
-- **IP-based only:** No per-user or per-API-key rate limiting. All requests from the same IP share a single counter.
+- **IP-based by default:** When `CERID_MULTI_USER=false`, all requests from the same IP share a single counter. When `CERID_MULTI_USER=true`, rate limits are keyed by authenticated user ID.
 
 **File:** `src/mcp/middleware/rate_limit.py`
 

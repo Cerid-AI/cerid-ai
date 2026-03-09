@@ -33,6 +33,17 @@
 - `POST /agent/memory/extract` — Extract and store memories from conversation
 - `POST /agent/memory/archive` — Archive old conversation memories
 
+**Auth endpoints (Phase 33, conditional on `CERID_MULTI_USER=true`):**
+- `POST /auth/register` — Create new user account (returns JWT tokens)
+- `POST /auth/login` — Authenticate with email/password (returns JWT tokens)
+- `POST /auth/refresh` — Refresh access token using refresh token
+- `POST /auth/logout` — Revoke refresh token (Redis blacklist)
+- `GET /auth/me` — Get current user profile (requires Bearer token)
+- `PUT /auth/me/api-key` — Generate per-user API key (Fernet-encrypted in Neo4j)
+- `DELETE /auth/me/api-key` — Revoke per-user API key
+- `GET /auth/me/api-key/status` — Check if user has an active API key
+- `GET /auth/me/usage` — Get per-user usage metrics from Redis
+
 **Artifact detail & feedback (Phase 16G, 19E):**
 - `GET /artifacts/{artifact_id}` — Full artifact detail (Neo4j metadata + reassembled ChromaDB chunks)
 - `POST /artifacts/{artifact_id}/feedback` — Submit quality feedback (inject/dismiss signals)

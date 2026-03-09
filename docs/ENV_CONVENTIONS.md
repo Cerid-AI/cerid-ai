@@ -162,6 +162,16 @@ Port overrides affect the host-side port mapping only. Container-internal ports 
 | `CERID_ENABLED_PLUGINS` | *(empty)* | Enabled plugin list |
 | `CERID_CUSTOM_DOMAINS` | *(empty)* | Custom domain JSON |
 
+### Multi-User Auth (optional)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CERID_MULTI_USER` | `false` | Enable multi-user JWT authentication |
+| `CERID_JWT_SECRET` | *(none)* | JWT signing secret (required when multi-user enabled) |
+| `CERID_JWT_ACCESS_TTL` | `1800` | Access token TTL in seconds (30 min) |
+| `CERID_JWT_REFRESH_TTL` | `604800` | Refresh token TTL in seconds (7 days) |
+| `CERID_DEFAULT_TENANT` | `default` | Default tenant ID for single-tenant mode |
+
 ### Encryption (optional)
 
 | Variable | Default | Description |
