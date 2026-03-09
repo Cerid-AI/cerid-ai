@@ -4,7 +4,6 @@
 """Tests for late interaction scoring module."""
 
 import numpy as np
-import pytest
 
 from utils.late_interaction import (
     _cosine_similarity,

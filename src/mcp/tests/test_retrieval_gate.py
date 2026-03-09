@@ -3,9 +3,7 @@
 
 """Tests for adaptive retrieval gate."""
 
-import pytest
-
-from utils.retrieval_gate import RetrievalDecision, classify_retrieval_need
+from utils.retrieval_gate import classify_retrieval_need
 
 
 class TestClassifyRetrievalNeed:

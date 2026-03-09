@@ -15,7 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Tag, Loader2, Merge, Trash2, X } from "lucide-react"
+import { Tag, Loader2, Merge, X } from "lucide-react"
 import { fetchAllTags, mergeTags } from "@/lib/api"
 import type { TagInfo } from "@/lib/api"
 
@@ -34,7 +34,7 @@ export function TagManager({ open, onOpenChange }: TagManagerProps) {
 
   const { data: tags, isLoading } = useQuery({
     queryKey: ["all-tags"],
-    queryFn: fetchAllTags,
+    queryFn: (): Promise<TagInfo[]> => fetchAllTags(),
     enabled: open,
     staleTime: 30_000,
   })

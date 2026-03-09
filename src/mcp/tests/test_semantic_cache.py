@@ -7,7 +7,6 @@ import json
 from unittest.mock import MagicMock
 
 import numpy as np
-import pytest
 
 from utils.semantic_cache import (
     _cosine_similarity,

@@ -10,7 +10,6 @@ decomposition via Bifrost for ambiguous cases.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import re
 from typing import Any
@@ -167,7 +166,7 @@ async def parallel_retrieve(
 
     merged: list[dict[str, Any]] = []
     for i, result in enumerate(all_results):
-        if isinstance(result, Exception):
+        if isinstance(result, BaseException):
             logger.warning("Sub-query %d failed: %s", i, result)
             continue
         for r in result:

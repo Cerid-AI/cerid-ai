@@ -96,7 +96,6 @@ def mmr_reorder(
     lam = lambda_param if lambda_param is not None else MMR_LAMBDA
     n = top_n or len(results)
 
-    query_terms = _extract_terms(query)
     doc_terms = [_extract_terms(r.get("content", "")) for r in results]
 
     # Use calibrated relevance scores directly — already boosted/reranked upstream

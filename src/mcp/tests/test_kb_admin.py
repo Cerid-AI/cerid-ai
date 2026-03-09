@@ -130,8 +130,8 @@ class TestClearDomain:
             patch("routers.kb_admin.list_artifacts", return_value=mock_artifacts),
             patch("routers.kb_admin.delete_artifact", return_value=delete_result),
             patch("routers.kb_admin.invalidate_cache_non_blocking", new_callable=AsyncMock),
-            patch("routers.kb_admin.get_chroma") as mock_chroma,
-            patch("routers.kb_admin.get_neo4j") as mock_neo4j,
+            patch("routers.kb_admin.get_chroma"),
+            patch("routers.kb_admin.get_neo4j"),
             patch("routers.kb_admin.config") as mock_config,
         ):
             mock_config.DOMAINS = ["code", "finance"]

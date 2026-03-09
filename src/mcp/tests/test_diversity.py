@@ -3,8 +3,6 @@
 
 """Tests for MMR diversity reordering module."""
 
-import pytest
-
 from utils.diversity import _extract_terms, jaccard_similarity, mmr_reorder
 
 
