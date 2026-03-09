@@ -177,6 +177,37 @@ export async function fetchTagSuggestions(
   return res.json()
 }
 
+export interface TagInfo {
+  name: string
+  usage_count: number
+}
+
+export async function fetchAllTags(limit = 500): Promise<TagInfo[]> {
+  const res = await fetch(`${MCP_BASE}/tags?limit=${limit}`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to fetch tags"))
+  return res.json()
+}
+
+export async function mergeTags(sourceTag: string, targetTag: string): Promise<{ status: string; artifacts_updated: number }> {
+  const res = await fetch(`${MCP_BASE}/tags/merge`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ source_tag: sourceTag, target_tag: targetTag }),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to merge tags"))
+  return res.json()
+}
+
+export async function updateArtifactTags(artifactId: string, tags: string[]): Promise<{ status: string }> {
+  const res = await fetch(`${MCP_BASE}/taxonomy/artifact`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ artifact_id: artifactId, tags }),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to update tags"))
+  return res.json()
+}
+
 // --- Monitoring & Audit ---
 
 export async function fetchMaintenance(
@@ -745,5 +776,69 @@ export async function authApiKeyStatus(): Promise<{ has_key: boolean }> {
 export async function authUsage(): Promise<UsageInfo> {
   const res = await fetch(`${MCP_BASE}/auth/me/usage`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, "Failed to fetch usage"))
+  return res.json()
+}
+
+// ---------------------------------------------------------------------------
+// KB Admin
+// ---------------------------------------------------------------------------
+
+export interface KBStats {
+  total_artifacts: number
+  total_chunks: number
+  domains: Record<string, { artifacts: number; chunks: number; avg_quality: number; synopsis_candidates: number }>
+}
+
+export async function fetchKBStats(): Promise<KBStats> {
+  const res = await fetch(`${MCP_BASE}/admin/kb/stats`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to fetch KB stats"))
+  return res.json()
+}
+
+export async function adminRebuildIndexes(): Promise<{ domains_rebuilt: number; message: string }> {
+  const res = await fetch(`${MCP_BASE}/admin/kb/rebuild-index`, {
+    method: "POST",
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to rebuild indexes"))
+  return res.json()
+}
+
+export async function adminRescore(domains?: string[]): Promise<{ artifacts_scored: number; avg_quality_score: number; message: string }> {
+  const res = await fetch(`${MCP_BASE}/admin/kb/rescore`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(domains ? { domains } : {}),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to rescore"))
+  return res.json()
+}
+
+export async function adminRegenerateSummaries(domains?: string[]): Promise<{ synopses_generated: number; message: string }> {
+  const res = await fetch(`${MCP_BASE}/admin/kb/regenerate-summaries`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(domains ? { domains } : {}),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to regenerate summaries"))
+  return res.json()
+}
+
+export async function adminClearDomain(domain: string): Promise<{ artifacts_deleted: number; message: string }> {
+  const res = await fetch(`${MCP_BASE}/admin/kb/clear-domain/${encodeURIComponent(domain)}`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ confirm: true }),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to clear domain"))
+  return res.json()
+}
+
+export async function adminDeleteArtifact(artifactId: string): Promise<{ deleted: boolean; message: string }> {
+  const res = await fetch(`${MCP_BASE}/admin/artifacts/${encodeURIComponent(artifactId)}`, {
+    method: "DELETE",
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to delete artifact"))
   return res.json()
 }

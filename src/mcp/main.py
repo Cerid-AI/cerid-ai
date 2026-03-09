@@ -26,6 +26,7 @@ from routers import (
     digest,
     health,
     ingestion,
+    kb_admin,
     mcp_sse,
     memories,
     query,
@@ -153,6 +154,7 @@ _api_routers = [
     upload.router,
     memories.router,
     sync.router,
+    kb_admin.router,
 ]
 for r in _api_routers:
     app.include_router(r)

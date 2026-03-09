@@ -5,6 +5,7 @@ import { useState, useRef, useCallback, type KeyboardEvent } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Send, Square } from "lucide-react"
 import { DomainBadge } from "@/components/ui/domain-badge"
 import { useDragDrop } from "@/hooks/use-drag-drop"
@@ -83,11 +84,24 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount
       />
       {injectedCount > 0 && (
         <Popover>
-          <PopoverTrigger asChild>
-            <Badge variant="secondary" className="mb-1.5 cursor-pointer text-xs hover:bg-accent">
-              {injectedCount} source{injectedCount !== 1 ? "s" : ""}
-            </Badge>
-          </PopoverTrigger>
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <PopoverTrigger asChild>
+                  <Badge variant="secondary" className="mb-1.5 cursor-pointer text-xs hover:bg-accent">
+                    {injectedCount} source{injectedCount !== 1 ? "s" : ""}
+                  </Badge>
+                </PopoverTrigger>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-xs">
+                <p className="text-xs">
+                  {injectedSources && injectedSources.length > 0
+                    ? `Injecting: ${injectedSources.map((s) => s.filename).join(", ")}`
+                    : `${injectedCount} source${injectedCount !== 1 ? "s" : ""} ready`}
+                </p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           <PopoverContent className="w-72 p-2" align="end">
             <p className="mb-2 text-xs font-medium text-muted-foreground">Injected context</p>
             <div className="space-y-2">

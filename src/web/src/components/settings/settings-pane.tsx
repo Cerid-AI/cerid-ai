@@ -1,8 +1,9 @@
 // Copyright (c) 2026 Justin Michaels. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useState } from "react"
-import { fetchSettings, updateSettings } from "@/lib/api"
+import { useCallback, useEffect, useState } from "react"
+import { fetchSettings, updateSettings, fetchKBStats, adminRebuildIndexes, adminRescore, adminRegenerateSummaries, adminClearDomain } from "@/lib/api"
+import type { KBStats } from "@/lib/api"
 import type { ServerSettings, SettingsUpdate } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -35,17 +36,19 @@ import {
   FolderSync,
   Wrench,
   SearchIcon,
+  HardDrive,
+  Trash2,
 } from "lucide-react"
 import { SyncSection } from "./sync-section"
 
 type LoadState = "loading" | "error" | "ready"
 
-type SectionKey = "connection" | "ingestion" | "features" | "knowledge" | "taxonomy" | "encryption" | "infrastructure" | "search" | "sync" | "flags"
+type SectionKey = "connection" | "ingestion" | "features" | "knowledge" | "taxonomy" | "encryption" | "infrastructure" | "search" | "sync" | "kb_admin" | "flags"
 
 function readSectionState(): Record<SectionKey, boolean> {
   const defaults: Record<SectionKey, boolean> = {
     connection: true, ingestion: true, features: true, knowledge: true,
-    taxonomy: true, encryption: true, infrastructure: false, search: false, sync: true, flags: true,
+    taxonomy: true, encryption: true, infrastructure: false, search: false, sync: true, kb_admin: true, flags: true,
   }
   try {
     const raw = localStorage.getItem("cerid-settings-sections")
@@ -64,6 +67,41 @@ export default function SettingsPane() {
   const [error, setError] = useState("")
   const [patchError, setPatchError] = useState("")
   const [sections, setSections] = useState<Record<SectionKey, boolean>>(readSectionState)
+  const [kbStats, setKBStats] = useState<KBStats | null>(null)
+  const [kbLoading, setKBLoading] = useState(false)
+  const [kbAction, setKBAction] = useState<string | null>(null)
+  const [kbResult, setKBResult] = useState("")
+  const [clearConfirmDomain, setClearConfirmDomain] = useState<string | null>(null)
+
+  const loadKBStats = useCallback(async () => {
+    setKBLoading(true)
+    try {
+      const stats = await fetchKBStats()
+      setKBStats(stats)
+    } catch {
+      /* ignore — section just stays empty */
+    } finally {
+      setKBLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadKBStats()
+  }, [loadKBStats])
+
+  const runKBAction = useCallback(async (action: string, fn: () => Promise<{ message: string }>) => {
+    setKBAction(action)
+    setKBResult("")
+    try {
+      const result = await fn()
+      setKBResult(result.message)
+      loadKBStats()
+    } catch (e) {
+      setKBResult(e instanceof Error ? e.message : "Action failed")
+    } finally {
+      setKBAction(null)
+    }
+  }, [loadKBStats])
 
   const toggleSection = (key: SectionKey) => {
     setSections((prev) => {
@@ -495,6 +533,122 @@ export default function SettingsPane() {
             {/* Sync */}
             <SectionHeading icon={FolderSync} label="Sync" open={sections.sync} onToggle={() => toggleSection("sync")} />
             {sections.sync && <SyncSection />}
+
+            {/* KB Management */}
+            <SectionHeading icon={HardDrive} label="KB Management" open={sections.kb_admin} onToggle={() => toggleSection("kb_admin")} />
+            {sections.kb_admin && (
+              <Card className="mb-4">
+                <CardContent className="grid gap-3 pt-4">
+                  {kbStats && (
+                    <div className="rounded border bg-muted/30 p-2 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground">Total artifacts</span>
+                        <span className="font-mono">{kbStats.total_artifacts}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground">Total chunks</span>
+                        <span className="font-mono">{kbStats.total_chunks}</span>
+                      </div>
+                      {Object.entries(kbStats.domains).map(([domain, info]) => (
+                        <div key={domain} className="mt-1 flex items-center justify-between gap-2 border-t pt-1">
+                          <span className="truncate text-muted-foreground">{domain}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono">{info.artifacts} / {info.chunks}</span>
+                            {info.artifacts > 0 && clearConfirmDomain !== domain && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-5 w-5 p-0 text-destructive/60 hover:text-destructive"
+                                onClick={() => setClearConfirmDomain(domain)}
+                                title={`Clear ${domain}`}
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            )}
+                            {clearConfirmDomain === domain && (
+                              <div className="flex items-center gap-1">
+                                <Button
+                                  variant="destructive"
+                                  size="sm"
+                                  className="h-5 px-1 text-[10px]"
+                                  disabled={kbAction !== null}
+                                  onClick={() => {
+                                    setClearConfirmDomain(null)
+                                    runKBAction("clear", () => adminClearDomain(domain))
+                                  }}
+                                >
+                                  Clear
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-5 px-1 text-[10px]"
+                                  onClick={() => setClearConfirmDomain(null)}
+                                >
+                                  Cancel
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {kbLoading && !kbStats && (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Loader2 className="h-3 w-3 animate-spin" /> Loading KB stats...
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-xs"
+                      disabled={kbAction !== null}
+                      onClick={() => runKBAction("rebuild", adminRebuildIndexes)}
+                    >
+                      {kbAction === "rebuild" && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                      Rebuild Indexes
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-xs"
+                      disabled={kbAction !== null}
+                      onClick={() => runKBAction("rescore", () => adminRescore())}
+                    >
+                      {kbAction === "rescore" && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                      Rescore All
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-xs"
+                      disabled={kbAction !== null}
+                      onClick={() => runKBAction("summaries", () => adminRegenerateSummaries())}
+                    >
+                      {kbAction === "summaries" && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                      Regenerate Summaries
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-xs"
+                      disabled={kbLoading}
+                      onClick={loadKBStats}
+                    >
+                      {kbLoading && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                      Refresh Stats
+                    </Button>
+                  </div>
+
+                  {kbResult && (
+                    <p className="rounded bg-muted/50 px-2 py-1 text-xs text-muted-foreground">{kbResult}</p>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
             {/* Feature Flags */}
             <SectionHeading icon={Layers} label="Feature Flags" open={sections.flags} onToggle={() => toggleSection("flags")} />

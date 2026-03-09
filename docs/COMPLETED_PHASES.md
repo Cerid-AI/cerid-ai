@@ -1,7 +1,7 @@
 # Cerid AI — Completed Phases
 
 > Full history of completed development phases. For current status and next steps, see [CLAUDE.md](../CLAUDE.md).
-> **Last updated:** 2026-03-08
+> **Last updated:** 2026-03-09
 
 ---
 
@@ -88,3 +88,11 @@
   - **Frontend Auth:** AuthContext with JWT token management, LoginPage + ProtectedRoute + ApiKeySettings components, 8 auth API functions with token interceptor.
   - **Marketing Website:** Next.js 16 static site (`packages/marketing/`) deployed to Vercel with custom domain cerid.ai + www.cerid.ai (SSL). 4 pages: Home, Features, Pricing, Security. shadcn/ui components.
   - 1018 Python tests (+41 auth), 371 frontend tests (+24 auth).
+- **Phase 34 (Complete):** UX Audit & Fixes + Advanced RAG Pipeline.
+  - **Sprint 0 — UX Audit & Bug Fixes:** Verification re-run prevention on tab switch (`useVerificationOrchestrator` guard), scrolling fixes (`min-h-0` on monitoring/memories panes), source injection tooltip (`chat-input.tsx` hover badge), verification status bar tooltips (accuracy/coherence/claims), KB verification method badge (`[kb]` purple badge in ClaimOverlay), KB admin endpoints (`routers/kb_admin.py` — rebuild-index, rescore, regenerate-summaries, clear-domain, delete artifact, stats), KB management GUI in Settings pane, tag curation GUI (edit/delete/merge on artifact cards + Knowledge pane), feature visibility documentation (`docs/OPERATIONS.md` feature checklist).
+  - **Sprint 1 — Adaptive Retrieval + Query Decomposition:** `utils/retrieval_gate.py` (heuristic skip/light/full classification, 2-word short-circuit, greeting/thanks detection), `utils/query_decomposer.py` (conjunction/comparison/multi-question detection, heuristic split, parallel sub-retrieval via `asyncio.gather`). Both integrated into `agent_query()` pipeline.
+  - **Sprint 2 — Result Diversity + Intelligent Assembly:** `utils/diversity.py` (MMR reordering with Jaccard similarity on stemmed term sets, Porter-lite suffix stripping, configurable lambda), `utils/context_assembler.py` (facet extraction, greedy set-cover weighted by relevance, coverage metadata with `facets_total`/`facets_covered`/`coverage_ratio`).
+  - **Sprint 3 — Late Interaction + Semantic Cache:** `utils/late_interaction.py` (ColBERT-inspired MaxSim scoring, 3-word sliding windows, blend weight 0.15 on top 8 candidates), `utils/semantic_cache.py` (quantized int8 embedding storage in Redis, cosine similarity lookup, `cache_lookup`/`cache_store`/`invalidate_cache`), `utils/query_cache.py` (`invalidate_cache_non_blocking` async wrapper).
+  - **Pipeline Integration:** 6 new insertion points in `agents/query_agent.py` — adaptive retrieval gate (step 0), query decomposition (step 0.5), late interaction refinement (step 5.1), MMR diversity reordering (step 5.6), intelligent context assembly (step 6), semantic cache (via feature flag). All features opt-in via `ENABLE_*` env vars.
+  - **Config:** 12 new feature flags in `config/features.py` (ENABLE_ADAPTIVE_RETRIEVAL, ADAPTIVE_RETRIEVAL_LIGHT_TOP_K, ENABLE_QUERY_DECOMPOSITION, QUERY_DECOMPOSITION_MAX_SUBQUERIES, ENABLE_MMR_DIVERSITY, MMR_LAMBDA, ENABLE_INTELLIGENT_ASSEMBLY, ENABLE_LATE_INTERACTION, LATE_INTERACTION_TOP_N, LATE_INTERACTION_BLEND_WEIGHT, ENABLE_SEMANTIC_CACHE, SEMANTIC_CACHE_THRESHOLD).
+  - 1129 Python tests (+111 new: 18 retrieval_gate, 15 query_decomposer, 14 diversity, 15 context_assembler, 16 late_interaction, 12 semantic_cache, 11 kb_admin, 10 verification/frontend), 367 frontend tests.

@@ -14,6 +14,7 @@ import pytest
 if "routers.ingestion" not in sys.modules:
     _stub = ModuleType("routers.ingestion")
     _stub.ingest_content = None  # type: ignore[attr-defined]
+    _stub.router = MagicMock()  # type: ignore[attr-defined]
     sys.modules["routers.ingestion"] = _stub
     # Also register as attribute on the parent package so _dot_lookup works.
     import routers

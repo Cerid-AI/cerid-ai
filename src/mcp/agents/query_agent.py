@@ -740,6 +740,14 @@ async def agent_query(
     neo4j_driver: Any | None = None,
 ) -> dict[str, Any]:
     """Execute multi-domain query with reranking, graph expansion, and context assembly."""
+    from config.features import (
+        ENABLE_ADAPTIVE_RETRIEVAL,
+        ENABLE_INTELLIGENT_ASSEMBLY,
+        ENABLE_LATE_INTERACTION,
+        ENABLE_MMR_DIVERSITY,
+        ENABLE_QUERY_DECOMPOSITION,
+    )
+
     search_query = query
     if conversation_messages:
         search_query = _enrich_query(
@@ -747,6 +755,29 @@ async def agent_query(
         )
         if search_query != query:
             logger.info(f"Enriched query: {query!r} → {search_query!r}")
+
+    # Step 0: Adaptive retrieval gate — may short-circuit or reduce top_k
+    effective_top_k = top_k
+    if ENABLE_ADAPTIVE_RETRIEVAL:
+        from utils.retrieval_gate import classify_retrieval_need
+        decision = classify_retrieval_need(query, conversation_messages)
+        if decision.action == "skip":
+            logger.info("Retrieval gate: skip (%s)", decision.reason)
+            return {
+                "context": "",
+                "sources": [],
+                "confidence": 0.0,
+                "domains_searched": domains if domains else DOMAINS,
+                "total_results": 0,
+                "token_budget_used": 0,
+                "graph_results": 0,
+                "results": [],
+                "retrieval_skipped": True,
+                "retrieval_reason": decision.reason,
+            }
+        if decision.action == "light":
+            effective_top_k = decision.top_k
+            logger.info("Retrieval gate: light (top_k=%d, %s)", effective_top_k, decision.reason)
 
     # When querying from a chat flow (conversation_messages provided) and no
     # explicit domain filter was requested, exclude the "conversations" domain.
@@ -756,12 +787,31 @@ async def agent_query(
     if effective_domains is None and conversation_messages:
         effective_domains = [d for d in config.DOMAINS if d != "conversations"]
 
-    results = await multi_domain_query(
-        query=search_query,
-        domains=effective_domains,
-        top_k=top_k,
-        chroma_client=chroma_client,
-    )
+    # Step 0.5: Query decomposition — may split into parallel sub-queries
+    _skip_normal_retrieval = False
+    if ENABLE_QUERY_DECOMPOSITION:
+        from utils.query_decomposer import decompose_query, needs_decomposition, parallel_retrieve
+        if needs_decomposition(search_query):
+            sub_queries = await decompose_query(search_query)
+            if len(sub_queries) > 1:
+                logger.info("Decomposed query into %d sub-queries: %s", len(sub_queries), sub_queries)
+
+                async def _retrieve_sub(sq: str) -> list[dict[str, Any]]:
+                    return await multi_domain_query(
+                        query=sq, domains=effective_domains,
+                        top_k=effective_top_k, chroma_client=chroma_client,
+                    )
+
+                results = await parallel_retrieve(sub_queries, _retrieve_sub)
+                _skip_normal_retrieval = True
+
+    if not _skip_normal_retrieval:
+        results = await multi_domain_query(
+            query=search_query,
+            domains=effective_domains,
+            top_k=effective_top_k,
+            chroma_client=chroma_client,
+        )
 
     # Search adjacent domains at reduced weight when specific domains are requested
     if domains and set(domains) != set(DOMAINS):
@@ -823,16 +873,48 @@ async def agent_query(
         use_reranking=use_reranking,
     )
 
+    # Step 5.1: Late interaction refinement — ColBERT-style MaxSim on top candidates
+    if ENABLE_LATE_INTERACTION and results:
+        try:
+            from utils.late_interaction import late_interaction_rerank
+            _chroma = chroma_client or get_chroma()
+            _ef = getattr(_chroma, "_embedding_function", None)
+            if _ef is not None:
+                results = late_interaction_rerank(
+                    results=results, query=query, embed_fn=_ef,
+                )
+        except Exception as e:
+            logger.warning("Late interaction scoring failed: %s", e)
+
     # Step 5.5: Quality boost — quality score multiplier after reranking
     results = apply_quality_boost(results, neo4j_driver=neo4j_driver)
     results = _enrich_summaries(results, neo4j_driver=neo4j_driver)
     results = sorted(results, key=lambda x: x["relevance"], reverse=True)
 
-    # Step 5.6: Filter low-relevance results below minimum threshold
+    # Step 5.6: MMR diversity reordering — reduce redundancy in top results
+    if ENABLE_MMR_DIVERSITY and len(results) > 1:
+        try:
+            from utils.diversity import mmr_reorder
+            results = mmr_reorder(results=results, query=query)
+        except Exception as e:
+            logger.warning("MMR diversity reordering failed: %s", e)
+
+    # Step 5.7: Filter low-relevance results below minimum threshold
     results = [r for r in results if r["relevance"] >= config.QUALITY_MIN_RELEVANCE_THRESHOLD]
 
     # Step 6: Assemble context
-    context, sources, char_count = assemble_context(results, max_chars=config.QUERY_CONTEXT_MAX_CHARS)
+    if ENABLE_INTELLIGENT_ASSEMBLY and results:
+        try:
+            from utils.context_assembler import intelligent_assemble
+            context, sources, coverage_meta = intelligent_assemble(
+                results=results, query=query, max_chars=config.QUERY_CONTEXT_MAX_CHARS,
+            )
+            char_count = len(context)
+        except Exception as e:
+            logger.warning("Intelligent assembly failed, falling back: %s", e)
+            context, sources, char_count = assemble_context(results, max_chars=config.QUERY_CONTEXT_MAX_CHARS)
+    else:
+        context, sources, char_count = assemble_context(results, max_chars=config.QUERY_CONTEXT_MAX_CHARS)
 
     # Step 7: Calculate confidence (average relevance of included sources)
     confidence = 0.0

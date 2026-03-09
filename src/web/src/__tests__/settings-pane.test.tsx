@@ -32,11 +32,22 @@ const mockSettings = {
 }
 
 function mockFetch(data: unknown, status = 200) {
-  return vi.fn().mockResolvedValue({
-    ok: status >= 200 && status < 300,
-    status,
-    json: () => Promise.resolve(data),
-    text: () => Promise.resolve(JSON.stringify(data)),
+  return vi.fn().mockImplementation((url: string) => {
+    // KB stats endpoint gets a default empty response
+    if (typeof url === "string" && url.includes("/admin/kb/stats")) {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ total_artifacts: 0, total_chunks: 0, domains: {} }),
+        text: () => Promise.resolve("{}"),
+      })
+    }
+    return Promise.resolve({
+      ok: status >= 200 && status < 300,
+      status,
+      json: () => Promise.resolve(data),
+      text: () => Promise.resolve(JSON.stringify(data)),
+    })
   })
 }
 

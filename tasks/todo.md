@@ -1,12 +1,12 @@
 # Cerid AI — Task Tracker
 
-> **Last updated:** 2026-03-08
-> **Current status:** Phase 33 complete. 1018 Python tests, 371 frontend tests. Multi-user auth foundations (opt-in JWT, tenant context, per-user API keys, usage metering) + marketing website at cerid.ai.
+> **Last updated:** 2026-03-09
+> **Current status:** Phase 34 complete. 1129 Python tests, 367 frontend tests. UX audit & fixes + advanced RAG pipeline (adaptive retrieval, query decomposition, MMR diversity, intelligent assembly, late interaction, semantic cache).
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md) — 0 open
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](../docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
 
-## Current: Phase 33 — Multi-User Auth Foundations + Marketing Website Complete
+## Current: Phase 34 — UX Audit & Fixes + Advanced RAG Pipeline Complete
 
 ### Multi-User Authentication (opt-in) ✅
 - [x] Create `models/user.py` — User/Tenant Pydantic schemas (52 lines)

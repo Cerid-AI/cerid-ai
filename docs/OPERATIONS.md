@@ -289,6 +289,69 @@ Access via your Cloudflare tunnel hostname. Configure email-based OTP access pol
 | Python | 3.11 | All Python jobs |
 | Node.js | 22 (from `.nvmrc`) | `frontend` job |
 
+---
+
+## Feature Visibility Checklist
+
+All features below are present in the codebase. Some require environment variables or runtime conditions to activate.
+
+### Always Active (no env var needed)
+
+| Feature | Phase | Description |
+|---------|-------|-------------|
+| Inline verification markup | 29 | Colored highlights, footnote markers, ClaimOverlay popovers on verified claims |
+| 15 MD component overrides | 29 | Custom renderers for code, tables, links, headings, blockquotes, etc. |
+| CollapsibleCodeBlock | 29 | Code blocks collapse when >15 lines |
+| MessageTOC | 29 | Table of contents for long responses (>3 headings) |
+| Drag-drop ingestion | 28 | Drop files on KB pane or chat input |
+| Right-click context menus | 28 | Context actions on toolbar icons |
+| Search tuning sliders | 28 | Adjustable weights in Settings |
+| iPad/tablet responsive | 27 | Sidebar auto-collapse, bottom sheet KB, touch targets |
+| Cross-encoder reranking | 32 | ONNX model, 3 modes (cross_encoder / hybrid / disabled) |
+| Streaming verification | 29 | SSE-based claim verification with status bar |
+| KB context injection | 28 | Select artifacts → inject into chat context |
+| Verification status bar tooltips | 34 | Hover explanations for all metrics |
+| KB method badge | 34 | Cyan "kb" badge on KB-verified claims |
+| Source injection tooltip | 34 | Hover to see injected source names |
+| KB Management GUI | 34 | Rebuild indexes, rescore, regen summaries, clear domains |
+| Tag Manager | 34 | Merge/browse tags from Knowledge pane |
+
+### Opt-In Features (env var required)
+
+| Feature | Env Var | Default | Description |
+|---------|---------|---------|-------------|
+| Self-RAG validation | `ENABLE_SELF_RAG` | `true` | Iterative retrieval refinement for weak claims |
+| Hallucination check | `ENABLE_HALLUCINATION_CHECK` | `false` | Post-response fact verification against KB |
+| Feedback loop | `ENABLE_FEEDBACK_LOOP` | `false` | Save AI responses back to KB |
+| Memory extraction | `ENABLE_MEMORY_EXTRACTION` | `false` | Extract facts/preferences from conversations |
+| Contextual chunking | `ENABLE_CONTEXTUAL_CHUNKS` | `false` | LLM-generated situational summaries on chunks |
+| Auto KB inject | `ENABLE_AUTO_INJECT` | `false` | Auto-inject relevant KB context into queries |
+| Model router | `ENABLE_MODEL_ROUTER` | `false` | Smart model selection (recommend/auto modes) |
+| Encryption at rest | `ENABLE_ENCRYPTION` | `false` | Fernet encryption for stored content |
+| Multi-user auth | `CERID_MULTI_USER` | `false` | JWT auth, tenant context, per-user API keys |
+| API key auth | `CERID_API_KEY` | (unset) | X-API-Key header auth when set |
+
+### Retrieval Tuning (env vars with defaults)
+
+| Setting | Env Var | Default | Description |
+|---------|---------|---------|-------------|
+| Rerank mode | `RERANK_MODE` | `cross_encoder` | `cross_encoder` / `hybrid` / `disabled` |
+| Vector weight | `HYBRID_VECTOR_WEIGHT` | `0.6` | Weight for vector similarity in hybrid search |
+| Keyword weight | `HYBRID_KEYWORD_WEIGHT` | `0.4` | Weight for BM25 in hybrid search |
+| Chunking mode | `CHUNKING_MODE` | `semantic` | `semantic` or `token` |
+
+### Runtime Conditions
+
+Some features only appear under specific conditions:
+
+- **Inline verification markup**: Only visible after verification streaming completes. Requires a response with verifiable claims.
+- **MessageTOC**: Only shown for responses with 3+ markdown headings.
+- **CollapsibleCodeBlock**: Only triggers for code blocks with 15+ lines.
+- **Model router banner**: Only shown when `ENABLE_MODEL_ROUTER=true` and routing mode is "recommend".
+- **Verification re-runs**: Fixed in Phase 34 — cached results persist across tab switches.
+
+---
+
 ### Known CVE Ignores
 
 **pip-audit ignores (Phase 11 migration planned):**

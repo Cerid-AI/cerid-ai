@@ -33,7 +33,7 @@ export function MonitoringPane() {
   })
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       <div className="border-b px-4 py-3">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">System Monitoring</h2>

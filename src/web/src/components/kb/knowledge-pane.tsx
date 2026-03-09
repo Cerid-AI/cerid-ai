@@ -8,11 +8,12 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Badge } from "@/components/ui/badge"
-import { Search, X, Loader2, AlertCircle, RefreshCcw, Upload, CheckCircle, Tag } from "lucide-react"
+import { Search, X, Loader2, AlertCircle, RefreshCcw, Upload, CheckCircle, Tag, Settings2 } from "lucide-react"
 import { ArtifactCard } from "./artifact-card"
 import { TaxonomyTree } from "./taxonomy-tree"
 import { GraphPreview } from "./graph-preview"
 import { UploadDialog } from "./upload-dialog"
+import { TagManager } from "./tag-manager"
 import { fetchArtifacts, queryKB, uploadFile, recategorizeArtifact } from "@/lib/api"
 import { useKBInjection } from "@/contexts/kb-injection-context"
 import { useDragDrop } from "@/hooks/use-drag-drop"
@@ -73,6 +74,7 @@ export function KnowledgePane() {
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null)
   const [activeTag, setActiveTag] = useState<string | null>(null)
   const [previewArtifactId, setPreviewArtifactId] = useState<string | null>(null)
+  const [tagManagerOpen, setTagManagerOpen] = useState(false)
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "success" | "error">("idle")
   const [uploadMessage, setUploadMessage] = useState("")
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
@@ -312,6 +314,16 @@ export function KnowledgePane() {
                 Clear
               </Button>
             )}
+            <Button
+              variant="ghost"
+              size="xs"
+              className="ml-auto h-5 text-[10px]"
+              onClick={() => setTagManagerOpen(true)}
+              title="Manage tags"
+            >
+              <Settings2 className="mr-0.5 h-3 w-3" />
+              Manage
+            </Button>
           </div>
         )}
       </div>
@@ -397,6 +409,8 @@ export function KnowledgePane() {
         onConfirm={handleUploadConfirm}
         onCancel={() => setPendingFiles([])}
       />
+
+      <TagManager open={tagManagerOpen} onOpenChange={setTagManagerOpen} />
     </div>
   )
 }

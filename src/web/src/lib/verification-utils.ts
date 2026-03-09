@@ -131,7 +131,8 @@ export const DISPLAY_STATUS_COLORS: Record<ClaimDisplayStatus | "error", string>
 
 /** Verification method → human-readable label. */
 export function verificationMethodLabel(method?: string): string | null {
-  if (!method || method === "kb") return null
+  if (!method) return null
+  if (method === "kb") return "kb"
   if (method === "cross_model") return "cross-model"
   if (method === "web_search") return "web search"
   if (method === "cross_model_failed") return "cross-model (failed)"
@@ -143,5 +144,6 @@ export function verificationMethodLabel(method?: string): string | null {
 export function verificationMethodColor(method?: string): string {
   if (method === "cross_model") return "bg-purple-500/15 text-purple-400 border-purple-500/30"
   if (method === "web_search") return "bg-blue-500/15 text-blue-400 border-blue-500/30"
+  if (method === "kb") return "bg-cyan-500/15 text-cyan-400 border-cyan-500/30"
   return "bg-muted text-muted-foreground border-border"
 }

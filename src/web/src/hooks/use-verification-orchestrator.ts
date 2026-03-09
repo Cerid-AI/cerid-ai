@@ -52,6 +52,8 @@ export function useVerificationOrchestrator({
   const [manualVerifyBump, setManualVerifyBump] = useState(0)
   const [verificationRecBanner, setVerificationRecBanner] = useState<{ model: ModelOption; reason: string } | null>(null)
   const reportCacheRef = useRef<Map<string, HallucinationReport>>(new Map())
+  /** Tracks conversations that have completed verification to prevent re-runs on remount. */
+  const completedConversationsRef = useRef<Set<string>>(new Set())
 
   // Derived values from messages
   const latestAssistantText = useMemo(() => {
@@ -62,8 +64,10 @@ export function useVerificationOrchestrator({
 
   const streamTriggerKey = useMemo(() => {
     if (!activeMessages || isStreaming) return 0
+    // Prevent re-triggering verification for conversations that already completed
+    if (activeId && completedConversationsRef.current.has(activeId)) return 0
     return activeMessages.filter((m) => m.role === "assistant").length
-  }, [activeMessages, isStreaming])
+  }, [activeMessages, isStreaming, activeId])
 
   const latestUserQuery = useMemo(() => {
     if (!activeMessages) return undefined
@@ -109,10 +113,11 @@ export function useVerificationOrchestrator({
     if (isStreaming) setSavedReport(null)
   }, [isStreaming])
 
-  // Cache completed verification report
+  // Cache completed verification report and mark conversation as completed
   useEffect(() => {
     if (verification.phase === "done" && verification.report && activeId) {
       reportCacheRef.current.set(activeId, verification.report)
+      completedConversationsRef.current.add(activeId)
     }
   }, [verification.phase, verification.report, activeId])
 
@@ -179,8 +184,10 @@ export function useVerificationOrchestrator({
   }, [hallucinationEnabled, lastAssistantMsgId, verification.loading, halReport])
 
   const handleVerifyMessage = useCallback(() => {
+    // Clear completed mark so re-verification can proceed
+    if (activeId) completedConversationsRef.current.delete(activeId)
     setManualVerifyBump((prev) => prev + 1)
-  }, [])
+  }, [activeId])
 
   return {
     halReport,

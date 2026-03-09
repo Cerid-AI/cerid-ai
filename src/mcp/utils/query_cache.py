@@ -9,6 +9,7 @@ TTL: 5 minutes. Invalidated on any ingest.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -69,3 +70,8 @@ def invalidate_all() -> None:
             logger.info(f"Invalidated {count} cached queries")
     except Exception as e:
         logger.warning(f"Cache invalidation failed: {e}")
+
+
+async def invalidate_cache_non_blocking() -> None:
+    """Async wrapper — runs invalidate_all() in a thread to avoid blocking the event loop."""
+    await asyncio.to_thread(invalidate_all)

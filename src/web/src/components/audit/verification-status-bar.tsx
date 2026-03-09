@@ -6,6 +6,7 @@ import {
   ShieldCheck, ShieldAlert, Loader2, ChevronDown, ChevronUp,
   CheckCircle2, XOctagon, AlertTriangle, Circle, ExternalLink,
 } from "lucide-react"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import type { HallucinationReport, StreamingClaim } from "@/lib/types"
 import type { VerificationPhase } from "@/hooks/use-verification-stream"
 import { getClaimDisplayStatus, type ClaimDisplayStatus } from "@/lib/verification-utils"
@@ -130,6 +131,9 @@ export function VerificationStatusBar({
                       {c.verification_method === "web_search" && (
                         <span className="shrink-0 rounded bg-blue-500/15 px-1 text-[10px] text-blue-400">web search</span>
                       )}
+                      {c.verification_method === "kb" && (
+                        <span className="shrink-0 rounded bg-cyan-500/15 px-1 text-[10px] text-cyan-400">kb</span>
+                      )}
                       {(c.source_urls?.length ?? 0) > 0 && (
                         <a
                           href={c.source_urls![0]}
@@ -236,6 +240,7 @@ export function VerificationStatusBar({
   return (
     <div className="border-t bg-muted/30">
       {/* Summary row — clickable to expand claims */}
+      <TooltipProvider delayDuration={300}>
       <button
         className="flex w-full items-center gap-3 px-4 py-1 text-left text-xs"
         onClick={() => hasClaims && setExpanded(!expanded)}
@@ -251,24 +256,35 @@ export function VerificationStatusBar({
         </span>
 
         {verified > 0 && (
-          <span className="text-green-400">{verified} verified</span>
+          <Tooltip><TooltipTrigger asChild>
+            <span className="text-green-400">{verified} verified</span>
+          </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Claims confirmed by cross-model check or KB evidence</p></TooltipContent></Tooltip>
         )}
         {refutedCount > 0 && (
-          <span className="text-red-400">{refutedCount} refuted</span>
+          <Tooltip><TooltipTrigger asChild>
+            <span className="text-red-400">{refutedCount} refuted</span>
+          </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Claims actively contradicted by another model or web search</p></TooltipContent></Tooltip>
         )}
         {evasionCount > 0 && (
-          <span className="text-orange-400">{evasionCount} evaded</span>
+          <Tooltip><TooltipTrigger asChild>
+            <span className="text-orange-400">{evasionCount} evaded</span>
+          </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Model deflected or avoided answering directly</p></TooltipContent></Tooltip>
         )}
         {softUnverifiedCount > 0 && (
-          <span className="text-yellow-400">{softUnverifiedCount} unverified</span>
+          <Tooltip><TooltipTrigger asChild>
+            <span className="text-yellow-400">{softUnverifiedCount} unverified</span>
+          </TooltipTrigger><TooltipContent side="top"><p className="text-xs">No matching evidence found in KB (not necessarily wrong)</p></TooltipContent></Tooltip>
         )}
         {uncertain > 0 && (
-          <span className="text-muted-foreground/60">{uncertain} uncertain</span>
+          <Tooltip><TooltipTrigger asChild>
+            <span className="text-muted-foreground/60">{uncertain} uncertain</span>
+          </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Checked but inconclusive — insufficient evidence to confirm or deny</p></TooltipContent></Tooltip>
         )}
 
         <div className="h-3 w-px shrink-0 bg-border" />
 
         {/* Accuracy bar */}
+        <Tooltip><TooltipTrigger asChild>
         <div className="flex items-center gap-1.5">
           <span className="text-muted-foreground">Accuracy:</span>
           <div className="h-1.5 w-12 overflow-hidden rounded-full bg-muted">
@@ -281,12 +297,17 @@ export function VerificationStatusBar({
             {accuracyPct}%
           </span>
         </div>
+        </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Verified claims / (verified + refuted). Unverified claims are excluded.</p></TooltipContent></Tooltip>
 
         <div className="h-3 w-px shrink-0 bg-border" />
 
         {/* Coherence */}
-        <span className="text-muted-foreground">Coherence:</span>
-        <span className={accuracyTier.textColor}>{accuracyTier.label}</span>
+        <Tooltip><TooltipTrigger asChild>
+        <span className="flex items-center gap-1">
+          <span className="text-muted-foreground">Coherence:</span>
+          <span className={accuracyTier.textColor}>{accuracyTier.label}</span>
+        </span>
+        </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Excellent: 95%+ accuracy. Good: 80-94%. Fair: 60-79%. Poor: below 60%.</p></TooltipContent></Tooltip>
 
         {/* Extraction method */}
         {report.extraction_method && (
@@ -300,9 +321,11 @@ export function VerificationStatusBar({
         {sessionClaimsChecked > 0 && (
           <>
             <div className="h-3 w-px shrink-0 bg-border" />
+            <Tooltip><TooltipTrigger asChild>
             <span className="text-muted-foreground/60">
               Session: {sessionClaimsChecked} facts &bull; ~${sessionEstCost.toFixed(4)}
             </span>
+            </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Total claims checked this session and estimated LLM verification cost</p></TooltipContent></Tooltip>
           </>
         )}
 
@@ -314,6 +337,7 @@ export function VerificationStatusBar({
             : <ChevronDown className="h-3 w-3 text-muted-foreground" />
         )}
       </button>
+      </TooltipProvider>
 
       {/* Expanded claims list with source attribution */}
       {expanded && hasClaims && (
@@ -333,6 +357,9 @@ export function VerificationStatusBar({
                     )}
                     {c.verification_method === "web_search" && (
                       <span className="shrink-0 rounded bg-blue-500/15 px-1 text-[10px] text-blue-400">web search</span>
+                    )}
+                    {c.verification_method === "kb" && (
+                      <span className="shrink-0 rounded bg-cyan-500/15 px-1 text-[10px] text-cyan-400">kb</span>
                     )}
                     {(c.source_urls?.length ?? 0) > 0 && c.source_urls!.slice(0, 2).map((url, ui) => {
                       let domain: string
