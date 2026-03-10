@@ -156,6 +156,32 @@ describe("VerificationStatusBar", () => {
     expect(screen.getByText(/\$0\.0042/)).toBeInTheDocument()
   })
 
+  it("shows error state when stream phase is error", () => {
+    render(
+      <VerificationStatusBar
+        report={null}
+        loading={false}
+        featureEnabled={true}
+        streamPhase="error"
+      />,
+    )
+    expect(screen.getByText(/Verification incomplete/)).toBeInTheDocument()
+  })
+
+  it("shows error state with session metrics", () => {
+    render(
+      <VerificationStatusBar
+        report={null}
+        loading={false}
+        featureEnabled={true}
+        streamPhase="error"
+        sessionClaimsChecked={8}
+      />,
+    )
+    expect(screen.getByText(/Verification incomplete/)).toBeInTheDocument()
+    expect(screen.getByText(/Session: 8 facts/)).toBeInTheDocument()
+  })
+
   it("shows refuted count for cross-model unverified claims", () => {
     const report = makeReport({
       claims: [

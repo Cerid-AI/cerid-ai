@@ -73,8 +73,12 @@ export function useVerificationStream(
   const [summary, setSummary] = useState<StreamingSummary | null>(null)
   const [extractionMethod, setExtractionMethod] = useState<string | null>(null)
   const abortRef = useRef<(() => void) | null>(null)
+  const responseTextRef = useRef(responseText)
+  useEffect(() => { responseTextRef.current = responseText }, [responseText])
   const modelRef = useRef(model)
   useEffect(() => { modelRef.current = model }, [model])
+  const userQueryRef = useRef(userQuery)
+  useEffect(() => { userQueryRef.current = userQuery }, [userQuery])
   const historyRef = useRef(conversationHistory)
   useEffect(() => { historyRef.current = conversationHistory }, [conversationHistory])
 
@@ -104,7 +108,11 @@ export function useVerificationStream(
   }, [triggerKey])
 
   useEffect(() => {
-    if (!responseText || !conversationId || !enabled || triggerKey === 0) {
+    // Read refs at effect-fire time to avoid re-triggering when these values
+    // change after the stream has already started (e.g., debounced content updates).
+    const text = responseTextRef.current
+    const query = userQueryRef.current
+    if (!text || !conversationId || !enabled || triggerKey === 0) {
       return
     }
 
@@ -116,14 +124,15 @@ export function useVerificationStream(
     setSummary(null)
     setExtractionMethod(null)
 
-    const { response, abort } = streamVerification(responseText, conversationId, undefined, modelRef.current, userQuery, historyRef.current)
+    const { response, abort } = streamVerification(text, conversationId, undefined, modelRef.current, query, historyRef.current)
     abortRef.current = abort
 
     let cancelled = false
     let receivedSummary = false
 
-    // Timeout: abort verification if it takes too long (60s)
-    const STREAM_TIMEOUT_MS = 60_000
+    // Timeout: abort verification if it takes too long.
+    // Backend can take up to 90s for 10 claims with retries and rate limits.
+    const STREAM_TIMEOUT_MS = 120_000
     const timeoutId = setTimeout(() => {
       if (!cancelled) {
         cancelled = true
@@ -273,7 +282,8 @@ export function useVerificationStream(
       clearTimeout(timeoutId)
       abort()
     }
-  }, [responseText, conversationId, enabled, triggerKey, userQuery])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- responseText/userQuery read via refs to prevent mid-stream restarts
+  }, [conversationId, enabled, triggerKey])
 
   const verifiedCount = claims.filter((c) => c.status && c.status !== "pending").length
   const totalClaims = claims.length

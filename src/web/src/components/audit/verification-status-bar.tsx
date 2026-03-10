@@ -179,6 +179,26 @@ export function VerificationStatusBar({
     )
   }
 
+  // Error state — stream failed or timed out
+  if (streamPhase === "error") {
+    return (
+      <div className="border-t bg-muted/30">
+        <div className="flex items-center gap-2 px-4 py-1">
+          <ShieldAlert className="h-3 w-3 shrink-0 text-yellow-500" />
+          <span className="text-xs text-muted-foreground">Verification incomplete — stream interrupted</span>
+          {sessionClaimsChecked > 0 && (
+            <>
+              <div className="h-3 w-px shrink-0 bg-border" />
+              <span className="text-xs text-muted-foreground/60">
+                Session: {sessionClaimsChecked} facts
+              </span>
+            </>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   // Fallback loading (non-streaming)
   if (loading) {
     return (
