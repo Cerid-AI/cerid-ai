@@ -53,7 +53,7 @@ export function useVerificationOrchestrator({
   const [verificationRecBanner, setVerificationRecBanner] = useState<{ model: ModelOption; reason: string } | null>(null)
   const reportCacheRef = useRef<Map<string, HallucinationReport>>(new Map())
   /** Tracks conversations that have completed verification to prevent re-runs on remount. */
-  const completedConversationsRef = useRef<Set<string>>(new Set())
+  const [completedConversations, setCompletedConversations] = useState<Set<string>>(() => new Set())
 
   // Derived values from messages
   const latestAssistantText = useMemo(() => {
@@ -65,9 +65,9 @@ export function useVerificationOrchestrator({
   const streamTriggerKey = useMemo(() => {
     if (!activeMessages || isStreaming) return 0
     // Prevent re-triggering verification for conversations that already completed
-    if (activeId && completedConversationsRef.current.has(activeId)) return 0
+    if (activeId && completedConversations.has(activeId)) return 0
     return activeMessages.filter((m) => m.role === "assistant").length
-  }, [activeMessages, isStreaming, activeId])
+  }, [activeMessages, isStreaming, activeId, completedConversations])
 
   const latestUserQuery = useMemo(() => {
     if (!activeMessages) return undefined
@@ -117,7 +117,12 @@ export function useVerificationOrchestrator({
   useEffect(() => {
     if (verification.phase === "done" && verification.report && activeId) {
       reportCacheRef.current.set(activeId, verification.report)
-      completedConversationsRef.current.add(activeId)
+      setCompletedConversations((prev) => {
+        if (prev.has(activeId)) return prev
+        const next = new Set(prev)
+        next.add(activeId)
+        return next
+      })
     }
   }, [verification.phase, verification.report, activeId])
 

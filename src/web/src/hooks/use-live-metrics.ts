@@ -52,7 +52,7 @@ export function useLiveMetrics(model: string, messages: ChatMessage[]) {
       messageCost,
       messagesCount: messages.length,
     }
-  }, [messages, modelInfo, streamingTick]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [messages, modelInfo, streamingTick])
 
   const addStreamingChars = useCallback((chars: number) => {
     const prev = streamingCharsRef.current

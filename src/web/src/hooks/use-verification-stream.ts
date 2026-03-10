@@ -74,9 +74,9 @@ export function useVerificationStream(
   const [extractionMethod, setExtractionMethod] = useState<string | null>(null)
   const abortRef = useRef<(() => void) | null>(null)
   const modelRef = useRef(model)
-  modelRef.current = model
+  useEffect(() => { modelRef.current = model }, [model])
   const historyRef = useRef(conversationHistory)
-  historyRef.current = conversationHistory
+  useEffect(() => { historyRef.current = conversationHistory }, [conversationHistory])
 
   // Accumulated session metrics (persist across verification runs, reset on page reload)
   const sessionRef = useRef({ claimsChecked: 0, estCost: 0 })
@@ -253,7 +253,6 @@ export function useVerificationStream(
       cancelled = true
       abort()
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- model tracked via ref
   }, [responseText, conversationId, enabled, triggerKey, userQuery])
 
   const verifiedCount = claims.filter((c) => c.status && c.status !== "pending").length
