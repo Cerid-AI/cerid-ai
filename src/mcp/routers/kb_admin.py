@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import logging
+import traceback
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -158,7 +159,7 @@ async def regenerate_summaries(req: RegenerateSummariesRequest | None = None):
             "message": f"Generated {result['synopses_generated']} synopses, scored {result['artifacts_scored']} artifacts",
         }
     except Exception as e:
-        logger.error("Failed to regenerate summaries: %s", e)
+        logger.error("Failed to regenerate summaries: %s\n%s", e, traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Failed to regenerate summaries: {e}")
 
 

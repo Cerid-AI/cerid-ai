@@ -243,6 +243,7 @@ async def _generate_synopsis(
                 model=model,
                 temperature=0.3,
                 max_tokens=max_tokens,
+                timeout=60.0,
             )
             content = extract_content(data)
             # Strip markdown code fences if present
@@ -254,6 +255,11 @@ async def _generate_synopsis(
         except CircuitOpenError:
             logger.warning("Bifrost synopsis circuit open, skipping synopsis generation")
             return ""
+        except httpx.TimeoutException:
+            logger.warning("Synopsis generation timed out (attempt %d)", attempt + 1)
+            if attempt == 0:
+                continue
+            return ""
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429 and attempt == 0:
                 logger.info("Rate limited (429), waiting 60s before retry")
@@ -261,7 +267,7 @@ async def _generate_synopsis(
                 continue
             logger.warning(f"Synopsis generation failed: {e}")
             return ""
-        except (json.JSONDecodeError, KeyError) as e:
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
             logger.warning("Synopsis generation failed: %s", e)
             return ""
     return ""

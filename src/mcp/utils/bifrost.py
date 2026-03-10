@@ -65,4 +65,13 @@ async def call_bifrost(
 
 def extract_content(data: dict) -> str:
     """Extract the text content from a Bifrost chat/completions response."""
-    return data["choices"][0]["message"]["content"].strip()
+    choices = data.get("choices")
+    if not choices:
+        raise KeyError("No choices in response")
+    message = choices[0].get("message") if choices[0] else None
+    if not message:
+        raise KeyError("No message in response")
+    content = message.get("content")
+    if content is None:
+        raise KeyError("No content in response")
+    return content.strip()
