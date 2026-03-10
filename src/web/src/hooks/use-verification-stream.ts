@@ -131,8 +131,10 @@ export function useVerificationStream(
     let receivedSummary = false
 
     // Timeout: abort verification if it takes too long.
-    // Backend can take up to 90s for 10 claims with retries and rate limits.
-    const STREAM_TIMEOUT_MS = 120_000
+    // Backend can take up to 120s for 10 claims with retries, rate limits,
+    // web search escalation, and consistency checking.  180s provides
+    // headroom for worst-case scenarios with multiple 429 retries.
+    const STREAM_TIMEOUT_MS = 180_000
     const timeoutId = setTimeout(() => {
       if (!cancelled) {
         cancelled = true
@@ -165,6 +167,8 @@ export function useVerificationStream(
 
           for (const line of lines) {
             const trimmed = line.trim()
+            // Skip SSE comments (keepalive heartbeats from backend)
+            if (trimmed.startsWith(":")) continue
             if (!trimmed.startsWith("data:")) continue
 
             const jsonStr = trimmed.slice(5).trim()

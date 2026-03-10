@@ -1168,6 +1168,33 @@ def _pick_verification_model(generating_model: str | None) -> str:
     return config.VERIFICATION_MODEL
 
 
+# Regex patterns that indicate a claim requires stronger reasoning —
+# causal chains, comparative judgments, multi-hop logic, quantitative
+# comparisons — where a lightweight model (GPT-4o-mini) may give
+# shallow or incorrect verdicts.
+_COMPLEX_CLAIM_PATTERNS = [
+    re.compile(p, re.IGNORECASE) for p in [
+        r"\b(?:because|due to|caused by|leads? to|results? in|as a result)\b",
+        r"\b(?:faster|slower|better|worse|higher|lower|more|less|larger|smaller) than\b",
+        r"\b(?:therefore|consequently|hence|thus|implies that)\b",
+        r"\b(?:if .+ then|assuming|given that|provided that)\b",
+        r"\b(?:unlike|whereas|in contrast|compared to|relative to)\b",
+        r"\b(?:requires|depends on|prerequisite|necessary for)\b",
+        r"\b(?:increased|decreased|doubled|tripled|grew|declined) .{0,20} (?:by|from|to) \d",
+    ]
+]
+
+
+def _is_complex_claim(claim: str) -> bool:
+    """Detect claims that require stronger reasoning to verify.
+
+    Complex claims involve causal chains, comparative judgments, quantitative
+    comparisons, or conditional logic.  These benefit from a more capable
+    model (Gemini 2.5 Flash) rather than GPT-4o-mini.
+    """
+    return sum(1 for p in _COMPLEX_CLAIM_PATTERNS if p.search(claim)) >= 1
+
+
 def _is_current_event_claim(claim: str) -> bool:
     """Detect whether a claim is about current events or recent information.
 
@@ -1394,9 +1421,16 @@ async def _verify_claim_externally(
             system_prompt = _SYSTEM_CURRENT_EVENT_VERIFICATION
         verification_method = "web_search"
     else:
-        verify_model = _pick_verification_model(generating_model)
+        # Complex claims (causal, comparative, multi-hop) use a stronger
+        # model for more reliable verdicts.  Simple factual claims use the
+        # lightweight cross-model pool for cost efficiency.
+        if _is_complex_claim(claim):
+            verify_model = config.VERIFICATION_COMPLEX_MODEL
+            verification_method = "cross_model_complex"
+        else:
+            verify_model = _pick_verification_model(generating_model)
+            verification_method = "cross_model"
         system_prompt = _SYSTEM_DIRECT_VERIFICATION
-        verification_method = "cross_model"
 
     sem = _get_ext_verify_semaphore()
 
@@ -1879,8 +1913,11 @@ async def _check_history_consistency(
 
     try:
         url = f"{config.BIFROST_URL}/chat/completions"
+        # Consistency checking requires nuanced cross-text comparison —
+        # use the dedicated consistency model (Gemini 2.5 Flash by default)
+        # instead of GPT-4o-mini for more reliable contradiction detection.
         payload = {
-            "model": config.VERIFICATION_MODEL,
+            "model": config.VERIFICATION_CONSISTENCY_MODEL,
             "messages": [
                 {"role": "system", "content": _SYSTEM_CONSISTENCY_CHECK},
                 {"role": "user", "content": user_prompt},
@@ -1996,6 +2033,10 @@ async def check_hallucinations(
     # Log verification metrics for analytics
     try:
         from utils.cache import log_verification_metrics
+        used_models: list[str] = list({
+            r.get("verification_model", "")
+            for r in results if r.get("verification_model")
+        })
         log_verification_metrics(
             redis_client,
             conversation_id=conversation_id,
@@ -2004,6 +2045,7 @@ async def check_hallucinations(
             unverified=status_counts["unverified"],
             uncertain=status_counts["uncertain"],
             total=len(results),
+            verification_models=used_models or None,
         )
     except Exception as e:
         logger.debug("Failed to log verification metrics (non-blocking): %s", e)
@@ -2087,6 +2129,7 @@ async def verify_response_streaming(
     assessed_confidence = 0.0  # Only accumulate for verified/unverified
     assessed_count = 0
     collected_results: list[dict[str, Any] | None] = [None] * len(claims)
+    stream_interrupted = False
 
     async def _verify_indexed(idx: int, claim_text: str) -> tuple[int, dict[str, Any]]:
         result = await verify_claim(
@@ -2096,47 +2139,65 @@ async def verify_response_streaming(
 
     tasks = [_verify_indexed(i, claim) for i, claim in enumerate(claims)]
 
-    for coro in asyncio.as_completed(tasks):
-        i, result = await coro
-        status = result.get("status", "error")
-        confidence = result.get("similarity", 0.0)
+    # Wrap verification loop in try/except to guarantee summary emission.
+    # Without this, an unhandled exception (e.g., task cancellation, httpx
+    # connection pool error) would terminate the async generator before the
+    # summary event is yielded, causing the frontend to show "stream interrupted".
+    try:
+        for coro in asyncio.as_completed(tasks):
+            try:
+                i, result = await coro
+            except Exception as task_exc:
+                logger.warning("Verification task failed: %s", task_exc)
+                continue
 
-        if status == "verified":
-            verified_count += 1
-            assessed_confidence += confidence
-            assessed_count += 1
-        elif status == "unverified":
-            unverified_count += 1
-            assessed_confidence += confidence
-            assessed_count += 1
-        else:
-            # Uncertain/unassessable claims excluded from confidence avg
-            uncertain_count += 1
+            status = result.get("status", "error")
+            confidence = result.get("similarity", 0.0)
 
-        collected_results[i] = result
+            if status == "verified":
+                verified_count += 1
+                assessed_confidence += confidence
+                assessed_count += 1
+            elif status == "unverified":
+                unverified_count += 1
+                assessed_confidence += confidence
+                assessed_count += 1
+            else:
+                # Uncertain/unassessable claims excluded from confidence avg
+                uncertain_count += 1
 
-        yield {
-            "type": "claim_verified",
-            "index": i,
-            "claim": claims[i],
-            "claim_type": _claim_type(claims[i]),
-            "status": status,
-            "confidence": confidence,
-            "source": result.get("source_filename", ""),
-            "source_artifact_id": result.get("source_artifact_id", ""),
-            "source_domain": result.get("source_domain", ""),
-            "source_snippet": result.get("source_snippet", ""),
-            "reason": result.get("reason", ""),
-            "verification_method": result.get("verification_method", "kb"),
-            "verification_model": result.get("verification_model"),
-            "source_urls": result.get("source_urls", []),
-            "verification_answer": result.get("verification_answer", ""),
-        }
+            collected_results[i] = result
+
+            yield {
+                "type": "claim_verified",
+                "index": i,
+                "claim": claims[i],
+                "claim_type": _claim_type(claims[i]),
+                "status": status,
+                "confidence": confidence,
+                "source": result.get("source_filename", ""),
+                "source_artifact_id": result.get("source_artifact_id", ""),
+                "source_domain": result.get("source_domain", ""),
+                "source_snippet": result.get("source_snippet", ""),
+                "reason": result.get("reason", ""),
+                "verification_method": result.get("verification_method", "kb"),
+                "verification_model": result.get("verification_model"),
+                "source_urls": result.get("source_urls", []),
+                "verification_answer": result.get("verification_answer", ""),
+            }
+    except Exception as loop_exc:
+        logger.error(
+            "Verification loop interrupted after %d/%d claims: %s",
+            verified_count + unverified_count + uncertain_count,
+            len(claims),
+            loop_exc,
+        )
+        stream_interrupted = True
 
     # --- Consistency checking (cross-turn + internal contradictions) ---
-    # Runs after all claims are individually verified.
+    # Runs after all claims are individually verified (best-effort).
     consistency_issues: list[dict[str, Any]] = []
-    if conversation_history or len(claims) >= 2:
+    if not stream_interrupted and (conversation_history or len(claims) >= 2):
         try:
             consistency_issues = await _check_history_consistency(
                 claims, conversation_history
@@ -2159,8 +2220,9 @@ async def verify_response_streaming(
         except Exception as e:
             logger.warning("Consistency check failed: %s", e)
 
-    # Confidence averaged over assessed claims only (verified + unverified).
-    # Uncertain/unassessable claims are neutral and excluded from the average.
+    # GUARANTEED summary emission — the frontend relies on receiving this event
+    # to transition from "verifying" to "done".  Without it, the stream appears
+    # interrupted and the UI shows an error.
     overall = (assessed_confidence / assessed_count) if assessed_count > 0 else 0
     yield {
         "type": "summary",
@@ -2171,6 +2233,7 @@ async def verify_response_streaming(
         "total": len(claims),
         "assessed": assessed_count,
         "extraction_method": method,
+        **({"interrupted": True} if stream_interrupted else {}),
     }
 
     # --- Persist to Redis (same format as batch path) ---
@@ -2200,6 +2263,11 @@ async def verify_response_streaming(
 
     try:
         from utils.cache import log_verification_metrics
+        # Collect distinct verification models used across all claims
+        used_models: list[str] = list({
+            r.get("verification_model", "")
+            for r in collected_results if r and r.get("verification_model")
+        })
         log_verification_metrics(
             redis_client,
             conversation_id=conversation_id,
@@ -2208,6 +2276,7 @@ async def verify_response_streaming(
             unverified=unverified_count,
             uncertain=uncertain_count,
             total=len(claims),
+            verification_models=used_models or None,
         )
     except Exception as e:
         logger.debug("Failed to log streaming verification metrics: %s", e)

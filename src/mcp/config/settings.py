@@ -159,13 +159,27 @@ VERIFICATION_CURRENT_EVENT_MODEL = os.getenv(
     "openrouter/x-ai/grok-4.1-fast:online",
 )
 
+# Stronger model for consistency checking (cross-turn contradiction detection).
+# Needs better reasoning than GPT-4o-mini; Gemini 2.5 Flash is 10x cheaper than
+# Sonnet but significantly better at nuanced multi-text comparison.
+VERIFICATION_CONSISTENCY_MODEL = os.getenv(
+    "VERIFICATION_CONSISTENCY_MODEL",
+    "openrouter/google/gemini-2.5-flash",
+)
+# Stronger model for complex factual claims (causal, comparative, multi-hop).
+# Falls back to VERIFICATION_MODEL pool for simple factual claims.
+VERIFICATION_COMPLEX_MODEL = os.getenv(
+    "VERIFICATION_COMPLEX_MODEL",
+    "openrouter/google/gemini-2.5-flash",
+)
+
 # ---------------------------------------------------------------------------
 # External (Cross-Model) Verification
 # ---------------------------------------------------------------------------
 ENABLE_EXTERNAL_VERIFICATION = os.getenv("ENABLE_EXTERNAL_VERIFICATION", "true").lower() == "true"
 EXTERNAL_VERIFY_MODEL = os.getenv("EXTERNAL_VERIFY_MODEL", "openrouter/openai/gpt-4o-mini")
 EXTERNAL_VERIFY_KB_THRESHOLD = float(os.getenv("EXTERNAL_VERIFY_KB_THRESHOLD", "0.5"))
-EXTERNAL_VERIFY_MAX_TOKENS = 200
+EXTERNAL_VERIFY_MAX_TOKENS = 250
 EXTERNAL_VERIFY_TEMPERATURE = 0.0
 EXTERNAL_VERIFY_MAX_CONCURRENT = int(os.getenv("EXTERNAL_VERIFY_MAX_CONCURRENT", "5"))
 EXTERNAL_VERIFY_RETRY_ATTEMPTS = 3

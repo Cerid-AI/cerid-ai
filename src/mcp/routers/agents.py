@@ -4,6 +4,7 @@
 """Agent endpoints — thin wrappers over agent modules."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
@@ -335,13 +336,18 @@ class VerifyStreamRequest(BaseModel):
 
 @router.post("/agent/verify-stream")
 async def verify_stream_endpoint(req: VerifyStreamRequest):
-    """SSE endpoint for streaming truth verification of an LLM response."""
+    """SSE endpoint for streaming truth verification of an LLM response.
+
+    Includes keepalive heartbeats (SSE comments) every 15s during long
+    verification phases to prevent intermediary proxies and browsers from
+    closing idle connections prematurely.
+    """
 
     async def event_generator():
         try:
             from agents.hallucination import verify_response_streaming
 
-            async for event in verify_response_streaming(
+            gen = verify_response_streaming(
                 response_text=req.response_text,
                 conversation_id=req.conversation_id,
                 chroma_client=get_chroma(),
@@ -351,8 +357,31 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
                 model=req.model,
                 user_query=req.user_query,
                 conversation_history=req.conversation_history,
-            ):
-                yield f"data: {json.dumps(event)}\n\n"
+            )
+
+            # Read events with a keepalive timeout — if no event arrives
+            # within 15s, emit an SSE comment to keep the connection alive.
+            anext_task: asyncio.Task | None = None
+            try:
+                while True:
+                    if anext_task is None:
+                        anext_task = asyncio.ensure_future(gen.__anext__())
+                    done, _ = await asyncio.wait({anext_task}, timeout=15.0)
+                    if done:
+                        try:
+                            event = anext_task.result()
+                            yield f"data: {json.dumps(event)}\n\n"
+                        except StopAsyncIteration:
+                            break
+                        anext_task = None
+                    else:
+                        # No event in 15s — emit SSE keepalive comment
+                        yield ": keepalive\n\n"
+            finally:
+                if anext_task and not anext_task.done():
+                    anext_task.cancel()
+                await gen.aclose()
+
         except Exception as e:
             logger.error(f"Verify stream error: {e}")
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"

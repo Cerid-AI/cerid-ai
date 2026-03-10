@@ -118,10 +118,17 @@ def log_verification_metrics(
     unverified: int = 0,
     uncertain: int = 0,
     total: int = 0,
+    verification_models: list[str] | None = None,
 ) -> None:
-    """Store verification metrics for analytics aggregation."""
+    """Store verification metrics for analytics aggregation.
+
+    ``verification_models`` is an optional list of the distinct LLM model IDs
+    that were actually used to verify claims in this run (e.g., GPT-4o-mini,
+    Gemini 2.5 Flash, Grok 4.1 Fast).  This enables per-verification-model
+    accuracy tracking in the audit dashboard.
+    """
     accuracy = round(verified / total, 4) if total > 0 else 0.0
-    entry = json.dumps({
+    data: dict = {
         "conversation_id": conversation_id,
         "model": model or "unknown",
         "verified": verified,
@@ -130,7 +137,10 @@ def log_verification_metrics(
         "total": total,
         "accuracy": accuracy,
         "timestamp": utcnow_iso(),
-    })
+    }
+    if verification_models:
+        data["verification_models"] = verification_models
+    entry = json.dumps(data)
     try:
         redis_client.rpush(REDIS_VERIFICATION_METRICS_KEY, entry)
         redis_client.expire(REDIS_VERIFICATION_METRICS_KEY, REDIS_VERIFICATION_METRICS_TTL)

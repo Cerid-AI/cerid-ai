@@ -314,6 +314,8 @@ def get_verification_analytics(
     model_stats: dict[str, dict[str, Any]] = defaultdict(lambda: {
         "checks": 0, "verified": 0, "unverified": 0, "uncertain": 0, "total_claims": 0,
     })
+    # Track which verification models were used (separate from generating model)
+    verify_model_counts: dict[str, int] = defaultdict(int)
     total_accuracy_sum = 0.0
 
     for entry in entries:
@@ -325,6 +327,9 @@ def get_verification_analytics(
         stats["uncertain"] += entry.get("uncertain", 0)
         stats["total_claims"] += entry.get("total", 0)
         total_accuracy_sum += entry.get("accuracy", 0.0)
+        # Aggregate verification model usage
+        for vm in entry.get("verification_models", []):
+            verify_model_counts[vm.replace("openrouter/", "")] += 1
 
     by_model = {}
     for model, stats in model_stats.items():
@@ -350,11 +355,32 @@ def get_verification_analytics(
         if counts["total"] > 0:
             hourly_accuracy[hour] = round(counts["verified"] / counts["total"], 4)
 
+    # --- User feedback stats (thumbs-up/down on individual claims) ---
+    feedback_stats = {"total": 0, "correct": 0, "incorrect": 0}
+    try:
+        from utils.cache import REDIS_VERIFICATION_FEEDBACK_KEY
+        raw_feedback = redis_client.lrange(REDIS_VERIFICATION_FEEDBACK_KEY, 0, -1)
+        for raw in raw_feedback:
+            try:
+                fb = json.loads(raw)
+                if fb.get("timestamp", "") >= cutoff:
+                    feedback_stats["total"] += 1
+                    if fb.get("correct"):
+                        feedback_stats["correct"] += 1
+                    else:
+                        feedback_stats["incorrect"] += 1
+            except Exception:
+                continue
+    except Exception as e:
+        logger.debug("Failed to read verification feedback: %s", e)
+
     return {
         "total_checks": len(entries),
         "avg_accuracy": round(total_accuracy_sum / len(entries), 4) if entries else 0.0,
         "by_model": by_model,
         "hourly_accuracy": hourly_accuracy,
+        "verification_models": dict(verify_model_counts) if verify_model_counts else {},
+        "user_feedback": feedback_stats if feedback_stats["total"] > 0 else None,
     }
 
 
