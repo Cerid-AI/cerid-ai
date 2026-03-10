@@ -35,7 +35,6 @@ import {
   Info,
   ChevronDown,
   ChevronRight,
-  FolderSync,
   Wrench,
   SearchIcon,
   HardDrive,

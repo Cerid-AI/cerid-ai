@@ -29,7 +29,6 @@ import config
 
 def _utcnow() -> datetime:
     """UTC-aware now (matches curator.utcnow)."""
-    from datetime import timezone
     return datetime.now(UTC)
 
 
