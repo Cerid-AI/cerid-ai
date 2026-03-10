@@ -190,7 +190,14 @@ export function useVerificationOrchestrator({
 
   const handleVerifyMessage = useCallback(() => {
     // Clear completed mark so re-verification can proceed
-    if (activeId) completedConversationsRef.current.delete(activeId)
+    if (activeId) {
+      setCompletedConversations((prev) => {
+        if (!prev.has(activeId)) return prev
+        const next = new Set(prev)
+        next.delete(activeId)
+        return next
+      })
+    }
     setManualVerifyBump((prev) => prev + 1)
   }, [activeId])
 
