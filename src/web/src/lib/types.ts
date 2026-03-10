@@ -477,6 +477,20 @@ export interface ServerSettings {
   rerank_original_weight?: number
   temporal_half_life_days?: number
   temporal_recency_weight?: number
+  // Advanced RAG pipeline (read-write)
+  enable_contextual_chunks?: boolean
+  enable_adaptive_retrieval?: boolean
+  adaptive_retrieval_light_top_k?: number
+  enable_query_decomposition?: boolean
+  query_decomposition_max_subqueries?: number
+  enable_mmr_diversity?: boolean
+  mmr_lambda?: number
+  enable_intelligent_assembly?: boolean
+  enable_late_interaction?: boolean
+  late_interaction_top_n?: number
+  late_interaction_blend_weight?: number
+  enable_semantic_cache?: boolean
+  semantic_cache_threshold?: number
 }
 
 export interface SettingsUpdate {
@@ -489,11 +503,26 @@ export interface SettingsUpdate {
   cost_sensitivity?: string
   enable_auto_inject?: boolean
   auto_inject_threshold?: number
+  enable_self_rag?: boolean
   storage_mode?: string
   hybrid_vector_weight?: number
   hybrid_keyword_weight?: number
   rerank_llm_weight?: number
   rerank_original_weight?: number
+  // Advanced RAG pipeline
+  enable_contextual_chunks?: boolean
+  enable_adaptive_retrieval?: boolean
+  adaptive_retrieval_light_top_k?: number
+  enable_query_decomposition?: boolean
+  query_decomposition_max_subqueries?: number
+  enable_mmr_diversity?: boolean
+  mmr_lambda?: number
+  enable_intelligent_assembly?: boolean
+  enable_late_interaction?: boolean
+  late_interaction_top_n?: number
+  late_interaction_blend_weight?: number
+  enable_semantic_cache?: boolean
+  semantic_cache_threshold?: number
 }
 
 export interface Memory {

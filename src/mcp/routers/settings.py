@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 import config
+import config.features as features_mod
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion.settings")
@@ -74,6 +75,46 @@ class SettingsUpdateRequest(BaseModel):
     rerank_original_weight: float | None = Field(
         None, ge=0.0, le=1.0, description="Weight for original relevance score in reranking"
     )
+    # Advanced RAG pipeline toggles
+    enable_contextual_chunks: bool | None = Field(
+        None, description="Toggle LLM-generated situational summaries on chunks"
+    )
+    enable_adaptive_retrieval: bool | None = Field(
+        None, description="Toggle adaptive retrieval gate (skip/reduce for simple queries)"
+    )
+    adaptive_retrieval_light_top_k: int | None = Field(
+        None, ge=1, le=20, description="Top-K for light retrieval mode"
+    )
+    enable_query_decomposition: bool | None = Field(
+        None, description="Toggle multi-part query decomposition into parallel sub-queries"
+    )
+    query_decomposition_max_subqueries: int | None = Field(
+        None, ge=2, le=8, description="Maximum sub-queries for query decomposition"
+    )
+    enable_mmr_diversity: bool | None = Field(
+        None, description="Toggle MMR diversity reordering of results"
+    )
+    mmr_lambda: float | None = Field(
+        None, ge=0.0, le=1.0, description="MMR lambda (1=pure relevance, 0=pure diversity)"
+    )
+    enable_intelligent_assembly: bool | None = Field(
+        None, description="Toggle three-pass context assembly with facet coverage"
+    )
+    enable_late_interaction: bool | None = Field(
+        None, description="Toggle ColBERT-inspired late interaction scoring"
+    )
+    late_interaction_top_n: int | None = Field(
+        None, ge=2, le=20, description="Number of candidates for late interaction scoring"
+    )
+    late_interaction_blend_weight: float | None = Field(
+        None, ge=0.0, le=0.5, description="Blend weight for late interaction score"
+    )
+    enable_semantic_cache: bool | None = Field(
+        None, description="Toggle semantic query cache"
+    )
+    semantic_cache_threshold: float | None = Field(
+        None, ge=0.5, le=1.0, description="Similarity threshold for cache hits"
+    )
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -126,6 +167,20 @@ async def get_settings_endpoint():
         "rerank_original_weight": config.RERANK_ORIGINAL_WEIGHT,
         "temporal_half_life_days": config.TEMPORAL_HALF_LIFE_DAYS,
         "temporal_recency_weight": config.TEMPORAL_RECENCY_WEIGHT,
+        # Advanced RAG pipeline (read-write)
+        "enable_contextual_chunks": features_mod.ENABLE_CONTEXTUAL_CHUNKS,
+        "enable_adaptive_retrieval": features_mod.ENABLE_ADAPTIVE_RETRIEVAL,
+        "adaptive_retrieval_light_top_k": features_mod.ADAPTIVE_RETRIEVAL_LIGHT_TOP_K,
+        "enable_query_decomposition": features_mod.ENABLE_QUERY_DECOMPOSITION,
+        "query_decomposition_max_subqueries": features_mod.QUERY_DECOMPOSITION_MAX_SUBQUERIES,
+        "enable_mmr_diversity": features_mod.ENABLE_MMR_DIVERSITY,
+        "mmr_lambda": features_mod.MMR_LAMBDA,
+        "enable_intelligent_assembly": features_mod.ENABLE_INTELLIGENT_ASSEMBLY,
+        "enable_late_interaction": features_mod.ENABLE_LATE_INTERACTION,
+        "late_interaction_top_n": features_mod.LATE_INTERACTION_TOP_N,
+        "late_interaction_blend_weight": features_mod.LATE_INTERACTION_BLEND_WEIGHT,
+        "enable_semantic_cache": features_mod.ENABLE_SEMANTIC_CACHE,
+        "semantic_cache_threshold": features_mod.SEMANTIC_CACHE_THRESHOLD,
     }
 
 
@@ -196,6 +251,7 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
         updated["storage_mode"] = req.storage_mode
 
     if req.enable_self_rag is not None:
+        features_mod.ENABLE_SELF_RAG = req.enable_self_rag
         config.ENABLE_SELF_RAG = req.enable_self_rag  # type: ignore[assignment]
         updated["enable_self_rag"] = req.enable_self_rag
 
@@ -215,15 +271,78 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
         config.RERANK_ORIGINAL_WEIGHT = req.rerank_original_weight  # type: ignore[assignment]
         updated["rerank_original_weight"] = req.rerank_original_weight
 
+    # Advanced RAG pipeline — dual mutation (config + config.features) so that
+    # both ``import config; config.X`` and ``from config.features import X``
+    # consumers see the updated value at runtime.
+    if req.enable_contextual_chunks is not None:
+        features_mod.ENABLE_CONTEXTUAL_CHUNKS = req.enable_contextual_chunks
+        config.ENABLE_CONTEXTUAL_CHUNKS = req.enable_contextual_chunks  # type: ignore[assignment]
+        updated["enable_contextual_chunks"] = req.enable_contextual_chunks
+
+    if req.enable_adaptive_retrieval is not None:
+        features_mod.ENABLE_ADAPTIVE_RETRIEVAL = req.enable_adaptive_retrieval
+        config.ENABLE_ADAPTIVE_RETRIEVAL = req.enable_adaptive_retrieval  # type: ignore[assignment]
+        updated["enable_adaptive_retrieval"] = req.enable_adaptive_retrieval
+
+    if req.adaptive_retrieval_light_top_k is not None:
+        features_mod.ADAPTIVE_RETRIEVAL_LIGHT_TOP_K = req.adaptive_retrieval_light_top_k
+        config.ADAPTIVE_RETRIEVAL_LIGHT_TOP_K = req.adaptive_retrieval_light_top_k  # type: ignore[assignment]
+        updated["adaptive_retrieval_light_top_k"] = req.adaptive_retrieval_light_top_k
+
+    if req.enable_query_decomposition is not None:
+        features_mod.ENABLE_QUERY_DECOMPOSITION = req.enable_query_decomposition
+        config.ENABLE_QUERY_DECOMPOSITION = req.enable_query_decomposition  # type: ignore[assignment]
+        updated["enable_query_decomposition"] = req.enable_query_decomposition
+
+    if req.query_decomposition_max_subqueries is not None:
+        features_mod.QUERY_DECOMPOSITION_MAX_SUBQUERIES = req.query_decomposition_max_subqueries
+        config.QUERY_DECOMPOSITION_MAX_SUBQUERIES = req.query_decomposition_max_subqueries  # type: ignore[assignment]
+        updated["query_decomposition_max_subqueries"] = req.query_decomposition_max_subqueries
+
+    if req.enable_mmr_diversity is not None:
+        features_mod.ENABLE_MMR_DIVERSITY = req.enable_mmr_diversity
+        config.ENABLE_MMR_DIVERSITY = req.enable_mmr_diversity  # type: ignore[assignment]
+        updated["enable_mmr_diversity"] = req.enable_mmr_diversity
+
+    if req.mmr_lambda is not None:
+        features_mod.MMR_LAMBDA = req.mmr_lambda
+        config.MMR_LAMBDA = req.mmr_lambda  # type: ignore[assignment]
+        updated["mmr_lambda"] = req.mmr_lambda
+
+    if req.enable_intelligent_assembly is not None:
+        features_mod.ENABLE_INTELLIGENT_ASSEMBLY = req.enable_intelligent_assembly
+        config.ENABLE_INTELLIGENT_ASSEMBLY = req.enable_intelligent_assembly  # type: ignore[assignment]
+        updated["enable_intelligent_assembly"] = req.enable_intelligent_assembly
+
+    if req.enable_late_interaction is not None:
+        features_mod.ENABLE_LATE_INTERACTION = req.enable_late_interaction
+        config.ENABLE_LATE_INTERACTION = req.enable_late_interaction  # type: ignore[assignment]
+        updated["enable_late_interaction"] = req.enable_late_interaction
+
+    if req.late_interaction_top_n is not None:
+        features_mod.LATE_INTERACTION_TOP_N = req.late_interaction_top_n
+        config.LATE_INTERACTION_TOP_N = req.late_interaction_top_n  # type: ignore[assignment]
+        updated["late_interaction_top_n"] = req.late_interaction_top_n
+
+    if req.late_interaction_blend_weight is not None:
+        features_mod.LATE_INTERACTION_BLEND_WEIGHT = req.late_interaction_blend_weight
+        config.LATE_INTERACTION_BLEND_WEIGHT = req.late_interaction_blend_weight  # type: ignore[assignment]
+        updated["late_interaction_blend_weight"] = req.late_interaction_blend_weight
+
+    if req.enable_semantic_cache is not None:
+        features_mod.ENABLE_SEMANTIC_CACHE = req.enable_semantic_cache
+        config.ENABLE_SEMANTIC_CACHE = req.enable_semantic_cache  # type: ignore[assignment]
+        updated["enable_semantic_cache"] = req.enable_semantic_cache
+
+    if req.semantic_cache_threshold is not None:
+        features_mod.SEMANTIC_CACHE_THRESHOLD = req.semantic_cache_threshold
+        config.SEMANTIC_CACHE_THRESHOLD = req.semantic_cache_threshold  # type: ignore[assignment]
+        updated["semantic_cache_threshold"] = req.semantic_cache_threshold
+
     if not updated:
         raise HTTPException(
             status_code=400,
-            detail="No valid fields provided. Updatable fields: "
-            "categorize_mode, enable_feedback_loop, enable_hallucination_check, "
-            "enable_memory_extraction, hallucination_threshold, cost_sensitivity, "
-            "enable_auto_inject, auto_inject_threshold, enable_model_router, "
-            "storage_mode, enable_self_rag, hybrid_vector_weight, "
-            "hybrid_keyword_weight, rerank_llm_weight, rerank_original_weight",
+            detail="No valid fields provided. See API docs for updatable fields.",
         )
 
     logger.info(f"Settings updated: {updated}")

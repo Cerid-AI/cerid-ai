@@ -11,6 +11,8 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Switch } from "@/components/ui/switch"
+import { Slider } from "@/components/ui/slider"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   Select,
@@ -44,22 +46,33 @@ import { SyncSection } from "./sync-section"
 
 type LoadState = "loading" | "error" | "ready"
 
-type SectionKey = "connection" | "ingestion" | "features" | "knowledge" | "taxonomy" | "encryption" | "infrastructure" | "search" | "sync" | "kb_admin" | "flags"
+type SectionKey = "connection" | "ingestion" | "features" | "knowledge" | "retrieval" | "search" | "taxonomy" | "infrastructure" | "sync" | "kb_admin"
 
 function readSectionState(): Record<SectionKey, boolean> {
   const defaults: Record<SectionKey, boolean> = {
     connection: true, ingestion: true, features: true, knowledge: true,
-    taxonomy: true, encryption: true, infrastructure: false, search: false, sync: true, kb_admin: true, flags: true,
+    retrieval: false, search: false, taxonomy: true, infrastructure: false,
+    sync: true, kb_admin: true,
   }
   try {
     const raw = localStorage.getItem("cerid-settings-sections")
-    if (raw) return { ...defaults, ...JSON.parse(raw) }
+    if (raw) {
+      const parsed = JSON.parse(raw) as Record<string, boolean>
+      // Migrate: drop legacy keys, merge with new defaults
+      return { ...defaults, ...Object.fromEntries(
+        Object.entries(parsed).filter(([k]) => k in defaults)
+      ) }
+    }
   } catch { /* noop */ }
   return defaults
 }
 
 function persistSectionState(state: Record<SectionKey, boolean>) {
   try { localStorage.setItem("cerid-settings-sections", JSON.stringify(state)) } catch { /* noop */ }
+}
+
+function formatFlagName(flag: string): string {
+  return flag.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
 export default function SettingsPane() {
@@ -98,7 +111,6 @@ export default function SettingsPane() {
       const result = await fn()
       setKBResult(result.message)
       loadKBStats()
-      // Invalidate KB-related caches so other panes pick up updated scores/data
       queryClient.invalidateQueries({ queryKey: ["artifacts"] })
       queryClient.invalidateQueries({ queryKey: ["kb-search"] })
       queryClient.invalidateQueries({ queryKey: ["taxonomy"] })
@@ -185,7 +197,7 @@ export default function SettingsPane() {
       <ScrollArea className="min-h-0 flex-1">
         <TooltipProvider delayDuration={300}>
           <div className="space-y-1 p-4">
-            {/* Connection */}
+            {/* ── Connection ── */}
             <SectionHeading icon={Server} label="Connection" open={sections.connection} onToggle={() => toggleSection("connection")} />
             {sections.connection && (
               <Card className="mb-4">
@@ -193,16 +205,28 @@ export default function SettingsPane() {
                   <Row label="Server Version" value={settings.version} info="Current MCP server version" />
                   <Row label="Machine ID" value={settings.machine_id} mono info="Unique identifier for this server instance" />
                   <div className="flex items-center justify-between">
-                    <LabelWithInfo label="Feature Tier" info="Community: taxonomy, file upload, encryption, truth audit, live metrics. Pro: OCR, audio transcription, image understanding, semantic dedup, advanced analytics, multi-user. Set via CERID_TIER env var." />
+                    <LabelWithInfo label="Feature Tier" info="Controls which platform capabilities are available. Set via CERID_TIER env var." />
                     <Badge variant={settings.feature_tier === "pro" ? "default" : "secondary"}>
                       {settings.feature_tier}
                     </Badge>
+                  </div>
+                  {/* Tier-gated capabilities grid */}
+                  <div className="mt-1 rounded border bg-muted/30 p-3">
+                    <p className="mb-2 text-[11px] font-medium text-muted-foreground">Platform Capabilities</p>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                      {Object.entries(settings.feature_flags).map(([flag, enabled]) => (
+                        <div key={flag} className="flex items-center gap-1.5">
+                          <div className={cn("h-1.5 w-1.5 rounded-full", enabled ? "bg-green-500" : "bg-muted-foreground/30")} />
+                          <span className="text-[11px] text-muted-foreground">{formatFlagName(flag)}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </CardContent>
               </Card>
             )}
 
-            {/* Ingestion */}
+            {/* ── Ingestion ── */}
             <SectionHeading icon={Database} label="Ingestion" open={sections.ingestion} onToggle={() => toggleSection("ingestion")} />
             {sections.ingestion && (
               <Card className="mb-4">
@@ -243,15 +267,27 @@ export default function SettingsPane() {
                       </SelectContent>
                     </Select>
                   </div>
+                  <ToggleRow
+                    label="Contextual Chunking"
+                    enabled={settings.enable_contextual_chunks ?? false}
+                    onToggle={(v) => patch({ enable_contextual_chunks: v })}
+                    info="Adds LLM-generated situational summaries to each chunk for richer retrieval context"
+                  />
                 </CardContent>
               </Card>
             )}
 
-            {/* Features */}
-            <SectionHeading icon={ToggleLeft} label="Features" open={sections.features} onToggle={() => toggleSection("features")} />
+            {/* ── AI Features ── */}
+            <SectionHeading icon={ToggleLeft} label="AI Features" open={sections.features} onToggle={() => toggleSection("features")} />
             {sections.features && (
               <Card className="mb-4">
                 <CardContent className="grid gap-3 pt-4">
+                  <ToggleRow
+                    label="Self-RAG Validation"
+                    enabled={settings.enable_self_rag ?? true}
+                    onToggle={(v) => patch({ enable_self_rag: v })}
+                    info="Validates retrieval quality and retries with refined queries if results are insufficient"
+                  />
                   <ToggleRow
                     label="Feedback Loop"
                     enabled={settings.enable_feedback_loop}
@@ -270,6 +306,19 @@ export default function SettingsPane() {
                     onToggle={(v) => patch({ enable_memory_extraction: v })}
                     info="Extracts key facts and preferences from conversations into long-term memory"
                   />
+
+                  <div className="my-1 h-px bg-border" />
+
+                  <SliderRow
+                    label="Hallucination Threshold"
+                    value={settings.hallucination_threshold}
+                    onChange={(v) => patch({ hallucination_threshold: v })}
+                    min={0} max={1} step={0.05}
+                    info="Confidence threshold for flagging claims (lower = more sensitive)"
+                  />
+
+                  <div className="my-1 h-px bg-border" />
+
                   <div className="flex items-center justify-between">
                     <LabelWithInfo label="Model Router" info="Manual: no suggestions. Recommend: shows switch banner. Auto: silently picks the best model." />
                     <Select
@@ -289,31 +338,6 @@ export default function SettingsPane() {
                       </SelectContent>
                     </Select>
                   </div>
-
-                  <div className="my-1 h-px bg-border" />
-
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex min-w-0 items-center gap-1.5">
-                      <LabelWithInfo
-                        label={`Hallucination Threshold: ${settings.hallucination_threshold.toFixed(2)}`}
-                        info="Confidence threshold for flagging claims (lower = more sensitive)"
-                      />
-                    </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={1}
-                      step={0.05}
-                      value={settings.hallucination_threshold}
-                      onChange={(e) =>
-                        patch({ hallucination_threshold: parseFloat(e.target.value) })
-                      }
-                      className="h-1.5 w-32 cursor-pointer accent-primary"
-                      aria-label="Hallucination threshold"
-                    />
-                  </div>
-
-                  <div className="my-1 h-px bg-border" />
 
                   <div className="flex items-center justify-between">
                     <LabelWithInfo label="Cost Sensitivity" info="How aggressively the model router optimizes for cost vs quality" />
@@ -335,7 +359,7 @@ export default function SettingsPane() {
               </Card>
             )}
 
-            {/* Knowledge */}
+            {/* ── Knowledge ── */}
             <SectionHeading icon={Database} label="Knowledge" open={sections.knowledge} onToggle={() => toggleSection("knowledge")} />
             {sections.knowledge && (
               <Card className="mb-4">
@@ -347,32 +371,190 @@ export default function SettingsPane() {
                     info="Automatically includes relevant KB context when relevance exceeds threshold"
                   />
                   {settings.enable_auto_inject && (
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="flex min-w-0 items-center gap-1.5">
-                        <LabelWithInfo
-                          label={`Injection Threshold: ${settings.auto_inject_threshold.toFixed(2)}`}
-                          info="Minimum relevance score to auto-inject (higher = more selective)"
-                        />
-                      </div>
-                      <input
-                        type="range"
-                        min={0.5}
-                        max={1}
-                        step={0.05}
-                        value={settings.auto_inject_threshold}
-                        onChange={(e) =>
-                          patch({ auto_inject_threshold: parseFloat(e.target.value) })
-                        }
-                        className="h-1.5 w-32 cursor-pointer accent-primary"
-                        aria-label="Auto-inject threshold"
-                      />
-                    </div>
+                    <SliderRow
+                      label="Injection Threshold"
+                      value={settings.auto_inject_threshold}
+                      onChange={(v) => patch({ auto_inject_threshold: v })}
+                      min={0.5} max={1} step={0.05}
+                      info="Minimum relevance score to auto-inject (higher = more selective)"
+                    />
                   )}
                 </CardContent>
               </Card>
             )}
 
-            {/* Taxonomy */}
+            {/* ── Retrieval Pipeline ── */}
+            <SectionHeading icon={Cpu} label="Retrieval Pipeline" open={sections.retrieval} onToggle={() => toggleSection("retrieval")} />
+            {sections.retrieval && (
+              <Card className="mb-4">
+                <CardHeader className="px-4 pb-2 pt-4">
+                  <CardDescription className="text-xs">
+                    Advanced RAG pipeline stages. Each stage is independent and can be toggled individually.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-4 px-4 pb-4">
+                  {/* Adaptive Retrieval */}
+                  <PipelineToggle
+                    label="Adaptive Retrieval"
+                    enabled={settings.enable_adaptive_retrieval ?? false}
+                    onToggle={(v) => patch({ enable_adaptive_retrieval: v })}
+                    description="Classifies query complexity to skip or reduce retrieval for simple queries"
+                  >
+                    <SliderRow
+                      label="Light Top-K"
+                      value={settings.adaptive_retrieval_light_top_k ?? 3}
+                      onChange={(v) => patch({ adaptive_retrieval_light_top_k: Math.round(v) })}
+                      min={1} max={10} step={1}
+                      info="Number of results for light retrieval mode"
+                    />
+                  </PipelineToggle>
+
+                  <div className="h-px bg-border" />
+
+                  {/* Query Decomposition */}
+                  <PipelineToggle
+                    label="Query Decomposition"
+                    enabled={settings.enable_query_decomposition ?? false}
+                    onToggle={(v) => patch({ enable_query_decomposition: v })}
+                    description="Breaks complex multi-part questions into parallel sub-queries for broader coverage"
+                  >
+                    <SliderRow
+                      label="Max Sub-queries"
+                      value={settings.query_decomposition_max_subqueries ?? 4}
+                      onChange={(v) => patch({ query_decomposition_max_subqueries: Math.round(v) })}
+                      min={2} max={6} step={1}
+                      info="Maximum number of sub-queries per decomposition"
+                    />
+                  </PipelineToggle>
+
+                  <div className="h-px bg-border" />
+
+                  {/* MMR Diversity */}
+                  <PipelineToggle
+                    label="MMR Diversity"
+                    enabled={settings.enable_mmr_diversity ?? false}
+                    onToggle={(v) => patch({ enable_mmr_diversity: v })}
+                    description="Reorders results using Maximal Marginal Relevance for diverse, non-redundant context"
+                  >
+                    <SliderRow
+                      label="Lambda"
+                      value={settings.mmr_lambda ?? 0.7}
+                      onChange={(v) => patch({ mmr_lambda: v })}
+                      min={0} max={1} step={0.05}
+                      info="Balance between relevance (1.0) and diversity (0.0)"
+                    />
+                  </PipelineToggle>
+
+                  <div className="h-px bg-border" />
+
+                  {/* Intelligent Assembly */}
+                  <PipelineToggle
+                    label="Intelligent Assembly"
+                    enabled={settings.enable_intelligent_assembly ?? false}
+                    onToggle={(v) => patch({ enable_intelligent_assembly: v })}
+                    description="Three-pass context assembly maximizing query facet coverage"
+                  />
+
+                  <div className="h-px bg-border" />
+
+                  {/* Late Interaction */}
+                  <PipelineToggle
+                    label="Late Interaction"
+                    enabled={settings.enable_late_interaction ?? false}
+                    onToggle={(v) => patch({ enable_late_interaction: v })}
+                    description="ColBERT-inspired MaxSim scoring for fine-grained token-level relevance"
+                  >
+                    <SliderRow
+                      label="Top-N Candidates"
+                      value={settings.late_interaction_top_n ?? 8}
+                      onChange={(v) => patch({ late_interaction_top_n: Math.round(v) })}
+                      min={4} max={16} step={1}
+                      info="Number of candidates for late interaction scoring"
+                    />
+                    <SliderRow
+                      label="Blend Weight"
+                      value={settings.late_interaction_blend_weight ?? 0.15}
+                      onChange={(v) => patch({ late_interaction_blend_weight: v })}
+                      min={0} max={0.5} step={0.05}
+                      info="Weight of late interaction score blended into final ranking"
+                    />
+                  </PipelineToggle>
+
+                  <div className="h-px bg-border" />
+
+                  {/* Semantic Cache */}
+                  <PipelineToggle
+                    label="Semantic Cache"
+                    enabled={settings.enable_semantic_cache ?? false}
+                    onToggle={(v) => patch({ enable_semantic_cache: v })}
+                    description="Caches retrieval results keyed by semantic query similarity"
+                  >
+                    <SliderRow
+                      label="Similarity Threshold"
+                      value={settings.semantic_cache_threshold ?? 0.92}
+                      onChange={(v) => patch({ semantic_cache_threshold: v })}
+                      min={0.8} max={1} step={0.01}
+                      info="Minimum cosine similarity for a cache hit"
+                    />
+                  </PipelineToggle>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* ── Search Tuning ── */}
+            <SectionHeading icon={SearchIcon} label="Search Tuning" open={sections.search} onToggle={() => toggleSection("search")} />
+            {sections.search && (
+              <Card className="mb-4">
+                <CardContent className="grid gap-4 pt-4">
+                  <SliderRow
+                    label="Vector Weight"
+                    value={settings.hybrid_vector_weight ?? 0.6}
+                    onChange={(v) => patch({ hybrid_vector_weight: v })}
+                    min={0} max={1} step={0.05}
+                    info="Weight for vector similarity in hybrid search (0-1)"
+                  />
+                  <SliderRow
+                    label="Keyword Weight"
+                    value={settings.hybrid_keyword_weight ?? 0.4}
+                    onChange={(v) => patch({ hybrid_keyword_weight: v })}
+                    min={0} max={1} step={0.05}
+                    info="Weight for BM25 keyword matching in hybrid search (0-1)"
+                  />
+
+                  <div className="my-1 h-px bg-border" />
+
+                  <SliderRow
+                    label="Rerank LLM Weight"
+                    value={settings.rerank_llm_weight ?? 0.6}
+                    onChange={(v) => patch({ rerank_llm_weight: v })}
+                    min={0} max={1} step={0.05}
+                    info="Weight for LLM-based reranking score (0-1)"
+                  />
+                  <SliderRow
+                    label="Rerank Original Weight"
+                    value={settings.rerank_original_weight ?? 0.4}
+                    onChange={(v) => patch({ rerank_original_weight: v })}
+                    min={0} max={1} step={0.05}
+                    info="Weight for original relevance score in reranking (0-1)"
+                  />
+
+                  <div className="my-1 h-px bg-border" />
+
+                  <Row
+                    label="Temporal Half-life"
+                    value={settings.temporal_half_life_days ? `${settings.temporal_half_life_days} days` : "—"}
+                    info="Days until temporal recency boost decays by half"
+                  />
+                  <Row
+                    label="Recency Weight"
+                    value={(settings.temporal_recency_weight ?? 0.1).toFixed(2)}
+                    info="Maximum boost from document recency"
+                  />
+                </CardContent>
+              </Card>
+            )}
+
+            {/* ── Taxonomy ── */}
             <SectionHeading icon={Tag} label="Taxonomy" open={sections.taxonomy} onToggle={() => toggleSection("taxonomy")} />
             {sections.taxonomy && (
               <div className="mb-4 grid gap-3">
@@ -399,23 +581,7 @@ export default function SettingsPane() {
               </div>
             )}
 
-            {/* Encryption */}
-            <SectionHeading icon={Shield} label="Encryption" open={sections.encryption} onToggle={() => toggleSection("encryption")} />
-            {sections.encryption && (
-              <Card className="mb-4">
-                <CardContent className="grid gap-3 pt-4">
-                  <div className="flex items-center justify-between">
-                    <LabelWithInfo label="Status" info="Whether data at rest is encrypted" />
-                    <Badge variant={settings.enable_encryption ? "default" : "secondary"}>
-                      {settings.enable_encryption ? "Enabled" : "Disabled"}
-                    </Badge>
-                  </div>
-                  <Row label="Sync Backend" value={settings.sync_backend} info="Storage backend for cross-device sync" />
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Infrastructure */}
+            {/* ── Infrastructure ── */}
             <SectionHeading icon={Wrench} label="Infrastructure" open={sections.infrastructure} onToggle={() => toggleSection("infrastructure")} />
             {sections.infrastructure && (
               <Card className="mb-4">
@@ -427,112 +593,23 @@ export default function SettingsPane() {
                   <Row label="Redis" value={settings.redis_url ?? "—"} mono info="Cache and BM25 index (password redacted)" />
                   <Row label="Archive Path" value={settings.archive_path ?? "—"} mono info="File archive mount path" />
                   <Row label="Chunking Mode" value={settings.chunking_mode ?? "—"} info="Token-based or semantic chunking" />
+                  <div className="my-1 h-px bg-border" />
+                  <div className="flex items-center justify-between">
+                    <LabelWithInfo label="Encryption" info="Whether data at rest is encrypted" />
+                    <Badge variant={settings.enable_encryption ? "default" : "secondary"}>
+                      {settings.enable_encryption ? "Enabled" : "Disabled"}
+                    </Badge>
+                  </div>
+                  <Row label="Sync Backend" value={settings.sync_backend} info="Storage backend for cross-device sync" />
                 </CardContent>
               </Card>
             )}
 
-            {/* Search Tuning */}
-            <SectionHeading icon={SearchIcon} label="Search Tuning" open={sections.search} onToggle={() => toggleSection("search")} />
-            {sections.search && (
-              <Card className="mb-4">
-                <CardContent className="grid gap-4 pt-4">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex min-w-0 items-center gap-1.5">
-                      <LabelWithInfo
-                        label={`Vector Weight: ${(settings.hybrid_vector_weight ?? 0.6).toFixed(2)}`}
-                        info="Weight for vector similarity in hybrid search (0–1)"
-                      />
-                    </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={1}
-                      step={0.05}
-                      value={settings.hybrid_vector_weight ?? 0.6}
-                      onChange={(e) => patch({ hybrid_vector_weight: parseFloat(e.target.value) })}
-                      className="h-1.5 w-32 cursor-pointer accent-primary"
-                      aria-label="Hybrid vector weight"
-                    />
-                  </div>
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex min-w-0 items-center gap-1.5">
-                      <LabelWithInfo
-                        label={`Keyword Weight: ${(settings.hybrid_keyword_weight ?? 0.4).toFixed(2)}`}
-                        info="Weight for BM25 keyword matching in hybrid search (0–1)"
-                      />
-                    </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={1}
-                      step={0.05}
-                      value={settings.hybrid_keyword_weight ?? 0.4}
-                      onChange={(e) => patch({ hybrid_keyword_weight: parseFloat(e.target.value) })}
-                      className="h-1.5 w-32 cursor-pointer accent-primary"
-                      aria-label="Hybrid keyword weight"
-                    />
-                  </div>
-
-                  <div className="my-1 h-px bg-border" />
-
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex min-w-0 items-center gap-1.5">
-                      <LabelWithInfo
-                        label={`Rerank LLM Weight: ${(settings.rerank_llm_weight ?? 0.6).toFixed(2)}`}
-                        info="Weight for LLM-based reranking score (0–1)"
-                      />
-                    </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={1}
-                      step={0.05}
-                      value={settings.rerank_llm_weight ?? 0.6}
-                      onChange={(e) => patch({ rerank_llm_weight: parseFloat(e.target.value) })}
-                      className="h-1.5 w-32 cursor-pointer accent-primary"
-                      aria-label="Rerank LLM weight"
-                    />
-                  </div>
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex min-w-0 items-center gap-1.5">
-                      <LabelWithInfo
-                        label={`Rerank Original Weight: ${(settings.rerank_original_weight ?? 0.4).toFixed(2)}`}
-                        info="Weight for original relevance score in reranking (0–1)"
-                      />
-                    </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={1}
-                      step={0.05}
-                      value={settings.rerank_original_weight ?? 0.4}
-                      onChange={(e) => patch({ rerank_original_weight: parseFloat(e.target.value) })}
-                      className="h-1.5 w-32 cursor-pointer accent-primary"
-                      aria-label="Rerank original weight"
-                    />
-                  </div>
-
-                  <div className="my-1 h-px bg-border" />
-
-                  <Row
-                    label="Temporal Half-life"
-                    value={settings.temporal_half_life_days ? `${settings.temporal_half_life_days} days` : "—"}
-                    info="Days until temporal recency boost decays by half"
-                  />
-                  <Row
-                    label="Recency Weight"
-                    value={(settings.temporal_recency_weight ?? 0.1).toFixed(2)}
-                    info="Maximum boost from document recency"
-                  />
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Sync */}
+            {/* ── Sync ── */}
             <SectionHeading icon={FolderSync} label="Sync" open={sections.sync} onToggle={() => toggleSection("sync")} />
             {sections.sync && <SyncSection />}
 
-            {/* KB Management */}
+            {/* ── KB Management ── */}
             <SectionHeading icon={HardDrive} label="KB Management" open={sections.kb_admin} onToggle={() => toggleSection("kb_admin")} />
             {sections.kb_admin && (
               <Card className="mb-4">
@@ -647,32 +724,14 @@ export default function SettingsPane() {
                 </CardContent>
               </Card>
             )}
-
-            {/* Feature Flags */}
-            <SectionHeading icon={Layers} label="Feature Flags" open={sections.flags} onToggle={() => toggleSection("flags")} />
-            {sections.flags && (
-              <Card className="mb-4">
-                <CardContent className="grid gap-2 pt-4">
-                  {Object.entries(settings.feature_flags).map(([flag, enabled]) => (
-                    <div key={flag} className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">{flag}</span>
-                      <Badge variant={enabled ? "default" : "outline"} className="text-[10px]">
-                        {enabled ? "on" : "off"}
-                      </Badge>
-                    </div>
-                  ))}
-                  {Object.keys(settings.feature_flags).length === 0 && (
-                    <p className="text-xs text-muted-foreground">No feature flags configured</p>
-                  )}
-                </CardContent>
-              </Card>
-            )}
           </div>
         </TooltipProvider>
       </ScrollArea>
     </div>
   )
 }
+
+/* ── Helper Components ── */
 
 function Header() {
   return (
@@ -681,7 +740,7 @@ function Header() {
         <Settings className="h-4 w-4 text-muted-foreground" />
         <h2 className="text-lg font-semibold">Settings</h2>
       </div>
-      <p className="text-xs text-muted-foreground">Server configuration and feature toggles</p>
+      <p className="text-xs text-muted-foreground">Server configuration, features, and retrieval pipeline</p>
     </div>
   )
 }
@@ -762,20 +821,83 @@ function ToggleRow({
   info?: string
 }) {
   return (
-    <div className="flex items-center justify-between">
+    <div className="flex items-center justify-between gap-4">
       {info ? (
         <LabelWithInfo label={label} info={info} />
       ) : (
         <span className="text-sm text-muted-foreground">{label}</span>
       )}
-      <Button
-        variant="ghost"
-        size="sm"
-        className={cn("h-7 px-2 text-xs", enabled ? "text-green-500" : "text-muted-foreground")}
-        onClick={() => onToggle(!enabled)}
-      >
-        {enabled ? "On" : "Off"}
-      </Button>
+      <Switch size="sm" checked={enabled} onCheckedChange={onToggle} />
+    </div>
+  )
+}
+
+function SliderRow({
+  label,
+  value,
+  onChange,
+  min,
+  max,
+  step,
+  info,
+}: {
+  label: string
+  value: number
+  onChange: (value: number) => void
+  min: number
+  max: number
+  step: number
+  info?: string
+}) {
+  const display = step >= 1 ? String(value) : value.toFixed(2)
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <LabelWithInfo
+          label={`${label}: ${display}`}
+          info={info ?? label}
+        />
+      </div>
+      <Slider
+        value={[value]}
+        onValueChange={([v]) => onChange(v)}
+        min={min}
+        max={max}
+        step={step}
+        className="w-32"
+        aria-label={label}
+      />
+    </div>
+  )
+}
+
+function PipelineToggle({
+  label,
+  enabled,
+  onToggle,
+  description,
+  children,
+}: {
+  label: string
+  enabled: boolean
+  onToggle: (value: boolean) => void
+  description: string
+  children?: React.ReactNode
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-sm font-medium">{label}</span>
+          <span className="text-[11px] leading-tight text-muted-foreground">{description}</span>
+        </div>
+        <Switch size="sm" checked={enabled} onCheckedChange={onToggle} />
+      </div>
+      {enabled && children && (
+        <div className="ml-4 space-y-2 border-l-2 border-muted pl-3">
+          {children}
+        </div>
+      )}
     </div>
   )
 }

@@ -110,7 +110,7 @@ describe("SettingsPane", () => {
     // Section headings are rendered as buttons with text
     expect(screen.getByText("Connection")).toBeInTheDocument()
     expect(screen.getByText("Ingestion")).toBeInTheDocument()
-    expect(screen.getByText("Features")).toBeInTheDocument()
+    expect(screen.getByText("AI Features")).toBeInTheDocument()
   })
 
   it("shows error state when fetch fails", async () => {
@@ -125,7 +125,8 @@ describe("SettingsPane", () => {
     vi.stubGlobal("fetch", mockFetch(mockSettings))
     render(<SettingsPane />, { wrapper })
     await screen.findByText("0.8.0")
-    expect(screen.getByText(/Hallucination Check/i)).toBeInTheDocument()
+    // Appears in both AI Features toggle and capabilities grid
+    expect(screen.getAllByText(/Hallucination Check/i).length).toBeGreaterThanOrEqual(1)
   })
 
   it("shows domains in taxonomy section", async () => {
@@ -133,5 +134,46 @@ describe("SettingsPane", () => {
     render(<SettingsPane />, { wrapper })
     await screen.findByText("0.8.0")
     expect(screen.getByText("coding")).toBeInTheDocument()
+  })
+
+  it("renders Switch components for feature toggles", async () => {
+    vi.stubGlobal("fetch", mockFetch(mockSettings))
+    render(<SettingsPane />, { wrapper })
+    await screen.findByText("0.8.0")
+    // Switch components render as role=switch buttons
+    const switches = screen.getAllByRole("switch")
+    expect(switches.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it("shows Retrieval Pipeline section heading", async () => {
+    vi.stubGlobal("fetch", mockFetch(mockSettings))
+    render(<SettingsPane />, { wrapper })
+    await screen.findByText("0.8.0")
+    expect(screen.getByText("Retrieval Pipeline")).toBeInTheDocument()
+  })
+
+  it("integrates feature flags into Connection section as capabilities", async () => {
+    vi.stubGlobal("fetch", mockFetch(mockSettings))
+    render(<SettingsPane />, { wrapper })
+    await screen.findByText("0.8.0")
+    expect(screen.getByText("Platform Capabilities")).toBeInTheDocument()
+    // "Hallucination Check" appears in both capabilities grid and AI Features toggle
+    expect(screen.getAllByText("Hallucination Check").length).toBeGreaterThanOrEqual(1)
+  })
+
+  it("does not render standalone Feature Flags section", async () => {
+    vi.stubGlobal("fetch", mockFetch(mockSettings))
+    render(<SettingsPane />, { wrapper })
+    await screen.findByText("0.8.0")
+    // "Feature Flags" section heading should not exist
+    const headings = screen.getAllByRole("button").map(b => b.textContent)
+    expect(headings).not.toContain(expect.stringContaining("Feature Flags"))
+  })
+
+  it("shows Self-RAG toggle in AI Features section", async () => {
+    vi.stubGlobal("fetch", mockFetch({ ...mockSettings, enable_self_rag: true }))
+    render(<SettingsPane />, { wrapper })
+    await screen.findByText("0.8.0")
+    expect(screen.getByText("Self-RAG Validation")).toBeInTheDocument()
   })
 })
