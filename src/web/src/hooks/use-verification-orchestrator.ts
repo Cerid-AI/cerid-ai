@@ -148,7 +148,7 @@ export function useVerificationOrchestrator({
         }
       })
       .catch(() => { if (!cancelled) setSavedReportLoading(false) })
-    return () => { cancelled = true }
+    return () => { cancelled = true; setSavedReportLoading(false) }
   }, [activeId, hallucinationEnabled, verification.phase])
 
   // Proactive web-model switch banner
@@ -168,7 +168,8 @@ export function useVerificationOrchestrator({
   }, [verification.phase, verification.claims, currentModel])
 
   const halReport = verification.report ?? savedReport
-  const halLoading = verification.loading || savedReportLoading
+  // Only include savedReportLoading when stream is idle — otherwise stream has its own phase
+  const halLoading = verification.loading || (verification.phase === "idle" && savedReportLoading)
 
   const verificationStatusForMsg = useMemo((): MessageVerificationStatus => {
     if (!hallucinationEnabled || !lastAssistantMsgId) return null

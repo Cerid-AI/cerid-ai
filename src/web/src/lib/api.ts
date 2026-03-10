@@ -828,11 +828,11 @@ export async function adminRescore(domains?: string[]): Promise<{ artifacts_scor
   return res.json()
 }
 
-export async function adminRegenerateSummaries(domains?: string[]): Promise<{ synopses_generated: number; message: string }> {
+export async function adminRegenerateSummaries(domains?: string[], force = true): Promise<{ synopses_generated: number; message: string }> {
   const res = await fetch(`${MCP_BASE}/admin/kb/regenerate-summaries`, {
     method: "POST",
     headers: mcpHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify(domains ? { domains } : {}),
+    body: JSON.stringify({ ...(domains ? { domains } : {}), force }),
   })
   if (!res.ok) throw new Error(await extractError(res, "Failed to regenerate summaries"))
   return res.json()

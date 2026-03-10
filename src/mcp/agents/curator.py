@@ -337,6 +337,7 @@ async def curate(
     chroma_client=None,
     generate_synopses: bool = False,
     synopsis_model: str | None = None,
+    force_synopses: bool = False,
 ) -> dict[str, Any]:
     """Score artifact quality across the knowledge base.
 
@@ -347,6 +348,7 @@ async def curate(
         max_artifacts: Max artifacts to score per domain.
         chroma_client: ChromaDB client (required if generate_synopses=True).
         generate_synopses: If True, generate AI synopses for truncated summaries.
+        force_synopses: If True, regenerate ALL synopses (not just truncated ones).
     """
     target_domains = domains or config.DOMAINS
 
@@ -391,10 +393,13 @@ async def curate(
 
     if generate_synopses and chroma_client:
         for domain, artifacts in artifacts_by_domain.items():
-            candidates = [
-                a for a in artifacts
-                if _is_truncated_summary(a.get("summary", ""))
-            ][:50]  # cap per run
+            if force_synopses:
+                candidates = artifacts[:50]
+            else:
+                candidates = [
+                    a for a in artifacts
+                    if _is_truncated_summary(a.get("summary", ""))
+                ][:50]  # cap per run
             if not candidates:
                 continue
             try:

@@ -199,8 +199,8 @@ export function VerificationStatusBar({
     )
   }
 
-  // Fallback loading (non-streaming)
-  if (loading) {
+  // Fallback loading (non-streaming) — skip if stream completed to avoid masking report
+  if (loading && streamPhase !== "done") {
     return (
       <div className="border-t bg-muted/30">
         <div className="flex items-center gap-2 px-4 py-1">

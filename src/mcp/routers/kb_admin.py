@@ -57,6 +57,7 @@ class RegenerateSummariesRequest(BaseModel):
     domains: list[str] | None = Field(None, description="Domains to regenerate (None = all)")
     max_artifacts: int = Field(200, ge=1, le=1000, description="Max artifacts per domain")
     model: str | None = Field(None, description="Model override for synopsis generation")
+    force: bool = Field(False, description="Force regenerate all synopses, not just truncated ones")
 
 
 class RegenerateSummariesResponse(BaseModel):
@@ -129,10 +130,14 @@ async def rescore_artifacts(req: RescoreRequest | None = None):
 
 @router.post("/admin/kb/regenerate-summaries", response_model=RegenerateSummariesResponse)
 async def regenerate_summaries(req: RegenerateSummariesRequest | None = None):
-    """Regenerate AI synopses for artifacts with raw/truncated summaries."""
+    """Regenerate AI synopses for artifacts with raw/truncated summaries.
+
+    Set force=true to regenerate ALL synopses, not just truncated ones.
+    """
     domains = req.domains if req else None
     max_artifacts = req.max_artifacts if req else 200
     model = req.model if req else None
+    force = req.force if req else False
     try:
         neo4j = get_neo4j()
         chroma = get_chroma()
@@ -144,6 +149,7 @@ async def regenerate_summaries(req: RegenerateSummariesRequest | None = None):
             chroma_client=chroma,
             generate_synopses=True,
             synopsis_model=model,
+            force_synopses=force,
         )
         await invalidate_cache_non_blocking()
         return {
