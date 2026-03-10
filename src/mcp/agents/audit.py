@@ -374,6 +374,25 @@ def get_verification_analytics(
     except Exception as e:
         logger.debug("Failed to read verification feedback: %s", e)
 
+    # --- Verification error stats ---
+    error_stats: dict[str, int] = defaultdict(int)
+    recent_errors: list[dict[str, Any]] = []
+    try:
+        from utils.cache import REDIS_VERIFICATION_ERRORS_KEY
+        raw_errors = redis_client.lrange(REDIS_VERIFICATION_ERRORS_KEY, 0, -1)
+        for raw in raw_errors:
+            try:
+                err = json.loads(raw)
+                if err.get("timestamp", "") >= cutoff:
+                    error_stats[err.get("error_type", "unknown")] += 1
+                    recent_errors.append(err)
+            except Exception:
+                continue
+        # Keep only last 10 recent errors for the response
+        recent_errors = recent_errors[-10:]
+    except Exception as e:
+        logger.debug("Failed to read verification errors: %s", e)
+
     return {
         "total_checks": len(entries),
         "avg_accuracy": round(total_accuracy_sum / len(entries), 4) if entries else 0.0,
@@ -381,6 +400,8 @@ def get_verification_analytics(
         "hourly_accuracy": hourly_accuracy,
         "verification_models": dict(verify_model_counts) if verify_model_counts else {},
         "user_feedback": feedback_stats if feedback_stats["total"] > 0 else None,
+        "verification_errors": dict(error_stats) if error_stats else {},
+        "recent_errors": recent_errors if recent_errors else [],
     }
 
 

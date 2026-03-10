@@ -334,6 +334,24 @@ class VerifyStreamRequest(BaseModel):
     )
 
 
+_STREAM_END = object()  # Sentinel for generator exhaustion
+
+
+async def _safe_anext(gen):  # type: ignore[no-untyped-def]
+    """Advance an async generator, returning ``_STREAM_END`` on exhaustion.
+
+    This **must** be a regular async function — not an async generator — so
+    that ``StopAsyncIteration`` raised by ``gen.__anext__()`` is caught
+    normally.  PEP 479 converts ``StopAsyncIteration`` into ``RuntimeError``
+    inside async generator frames, which is exactly the bug this helper
+    exists to avoid.
+    """
+    try:
+        return await gen.__anext__()
+    except StopAsyncIteration:
+        return _STREAM_END
+
+
 @router.post("/agent/verify-stream")
 async def verify_stream_endpoint(req: VerifyStreamRequest):
     """SSE endpoint for streaming truth verification of an LLM response.
@@ -346,6 +364,13 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
     async def event_generator():
         try:
             from agents.hallucination import verify_response_streaming
+
+            logger.info(
+                "Verify stream started for conversation=%s (model=%s, query_len=%d)",
+                req.conversation_id,
+                req.model or "default",
+                len(req.user_query or ""),
+            )
 
             gen = verify_response_streaming(
                 response_text=req.response_text,
@@ -361,21 +386,39 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
 
             # Read events with a keepalive timeout — if no event arrives
             # within 15s, emit an SSE comment to keep the connection alive.
+            # NOTE: _safe_anext is a regular async function (not a generator)
+            # to avoid PEP 479 converting StopAsyncIteration → RuntimeError
+            # inside this async generator frame.
             anext_task: asyncio.Task | None = None
+            event_count = 0
+            keepalive_count = 0
             try:
                 while True:
                     if anext_task is None:
-                        anext_task = asyncio.ensure_future(gen.__anext__())
+                        anext_task = asyncio.ensure_future(_safe_anext(gen))
                     done, _ = await asyncio.wait({anext_task}, timeout=15.0)
                     if done:
-                        try:
-                            event = anext_task.result()
-                            yield f"data: {json.dumps(event)}\n\n"
-                        except StopAsyncIteration:
+                        event = anext_task.result()
+                        if event is _STREAM_END:
+                            logger.info(
+                                "Verify stream completed for conversation=%s "
+                                "(events=%d, keepalives=%d)",
+                                req.conversation_id,
+                                event_count,
+                                keepalive_count,
+                            )
                             break
+                        event_count += 1
+                        yield f"data: {json.dumps(event)}\n\n"
                         anext_task = None
                     else:
                         # No event in 15s — emit SSE keepalive comment
+                        keepalive_count += 1
+                        logger.debug(
+                            "Verify stream keepalive #%d for conversation=%s",
+                            keepalive_count,
+                            req.conversation_id,
+                        )
                         yield ": keepalive\n\n"
             finally:
                 if anext_task and not anext_task.done():
@@ -383,7 +426,12 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
                 await gen.aclose()
 
         except Exception as e:
-            logger.error(f"Verify stream error: {e}")
+            logger.error(
+                "Verify stream error for conversation=%s: %s",
+                req.conversation_id,
+                e,
+                exc_info=True,
+            )
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
 
     return StreamingResponse(

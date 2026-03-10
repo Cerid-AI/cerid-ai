@@ -107,7 +107,9 @@ def log_conversation_metrics(
 
 REDIS_VERIFICATION_METRICS_KEY = "verify:metrics"
 REDIS_VERIFICATION_FEEDBACK_KEY = "verify:feedback"
+REDIS_VERIFICATION_ERRORS_KEY = "verify:errors"
 REDIS_VERIFICATION_METRICS_TTL = 86400 * 30  # 30 days
+REDIS_VERIFICATION_ERRORS_MAX = 200  # Keep last 200 errors
 
 
 def log_verification_metrics(
@@ -168,3 +170,42 @@ def log_claim_feedback(
         redis_client.expire(REDIS_VERIFICATION_FEEDBACK_KEY, REDIS_VERIFICATION_METRICS_TTL)
     except Exception as e:
         logger.warning(f"Failed to log claim feedback: {e}")
+
+
+def log_verification_error(
+    redis_client,
+    conversation_id: str,
+    error_type: str,
+    error_message: str,
+    model: str | None = None,
+    claim_index: int | None = None,
+    phase: str | None = None,
+) -> None:
+    """Cache verification errors for troubleshooting and analytics.
+
+    Args:
+        error_type: Category of error (e.g., ``"stream_interrupted"``,
+            ``"claim_verification_failed"``, ``"extraction_failed"``,
+            ``"timeout"``, ``"circuit_breaker"``).
+        error_message: Human-readable error description.
+        model: Model ID that was being used when the error occurred.
+        claim_index: Index of the claim being verified (if applicable).
+        phase: Pipeline phase (``"extraction"``, ``"verification"``,
+            ``"consistency"``, ``"summary"``).
+    """
+    entry = json.dumps({
+        "conversation_id": conversation_id,
+        "error_type": error_type,
+        "error_message": error_message,
+        "model": model or "unknown",
+        "claim_index": claim_index,
+        "phase": phase,
+        "timestamp": utcnow_iso(),
+    })
+    try:
+        redis_client.rpush(REDIS_VERIFICATION_ERRORS_KEY, entry)
+        # Trim to keep only the most recent errors
+        redis_client.ltrim(REDIS_VERIFICATION_ERRORS_KEY, -REDIS_VERIFICATION_ERRORS_MAX, -1)
+        redis_client.expire(REDIS_VERIFICATION_ERRORS_KEY, REDIS_VERIFICATION_METRICS_TTL)
+    except Exception as e:
+        logger.warning(f"Failed to log verification error: {e}")

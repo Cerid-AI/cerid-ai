@@ -34,6 +34,7 @@ from agents.hallucination import (
     _interpret_recency_verdict,
     _invert_evasion_verdict,
     _invert_ignorance_verdict,
+    _is_complex_claim,
     _is_current_event_claim,
     _is_ignorance_admission,
     _is_recency_claim,
@@ -2432,3 +2433,314 @@ class TestRecencyAndCitationPrompts:
         # Should check both history and internal consistency
         assert "contradict" in _SYSTEM_CONSISTENCY_CHECK.lower()
         assert "claim_index" in _SYSTEM_CONSISTENCY_CHECK
+
+
+class TestComplexClaimClassifier:
+    """Test the _is_complex_claim function for complexity-based model routing."""
+
+    def test_causal_claim(self):
+        assert _is_complex_claim("Global warming leads to rising sea levels")
+
+    def test_comparative_claim(self):
+        assert _is_complex_claim("Python is faster than Ruby for web scraping")
+
+    def test_conditional_claim(self):
+        assert _is_complex_claim("If interest rates rise then housing prices fall")
+
+    def test_quantitative_change(self):
+        assert _is_complex_claim("Revenue increased by 25% from 2024 to 2025")
+
+    def test_contrast_claim(self):
+        assert _is_complex_claim("Unlike Java, Rust provides memory safety without garbage collection")
+
+    def test_dependency_claim(self):
+        assert _is_complex_claim("This process requires a GPU with at least 8GB VRAM")
+
+    def test_consequence_claim(self):
+        assert _is_complex_claim("The policy failed, consequently unemployment rose")
+
+    def test_simple_factual_claim(self):
+        assert not _is_complex_claim("Paris is the capital of France")
+
+    def test_simple_date_claim(self):
+        assert not _is_complex_claim("Python was released in 1991")
+
+    def test_simple_attribution(self):
+        assert not _is_complex_claim("Tesla was founded by Elon Musk")
+
+    def test_edge_case_empty_string(self):
+        assert not _is_complex_claim("")
+
+
+class TestStreamingGuaranteedSummary:
+    """Test that verify_response_streaming always emits a summary event.
+
+    These tests use synthetic data to verify the streaming pipeline's
+    guaranteed summary emission, including when individual verification
+    tasks fail.
+    """
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.extract_claims")
+    @patch("agents.hallucination.verify_claim")
+    async def test_summary_emitted_on_success(
+        self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis
+    ):
+        """Happy path: all claims verify successfully → summary emitted."""
+        mock_extract.return_value = (
+            ["The sky is blue", "Water boils at 100 degrees Celsius"],
+            "heuristic",
+        )
+        mock_verify.return_value = {
+            "status": "verified",
+            "similarity": 0.9,
+            "source_filename": "facts.txt",
+            "source_artifact_id": "art-1",
+            "source_domain": "science",
+            "source_snippet": "The sky is blue",
+            "reason": "High similarity",
+            "verification_method": "kb",
+            "verification_model": "gpt-4o-mini",
+            "source_urls": [],
+            "verification_answer": "yes",
+        }
+
+        events = []
+        async for event in verify_response_streaming(
+            response_text="The sky is blue. Water boils at 100 degrees Celsius. " * 5,
+            conversation_id="test-conv-1",
+            chroma_client=mock_chroma,
+            neo4j_driver=mock_neo4j,
+            redis_client=mock_redis,
+        ):
+            events.append(event)
+
+        types = [e["type"] for e in events]
+        assert "summary" in types, "Summary event must always be emitted"
+        summary = next(e for e in events if e["type"] == "summary")
+        assert summary["total"] == 2
+        assert summary["verified"] == 2
+        assert "interrupted" not in summary
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.extract_claims")
+    @patch("agents.hallucination.verify_claim")
+    async def test_summary_emitted_on_partial_failure(
+        self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis
+    ):
+        """When some verification tasks fail, summary is still emitted."""
+        mock_extract.return_value = (
+            ["Claim A is true", "Claim B is true", "Claim C is true"],
+            "heuristic",
+        )
+        # First call succeeds, second raises, third succeeds
+        call_count = 0
+
+        async def side_effect_verify(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                raise RuntimeError("Simulated verification timeout")
+            return {
+                "status": "verified",
+                "similarity": 0.85,
+                "source_filename": "test.txt",
+                "source_artifact_id": "",
+                "source_domain": "",
+                "source_snippet": "",
+                "reason": "Matched",
+                "verification_method": "kb",
+                "source_urls": [],
+            }
+
+        mock_verify.side_effect = side_effect_verify
+
+        events = []
+        async for event in verify_response_streaming(
+            response_text="Claim A is true. Claim B is true. Claim C is true. " * 5,
+            conversation_id="test-conv-2",
+            chroma_client=mock_chroma,
+            neo4j_driver=mock_neo4j,
+            redis_client=mock_redis,
+        ):
+            events.append(event)
+
+        types = [e["type"] for e in events]
+        assert "summary" in types, "Summary must be emitted even with failures"
+        summary = next(e for e in events if e["type"] == "summary")
+        # 2 succeeded, 1 failed (silently skipped)
+        assert summary["verified"] == 2
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.extract_claims")
+    async def test_short_response_emits_skipped_summary(
+        self, mock_extract, mock_chroma, mock_neo4j, mock_redis
+    ):
+        """Very short responses should emit a skipped summary."""
+        events = []
+        async for event in verify_response_streaming(
+            response_text="OK",
+            conversation_id="test-conv-3",
+            chroma_client=mock_chroma,
+            neo4j_driver=mock_neo4j,
+            redis_client=mock_redis,
+        ):
+            events.append(event)
+
+        assert len(events) == 1
+        assert events[0]["type"] == "summary"
+        assert events[0]["skipped"] is True
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.extract_claims")
+    async def test_no_claims_emits_skipped_summary(
+        self, mock_extract, mock_chroma, mock_neo4j, mock_redis
+    ):
+        """When extraction finds no claims, a skipped summary is emitted."""
+        mock_extract.return_value = ([], "heuristic")
+
+        events = []
+        async for event in verify_response_streaming(
+            response_text="This is a long enough response with no factual claims. " * 10,
+            conversation_id="test-conv-4",
+            chroma_client=mock_chroma,
+            neo4j_driver=mock_neo4j,
+            redis_client=mock_redis,
+        ):
+            events.append(event)
+
+        assert len(events) == 1
+        assert events[0]["type"] == "summary"
+        assert events[0]["skipped"] is True
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.extract_claims")
+    @patch("agents.hallucination.verify_claim")
+    async def test_streaming_event_order(
+        self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis
+    ):
+        """Events must arrive in order: extraction_complete → claim_extracted* → claim_verified* → summary."""
+        mock_extract.return_value = (
+            ["Python was created by Guido van Rossum"],
+            "heuristic",
+        )
+        mock_verify.return_value = {
+            "status": "verified",
+            "similarity": 0.92,
+            "source_filename": "python.txt",
+            "source_artifact_id": "",
+            "source_domain": "",
+            "source_snippet": "",
+            "reason": "Match",
+            "verification_method": "cross_model",
+            "verification_model": "gpt-4o-mini",
+            "source_urls": [],
+        }
+
+        events = []
+        async for event in verify_response_streaming(
+            response_text="Python was created by Guido van Rossum. " * 10,
+            conversation_id="test-conv-5",
+            chroma_client=mock_chroma,
+            neo4j_driver=mock_neo4j,
+            redis_client=mock_redis,
+        ):
+            events.append(event)
+
+        types = [e["type"] for e in events]
+        assert types[0] == "extraction_complete"
+        assert types[1] == "claim_extracted"
+        assert "claim_verified" in types
+        assert types[-1] == "summary"
+
+    @pytest.mark.asyncio
+    @patch("agents.hallucination.extract_claims")
+    @patch("agents.hallucination.verify_claim")
+    async def test_mixed_statuses_in_summary(
+        self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis
+    ):
+        """Summary correctly counts verified, unverified, and uncertain claims."""
+        mock_extract.return_value = (
+            ["Claim verified", "Claim unverified", "Claim uncertain"],
+            "heuristic",
+        )
+        results = [
+            {"status": "verified", "similarity": 0.9, "source_filename": "", "source_artifact_id": "",
+             "source_domain": "", "source_snippet": "", "reason": "", "verification_method": "kb", "source_urls": []},
+            {"status": "unverified", "similarity": 0.2, "source_filename": "", "source_artifact_id": "",
+             "source_domain": "", "source_snippet": "", "reason": "", "verification_method": "kb", "source_urls": []},
+            {"status": "uncertain", "similarity": 0.5, "source_filename": "", "source_artifact_id": "",
+             "source_domain": "", "source_snippet": "", "reason": "", "verification_method": "kb", "source_urls": []},
+        ]
+        call_idx = 0
+
+        async def side_effect(*a, **kw):
+            nonlocal call_idx
+            r = results[call_idx % len(results)]
+            call_idx += 1
+            return r
+
+        mock_verify.side_effect = side_effect
+
+        events = []
+        async for event in verify_response_streaming(
+            response_text="Claim verified. Claim unverified. Claim uncertain. " * 5,
+            conversation_id="test-conv-6",
+            chroma_client=mock_chroma,
+            neo4j_driver=mock_neo4j,
+            redis_client=mock_redis,
+        ):
+            events.append(event)
+
+        summary = next(e for e in events if e["type"] == "summary")
+        assert summary["verified"] == 1
+        assert summary["unverified"] == 1
+        assert summary["uncertain"] == 1
+        assert summary["total"] == 3
+
+
+class TestVerificationErrorCaching:
+    """Test the error caching functions in utils.cache."""
+
+    def test_log_verification_error(self, mock_redis):
+        from utils.cache import log_verification_error
+        log_verification_error(
+            mock_redis,
+            conversation_id="conv-err-1",
+            error_type="stream_interrupted",
+            error_message="Connection reset",
+            model="gpt-4o-mini",
+            phase="verification",
+        )
+        mock_redis.rpush.assert_called_once()
+        call_args = mock_redis.rpush.call_args
+        assert call_args[0][0] == "verify:errors"
+        entry = json.loads(call_args[0][1])
+        assert entry["error_type"] == "stream_interrupted"
+        assert entry["conversation_id"] == "conv-err-1"
+        assert entry["phase"] == "verification"
+
+    def test_log_verification_error_trims_old(self, mock_redis):
+        from utils.cache import log_verification_error
+        log_verification_error(
+            mock_redis,
+            conversation_id="conv-err-2",
+            error_type="claim_verification_failed",
+            error_message="Timeout",
+        )
+        mock_redis.ltrim.assert_called_once()
+        # Should keep last 200
+        call_args = mock_redis.ltrim.call_args
+        assert call_args[0][1] == -200
+        assert call_args[0][2] == -1
+
+    def test_log_verification_error_handles_redis_failure(self, mock_redis):
+        from utils.cache import log_verification_error
+        mock_redis.rpush.side_effect = Exception("Redis down")
+        # Should not raise
+        log_verification_error(
+            mock_redis,
+            conversation_id="conv-err-3",
+            error_type="timeout",
+            error_message="Timed out",
+        )

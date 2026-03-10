@@ -295,4 +295,61 @@ describe("useVerificationStream", () => {
     expect(report.summary.verified).toBe(1)
     expect(report.summary.unverified).toBe(1)
   })
+
+  // --- SSE keepalive comment handling ---
+
+  it("ignores SSE keepalive comments interleaved with data events", async () => {
+    // Simulate a stream with keepalive comments (: keepalive) mixed in
+    let aborted = false
+    const abort = vi.fn(() => { aborted = true })
+
+    const lines = [
+      ": keepalive\n",
+      `data: ${JSON.stringify(HAPPY_EVENTS[0])}\n`,
+      "\n",
+      ": keepalive\n",
+      `data: ${JSON.stringify(HAPPY_EVENTS[1])}\n`,
+      "\n",
+      `data: ${JSON.stringify(HAPPY_EVENTS[2])}\n`,
+      "\n",
+      ": keepalive\n",
+      `data: ${JSON.stringify(HAPPY_EVENTS[3])}\n`,
+      "\n",
+      `data: ${JSON.stringify(HAPPY_EVENTS[4])}\n`,
+      "\n",
+      `data: ${JSON.stringify(HAPPY_EVENTS[5])}\n`,
+      "\n",
+    ]
+
+    const body = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        for (const line of lines) {
+          if (aborted) break
+          controller.enqueue(new TextEncoder().encode(line))
+        }
+        controller.close()
+      },
+    })
+
+    const response = Promise.resolve({
+      ok: true,
+      status: 200,
+      body,
+    } as unknown as Response)
+
+    mockStreamFn.mockReturnValue({ response, abort })
+
+    const { result } = renderHook(() =>
+      useVerificationStream("Test response with keepalives", "conv-ka-1", true, 1),
+    )
+
+    await waitFor(() => {
+      expect(result.current.phase).toBe("done")
+    })
+
+    // Should complete successfully despite keepalive comments
+    expect(result.current.claims).toHaveLength(2)
+    expect(result.current.summary?.verified).toBe(1)
+    expect(result.current.summary?.total).toBe(2)
+  })
 })

@@ -2149,6 +2149,16 @@ async def verify_response_streaming(
                 i, result = await coro
             except Exception as task_exc:
                 logger.warning("Verification task failed: %s", task_exc)
+                try:
+                    from utils.cache import log_verification_error
+                    log_verification_error(
+                        redis_client, conversation_id,
+                        error_type="claim_verification_failed",
+                        error_message=str(task_exc),
+                        model=model, phase="verification",
+                    )
+                except Exception:
+                    pass
                 continue
 
             status = result.get("status", "error")
@@ -2193,6 +2203,16 @@ async def verify_response_streaming(
             loop_exc,
         )
         stream_interrupted = True
+        try:
+            from utils.cache import log_verification_error
+            log_verification_error(
+                redis_client, conversation_id,
+                error_type="stream_interrupted",
+                error_message=str(loop_exc),
+                model=model, phase="verification",
+            )
+        except Exception:
+            pass
 
     # --- Consistency checking (cross-turn + internal contradictions) ---
     # Runs after all claims are individually verified (best-effort).
@@ -2219,6 +2239,16 @@ async def verify_response_streaming(
                 )
         except Exception as e:
             logger.warning("Consistency check failed: %s", e)
+            try:
+                from utils.cache import log_verification_error
+                log_verification_error(
+                    redis_client, conversation_id,
+                    error_type="consistency_check_failed",
+                    error_message=str(e),
+                    model=model, phase="consistency",
+                )
+            except Exception:
+                pass
 
     # GUARANTEED summary emission — the frontend relies on receiving this event
     # to transition from "verifying" to "done".  Without it, the stream appears
