@@ -110,10 +110,13 @@ export function useVerificationOrchestrator({
     priorAssistantContext,
   )
 
-  // Clear stale saved report when a new response starts streaming
+  // Clear stale saved report and verified mark when a new response starts streaming
   useEffect(() => {
-    if (isStreaming) setSavedReport(null)
-  }, [isStreaming])
+    if (isStreaming) {
+      setSavedReport(null)
+      if (activeId) clearVerified(activeId)
+    }
+  }, [isStreaming, activeId, clearVerified])
 
   // Cache completed verification report and mark conversation as completed
   useEffect(() => {
