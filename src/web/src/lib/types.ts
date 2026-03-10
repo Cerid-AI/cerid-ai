@@ -461,6 +461,7 @@ export interface ServerSettings {
     storage_domain: string
     extraction_model: string
   }
+  enable_self_rag?: boolean
   multi_user?: boolean
   // Infrastructure (read-only)
   bifrost_url?: string
