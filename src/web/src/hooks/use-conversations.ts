@@ -51,7 +51,7 @@ function saveConversations(convos: Conversation[]) {
 
 export function useConversations() {
   const [conversations, setConversations] = useState<Conversation[]>(loadConversations)
-  const [activeId, setActiveId] = useState<string | null>(() => conversations[0]?.id ?? null)
+  const [activeId, setActiveId] = useState<string | null>(null)
 
   const active = conversations.find((c) => c.id === activeId) ?? null
 

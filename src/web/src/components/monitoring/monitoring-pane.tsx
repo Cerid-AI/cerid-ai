@@ -36,10 +36,10 @@ export function MonitoringPane() {
     <div className="flex h-full min-h-0 flex-col">
       <div className="border-b px-4 py-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">System Monitoring</h2>
+          <h2 className="text-lg font-semibold">Health</h2>
           <LastUpdated timestamp={dataUpdatedAt} />
         </div>
-        <p className="text-xs text-muted-foreground">Auto-refreshes every 30 seconds</p>
+        <p className="text-xs text-muted-foreground">Live infrastructure status and recent operations</p>
       </div>
 
       {loadingMaintenance ? (

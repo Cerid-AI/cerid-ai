@@ -5,7 +5,7 @@
 
 import json
 import math
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -147,7 +147,7 @@ class TestScoreFreshness:
     @patch("agents.curator.utcnow")
     def test_recent_today(self, mock_utcnow):
         """Document from today -> age ~0 days -> score close to 1.0."""
-        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
         ts = now.isoformat()
         result = score_freshness(ts)
@@ -156,7 +156,7 @@ class TestScoreFreshness:
     @patch("agents.curator.utcnow")
     def test_thirty_days_old(self, mock_utcnow):
         """30 days old -> half-life of 30 -> score = 0.5."""
-        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
         ts = (now - timedelta(days=30)).isoformat()
         result = score_freshness(ts)
@@ -165,7 +165,7 @@ class TestScoreFreshness:
     @patch("agents.curator.utcnow")
     def test_sixty_days_old(self, mock_utcnow):
         """60 days old -> 2 half-lives -> score = 0.25."""
-        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
         ts = (now - timedelta(days=60)).isoformat()
         result = score_freshness(ts)
@@ -186,7 +186,7 @@ class TestScoreFreshness:
     @patch("agents.curator.utcnow")
     def test_future_date_clamped(self, mock_utcnow):
         """Future date -> age clamped to 0 -> score = 1.0."""
-        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
         future = (now + timedelta(days=5)).isoformat()
         result = score_freshness(future)
@@ -195,7 +195,7 @@ class TestScoreFreshness:
     @patch("agents.curator.utcnow")
     def test_modified_at_preferred(self, mock_utcnow):
         """modified_at should be used over ingested_at when present."""
-        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
         old_ingested = (now - timedelta(days=60)).isoformat()
         recent_modified = (now - timedelta(days=1)).isoformat()
@@ -208,7 +208,7 @@ class TestScoreFreshness:
     @patch("agents.curator.utcnow")
     def test_modified_at_none_falls_back(self, mock_utcnow):
         """modified_at=None -> falls back to ingested_at."""
-        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
         ts = (now - timedelta(days=30)).isoformat()
 
@@ -218,7 +218,7 @@ class TestScoreFreshness:
     @patch("agents.curator.utcnow")
     def test_naive_timestamp_comparison(self, mock_utcnow):
         """Naive (no timezone) timestamp should still work."""
-        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
         # Naive timestamp (no +00:00 suffix)
         naive_ts = "2026-02-28T12:00:00"
@@ -341,11 +341,13 @@ class TestScoreCompleteness:
 # ---------------------------------------------------------------------------
 
 class TestComputeQualityScore:
+    @patch("utils.quality._utcnow")
     @patch("agents.curator.utcnow")
-    def test_weighted_sum_matches_manual(self, mock_utcnow):
+    def test_weighted_sum_matches_manual(self, mock_utcnow, mock_quality_utcnow):
         """Verify weighted sum calculation with known inputs."""
-        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
+        mock_quality_utcnow.return_value = now
 
         artifact = {
             "summary": "a" * 100,  # optimal -> s_summary = 1.0
@@ -369,7 +371,7 @@ class TestComputeQualityScore:
     @patch("agents.curator.utcnow")
     def test_issues_include_summary_missing(self, mock_utcnow):
         """Missing summary -> summary_missing in issues."""
-        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
 
         artifact = {
@@ -386,7 +388,7 @@ class TestComputeQualityScore:
     @patch("agents.curator.utcnow")
     def test_issues_include_summary_weak(self, mock_utcnow):
         """Short but non-empty summary (< 0.5 score) -> summary_weak."""
-        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
 
         # 20 chars -> score = 20/50 = 0.4 < 0.5
@@ -404,7 +406,7 @@ class TestComputeQualityScore:
     @patch("agents.curator.utcnow")
     def test_issues_include_keywords_missing(self, mock_utcnow):
         """No keywords -> keywords_missing."""
-        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
 
         artifact = {
@@ -421,7 +423,7 @@ class TestComputeQualityScore:
     @patch("agents.curator.utcnow")
     def test_issues_include_keywords_sparse(self, mock_utcnow):
         """1 keyword (score = 0.2 < 0.5) -> keywords_sparse."""
-        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
 
         artifact = {
@@ -438,7 +440,7 @@ class TestComputeQualityScore:
     @patch("agents.curator.utcnow")
     def test_issues_include_metadata_incomplete(self, mock_utcnow):
         """Completeness < 0.5 -> metadata_incomplete."""
-        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
 
         artifact = {
@@ -455,7 +457,7 @@ class TestComputeQualityScore:
     @patch("agents.curator.utcnow")
     def test_issues_include_stale(self, mock_utcnow):
         """Very old artifact -> freshness < 0.3 -> stale."""
-        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
 
         # 90 days old -> 2^(-90/30) = 2^-3 = 0.125 < 0.3
@@ -470,11 +472,13 @@ class TestComputeQualityScore:
         result = compute_quality_score(artifact)
         assert "stale" in result["issues"]
 
+    @patch("utils.quality._utcnow")
     @patch("agents.curator.utcnow")
-    def test_all_dimensions_contribute(self, mock_utcnow):
+    def test_all_dimensions_contribute(self, mock_utcnow, mock_quality_utcnow):
         """Verify each dimension contributes proportionally to weighted total."""
-        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
+        mock_quality_utcnow.return_value = now
 
         artifact = {
             "summary": "a" * 25,  # 25/50 = 0.5
@@ -586,7 +590,7 @@ class TestCurate:
         self, mock_config, mock_list, mock_store, mock_utcnow
     ):
         """Verify curate() returns all expected keys."""
-        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
         mock_config.DOMAINS = ["coding"]
         mock_config.QUALITY_WEIGHT_SUMMARY = 0.30
@@ -633,7 +637,7 @@ class TestCurate:
         self, mock_config, mock_list, mock_store, mock_utcnow
     ):
         """When domains are specified, only those domains should be scored."""
-        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
         mock_config.DOMAINS = ["coding", "finance", "general"]
         mock_config.QUALITY_WEIGHT_SUMMARY = 0.30
@@ -665,7 +669,7 @@ class TestCurate:
         self, mock_config, mock_list, mock_store, mock_utcnow
     ):
         """If list_artifacts raises for a domain, curate() continues with warning."""
-        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
         mock_config.DOMAINS = ["coding", "finance"]
         mock_config.QUALITY_WEIGHT_SUMMARY = 0.30
@@ -711,7 +715,7 @@ class TestCurate:
         self, mock_config, mock_list, mock_store, mock_utcnow
     ):
         """If _store_quality_scores raises, curate() continues and reports 0 stored."""
-        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
         mock_config.DOMAINS = ["coding"]
         mock_config.QUALITY_WEIGHT_SUMMARY = 0.30
@@ -753,7 +757,7 @@ class TestCurate:
         self, mock_config, mock_list, mock_store, mock_utcnow
     ):
         """Low quality artifacts (< 0.5) should be sorted ascending by score."""
-        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
         mock_config.DOMAINS = ["coding"]
         mock_config.QUALITY_WEIGHT_SUMMARY = 0.30
@@ -807,7 +811,7 @@ class TestCurate:
         self, mock_config, mock_list, mock_store, mock_utcnow
     ):
         """No artifacts across any domain -> avg_quality_score = 0.0."""
-        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
         mock_config.DOMAINS = ["coding"]
         mock_config.QUALITY_WEIGHT_SUMMARY = 0.30
@@ -841,7 +845,7 @@ class TestCurate:
         self, mock_config, mock_list, mock_store, mock_utcnow
     ):
         """max_artifacts kwarg should be passed through to list_artifacts."""
-        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
         mock_config.DOMAINS = ["coding"]
         mock_config.QUALITY_WEIGHT_SUMMARY = 0.30

@@ -364,9 +364,9 @@ class TestVerifyClaim:
     @patch("agents.hallucination._query_memories", new_callable=AsyncMock, return_value=[])
     @patch("agents.query_agent.agent_query", new_callable=AsyncMock)
     async def test_unverified_claim(self, mock_query, _mock_mem, mock_ext, mock_chroma, mock_neo4j, mock_redis):
-        """Very low similarity should mark claim as unverified when external also fails."""
+        """Low similarity (below escalation threshold) should mark claim as unverified when external also fails."""
         mock_query.return_value = {
-            "results": [{"relevance": 0.2, "content": "unrelated"}]
+            "results": [{"relevance": 0.4, "content": "unrelated"}]
         }
         mock_ext.return_value = {
             "status": "uncertain", "confidence": 0.1, "reason": "No signal",
@@ -428,7 +428,8 @@ class TestMemoryIntegration:
     @patch("agents.hallucination._query_memories", new_callable=AsyncMock)
     @patch("agents.query_agent.agent_query", new_callable=AsyncMock)
     async def test_memories_ignored_when_no_match(self, mock_query, mock_mem, mock_ext, mock_chroma, mock_neo4j, mock_redis):
-        """Low-relevance memories should not change the result."""
+        """Low-relevance memories (below filter threshold) should be filtered out,
+        and with no remaining results, external verification determines the result."""
         mock_query.return_value = {
             "results": [{"relevance": 0.2, "artifact_id": "kb1", "content": "unrelated"}]
         }
@@ -445,7 +446,9 @@ class TestMemoryIntegration:
         }
 
         result = await verify_claim("obscure claim xyz", mock_chroma[0], mock_neo4j[0], mock_redis)
-        assert result["status"] == "unverified"
+        # KB (0.2) and memory (0.15+0.15=0.30) both below VERIFICATION_MIN_RELEVANCE (0.35),
+        # so all results are filtered → Fallback 1 → external returns uncertain
+        assert result["status"] == "uncertain"
 
 
 class TestQueryMemories:

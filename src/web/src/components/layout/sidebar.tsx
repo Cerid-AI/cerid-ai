@@ -3,7 +3,7 @@
 
 import { useState } from "react"
 import {
-  MessageSquare, Database, Activity, FileBarChart, Brain, Settings,
+  MessageSquare, Database, HeartPulse, BarChart3, Brain, Settings,
   Sun, Moon, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Plus, History,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -28,8 +28,8 @@ interface SidebarProps {
 const NAV_ITEMS: { pane: Pane; icon: typeof MessageSquare; label: string }[] = [
   { pane: "chat", icon: MessageSquare, label: "Chat" },
   { pane: "knowledge", icon: Database, label: "Knowledge" },
-  { pane: "monitoring", icon: Activity, label: "Monitoring" },
-  { pane: "audit", icon: FileBarChart, label: "Audit" },
+  { pane: "monitoring", icon: HeartPulse, label: "Health" },
+  { pane: "audit", icon: BarChart3, label: "Analytics" },
   { pane: "memories", icon: Brain, label: "Memories" },
   { pane: "settings", icon: Settings, label: "Settings" },
 ]

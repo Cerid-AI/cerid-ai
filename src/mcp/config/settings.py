@@ -164,12 +164,13 @@ VERIFICATION_CURRENT_EVENT_MODEL = os.getenv(
 # ---------------------------------------------------------------------------
 ENABLE_EXTERNAL_VERIFICATION = os.getenv("ENABLE_EXTERNAL_VERIFICATION", "true").lower() == "true"
 EXTERNAL_VERIFY_MODEL = os.getenv("EXTERNAL_VERIFY_MODEL", "openrouter/openai/gpt-4o-mini")
-EXTERNAL_VERIFY_KB_THRESHOLD = float(os.getenv("EXTERNAL_VERIFY_KB_THRESHOLD", "0.3"))
+EXTERNAL_VERIFY_KB_THRESHOLD = float(os.getenv("EXTERNAL_VERIFY_KB_THRESHOLD", "0.5"))
 EXTERNAL_VERIFY_MAX_TOKENS = 200
 EXTERNAL_VERIFY_TEMPERATURE = 0.0
 EXTERNAL_VERIFY_MAX_CONCURRENT = int(os.getenv("EXTERNAL_VERIFY_MAX_CONCURRENT", "5"))
 EXTERNAL_VERIFY_RETRY_ATTEMPTS = 3
 EXTERNAL_VERIFY_RETRY_BASE_DELAY = 2.0  # seconds — defense-in-depth (1000 RPM models)
+VERIFICATION_MIN_RELEVANCE = float(os.getenv("VERIFICATION_MIN_RELEVANCE", "0.35"))
 
 # ---------------------------------------------------------------------------
 # Self-RAG (retrieval-augmented generation validation loop)

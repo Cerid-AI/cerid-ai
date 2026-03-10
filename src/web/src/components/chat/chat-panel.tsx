@@ -5,8 +5,9 @@ import { useEffect, useCallback, useState, useMemo, useSyncExternalStore } from 
 import { Group, Panel, Separator as PanelSeparator } from "react-resizable-panels"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { cn } from "@/lib/utils"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
-import { Database, Zap, Sparkles } from "lucide-react"
+import { Database, Zap, Sparkles, MessageSquarePlus, Clock } from "lucide-react"
 import { ChatToolbar } from "./chat-toolbar"
 import { ChatMessages } from "./chat-messages"
 import { ChatInput } from "./chat-input"
@@ -44,6 +45,8 @@ export function ChatPanel() {
   const {
     active,
     activeId,
+    conversations,
+    setActiveId,
     create,
     addMessage,
     updateLastMessage,
@@ -232,6 +235,59 @@ export function ChatPanel() {
     [activeId, active, replaceMessages, addMessage, send, selectedModel],
   )
 
+  // --- Welcome state (no active conversation) ---
+  const recentConversations = conversations.slice(0, 3)
+
+  if (!active) {
+    return (
+      <div className="flex h-full items-center justify-center bg-background">
+        <div className="flex max-w-md flex-col items-center gap-6 px-6 text-center">
+          <div className="space-y-2">
+            <h1 className="text-2xl font-semibold tracking-tight">Cerid AI</h1>
+            <p className="text-sm text-muted-foreground">
+              Your personal knowledge companion — ask questions, explore your knowledge base, and get verified answers.
+            </p>
+          </div>
+
+          <Button
+            size="lg"
+            className="gap-2"
+            onClick={() => create(selectedModel)}
+          >
+            <MessageSquarePlus className="h-4 w-4" />
+            New Conversation
+          </Button>
+
+          {recentConversations.length > 0 && (
+            <div className="w-full space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">Recent</p>
+              <div className="space-y-1.5">
+                {recentConversations.map((c) => {
+                  const preview = c.messages[0]?.content?.slice(0, 80) || "Empty conversation"
+                  return (
+                    <button
+                      key={c.id}
+                      className="flex w-full items-start gap-2.5 rounded-lg border bg-card px-3 py-2.5 text-left transition-colors hover:bg-accent"
+                      onClick={() => setActiveId(c.id)}
+                    >
+                      <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm">{preview}</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {c.messages.length} message{c.messages.length !== 1 ? "s" : ""}
+                        </p>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   // --- Render ---
   const chatArea = (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
@@ -358,13 +414,22 @@ export function ChatPanel() {
             <Badge
               key={s.artifact_id}
               variant="secondary"
-              className="shrink-0 cursor-pointer text-xs hover:bg-accent"
+              className="shrink-0 cursor-pointer text-xs hover:bg-accent gap-1.5"
               onClick={() => {
                 kbContext.injectResult(s)
                 smartSuggestions.dismissSuggestion(s.artifact_id)
               }}
             >
+              <span
+                className={cn(
+                  "inline-block h-1.5 w-1.5 rounded-full",
+                  s.relevance >= 0.7 ? "bg-green-500" : s.relevance >= 0.5 ? "bg-yellow-500" : "bg-orange-500",
+                )}
+              />
               {s.filename}
+              <span className="text-[10px] text-muted-foreground tabular-nums">
+                {Math.round(s.relevance * 100)}%
+              </span>
             </Badge>
           ))}
         </div>

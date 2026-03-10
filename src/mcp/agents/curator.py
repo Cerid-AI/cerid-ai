@@ -119,7 +119,11 @@ def score_completeness(artifact: dict[str, Any]) -> float:
 
 
 def compute_quality_score(artifact: dict[str, Any]) -> dict[str, Any]:
-    """Compute weighted quality score for a single artifact."""
+    """Compute weighted quality score for a single artifact.
+
+    Uses the shared ``utils.quality.compute_quality_score`` for the numeric
+    score and adds issue diagnostics and per-dimension breakdown.
+    """
     s_summary = score_summary(artifact.get("summary", ""))
     s_keywords = score_keywords(artifact.get("keywords", "[]"))
     s_freshness = score_freshness(
@@ -128,11 +132,15 @@ def compute_quality_score(artifact: dict[str, Any]) -> dict[str, Any]:
     )
     s_completeness = score_completeness(artifact)
 
-    total = (
-        config.QUALITY_WEIGHT_SUMMARY * s_summary
-        + config.QUALITY_WEIGHT_KEYWORDS * s_keywords
-        + config.QUALITY_WEIGHT_FRESHNESS * s_freshness
-        + config.QUALITY_WEIGHT_COMPLETENESS * s_completeness
+    # Use shared utility for the aggregate score
+    from utils.quality import compute_quality_score as _shared_score
+    total = _shared_score(
+        summary=artifact.get("summary", ""),
+        keywords=artifact.get("keywords", "[]"),
+        tags=artifact.get("tags", "[]"),
+        sub_category=artifact.get("sub_category", ""),
+        default_sub_category=config.DEFAULT_SUB_CATEGORY,
+        ingested_at=artifact.get("modified_at") or artifact.get("ingested_at"),
     )
 
     issues: list[str] = []
@@ -146,7 +154,7 @@ def compute_quality_score(artifact: dict[str, Any]) -> dict[str, Any]:
         issues.append("stale")
 
     return {
-        "quality_score": round(total, 4),
+        "quality_score": total,
         "breakdown": {
             "summary": round(s_summary, 4),
             "keywords": round(s_keywords, 4),

@@ -109,7 +109,7 @@ describe("SettingsPane", () => {
     await screen.findByText("0.8.0")
     // Section headings are rendered as buttons with text
     expect(screen.getByText("Connection")).toBeInTheDocument()
-    expect(screen.getByText("Ingestion")).toBeInTheDocument()
+    expect(screen.getByText("Knowledge & Ingestion")).toBeInTheDocument()
     expect(screen.getByText("AI Features")).toBeInTheDocument()
   })
 

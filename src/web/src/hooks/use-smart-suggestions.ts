@@ -6,6 +6,7 @@ import { queryKB } from "@/lib/api"
 import type { KBQueryResult } from "@/lib/types"
 
 const MIN_SUGGESTION_LENGTH = 10
+const SUGGESTION_MIN_RELEVANCE = 0.4
 
 interface UseSmartSuggestionsOptions {
   enabled: boolean
@@ -57,6 +58,7 @@ export function useSmartSuggestions({
         if (gen !== generationRef.current) return
         const filtered = result.results
           .filter((r) => !ids.includes(r.artifact_id))
+          .filter((r) => r.relevance >= SUGGESTION_MIN_RELEVANCE)
           .slice(0, max)
         setSuggestions(filtered)
       } catch {

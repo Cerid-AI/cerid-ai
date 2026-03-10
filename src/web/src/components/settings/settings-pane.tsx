@@ -7,6 +7,7 @@ import { fetchSettings, updateSettings, fetchKBStats, adminRebuildIndexes, admin
 import type { KBStats } from "@/lib/api"
 import type { ServerSettings, SettingsUpdate } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { PRESETS, detectActivePreset } from "@/lib/settings-presets"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -44,13 +45,13 @@ import { SyncSection } from "./sync-section"
 
 type LoadState = "loading" | "error" | "ready"
 
-type SectionKey = "connection" | "ingestion" | "features" | "knowledge" | "retrieval" | "search" | "taxonomy" | "infrastructure" | "sync" | "kb_admin"
+type SectionKey = "connection" | "knowledge_ingestion" | "features" | "retrieval" | "search" | "taxonomy" | "infra_sync" | "kb_admin"
 
 function readSectionState(): Record<SectionKey, boolean> {
   const defaults: Record<SectionKey, boolean> = {
-    connection: true, ingestion: true, features: true, knowledge: true,
-    retrieval: false, search: false, taxonomy: true, infrastructure: false,
-    sync: true, kb_admin: true,
+    connection: true, knowledge_ingestion: true, features: true,
+    retrieval: false, search: false, taxonomy: true, infra_sync: false,
+    kb_admin: true,
   }
   try {
     const raw = localStorage.getItem("cerid-settings-sections")
@@ -85,6 +86,7 @@ export default function SettingsPane() {
   const [kbAction, setKBAction] = useState<string | null>(null)
   const [kbResult, setKBResult] = useState("")
   const [clearConfirmDomain, setClearConfirmDomain] = useState<string | null>(null)
+  const [pipelineCustomize, setPipelineCustomize] = useState(false)
 
   const loadKBStats = useCallback(async () => {
     setKBLoading(true)
@@ -224,11 +226,29 @@ export default function SettingsPane() {
               </Card>
             )}
 
-            {/* ── Ingestion ── */}
-            <SectionHeading icon={Database} label="Ingestion" open={sections.ingestion} onToggle={() => toggleSection("ingestion")} />
-            {sections.ingestion && (
+            {/* ── Knowledge & Ingestion ── */}
+            <SectionHeading icon={Database} label="Knowledge & Ingestion" open={sections.knowledge_ingestion} onToggle={() => toggleSection("knowledge_ingestion")} />
+            {sections.knowledge_ingestion && (
               <Card className="mb-4">
                 <CardContent className="grid gap-4 pt-4">
+                  <ToggleRow
+                    label="Auto-inject KB Context"
+                    enabled={settings.enable_auto_inject}
+                    onToggle={(v) => patch({ enable_auto_inject: v })}
+                    info="Automatically includes relevant KB context when relevance exceeds threshold"
+                  />
+                  {settings.enable_auto_inject && (
+                    <SliderRow
+                      label="Injection Threshold"
+                      value={settings.auto_inject_threshold}
+                      onChange={(v) => patch({ auto_inject_threshold: v })}
+                      min={0.5} max={1} step={0.05}
+                      info="Minimum relevance score to auto-inject (higher = more selective)"
+                    />
+                  )}
+
+                  <div className="my-1 h-px bg-border" />
+
                   <div className="flex items-center justify-between">
                     <LabelWithInfo label="Categorization Mode" info="How uploaded documents are categorized into KB domains" />
                     <Select
@@ -357,40 +377,65 @@ export default function SettingsPane() {
               </Card>
             )}
 
-            {/* ── Knowledge ── */}
-            <SectionHeading icon={Database} label="Knowledge" open={sections.knowledge} onToggle={() => toggleSection("knowledge")} />
-            {sections.knowledge && (
-              <Card className="mb-4">
-                <CardContent className="grid gap-3 pt-4">
-                  <ToggleRow
-                    label="Auto-inject KB Context"
-                    enabled={settings.enable_auto_inject}
-                    onToggle={(v) => patch({ enable_auto_inject: v })}
-                    info="Automatically includes relevant KB context when relevance exceeds threshold"
-                  />
-                  {settings.enable_auto_inject && (
-                    <SliderRow
-                      label="Injection Threshold"
-                      value={settings.auto_inject_threshold}
-                      onChange={(v) => patch({ auto_inject_threshold: v })}
-                      min={0.5} max={1} step={0.05}
-                      info="Minimum relevance score to auto-inject (higher = more selective)"
-                    />
-                  )}
-                </CardContent>
-              </Card>
-            )}
-
             {/* ── Retrieval Pipeline ── */}
             <SectionHeading icon={Cpu} label="Retrieval Pipeline" open={sections.retrieval} onToggle={() => toggleSection("retrieval")} />
             {sections.retrieval && (
               <Card className="mb-4">
                 <CardHeader className="px-4 pb-2 pt-4">
                   <CardDescription className="text-xs">
-                    Advanced RAG pipeline stages. Each stage is independent and can be toggled individually.
+                    Choose a preset or customize individual pipeline stages.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="grid gap-4 px-4 pb-4">
+                  {/* ── Preset cards ── */}
+                  {(() => {
+                    const activePreset = detectActivePreset(settings as unknown as Record<string, unknown>)
+                    return (
+                      <div className="grid grid-cols-3 gap-2">
+                        {Object.entries(PRESETS).map(([key, preset]) => (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => patch(preset.values)}
+                            className={cn(
+                              "rounded-lg border p-2.5 text-left transition-colors",
+                              activePreset === key
+                                ? "border-primary bg-primary/5"
+                                : "border-muted hover:border-muted-foreground/30",
+                            )}
+                          >
+                            <span className="text-sm font-medium">{preset.label}</span>
+                            <p className="mt-0.5 text-[11px] leading-tight text-muted-foreground">
+                              {preset.description}
+                            </p>
+                          </button>
+                        ))}
+                      </div>
+                    )
+                  })()}
+
+                  {!detectActivePreset(settings as unknown as Record<string, unknown>) && (
+                    <p className="text-[11px] text-muted-foreground">
+                      Custom configuration — doesn&apos;t match any preset
+                    </p>
+                  )}
+
+                  {/* ── Customize disclosure ── */}
+                  <button
+                    type="button"
+                    className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+                    onClick={() => setPipelineCustomize(!pipelineCustomize)}
+                  >
+                    {pipelineCustomize ? (
+                      <ChevronDown className="h-3 w-3" />
+                    ) : (
+                      <ChevronRight className="h-3 w-3" />
+                    )}
+                    Customize
+                  </button>
+
+                  {pipelineCustomize && (
+                    <div className="space-y-4 border-t pt-4">
                   {/* Adaptive Retrieval */}
                   <PipelineToggle
                     label="Adaptive Retrieval"
@@ -495,6 +540,8 @@ export default function SettingsPane() {
                       info="Minimum cosine similarity for a cache hit"
                     />
                   </PipelineToggle>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )}
@@ -579,33 +626,32 @@ export default function SettingsPane() {
               </div>
             )}
 
-            {/* ── Infrastructure ── */}
-            <SectionHeading icon={Wrench} label="Infrastructure" open={sections.infrastructure} onToggle={() => toggleSection("infrastructure")} />
-            {sections.infrastructure && (
-              <Card className="mb-4">
-                <CardContent className="grid gap-3 pt-4">
-                  <Row label="Bifrost URL" value={settings.bifrost_url ?? "—"} mono info="LLM gateway endpoint" />
-                  <Row label="Bifrost Timeout" value={settings.bifrost_timeout ? `${settings.bifrost_timeout}s` : "—"} info="Request timeout for LLM calls" />
-                  <Row label="ChromaDB" value={settings.chroma_url ?? "—"} mono info="Vector database endpoint" />
-                  <Row label="Neo4j" value={settings.neo4j_uri ?? "—"} mono info="Graph database endpoint" />
-                  <Row label="Redis" value={settings.redis_url ?? "—"} mono info="Cache and BM25 index (password redacted)" />
-                  <Row label="Archive Path" value={settings.archive_path ?? "—"} mono info="File archive mount path" />
-                  <Row label="Chunking Mode" value={settings.chunking_mode ?? "—"} info="Token-based or semantic chunking" />
-                  <div className="my-1 h-px bg-border" />
-                  <div className="flex items-center justify-between">
-                    <LabelWithInfo label="Encryption" info="Whether data at rest is encrypted" />
-                    <Badge variant={settings.enable_encryption ? "default" : "secondary"}>
-                      {settings.enable_encryption ? "Enabled" : "Disabled"}
-                    </Badge>
-                  </div>
-                  <Row label="Sync Backend" value={settings.sync_backend} info="Storage backend for cross-device sync" />
-                </CardContent>
-              </Card>
+            {/* ── Infrastructure & Sync ── */}
+            <SectionHeading icon={Wrench} label="Infrastructure & Sync" open={sections.infra_sync} onToggle={() => toggleSection("infra_sync")} />
+            {sections.infra_sync && (
+              <>
+                <Card className="mb-2">
+                  <CardContent className="grid gap-3 pt-4">
+                    <Row label="Bifrost URL" value={settings.bifrost_url ?? "—"} mono info="LLM gateway endpoint" />
+                    <Row label="Bifrost Timeout" value={settings.bifrost_timeout ? `${settings.bifrost_timeout}s` : "—"} info="Request timeout for LLM calls" />
+                    <Row label="ChromaDB" value={settings.chroma_url ?? "—"} mono info="Vector database endpoint" />
+                    <Row label="Neo4j" value={settings.neo4j_uri ?? "—"} mono info="Graph database endpoint" />
+                    <Row label="Redis" value={settings.redis_url ?? "—"} mono info="Cache and BM25 index (password redacted)" />
+                    <Row label="Archive Path" value={settings.archive_path ?? "—"} mono info="File archive mount path" />
+                    <Row label="Chunking Mode" value={settings.chunking_mode ?? "—"} info="Token-based or semantic chunking" />
+                    <div className="my-1 h-px bg-border" />
+                    <div className="flex items-center justify-between">
+                      <LabelWithInfo label="Encryption" info="Whether data at rest is encrypted" />
+                      <Badge variant={settings.enable_encryption ? "default" : "secondary"}>
+                        {settings.enable_encryption ? "Enabled" : "Disabled"}
+                      </Badge>
+                    </div>
+                    <Row label="Sync Backend" value={settings.sync_backend} info="Storage backend for cross-device sync" />
+                  </CardContent>
+                </Card>
+                <SyncSection />
+              </>
             )}
-
-            {/* ── Sync ── */}
-            <SectionHeading icon={FolderSync} label="Sync" open={sections.sync} onToggle={() => toggleSection("sync")} />
-            {sections.sync && <SyncSection />}
 
             {/* ── KB Management ── */}
             <SectionHeading icon={HardDrive} label="KB Management" open={sections.kb_admin} onToggle={() => toggleSection("kb_admin")} />

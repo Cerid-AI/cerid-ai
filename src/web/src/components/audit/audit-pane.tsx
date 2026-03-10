@@ -62,22 +62,25 @@ export function AuditPane() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* Header — title + refresh only */}
-      <div className="flex items-center justify-between border-b px-4 py-3">
-        <h2 className="text-lg font-semibold">Audit & Analytics</h2>
-        <div className="flex items-center gap-2">
-          <LastUpdated timestamp={dataUpdatedAt} />
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7"
-            onClick={handleRefresh}
-            disabled={isFetching}
-            aria-label="Refresh audit"
-          >
-            <RefreshCw className={cn("h-3.5 w-3.5", isFetching && "animate-spin")} />
-          </Button>
+      {/* Header */}
+      <div className="border-b px-4 py-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Analytics</h2>
+          <div className="flex items-center gap-2">
+            <LastUpdated timestamp={dataUpdatedAt} />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7"
+              onClick={handleRefresh}
+              disabled={isFetching}
+              aria-label="Refresh analytics"
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5", isFetching && "animate-spin")} />
+            </Button>
+          </div>
         </div>
+        <p className="text-xs text-muted-foreground">Historical usage, costs, and accuracy reports</p>
       </div>
 
       <ScrollArea className="min-h-0 flex-1">

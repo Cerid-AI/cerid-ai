@@ -262,29 +262,17 @@ def ingest_content(
     except Exception as e:
         logger.warning(f"BM25 indexing failed (non-blocking): {e}")
 
-    # Compute quality_score based on available metadata signals
-    _summary = base_meta.get("summary", "")
-    _tags = base_meta.get("tags_json", "[]")
-    _sub_cat = base_meta.get("sub_category", "")
-    _qscore = 0.0
-    if _summary and _summary != content[:200]:
-        _qscore += 0.20  # has a real summary, not just truncated content
-    try:
-        _tag_list = json.loads(_tags) if _tags else []
-    except (json.JSONDecodeError, TypeError):
-        _tag_list = []
-    if _tag_list:
-        _qscore += 0.15
-    if len(chunks) > 1:
-        _qscore += 0.15
-    if len(content) > 500:
-        _qscore += 0.15
-    if domain:
-        _qscore += 0.10
-    if _sub_cat and _sub_cat != config.DEFAULT_SUB_CATEGORY:
-        _qscore += 0.10
-    _qscore += 0.15  # dedup passed (we got this far)
-    quality_score = round(min(_qscore, 1.0), 2)
+    # Compute quality_score using weighted 4-dimension formula
+    from utils.quality import compute_quality_score as _compute_quality
+
+    quality_score = _compute_quality(
+        summary=base_meta.get("summary", ""),
+        keywords=base_meta.get("keywords_json", "[]"),
+        tags=base_meta.get("tags_json", "[]"),
+        sub_category=base_meta.get("sub_category", ""),
+        default_sub_category=config.DEFAULT_SUB_CATEGORY,
+        ingested_at=base_meta.get("ingested_at"),
+    )
 
     artifact_created = False
     try:

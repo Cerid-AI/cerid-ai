@@ -827,7 +827,7 @@ def _extract_citation_claims(response_text: str) -> list[str]:
             if source_lower in seen:
                 continue
             seen.add(source_lower)
-            claims.append(f'[CITATION] Source cited: "{source}"')
+            claims.append(f"[CITATION] {source}")
 
     if claims:
         logger.info("Extracted %d citation claims for verification", len(claims))
@@ -1616,6 +1616,18 @@ async def _verify_claim_externally(
 # Claim verification
 # ---------------------------------------------------------------------------
 
+def _kb_source_fields(top_result: dict[str, Any] | None) -> dict[str, Any]:
+    """Extract KB source metadata for inclusion in verification results."""
+    if not top_result:
+        return {}
+    return {
+        "source_artifact_id": top_result.get("artifact_id", ""),
+        "source_filename": top_result.get("filename", ""),
+        "source_domain": top_result.get("domain", ""),
+        "source_snippet": top_result.get("content", "")[:200],
+    }
+
+
 async def verify_claim(
     claim: str,
     chroma_client,
@@ -1654,7 +1666,7 @@ async def verify_claim(
             query=claim,
             domains=verification_domains,
             top_k=5,
-            use_reranking=False,  # speed over accuracy for verification
+            use_reranking=True,  # cross-encoder for better verification accuracy
             chroma_client=chroma_client,
             redis_client=redis_client,
             neo4j_driver=neo4j_driver,
@@ -1666,9 +1678,18 @@ async def verify_claim(
         # Merge KB results with memory results
         all_results = list(result.get("results", []))
         for mr in memory_results:
+            # Preserve raw relevance for escalation decisions
+            raw_rel = mr["relevance"]
+            mr["_raw_relevance"] = raw_rel
             # Memories get an authority boost (user-confirmed content)
-            mr["relevance"] = min(1.0, round(mr["relevance"] + _MEMORY_AUTHORITY_BOOST, 4))
+            mr["relevance"] = min(1.0, round(raw_rel + _MEMORY_AUTHORITY_BOOST, 4))
             all_results.append(mr)
+
+        # Filter out results below verification relevance threshold
+        all_results = [
+            r for r in all_results
+            if r.get("relevance", 0) >= config.VERIFICATION_MIN_RELEVANCE
+        ]
 
         # Sort by relevance descending
         all_results.sort(key=lambda x: x.get("relevance", 0.0), reverse=True)
@@ -1691,9 +1712,12 @@ async def verify_claim(
         top_results = all_results[:3]
         top_result = top_results[0]
         raw_similarity = top_result.get("relevance", 0.0)
+        # Use pre-boost relevance for escalation if this is a memory result,
+        # so the +0.15 authority boost doesn't mask low KB evidence.
+        escalation_similarity = top_result.get("_raw_relevance", raw_similarity)
 
         # --- Fallback 2: Very low KB similarity → try external verification ---
-        if raw_similarity < ext_kb_threshold:
+        if escalation_similarity < ext_kb_threshold:
             ext_result = await _verify_claim_externally(claim, model)
             # Use external result if it provides a stronger signal than KB
             if ext_result["confidence"] > raw_similarity:
@@ -1705,6 +1729,7 @@ async def verify_claim(
                     "verification_method": ext_result.get("verification_method", "none"),
                     "verification_model": ext_result.get("verification_model"),
                     "source_urls": ext_result.get("source_urls", []),
+                    **_kb_source_fields(top_result),
                 }
 
         # Apply multi-result confidence calibration
@@ -1736,6 +1761,7 @@ async def verify_claim(
                     "verification_method": ext_result.get("verification_method", "none"),
                     "verification_model": ext_result.get("verification_model"),
                     "source_urls": ext_result.get("source_urls", []),
+                    **_kb_source_fields(top_result),
                 }
             return {
                 "claim": claim,
@@ -1744,6 +1770,7 @@ async def verify_claim(
                 "reason": details.get("reason", "Low similarity to any KB content"),
                 "verification_details": details,
                 "verification_method": "kb",
+                **_kb_source_fields(top_result),
             }
         else:
             # --- Fallback 4: KB says "uncertain" → try external for a
@@ -1758,19 +1785,36 @@ async def verify_claim(
                     "verification_method": ext_result.get("verification_method", "none"),
                     "verification_model": ext_result.get("verification_model"),
                     "source_urls": ext_result.get("source_urls", []),
+                    **_kb_source_fields(top_result),
                 }
-            # External also uncertain — return KB result with context
+            # External also uncertain — try web search as final escalation
+            if ext_result.get("verification_method") != "web_search":
+                web_result = await _verify_claim_externally(
+                    claim, model, force_web_search=True,
+                )
+                if web_result.get("status") in ("verified", "unverified"):
+                    return {
+                        "claim": claim,
+                        "status": web_result["status"],
+                        "similarity": web_result["confidence"],
+                        "reason": web_result["reason"],
+                        "verification_method": web_result.get(
+                            "verification_method", "web_search",
+                        ),
+                        "verification_model": web_result.get("verification_model"),
+                        "source_urls": web_result.get("source_urls", []),
+                        **_kb_source_fields(top_result),
+                    }
+            # All methods exhausted — return uncertain with all available context
             return {
                 "claim": claim,
                 "status": "uncertain",
                 "similarity": round(similarity, 3),
-                "source_artifact_id": top_result.get("artifact_id", ""),
-                "source_filename": top_result.get("filename", ""),
-                "source_domain": top_result.get("domain", ""),
-                "source_snippet": top_result.get("content", "")[:200],
                 "reason": details.get("reason", "Partial match — review recommended"),
                 "verification_details": details,
                 "verification_method": "kb",
+                "source_urls": ext_result.get("source_urls", []),
+                **_kb_source_fields(top_result),
             }
 
     except Exception as e:
