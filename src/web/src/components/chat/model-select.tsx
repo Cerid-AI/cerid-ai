@@ -29,20 +29,20 @@ export function ModelSelect({ value, onChange }: ModelSelectProps) {
       <SelectTrigger className="w-48">
         <SelectValue />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent position="popper" className="min-w-[20rem]">
         {MODELS.map((m) => {
           const cost = estimateTurnCost(m, 2000, 500)
           const top = m.capabilities ? topCapability(m.capabilities) : null
           return (
             <SelectItem key={m.id} value={m.id}>
-              <span>{m.label}</span>
-              <span className="ml-2 text-xs text-muted-foreground">{m.provider}</span>
+              <span className="truncate">{m.label}</span>
+              <span className="ml-2 shrink-0 text-xs text-muted-foreground">{m.provider}</span>
               {top && (
-                <span className="ml-1.5 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
+                <span className="ml-1.5 shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
                   {top}
                 </span>
               )}
-              <span className="ml-1.5 text-[10px] text-muted-foreground/60">
+              <span className="ml-1.5 shrink-0 text-[10px] text-muted-foreground/60">
                 ~{formatCost(cost)}
               </span>
             </SelectItem>

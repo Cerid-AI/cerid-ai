@@ -66,7 +66,7 @@ export function KBContextPanel({
 
   return (
     <div
-      className="relative flex h-full min-w-0 flex-col overflow-hidden"
+      className="relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
       {...dragHandlers}
     >
       {/* Drag overlay */}
@@ -166,7 +166,7 @@ export function KBContextPanel({
       )}
 
       {/* Results */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="min-h-0 flex-1">
         <div className="min-w-0 space-y-2 p-3">
           {isLoading && (
             <div className="flex items-center justify-center py-8 text-muted-foreground">

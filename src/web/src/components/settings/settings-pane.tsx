@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useCallback, useEffect, useState } from "react"
+import { useQueryClient } from "@tanstack/react-query"
 import { fetchSettings, updateSettings, fetchKBStats, adminRebuildIndexes, adminRescore, adminRegenerateSummaries, adminClearDomain } from "@/lib/api"
 import type { KBStats } from "@/lib/api"
 import type { ServerSettings, SettingsUpdate } from "@/lib/types"
@@ -62,6 +63,7 @@ function persistSectionState(state: Record<SectionKey, boolean>) {
 }
 
 export default function SettingsPane() {
+  const queryClient = useQueryClient()
   const [settings, setSettings] = useState<ServerSettings | null>(null)
   const [loadState, setLoadState] = useState<LoadState>("loading")
   const [error, setError] = useState("")
@@ -96,12 +98,16 @@ export default function SettingsPane() {
       const result = await fn()
       setKBResult(result.message)
       loadKBStats()
+      // Invalidate KB-related caches so other panes pick up updated scores/data
+      queryClient.invalidateQueries({ queryKey: ["artifacts"] })
+      queryClient.invalidateQueries({ queryKey: ["kb-search"] })
+      queryClient.invalidateQueries({ queryKey: ["taxonomy"] })
     } catch (e) {
       setKBResult(e instanceof Error ? e.message : "Action failed")
     } finally {
       setKBAction(null)
     }
-  }, [loadKBStats])
+  }, [loadKBStats, queryClient])
 
   const toggleSection = (key: SectionKey) => {
     setSections((prev) => {
@@ -176,7 +182,7 @@ export default function SettingsPane() {
           Save failed: {patchError}
         </div>
       )}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="min-h-0 flex-1">
         <TooltipProvider delayDuration={300}>
           <div className="space-y-1 p-4">
             {/* Connection */}

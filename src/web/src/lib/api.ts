@@ -250,19 +250,33 @@ export async function fetchCurate(
   generateSynopses = false,
   synopsisModel?: string,
 ): Promise<CurateResponse> {
-  const res = await fetch(`${MCP_BASE}/agent/curate`, {
-    method: "POST",
-    headers: mcpHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({
-      mode: "audit",
-      domains: domains ?? null,
-      max_artifacts: maxArtifacts,
-      generate_synopses: generateSynopses,
-      ...(synopsisModel && { synopsis_model: synopsisModel }),
-    }),
-  })
-  if (!res.ok) throw new Error(await extractError(res, `Curate failed: ${res.status}`))
-  return res.json()
+  // Long-running operation: 120s for scoring only, 10min with synopsis generation
+  const timeoutMs = generateSynopses ? 600_000 : 120_000
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const res = await fetch(`${MCP_BASE}/agent/curate`, {
+      method: "POST",
+      headers: mcpHeaders({ "Content-Type": "application/json" }),
+      signal: controller.signal,
+      body: JSON.stringify({
+        mode: "audit",
+        domains: domains ?? null,
+        max_artifacts: maxArtifacts,
+        generate_synopses: generateSynopses,
+        ...(synopsisModel && { synopsis_model: synopsisModel }),
+      }),
+    })
+    if (!res.ok) throw new Error(await extractError(res, `Curate failed: ${res.status}`))
+    return res.json()
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error(`Quality audit timed out after ${timeoutMs / 1000}s — try reducing artifact count or disabling synopsis generation`)
+    }
+    throw err
+  } finally {
+    clearTimeout(timeoutId)
+  }
 }
 
 export async function fetchSynopsisEstimate(

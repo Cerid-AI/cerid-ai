@@ -55,6 +55,27 @@ export function useConversations() {
 
   const active = conversations.find((c) => c.id === activeId) ?? null
 
+  // Verification tracking — persists across ChatPanel unmount/remount (lives in ConversationsContext)
+  const [verifiedConversations, setVerifiedConversations] = useState<Set<string>>(() => new Set())
+
+  const markVerified = useCallback((id: string) => {
+    setVerifiedConversations((prev) => {
+      if (prev.has(id)) return prev
+      const next = new Set(prev)
+      next.add(id)
+      return next
+    })
+  }, [])
+
+  const clearVerified = useCallback((id: string) => {
+    setVerifiedConversations((prev) => {
+      if (!prev.has(id)) return prev
+      const next = new Set(prev)
+      next.delete(id)
+      return next
+    })
+  }, [])
+
   // Debounced save: flushes to localStorage at most every SAVE_DEBOUNCE_MS.
   // Immediate saves (create, delete, model change) call saveConversations directly.
   // High-frequency updates (streaming chunks) use debouncedSave.
@@ -193,5 +214,6 @@ export function useConversations() {
     conversations, active, activeId, setActiveId,
     create, addMessage, updateLastMessage, updateLastMessageModel, updateModel, remove,
     replaceMessages, clearMessages,
+    verifiedConversations, markVerified, clearVerified,
   }
 }

@@ -201,7 +201,7 @@ export function KnowledgePane() {
 
   return (
     <div
-      className="relative flex h-full min-w-0 flex-col overflow-hidden"
+      className="relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
       {...dragHandlers}
     >
       {/* Drag overlay */}
@@ -329,7 +329,7 @@ export function KnowledgePane() {
       </div>
 
       {/* Results */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="min-h-0 flex-1">
         <div className="min-w-0 max-w-full space-y-2 overflow-hidden p-4">
           {isLoading && (
             <div className="flex items-center justify-center py-12 text-muted-foreground">

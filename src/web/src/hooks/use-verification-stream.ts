@@ -120,6 +120,17 @@ export function useVerificationStream(
     abortRef.current = abort
 
     let cancelled = false
+    let receivedSummary = false
+
+    // Timeout: abort verification if it takes too long (60s)
+    const STREAM_TIMEOUT_MS = 60_000
+    const timeoutId = setTimeout(() => {
+      if (!cancelled) {
+        cancelled = true
+        abort()
+        setPhase("error")
+      }
+    }, STREAM_TIMEOUT_MS)
 
     async function processStream() {
       try {
@@ -200,6 +211,7 @@ export function useVerificationStream(
                   break
 
                 case "summary":
+                  receivedSummary = true
                   setSummary({
                     verified: event.verified,
                     unverified: event.unverified,
@@ -240,10 +252,17 @@ export function useVerificationStream(
             }
           }
         }
+
+        // Stream ended — if no summary event was received, don't leave phase stuck
+        if (!cancelled && !receivedSummary) {
+          setPhase("error")
+        }
       } catch (err) {
         if (!cancelled && !(err instanceof DOMException && (err as DOMException).name === "AbortError")) {
           setPhase("error")
         }
+      } finally {
+        clearTimeout(timeoutId)
       }
     }
 
@@ -251,6 +270,7 @@ export function useVerificationStream(
 
     return () => {
       cancelled = true
+      clearTimeout(timeoutId)
       abort()
     }
   }, [responseText, conversationId, enabled, triggerKey, userQuery])

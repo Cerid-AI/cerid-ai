@@ -3,7 +3,15 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import SettingsPane from "@/components/settings/settings-pane"
+
+function wrapper({ children }: { children: React.ReactNode }) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+}
 
 const mockSettings = {
   categorize_mode: "smart",
@@ -58,38 +66,38 @@ beforeEach(() => {
 describe("SettingsPane", () => {
   it("shows loading state initially", () => {
     vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise(() => {}))) // never resolves
-    render(<SettingsPane />)
+    render(<SettingsPane />, { wrapper })
     // Component shows "Loading settings..." with Loader2 spinner
     expect(screen.getByText(/loading settings/i)).toBeInTheDocument()
   })
 
   it("renders settings after loading", async () => {
     vi.stubGlobal("fetch", mockFetch(mockSettings))
-    render(<SettingsPane />)
+    render(<SettingsPane />, { wrapper })
     expect(await screen.findByText("0.8.0")).toBeInTheDocument()
   })
 
   it("shows version number", async () => {
     vi.stubGlobal("fetch", mockFetch(mockSettings))
-    render(<SettingsPane />)
+    render(<SettingsPane />, { wrapper })
     expect(await screen.findByText("0.8.0")).toBeInTheDocument()
   })
 
   it("shows machine ID", async () => {
     vi.stubGlobal("fetch", mockFetch(mockSettings))
-    render(<SettingsPane />)
+    render(<SettingsPane />, { wrapper })
     expect(await screen.findByText("test-machine")).toBeInTheDocument()
   })
 
   it("shows feature tier badge", async () => {
     vi.stubGlobal("fetch", mockFetch(mockSettings))
-    render(<SettingsPane />)
+    render(<SettingsPane />, { wrapper })
     expect(await screen.findByText("community")).toBeInTheDocument()
   })
 
   it("shows storage mode in select", async () => {
     vi.stubGlobal("fetch", mockFetch(mockSettings))
-    render(<SettingsPane />)
+    render(<SettingsPane />, { wrapper })
     await screen.findByText("0.8.0")
     // Storage mode is shown via a Select component
     expect(screen.getByText(/Extract Only/i)).toBeInTheDocument()
@@ -97,7 +105,7 @@ describe("SettingsPane", () => {
 
   it("displays collapsible section headings", async () => {
     vi.stubGlobal("fetch", mockFetch(mockSettings))
-    render(<SettingsPane />)
+    render(<SettingsPane />, { wrapper })
     await screen.findByText("0.8.0")
     // Section headings are rendered as buttons with text
     expect(screen.getByText("Connection")).toBeInTheDocument()
@@ -107,7 +115,7 @@ describe("SettingsPane", () => {
 
   it("shows error state when fetch fails", async () => {
     vi.stubGlobal("fetch", mockFetch({ detail: "Server error" }, 500))
-    render(<SettingsPane />)
+    render(<SettingsPane />, { wrapper })
     await waitFor(() => {
       expect(screen.getByText(/server error/i)).toBeInTheDocument()
     })
@@ -115,14 +123,14 @@ describe("SettingsPane", () => {
 
   it("shows hallucination check toggle", async () => {
     vi.stubGlobal("fetch", mockFetch(mockSettings))
-    render(<SettingsPane />)
+    render(<SettingsPane />, { wrapper })
     await screen.findByText("0.8.0")
     expect(screen.getByText(/Hallucination Check/i)).toBeInTheDocument()
   })
 
   it("shows domains in taxonomy section", async () => {
     vi.stubGlobal("fetch", mockFetch(mockSettings))
-    render(<SettingsPane />)
+    render(<SettingsPane />, { wrapper })
     await screen.findByText("0.8.0")
     expect(screen.getByText("coding")).toBeInTheDocument()
   })

@@ -8,12 +8,16 @@
  * Extracted from ChatPanel to keep verification concerns cohesive.
  */
 
-import { useState, useMemo, useEffect, useRef, useCallback } from "react"
+import { useState, useMemo, useEffect, useCallback } from "react"
 import { useVerificationStream } from "@/hooks/use-verification-stream"
+import { useConversationsContext } from "@/contexts/conversations-context"
 import { fetchHallucinationReport } from "@/lib/api"
 import { MODELS } from "@/lib/types"
 import type { ChatMessage, HallucinationReport, ModelOption } from "@/lib/types"
 import type { MessageVerificationStatus } from "@/components/chat/message-bubble"
+
+/** Module-level report cache — survives hook unmount/remount across pane switches. */
+const reportCache = new Map<string, HallucinationReport>()
 
 interface UseVerificationOrchestratorOptions {
   activeMessages: ChatMessage[] | undefined
@@ -47,13 +51,11 @@ export function useVerificationOrchestrator({
   hallucinationEnabled,
   currentModel,
 }: UseVerificationOrchestratorOptions): UseVerificationOrchestratorReturn {
+  const { verifiedConversations, markVerified, clearVerified } = useConversationsContext()
   const [savedReport, setSavedReport] = useState<HallucinationReport | null>(null)
   const [savedReportLoading, setSavedReportLoading] = useState(false)
   const [manualVerifyBump, setManualVerifyBump] = useState(0)
   const [verificationRecBanner, setVerificationRecBanner] = useState<{ model: ModelOption; reason: string } | null>(null)
-  const reportCacheRef = useRef<Map<string, HallucinationReport>>(new Map())
-  /** Tracks conversations that have completed verification to prevent re-runs on remount. */
-  const [completedConversations, setCompletedConversations] = useState<Set<string>>(() => new Set())
 
   // Derived values from messages
   const latestAssistantText = useMemo(() => {
@@ -65,9 +67,9 @@ export function useVerificationOrchestrator({
   const streamTriggerKey = useMemo(() => {
     if (!activeMessages || isStreaming) return 0
     // Prevent re-triggering verification for conversations that already completed
-    if (activeId && completedConversations.has(activeId)) return 0
+    if (activeId && verifiedConversations.has(activeId)) return 0
     return activeMessages.filter((m) => m.role === "assistant").length
-  }, [activeMessages, isStreaming, activeId, completedConversations])
+  }, [activeMessages, isStreaming, activeId, verifiedConversations])
 
   const latestUserQuery = useMemo(() => {
     if (!activeMessages) return undefined
@@ -116,15 +118,10 @@ export function useVerificationOrchestrator({
   // Cache completed verification report and mark conversation as completed
   useEffect(() => {
     if (verification.phase === "done" && verification.report && activeId) {
-      reportCacheRef.current.set(activeId, verification.report)
-      setCompletedConversations((prev) => {
-        if (prev.has(activeId)) return prev
-        const next = new Set(prev)
-        next.add(activeId)
-        return next
-      })
+      reportCache.set(activeId, verification.report)
+      markVerified(activeId)
     }
-  }, [verification.phase, verification.report, activeId])
+  }, [verification.phase, verification.report, activeId, markVerified])
 
   // Fetch saved report when switching conversations (check cache first)
   useEffect(() => {
@@ -134,7 +131,7 @@ export function useVerificationOrchestrator({
     }
     if (verification.phase !== "idle") return
 
-    const cached = reportCacheRef.current.get(activeId)
+    const cached = reportCache.get(activeId)
     if (cached) {
       setSavedReport(cached)
       return
@@ -147,7 +144,7 @@ export function useVerificationOrchestrator({
         if (!cancelled) {
           setSavedReport(r)
           setSavedReportLoading(false)
-          if (r) reportCacheRef.current.set(activeId, r)
+          if (r) reportCache.set(activeId, r)
         }
       })
       .catch(() => { if (!cancelled) setSavedReportLoading(false) })
@@ -190,16 +187,9 @@ export function useVerificationOrchestrator({
 
   const handleVerifyMessage = useCallback(() => {
     // Clear completed mark so re-verification can proceed
-    if (activeId) {
-      setCompletedConversations((prev) => {
-        if (!prev.has(activeId)) return prev
-        const next = new Set(prev)
-        next.delete(activeId)
-        return next
-      })
-    }
+    if (activeId) clearVerified(activeId)
     setManualVerifyBump((prev) => prev + 1)
-  }, [activeId])
+  }, [activeId, clearVerified])
 
   return {
     halReport,

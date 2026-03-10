@@ -48,7 +48,7 @@ export function MonitoringPane() {
           Loading system status...
         </div>
       ) : (
-        <ScrollArea className="flex-1">
+        <ScrollArea className="min-h-0 flex-1">
           <div className="space-y-4 p-4">
             <PaneErrorBoundary label="Health Cards">
               <HealthCards health={maintenance?.health} />

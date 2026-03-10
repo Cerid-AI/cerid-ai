@@ -3,7 +3,15 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import SettingsPane from "@/components/settings/settings-pane"
+
+function wrapper({ children }: { children: React.ReactNode }) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+}
 
 const mockSettings = {
   categorize_mode: "smart",
@@ -63,13 +71,13 @@ beforeEach(() => {
 describe("KB Management Section", () => {
   it("renders KB Management section heading", async () => {
     vi.stubGlobal("fetch", mockMultiFetch(mockSettings, mockKBStats))
-    render(<SettingsPane />)
+    render(<SettingsPane />, { wrapper })
     expect(await screen.findByText("KB Management")).toBeInTheDocument()
   })
 
   it("displays total artifact and chunk counts", async () => {
     vi.stubGlobal("fetch", mockMultiFetch(mockSettings, mockKBStats))
-    render(<SettingsPane />)
+    render(<SettingsPane />, { wrapper })
     await screen.findByText("KB Management")
     expect(await screen.findByText("42")).toBeInTheDocument()
     expect(await screen.findByText("150")).toBeInTheDocument()
@@ -77,7 +85,7 @@ describe("KB Management Section", () => {
 
   it("shows per-domain stats", async () => {
     vi.stubGlobal("fetch", mockMultiFetch(mockSettings, mockKBStats))
-    render(<SettingsPane />)
+    render(<SettingsPane />, { wrapper })
     await screen.findByText("KB Management")
     // Domain names
     expect(await screen.findByText("code")).toBeInTheDocument()
@@ -89,7 +97,7 @@ describe("KB Management Section", () => {
 
   it("renders management action buttons", async () => {
     vi.stubGlobal("fetch", mockMultiFetch(mockSettings, mockKBStats))
-    render(<SettingsPane />)
+    render(<SettingsPane />, { wrapper })
     await screen.findByText("KB Management")
     expect(await screen.findByText("Rebuild Indexes")).toBeInTheDocument()
     expect(screen.getByText("Rescore All")).toBeInTheDocument()
@@ -100,7 +108,7 @@ describe("KB Management Section", () => {
   it("calls rebuild endpoint on button click", async () => {
     const fetchMock = mockMultiFetch(mockSettings, mockKBStats)
     vi.stubGlobal("fetch", fetchMock)
-    render(<SettingsPane />)
+    render(<SettingsPane />, { wrapper })
 
     const rebuildBtn = await screen.findByText("Rebuild Indexes")
 
@@ -136,7 +144,7 @@ describe("KB Management Section", () => {
 
   it("shows clear confirmation when trash icon is clicked", async () => {
     vi.stubGlobal("fetch", mockMultiFetch(mockSettings, mockKBStats))
-    render(<SettingsPane />)
+    render(<SettingsPane />, { wrapper })
     await screen.findByText("KB Management")
 
     // Find the trash icons (one per domain with artifacts)
@@ -152,7 +160,7 @@ describe("KB Management Section", () => {
 
   it("cancels clear confirmation", async () => {
     vi.stubGlobal("fetch", mockMultiFetch(mockSettings, mockKBStats))
-    render(<SettingsPane />)
+    render(<SettingsPane />, { wrapper })
     await screen.findByText("KB Management")
 
     const trashButtons = await screen.findAllByTitle(/Clear/)
