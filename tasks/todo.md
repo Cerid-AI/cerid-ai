@@ -1,8 +1,8 @@
 # Cerid AI — Task Tracker
 
-> **Last updated:** 2026-03-09
-> **Current status:** Phase 34 complete. 1129 Python tests, 367 frontend tests. UX audit & fixes + advanced RAG pipeline (adaptive retrieval, query decomposition, MMR diversity, intelligent assembly, late interaction, semantic cache).
-> **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md) — 0 open
+> **Last updated:** 2026-03-10
+> **Current status:** Phase 35 in progress. 1171 Python tests, 388 frontend tests. Verification pipeline, scoring, and UX refinement.
+> **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md) — 1 open
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](../docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
 

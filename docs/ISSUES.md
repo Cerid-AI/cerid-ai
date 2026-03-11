@@ -1,8 +1,8 @@
 # Cerid AI — Issues & Backlog
 
 > **Created:** 2026-02-25
-> **Last updated:** 2026-03-09
-> **Status:** Phase 34 complete. UX audit & fixes + advanced RAG pipeline. 73 resolved, 0 open. 1129 Python tests, 367 frontend tests.
+> **Last updated:** 2026-03-10
+> **Status:** Phase 35 in progress. Verification pipeline, scoring, and UX refinement. 73 resolved, 1 open. 1171 Python tests, 388 frontend tests.
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21 roadmap)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](COMPLETED_PHASES.md)
 > **Purpose:** Track known bugs, feature gaps, structural issues, and architecture evaluations for upcoming phases.
@@ -775,11 +775,40 @@ Verification results only appear in the status bar and hallucination panel sideb
 
 ---
 
+## J. Phase 35 — Verification & Infrastructure
+
+### J1. Verification Stream OOM — Memory Optimization Needed
+
+**Severity:** Medium
+**Status:** 🔓 Open (Phase 35, 2026-03-10)
+
+**Problem:** Verification of LLM responses with 10+ factual claims causes the MCP container to OOM-kill under the 2 GB memory limit. Each claim verification loads a BM25 index (bm25s library), runs ONNX cross-encoder reranking (ms-marco-MiniLM-L-6-v2), and issues ChromaDB vector queries — all memory-intensive. When 10+ claims run in parallel via `asyncio.gather()`, peak memory exceeds 2 GB and the Linux OOM killer sends SIGKILL (uncatchable, exit code 137).
+
+**Mitigated (not fully fixed):** Added `VERIFY_CLAIM_MAX_CONCURRENT=3` semaphore to bound parallelism. This keeps peak memory at ~1.84 GB under a 2 GB limit — functional but leaves only ~160 MB headroom. A response with 15+ claims or concurrent users could still OOM.
+
+**Root cause details:**
+- `docker inspect` shows `OOMKilled=false` and `ExitCode=0` after container auto-restart — misleading. Only `docker events` reveals the truth (`container oom` + `exitCode=137`).
+- Module-level `signal.signal()` handlers get overwritten by uvicorn during startup; must register in FastAPI's `lifespan` hook.
+
+**Optimization opportunities:**
+1. **Singleton BM25/ONNX models:** Currently each verification may re-load the cross-encoder and rebuild BM25 indices. A process-global model cache would eliminate repeated allocations.
+2. **Container memory limit:** Consider raising from 2 GB to 3 GB (host has 160 GB RAM).
+3. **Streaming batch size:** Currently fixed at 3. Could be made adaptive based on `psutil.virtual_memory()` available headroom.
+4. **BM25 index caching:** The bm25s library rebuilds indices per query. A per-collection index cache with TTL would reduce memory churn.
+5. **ONNX model sharing:** Ensure the `onnxruntime.InferenceSession` is created once and reused across all verifications within a request.
+
+**Files:**
+- `src/mcp/agents/hallucination.py` — `_claim_verify_semaphore`, `_get_claim_verify_semaphore()`
+- `src/mcp/config/settings.py` — `VERIFY_CLAIM_MAX_CONCURRENT`
+- `src/mcp/main.py` — Signal handler in lifespan (for debugging future crashes)
+
+---
+
 ## Priority Order
 
-### Open Items (0)
+### Open Items (1)
 
-None. All items resolved or formally dropped.
+J1 (verification OOM optimization) — Medium severity, mitigated via concurrency semaphore
 
 ### Resolved (73 items)
 

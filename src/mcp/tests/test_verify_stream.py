@@ -12,7 +12,6 @@ Also validates streaming timeout behavior (per-claim and total deadlines).
 """
 
 import asyncio
-import time
 from unittest.mock import patch
 
 import pytest
@@ -353,12 +352,12 @@ class TestStreamingTimeouts:
         ):
             # Non-streaming: should make 2 external calls (cross-model + web escalation)
             external_calls.clear()
-            result = await verify_claim("Test claim.", None, None, None, streaming=False)
+            await verify_claim("Test claim.", None, None, None, streaming=False)
             non_streaming_count = len(external_calls)
 
             # Streaming: should make only 1 external call (skip web escalation)
             external_calls.clear()
-            result = await verify_claim("Test claim.", None, None, None, streaming=True)
+            await verify_claim("Test claim.", None, None, None, streaming=True)
             streaming_count = len(external_calls)
 
         # Non-streaming makes 2 calls (fallback 4 + web escalation)
