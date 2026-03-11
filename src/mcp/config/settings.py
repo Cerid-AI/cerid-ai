@@ -182,9 +182,25 @@ EXTERNAL_VERIFY_KB_THRESHOLD = float(os.getenv("EXTERNAL_VERIFY_KB_THRESHOLD", "
 EXTERNAL_VERIFY_MAX_TOKENS = 250
 EXTERNAL_VERIFY_TEMPERATURE = 0.0
 EXTERNAL_VERIFY_MAX_CONCURRENT = int(os.getenv("EXTERNAL_VERIFY_MAX_CONCURRENT", "5"))
+# Max concurrent claim verifications (KB search + reranking + external LLM).
+# Each verification loads BM25 indices and runs ONNX cross-encoder inference,
+# which is memory-intensive.  With 10+ claims, unbounded parallelism can OOM
+# a 2 GB container.  Default 3 keeps peak memory well under 1 GB.
+VERIFY_CLAIM_MAX_CONCURRENT = int(os.getenv("VERIFY_CLAIM_MAX_CONCURRENT", "3"))
 EXTERNAL_VERIFY_RETRY_ATTEMPTS = 3
 EXTERNAL_VERIFY_RETRY_BASE_DELAY = 2.0  # seconds — defense-in-depth (1000 RPM models)
 VERIFICATION_MIN_RELEVANCE = float(os.getenv("VERIFICATION_MIN_RELEVANCE", "0.35"))
+
+# ---------------------------------------------------------------------------
+# Streaming Verification Timeouts
+# ---------------------------------------------------------------------------
+# Per-claim timeout: max time for any single claim's full verification
+# (including KB lookup, external calls, and all fallbacks)
+STREAMING_PER_CLAIM_TIMEOUT = float(os.getenv("STREAMING_PER_CLAIM_TIMEOUT", "45"))
+# Total deadline for the entire streaming verification loop (all claims)
+STREAMING_TOTAL_TIMEOUT = float(os.getenv("STREAMING_TOTAL_TIMEOUT", "180"))
+# Fewer LLM retries on 429 during streaming to avoid compounding delays
+STREAMING_RETRY_ATTEMPTS = int(os.getenv("STREAMING_RETRY_ATTEMPTS", "1"))
 
 # ---------------------------------------------------------------------------
 # Self-RAG (retrieval-augmented generation validation loop)

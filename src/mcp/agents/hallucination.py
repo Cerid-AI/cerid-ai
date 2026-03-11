@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from typing import Any
 
 import httpx
@@ -38,10 +39,21 @@ REDIS_HALLUCINATION_TTL = 86400 * 7  # 7 days
 # longer require a running event loop at creation time.
 _ext_verify_semaphore = asyncio.Semaphore(config.EXTERNAL_VERIFY_MAX_CONCURRENT)
 
+# Concurrency gate for overall claim verification (KB search + reranking +
+# external LLM).  Each verification loads BM25 indices and runs ONNX
+# cross-encoder inference which is memory-intensive.  Without this,
+# 10+ parallel claims can OOM a 2 GB container.
+_claim_verify_semaphore = asyncio.Semaphore(config.VERIFY_CLAIM_MAX_CONCURRENT)
+
 
 def _get_ext_verify_semaphore() -> asyncio.Semaphore:
     """Return the external-verification semaphore."""
     return _ext_verify_semaphore
+
+
+def _get_claim_verify_semaphore() -> asyncio.Semaphore:
+    """Return the claim-verification concurrency semaphore."""
+    return _claim_verify_semaphore
 
 
 # Memory types that count as user-confirmed facts for verification
@@ -938,6 +950,8 @@ async def _extract_claims_llm(response_text: str, max_claims: int) -> list[str]:
         logger.warning("LLM claim extraction returned non-list: %s", type(raw).__name__)
     except CircuitOpenError:
         logger.warning("Bifrost claims circuit open, skipping LLM claim extraction")
+    except (httpx.TimeoutException, httpx.ConnectError) as e:
+        logger.warning("Claim extraction timeout/connection error: %s", e)
     except httpx.HTTPStatusError as e:
         logger.warning("Claim extraction HTTP error: %s %s", e.response.status_code, e.response.text[:200])
     except (json.JSONDecodeError, KeyError) as e:
@@ -1300,9 +1314,11 @@ async def _llm_call_with_retry(
     client: httpx.AsyncClient,
     url: str,
     payload: dict,
+    max_attempts: int | None = None,
 ) -> httpx.Response:
     """POST to an LLM endpoint with exponential backoff on 429 responses."""
-    max_attempts = config.EXTERNAL_VERIFY_RETRY_ATTEMPTS
+    if max_attempts is None:
+        max_attempts = config.EXTERNAL_VERIFY_RETRY_ATTEMPTS
     base_delay = config.EXTERNAL_VERIFY_RETRY_BASE_DELAY
 
     for attempt in range(max_attempts):
@@ -1334,6 +1350,7 @@ async def _verify_claim_externally(
     claim: str,
     generating_model: str | None = None,
     force_web_search: bool = False,
+    streaming: bool = False,
 ) -> dict[str, Any]:
     """Direct structured cross-model verification for a single claim.
 
@@ -1355,6 +1372,10 @@ async def _verify_claim_externally(
     web-search model regardless of current-event detection.  This is used
     by the staleness escalation path when a static model admits stale
     knowledge in its reasoning.
+
+    When ``streaming`` is True, the function uses fewer LLM retries and
+    skips the staleness-escalation recursive call to avoid compounding
+    delays in the SSE streaming path.
 
     Pipeline:
     1. Check feature flag (early return if disabled)
@@ -1514,10 +1535,16 @@ async def _verify_claim_externally(
             timeout = config.BIFROST_TIMEOUT * 2 if is_current_event else config.BIFROST_TIMEOUT
 
             breaker = get_breaker("bifrost-verify")
+            # In streaming mode, use fewer retries to avoid compounding
+            # delays (each 429 retry holds a semaphore slot and adds 2-4s
+            # sleep + full timeout duration).
+            retry_limit = config.STREAMING_RETRY_ATTEMPTS if streaming else None
 
             async def _bifrost_verify() -> dict:
                 async with httpx.AsyncClient(timeout=timeout, headers=tracing_headers()) as client:
-                    resp = await _llm_call_with_retry(client, url, payload)
+                    resp = await _llm_call_with_retry(
+                        client, url, payload, max_attempts=retry_limit,
+                    )
                     return resp.json()
 
             data = await breaker.call(_bifrost_verify)
@@ -1599,12 +1626,14 @@ async def _verify_claim_externally(
             # a second opinion.  Only triggers when:
             #  1. NOT already a forced web search (prevents infinite recursion)
             #  2. NOT an ignorance claim (already handled above)
-            #  3. The claim looks like it could be about current events
-            #  4. The reasoning contains staleness indicators
+            #  3. NOT streaming mode (avoids recursive delay in SSE path)
+            #  4. The claim looks like it could be about current events
+            #  5. The reasoning contains staleness indicators
             if (
                 not force_web_search
                 and not is_ignorance
                 and not is_current_event
+                and not streaming
                 and _is_current_event_claim(claim)  # re-check with broader lens
                 and verdict["status"] in ("verified", "uncertain")
                 and _has_staleness_indicators(raw_answer)
@@ -1669,6 +1698,7 @@ async def verify_claim(
     redis_client,
     threshold: float | None = None,
     model: str | None = None,
+    streaming: bool = False,
 ) -> dict[str, Any]:
     """Verify a single claim against the knowledge base and user memories.
 
@@ -1684,6 +1714,10 @@ async def verify_claim(
 
     Only KB-verified claims (similarity >= threshold) skip external
     verification, since the KB provides strong positive evidence.
+
+    When ``streaming`` is True, the function limits external verification
+    to a single call per fallback path (skipping fallback 4's secondary
+    web search escalation) to avoid compounding delays in the SSE path.
     """
     from agents.query_agent import agent_query
 
@@ -1732,7 +1766,9 @@ async def verify_claim(
         # With zero KB evidence, cross-model guessing is unreliable —
         # force web search so the verifier can look up authoritative sources.
         if not all_results:
-            ext_result = await _verify_claim_externally(claim, model, force_web_search=True)
+            ext_result = await _verify_claim_externally(
+                claim, model, force_web_search=True, streaming=streaming,
+            )
             return {
                 "claim": claim,
                 "status": ext_result["status"],
@@ -1752,7 +1788,9 @@ async def verify_claim(
 
         # --- Fallback 2: Very low KB similarity → try external verification ---
         if escalation_similarity < ext_kb_threshold:
-            ext_result = await _verify_claim_externally(claim, model)
+            ext_result = await _verify_claim_externally(
+                claim, model, streaming=streaming,
+            )
             # Use external result if it provides a stronger signal than KB
             if ext_result["confidence"] > raw_similarity:
                 return {
@@ -1785,7 +1823,9 @@ async def verify_claim(
             }
         elif similarity < unverified_threshold:
             # --- Fallback 3: KB says "unverified" → try external ---
-            ext_result = await _verify_claim_externally(claim, model)
+            ext_result = await _verify_claim_externally(
+                claim, model, streaming=streaming,
+            )
             if ext_result.get("status") in ("verified", "unverified"):
                 return {
                     "claim": claim,
@@ -1809,7 +1849,9 @@ async def verify_claim(
         else:
             # --- Fallback 4: KB says "uncertain" → try external for a
             # definitive answer before falling back to KB-only uncertain ---
-            ext_result = await _verify_claim_externally(claim, model)
+            ext_result = await _verify_claim_externally(
+                claim, model, streaming=streaming,
+            )
             if ext_result.get("status") in ("verified", "unverified"):
                 return {
                     "claim": claim,
@@ -1821,8 +1863,13 @@ async def verify_claim(
                     "source_urls": ext_result.get("source_urls", []),
                     **_kb_source_fields(top_result),
                 }
-            # External also uncertain — try web search as final escalation
-            if ext_result.get("verification_method") != "web_search":
+            # External also uncertain — try web search as final escalation.
+            # In streaming mode, skip this second external call to avoid
+            # compounding delays (each call can take 20-40s + retries).
+            if (
+                not streaming
+                and ext_result.get("verification_method") != "web_search"
+            ):
                 web_result = await _verify_claim_externally(
                     claim, model, force_web_search=True,
                 )
@@ -1999,10 +2046,16 @@ async def check_hallucinations(
             "summary": {"total": 0, "verified": 0, "unverified": 0, "uncertain": 0},
         }
 
-    results = await asyncio.gather(*[
-        verify_claim(claim, chroma_client, neo4j_driver, redis_client, threshold, model=model)
-        for claim in claims
-    ])
+    sem = _get_claim_verify_semaphore()
+
+    async def _limited_verify(claim_text: str) -> dict[str, Any]:
+        async with sem:
+            return await verify_claim(
+                claim_text, chroma_client, neo4j_driver, redis_client,
+                threshold, model=model,
+            )
+
+    results = await asyncio.gather(*[_limited_verify(c) for c in claims])
 
     status_counts = {"verified": 0, "unverified": 0, "uncertain": 0, "error": 0}
     for r in results:
@@ -2086,7 +2139,27 @@ async def verify_response_streaming(
         }
         return
 
-    claims, method = await extract_claims(response_text, user_query=user_query)
+    # Extraction with timeout — if Bifrost hangs or crashes, the generator
+    # must still yield a summary instead of dying with an unhandled exception.
+    EXTRACTION_TIMEOUT = 30  # seconds — Bifrost default is 20s
+    try:
+        claims, method = await asyncio.wait_for(
+            extract_claims(response_text, user_query=user_query),
+            timeout=EXTRACTION_TIMEOUT,
+        )
+    except TimeoutError:
+        logger.error(
+            "Claim extraction timed out after %ds for conversation %s",
+            EXTRACTION_TIMEOUT, conversation_id,
+        )
+        claims, method = [], "timeout"
+    except Exception as extraction_exc:
+        logger.error(
+            "Claim extraction failed for conversation %s: %s",
+            conversation_id, extraction_exc,
+        )
+        claims, method = [], "error"
+
     if not claims:
         yield {
             "type": "summary",
@@ -2096,7 +2169,8 @@ async def verify_response_streaming(
             "uncertain": 0,
             "total": 0,
             "skipped": True,
-            "reason": "No factual claims extracted",
+            "reason": "No factual claims extracted" if method not in ("timeout", "error")
+                      else f"Extraction {method}: could not extract claims",
             "extraction_method": method,
         }
         return
@@ -2132,12 +2206,37 @@ async def verify_response_streaming(
     stream_interrupted = False
 
     async def _verify_indexed(idx: int, claim_text: str) -> tuple[int, dict[str, Any]]:
-        result = await verify_claim(
-            claim_text, chroma_client, neo4j_driver, redis_client, threshold, model=model
-        )
+        """Verify a single claim with a per-claim timeout and concurrency limit."""
+        sem = _get_claim_verify_semaphore()
+        try:
+            async with sem:
+                result = await asyncio.wait_for(
+                    verify_claim(
+                        claim_text, chroma_client, neo4j_driver, redis_client,
+                        threshold, model=model, streaming=True,
+                    ),
+                    timeout=config.STREAMING_PER_CLAIM_TIMEOUT,
+                )
+        except TimeoutError:
+            logger.warning(
+                "Claim %d verification timed out after %ds: '%s...'",
+                idx, config.STREAMING_PER_CLAIM_TIMEOUT, claim_text[:50],
+            )
+            result = {
+                "claim": claim_text,
+                "status": "uncertain",
+                "similarity": 0.0,
+                "reason": f"Verification timed out ({int(config.STREAMING_PER_CLAIM_TIMEOUT)}s)",
+                "verification_method": "timeout",
+            }
         return idx, result
 
     tasks = [_verify_indexed(i, claim) for i, claim in enumerate(claims)]
+
+    # Total deadline prevents the verification loop from running forever.
+    # Individual claims have per-claim timeouts, but the total deadline
+    # catches edge cases where many claims each take close to the limit.
+    stream_deadline = time.monotonic() + config.STREAMING_TOTAL_TIMEOUT
 
     # Wrap verification loop in try/except to guarantee summary emission.
     # Without this, an unhandled exception (e.g., task cancellation, httpx
@@ -2145,8 +2244,32 @@ async def verify_response_streaming(
     # summary event is yielded, causing the frontend to show "stream interrupted".
     try:
         for coro in asyncio.as_completed(tasks):
+            # Check total deadline before awaiting the next result
+            remaining = stream_deadline - time.monotonic()
+            if remaining <= 0:
+                logger.warning(
+                    "Streaming verification total timeout reached (%ds) "
+                    "after %d/%d claims",
+                    config.STREAMING_TOTAL_TIMEOUT,
+                    verified_count + unverified_count + uncertain_count,
+                    len(claims),
+                )
+                stream_interrupted = True
+                # Count remaining uncompleted claims as uncertain
+                completed = verified_count + unverified_count + uncertain_count
+                uncertain_count += len(claims) - completed
+                break
             try:
-                i, result = await coro
+                i, result = await asyncio.wait_for(coro, timeout=remaining)
+            except TimeoutError:
+                logger.warning(
+                    "Stream deadline expired waiting for claim result "
+                    "(%ds total)", config.STREAMING_TOTAL_TIMEOUT,
+                )
+                stream_interrupted = True
+                completed = verified_count + unverified_count + uncertain_count
+                uncertain_count += len(claims) - completed
+                break
             except Exception as task_exc:
                 logger.warning("Verification task failed: %s", task_exc)
                 try:

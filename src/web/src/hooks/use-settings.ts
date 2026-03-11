@@ -37,8 +37,19 @@ function useSyncedToggle(
     })
   }, [localKey, serverKey])
 
-  /** Direct set for server hydration (persists locally, no server push). */
+  /**
+   * Accept value from server hydration — but ONLY if localStorage has no
+   * value for this key yet (first-time setup).  Once the user has toggled a
+   * setting (or a prior hydration wrote it), localStorage IS the source of
+   * truth because `toggle()` syncs to the server with fire-and-forget
+   * semantics: if that `updateSettings()` call failed the server is stale,
+   * and hydrating from the stale server value would overwrite the user's
+   * explicit intent.
+   */
   const hydrate = useCallback((v: boolean) => {
+    try {
+      if (localStorage.getItem(localKey) !== null) return
+    } catch { /* noop */ }
     setValue(v)
     persist(localKey, String(v))
   }, [localKey])
@@ -117,6 +128,26 @@ export function useSettings() {
             setRoutingModeState(mode)
             persist("cerid-routing-mode", mode)
           }
+        }
+
+        // Reconcile: push local boolean toggle values back to server when
+        // they disagree.  This fixes stale server state left by previous
+        // fire-and-forget updateSettings() failures.
+        const reconcile: SettingsUpdate = {}
+        const check = (localKey: string, serverVal: boolean | undefined, assign: (r: SettingsUpdate, v: boolean) => void) => {
+          try {
+            const stored = localStorage.getItem(localKey)
+            if (stored !== null && serverVal !== undefined && (stored === "true") !== serverVal) {
+              assign(reconcile, stored === "true")
+            }
+          } catch { /* noop */ }
+        }
+        check("cerid-feedback-loop", s.enable_feedback_loop, (r, v) => { r.enable_feedback_loop = v })
+        check("cerid-auto-inject", s.enable_auto_inject, (r, v) => { r.enable_auto_inject = v })
+        check("cerid-hallucination-check", s.enable_hallucination_check, (r, v) => { r.enable_hallucination_check = v })
+        check("cerid-memory-extraction", s.enable_memory_extraction, (r, v) => { r.enable_memory_extraction = v })
+        if (Object.keys(reconcile).length > 0) {
+          updateSettings(reconcile).catch(() => { /* best-effort */ })
         }
       })
       .catch(() => { /* Server unavailable — use localStorage values */ })

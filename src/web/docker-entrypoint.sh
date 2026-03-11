@@ -10,7 +10,7 @@ ENV_JS="/usr/share/nginx/html/env-config.js"
 
 cat > "$ENV_JS" <<EOF
 window.__ENV__ = {
-  VITE_MCP_URL: "${VITE_MCP_URL:-http://localhost:8888}",
+  VITE_MCP_URL: "${VITE_MCP_URL:-/api/mcp}",
   VITE_BIFROST_URL: "${VITE_BIFROST_URL:-/api/bifrost}",
   VITE_CERID_API_KEY: "${VITE_CERID_API_KEY:-}"
 };

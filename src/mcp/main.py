@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import logging
 import os
+import signal
+import traceback
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -45,8 +47,22 @@ logging.basicConfig(
 logger = logging.getLogger("ai-companion")
 
 
+def _signal_handler(signum: int, frame) -> None:
+    """Log signal receipt with stack trace for debugging container restarts."""
+    sig_name = signal.Signals(signum).name
+    stack = "".join(traceback.format_stack(frame)) if frame else "no frame"
+    logger.critical(
+        "SIGNAL RECEIVED: %s (%d) — stack:\n%s", sig_name, signum, stack,
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Install signal handlers AFTER uvicorn startup (uvicorn overwrites module-level handlers)
+    signal.signal(signal.SIGTERM, _signal_handler)
+    signal.signal(signal.SIGINT, _signal_handler)
+    logger.info("Signal handlers installed (SIGTERM/SIGINT)")
+
     # Startup validation: warn on missing critical env vars
     if not os.getenv("OPENROUTER_API_KEY"):
         logger.warning(

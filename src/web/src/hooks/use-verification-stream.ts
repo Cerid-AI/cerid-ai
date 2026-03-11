@@ -81,6 +81,12 @@ export function useVerificationStream(
   useEffect(() => { userQueryRef.current = userQuery }, [userQuery])
   const historyRef = useRef(conversationHistory)
   useEffect(() => { historyRef.current = conversationHistory }, [conversationHistory])
+  // enabled is read via ref so that toggling verification mid-stream does NOT
+  // abort the running stream.  Only checked at stream-start time.  This
+  // prevents settings hydration (fetchSettings → hydrateHallucination) from
+  // racing with an active stream and killing it via effect cleanup.
+  const enabledRef = useRef(enabled)
+  useEffect(() => { enabledRef.current = enabled }, [enabled])
 
   // Accumulated session metrics (persist across verification runs, reset on page reload)
   const sessionRef = useRef({ claimsChecked: 0, estCost: 0 })
@@ -107,14 +113,33 @@ export function useVerificationStream(
     prevTriggerKey.current = triggerKey
   }, [triggerKey])
 
+  // Debounce guard: React 18+ StrictMode double-mounts components in dev
+  // mode, which fires this effect twice with identical deps. The cleanup
+  // from the first mount aborts stream #1, but stream #2 still fires a
+  // second HTTP POST to the server. This ref tracks the last stream key
+  // and timestamp so we can skip the duplicate.
+  const lastStreamRef = useRef<{ key: string; time: number }>({ key: "", time: 0 })
+
   useEffect(() => {
     // Read refs at effect-fire time to avoid re-triggering when these values
     // change after the stream has already started (e.g., debounced content updates).
     const text = responseTextRef.current
     const query = userQueryRef.current
-    if (!text || !conversationId || !enabled || triggerKey === 0) {
+    if (!text || !conversationId || !enabledRef.current || triggerKey === 0) {
       return
     }
+
+    // StrictMode debounce: if the same stream key fired within 50ms,
+    // this is a StrictMode remount — skip to avoid duplicate HTTP requests.
+    const streamKey = `${conversationId}-${triggerKey}`
+    const now = Date.now()
+    if (
+      lastStreamRef.current.key === streamKey &&
+      now - lastStreamRef.current.time < 50
+    ) {
+      return
+    }
+    lastStreamRef.current = { key: streamKey, time: now }
 
     // Abort any previous stream
     abortRef.current?.()
@@ -194,7 +219,9 @@ export function useVerificationStream(
                       status: "pending",
                     },
                   ])
-                  setPhase("extracting")
+                  // Phase stays at "verifying" (set by extraction_complete).
+                  // Previously this set "extracting" which reverted the phase
+                  // after extraction_complete had already transitioned it.
                   break
 
                 case "claim_verified":
@@ -286,8 +313,8 @@ export function useVerificationStream(
       clearTimeout(timeoutId)
       abort()
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- responseText/userQuery read via refs to prevent mid-stream restarts
-  }, [conversationId, enabled, triggerKey])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- responseText/userQuery/enabled read via refs to prevent mid-stream restarts
+  }, [conversationId, triggerKey])
 
   const verifiedCount = claims.filter((c) => c.status && c.status !== "pending").length
   const totalClaims = claims.length

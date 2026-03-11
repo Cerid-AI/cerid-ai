@@ -7,7 +7,7 @@ services:
     ports:
       - "${CERID_PORT_GUI:-3000}:80"
     environment:
-      - VITE_MCP_URL=${VITE_MCP_URL:-http://localhost:8888}
+      - VITE_MCP_URL=${VITE_MCP_URL:-/api/mcp}
     networks:
       - llm-network
     restart: unless-stopped

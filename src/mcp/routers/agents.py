@@ -362,6 +362,8 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
     """
 
     async def event_generator():
+        event_count = 0
+        keepalive_count = 0
         try:
             from agents.hallucination import verify_response_streaming
 
@@ -390,8 +392,6 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
             # to avoid PEP 479 converting StopAsyncIteration → RuntimeError
             # inside this async generator frame.
             anext_task: asyncio.Task | None = None
-            event_count = 0
-            keepalive_count = 0
             try:
                 while True:
                     if anext_task is None:
@@ -421,10 +421,44 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
                         )
                         yield ": keepalive\n\n"
             finally:
+                # Cancel the pending anext task and wait for it to finish
+                # before closing the generator.  If we call gen.aclose()
+                # while the generator is still mid-yield (e.g. Starlette
+                # cancelled our request), we get:
+                #   RuntimeError: aclose(): asynchronous generator is already running
                 if anext_task and not anext_task.done():
                     anext_task.cancel()
-                await gen.aclose()
+                    try:
+                        await anext_task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+                # Now the generator is idle — safe to close
+                try:
+                    await gen.aclose()
+                except (RuntimeError, asyncio.CancelledError, GeneratorExit):
+                    # RuntimeError: generator still running despite cancel-wait
+                    # CancelledError: cancel scope still active during cleanup
+                    # GeneratorExit: nested generator cleanup during our own exit
+                    pass
 
+        except GeneratorExit:
+            # Client disconnected — Starlette closed the async generator.
+            # GeneratorExit is a BaseException, not caught by except Exception.
+            # We MUST re-raise it (async generators cannot suppress it).
+            logger.info(
+                "Verify stream client disconnected for conversation=%s "
+                "(events=%d)",
+                req.conversation_id,
+                event_count,
+            )
+            raise
+        except asyncio.CancelledError:
+            # Request was aborted (user navigated away, frontend abort()).
+            # This is normal — not an error.
+            logger.info(
+                "Verify stream cancelled for conversation=%s",
+                req.conversation_id,
+            )
         except Exception as e:
             logger.error(
                 "Verify stream error for conversation=%s: %s",

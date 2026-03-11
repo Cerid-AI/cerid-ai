@@ -7,9 +7,13 @@ Validates the PEP 479 fix: ``_safe_anext()`` must be a regular async function
 (not an async generator) so that ``StopAsyncIteration`` raised by the
 underlying generator is caught normally instead of being converted to
 ``RuntimeError`` by PEP 479 inside an async generator frame.
+
+Also validates streaming timeout behavior (per-claim and total deadlines).
 """
 
 import asyncio
+import time
+from unittest.mock import patch
 
 import pytest
 
@@ -195,3 +199,260 @@ class TestKeepaliveIntegration:
 
         with pytest.raises(ValueError, match="backend crash"):
             await _safe_anext(gen)
+
+
+class TestStreamingTimeouts:
+    """Verify per-claim and total verification timeouts."""
+
+    @pytest.mark.asyncio
+    async def test_per_claim_timeout_returns_uncertain(self):
+        """A claim that exceeds the per-claim timeout should return 'uncertain'."""
+        from agents.hallucination import verify_response_streaming
+
+        async def _mock_verify_claim(*args, **kwargs):
+            """Simulate a claim that hangs for 10s (will be killed by timeout)."""
+            await asyncio.sleep(10)
+            return {"status": "verified", "similarity": 0.9}
+
+        # Patch verify_claim and extract_claims with fast fakes, and set
+        # very short per-claim timeout (0.1s) so the test doesn't wait long.
+        with (
+            patch("agents.hallucination.verify_claim", side_effect=_mock_verify_claim),
+            patch(
+                "agents.hallucination.extract_claims",
+                return_value=(["Paris is the capital of France."], "heuristic"),
+            ),
+            patch("config.STREAMING_PER_CLAIM_TIMEOUT", 0.1),
+            patch("config.STREAMING_TOTAL_TIMEOUT", 5),
+            patch("config.HALLUCINATION_MIN_RESPONSE_LENGTH", 10),
+        ):
+            events = []
+            async for event in verify_response_streaming(
+                "Test response text for timeout",
+                "test-timeout-001",
+                None, None, None,
+            ):
+                events.append(event)
+
+        # Should have: extraction_complete, claim_extracted, claim_verified (timeout), summary
+        types = [e["type"] for e in events]
+        assert "extraction_complete" in types
+        assert "claim_extracted" in types
+        assert "summary" in types
+        # The timed-out claim should appear as claim_verified with uncertain status
+        verified_events = [e for e in events if e["type"] == "claim_verified"]
+        assert len(verified_events) == 1
+        assert verified_events[0]["status"] == "uncertain"
+        assert "timed out" in verified_events[0]["reason"].lower()
+
+    @pytest.mark.asyncio
+    async def test_total_timeout_produces_summary(self):
+        """When total deadline expires, stream should still emit a summary."""
+        from agents.hallucination import verify_response_streaming
+
+        call_count = 0
+
+        async def _mock_verify_claim(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            # First claim returns quickly, rest hang
+            if call_count == 1:
+                return {"status": "verified", "similarity": 0.85}
+            await asyncio.sleep(10)
+            return {"status": "verified", "similarity": 0.9}
+
+        with (
+            patch("agents.hallucination.verify_claim", side_effect=_mock_verify_claim),
+            patch(
+                "agents.hallucination.extract_claims",
+                return_value=(
+                    ["Claim 1.", "Claim 2.", "Claim 3."],
+                    "heuristic",
+                ),
+            ),
+            patch("config.STREAMING_PER_CLAIM_TIMEOUT", 5),  # High so per-claim doesn't trigger first
+            patch("config.STREAMING_TOTAL_TIMEOUT", 0.3),  # Low total timeout
+            patch("config.HALLUCINATION_MIN_RESPONSE_LENGTH", 10),
+        ):
+            events = []
+            async for event in verify_response_streaming(
+                "Test response for total timeout",
+                "test-total-001",
+                None, None, None,
+            ):
+                events.append(event)
+
+        types = [e["type"] for e in events]
+        assert "summary" in types
+        summary = next(e for e in events if e["type"] == "summary")
+        # The first claim should have completed; remaining should be uncertain
+        assert summary["total"] == 3
+
+    @pytest.mark.asyncio
+    async def test_streaming_flag_limits_retries(self):
+        """In streaming mode, _llm_call_with_retry should use fewer attempts."""
+        from agents.hallucination import _llm_call_with_retry
+
+        call_count = 0
+
+        class FakeClient:
+            async def post(self, url, json=None):
+                nonlocal call_count
+                call_count += 1
+
+                class FakeResp:
+                    status_code = 429
+                    headers = {}
+
+                    def raise_for_status(self):
+                        raise Exception("Rate limited after exhausting retries")
+
+                return FakeResp()
+
+        # With max_attempts=1, should only try once then raise
+        with pytest.raises(Exception, match="Rate limited"):
+            await _llm_call_with_retry(FakeClient(), "http://fake", {}, max_attempts=1)
+
+        assert call_count == 1  # Only 1 attempt, no retries
+
+    @pytest.mark.asyncio
+    async def test_streaming_mode_skips_web_escalation(self):
+        """In streaming mode, verify_claim should skip fallback 4 web search escalation."""
+        from agents.hallucination import verify_claim
+
+        external_calls = []
+
+        async def _mock_agent_query(**kwargs):
+            return {
+                "results": [{
+                    "relevance": 0.55,  # Between unverified_threshold and threshold → uncertain
+                    "content": "Some KB content",
+                    "artifact_id": "a1",
+                    "filename": "test.txt",
+                    "domain": "general",
+                }],
+            }
+
+        async def _mock_external(claim, model=None, force_web_search=False, streaming=False):
+            external_calls.append({"force_web_search": force_web_search, "streaming": streaming})
+            return {
+                "status": "uncertain",
+                "confidence": 0.4,
+                "reason": "Cannot determine",
+                "verification_method": "cross_model",
+                "source_urls": [],
+            }
+
+        async def _mock_memories(claim, chroma_client, top_k=2):
+            return []
+
+        with (
+            patch("agents.query_agent.agent_query", side_effect=_mock_agent_query),
+            patch("agents.hallucination._verify_claim_externally", side_effect=_mock_external),
+            patch("agents.hallucination._query_memories", side_effect=_mock_memories),
+        ):
+            # Non-streaming: should make 2 external calls (cross-model + web escalation)
+            external_calls.clear()
+            result = await verify_claim("Test claim.", None, None, None, streaming=False)
+            non_streaming_count = len(external_calls)
+
+            # Streaming: should make only 1 external call (skip web escalation)
+            external_calls.clear()
+            result = await verify_claim("Test claim.", None, None, None, streaming=True)
+            streaming_count = len(external_calls)
+
+        # Non-streaming makes 2 calls (fallback 4 + web escalation)
+        assert non_streaming_count == 2
+        # Streaming makes only 1 call (fallback 4 only, no web escalation)
+        assert streaming_count == 1
+
+
+class TestExtractionErrorHandling:
+    """Verify that extraction errors don't crash the streaming generator."""
+
+    @pytest.mark.asyncio
+    async def test_extract_claims_llm_catches_timeout(self):
+        """httpx.TimeoutException in LLM extraction should return empty list."""
+        import httpx
+
+        from agents.hallucination import _extract_claims_llm
+
+        async def _mock_call_bifrost(*args, **kwargs):
+            raise httpx.ReadTimeout("Connection timed out")
+
+        with patch("agents.hallucination.call_bifrost", side_effect=_mock_call_bifrost):
+            result = await _extract_claims_llm("Some response text for testing.", 10)
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_extract_claims_llm_catches_connect_error(self):
+        """httpx.ConnectError in LLM extraction should return empty list."""
+        import httpx
+
+        from agents.hallucination import _extract_claims_llm
+
+        async def _mock_call_bifrost(*args, **kwargs):
+            raise httpx.ConnectError("Connection refused")
+
+        with patch("agents.hallucination.call_bifrost", side_effect=_mock_call_bifrost):
+            result = await _extract_claims_llm("Some response text for testing.", 10)
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_streaming_extraction_crash_yields_summary(self):
+        """When extract_claims crashes, streaming should still emit a summary."""
+        from agents.hallucination import verify_response_streaming
+
+        async def _crash_extract(*args, **kwargs):
+            raise RuntimeError("Bifrost is down")
+
+        with (
+            patch("agents.hallucination.extract_claims", side_effect=_crash_extract),
+            patch("config.HALLUCINATION_MIN_RESPONSE_LENGTH", 10),
+        ):
+            events = []
+            async for event in verify_response_streaming(
+                "Test response for extraction crash handling",
+                "test-crash-001",
+                None, None, None,
+            ):
+                events.append(event)
+
+        # Should get exactly one summary event with skipped=True
+        assert len(events) == 1
+        assert events[0]["type"] == "summary"
+        assert events[0]["skipped"] is True
+        assert events[0]["total"] == 0
+        assert "error" in events[0]["extraction_method"]
+
+    @pytest.mark.asyncio
+    async def test_streaming_extraction_timeout_yields_summary(self):
+        """When extract_claims hangs, the asyncio.wait_for timeout catches it
+        and the generator still produces a summary event."""
+        from agents.hallucination import verify_response_streaming
+
+        async def _timeout_extract(*args, **kwargs):
+            """Simulate what asyncio.wait_for does when the coroutine exceeds
+            EXTRACTION_TIMEOUT — it raises TimeoutError."""
+            raise TimeoutError("simulated extraction timeout")
+
+        with (
+            patch("agents.hallucination.extract_claims", side_effect=_timeout_extract),
+            patch("config.HALLUCINATION_MIN_RESPONSE_LENGTH", 10),
+        ):
+            events = []
+            async for event in verify_response_streaming(
+                "Test response for extraction timeout",
+                "test-timeout-002",
+                None, None, None,
+            ):
+                events.append(event)
+
+        # TimeoutError is caught, method set to "timeout", summary emitted
+        assert len(events) == 1
+        assert events[0]["type"] == "summary"
+        assert events[0]["skipped"] is True
+        assert events[0]["total"] == 0
+        assert "timeout" in events[0]["extraction_method"]
