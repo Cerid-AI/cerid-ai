@@ -8,7 +8,10 @@ import type { KBStats } from "@/lib/api"
 import type { ServerSettings, SettingsUpdate } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { PRESETS, detectActivePreset } from "@/lib/settings-presets"
+import { USER_PRESETS, type PresetId } from "@/lib/user-presets"
+import { useUIMode } from "@/contexts/ui-mode-context"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -86,6 +89,25 @@ export default function SettingsPane() {
   const [kbResult, setKBResult] = useState("")
   const [clearConfirmDomain, setClearConfirmDomain] = useState<string | null>(null)
   const [pipelineCustomize, setPipelineCustomize] = useState(false)
+  const { mode: uiMode, setMode: setUIMode } = useUIMode()
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    try { return localStorage.getItem("cerid-settings-tab") ?? "essentials" } catch { return "essentials" }
+  })
+
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab)
+    try { localStorage.setItem("cerid-settings-tab", tab) } catch { /* noop */ }
+  }
+
+  const applyUserPreset = async (preset: typeof USER_PRESETS[number]) => {
+    setUIMode(preset.uiMode)
+    // Apply localStorage overrides
+    for (const [key, value] of Object.entries(preset.local)) {
+      try { localStorage.setItem(key, value) } catch { /* noop */ }
+    }
+    // Apply server settings
+    await patch(preset.settings)
+  }
 
   const loadKBStats = useCallback(async () => {
     setKBLoading(true)
@@ -195,35 +217,49 @@ export default function SettingsPane() {
       )}
       <ScrollArea className="min-h-0 flex-1">
         <TooltipProvider delayDuration={300}>
-          <div className="space-y-1 p-4">
-            {/* ── Connection ── */}
-            <SectionHeading icon={Server} label="Connection" open={sections.connection} onToggle={() => toggleSection("connection")} />
-            {sections.connection && (
-              <Card className="mb-4">
-                <CardContent className="grid gap-3 pt-4">
-                  <Row label="Server Version" value={settings.version} info="Current MCP server version" />
-                  <Row label="Machine ID" value={settings.machine_id} mono info="Unique identifier for this server instance" />
-                  <div className="flex items-center justify-between">
-                    <LabelWithInfo label="Feature Tier" info="Controls which platform capabilities are available. Set via CERID_TIER env var." />
-                    <Badge variant={settings.feature_tier === "pro" ? "default" : "secondary"}>
-                      {settings.feature_tier}
-                    </Badge>
-                  </div>
-                  {/* Tier-gated capabilities grid */}
-                  <div className="mt-1 rounded border bg-muted/30 p-3">
-                    <p className="mb-2 text-[11px] font-medium text-muted-foreground">Platform Capabilities</p>
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-                      {Object.entries(settings.feature_flags).map(([flag, enabled]) => (
-                        <div key={flag} className="flex items-center gap-1.5">
-                          <div className={cn("h-1.5 w-1.5 rounded-full", enabled ? "bg-green-500" : "bg-muted-foreground/30")} />
-                          <span className="text-[11px] text-muted-foreground">{formatFlagName(flag)}</span>
-                        </div>
-                      ))}
+          <div className="space-y-4 p-4">
+            {/* ── User Experience Presets ── */}
+            <div className="grid grid-cols-3 gap-2">
+              {USER_PRESETS.map((preset) => {
+                // Detect active preset by comparing UI mode + key settings
+                const isActive = uiMode === preset.uiMode &&
+                  settings.enable_hallucination_check === (preset.settings.enable_hallucination_check ?? false) &&
+                  settings.enable_feedback_loop === (preset.settings.enable_feedback_loop ?? false) &&
+                  settings.enable_memory_extraction === (preset.settings.enable_memory_extraction ?? false)
+                return (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => applyUserPreset(preset)}
+                    className={cn(
+                      "rounded-lg border p-3 text-left transition-colors",
+                      isActive
+                        ? "border-brand bg-brand/5"
+                        : "border-muted hover:border-muted-foreground/30",
+                    )}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span>{preset.emoji}</span>
+                      <span className="text-sm font-medium">{preset.label}</span>
                     </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
+                    <p className="mt-1 text-[11px] leading-tight text-muted-foreground">
+                      {preset.description}
+                    </p>
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* ── Tabbed Settings ── */}
+            <Tabs value={activeTab} onValueChange={handleTabChange}>
+              <TabsList className="w-full">
+                <TabsTrigger value="essentials" className="flex-1">Essentials</TabsTrigger>
+                <TabsTrigger value="pipeline" className="flex-1">Pipeline</TabsTrigger>
+                <TabsTrigger value="system" className="flex-1">System</TabsTrigger>
+              </TabsList>
+
+              {/* ── Essentials Tab ── */}
+              <TabsContent value="essentials" className="space-y-1 pt-2">
 
             {/* ── Knowledge & Ingestion ── */}
             <SectionHeading icon={Database} label="Knowledge & Ingestion" open={sections.knowledge_ingestion} onToggle={() => toggleSection("knowledge_ingestion")} />
@@ -375,6 +411,11 @@ export default function SettingsPane() {
                 </CardContent>
               </Card>
             )}
+
+              </TabsContent>
+
+              {/* ── Pipeline Tab ── */}
+              <TabsContent value="pipeline" className="space-y-1 pt-2">
 
             {/* ── Retrieval Pipeline ── */}
             <SectionHeading icon={Cpu} label="Retrieval Pipeline" open={sections.retrieval} onToggle={() => toggleSection("retrieval")} />
@@ -598,6 +639,40 @@ export default function SettingsPane() {
               </Card>
             )}
 
+              </TabsContent>
+
+              {/* ── System Tab ── */}
+              <TabsContent value="system" className="space-y-1 pt-2">
+
+            {/* ── Connection ── */}
+            <SectionHeading icon={Server} label="Connection" open={sections.connection} onToggle={() => toggleSection("connection")} />
+            {sections.connection && (
+              <Card className="mb-4">
+                <CardContent className="grid gap-3 pt-4">
+                  <Row label="Server Version" value={settings.version} info="Current MCP server version" />
+                  <Row label="Machine ID" value={settings.machine_id} mono info="Unique identifier for this server instance" />
+                  <div className="flex items-center justify-between">
+                    <LabelWithInfo label="Feature Tier" info="Controls which platform capabilities are available. Set via CERID_TIER env var." />
+                    <Badge variant={settings.feature_tier === "pro" ? "default" : "secondary"}>
+                      {settings.feature_tier}
+                    </Badge>
+                  </div>
+                  {/* Tier-gated capabilities grid */}
+                  <div className="mt-1 rounded border bg-muted/30 p-3">
+                    <p className="mb-2 text-[11px] font-medium text-muted-foreground">Platform Capabilities</p>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                      {Object.entries(settings.feature_flags).map(([flag, enabled]) => (
+                        <div key={flag} className="flex items-center gap-1.5">
+                          <div className={cn("h-1.5 w-1.5 rounded-full", enabled ? "bg-green-500" : "bg-muted-foreground/30")} />
+                          <span className="text-[11px] text-muted-foreground">{formatFlagName(flag)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* ── Taxonomy ── */}
             <SectionHeading icon={Tag} label="Taxonomy" open={sections.taxonomy} onToggle={() => toggleSection("taxonomy")} />
             {sections.taxonomy && (
@@ -767,6 +842,9 @@ export default function SettingsPane() {
                 </CardContent>
               </Card>
             )}
+
+              </TabsContent>
+            </Tabs>
           </div>
         </TooltipProvider>
       </ScrollArea>

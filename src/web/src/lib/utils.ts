@@ -20,15 +20,23 @@ export function uuid(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
+/** Approximate chars-per-token ratio (closer to actual tokenizer average than /4). */
+export const TOKEN_CHARS_RATIO = 3.5
+
+/** Estimate token count from a text string. */
+export function estimateTokenCount(text: string): number {
+  return Math.ceil(text.length / TOKEN_CHARS_RATIO)
+}
+
 /**
- * Estimate token counts from messages (chars / 4 heuristic).
+ * Estimate token counts from messages.
  * Shared between ChatDashboard and useLiveMetrics.
  */
 export function estimateTokens(messages: ChatMessage[]): { input: number; output: number } {
   let input = 0
   let output = 0
   for (const msg of messages) {
-    const tokens = Math.ceil(msg.content.length / 4)
+    const tokens = estimateTokenCount(msg.content)
     if (msg.role === "assistant") {
       output += tokens
     } else {

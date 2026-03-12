@@ -118,7 +118,8 @@ def get_redis() -> redis.Redis:
         with _redis_lock:
             if _redis is None:
                 _redis = redis.from_url(
-                    config.REDIS_URL, decode_responses=True, socket_connect_timeout=5
+                    config.REDIS_URL, decode_responses=True,
+                    socket_connect_timeout=5, socket_timeout=10,
                 )
                 _retry(_redis.ping, "Redis")
                 logger.info("Redis connected")

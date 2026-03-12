@@ -15,6 +15,7 @@ import pytest
 if "agents.query_agent" not in sys.modules:
     _stub = ModuleType("agents.query_agent")
     _stub.agent_query = None  # type: ignore[attr-defined]
+    _stub.lightweight_kb_query = None  # type: ignore[attr-defined]
     sys.modules["agents.query_agent"] = _stub
     # Also register as attribute on the parent package so _dot_lookup works.
     import agents
@@ -348,27 +349,23 @@ class TestVerifyClaim:
     """Test individual claim verification against KB."""
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination._query_memories", new_callable=AsyncMock, return_value=[])
-    @patch("agents.query_agent.agent_query", new_callable=AsyncMock)
+    @patch("agents.hallucination.verification._query_memories", new_callable=AsyncMock, return_value=[])
+    @patch("agents.query_agent.lightweight_kb_query", new_callable=AsyncMock)
     async def test_verified_claim(self, mock_query, _mock_mem, mock_chroma, mock_neo4j, mock_redis):
         """High-similarity result should mark claim as verified."""
-        mock_query.return_value = {
-            "results": [{"relevance": 0.85, "artifact_id": "abc", "filename": "doc.pdf", "domain": "general", "content": "matching text"}]
-        }
+        mock_query.return_value = [{"relevance": 0.85, "artifact_id": "abc", "filename": "doc.pdf", "domain": "general", "content": "matching text"}]
         result = await verify_claim("test claim", mock_chroma[0], mock_neo4j[0], mock_redis)
         assert result["status"] == "verified"
         assert result["source_artifact_id"] == "abc"
         assert result["source_domain"] == "general"
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination._verify_claim_externally", new_callable=AsyncMock)
-    @patch("agents.hallucination._query_memories", new_callable=AsyncMock, return_value=[])
-    @patch("agents.query_agent.agent_query", new_callable=AsyncMock)
+    @patch("agents.hallucination.verification._verify_claim_externally", new_callable=AsyncMock)
+    @patch("agents.hallucination.verification._query_memories", new_callable=AsyncMock, return_value=[])
+    @patch("agents.query_agent.lightweight_kb_query", new_callable=AsyncMock)
     async def test_unverified_claim(self, mock_query, _mock_mem, mock_ext, mock_chroma, mock_neo4j, mock_redis):
         """Low similarity (below escalation threshold) should mark claim as unverified when external also fails."""
-        mock_query.return_value = {
-            "results": [{"relevance": 0.4, "content": "unrelated"}]
-        }
+        mock_query.return_value = [{"relevance": 0.4, "content": "unrelated"}]
         mock_ext.return_value = {
             "status": "uncertain", "confidence": 0.1, "reason": "No signal",
             "verification_method": "cross_model_failed",
@@ -377,12 +374,12 @@ class TestVerifyClaim:
         assert result["status"] == "unverified"
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination._verify_claim_externally", new_callable=AsyncMock)
-    @patch("agents.hallucination._query_memories", new_callable=AsyncMock, return_value=[])
-    @patch("agents.query_agent.agent_query", new_callable=AsyncMock)
+    @patch("agents.hallucination.verification._verify_claim_externally", new_callable=AsyncMock)
+    @patch("agents.hallucination.verification._query_memories", new_callable=AsyncMock, return_value=[])
+    @patch("agents.query_agent.lightweight_kb_query", new_callable=AsyncMock)
     async def test_no_results(self, mock_query, _mock_mem, mock_ext, mock_chroma, mock_neo4j, mock_redis):
         """No KB results should fall back to external verification."""
-        mock_query.return_value = {"results": []}
+        mock_query.return_value = []
         mock_ext.return_value = {
             "status": "uncertain", "confidence": 0.3, "reason": "External failed",
             "verification_method": "cross_model_failed",
@@ -396,14 +393,12 @@ class TestMemoryIntegration:
     """Test that user-confirmed memories are included in verification."""
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination._query_memories", new_callable=AsyncMock)
-    @patch("agents.query_agent.agent_query", new_callable=AsyncMock)
+    @patch("agents.hallucination.verification._query_memories", new_callable=AsyncMock)
+    @patch("agents.query_agent.lightweight_kb_query", new_callable=AsyncMock)
     async def test_memory_boosts_verification(self, mock_query, mock_mem, mock_chroma, mock_neo4j, mock_redis):
         """A strong memory match should boost an otherwise uncertain claim to verified."""
         # KB returns a moderate match
-        mock_query.return_value = {
-            "results": [{"relevance": 0.60, "artifact_id": "kb1", "filename": "doc.pdf", "domain": "general", "content": "some content"}]
-        }
+        mock_query.return_value = [{"relevance": 0.60, "artifact_id": "kb1", "filename": "doc.pdf", "domain": "general", "content": "some content"}]
         # Memory returns a strong match (pre-boost relevance)
         mock_mem.return_value = [{
             "relevance": 0.75,
@@ -425,15 +420,13 @@ class TestMemoryIntegration:
         assert result.get("source_domain") == "conversations" or result["similarity"] >= 0.6
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination._verify_claim_externally", new_callable=AsyncMock)
-    @patch("agents.hallucination._query_memories", new_callable=AsyncMock)
-    @patch("agents.query_agent.agent_query", new_callable=AsyncMock)
+    @patch("agents.hallucination.verification._verify_claim_externally", new_callable=AsyncMock)
+    @patch("agents.hallucination.verification._query_memories", new_callable=AsyncMock)
+    @patch("agents.query_agent.lightweight_kb_query", new_callable=AsyncMock)
     async def test_memories_ignored_when_no_match(self, mock_query, mock_mem, mock_ext, mock_chroma, mock_neo4j, mock_redis):
         """Low-relevance memories (below filter threshold) should be filtered out,
         and with no remaining results, external verification determines the result."""
-        mock_query.return_value = {
-            "results": [{"relevance": 0.2, "artifact_id": "kb1", "content": "unrelated"}]
-        }
+        mock_query.return_value = [{"relevance": 0.2, "artifact_id": "kb1", "content": "unrelated"}]
         mock_mem.return_value = [{
             "relevance": 0.15,
             "artifact_id": "mem1",
@@ -510,8 +503,8 @@ class TestCheckHallucinations:
         assert result["summary"]["total"] == 0
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
-    @patch("agents.hallucination.verify_claim", new_callable=AsyncMock)
+    @patch("agents.hallucination.streaming.extract_claims", new_callable=AsyncMock)
+    @patch("agents.hallucination.streaming.verify_claim", new_callable=AsyncMock)
     async def test_full_pipeline(self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis):
         """Full pipeline should extract and verify claims."""
         mock_extract.return_value = (["claim 1", "claim 2"], "llm")
@@ -531,8 +524,8 @@ class TestCheckHallucinations:
         mock_redis.setex.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
-    @patch("agents.hallucination.verify_claim", new_callable=AsyncMock)
+    @patch("agents.hallucination.streaming.extract_claims", new_callable=AsyncMock)
+    @patch("agents.hallucination.streaming.verify_claim", new_callable=AsyncMock)
     async def test_stores_extraction_method(self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis):
         """Report should include extraction_method field."""
         mock_extract.return_value = (["claim 1"], "heuristic")
@@ -544,8 +537,8 @@ class TestCheckHallucinations:
         assert result["extraction_method"] == "heuristic"
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
-    @patch("agents.hallucination.verify_claim", new_callable=AsyncMock)
+    @patch("agents.hallucination.streaming.extract_claims", new_callable=AsyncMock)
+    @patch("agents.hallucination.streaming.verify_claim", new_callable=AsyncMock)
     async def test_stores_model(self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis):
         """Report should include model field when provided."""
         mock_extract.return_value = (["claim 1"], "llm")
@@ -562,8 +555,8 @@ class TestStreamingSourceAttribution:
     """Test that streaming verification yields full source attribution."""
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
-    @patch("agents.hallucination.verify_claim", new_callable=AsyncMock)
+    @patch("agents.hallucination.streaming.extract_claims", new_callable=AsyncMock)
+    @patch("agents.hallucination.streaming.verify_claim", new_callable=AsyncMock)
     async def test_claim_verified_includes_source_fields(self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis):
         """claim_verified events should include source_artifact_id, source_domain, source_snippet."""
         mock_extract.return_value = (["Python was created in 1991"], "heuristic")
@@ -598,8 +591,8 @@ class TestStreamingPersistence:
     """Test that streaming path persists results to Redis."""
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
-    @patch("agents.hallucination.verify_claim", new_callable=AsyncMock)
+    @patch("agents.hallucination.streaming.extract_claims", new_callable=AsyncMock)
+    @patch("agents.hallucination.streaming.verify_claim", new_callable=AsyncMock)
     async def test_persists_to_redis(self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis):
         """After streaming completes, report should be stored in Redis."""
         mock_extract.return_value = (["claim 1", "claim 2"], "heuristic")
@@ -631,8 +624,8 @@ class TestStreamingPersistence:
         assert len(stored["claims"]) == 2
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
-    @patch("agents.hallucination.verify_claim", new_callable=AsyncMock)
+    @patch("agents.hallucination.streaming.extract_claims", new_callable=AsyncMock)
+    @patch("agents.hallucination.streaming.verify_claim", new_callable=AsyncMock)
     async def test_summary_includes_extraction_method(self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis):
         """Summary event should include extraction_method."""
         mock_extract.return_value = (["claim 1"], "heuristic")
@@ -649,8 +642,8 @@ class TestStreamingPersistence:
         assert summary["extraction_method"] == "heuristic"
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
-    @patch("agents.hallucination.verify_claim", new_callable=AsyncMock)
+    @patch("agents.hallucination.streaming.extract_claims", new_callable=AsyncMock)
+    @patch("agents.hallucination.streaming.verify_claim", new_callable=AsyncMock)
     async def test_stores_model_in_report(self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis):
         """Persisted report should include the model parameter."""
         mock_extract.return_value = (["claim 1"], "llm")
@@ -1041,12 +1034,12 @@ class TestVerifyClaimWithExternalFallback:
     """Test that verify_claim falls back to external verification."""
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination._verify_claim_externally", new_callable=AsyncMock)
-    @patch("agents.hallucination._query_memories", new_callable=AsyncMock, return_value=[])
-    @patch("agents.query_agent.agent_query", new_callable=AsyncMock)
+    @patch("agents.hallucination.verification._verify_claim_externally", new_callable=AsyncMock)
+    @patch("agents.hallucination.verification._query_memories", new_callable=AsyncMock, return_value=[])
+    @patch("agents.query_agent.lightweight_kb_query", new_callable=AsyncMock)
     async def test_no_kb_triggers_external(self, mock_query, _mock_mem, mock_ext, mock_chroma, mock_neo4j, mock_redis):
         """When KB returns no results, should fall back to external verification."""
-        mock_query.return_value = {"results": []}
+        mock_query.return_value = []
         mock_ext.return_value = {
             "status": "verified",
             "confidence": 0.75,
@@ -1065,14 +1058,12 @@ class TestVerifyClaimWithExternalFallback:
         mock_ext.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination._verify_claim_externally", new_callable=AsyncMock)
-    @patch("agents.hallucination._query_memories", new_callable=AsyncMock, return_value=[])
-    @patch("agents.query_agent.agent_query", new_callable=AsyncMock)
+    @patch("agents.hallucination.verification._verify_claim_externally", new_callable=AsyncMock)
+    @patch("agents.hallucination.verification._query_memories", new_callable=AsyncMock, return_value=[])
+    @patch("agents.query_agent.lightweight_kb_query", new_callable=AsyncMock)
     async def test_strong_kb_skips_external(self, mock_query, _mock_mem, mock_ext, mock_chroma, mock_neo4j, mock_redis):
         """When KB returns a strong match, should NOT call external verification."""
-        mock_query.return_value = {
-            "results": [{"relevance": 0.85, "artifact_id": "abc", "filename": "doc.pdf", "domain": "general", "content": "matching text"}]
-        }
+        mock_query.return_value = [{"relevance": 0.85, "artifact_id": "abc", "filename": "doc.pdf", "domain": "general", "content": "matching text"}]
 
         result = await verify_claim(
             "test claim",
@@ -1082,14 +1073,12 @@ class TestVerifyClaimWithExternalFallback:
         mock_ext.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination._verify_claim_externally", new_callable=AsyncMock)
-    @patch("agents.hallucination._query_memories", new_callable=AsyncMock, return_value=[])
-    @patch("agents.query_agent.agent_query", new_callable=AsyncMock)
+    @patch("agents.hallucination.verification._verify_claim_externally", new_callable=AsyncMock)
+    @patch("agents.hallucination.verification._query_memories", new_callable=AsyncMock, return_value=[])
+    @patch("agents.query_agent.lightweight_kb_query", new_callable=AsyncMock)
     async def test_low_kb_triggers_external(self, mock_query, _mock_mem, mock_ext, mock_chroma, mock_neo4j, mock_redis):
         """When KB returns very low similarity, should try external verification."""
-        mock_query.return_value = {
-            "results": [{"relevance": 0.15, "artifact_id": "abc", "content": "barely related"}]
-        }
+        mock_query.return_value = [{"relevance": 0.15, "artifact_id": "abc", "content": "barely related"}]
         mock_ext.return_value = {
             "status": "verified",
             "confidence": 0.8,
@@ -1327,7 +1316,7 @@ class TestStalenessEscalation:
         # current-event markers to test the escalation path.
         # Force the initial path to be cross_model by using a claim that
         # passes _is_current_event_claim only with the borderline patterns.
-        with patch("agents.hallucination._is_current_event_claim") as mock_detect:
+        with patch("agents.hallucination.verification._is_current_event_claim") as mock_detect:
             # First call: not detected as current event (goes to cross_model)
             # Second call (inside escalation check): detected as current event
             mock_detect.side_effect = [False, True]
@@ -1914,7 +1903,7 @@ class TestEvasionClaimExtraction:
     """Test that evasion claims are merged into extract_claims output."""
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination._extract_claims_llm")
+    @patch("agents.hallucination.extraction._extract_claims_llm")
     async def test_evasion_returned_when_no_other_claims(self, mock_llm):
         """When LLM+heuristic find nothing, evasion claims returned alone."""
         mock_llm.return_value = []
@@ -1932,7 +1921,7 @@ class TestEvasionClaimExtraction:
         assert any("[EVASION]" in c for c in claims)
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination._extract_claims_llm")
+    @patch("agents.hallucination.extraction._extract_claims_llm")
     async def test_evasion_merged_with_llm_claims(self, mock_llm):
         """Evasion claims merge with LLM-extracted claims."""
         mock_llm.return_value = ["Some factual claim about demographics"]
@@ -2333,9 +2322,9 @@ class TestVerifyStreamConversationHistory:
     """Test that conversation_history is threaded through verify_response_streaming."""
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination._check_history_consistency", new_callable=AsyncMock)
-    @patch("agents.hallucination.verify_claim", new_callable=AsyncMock)
-    @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
+    @patch("agents.hallucination.streaming._check_history_consistency", new_callable=AsyncMock)
+    @patch("agents.hallucination.streaming.verify_claim", new_callable=AsyncMock)
+    @patch("agents.hallucination.streaming.extract_claims", new_callable=AsyncMock)
     async def test_consistency_check_called_with_history(
         self, mock_extract, mock_verify, mock_consistency,
     ):
@@ -2376,9 +2365,9 @@ class TestVerifyStreamConversationHistory:
             assert kwargs["claims"] == ["Claim 1", "Claim 2"]
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination._check_history_consistency", new_callable=AsyncMock)
-    @patch("agents.hallucination.verify_claim", new_callable=AsyncMock)
-    @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
+    @patch("agents.hallucination.streaming._check_history_consistency", new_callable=AsyncMock)
+    @patch("agents.hallucination.streaming.verify_claim", new_callable=AsyncMock)
+    @patch("agents.hallucination.streaming.extract_claims", new_callable=AsyncMock)
     async def test_consistency_issues_emitted_as_event(
         self, mock_extract, mock_verify, mock_consistency,
     ):
@@ -2481,8 +2470,8 @@ class TestStreamingGuaranteedSummary:
     """
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.extract_claims")
-    @patch("agents.hallucination.verify_claim")
+    @patch("agents.hallucination.streaming.extract_claims")
+    @patch("agents.hallucination.streaming.verify_claim")
     async def test_summary_emitted_on_success(
         self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis
     ):
@@ -2523,8 +2512,8 @@ class TestStreamingGuaranteedSummary:
         assert "interrupted" not in summary
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.extract_claims")
-    @patch("agents.hallucination.verify_claim")
+    @patch("agents.hallucination.streaming.extract_claims")
+    @patch("agents.hallucination.streaming.verify_claim")
     async def test_summary_emitted_on_partial_failure(
         self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis
     ):
@@ -2572,7 +2561,7 @@ class TestStreamingGuaranteedSummary:
         assert summary["verified"] == 2
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.extract_claims")
+    @patch("agents.hallucination.streaming.extract_claims")
     async def test_short_response_emits_skipped_summary(
         self, mock_extract, mock_chroma, mock_neo4j, mock_redis
     ):
@@ -2592,7 +2581,7 @@ class TestStreamingGuaranteedSummary:
         assert events[0]["skipped"] is True
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.extract_claims")
+    @patch("agents.hallucination.streaming.extract_claims")
     async def test_no_claims_emits_skipped_summary(
         self, mock_extract, mock_chroma, mock_neo4j, mock_redis
     ):
@@ -2614,8 +2603,8 @@ class TestStreamingGuaranteedSummary:
         assert events[0]["skipped"] is True
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.extract_claims")
-    @patch("agents.hallucination.verify_claim")
+    @patch("agents.hallucination.streaming.extract_claims")
+    @patch("agents.hallucination.streaming.verify_claim")
     async def test_streaming_event_order(
         self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis
     ):
@@ -2654,8 +2643,8 @@ class TestStreamingGuaranteedSummary:
         assert types[-1] == "summary"
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.extract_claims")
-    @patch("agents.hallucination.verify_claim")
+    @patch("agents.hallucination.streaming.extract_claims")
+    @patch("agents.hallucination.streaming.verify_claim")
     async def test_mixed_statuses_in_summary(
         self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis
     ):

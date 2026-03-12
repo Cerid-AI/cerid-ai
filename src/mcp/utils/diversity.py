@@ -10,27 +10,13 @@ on stemmed term sets — no additional model required.
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any
 
 from config.features import MMR_LAMBDA
+from utils.text import STOPWORDS as _STOPWORDS
+from utils.text import WORD_RE as _WORD_RE
 
 logger = logging.getLogger("ai-companion.diversity")
-
-# Common English stopwords for term extraction
-_STOPWORDS = frozenset({
-    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
-    "have", "has", "had", "do", "does", "did", "will", "would", "could",
-    "should", "may", "might", "can", "shall", "to", "of", "in", "for",
-    "on", "with", "at", "by", "from", "as", "into", "through", "during",
-    "before", "after", "above", "below", "between", "and", "but", "or",
-    "not", "no", "if", "then", "so", "that", "this", "it", "its",
-    "which", "what", "who", "whom", "where", "when", "how", "why",
-    "all", "each", "every", "both", "few", "more", "most", "other",
-    "some", "such", "than", "too", "very", "just", "also",
-})
-
-_WORD_RE = re.compile(r"[a-z]+", re.IGNORECASE)
 
 
 def _extract_terms(text: str) -> frozenset[str]:

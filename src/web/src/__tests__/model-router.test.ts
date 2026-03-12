@@ -74,6 +74,8 @@ describe("estimateTurnCost", () => {
     label: "Cheap",
     provider: "test",
     contextWindow: 128_000,
+    effectiveContextWindow: 102_400,
+    maxOutputTokens: 4_096,
     inputCostPer1M: 0.15,
     outputCostPer1M: 0.60,
   }
@@ -83,6 +85,8 @@ describe("estimateTurnCost", () => {
     label: "Expensive",
     provider: "test",
     contextWindow: 128_000,
+    effectiveContextWindow: 102_400,
+    maxOutputTokens: 4_096,
     inputCostPer1M: 3.0,
     outputCostPer1M: 15.0,
   }
@@ -116,6 +120,8 @@ describe("estimateTurnCost", () => {
       label: "Free",
       provider: "test",
       contextWindow: 128_000,
+      effectiveContextWindow: 102_400,
+      maxOutputTokens: 4_096,
       inputCostPer1M: 0,
       outputCostPer1M: 0,
     }
@@ -191,6 +197,8 @@ describe("recommendModel boundary cases", () => {
       label: "Free",
       provider: "test",
       contextWindow: 128_000,
+      effectiveContextWindow: 102_400,
+      maxOutputTokens: 4_096,
       inputCostPer1M: 0,
       outputCostPer1M: 0,
     }
@@ -230,6 +238,8 @@ describe("recommendModel boundary cases", () => {
       label: "NoCost",
       provider: "test",
       contextWindow: 128_000,
+      effectiveContextWindow: 102_400,
+      maxOutputTokens: 4_096,
       inputCostPer1M: undefined as unknown as number,
       outputCostPer1M: undefined as unknown as number,
     }
@@ -245,6 +255,8 @@ describe("recommendModel boundary cases", () => {
       label: "GPT-4o Mini",
       provider: "OpenAI",
       contextWindow: 128_000,
+      effectiveContextWindow: 102_400,
+      maxOutputTokens: 16_384,
       inputCostPer1M: 0.15,
       outputCostPer1M: 0.60,
     }
@@ -284,6 +296,8 @@ describe("calculateSwitchCost", () => {
     label: "Cheap",
     provider: "test",
     contextWindow: 128_000,
+    effectiveContextWindow: 102_400,
+    maxOutputTokens: 4_096,
     inputCostPer1M: 0.15,
     outputCostPer1M: 0.60,
   }
@@ -293,6 +307,8 @@ describe("calculateSwitchCost", () => {
     label: "Expensive",
     provider: "test",
     contextWindow: 128_000,
+    effectiveContextWindow: 102_400,
+    maxOutputTokens: 4_096,
     inputCostPer1M: 3.0,
     outputCostPer1M: 15.0,
   }
@@ -302,6 +318,8 @@ describe("calculateSwitchCost", () => {
     label: "Small",
     provider: "test",
     contextWindow: 1_000,
+    effectiveContextWindow: 800,
+    maxOutputTokens: 500,
     inputCostPer1M: 0.15,
     outputCostPer1M: 0.60,
   }
@@ -402,6 +420,8 @@ describe("buildSwitchOptions", () => {
     label: "Model A",
     provider: "test",
     contextWindow: 128_000,
+    effectiveContextWindow: 102_400,
+    maxOutputTokens: 4_096,
     inputCostPer1M: 0.15,
     outputCostPer1M: 0.60,
   }
@@ -411,6 +431,8 @@ describe("buildSwitchOptions", () => {
     label: "Model B",
     provider: "test",
     contextWindow: 128_000,
+    effectiveContextWindow: 102_400,
+    maxOutputTokens: 4_096,
     inputCostPer1M: 3.0,
     outputCostPer1M: 15.0,
   }
@@ -420,6 +442,8 @@ describe("buildSwitchOptions", () => {
     label: "Tiny",
     provider: "test",
     contextWindow: 500,
+    effectiveContextWindow: 400,
+    maxOutputTokens: 250,
     inputCostPer1M: 0.15,
     outputCostPer1M: 0.60,
   }
@@ -505,6 +529,8 @@ describe("scoreModelForQuery", () => {
       label: "NoCaps",
       provider: "test",
       contextWindow: 128_000,
+      effectiveContextWindow: 102_400,
+      maxOutputTokens: 4_096,
       inputCostPer1M: 0.15,
       outputCostPer1M: 0.60,
     }
@@ -517,6 +543,8 @@ describe("scoreModelForQuery", () => {
       label: "Coder",
       provider: "test",
       contextWindow: 128_000,
+      effectiveContextWindow: 102_400,
+      maxOutputTokens: 4_096,
       inputCostPer1M: 0.15,
       outputCostPer1M: 0.60,
       capabilities: { reasoning: 70, coding: 95, creative: 50, factual: 60, webSearch: false, vision: false, knowledgeCutoff: "2025-01" },
@@ -526,6 +554,8 @@ describe("scoreModelForQuery", () => {
       label: "Generic",
       provider: "test",
       contextWindow: 128_000,
+      effectiveContextWindow: 102_400,
+      maxOutputTokens: 4_096,
       inputCostPer1M: 0.15,
       outputCostPer1M: 0.60,
       capabilities: { reasoning: 70, coding: 60, creative: 70, factual: 70, webSearch: false, vision: false, knowledgeCutoff: "2025-01" },
@@ -541,6 +571,8 @@ describe("scoreModelForQuery", () => {
       label: "Search",
       provider: "test",
       contextWindow: 128_000,
+      effectiveContextWindow: 102_400,
+      maxOutputTokens: 4_096,
       inputCostPer1M: 0.15,
       outputCostPer1M: 0.60,
       capabilities: { reasoning: 70, coding: 70, creative: 70, factual: 70, webSearch: true, vision: false, knowledgeCutoff: "2025-01" },
@@ -561,6 +593,8 @@ describe("scoreModelForQuery", () => {
       label: "Super",
       provider: "test",
       contextWindow: 128_000,
+      effectiveContextWindow: 102_400,
+      maxOutputTokens: 4_096,
       inputCostPer1M: 0.15,
       outputCostPer1M: 0.60,
       capabilities: { reasoning: 99, coding: 99, creative: 99, factual: 99, webSearch: true, vision: true, knowledgeCutoff: "2026-03" },

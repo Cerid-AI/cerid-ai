@@ -7,7 +7,7 @@ export function Footer() {
         <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
           <div>
             <p className="text-lg font-bold">
-              Cerid<span className="text-primary">AI</span>
+              Cerid<span className="text-brand">AI</span>
             </p>
             <p className="mt-2 text-sm text-muted-foreground">
               Privacy-first AI knowledge companion. Your data stays yours.
@@ -20,6 +20,7 @@ export function Footer() {
               <li><Link href="/features" className="hover:text-foreground">Features</Link></li>
               <li><Link href="/pricing" className="hover:text-foreground">Pricing</Link></li>
               <li><Link href="/security" className="hover:text-foreground">Security</Link></li>
+              <li><Link href="/changelog" className="hover:text-foreground">Changelog</Link></li>
             </ul>
           </div>
 

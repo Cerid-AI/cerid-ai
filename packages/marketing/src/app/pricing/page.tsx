@@ -1,4 +1,10 @@
+import type { Metadata } from "next"
 import Link from "next/link"
+
+export const metadata: Metadata = {
+  title: "Pricing — Cerid AI",
+  description: "Cerid AI is free and open source. Self-host the full-featured Community edition or wait for managed Pro hosting.",
+}
 import { Check, ArrowRight } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -22,6 +28,12 @@ const PLANS = [
       "Smart model routing",
       "Universal file ingestion",
       "Multi-machine sync",
+      "Cross-encoder reranking (ONNX)",
+      "Contextual chunking",
+      "6-stage adaptive RAG pipeline",
+      "Semantic query cache",
+      "Async batch ingestion",
+      "Simple / Advanced mode",
       "Community support",
     ],
   },
@@ -31,7 +43,7 @@ const PLANS = [
     period: "per query / per ingestion",
     description: "Managed hosting with usage-based pricing. Bring your own LLM key.",
     badge: "Coming Soon",
-    cta: "Join Waitlist",
+    cta: "Star on GitHub",
     ctaHref: "https://github.com/sunrunnerfire/cerid-ai",
     features: [
       "Everything in Community",

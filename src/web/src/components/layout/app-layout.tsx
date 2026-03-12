@@ -33,7 +33,7 @@ export function AppLayout({ children }: AppLayoutProps) {
           theme={theme}
           onToggleTheme={toggleTheme}
         />
-        <main className="flex-1 overflow-hidden">{children(activePane)}</main>
+        <main key={activePane} className="flex-1 animate-in fade-in duration-200 overflow-hidden">{children(activePane)}</main>
       </div>
       <StatusBar />
     </div>

@@ -12,11 +12,11 @@ import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import config
 from deps import get_chroma, get_neo4j, get_redis
-from services.ingestion import ingest_content, ingest_file
+from services.ingestion import ingest_batch, ingest_content, ingest_file
 from utils import cache
 from utils.time import utcnow
 
@@ -52,12 +52,25 @@ class FeedbackIngestRequest(BaseModel):
     latency_ms: int = 0
 
 
+class BatchIngestItem(BaseModel):
+    content: str | None = None
+    file_path: str | None = None
+    domain: str = ""
+    sub_category: str = ""
+    tags: str = ""
+    categorize_mode: str = ""
+
+
+class BatchIngestRequest(BaseModel):
+    items: list[BatchIngestItem] = Field(..., max_length=20)
+
+
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
 @router.post("/ingest")
 async def ingest_endpoint(req: IngestRequest):
     async with _ingest_semaphore:
-        result = ingest_content(req.content, req.domain)
+        result = await asyncio.to_thread(ingest_content, req.content, req.domain)
     try:
         from utils.query_cache import invalidate_all
         invalidate_all()
@@ -92,6 +105,42 @@ async def ingest_file_endpoint(req: IngestFileRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/ingest_batch")
+async def ingest_batch_endpoint(req: BatchIngestRequest):
+    """Ingest up to 20 files/content items concurrently."""
+    try:
+        # Validate each item has exactly one of content or file_path
+        for i, item in enumerate(req.items):
+            if item.content and item.file_path:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Item {i}: provide either 'content' or 'file_path', not both",
+                )
+            if not item.content and not item.file_path:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Item {i}: must have either 'content' or 'file_path'",
+                )
+
+        items = [item.model_dump() for item in req.items]
+        result = await ingest_batch(items)
+
+        try:
+            from utils.query_cache import invalidate_all
+            invalidate_all()
+        except Exception as e:
+            logger.debug(f"Cache invalidation failed (non-blocking): {e}")
+
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Batch ingest error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/ingest/feedback")
 async def ingest_feedback_endpoint(req: FeedbackIngestRequest):
     """Ingest a chat turn into the conversations domain for the feedback loop."""
@@ -114,7 +163,7 @@ async def ingest_feedback_endpoint(req: FeedbackIngestRequest):
             "summary": req.user_message[:200],
         }
         async with _ingest_semaphore:
-            result = ingest_content(content, "conversations", metadata=metadata)
+            result = await asyncio.to_thread(ingest_content, content, "conversations", metadata)
 
         try:
             cache.log_event(

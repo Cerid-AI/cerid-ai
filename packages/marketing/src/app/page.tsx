@@ -9,6 +9,7 @@ import {
   Zap,
   Bot,
   GitBranch,
+  Layers,
   ArrowRight,
 } from "lucide-react"
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -50,6 +51,12 @@ const VALUE_PROPS = [
     description:
       "Capability-based model scoring with three-way routing. The right model for every query.",
   },
+  {
+    icon: Layers,
+    title: "Advanced RAG Pipeline",
+    description:
+      "6-stage adaptive pipeline with query decomposition, MMR diversity, late interaction scoring, and semantic cache.",
+  },
 ]
 
 export default function Home() {
@@ -58,29 +65,29 @@ export default function Home() {
       {/* Hero */}
       <section className="relative overflow-hidden bg-gradient-to-b from-background to-muted/30 py-24 md:py-32">
         <div className="mx-auto max-w-6xl px-6 text-center">
-          <div className="mx-auto inline-flex items-center gap-2 rounded-full border border-border/60 bg-muted/50 px-4 py-1.5 text-sm text-muted-foreground">
+          <div className="animate-in fade-in slide-in-from-bottom-4 fill-mode-both duration-500 mx-auto inline-flex items-center gap-2 rounded-full border border-border/60 bg-muted/50 px-4 py-1.5 text-sm text-muted-foreground">
             <Sparkles className="h-3.5 w-3.5" />
             Open source &middot; Self-hosted &middot; Privacy-first
           </div>
 
-          <h1 className="mt-6 text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl">
+          <h1 className="animate-in fade-in slide-in-from-bottom-4 fill-mode-both duration-700 delay-150 mt-6 text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl">
             Your AI Knowledge
             <br />
             <span className="text-primary">Companion</span>
           </h1>
 
-          <p className="mx-auto mt-6 max-w-2xl text-lg text-muted-foreground">
+          <p className="animate-in fade-in slide-in-from-bottom-4 fill-mode-both duration-700 delay-300 mx-auto mt-6 max-w-2xl text-lg text-muted-foreground">
             Cerid AI unifies your knowledge bases into a context-aware LLM
-            interface with RAG-powered retrieval, intelligent agents, and
-            real-time verification. All data stays on your machine.
+            interface with a 6-stage adaptive RAG pipeline, 9 intelligent agents,
+            and real-time verification. All data stays on your machine.
           </p>
 
-          <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
+          <div className="animate-in fade-in slide-in-from-bottom-4 fill-mode-both duration-700 delay-500 mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
             <Link
               href="https://github.com/sunrunnerfire/cerid-ai"
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-primary px-6 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90"
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-brand px-6 text-sm font-medium text-brand-foreground shadow transition-colors hover:bg-brand/90"
             >
               Get Started
               <ArrowRight className="h-4 w-4" />
@@ -91,6 +98,19 @@ export default function Home() {
             >
               Explore Features
             </Link>
+          </div>
+
+          {/* Stats strip */}
+          <div className="mx-auto mt-12 flex max-w-lg flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
+            <span>Phase 37</span>
+            <span className="text-border">·</span>
+            <span>1,302 tests</span>
+            <span className="text-border">·</span>
+            <span>9 agents</span>
+            <span className="text-border">·</span>
+            <span>18 MCP tools</span>
+            <span className="text-border">·</span>
+            <span>6-stage RAG</span>
           </div>
         </div>
       </section>
@@ -109,8 +129,12 @@ export default function Home() {
           </div>
 
           <div className="mt-12 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {VALUE_PROPS.map((prop) => (
-              <Card key={prop.title} className="border-border bg-card">
+            {VALUE_PROPS.map((prop, i) => (
+              <Card
+                key={prop.title}
+                className="animate-in fade-in slide-in-from-bottom-2 fill-mode-both border-border bg-card"
+                style={{ animationDelay: `${i * 100}ms`, animationDuration: "500ms" }}
+              >
                 <CardHeader>
                   <prop.icon className="mb-2 h-6 w-6 text-primary" />
                   <CardTitle className="text-lg">{prop.title}</CardTitle>
@@ -192,7 +216,7 @@ export default function Home() {
             href="https://github.com/sunrunnerfire/cerid-ai"
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-8 inline-flex h-11 items-center justify-center gap-2 rounded-md bg-primary px-6 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90"
+            className="mt-8 inline-flex h-11 items-center justify-center gap-2 rounded-md bg-brand px-6 text-sm font-medium text-brand-foreground shadow transition-colors hover:bg-brand/90"
           >
             View on GitHub
             <ArrowRight className="h-4 w-4" />

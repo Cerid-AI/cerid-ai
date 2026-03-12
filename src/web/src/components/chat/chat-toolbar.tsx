@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils"
 
 interface ChatToolbarProps {
   isNarrow: boolean
+  isSimple?: boolean
   // KB
   showKB: boolean
   onToggleKB: () => void
@@ -56,6 +57,7 @@ interface ChatToolbarProps {
 
 export function ChatToolbar({
   isNarrow,
+  isSimple,
   showKB, onToggleKB,
   autoInject, toggleAutoInject, autoInjectThreshold, setAutoInjectThreshold,
   hallucinationEnabled, toggleHallucinationEnabled,
@@ -75,6 +77,9 @@ export function ChatToolbar({
       </Button>
       <div className="flex-1" />
       <TooltipProvider delayDuration={0}>
+        {/* Advanced-only toggles */}
+        {!isSimple && (
+        <>
         {/* KB toggle (right-click: auto-inject settings) */}
         <ContextMenu>
           <ContextMenuTrigger asChild>
@@ -83,7 +88,7 @@ export function ChatToolbar({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className={cn("h-8 w-8", showKB && "text-green-500")}
+                  className={cn("h-8 w-8", showKB && "text-brand")}
                   onClick={onToggleKB}
                   aria-label={showKB ? "Hide knowledge context" : "Show knowledge context"}
                 >
@@ -122,7 +127,7 @@ export function ChatToolbar({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className={cn("h-8 w-8", hallucinationEnabled && "text-green-500")}
+                  className={cn("h-8 w-8", hallucinationEnabled && "text-brand")}
                   onClick={toggleHallucinationEnabled}
                   aria-label={hallucinationEnabled ? "Disable response verification" : "Enable response verification"}
                 >
@@ -156,7 +161,7 @@ export function ChatToolbar({
                     <Button
                       variant="ghost"
                       size="icon"
-                      className={cn("h-8 w-8", feedbackLoop && "text-green-500")}
+                      className={cn("h-8 w-8", feedbackLoop && "text-brand")}
                       onClick={toggleFeedbackLoop}
                       aria-label={feedbackLoop ? "Disable feedback loop" : "Enable feedback loop"}
                     >
@@ -184,7 +189,7 @@ export function ChatToolbar({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className={cn("h-8 w-8", showDashboard && "text-green-500")}
+                  className={cn("h-8 w-8", showDashboard && "text-brand")}
                   onClick={toggleDashboard}
                   aria-label={showDashboard ? "Hide metrics dashboard" : "Show metrics dashboard"}
                 >
@@ -204,7 +209,7 @@ export function ChatToolbar({
                     <Button
                       variant="ghost"
                       size="icon"
-                      className={cn("h-8 w-8", routingMode !== "manual" && "text-green-500")}
+                      className={cn("h-8 w-8", routingMode !== "manual" && "text-brand")}
                       onClick={cycleRoutingMode}
                       aria-label={`Smart routing: ${routingMode}`}
                     >
@@ -238,28 +243,28 @@ export function ChatToolbar({
             </PopoverTrigger>
             <PopoverContent className="w-48">
               <button
-                className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent", feedbackLoop && "text-green-500")}
+                className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent", feedbackLoop && "text-brand")}
                 onClick={toggleFeedbackLoop}
               >
                 <Rss className="h-4 w-4" />
                 {feedbackLoop ? "Feedback: ON" : "Feedback: OFF"}
               </button>
               <button
-                className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent", memoryExtraction && "text-green-500")}
+                className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent", memoryExtraction && "text-brand")}
                 onClick={toggleMemoryExtraction}
               >
                 <Brain className="h-4 w-4" />
                 {memoryExtraction ? "Memory: ON" : "Memory: OFF"}
               </button>
               <button
-                className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent", showDashboard && "text-green-500")}
+                className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent", showDashboard && "text-brand")}
                 onClick={toggleDashboard}
               >
                 <LayoutDashboard className="h-4 w-4" />
                 {showDashboard ? "Dashboard: ON" : "Dashboard: OFF"}
               </button>
               <button
-                className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent", routingMode !== "manual" && "text-green-500")}
+                className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent", routingMode !== "manual" && "text-brand")}
                 onClick={cycleRoutingMode}
               >
                 <Zap className="h-4 w-4" />
@@ -267,6 +272,8 @@ export function ChatToolbar({
               </button>
             </PopoverContent>
           </Popover>
+        )}
+        </>
         )}
       </TooltipProvider>
       <ModelSelect value={selectedModel} onChange={onModelChange} />

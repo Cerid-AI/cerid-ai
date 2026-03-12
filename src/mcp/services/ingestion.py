@@ -18,11 +18,12 @@ from pathlib import Path
 from typing import Any
 
 import config
+from db import neo4j as graph
 from deps import get_chroma, get_neo4j, get_redis
-from utils import cache, graph
+from parsers import parse_file
+from utils import cache
 from utils.chunker import chunk_text, make_context_header
 from utils.metadata import ai_categorize, extract_metadata
-from utils.parsers import parse_file
 from utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion")
@@ -45,6 +46,20 @@ def validate_file_path(file_path: str) -> Path:
 
 def _content_hash(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _rollback_chromadb(collection, chunk_ids: list[str]) -> None:
+    """Compensating transaction: remove ChromaDB chunks when Neo4j write fails."""
+    try:
+        collection.delete(ids=chunk_ids)
+        logger.warning(
+            "Rolled back %d ChromaDB chunks after graph failure", len(chunk_ids),
+        )
+    except Exception as e:
+        logger.error(
+            "CRITICAL: ChromaDB rollback failed for %d chunks — orphaned data: %s",
+            len(chunk_ids), e,
+        )
 
 
 def _check_duplicate(content_hash: str, domain: str) -> dict | None:
@@ -296,10 +311,7 @@ def ingest_content(
         err_msg = str(e).lower()
         if "constraint" in err_msg and "content_hash" in err_msg:
             logger.info(f"Concurrent duplicate detected via constraint: {base_meta.get('filename', '?')}")
-            try:
-                collection.delete(ids=chunk_ids)
-            except Exception as cleanup_err:
-                logger.warning(f"Failed to clean up chunks after concurrent duplicate: {cleanup_err}")
+            _rollback_chromadb(collection, chunk_ids)
             return {
                 "status": "duplicate",
                 "artifact_id": artifact_id,
@@ -309,10 +321,15 @@ def ingest_content(
                 "duplicate_of": "(concurrent)",
             }
         logger.error(f"Neo4j artifact creation failed: {e}")
-        try:
-            collection.delete(ids=chunk_ids)
-        except Exception as ce:
-            logger.warning(f"Failed to roll back chunks after Neo4j failure: {ce}")
+        _rollback_chromadb(collection, chunk_ids)
+        return {
+            "status": "error",
+            "artifact_id": artifact_id,
+            "domain": domain,
+            "chunks": 0,
+            "timestamp": utcnow_iso(),
+            "error": f"Graph storage failed: {e}",
+        }
 
     try:
         cache.log_event(
@@ -397,7 +414,9 @@ async def ingest_file(
     """Parse a file, extract metadata, optionally AI-categorize, chunk, and store."""
     validate_file_path(file_path)
     filename = Path(file_path).name
-    parsed = parse_file(file_path)
+    # Run sync parser in thread pool to avoid blocking the event loop
+    # (CPU-bound: PDF/DOCX parsing can take 100ms–2s per file)
+    parsed = await asyncio.to_thread(parse_file, file_path)
     text = parsed["text"]
     meta = extract_metadata(text, filename, domain or config.DEFAULT_DOMAIN)
     mode = categorize_mode or (
@@ -431,7 +450,9 @@ async def ingest_file(
     meta["file_type"] = parsed.get("file_type", "")
     if parsed.get("page_count") is not None:
         meta["page_count"] = parsed["page_count"]
-    result = ingest_content(text, domain, metadata=meta)
+    # Run sync ingest_content in thread pool to avoid blocking the event loop
+    # (I/O-bound: Neo4j, ChromaDB, Redis writes + CPU-bound tiktoken chunking)
+    result = await asyncio.to_thread(ingest_content, text, domain, meta)
     result["filename"] = filename
     result["categorize_mode"] = mode
     result["metadata"] = {
@@ -439,3 +460,82 @@ async def ingest_file(
         if k in ("filename", "domain", "sub_category", "keywords", "summary", "tags_json", "file_type", "estimated_tokens")
     }
     return result
+
+
+# ── Batch ingestion ──────────────────────────────────────────────────────────
+
+# Concurrency limiter shared with single-file ingestion — prevents overloading
+# ChromaDB / Neo4j with too many parallel writes.
+_ingest_semaphore = asyncio.Semaphore(3)
+
+BATCH_MAX_ITEMS = 20
+
+
+async def ingest_batch(
+    items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Ingest up to BATCH_MAX_ITEMS files/content entries concurrently.
+
+    Each item should contain either ``file_path`` or ``content`` (not both).
+    Returns per-item results with overall success/failure counts.
+    Individual failures do not block the rest of the batch.
+    """
+    if len(items) > BATCH_MAX_ITEMS:
+        raise ValueError(
+            f"Batch size {len(items)} exceeds maximum ({BATCH_MAX_ITEMS})"
+        )
+
+    async def _ingest_one(item: dict[str, Any]) -> dict[str, Any]:
+        """Ingest a single item under the shared semaphore."""
+        async with _ingest_semaphore:
+            try:
+                if item.get("file_path"):
+                    return await ingest_file(
+                        file_path=item["file_path"],
+                        domain=item.get("domain", ""),
+                        sub_category=item.get("sub_category", ""),
+                        tags=item.get("tags", ""),
+                        categorize_mode=item.get("categorize_mode", ""),
+                    )
+                elif item.get("content"):
+                    return await asyncio.to_thread(
+                        ingest_content,
+                        item["content"],
+                        item.get("domain", "general"),
+                        item.get("metadata"),
+                    )
+                else:
+                    return {"status": "error", "error": "Item must have 'file_path' or 'content'"}
+            except Exception as e:
+                logger.error("Batch ingest item failed: %s", e)
+                return {
+                    "status": "error",
+                    "error": str(e),
+                    "file_path": item.get("file_path", ""),
+                }
+
+    results = await asyncio.gather(
+        *[_ingest_one(item) for item in items],
+        return_exceptions=True,
+    )
+
+    # Convert any bare exceptions to error dicts
+    clean_results: list[dict[str, Any]] = []
+    for i, r in enumerate(results):
+        if isinstance(r, Exception):
+            clean_results.append({
+                "status": "error",
+                "error": str(r),
+                "file_path": items[i].get("file_path", ""),
+            })
+        else:
+            clean_results.append(r)
+
+    succeeded = sum(1 for r in clean_results if r.get("status") in ("success", "duplicate", "updated"))
+    failed = len(clean_results) - succeeded
+
+    return {
+        "results": clean_results,
+        "succeeded": succeeded,
+        "failed": failed,
+    }

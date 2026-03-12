@@ -1,3 +1,10 @@
+import type { Metadata } from "next"
+
+export const metadata: Metadata = {
+  title: "Security — Cerid AI",
+  description: "How Cerid AI keeps your data private: local-first architecture, encrypted secrets, infrastructure hardening, and zero telemetry.",
+}
+
 import {
   Shield,
   Lock,

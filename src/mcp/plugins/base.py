@@ -88,7 +88,7 @@ class ParserPlugin(CeridPlugin):
         ...
 
     def register(self) -> None:
-        from utils.parsers import PARSER_REGISTRY
+        from parsers import PARSER_REGISTRY
 
         for ext, parser_fn in self.get_parsers().items():
             ext_lower = ext.lower()

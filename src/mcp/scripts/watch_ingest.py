@@ -46,6 +46,12 @@ STABILITY_INTERVAL = 2.0  # seconds between size checks (max wait ~30s)
 RETRY_DELAY = 30.0
 _retry_queue: list[tuple[str, str, float]] = []  # (host_path, mode, retry_after)
 
+# Batch queue: accumulate file events before flushing via /ingest_batch
+BATCH_WINDOW = 5.0  # seconds — accumulates events before flushing
+BATCH_MAX = 20       # max items per batch (matches server limit)
+_pending_queue: list[tuple[str, str]] = []  # (host_path, mode)
+_last_queue_time: float = 0.0  # time of last item added to pending queue
+
 
 def _log(level: str, msg: str):
     """Simple colored logging."""
@@ -163,8 +169,10 @@ def _process_retries():
         ingest_file(host_path, mode)
 
 
-def ingest_file(host_path: str, default_mode: str):
-    """Send a file to the MCP /ingest_file endpoint."""
+def _queue_for_batch(host_path: str, default_mode: str):
+    """Add a file to the pending batch queue after validation and stability checks."""
+    global _last_queue_time
+
     if not _should_process(host_path):
         return
 
@@ -173,44 +181,94 @@ def ingest_file(host_path: str, default_mode: str):
         _log("WARN", f"  Skipping (file disappeared): {Path(host_path).name}")
         return
 
-    domain, sub_category = _detect_domain(host_path)
-    container_path = _translate_path(host_path)
-    mode = "manual" if domain else default_mode
+    # Deduplicate within the pending queue
+    for queued_path, _ in _pending_queue:
+        if queued_path == host_path:
+            return
+
+    _pending_queue.append((host_path, default_mode))
+    _last_queue_time = time.time()
 
     filename = Path(host_path).name
-    sub_info = f"/{sub_category}" if sub_category else ""
-    _log("INFO", f"Ingesting: {filename} → domain={domain or '(AI)'}{sub_info}, mode={mode}")
+    _log("INFO", f"Queued: {filename} ({len(_pending_queue)} pending)")
 
-    try:
-        payload = {
+    # Flush immediately if batch is full
+    if len(_pending_queue) >= BATCH_MAX:
+        _flush_batch()
+
+
+def _flush_batch():
+    """Send all pending files as a single batch request to /ingest_batch."""
+    if not _pending_queue:
+        return
+
+    items_to_send = list(_pending_queue)
+    _pending_queue.clear()
+
+    batch_items = []
+    for host_path, default_mode in items_to_send:
+        domain, sub_category = _detect_domain(host_path)
+        container_path = _translate_path(host_path)
+        mode = "manual" if domain else default_mode
+
+        item: dict[str, str] = {
             "file_path": container_path,
             "domain": domain,
             "categorize_mode": mode,
         }
         if sub_category:
-            payload["sub_category"] = sub_category
+            item["sub_category"] = sub_category
+        batch_items.append(item)
+
+    _log("INFO", f"Flushing batch: {len(batch_items)} file(s)")
+
+    try:
         resp = requests.post(
-            f"{MCP_URL}/ingest_file",
-            json=payload,
-            timeout=60,
+            f"{MCP_URL}/ingest_batch",
+            json={"items": batch_items},
+            timeout=120,  # longer timeout for batch
         )
         if resp.status_code == 200:
             data = resp.json()
-            status = data.get("status", "success")
-            if status == "duplicate":
-                dup_of = data.get("duplicate_of", "?")
-                _log("INFO", f"  ⊘ {filename}: duplicate of '{dup_of}' (skipped)")
-            else:
-                assigned_domain = data.get("domain", "?")
-                chunks = data.get("chunks", 0)
-                cat_mode = data.get("categorize_mode", mode)
-                _log("INFO", f"  ✓ {filename} → {assigned_domain} ({chunks} chunks, {cat_mode})")
+            succeeded = data.get("succeeded", 0)
+            failed = data.get("failed", 0)
+            _log("INFO", f"  Batch result: {succeeded} succeeded, {failed} failed")
+
+            # Log individual results
+            for i, result in enumerate(data.get("results", [])):
+                host_path = items_to_send[i][0] if i < len(items_to_send) else "?"
+                filename = Path(host_path).name
+                status = result.get("status", "error")
+                if status == "duplicate":
+                    _log("INFO", f"  ⊘ {filename}: duplicate (skipped)")
+                elif status in ("success", "updated"):
+                    chunks = result.get("chunks", 0)
+                    domain = result.get("domain", "?")
+                    _log("INFO", f"  ✓ {filename} → {domain} ({chunks} chunks)")
+                elif status == "error":
+                    error = result.get("error", "unknown")
+                    _log("ERROR", f"  ✗ {filename}: {error}")
+                    _schedule_retry(host_path, items_to_send[i][1])
         else:
-            _log("ERROR", f"  ✗ {filename}: HTTP {resp.status_code} - {resp.text[:200]}")
-            _schedule_retry(host_path, default_mode)
+            _log("ERROR", f"  Batch HTTP {resp.status_code}: {resp.text[:200]}")
+            # Fall back to individual retry for all items
+            for host_path, mode in items_to_send:
+                _schedule_retry(host_path, mode)
     except requests.RequestException as e:
-        _log("ERROR", f"  ✗ {filename}: {e}")
-        _schedule_retry(host_path, default_mode)
+        _log("ERROR", f"  Batch request failed: {e}")
+        # Fall back to individual retry for all items
+        for host_path, mode in items_to_send:
+            _schedule_retry(host_path, mode)
+
+
+def ingest_file(host_path: str, default_mode: str):
+    """Queue a file for batch ingestion via /ingest_batch.
+
+    Files are accumulated in a pending queue and flushed as a batch
+    after BATCH_WINDOW seconds of inactivity or when BATCH_MAX items
+    are queued. Falls back to individual /ingest_file on batch failure.
+    """
+    _queue_for_batch(host_path, default_mode)
 
 
 def main():
@@ -268,7 +326,14 @@ def main():
         while True:
             time.sleep(1)
             _process_retries()
+            # Flush pending batch if window has elapsed since last queued item
+            if _pending_queue and (time.time() - _last_queue_time) >= BATCH_WINDOW:
+                _flush_batch()
     except KeyboardInterrupt:
+        # Flush any remaining items before stopping
+        if _pending_queue:
+            _log("INFO", "Flushing remaining batch before exit...")
+            _flush_batch()
         observer.stop()
         _log("INFO", "Watcher stopped")
     observer.join()

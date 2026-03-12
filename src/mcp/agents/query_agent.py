@@ -6,8 +6,9 @@
 import asyncio
 import json
 import logging
-import re
+import time
 from collections import defaultdict
+from contextlib import contextmanager
 from typing import Any
 
 import httpx
@@ -20,8 +21,43 @@ from utils.bifrost import call_bifrost, extract_content
 from utils.cache import log_event
 from utils.circuit_breaker import CircuitOpenError
 from utils.llm_parsing import parse_llm_json
+from utils.text import STOPWORDS as _STOPWORDS
+from utils.text import WORD_RE as _WORD_RE
 
 logger = logging.getLogger("ai-companion.query_agent")
+
+
+# ---------------------------------------------------------------------------
+# Step timer for latency tracing
+# ---------------------------------------------------------------------------
+
+class StepTimer:
+    """Lightweight latency tracker for pipeline steps.
+
+    Zero overhead when disabled — the ``step()`` context manager becomes a no-op.
+    """
+
+    __slots__ = ("_enabled", "_timings", "_t0")
+
+    def __init__(self, enabled: bool = False):
+        self._enabled = enabled
+        self._timings: dict[str, float] = {}
+        self._t0 = time.monotonic() if enabled else 0.0
+
+    @contextmanager
+    def step(self, name: str):
+        if not self._enabled:
+            yield
+            return
+        start = time.monotonic()
+        yield
+        self._timings[name] = round(time.monotonic() - start, 4)
+
+    def result(self) -> dict[str, float]:
+        if not self._enabled:
+            return {}
+        self._timings["total"] = round(time.monotonic() - self._t0, 4)
+        return dict(self._timings)
 
 
 # ---------------------------------------------------------------------------
@@ -74,26 +110,6 @@ def _get_adjacent_domains(requested: list[str]) -> dict[str, float]:
 # Conversation-aware query enrichment
 # ---------------------------------------------------------------------------
 
-# Common English stopwords to filter from context terms
-_STOPWORDS = frozenset({
-    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
-    "have", "has", "had", "do", "does", "did", "will", "would", "could",
-    "should", "may", "might", "shall", "can", "need", "dare", "ought",
-    "used", "to", "of", "in", "for", "on", "with", "at", "by", "from",
-    "as", "into", "through", "during", "before", "after", "above", "below",
-    "between", "out", "off", "over", "under", "again", "further", "then",
-    "once", "here", "there", "when", "where", "why", "how", "all", "each",
-    "every", "both", "few", "more", "most", "other", "some", "such", "no",
-    "nor", "not", "only", "own", "same", "so", "than", "too", "very",
-    "just", "because", "but", "and", "or", "if", "while", "about", "up",
-    "that", "this", "these", "those", "am", "what", "which", "who", "whom",
-    "its", "it", "he", "she", "they", "them", "his", "her", "my", "your",
-    "our", "their", "me", "him", "us", "i", "you", "we", "also", "like",
-    "get", "got", "make", "made", "know", "think", "want", "see", "look",
-    "find", "give", "tell", "say", "said", "going", "come", "take",
-})
-
-_WORD_RE = re.compile(r"[a-zA-Z0-9_]+(?:[-'][a-zA-Z0-9_]+)*")
 
 
 def _enrich_query(
@@ -293,6 +309,31 @@ def deduplicate_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# Lightweight retrieval (verification fast-path)
+# ---------------------------------------------------------------------------
+
+async def lightweight_kb_query(
+    query: str,
+    domains: list[str] | None = None,
+    top_k: int = 5,
+    chroma_client: Any | None = None,
+) -> list[dict[str, Any]]:
+    """Fast KB retrieval for verification — vector + BM25 hybrid only.
+
+    Skips: graph expansion, cross-encoder reranking, quality boost,
+    MMR diversity, semantic cache, adaptive gate, query decomposition,
+    context assembly.  Returns raw ranked results suitable for
+    claim verification where only semantic similarity matters.
+    """
+    results = await multi_domain_query(
+        query, domains=domains, top_k=top_k, chroma_client=chroma_client,
+    )
+    results = deduplicate_results(results)
+    results.sort(key=lambda x: x.get("relevance", 0.0), reverse=True)
+    return results[:top_k]
+
+
+# ---------------------------------------------------------------------------
 # Graph-enhanced retrieval
 # ---------------------------------------------------------------------------
 
@@ -306,7 +347,7 @@ async def graph_expand_results(
     if neo4j_driver is None or not results:
         return results
 
-    from utils.graph import find_related_artifacts
+    from db.neo4j import find_related_artifacts
 
     initial_ids = list({r["artifact_id"] for r in results if r.get("artifact_id")})
     if not initial_ids:
@@ -330,61 +371,64 @@ async def graph_expand_results(
         chroma_client = get_chroma()
 
     existing_ids = {r.get("chunk_id") for r in results}
-    graph_results: list[dict[str, Any]] = []
 
-    for rel_artifact in related:
-        try:
-            chunk_ids_json = rel_artifact.get("chunk_ids", "[]")
-            chunk_ids = json.loads(chunk_ids_json) if chunk_ids_json else []
-            if not chunk_ids:
-                continue
+    async def _fetch_related(rel_artifact: dict) -> list[dict[str, Any]]:
+        """Fetch and score chunks for a single related artifact."""
+        chunk_ids_json = rel_artifact.get("chunk_ids", "[]")
+        chunk_ids = json.loads(chunk_ids_json) if chunk_ids_json else []
+        if not chunk_ids:
+            return []
 
-            domain = rel_artifact["domain"]
-            collection = chroma_client.get_collection(name=config.collection_name(domain))
+        domain = rel_artifact["domain"]
+        collection = chroma_client.get_collection(name=config.collection_name(domain))
 
-            # Re-score related chunks against the actual query
-            fetched = collection.query(
-                query_texts=[query],
-                n_results=min(3, len(chunk_ids)),  # limit chunks per related artifact
-                where={"artifact_id": rel_artifact["id"]},
-                include=["documents", "metadatas", "distances"],
+        fetched = collection.query(
+            query_texts=[query],
+            n_results=min(3, len(chunk_ids)),
+            where={"artifact_id": rel_artifact["id"]},
+            include=["documents", "metadatas", "distances"],
+        )
+
+        if not fetched["ids"] or not fetched["ids"][0]:
+            return []
+
+        chunks: list[dict[str, Any]] = []
+        for i, chunk_id in enumerate(fetched["ids"][0]):
+            distance = fetched["distances"][0][i] if fetched["distances"] else 1.0
+            raw_relevance = max(0.0, min(1.0, 1.0 - distance))
+            depth_penalty = 1.0 / (1.0 + rel_artifact.get("relationship_depth", 1))
+            relevance = round(
+                raw_relevance * config.GRAPH_RELATED_SCORE_FACTOR * depth_penalty, 4
             )
+            metadata = fetched["metadatas"][0][i] if fetched["metadatas"] else {}
+            chunks.append({
+                "content": fetched["documents"][0][i],
+                "relevance": relevance,
+                "artifact_id": rel_artifact["id"],
+                "filename": rel_artifact["filename"],
+                "domain": domain,
+                "chunk_index": metadata.get("chunk_index", 0),
+                "collection": config.collection_name(domain),
+                "chunk_id": chunk_id,
+                "graph_source": True,
+                "relationship_type": rel_artifact.get("relationship_type", ""),
+                "relationship_reason": rel_artifact.get("relationship_reason", ""),
+            })
+        return chunks
 
-            if not fetched["ids"] or not fetched["ids"][0]:
-                continue
+    # Fetch chunks for all related artifacts in parallel
+    tasks = [_fetch_related(ra) for ra in related]
+    all_fetched = await asyncio.gather(*tasks, return_exceptions=True)
 
-            for i, chunk_id in enumerate(fetched["ids"][0]):
-                if chunk_id in existing_ids:
-                    continue
-
-                distance = fetched["distances"][0][i] if fetched["distances"] else 1.0
-                raw_relevance = max(0.0, min(1.0, 1.0 - distance))
-                # Apply graph score factor — related content scores lower than direct hits
-                depth_penalty = 1.0 / (1.0 + rel_artifact.get("relationship_depth", 1))
-                relevance = round(
-                    raw_relevance * config.GRAPH_RELATED_SCORE_FACTOR * depth_penalty, 4
-                )
-
-                metadata = fetched["metadatas"][0][i] if fetched["metadatas"] else {}
-
-                graph_results.append({
-                    "content": fetched["documents"][0][i],
-                    "relevance": relevance,
-                    "artifact_id": rel_artifact["id"],
-                    "filename": rel_artifact["filename"],
-                    "domain": domain,
-                    "chunk_index": metadata.get("chunk_index", 0),
-                    "collection": config.collection_name(domain),
-                    "chunk_id": chunk_id,
-                    "graph_source": True,
-                    "relationship_type": rel_artifact.get("relationship_type", ""),
-                    "relationship_reason": rel_artifact.get("relationship_reason", ""),
-                })
-                existing_ids.add(chunk_id)
-
-        except Exception as e:
-            logger.debug(f"Failed to fetch chunks for related artifact {rel_artifact['id'][:8]}: {e}")
+    graph_results: list[dict[str, Any]] = []
+    for batch in all_fetched:
+        if isinstance(batch, BaseException):
+            logger.debug("Failed to fetch chunks for related artifact: %s", batch)
             continue
+        for chunk in batch:
+            if chunk["chunk_id"] not in existing_ids:
+                graph_results.append(chunk)
+                existing_ids.add(chunk["chunk_id"])
 
     if graph_results:
         logger.info(f"Graph expansion added {len(graph_results)} related chunk(s)")
@@ -675,6 +719,44 @@ def _enrich_summaries(
     return results
 
 
+def _apply_quality_and_summaries(
+    results: list[dict[str, Any]],
+    neo4j_driver: Any | None = None,
+) -> list[dict[str, Any]]:
+    """Apply quality boost and summary enrichment in a single Neo4j query.
+
+    Replaces the previous sequential ``apply_quality_boost`` +
+    ``_enrich_summaries`` pattern, halving Neo4j round-trips.
+    """
+    if neo4j_driver is None or not results:
+        return results
+
+    artifact_ids = list({r["artifact_id"] for r in results if r.get("artifact_id")})
+    if not artifact_ids:
+        return results
+
+    try:
+        from db.neo4j.artifacts import get_quality_and_summaries
+        scores, summaries = get_quality_and_summaries(neo4j_driver, artifact_ids)
+    except Exception as e:
+        logger.warning(f"Quality/summary lookup failed (skipping): {e}")
+        return results
+
+    for r in results:
+        aid = r.get("artifact_id", "")
+        # Quality boost
+        quality = scores.get(aid, 0.5)
+        multiplier = config.QUALITY_BOOST_BASE + config.QUALITY_BOOST_FACTOR * quality
+        r["relevance"] = round(r["relevance"] * multiplier, 4)
+        r["quality_score"] = quality
+        # Summary enrichment
+        s = summaries.get(aid)
+        if s:
+            r["summary"] = s
+
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Context assembly
 # ---------------------------------------------------------------------------
@@ -739,8 +821,10 @@ async def agent_query(
     chroma_client: Any | None = None,
     redis_client: Any | None = None,
     neo4j_driver: Any | None = None,
+    debug_timing: bool = False,
 ) -> dict[str, Any]:
     """Execute multi-domain query with reranking, graph expansion, and context assembly."""
+    timer = StepTimer(enabled=debug_timing)
     from config.features import (
         ENABLE_ADAPTIVE_RETRIEVAL,
         ENABLE_INTELLIGENT_ASSEMBLY,
@@ -752,19 +836,20 @@ async def agent_query(
 
     # Semantic cache early-return — check before any retrieval work
     _query_embedding: np.ndarray | None = None
-    if ENABLE_SEMANTIC_CACHE and redis_client:
-        try:
-            from utils.embeddings import get_embedding_function
-            from utils.semantic_cache import cache_lookup
-            _ef = get_embedding_function()
-            if _ef is not None:
-                _query_embedding = np.asarray(_ef([query])[0])
-                cached = cache_lookup(_query_embedding, redis_client)
-                if cached is not None:
-                    cached["semantic_cache_hit"] = True
-                    return cached
-        except Exception as e:
-            logger.debug("Semantic cache lookup skipped: %s", e)
+    with timer.step("semantic_cache_lookup"):
+        if ENABLE_SEMANTIC_CACHE and redis_client:
+            try:
+                from utils.embeddings import get_embedding_function
+                from utils.semantic_cache import cache_lookup
+                _ef = get_embedding_function()
+                if _ef is not None:
+                    _query_embedding = np.asarray(_ef([query])[0])
+                    cached = cache_lookup(_query_embedding, redis_client)
+                    if cached is not None:
+                        cached["semantic_cache_hit"] = True
+                        return cached
+            except Exception as e:
+                logger.debug("Semantic cache lookup skipped: %s", e)
 
     search_query = query
     if conversation_messages:
@@ -807,29 +892,30 @@ async def agent_query(
 
     # Step 0.5: Query decomposition — may split into parallel sub-queries
     _skip_normal_retrieval = False
-    if ENABLE_QUERY_DECOMPOSITION:
-        from utils.query_decomposer import decompose_query, needs_decomposition, parallel_retrieve
-        if needs_decomposition(search_query):
-            sub_queries = await decompose_query(search_query)
-            if len(sub_queries) > 1:
-                logger.info("Decomposed query into %d sub-queries: %s", len(sub_queries), sub_queries)
+    with timer.step("vector_search"):
+        if ENABLE_QUERY_DECOMPOSITION:
+            from utils.query_decomposer import decompose_query, needs_decomposition, parallel_retrieve
+            if needs_decomposition(search_query):
+                sub_queries = await decompose_query(search_query)
+                if len(sub_queries) > 1:
+                    logger.info("Decomposed query into %d sub-queries: %s", len(sub_queries), sub_queries)
 
-                async def _retrieve_sub(sq: str) -> list[dict[str, Any]]:
-                    return await multi_domain_query(
-                        query=sq, domains=effective_domains,
-                        top_k=effective_top_k, chroma_client=chroma_client,
-                    )
+                    async def _retrieve_sub(sq: str) -> list[dict[str, Any]]:
+                        return await multi_domain_query(
+                            query=sq, domains=effective_domains,
+                            top_k=effective_top_k, chroma_client=chroma_client,
+                        )
 
-                results = await parallel_retrieve(sub_queries, _retrieve_sub)
-                _skip_normal_retrieval = True
+                    results = await parallel_retrieve(sub_queries, _retrieve_sub)
+                    _skip_normal_retrieval = True
 
-    if not _skip_normal_retrieval:
-        results = await multi_domain_query(
-            query=search_query,
-            domains=effective_domains,
-            top_k=effective_top_k,
-            chroma_client=chroma_client,
-        )
+        if not _skip_normal_retrieval:
+            results = await multi_domain_query(
+                query=search_query,
+                domains=effective_domains,
+                top_k=effective_top_k,
+                chroma_client=chroma_client,
+            )
 
     # Search adjacent domains at reduced weight when specific domains are requested
     if domains and set(domains) != set(DOMAINS):
@@ -851,14 +937,15 @@ async def agent_query(
 
     results = deduplicate_results(results)
 
-    graph_count_before = len(results)
-    results = await graph_expand_results(
-        results=results,
-        query=query,
-        chroma_client=chroma_client,
-        neo4j_driver=neo4j_driver,
-    )
-    graph_results_added = len(results) - graph_count_before
+    with timer.step("graph_expansion"):
+        graph_count_before = len(results)
+        results = await graph_expand_results(
+            results=results,
+            query=query,
+            chroma_client=chroma_client,
+            neo4j_driver=neo4j_driver,
+        )
+        graph_results_added = len(results) - graph_count_before
 
     from utils.temporal import is_within_window, parse_temporal_intent, recency_score
     temporal_days = parse_temporal_intent(query)
@@ -885,54 +972,58 @@ async def agent_query(
     results = apply_context_alignment_boost(results, conversation_messages)
 
     # Step 5: Reranking (includes both direct and graph-sourced results)
-    results = await rerank_results(
-        results=results,
-        query=query,
-        use_reranking=use_reranking,
-    )
+    with timer.step("reranking"):
+        results = await rerank_results(
+            results=results,
+            query=query,
+            use_reranking=use_reranking,
+        )
 
     # Step 5.1: Late interaction refinement — ColBERT-style MaxSim on top candidates
-    if ENABLE_LATE_INTERACTION and results:
-        try:
-            from utils.embeddings import get_embedding_function
-            from utils.late_interaction import late_interaction_rerank
-            _ef = get_embedding_function()
-            if _ef is not None:
-                results = late_interaction_rerank(
-                    results=results, query=query, embed_fn=_ef,
-                )
-        except Exception as e:
-            logger.warning("Late interaction scoring failed: %s", e)
+    with timer.step("late_interaction"):
+        if ENABLE_LATE_INTERACTION and results:
+            try:
+                from utils.embeddings import get_embedding_function
+                from utils.late_interaction import late_interaction_rerank
+                _ef = get_embedding_function()
+                if _ef is not None:
+                    results = late_interaction_rerank(
+                        results=results, query=query, embed_fn=_ef,
+                    )
+            except Exception as e:
+                logger.warning("Late interaction scoring failed: %s", e)
 
-    # Step 5.5: Quality boost — quality score multiplier after reranking
-    results = apply_quality_boost(results, neo4j_driver=neo4j_driver)
-    results = _enrich_summaries(results, neo4j_driver=neo4j_driver)
-    results = sorted(results, key=lambda x: x["relevance"], reverse=True)
+    # Step 5.5: Quality boost + summary enrichment — single Neo4j round-trip
+    with timer.step("quality_boost"):
+        results = _apply_quality_and_summaries(results, neo4j_driver=neo4j_driver)
+        results = sorted(results, key=lambda x: x["relevance"], reverse=True)
 
     # Step 5.6: MMR diversity reordering — reduce redundancy in top results
-    if ENABLE_MMR_DIVERSITY and len(results) > 1:
-        try:
-            from utils.diversity import mmr_reorder
-            results = mmr_reorder(results=results, query=query)
-        except Exception as e:
-            logger.warning("MMR diversity reordering failed: %s", e)
+    with timer.step("mmr_diversity"):
+        if ENABLE_MMR_DIVERSITY and len(results) > 1:
+            try:
+                from utils.diversity import mmr_reorder
+                results = mmr_reorder(results=results, query=query)
+            except Exception as e:
+                logger.warning("MMR diversity reordering failed: %s", e)
 
     # Step 5.7: Filter low-relevance results below minimum threshold
     results = [r for r in results if r["relevance"] >= config.QUALITY_MIN_RELEVANCE_THRESHOLD]
 
     # Step 6: Assemble context
-    if ENABLE_INTELLIGENT_ASSEMBLY and results:
-        try:
-            from utils.context_assembler import intelligent_assemble
-            context, sources, coverage_meta = intelligent_assemble(
-                results=results, query=query, max_chars=config.QUERY_CONTEXT_MAX_CHARS,
-            )
-            char_count = len(context)
-        except Exception as e:
-            logger.warning("Intelligent assembly failed, falling back: %s", e)
+    with timer.step("context_assembly"):
+        if ENABLE_INTELLIGENT_ASSEMBLY and results:
+            try:
+                from utils.context_assembler import intelligent_assemble
+                context, sources, coverage_meta = intelligent_assemble(
+                    results=results, query=query, max_chars=config.QUERY_CONTEXT_MAX_CHARS,
+                )
+                char_count = len(context)
+            except Exception as e:
+                logger.warning("Intelligent assembly failed, falling back: %s", e)
+                context, sources, char_count = assemble_context(results, max_chars=config.QUERY_CONTEXT_MAX_CHARS)
+        else:
             context, sources, char_count = assemble_context(results, max_chars=config.QUERY_CONTEXT_MAX_CHARS)
-    else:
-        context, sources, char_count = assemble_context(results, max_chars=config.QUERY_CONTEXT_MAX_CHARS)
 
     # Step 7: Calculate confidence (average relevance of included sources)
     confidence = 0.0
@@ -957,7 +1048,7 @@ async def agent_query(
         except Exception as e:
             logger.warning(f"Failed to log query: {e}")
 
-    result_dict = {
+    result_dict: dict[str, Any] = {
         "context": context,
         "sources": sources,
         "confidence": round(confidence, 4),
@@ -967,6 +1058,10 @@ async def agent_query(
         "graph_results": graph_results_added,
         "results": results,
     }
+
+    timings = timer.result()
+    if timings:
+        result_dict["_timings"] = timings
 
     # Semantic cache store — persist result for similar future queries
     if ENABLE_SEMANTIC_CACHE and redis_client and _query_embedding is not None:

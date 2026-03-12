@@ -8,7 +8,7 @@ import asyncio
 import json
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -91,8 +91,55 @@ class CurateEstimateRequest(BaseModel):
     max_artifacts: int = Field(200, ge=1, le=1000)
 
 
+class CompressRequest(BaseModel):
+    messages: list[dict[str, str]]
+    target_tokens: int = Field(ge=100, le=1_000_000)
+
+
+@router.post("/chat/compress")
+async def compress_history_endpoint(req: CompressRequest):
+    """Compress conversation history to fit a target token budget.
+
+    Uses LLM summarization for the middle turns while preserving the
+    system message and most recent turns verbatim.  Falls back to pure
+    sliding-window truncation if the LLM call fails.
+    """
+    try:
+        from utils.context_compression import (
+            _estimate_messages_tokens,
+            compress_history,
+            sliding_window_prune,
+        )
+
+        messages = [dict(m) for m in req.messages]
+        original_tokens = _estimate_messages_tokens(messages)
+
+        if original_tokens <= req.target_tokens:
+            return {
+                "messages": messages,
+                "original_tokens": original_tokens,
+                "compressed_tokens": original_tokens,
+            }
+
+        try:
+            compressed = await compress_history(messages, req.target_tokens)
+        except Exception as exc:
+            logger.warning("compress_history LLM failed, falling back to sliding window: %s", exc)
+            compressed = sliding_window_prune(messages)
+
+        compressed_tokens = _estimate_messages_tokens(compressed)
+        return {
+            "messages": compressed,
+            "original_tokens": original_tokens,
+            "compressed_tokens": compressed_tokens,
+        }
+    except Exception as e:
+        logger.error("Compress history error: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/agent/query")
-async def agent_query_endpoint(req: AgentQueryRequest):
+async def agent_query_endpoint(req: AgentQueryRequest, request: Request):
     try:
         from utils.query_cache import get_cached, set_cached
 
@@ -102,6 +149,8 @@ async def agent_query_endpoint(req: AgentQueryRequest):
             cached = get_cached(req.query, domain_key, req.top_k)
             if cached:
                 return cached
+
+        debug_timing = request.headers.get("X-Debug-Timing", "").lower() == "true"
 
         from agents.query_agent import agent_query
         result = await agent_query(
@@ -113,6 +162,7 @@ async def agent_query_endpoint(req: AgentQueryRequest):
             chroma_client=get_chroma(),
             redis_client=get_redis(),
             neo4j_driver=get_neo4j(),
+            debug_timing=debug_timing,
         )
 
         # Self-RAG: validate claims and refine retrieval if enabled
@@ -477,6 +527,59 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Verification persistence
+# ---------------------------------------------------------------------------
+
+class SaveVerificationRequest(BaseModel):
+    conversation_id: str
+    claims: list[dict]
+    overall_score: float = Field(ge=0.0, le=1.0)
+    verified: int = 0
+    unverified: int = 0
+    uncertain: int = 0
+    total: int = 0
+
+
+@router.post("/verification/save")
+async def save_verification_report(req: SaveVerificationRequest):
+    """Persist a verification report to Neo4j for long-term storage."""
+    from db.neo4j.artifacts import save_verification_report as _save
+
+    try:
+        report_id = _save(
+            get_neo4j(),
+            conversation_id=req.conversation_id,
+            claims=req.claims,
+            overall_score=req.overall_score,
+            verified=req.verified,
+            unverified=req.unverified,
+            uncertain=req.uncertain,
+            total=req.total,
+        )
+        return {"status": "saved", "report_id": report_id}
+    except Exception as e:
+        logger.error("Failed to save verification report: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/verification/{conversation_id}")
+async def get_verification_report(conversation_id: str):
+    """Retrieve a saved verification report by conversation ID."""
+    from db.neo4j.artifacts import get_verification_report as _get
+
+    try:
+        report = _get(get_neo4j(), conversation_id)
+        if report is None:
+            raise HTTPException(status_code=404, detail="No verification report found")
+        return report
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to get verification report: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/agent/rectify")

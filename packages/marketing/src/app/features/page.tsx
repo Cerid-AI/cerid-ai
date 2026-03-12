@@ -1,3 +1,10 @@
+import type { Metadata } from "next"
+
+export const metadata: Metadata = {
+  title: "Features — Cerid AI",
+  description: "Explore Cerid AI's advanced RAG pipeline, 9 intelligent agents, streaming verification, and full knowledge graph.",
+}
+
 import {
   Search,
   Bot,
@@ -94,6 +101,41 @@ const FEATURES = [
       "All Bifrost and Neo4j calls protected by circuit breakers. Graceful degradation when services are overloaded.",
     tag: "Reliability",
   },
+  {
+    icon: Layers,
+    title: "Advanced RAG Pipeline",
+    description:
+      "6-stage adaptive pipeline: retrieval gate, query decomposition, hybrid search, MMR diversity, late interaction scoring, and semantic cache.",
+    tag: "Pipeline",
+  },
+  {
+    icon: Cpu,
+    title: "Cross-Encoder Reranking",
+    description:
+      "ONNX-accelerated cross-encoder with three modes. Blends neural reranking with original scores for fine-grained relevance.",
+    tag: "Retrieval",
+  },
+  {
+    icon: FileText,
+    title: "Contextual Chunking",
+    description:
+      "LLM-generated situational summaries prepended to each chunk. Richer context for more precise retrieval hits.",
+    tag: "Ingestion",
+  },
+  {
+    icon: Zap,
+    title: "Semantic Cache",
+    description:
+      "HNSW-indexed query cache with quantized int8 embeddings. O(log n) lookup skips the full pipeline for repeated queries.",
+    tag: "Performance",
+  },
+  {
+    icon: HardDrive,
+    title: "Async Batch Ingestion",
+    description:
+      "Non-blocking file ingestion with asyncio. Watch-directory queue pattern processes uploads without blocking the API.",
+    tag: "Ingestion",
+  },
 ]
 
 export default function FeaturesPage() {
@@ -116,8 +158,12 @@ export default function FeaturesPage() {
       <section className="py-16">
         <div className="mx-auto max-w-6xl px-6">
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {FEATURES.map((feature) => (
-              <Card key={feature.title} className="border-border bg-card">
+            {FEATURES.map((feature, i) => (
+              <Card
+                key={feature.title}
+                className="animate-in fade-in slide-in-from-bottom-2 fill-mode-both border-border bg-card"
+                style={{ animationDelay: `${i * 80}ms`, animationDuration: "500ms" }}
+              >
                 <CardHeader>
                   <div className="flex items-center justify-between">
                     <feature.icon className="h-6 w-6 text-primary" />
@@ -134,8 +180,41 @@ export default function FeaturesPage() {
         </div>
       </section>
 
-      {/* Agents */}
+      {/* 6-Stage Pipeline */}
       <section className="border-t border-border bg-muted/50 py-16">
+        <div className="mx-auto max-w-6xl px-6">
+          <div className="text-center">
+            <h2 className="text-3xl font-bold tracking-tight">
+              6-Stage Retrieval Pipeline
+            </h2>
+            <p className="mx-auto mt-4 max-w-2xl text-muted-foreground">
+              Every query passes through an adaptive pipeline that maximizes
+              relevance while minimizing latency.
+            </p>
+          </div>
+          <div className="mx-auto mt-10 flex max-w-4xl flex-wrap items-center justify-center gap-2 text-sm">
+            {[
+              { label: "Adaptive Gate", desc: "Complexity classification" },
+              { label: "Query Decomposition", desc: "Parallel sub-queries" },
+              { label: "Hybrid Search", desc: "BM25s + vectors" },
+              { label: "MMR Diversity", desc: "Non-redundant results" },
+              { label: "Late Interaction", desc: "Token-level scoring" },
+              { label: "Semantic Cache", desc: "O(log n) lookup" },
+            ].map((stage, i) => (
+              <div key={stage.label} className="flex items-center gap-2">
+                <div className="rounded-lg border border-brand/30 bg-brand/5 px-3 py-2 text-center">
+                  <p className="font-medium">{stage.label}</p>
+                  <p className="text-xs text-muted-foreground">{stage.desc}</p>
+                </div>
+                {i < 5 && <span className="text-muted-foreground">→</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Agents */}
+      <section className="border-t border-border py-16">
         <div className="mx-auto max-w-6xl px-6">
           <div className="text-center">
             <div className="inline-flex items-center gap-2 text-primary">

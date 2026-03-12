@@ -3,14 +3,20 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import SettingsPane from "@/components/settings/settings-pane"
+import { UIModeProvider } from "@/contexts/ui-mode-context"
 
 function wrapper({ children }: { children: React.ReactNode }) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  return (
+    <UIModeProvider>
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    </UIModeProvider>
+  )
 }
 
 const mockSettings = {
@@ -64,20 +70,31 @@ function mockMultiFetch(settingsData: unknown, kbStatsData: unknown) {
   })
 }
 
+/** Switch to a tab using userEvent (Radix needs pointer events) */
+async function clickTab(name: string) {
+  const user = userEvent.setup()
+  await user.click(screen.getByRole("tab", { name }))
+}
+
 beforeEach(() => {
   vi.restoreAllMocks()
+  localStorage.clear()
 })
 
 describe("KB Management Section", () => {
   it("renders KB Management section heading", async () => {
     vi.stubGlobal("fetch", mockMultiFetch(mockSettings, mockKBStats))
     render(<SettingsPane />, { wrapper })
+    await screen.findByText("Knowledge & Ingestion") // wait for load
+    await clickTab("System")
     expect(await screen.findByText("KB Management")).toBeInTheDocument()
   })
 
   it("displays total artifact and chunk counts", async () => {
     vi.stubGlobal("fetch", mockMultiFetch(mockSettings, mockKBStats))
     render(<SettingsPane />, { wrapper })
+    await screen.findByText("Knowledge & Ingestion")
+    await clickTab("System")
     await screen.findByText("KB Management")
     expect(await screen.findByText("42")).toBeInTheDocument()
     expect(await screen.findByText("150")).toBeInTheDocument()
@@ -86,6 +103,8 @@ describe("KB Management Section", () => {
   it("shows per-domain stats", async () => {
     vi.stubGlobal("fetch", mockMultiFetch(mockSettings, mockKBStats))
     render(<SettingsPane />, { wrapper })
+    await screen.findByText("Knowledge & Ingestion")
+    await clickTab("System")
     await screen.findByText("KB Management")
     // Domain names
     expect(await screen.findByText("code")).toBeInTheDocument()
@@ -98,6 +117,8 @@ describe("KB Management Section", () => {
   it("renders management action buttons", async () => {
     vi.stubGlobal("fetch", mockMultiFetch(mockSettings, mockKBStats))
     render(<SettingsPane />, { wrapper })
+    await screen.findByText("Knowledge & Ingestion")
+    await clickTab("System")
     await screen.findByText("KB Management")
     expect(await screen.findByText("Rebuild Indexes")).toBeInTheDocument()
     expect(screen.getByText("Rescore All")).toBeInTheDocument()
@@ -109,6 +130,8 @@ describe("KB Management Section", () => {
     const fetchMock = mockMultiFetch(mockSettings, mockKBStats)
     vi.stubGlobal("fetch", fetchMock)
     render(<SettingsPane />, { wrapper })
+    await screen.findByText("Knowledge & Ingestion")
+    await clickTab("System")
 
     const rebuildBtn = await screen.findByText("Rebuild Indexes")
 
@@ -145,6 +168,8 @@ describe("KB Management Section", () => {
   it("shows clear confirmation when trash icon is clicked", async () => {
     vi.stubGlobal("fetch", mockMultiFetch(mockSettings, mockKBStats))
     render(<SettingsPane />, { wrapper })
+    await screen.findByText("Knowledge & Ingestion")
+    await clickTab("System")
     await screen.findByText("KB Management")
 
     // Find the trash icons (one per domain with artifacts)
@@ -161,6 +186,8 @@ describe("KB Management Section", () => {
   it("cancels clear confirmation", async () => {
     vi.stubGlobal("fetch", mockMultiFetch(mockSettings, mockKBStats))
     render(<SettingsPane />, { wrapper })
+    await screen.findByText("Knowledge & Ingestion")
+    await clickTab("System")
     await screen.findByText("KB Management")
 
     const trashButtons = await screen.findAllByTitle(/Clear/)

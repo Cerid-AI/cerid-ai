@@ -17,7 +17,7 @@ import {
   type SwitchStrategy,
   type ModelSwitchOptions,
 } from "./types"
-import { formatCost } from "./utils"
+import { TOKEN_CHARS_RATIO, estimateTokenCount, formatCost } from "./utils"
 
 // ---------------------------------------------------------------------------
 // Complexity scoring
@@ -73,7 +73,7 @@ export function estimateTurnCost(
   inputChars: number,
   estimatedOutputTokens = 500,
 ): number {
-  const inputTokens = Math.ceil(inputChars / 4)
+  const inputTokens = Math.ceil(inputChars / TOKEN_CHARS_RATIO)
   return (
     (inputTokens / 1_000_000) * model.inputCostPer1M +
     (estimatedOutputTokens / 1_000_000) * model.outputCostPer1M
@@ -166,7 +166,7 @@ export function recommendModel(
 
   const contextChars = conversationMessages.reduce((sum, m) => sum + m.content.length, 0) + query.length
   const estimatedOutput = complexity === "simple" ? 200 : complexity === "medium" ? 500 : 1000
-  const estimatedInputTokens = Math.ceil(contextChars / 4)
+  const estimatedInputTokens = Math.ceil(contextChars / TOKEN_CHARS_RATIO)
 
   const currentCost = estimateTurnCost(currentModel, contextChars, estimatedOutput)
   const currentScore = scoreModelForQuery(currentModel, query)
@@ -176,8 +176,8 @@ export function recommendModel(
   let bestCost = currentCost
 
   for (const candidate of MODELS) {
-    // Skip if context would exceed model's window
-    if (estimatedInputTokens > candidate.contextWindow * 0.8) continue
+    // Skip if context would exceed model's effective window
+    if (estimatedInputTokens > candidate.effectiveContextWindow) continue
 
     const score = scoreModelForQuery(candidate, query)
     if (score < minScore) continue
@@ -233,7 +233,7 @@ export function calculateSwitchCost(
   conversationMessages: ChatMessage[],
 ): SwitchCostEstimate {
   const historyText = conversationMessages.map((m) => m.content).join("")
-  const historyTokens = Math.ceil(historyText.length / 4)
+  const historyTokens = estimateTokenCount(historyText)
 
   // Cost to replay full history on target model + one response
   const replayCost =
@@ -255,7 +255,7 @@ export function calculateSwitchCost(
     (summarizedTokens / 1_000_000) * targetModel.inputCostPer1M +
     (500 / 1_000_000) * targetModel.outputCostPer1M
 
-  const exceedsTargetContext = historyTokens > targetModel.contextWindow * 0.8
+  const exceedsTargetContext = historyTokens > targetModel.effectiveContextWindow
 
   return {
     replayCost,

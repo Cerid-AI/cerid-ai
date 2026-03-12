@@ -11,7 +11,7 @@
 import { useState, useMemo, useEffect, useCallback } from "react"
 import { useVerificationStream } from "@/hooks/use-verification-stream"
 import { useConversationsContext } from "@/contexts/conversations-context"
-import { fetchHallucinationReport } from "@/lib/api"
+import { fetchHallucinationReport, saveVerificationReport } from "@/lib/api"
 import { MODELS } from "@/lib/types"
 import type { ChatMessage, HallucinationReport, ModelOption } from "@/lib/types"
 import type { MessageVerificationStatus } from "@/components/chat/message-bubble"
@@ -118,11 +118,25 @@ export function useVerificationOrchestrator({
     }
   }, [isStreaming, activeId, clearVerified])
 
-  // Cache completed verification report and mark conversation as completed
+  // Cache completed verification report, mark conversation as completed, and persist to backend
   useEffect(() => {
     if (verification.phase === "done" && verification.report && activeId) {
       reportCache.set(activeId, verification.report)
       markVerified(activeId)
+
+      // Persist to Neo4j for long-term storage (fire-and-forget)
+      const r = verification.report
+      if (r.summary && r.claims) {
+        saveVerificationReport({
+          conversation_id: activeId,
+          claims: r.claims,
+          overall_score: r.summary.overall_confidence ?? 0,
+          verified: r.summary.verified ?? 0,
+          unverified: r.summary.unverified ?? 0,
+          uncertain: r.summary.uncertain ?? 0,
+          total: r.summary.total ?? 0,
+        }).catch(() => {})
+      }
     }
   }, [verification.phase, verification.report, activeId, markVerified])
 

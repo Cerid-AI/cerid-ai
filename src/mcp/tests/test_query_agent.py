@@ -448,6 +448,7 @@ class TestAgentQuery:
     @patch("agents.query_agent.graph_expand_results")
     @patch("agents.query_agent.multi_domain_query")
     @patch("agents.query_agent.config")
+    @patch("config.features.ENABLE_ADAPTIVE_RETRIEVAL", False)
     def test_basic_query_response_shape(
         self, mock_config, mock_mdq, mock_graph, mock_rerank, mock_log
     ):
@@ -493,6 +494,7 @@ class TestAgentQuery:
     @patch("agents.query_agent.graph_expand_results")
     @patch("agents.query_agent.multi_domain_query")
     @patch("agents.query_agent.config")
+    @patch("config.features.ENABLE_ADAPTIVE_RETRIEVAL", False)
     def test_logs_to_redis_when_client_provided(
         self, mock_config, mock_mdq, mock_graph, mock_rerank, mock_log
     ):

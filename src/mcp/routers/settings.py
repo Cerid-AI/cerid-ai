@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 import config
 import config.features as features_mod
+from utils.features import set_toggle
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion.settings")
@@ -138,6 +139,7 @@ async def get_settings_endpoint():
         "cost_sensitivity": config.COST_SENSITIVITY,
         "feature_tier": config.FEATURE_TIER,
         "feature_flags": config.FEATURE_FLAGS,
+        "feature_toggles": config.FEATURE_TOGGLES,
         "multi_user": config.CERID_MULTI_USER,
         "domains": config.DOMAINS,
         "taxonomy": config.TAXONOMY,
@@ -203,15 +205,15 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
         updated["categorize_mode"] = req.categorize_mode
 
     if req.enable_feedback_loop is not None:
-        config.ENABLE_FEEDBACK_LOOP = req.enable_feedback_loop  # type: ignore[assignment]
+        set_toggle("enable_feedback_loop", req.enable_feedback_loop)
         updated["enable_feedback_loop"] = req.enable_feedback_loop
 
     if req.enable_hallucination_check is not None:
-        config.ENABLE_HALLUCINATION_CHECK = req.enable_hallucination_check  # type: ignore[assignment]
+        set_toggle("enable_hallucination_check", req.enable_hallucination_check)
         updated["enable_hallucination_check"] = req.enable_hallucination_check
 
     if req.enable_memory_extraction is not None:
-        config.ENABLE_MEMORY_EXTRACTION = req.enable_memory_extraction  # type: ignore[assignment]
+        set_toggle("enable_memory_extraction", req.enable_memory_extraction)
         updated["enable_memory_extraction"] = req.enable_memory_extraction
 
     if req.hallucination_threshold is not None:
@@ -229,7 +231,7 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
         updated["cost_sensitivity"] = req.cost_sensitivity
 
     if req.enable_auto_inject is not None:
-        config.ENABLE_AUTO_INJECT = req.enable_auto_inject  # type: ignore[assignment]
+        set_toggle("enable_auto_inject", req.enable_auto_inject)
         updated["enable_auto_inject"] = req.enable_auto_inject
 
     if req.auto_inject_threshold is not None:
@@ -237,7 +239,7 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
         updated["auto_inject_threshold"] = req.auto_inject_threshold
 
     if req.enable_model_router is not None:
-        config.ENABLE_MODEL_ROUTER = req.enable_model_router  # type: ignore[assignment]
+        set_toggle("enable_model_router", req.enable_model_router)
         updated["enable_model_router"] = req.enable_model_router
 
     if req.storage_mode is not None:
@@ -251,8 +253,7 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
         updated["storage_mode"] = req.storage_mode
 
     if req.enable_self_rag is not None:
-        features_mod.ENABLE_SELF_RAG = req.enable_self_rag
-        config.ENABLE_SELF_RAG = req.enable_self_rag  # type: ignore[assignment]
+        set_toggle("enable_self_rag", req.enable_self_rag)
         updated["enable_self_rag"] = req.enable_self_rag
 
     if req.hybrid_vector_weight is not None:
@@ -271,17 +272,14 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
         config.RERANK_ORIGINAL_WEIGHT = req.rerank_original_weight  # type: ignore[assignment]
         updated["rerank_original_weight"] = req.rerank_original_weight
 
-    # Advanced RAG pipeline — dual mutation (config + config.features) so that
-    # both ``import config; config.X`` and ``from config.features import X``
-    # consumers see the updated value at runtime.
+    # Advanced RAG pipeline — boolean toggles via set_toggle(), numeric params
+    # via direct dual-mutation (not in FEATURE_TOGGLES registry).
     if req.enable_contextual_chunks is not None:
-        features_mod.ENABLE_CONTEXTUAL_CHUNKS = req.enable_contextual_chunks
-        config.ENABLE_CONTEXTUAL_CHUNKS = req.enable_contextual_chunks  # type: ignore[assignment]
+        set_toggle("enable_contextual_chunks", req.enable_contextual_chunks)
         updated["enable_contextual_chunks"] = req.enable_contextual_chunks
 
     if req.enable_adaptive_retrieval is not None:
-        features_mod.ENABLE_ADAPTIVE_RETRIEVAL = req.enable_adaptive_retrieval
-        config.ENABLE_ADAPTIVE_RETRIEVAL = req.enable_adaptive_retrieval  # type: ignore[assignment]
+        set_toggle("enable_adaptive_retrieval", req.enable_adaptive_retrieval)
         updated["enable_adaptive_retrieval"] = req.enable_adaptive_retrieval
 
     if req.adaptive_retrieval_light_top_k is not None:
@@ -290,8 +288,7 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
         updated["adaptive_retrieval_light_top_k"] = req.adaptive_retrieval_light_top_k
 
     if req.enable_query_decomposition is not None:
-        features_mod.ENABLE_QUERY_DECOMPOSITION = req.enable_query_decomposition
-        config.ENABLE_QUERY_DECOMPOSITION = req.enable_query_decomposition  # type: ignore[assignment]
+        set_toggle("enable_query_decomposition", req.enable_query_decomposition)
         updated["enable_query_decomposition"] = req.enable_query_decomposition
 
     if req.query_decomposition_max_subqueries is not None:
@@ -300,8 +297,7 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
         updated["query_decomposition_max_subqueries"] = req.query_decomposition_max_subqueries
 
     if req.enable_mmr_diversity is not None:
-        features_mod.ENABLE_MMR_DIVERSITY = req.enable_mmr_diversity
-        config.ENABLE_MMR_DIVERSITY = req.enable_mmr_diversity  # type: ignore[assignment]
+        set_toggle("enable_mmr_diversity", req.enable_mmr_diversity)
         updated["enable_mmr_diversity"] = req.enable_mmr_diversity
 
     if req.mmr_lambda is not None:
@@ -310,13 +306,11 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
         updated["mmr_lambda"] = req.mmr_lambda
 
     if req.enable_intelligent_assembly is not None:
-        features_mod.ENABLE_INTELLIGENT_ASSEMBLY = req.enable_intelligent_assembly
-        config.ENABLE_INTELLIGENT_ASSEMBLY = req.enable_intelligent_assembly  # type: ignore[assignment]
+        set_toggle("enable_intelligent_assembly", req.enable_intelligent_assembly)
         updated["enable_intelligent_assembly"] = req.enable_intelligent_assembly
 
     if req.enable_late_interaction is not None:
-        features_mod.ENABLE_LATE_INTERACTION = req.enable_late_interaction
-        config.ENABLE_LATE_INTERACTION = req.enable_late_interaction  # type: ignore[assignment]
+        set_toggle("enable_late_interaction", req.enable_late_interaction)
         updated["enable_late_interaction"] = req.enable_late_interaction
 
     if req.late_interaction_top_n is not None:
@@ -330,8 +324,7 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
         updated["late_interaction_blend_weight"] = req.late_interaction_blend_weight
 
     if req.enable_semantic_cache is not None:
-        features_mod.ENABLE_SEMANTIC_CACHE = req.enable_semantic_cache
-        config.ENABLE_SEMANTIC_CACHE = req.enable_semantic_cache  # type: ignore[assignment]
+        set_toggle("enable_semantic_cache", req.enable_semantic_cache)
         updated["enable_semantic_cache"] = req.enable_semantic_cache
 
     if req.semantic_cache_threshold is not None:

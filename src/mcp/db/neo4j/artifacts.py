@@ -299,6 +299,33 @@ def get_artifact_summaries(
         }
 
 
+def get_quality_and_summaries(
+    driver,
+    artifact_ids: list[str],
+) -> tuple[dict[str, float], dict[str, str]]:
+    """Batch-fetch quality_score AND summary in a single Cypher round-trip.
+
+    Returns ``(scores_dict, summaries_dict)`` with the same semantics as
+    :func:`get_quality_scores` and :func:`get_artifact_summaries`.
+    """
+    if not artifact_ids:
+        return {}, {}
+    with driver.session() as session:
+        result = session.run(
+            "UNWIND $ids AS aid "
+            "MATCH (a:Artifact {id: aid}) "
+            "RETURN a.id AS id, a.quality_score AS score, a.summary AS summary",
+            ids=artifact_ids,
+        )
+        scores: dict[str, float] = {}
+        summaries: dict[str, str] = {}
+        for record in result:
+            scores[record["id"]] = record["score"] if record["score"] is not None else 0.5
+            if record["summary"]:
+                summaries[record["id"]] = record["summary"]
+        return scores, summaries
+
+
 def update_artifact_summary(
     driver,
     artifact_id: str,
@@ -359,6 +386,53 @@ def delete_artifact(
     }
 
 
+def get_active_memories(
+    driver,
+    domain: str = "conversations",
+    memory_type: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """Fetch memories that have NOT been superseded.
+
+    Filters on ``superseded_by IS NULL`` to exclude stale/replaced entries.
+    Optionally filter by memory_type metadata.
+    """
+    conditions = [
+        "d.name = $domain",
+        "a.superseded_by IS NULL",
+    ]
+    params: dict[str, Any] = {"domain": domain, "limit": limit}
+
+    if memory_type:
+        conditions.append("a.memory_type = $memory_type")
+        params["memory_type"] = memory_type
+
+    where_clause = " AND ".join(conditions)
+
+    query = (
+        f"MATCH (a:Artifact)-[:BELONGS_TO]->(d:Domain) "
+        f"WHERE {where_clause} "
+        "RETURN a.id AS id, a.filename AS filename, a.summary AS summary, "
+        "a.memory_type AS memory_type, a.valid_from AS valid_from, "
+        "a.ingested_at AS ingested_at "
+        "ORDER BY a.ingested_at DESC LIMIT $limit"
+    )
+
+    with driver.session() as session:
+        result = session.run(query, **params)
+        return [
+            {
+                "id": record["id"],
+                "filename": record["filename"],
+                "summary": record["summary"],
+                "memory_type": record["memory_type"],
+                "valid_from": record["valid_from"],
+                "ingested_at": record["ingested_at"],
+            }
+            for record in result
+        ]
+
+
 def recategorize_artifact(
     driver,
     artifact_id: str,
@@ -387,4 +461,110 @@ def recategorize_artifact(
         return {
             "old_domain": record["old_domain"],
             "new_domain": record["new_domain"],
+        }
+
+
+# ---------------------------------------------------------------------------
+# Verification report persistence
+# ---------------------------------------------------------------------------
+
+def save_verification_report(
+    driver,
+    conversation_id: str,
+    claims: list[dict],
+    overall_score: float,
+    verified: int = 0,
+    unverified: int = 0,
+    uncertain: int = 0,
+    total: int = 0,
+) -> str:
+    """Persist a verification report as a Neo4j node.
+
+    Creates a ``VerificationReport`` node and ``VERIFIED`` relationships
+    to any ``Artifact`` nodes referenced in the claims' sources.
+    """
+    import uuid
+
+    report_id = str(uuid.uuid4())
+    claims_json = json.dumps(claims)
+
+    with driver.session() as session:
+        # Upsert: one report per conversation (replace if re-verified)
+        session.run(
+            "MERGE (r:VerificationReport {conversation_id: $cid}) "
+            "SET r.id = $rid, "
+            "    r.claims = $claims, "
+            "    r.overall_score = $score, "
+            "    r.verified = $verified, "
+            "    r.unverified = $unverified, "
+            "    r.uncertain = $uncertain, "
+            "    r.total = $total, "
+            "    r.created_at = $now ",
+            rid=report_id,
+            cid=conversation_id,
+            claims=claims_json,
+            score=overall_score,
+            verified=verified,
+            unverified=unverified,
+            uncertain=uncertain,
+            total=total,
+            now=utcnow_iso(),
+        )
+
+        # Create VERIFIED relationships to referenced artifacts
+        artifact_ids = set()
+        for claim in claims:
+            for source in claim.get("sources", []):
+                aid = source.get("artifact_id")
+                if aid:
+                    artifact_ids.add(aid)
+
+        for aid in artifact_ids:
+            try:
+                session.run(
+                    "MATCH (r:VerificationReport {conversation_id: $cid}) "
+                    "MATCH (a:Artifact {id: $aid}) "
+                    "MERGE (r)-[:VERIFIED]->(a)",
+                    cid=conversation_id,
+                    aid=aid,
+                )
+            except Exception as e:
+                logger.debug("Failed to create VERIFIED relationship: %s", e)
+
+    logger.info("Saved verification report %s for conversation %s", report_id[:8], conversation_id[:8])
+    return report_id
+
+
+def get_verification_report(driver, conversation_id: str) -> dict | None:
+    """Retrieve a saved verification report by conversation ID."""
+    with driver.session() as session:
+        result = session.run(
+            "MATCH (r:VerificationReport {conversation_id: $cid}) "
+            "RETURN r.id AS id, r.conversation_id AS conversation_id, "
+            "       r.claims AS claims, r.overall_score AS overall_score, "
+            "       r.verified AS verified, r.unverified AS unverified, "
+            "       r.uncertain AS uncertain, r.total AS total, "
+            "       r.created_at AS created_at",
+            cid=conversation_id,
+        )
+        record = result.single()
+        if not record:
+            return None
+
+        claims = []
+        try:
+            claims = json.loads(record["claims"])
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        return {
+            "report_id": record["id"],
+            "conversation_id": record["conversation_id"],
+            "claims": claims,
+            "overall_score": record["overall_score"],
+            "verified": record["verified"],
+            "unverified": record["unverified"],
+            "uncertain": record["uncertain"],
+            "total": record["total"],
+            "created_at": record["created_at"],
         }

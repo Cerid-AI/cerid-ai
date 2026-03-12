@@ -4,7 +4,7 @@
 import { useState, useCallback, useMemo, useRef } from "react"
 import { MODELS } from "@/lib/types"
 import type { ChatMessage, LiveMetrics, ModelOption } from "@/lib/types"
-import { estimateTokens, tokenCost } from "@/lib/utils"
+import { estimateTokenCount, estimateTokens, tokenCost } from "@/lib/utils"
 
 /** Chars-per-tick threshold (~100 tokens). Re-renders only fire when crossing a tick boundary. */
 const CHARS_PER_TICK = 400
@@ -22,10 +22,10 @@ export function useLiveMetrics(model: string, messages: ChatMessage[]) {
     const { input: inputTokens, output: baseOutputTokens } = estimateTokens(messages)
 
     // Derive streaming tokens from the tick counter (not the ref) to avoid ref-during-render.
-    // Each tick ≈ CHARS_PER_TICK chars ≈ CHARS_PER_TICK/4 tokens.
-    const outputTokens = baseOutputTokens + streamingTick * Math.ceil(CHARS_PER_TICK / 4)
+    // Each tick ≈ CHARS_PER_TICK chars worth of tokens.
+    const outputTokens = baseOutputTokens + streamingTick * estimateTokenCount("x".repeat(CHARS_PER_TICK))
 
-    const contextWindow = modelInfo?.contextWindow ?? 128_000
+    const contextWindow = modelInfo?.effectiveContextWindow ?? modelInfo?.contextWindow ?? 128_000
     const totalTokens = inputTokens + outputTokens
     const contextPct = contextWindow > 0 ? (totalTokens / contextWindow) * 100 : 0
 
@@ -38,8 +38,8 @@ export function useLiveMetrics(model: string, messages: ChatMessage[]) {
       const lastAssistant = messages.findLast((m) => m.role === "assistant")
       const lastUser = messages.findLast((m) => m.role === "user")
       if (lastAssistant && lastUser) {
-        const inTok = Math.ceil(lastUser.content.length / 4)
-        const outTok = Math.ceil(lastAssistant.content.length / 4)
+        const inTok = estimateTokenCount(lastUser.content)
+        const outTok = estimateTokenCount(lastAssistant.content)
         messageCost = tokenCost(inTok, modelInfo.inputCostPer1M) + tokenCost(outTok, modelInfo.outputCostPer1M)
       }
     }

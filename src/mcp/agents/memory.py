@@ -99,7 +99,12 @@ async def extract_and_store_memories(
     neo4j_driver=None,
     redis_client=None,
 ) -> dict[str, Any]:
-    """Extract memories and store each as a KB artifact in the conversations domain."""
+    """Extract memories and store each as a KB artifact in the conversations domain.
+
+    When memory consolidation is enabled (default), each extracted memory is
+    compared against existing memories to avoid duplicates and track superseded
+    information.
+    """
     if not config.ENABLE_MEMORY_EXTRACTION:
         return {"status": "skipped", "reason": "Memory extraction disabled"}
 
@@ -111,16 +116,61 @@ async def extract_and_store_memories(
             "timestamp": utcnow_iso(),
             "memories_extracted": 0,
             "memories_stored": 0,
+            "skipped_duplicates": 0,
             "results": [],
         }
 
     from services.ingestion import ingest_content
 
+    # Import consolidation only when enabled (avoids import cost when disabled)
+    consolidation_enabled = False
+    classify_memory = None
+    mark_superseded = None
+    try:
+        from config.features import FEATURE_TOGGLES
+        consolidation_enabled = FEATURE_TOGGLES.get("enable_memory_consolidation", False)
+        if consolidation_enabled:
+            from utils.memory_consolidation import (
+                classify_memory,
+                mark_superseded,
+            )
+    except ImportError:
+        pass
+
     results = []
     stored_count = 0
+    skipped_count = 0
 
     for idx, mem in enumerate(memories):
         try:
+            # Consolidation check: ADD / UPDATE / NOOP
+            action_label = "ADD"
+            supersede_target = None
+
+            if consolidation_enabled and classify_memory is not None:
+                action = await classify_memory(
+                    mem["content"],
+                    chroma_client=chroma_client,
+                    memory_type=mem["memory_type"],
+                )
+                action_label = action.action
+
+                if action_label == "NOOP":
+                    logger.debug(
+                        "Memory consolidation: NOOP — %s", action.reason,
+                    )
+                    skipped_count += 1
+                    results.append({
+                        "memory_type": mem["memory_type"],
+                        "summary": mem["summary"],
+                        "status": "skipped_duplicate",
+                        "reason": action.reason,
+                    })
+                    continue
+
+                if action_label == "UPDATE":
+                    supersede_target = action.target_id
+
             convo_prefix = conversation_id[:8] if conversation_id else "unknown"
             timestamp = utcnow().strftime("%Y%m%d_%H%M%S")
             filename = f"memory_{mem['memory_type']}_{convo_prefix}_{timestamp}_{idx}"
@@ -131,35 +181,50 @@ async def extract_and_store_memories(
                 "model": model,
                 "memory_type": mem["memory_type"],
                 "summary": mem["summary"],
+                "valid_from": utcnow_iso(),
             }
 
             result = ingest_content(mem["content"], "conversations", metadata=metadata)
 
             if result.get("status") == "success":
                 stored_count += 1
+                new_artifact_id = result.get("artifact_id", "")
+
+                # Mark superseded memory if this was an UPDATE
+                if (
+                    action_label == "UPDATE"
+                    and supersede_target
+                    and neo4j_driver
+                    and new_artifact_id
+                    and mark_superseded is not None
+                ):
+                    mark_superseded(neo4j_driver, supersede_target, new_artifact_id)
 
                 if redis_client:
                     try:
                         log_event(
                             redis_client,
                             event_type="memory_extraction",
-                            artifact_id=result.get("artifact_id", ""),
+                            artifact_id=new_artifact_id,
                             domain="conversations",
                             filename=filename,
                             conversation_id=conversation_id,
-                            extra={"memory_type": mem["memory_type"]},
+                            extra={
+                                "memory_type": mem["memory_type"],
+                                "consolidation_action": action_label,
+                            },
                         )
                     except Exception as e:
                         logger.debug(f"Failed to log memory extraction event: {e}")
 
-                if neo4j_driver and result.get("artifact_id"):
+                if neo4j_driver and new_artifact_id:
                     try:
                         with neo4j_driver.session() as session:
                             session.run(
                                 "MATCH (m:Artifact {id: $memory_id}) "
                                 "MERGE (c:Conversation {id: $convo_id}) "
                                 "MERGE (m)-[:EXTRACTED_FROM]->(c)",
-                                memory_id=result["artifact_id"],
+                                memory_id=new_artifact_id,
                                 convo_id=conversation_id,
                             )
                     except Exception as e:  # Neo4j driver exceptions vary by version
@@ -170,6 +235,7 @@ async def extract_and_store_memories(
                 "summary": mem["summary"],
                 "status": result.get("status", "error"),
                 "artifact_id": result.get("artifact_id", ""),
+                "consolidation_action": action_label,
             })
         except Exception as e:
             logger.warning(f"Failed to store memory: {e}")
@@ -185,6 +251,7 @@ async def extract_and_store_memories(
         "timestamp": utcnow_iso(),
         "memories_extracted": len(memories),
         "memories_stored": stored_count,
+        "skipped_duplicates": skipped_count,
         "results": results,
     }
 

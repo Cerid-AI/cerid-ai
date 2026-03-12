@@ -14,6 +14,7 @@ import pytest
 if "routers.ingestion" not in sys.modules:
     _stub = ModuleType("routers.ingestion")
     _stub.ingest_content = None  # type: ignore[attr-defined]
+    _stub.ingest_batch = None  # type: ignore[attr-defined]
     _stub.router = MagicMock()  # type: ignore[attr-defined]
     sys.modules["routers.ingestion"] = _stub
     # Also register as attribute on the parent package so _dot_lookup works.
@@ -37,8 +38,8 @@ class TestExtractMemories:
         assert result == []
 
     @pytest.mark.asyncio
-    @patch("agents.memory.httpx.AsyncClient")
-    async def test_successful_extraction(self, mock_client_cls):
+    @patch("utils.bifrost.get_bifrost_client")
+    async def test_successful_extraction(self, mock_get_client):
         """Valid LLM response should parse into memory list."""
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
@@ -48,9 +49,7 @@ class TestExtractMemories:
 
         mock_client = AsyncMock()
         mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
+        mock_get_client.return_value = mock_client
 
         result = await extract_memories("x" * 200, "conv-123")
         assert len(result) == 1
@@ -58,8 +57,8 @@ class TestExtractMemories:
         assert "GIL" in result[0]["content"]
 
     @pytest.mark.asyncio
-    @patch("agents.memory.httpx.AsyncClient")
-    async def test_invalid_memory_type_defaults_to_fact(self, mock_client_cls):
+    @patch("utils.bifrost.get_bifrost_client")
+    async def test_invalid_memory_type_defaults_to_fact(self, mock_get_client):
         """Unknown memory_type should default to 'fact'."""
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
@@ -69,9 +68,7 @@ class TestExtractMemories:
 
         mock_client = AsyncMock()
         mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
+        mock_get_client.return_value = mock_client
 
         result = await extract_memories("x" * 200, "conv-123")
         assert result[0]["memory_type"] == "fact"

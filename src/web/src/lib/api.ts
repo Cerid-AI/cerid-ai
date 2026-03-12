@@ -354,12 +354,45 @@ export async function ingestFeedback(
 export async function fetchHallucinationReport(
   conversationId: string,
 ): Promise<HallucinationReport | null> {
+  // Try Redis cache first (fast, 30-day TTL)
   const res = await fetch(`${MCP_BASE}/agent/hallucination/${conversationId}`, {
     headers: mcpHeaders(),
   })
-  if (res.status === 404) return null
-  if (!res.ok) throw new Error(await extractError(res, `Hallucination report fetch failed: ${res.status}`))
-  return res.json()
+  if (res.ok) return res.json()
+
+  // Fall back to Neo4j persistence (long-term storage)
+  if (res.status === 404) {
+    try {
+      const neo4jRes = await fetch(`${MCP_BASE}/verification/${conversationId}`, {
+        headers: mcpHeaders(),
+      })
+      if (neo4jRes.ok) return neo4jRes.json()
+    } catch {
+      // Neo4j fallback failed — not critical
+    }
+    return null
+  }
+
+  throw new Error(await extractError(res, `Hallucination report fetch failed: ${res.status}`))
+}
+
+export async function saveVerificationReport(report: {
+  conversation_id: string
+  claims: Array<Record<string, unknown>>
+  overall_score: number
+  verified: number
+  unverified: number
+  uncertain: number
+  total: number
+}): Promise<void> {
+  const res = await fetch(`${MCP_BASE}/verification/save`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(report),
+  })
+  if (!res.ok) {
+    console.warn("[verification] Failed to persist report:", res.status)
+  }
 }
 
 export function streamVerification(
@@ -650,6 +683,23 @@ export async function summarizeConversation(
   }, signal)
 
   return summary
+}
+
+/**
+ * Compress conversation history to fit a target token budget via backend LLM.
+ * Returns compressed messages and token counts.
+ */
+export async function compressConversation(
+  messages: Pick<ChatMessage, "role" | "content">[],
+  targetTokens: number,
+): Promise<{ messages: { role: string; content: string }[]; original_tokens: number; compressed_tokens: number }> {
+  const res = await fetch(`${MCP_BASE}/chat/compress`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ messages, target_tokens: targetTokens }),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Compress failed: ${res.status}`))
+  return res.json()
 }
 
 // -- Sync API (Phase 21B) ----------------------------------------------------

@@ -1,15 +1,17 @@
 // Copyright (c) 2026 Justin Michaels. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { lazy, Suspense, useEffect, useState } from "react"
+import { lazy, Suspense, useCallback, useEffect, useState } from "react"
 import { Loader2 } from "lucide-react"
 import { AppLayout } from "@/components/layout/app-layout"
 import { ChatPanel } from "@/components/chat/chat-panel"
 import { KBInjectionProvider } from "@/contexts/kb-injection-context"
 import { ConversationsProvider } from "@/contexts/conversations-context"
 import { AuthProvider } from "@/contexts/auth-context"
+import { UIModeProvider } from "@/contexts/ui-mode-context"
 import { ProtectedRoute } from "@/components/auth/protected-route"
 import { fetchSettings } from "@/lib/api"
+import { OnboardingDialog } from "@/components/onboarding/onboarding-dialog"
 
 const KnowledgePane = lazy(() => import("@/components/kb/knowledge-pane"))
 const MonitoringPane = lazy(() => import("@/components/monitoring/monitoring-pane"))
@@ -28,6 +30,11 @@ function PaneLoader() {
 
 export default function App() {
   const [multiUser, setMultiUser] = useState(false)
+  const [showOnboarding, setShowOnboarding] = useState(() => {
+    try { return !localStorage.getItem("cerid-onboarding-complete") } catch { return false }
+  })
+
+  const handleOnboardingComplete = useCallback(() => setShowOnboarding(false), [])
 
   useEffect(() => {
     fetchSettings()
@@ -38,6 +45,8 @@ export default function App() {
   return (
     <AuthProvider>
     <ProtectedRoute multiUser={multiUser}>
+    <UIModeProvider>
+    {showOnboarding && <OnboardingDialog open={showOnboarding} onComplete={handleOnboardingComplete} />}
     <ConversationsProvider>
     <KBInjectionProvider>
     <AppLayout>
@@ -64,6 +73,7 @@ export default function App() {
     </AppLayout>
     </KBInjectionProvider>
     </ConversationsProvider>
+    </UIModeProvider>
     </ProtectedRoute>
     </AuthProvider>
   )

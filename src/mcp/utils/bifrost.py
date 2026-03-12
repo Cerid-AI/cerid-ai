@@ -1,7 +1,12 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Shared Bifrost LLM call utility with circuit breaker and tracing."""
+"""Shared Bifrost LLM call utility with circuit breaker and tracing.
+
+Provides a shared :class:`httpx.AsyncClient` connection pool so that
+multiple LLM calls within the same request (e.g. 10-claim verification)
+reuse TCP connections instead of opening a new one per call.
+"""
 
 from __future__ import annotations
 
@@ -14,6 +19,35 @@ from middleware.request_id import tracing_headers
 from utils.circuit_breaker import get_breaker
 
 logger = logging.getLogger("ai-companion.bifrost")
+
+# ---------------------------------------------------------------------------
+# Shared httpx connection pool — reused across all Bifrost/LLM calls
+# ---------------------------------------------------------------------------
+
+_client: httpx.AsyncClient | None = None
+
+
+def get_bifrost_client() -> httpx.AsyncClient:
+    """Get or create the shared httpx client for Bifrost calls.
+
+    Connection pool is sized for concurrent verification workloads
+    (up to 20 concurrent connections, 10 keep-alive).
+    """
+    global _client
+    if _client is None or _client.is_closed:
+        _client = httpx.AsyncClient(
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+            timeout=config.BIFROST_TIMEOUT,
+        )
+    return _client
+
+
+async def close_bifrost_client() -> None:
+    """Close the shared httpx client.  Call during application shutdown."""
+    global _client
+    if _client is not None and not _client.is_closed:
+        await _client.aclose()
+        _client = None
 
 
 async def call_bifrost(
@@ -50,15 +84,15 @@ async def call_bifrost(
         headers = tracing_headers()
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
-        async with httpx.AsyncClient(
-            timeout=effective_timeout, headers=headers
-        ) as client:
-            resp = await client.post(
-                f"{config.BIFROST_URL}/chat/completions",
-                json=payload,
-            )
-            resp.raise_for_status()
-            return resp.json()
+        client = get_bifrost_client()
+        resp = await client.post(
+            f"{config.BIFROST_URL}/chat/completions",
+            json=payload,
+            headers=headers,
+            timeout=effective_timeout,
+        )
+        resp.raise_for_status()
+        return resp.json()
 
     return await breaker.call(_call)
 

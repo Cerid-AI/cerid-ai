@@ -15,21 +15,13 @@ import logging
 import re
 from typing import Any
 
+from utils.text import STOPWORDS as _STOPWORDS
+from utils.text import WORD_RE as _WORD_RE
+
 logger = logging.getLogger("ai-companion.context_assembler")
 
 # Minimum meaningful facet length
 _MIN_FACET_LENGTH = 8
-
-# Stopwords for facet cleaning
-_STOPWORDS = frozenset({
-    "a", "an", "the", "is", "are", "was", "were", "be", "been",
-    "have", "has", "had", "do", "does", "did", "will", "would",
-    "to", "of", "in", "for", "on", "with", "at", "by", "from",
-    "and", "but", "or", "not", "what", "how", "why", "when", "where",
-    "which", "who", "that", "this", "it", "can", "could", "should",
-})
-
-_WORD_RE = re.compile(r"[a-z]+", re.IGNORECASE)
 
 
 def extract_facets(query: str) -> list[str]:

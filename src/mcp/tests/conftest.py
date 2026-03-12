@@ -117,6 +117,19 @@ def pytest_configure(config):
 # Shared fixtures
 # ---------------------------------------------------------------------------
 
+@pytest.fixture(autouse=True)
+def _reset_bifrost_client():
+    """Reset the shared Bifrost httpx.AsyncClient singleton between tests.
+
+    Without this, get_bifrost_client() caches a client from the first test,
+    preventing subsequent tests' httpx.AsyncClient patches from taking effect.
+    """
+    import utils.bifrost as _bifrost_mod
+    _bifrost_mod._client = None
+    yield
+    _bifrost_mod._client = None
+
+
 @pytest.fixture
 def mock_neo4j():
     """Mock Neo4j driver with session context manager."""

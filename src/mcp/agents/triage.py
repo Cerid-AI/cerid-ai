@@ -13,9 +13,9 @@ from typing import Any
 from langgraph.graph import END, StateGraph
 
 import config
+from parsers import PARSER_REGISTRY, parse_file
 from utils.chunker import chunk_text, make_context_header
 from utils.metadata import ai_categorize, extract_metadata
-from utils.parsers import PARSER_REGISTRY, parse_file
 
 logger = logging.getLogger("ai-companion.triage")
 

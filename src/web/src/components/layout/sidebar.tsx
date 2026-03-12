@@ -9,8 +9,10 @@ import {
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Separator } from "@/components/ui/separator"
+import { Switch } from "@/components/ui/switch"
 import { ConversationList } from "@/components/chat/conversation-list"
 import { useConversationsContext } from "@/contexts/conversations-context"
+import { useUIMode } from "@/contexts/ui-mode-context"
 import { MODELS } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -41,9 +43,14 @@ function readBool(key: string, fallback: boolean): boolean {
   } catch { return fallback }
 }
 
+const SIMPLE_PANES = new Set<Pane>(["chat", "memories", "settings"])
+
 export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse, theme, onToggleTheme }: SidebarProps) {
   const { conversations, activeId, setActiveId, create, remove } = useConversationsContext()
+  const { mode, toggle: toggleMode, isSimple } = useUIMode()
   const [historyExpanded, setHistoryExpanded] = useState(() => readBool("cerid-sidebar-history", true))
+
+  const visibleNav = isSimple ? NAV_ITEMS.filter((n) => SIMPLE_PANES.has(n.pane)) : NAV_ITEMS
 
   const toggleHistory = () => {
     setHistoryExpanded((prev) => {
@@ -73,7 +80,7 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
       >
         {/* Logo area */}
         <div className="flex h-14 items-center border-b px-3">
-          {!collapsed && <span className="text-lg font-semibold tracking-tight">Cerid AI</span>}
+          {!collapsed && <span className="text-lg font-semibold tracking-tight">Cerid <span className="text-brand">AI</span></span>}
           <Button variant="ghost" size="icon" className={cn("ml-auto h-8 w-8")} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} onClick={onToggleCollapse}>
             {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
           </Button>
@@ -81,15 +88,19 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
 
         {/* Nav items */}
         <nav className="space-y-1 p-2">
-          {NAV_ITEMS.map(({ pane, icon: Icon, label }) => (
+          {visibleNav.map(({ pane, icon: Icon, label }) => (
             <Tooltip key={pane}>
               <TooltipTrigger asChild>
                 <Button
                   variant={activePane === pane ? "secondary" : "ghost"}
-                  className={cn("w-full justify-start gap-3", collapsed && "justify-center px-0")}
+                  className={cn(
+                    "w-full justify-start gap-3",
+                    collapsed && "justify-center px-0",
+                    activePane === pane && "border-l-2 border-brand bg-brand/5"
+                  )}
                   onClick={() => onPaneChange(pane)}
                 >
-                  <Icon className="h-4 w-4 shrink-0" />
+                  <Icon className={cn("h-4 w-4 shrink-0", activePane === pane && "text-brand")} />
                   {!collapsed && <span>{label}</span>}
                 </Button>
               </TooltipTrigger>
@@ -161,7 +172,40 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
         )}
 
         {/* Bottom controls */}
-        <div className="border-t p-2">
+        <div className="space-y-1 border-t p-2">
+          {/* Mode toggle */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                className={cn(
+                  "flex w-full items-center rounded-md px-3 py-1.5 text-sm hover:bg-accent",
+                  collapsed && "justify-center px-0"
+                )}
+                onClick={toggleMode}
+                aria-label={isSimple ? "Switch to advanced mode" : "Switch to simple mode"}
+              >
+                {!collapsed ? (
+                  <>
+                    <span className="flex-1 text-left text-xs text-muted-foreground">
+                      {isSimple ? "Simple" : "Advanced"}
+                    </span>
+                    <Switch checked={!isSimple} className="scale-75" />
+                  </>
+                ) : (
+                  <span className="text-[10px] font-medium text-muted-foreground">
+                    {isSimple ? "S" : "A"}
+                  </span>
+                )}
+              </button>
+            </TooltipTrigger>
+            {collapsed && (
+              <TooltipContent side="right">
+                {isSimple ? "Simple mode — click for Advanced" : "Advanced mode — click for Simple"}
+              </TooltipContent>
+            )}
+          </Tooltip>
+
+          {/* Theme toggle */}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button

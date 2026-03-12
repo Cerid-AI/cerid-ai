@@ -11,12 +11,12 @@ from __future__ import annotations
 from typing import Any
 
 import config
+from db import neo4j as graph
 from deps import get_chroma, get_neo4j, get_redis
 from routers.artifacts import recategorize
 from routers.health import health_check, list_collections
 from routers.query import query_knowledge
 from services.ingestion import ingest_content, ingest_file
-from utils import graph
 
 # ── MCP Tool Definitions ─────────────────────────────────────────────────────
 

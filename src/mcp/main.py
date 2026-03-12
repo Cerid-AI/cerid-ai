@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config.features import CERID_MULTI_USER
+from db import neo4j as graph
 from deps import close_chroma, close_neo4j, close_redis, get_neo4j
 from middleware.auth import APIKeyMiddleware
 from middleware.rate_limit import RateLimitMiddleware
@@ -38,7 +39,6 @@ from routers import (
     upload,
 )
 from scheduler import start_scheduler, stop_scheduler
-from utils import graph
 
 logging.basicConfig(
     level=logging.INFO,
@@ -101,6 +101,10 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Sync auto-import check failed: {e}")
 
+    # Log feature toggle states
+    from config.features import log_feature_toggles
+    log_feature_toggles()
+
     # Load plugins
     try:
         from plugins import load_plugins
@@ -116,10 +120,41 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Scheduler start failed (server runs without it): {e}")
 
+    # Pre-warm connections and models for faster first request
+    try:
+        from config.taxonomy import DOMAINS, collection_name
+        from deps import get_chroma
+        chroma = get_chroma()
+        _first_domain = DOMAINS[0] if DOMAINS else None
+        if _first_domain:
+            chroma.get_or_create_collection(name=collection_name(_first_domain))
+        logger.info("ChromaDB + embedding model pre-warmed")
+    except Exception as e:
+        logger.debug("Pre-warm ChromaDB failed (lazy init on first use): %s", e)
+
+    try:
+        from utils.bifrost import get_bifrost_client
+        get_bifrost_client()
+        logger.info("Bifrost HTTP client pool pre-warmed")
+    except Exception as e:
+        logger.debug("Pre-warm Bifrost client failed: %s", e)
+
     yield
 
-    # Shutdown: stop scheduler, close DB connections, clear MCP sessions
+    # Shutdown: stop scheduler, flush caches, close connections, clear MCP sessions
     stop_scheduler()
+    try:
+        from utils.bifrost import close_bifrost_client
+        await close_bifrost_client()
+    except Exception:
+        pass
+    # Flush semantic cache HNSW index to Redis before closing Redis
+    try:
+        from deps import get_redis
+        from utils.semantic_cache import flush_cache
+        flush_cache(get_redis())
+    except Exception:
+        pass
     close_neo4j()
     close_chroma()
     close_redis()

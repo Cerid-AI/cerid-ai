@@ -175,7 +175,7 @@ def parse_pdf_with_ocr(file_path: str) -> dict[str, Any]:
 
 def register():
     """Register the OCR PDF parser, overriding the default pdfplumber parser."""
-    from utils.parsers import PARSER_REGISTRY
+    from parsers import PARSER_REGISTRY
 
     PARSER_REGISTRY[".pdf"] = parse_pdf_with_ocr
     logger.info("OCR plugin registered: .pdf parser overridden with OCR-aware version")

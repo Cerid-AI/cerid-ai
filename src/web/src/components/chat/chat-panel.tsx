@@ -26,6 +26,7 @@ import { useModelRouter } from "@/hooks/use-model-router"
 import { useModelSwitch } from "@/hooks/use-model-switch"
 import { useSmartSuggestions } from "@/hooks/use-smart-suggestions"
 import { useVerificationOrchestrator } from "@/hooks/use-verification-orchestrator"
+import { useUIMode } from "@/contexts/ui-mode-context"
 import { UploadDialog } from "@/components/kb/upload-dialog"
 import { uploadFile } from "@/lib/api"
 import type { ChatMessage } from "@/lib/types"
@@ -42,6 +43,7 @@ const getIsNarrow = () => window.matchMedia(NARROW_MQ).matches
 
 export function ChatPanel() {
   const isNarrow = useSyncExternalStore(narrowSubscribe, getIsNarrow)
+  const { isSimple } = useUIMode()
   const {
     active,
     activeId,
@@ -240,10 +242,12 @@ export function ChatPanel() {
 
   if (!active) {
     return (
-      <div className="flex h-full items-center justify-center bg-background">
-        <div className="flex max-w-md flex-col items-center gap-6 px-6 text-center">
-          <div className="space-y-2">
-            <h1 className="text-2xl font-semibold tracking-tight">Cerid AI</h1>
+      <div className="flex h-full items-center justify-center bg-background bg-brand-gradient">
+        <div className="relative flex max-w-md flex-col items-center gap-6 px-6 text-center">
+          {/* Subtle pulsing brand glow */}
+          <div className="pointer-events-none absolute -top-12 h-32 w-32 animate-pulse rounded-full bg-brand/10 blur-2xl" />
+          <div className="relative space-y-2">
+            <h1 className="text-2xl font-semibold tracking-tight">Cerid <span className="text-brand">AI</span></h1>
             <p className="text-sm text-muted-foreground">
               Your personal knowledge companion — ask questions, explore your knowledge base, and get verified answers.
             </p>
@@ -293,6 +297,7 @@ export function ChatPanel() {
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       <ChatToolbar
         isNarrow={isNarrow}
+        isSimple={isSimple}
         showKB={showKB}
         onToggleKB={() => setShowKB(!showKB)}
         autoInject={autoInject}
@@ -318,8 +323,8 @@ export function ChatPanel() {
         onNewChat={() => create(selectedModel)}
       />
 
-      {/* Dashboard metrics bar */}
-      {showDashboard && (
+      {/* Dashboard metrics bar (advanced only) */}
+      {!isSimple && showDashboard && (
         <ChatDashboard
           model={selectedModel}
           messages={active?.messages ?? []}
@@ -327,8 +332,8 @@ export function ChatPanel() {
         />
       )}
 
-      {/* Model recommendation banner (only in recommend mode, auto mode switches silently) */}
-      {recommendation && routingMode === "recommend" && (
+      {/* Model recommendation banner (advanced only, recommend mode) */}
+      {!isSimple && recommendation && routingMode === "recommend" && (
         <div className="flex items-center gap-2 border-b bg-muted/50 px-4 py-1.5 text-xs">
           <Zap className="h-3.5 w-3.5 text-yellow-500" />
           <span className="flex-1">{recommendation.reasoning}</span>
@@ -349,8 +354,8 @@ export function ChatPanel() {
         </div>
       )}
 
-      {/* V1b: Proactive switch banner after verification detects ignorance with real-time answers */}
-      {verificationRecBanner && (
+      {/* V1b: Proactive switch banner (advanced only) */}
+      {!isSimple && verificationRecBanner && (
         <div className="flex items-center gap-2 border-b bg-blue-500/10 px-4 py-1.5 text-xs">
           <Zap className="h-3.5 w-3.5 text-blue-500" />
           <span className="flex-1">{verificationRecBanner.reason}</span>
@@ -406,8 +411,8 @@ export function ChatPanel() {
         }}
       />
 
-      {/* Smart KB suggestions */}
-      {smartSuggestions.suggestions.length > 0 && !isStreaming && (
+      {/* Smart KB suggestions (advanced only) */}
+      {!isSimple && smartSuggestions.suggestions.length > 0 && !isStreaming && (
         <div className="flex items-center gap-1.5 overflow-x-auto border-t bg-muted/30 px-4 py-1.5">
           <Sparkles className="h-3 w-3 shrink-0 text-muted-foreground" />
           {smartSuggestions.suggestions.map((s) => (
@@ -435,8 +440,8 @@ export function ChatPanel() {
         </div>
       )}
 
-      {/* Verification status bar */}
-      <VerificationStatusBar
+      {/* Verification status bar (advanced only) */}
+      {!isSimple && <VerificationStatusBar
         report={halReport}
         loading={halLoading}
         featureEnabled={hallucinationEnabled}
@@ -451,18 +456,18 @@ export function ChatPanel() {
           kbContext.setSelectedArtifactId(artifactId)
           setShowKB(true)
         }}
-      />
+      />}
 
-      {/* Auto-route notice */}
-      {autoRouteNotice && (
+      {/* Auto-route notice (advanced only) */}
+      {!isSimple && autoRouteNotice && (
         <div className="flex items-center gap-1.5 border-t bg-yellow-500/10 px-4 py-1">
           <Zap className="h-3 w-3 shrink-0 text-yellow-500" />
           <span className="text-xs text-muted-foreground">{autoRouteNotice}</span>
         </div>
       )}
 
-      {/* Auto-inject indicator */}
-      {lastAutoInjectCount > 0 && isStreaming && (
+      {/* Auto-inject indicator (advanced only) */}
+      {!isSimple && lastAutoInjectCount > 0 && isStreaming && (
         <div className="flex items-center gap-1.5 border-t bg-primary/5 px-4 py-1">
           <Database className="h-3 w-3 shrink-0 text-primary" />
           <span className="text-xs text-muted-foreground">
@@ -520,6 +525,9 @@ export function ChatPanel() {
       </Panel>
     </Group>
   )
+
+  // Simple mode: no right column at all
+  if (isSimple) return chatArea
 
   // On narrow viewports, show KB as a bottom drawer instead of split pane
   if (isNarrow) {

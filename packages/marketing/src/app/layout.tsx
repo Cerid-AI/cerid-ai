@@ -18,9 +18,12 @@ export const metadata: Metadata = {
   title: "Cerid AI — Privacy-First AI Knowledge Companion",
   description:
     "Self-hosted, privacy-first AI knowledge management. Unify code, finance, projects, and artifacts into a context-aware LLM interface with RAG-powered retrieval.",
+  metadataBase: new URL("https://cerid.ai"),
   openGraph: {
     title: "Cerid AI",
     description: "Privacy-First AI Knowledge Companion",
+    url: "https://cerid.ai",
+    siteName: "Cerid AI",
     type: "website",
   },
 }

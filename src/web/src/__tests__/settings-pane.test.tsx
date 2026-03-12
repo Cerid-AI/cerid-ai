@@ -3,14 +3,20 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import SettingsPane from "@/components/settings/settings-pane"
+import { UIModeProvider } from "@/contexts/ui-mode-context"
 
 function wrapper({ children }: { children: React.ReactNode }) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  return (
+    <UIModeProvider>
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    </UIModeProvider>
+  )
 }
 
 const mockSettings = {
@@ -59,8 +65,15 @@ function mockFetch(data: unknown, status = 200) {
   })
 }
 
+/** Click a Radix tab trigger by its name */
+async function clickTab(name: string) {
+  const user = userEvent.setup()
+  await user.click(screen.getByRole("tab", { name }))
+}
+
 beforeEach(() => {
   vi.restoreAllMocks()
+  localStorage.clear()
 })
 
 describe("SettingsPane", () => {
@@ -74,41 +87,46 @@ describe("SettingsPane", () => {
   it("renders settings after loading", async () => {
     vi.stubGlobal("fetch", mockFetch(mockSettings))
     render(<SettingsPane />, { wrapper })
+    expect(await screen.findByText("Knowledge & Ingestion")).toBeInTheDocument()
+  })
+
+  it("shows version number on System tab", async () => {
+    vi.stubGlobal("fetch", mockFetch(mockSettings))
+    render(<SettingsPane />, { wrapper })
+    await screen.findByText("Knowledge & Ingestion")
+    await clickTab("System")
     expect(await screen.findByText("0.8.0")).toBeInTheDocument()
   })
 
-  it("shows version number", async () => {
+  it("shows machine ID on System tab", async () => {
     vi.stubGlobal("fetch", mockFetch(mockSettings))
     render(<SettingsPane />, { wrapper })
-    expect(await screen.findByText("0.8.0")).toBeInTheDocument()
-  })
-
-  it("shows machine ID", async () => {
-    vi.stubGlobal("fetch", mockFetch(mockSettings))
-    render(<SettingsPane />, { wrapper })
+    await screen.findByText("Knowledge & Ingestion")
+    await clickTab("System")
     expect(await screen.findByText("test-machine")).toBeInTheDocument()
   })
 
-  it("shows feature tier badge", async () => {
+  it("shows feature tier badge on System tab", async () => {
     vi.stubGlobal("fetch", mockFetch(mockSettings))
     render(<SettingsPane />, { wrapper })
+    await screen.findByText("Knowledge & Ingestion")
+    await clickTab("System")
     expect(await screen.findByText("community")).toBeInTheDocument()
   })
 
   it("shows storage mode in select", async () => {
     vi.stubGlobal("fetch", mockFetch(mockSettings))
     render(<SettingsPane />, { wrapper })
-    await screen.findByText("0.8.0")
-    // Storage mode is shown via a Select component
+    await screen.findByText("Knowledge & Ingestion")
+    // Storage mode is shown via a Select component on Essentials tab
     expect(screen.getByText(/Extract Only/i)).toBeInTheDocument()
   })
 
-  it("displays collapsible section headings", async () => {
+  it("displays Essentials tab section headings by default", async () => {
     vi.stubGlobal("fetch", mockFetch(mockSettings))
     render(<SettingsPane />, { wrapper })
-    await screen.findByText("0.8.0")
-    // Section headings are rendered as buttons with text
-    expect(screen.getByText("Connection")).toBeInTheDocument()
+    await screen.findByText("Knowledge & Ingestion")
+    // Essentials tab shows Knowledge & Ingestion and AI Features
     expect(screen.getByText("Knowledge & Ingestion")).toBeInTheDocument()
     expect(screen.getByText("AI Features")).toBeInTheDocument()
   })
@@ -124,56 +142,68 @@ describe("SettingsPane", () => {
   it("shows hallucination check toggle", async () => {
     vi.stubGlobal("fetch", mockFetch(mockSettings))
     render(<SettingsPane />, { wrapper })
-    await screen.findByText("0.8.0")
-    // Appears in both AI Features toggle and capabilities grid
+    await screen.findByText("Knowledge & Ingestion")
+    // Appears in AI Features toggle on Essentials tab
     expect(screen.getAllByText(/Hallucination Check/i).length).toBeGreaterThanOrEqual(1)
   })
 
-  it("shows domains in taxonomy section", async () => {
+  it("shows domains in taxonomy section on System tab", async () => {
     vi.stubGlobal("fetch", mockFetch(mockSettings))
     render(<SettingsPane />, { wrapper })
-    await screen.findByText("0.8.0")
-    expect(screen.getByText("coding")).toBeInTheDocument()
+    await screen.findByText("Knowledge & Ingestion")
+    await clickTab("System")
+    expect(await screen.findByText("coding")).toBeInTheDocument()
   })
 
   it("renders Switch components for feature toggles", async () => {
     vi.stubGlobal("fetch", mockFetch(mockSettings))
     render(<SettingsPane />, { wrapper })
-    await screen.findByText("0.8.0")
+    await screen.findByText("Knowledge & Ingestion")
     // Switch components render as role=switch buttons
     const switches = screen.getAllByRole("switch")
     expect(switches.length).toBeGreaterThanOrEqual(1)
   })
 
-  it("shows Retrieval Pipeline section heading", async () => {
+  it("shows Retrieval Pipeline on Pipeline tab", async () => {
     vi.stubGlobal("fetch", mockFetch(mockSettings))
     render(<SettingsPane />, { wrapper })
-    await screen.findByText("0.8.0")
-    expect(screen.getByText("Retrieval Pipeline")).toBeInTheDocument()
+    await screen.findByText("Knowledge & Ingestion")
+    await clickTab("Pipeline")
+    expect(await screen.findByText("Retrieval Pipeline")).toBeInTheDocument()
   })
 
-  it("integrates feature flags into Connection section as capabilities", async () => {
+  it("shows Connection section on System tab", async () => {
     vi.stubGlobal("fetch", mockFetch(mockSettings))
     render(<SettingsPane />, { wrapper })
-    await screen.findByText("0.8.0")
-    expect(screen.getByText("Platform Capabilities")).toBeInTheDocument()
-    // "Hallucination Check" appears in both capabilities grid and AI Features toggle
-    expect(screen.getAllByText("Hallucination Check").length).toBeGreaterThanOrEqual(1)
+    await screen.findByText("Knowledge & Ingestion")
+    await clickTab("System")
+    expect(await screen.findByText("Connection")).toBeInTheDocument()
+    expect(await screen.findByText("Platform Capabilities")).toBeInTheDocument()
   })
 
-  it("does not render standalone Feature Flags section", async () => {
+  it("renders tab triggers for Essentials, Pipeline, and System", async () => {
     vi.stubGlobal("fetch", mockFetch(mockSettings))
     render(<SettingsPane />, { wrapper })
-    await screen.findByText("0.8.0")
-    // "Feature Flags" section heading should not exist
-    const headings = screen.getAllByRole("button").map(b => b.textContent)
-    expect(headings).not.toContain(expect.stringContaining("Feature Flags"))
+    await screen.findByText("Knowledge & Ingestion")
+    expect(screen.getByRole("tab", { name: "Essentials" })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Pipeline" })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "System" })).toBeInTheDocument()
+  })
+
+  it("renders preset buttons", async () => {
+    vi.stubGlobal("fetch", mockFetch(mockSettings))
+    render(<SettingsPane />, { wrapper })
+    await screen.findByText("Knowledge & Ingestion")
+    // Emoji and label are in separate spans; check for labels only
+    expect(screen.getByText("Casual")).toBeInTheDocument()
+    expect(screen.getByText("Researcher")).toBeInTheDocument()
+    expect(screen.getByText("Power User")).toBeInTheDocument()
   })
 
   it("shows Self-RAG toggle in AI Features section", async () => {
     vi.stubGlobal("fetch", mockFetch({ ...mockSettings, enable_self_rag: true }))
     render(<SettingsPane />, { wrapper })
-    await screen.findByText("0.8.0")
+    await screen.findByText("Knowledge & Ingestion")
     expect(screen.getByText("Self-RAG Validation")).toBeInTheDocument()
   })
 })

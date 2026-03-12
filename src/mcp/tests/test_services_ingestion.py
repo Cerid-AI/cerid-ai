@@ -15,6 +15,7 @@ import pytest
 
 from services.ingestion import (
     _content_hash,
+    _rollback_chromadb,
     ingest_content,
     validate_file_path,
 )
@@ -333,3 +334,133 @@ class TestIngestRedisLogging:
         mock_cache.log_event.assert_called_once()
         call_kwargs = mock_cache.log_event.call_args
         assert call_kwargs.kwargs.get("event_type") == "ingest" or call_kwargs.args[1] == "ingest"
+
+
+# ---------------------------------------------------------------------------
+# Tests: _rollback_chromadb helper
+# ---------------------------------------------------------------------------
+
+class TestRollbackChromaDB:
+    """Test the compensating transaction helper."""
+
+    def test_deletes_chunk_ids(self):
+        collection = MagicMock()
+        _rollback_chromadb(collection, ["id1", "id2", "id3"])
+        collection.delete.assert_called_once_with(ids=["id1", "id2", "id3"])
+
+    def test_handles_delete_failure(self):
+        collection = MagicMock()
+        collection.delete.side_effect = Exception("ChromaDB unavailable")
+        # Should not raise — logs error instead
+        _rollback_chromadb(collection, ["id1"])
+
+    def test_empty_chunk_ids(self):
+        collection = MagicMock()
+        _rollback_chromadb(collection, [])
+        collection.delete.assert_called_once_with(ids=[])
+
+
+# ---------------------------------------------------------------------------
+# Tests: ingest_content — compensating transaction on Neo4j failure
+# ---------------------------------------------------------------------------
+
+class TestCompensatingTransaction:
+    """Test that ChromaDB chunks are rolled back when Neo4j fails."""
+
+    @patch("services.ingestion.get_redis", return_value=MagicMock())
+    @patch("services.ingestion.get_neo4j")
+    @patch("services.ingestion.get_chroma")
+    def test_neo4j_failure_rolls_back_chromadb(self, mock_chroma, mock_neo4j, mock_redis):
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+
+        driver = MagicMock()
+        session = MagicMock()
+        mock_neo4j.return_value = driver
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        session.run.return_value.single.return_value = None
+
+        with patch("services.ingestion.graph") as mock_graph:
+            mock_graph.find_artifact_by_filename.return_value = None
+            mock_graph.create_artifact.side_effect = Exception("Neo4j connection lost")
+            mock_graph.discover_relationships.return_value = 0
+
+            result = ingest_content("rollback test", domain="coding")
+
+        assert result["status"] == "error"
+        assert "Graph storage failed" in result["error"]
+        # ChromaDB chunks should have been rolled back
+        collection.delete.assert_called_once()
+
+    @patch("services.ingestion.get_redis", return_value=MagicMock())
+    @patch("services.ingestion.get_neo4j")
+    @patch("services.ingestion.get_chroma")
+    def test_neo4j_failure_returns_zero_chunks(self, mock_chroma, mock_neo4j, mock_redis):
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+
+        driver = MagicMock()
+        session = MagicMock()
+        mock_neo4j.return_value = driver
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        session.run.return_value.single.return_value = None
+
+        with patch("services.ingestion.graph") as mock_graph:
+            mock_graph.find_artifact_by_filename.return_value = None
+            mock_graph.create_artifact.side_effect = Exception("Neo4j timeout")
+
+            result = ingest_content("test", domain="general")
+
+        assert result["chunks"] == 0
+
+    @patch("services.ingestion.get_redis", return_value=MagicMock())
+    @patch("services.ingestion.get_neo4j")
+    @patch("services.ingestion.get_chroma")
+    def test_constraint_violation_still_returns_duplicate(self, mock_chroma, mock_neo4j, mock_redis):
+        """Constraint violations should still return duplicate, not error."""
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+
+        driver = MagicMock()
+        session = MagicMock()
+        mock_neo4j.return_value = driver
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        session.run.return_value.single.return_value = None
+
+        with patch("services.ingestion.graph") as mock_graph:
+            mock_graph.find_artifact_by_filename.return_value = None
+            mock_graph.create_artifact.side_effect = Exception(
+                "ConstraintValidationFailed content_hash uniqueness"
+            )
+
+            result = ingest_content("concurrent test", domain="coding")
+
+        assert result["status"] == "duplicate"
+        collection.delete.assert_called_once()
+
+    @patch("services.ingestion.get_redis", return_value=MagicMock())
+    @patch("services.ingestion.get_neo4j")
+    @patch("services.ingestion.get_chroma")
+    def test_neo4j_failure_does_not_log_to_redis(self, mock_chroma, mock_neo4j, mock_redis):
+        """Failed ingestion should not log an event to Redis."""
+        collection = MagicMock()
+        mock_chroma.return_value.get_or_create_collection.return_value = collection
+
+        driver = MagicMock()
+        session = MagicMock()
+        mock_neo4j.return_value = driver
+        driver.session.return_value.__enter__ = MagicMock(return_value=session)
+        driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        session.run.return_value.single.return_value = None
+
+        with patch("services.ingestion.graph") as mock_graph, \
+             patch("services.ingestion.cache") as mock_cache:
+            mock_graph.find_artifact_by_filename.return_value = None
+            mock_graph.create_artifact.side_effect = Exception("Neo4j down")
+
+            ingest_content("fail test", domain="coding")
+
+        mock_cache.log_event.assert_not_called()

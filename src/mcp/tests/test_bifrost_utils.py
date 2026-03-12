@@ -146,16 +146,16 @@ class TestCallBifrost:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("utils.bifrost.httpx.AsyncClient", return_value=mock_client) as mock_cls:
+        with patch("utils.bifrost.httpx.AsyncClient", return_value=mock_client):
             await call_bifrost(
                 [{"role": "user", "content": "test"}],
                 breaker_name="bifrost-verify",
                 timeout=60.0,
             )
 
-        # Verify the custom timeout was used
-        mock_cls.assert_called_once()
-        assert mock_cls.call_args[1]["timeout"] == 60.0
+        # Verify the custom timeout was passed to the post() call
+        call_kwargs = mock_client.post.call_args[1]
+        assert call_kwargs["timeout"] == 60.0
 
 
 class TestExtractContent:

@@ -14,8 +14,8 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 import config
+from db import neo4j as graph
 from deps import get_neo4j
-from utils import graph
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion.taxonomy")

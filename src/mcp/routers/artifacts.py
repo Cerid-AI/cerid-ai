@@ -11,8 +11,9 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 import config
+from db import neo4j as graph
 from deps import get_chroma, get_neo4j, get_redis
-from utils import cache, graph
+from utils import cache
 from utils.time import utcnow_iso
 
 router = APIRouter()
