@@ -47,7 +47,7 @@ const SIMPLE_PANES = new Set<Pane>(["chat", "memories", "settings"])
 
 export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse, theme, onToggleTheme }: SidebarProps) {
   const { conversations, activeId, setActiveId, create, remove } = useConversationsContext()
-  const { mode, toggle: toggleMode, isSimple } = useUIMode()
+  const { toggle: toggleMode, isSimple } = useUIMode()
   const [historyExpanded, setHistoryExpanded] = useState(() => readBool("cerid-sidebar-history", true))
 
   const visibleNav = isSimple ? NAV_ITEMS.filter((n) => SIMPLE_PANES.has(n.pane)) : NAV_ITEMS

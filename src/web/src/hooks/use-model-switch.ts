@@ -45,8 +45,8 @@ export function useModelSwitch({
           compressConversation(
             messages.map((m) => ({ role: m.role, content: m.content })),
             threshold,
-          ).then(({ compressed_messages }) => {
-            const compressedMsgs: ChatMessage[] = compressed_messages.map((m) => ({
+          ).then(({ messages: compressedMessages }) => {
+            const compressedMsgs: ChatMessage[] = compressedMessages.map((m: { role: string; content: string }) => ({
               id: uuid(),
               role: m.role as ChatMessage["role"],
               content: m.content,

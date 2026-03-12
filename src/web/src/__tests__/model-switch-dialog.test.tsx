@@ -12,6 +12,8 @@ const targetModel: ModelOption = {
   label: "GPT-4o Mini",
   provider: "openai",
   contextWindow: 128_000,
+  effectiveContextWindow: 102_400,
+  maxOutputTokens: 16_384,
   inputCostPer1M: 0.15,
   outputCostPer1M: 0.60,
 }

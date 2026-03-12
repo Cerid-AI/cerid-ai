@@ -129,8 +129,8 @@ export function useVerificationOrchestrator({
       if (r.summary && r.claims) {
         saveVerificationReport({
           conversation_id: activeId,
-          claims: r.claims,
-          overall_score: r.summary.overall_confidence ?? 0,
+          claims: r.claims as unknown as Array<Record<string, unknown>>,
+          overall_score: (r.summary as Record<string, unknown>).overall_confidence as number ?? 0,
           verified: r.summary.verified ?? 0,
           unverified: r.summary.unverified ?? 0,
           uncertain: r.summary.uncertain ?? 0,
