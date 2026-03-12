@@ -522,14 +522,14 @@ async def ingest_batch(
     # Convert any bare exceptions to error dicts
     clean_results: list[dict[str, Any]] = []
     for i, r in enumerate(results):
-        if isinstance(r, Exception):
+        if isinstance(r, BaseException):
             clean_results.append({
                 "status": "error",
                 "error": str(r),
                 "file_path": items[i].get("file_path", ""),
             })
         else:
-            clean_results.append(r)
+            clean_results.append(r)  # type: ignore[arg-type]
 
     succeeded = sum(1 for r in clean_results if r.get("status") in ("success", "duplicate", "updated"))
     failed = len(clean_results) - succeeded

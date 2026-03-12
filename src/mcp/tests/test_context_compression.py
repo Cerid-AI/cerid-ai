@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from utils.context_compression import (
-    CHARS_PER_TOKEN,
     _estimate_messages_tokens,
     compress_history,
     estimate_tokens,

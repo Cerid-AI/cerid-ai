@@ -5,9 +5,8 @@
 
 from __future__ import annotations
 
-import json
 import threading
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -15,7 +14,6 @@ import pytest
 import utils.semantic_cache as sc
 from utils.semantic_cache import (
     _dequantize_int8,
-    _entry_key,
     _HNSWIndex,
     _quantize_int8,
     cache_lookup,

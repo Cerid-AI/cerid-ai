@@ -23,7 +23,6 @@ from agents.hallucination.patterns import (
     MEMORY_TYPES,
     PERCENT_RE,
     YEAR_RE,
-    _get_claim_verify_semaphore,
     _get_ext_verify_semaphore,
     _has_staleness_indicators,
     _is_complex_claim,
@@ -32,8 +31,6 @@ from agents.hallucination.patterns import (
     _is_recency_claim,
     _pick_verification_model,
 )
-from middleware.request_id import tracing_headers
-from utils.bifrost import call_bifrost, extract_content
 from utils.circuit_breaker import CircuitOpenError, get_breaker
 from utils.llm_parsing import parse_llm_json
 

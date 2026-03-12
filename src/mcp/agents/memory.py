@@ -124,8 +124,8 @@ async def extract_and_store_memories(
 
     # Import consolidation only when enabled (avoids import cost when disabled)
     consolidation_enabled = False
-    classify_memory = None
-    mark_superseded = None
+    classify_memory: Any = None
+    mark_superseded: Any = None
     try:
         from config.features import FEATURE_TOGGLES
         consolidation_enabled = FEATURE_TOGGLES.get("enable_memory_consolidation", False)
