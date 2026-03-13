@@ -46,6 +46,7 @@ import type {
   SchedulerStatus,
   IngestLogResponse,
   AuditResponse,
+  DigestResponse,
   HallucinationClaim,
   HallucinationReport,
   MemoryExtractionResult,
@@ -225,6 +226,14 @@ export async function fetchMaintenance(
     }),
   })
   if (!res.ok) throw new Error(await extractError(res, `Maintenance fetch failed: ${res.status}`))
+  return res.json()
+}
+
+export async function fetchDigest(hours = 24): Promise<DigestResponse> {
+  const res = await fetch(`${MCP_BASE}/digest?hours=${hours}`, {
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Digest fetch failed: ${res.status}`))
   return res.json()
 }
 
