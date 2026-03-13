@@ -182,6 +182,35 @@ describe("recommendModel", () => {
     const result = recommendModel("explain algorithms", defaultModel, emptyMessages, 0)
     expect(result.estimatedCost).toBeGreaterThanOrEqual(0)
   })
+
+  it("excludes stale models for temporal queries in auto mode", () => {
+    // Start on GPT-4o-mini (cutoff 2024-10) with a temporal query
+    const gpt4oMini = MODELS.find((m) => m.id === "openrouter/openai/gpt-4o-mini")!
+    const result = recommendModel(
+      "What are the latest AI developments in 2026?",
+      gpt4oMini,
+      [],
+      0,
+      "high",
+    )
+    // Should NOT stay on GPT-4o-mini (cutoff 2024-10, 17+ months old)
+    expect(result.model.id).not.toBe(gpt4oMini.id)
+    expect(result.model.capabilities?.knowledgeCutoff).toBeDefined()
+  })
+
+  it("prefers web-search-capable model for temporal queries", () => {
+    const gpt4oMini = MODELS.find((m) => m.id === "openrouter/openai/gpt-4o-mini")!
+    const result = recommendModel(
+      "What's happening with AI regulation right now?",
+      gpt4oMini,
+      [],
+      0,
+      "high",
+    )
+    // Grok has webSearch: true — should be preferred
+    const grok = MODELS.find((m) => m.id === "openrouter/x-ai/grok-4.1-fast")!
+    expect(result.model.id).toBe(grok.id)
+  })
 })
 
 // ---------------------------------------------------------------------------

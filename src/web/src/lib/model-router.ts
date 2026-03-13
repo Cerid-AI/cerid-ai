@@ -164,6 +164,10 @@ export function recommendModel(
   const complexity = scoreQueryComplexity(query, conversationMessages.length, kbInjections)
   const minScore = MIN_SCORE[complexity]
 
+  // For temporal queries, filter out models with stale knowledge cutoffs
+  const isTemporalQuery = CURRENT_INFO_RE.test(query)
+  const CUTOFF_MAX_AGE_MONTHS = 3
+
   const contextChars = conversationMessages.reduce((sum, m) => sum + m.content.length, 0) + query.length
   const estimatedOutput = complexity === "simple" ? 200 : complexity === "medium" ? 500 : 1000
   const estimatedInputTokens = Math.ceil(contextChars / TOKEN_CHARS_RATIO)
@@ -178,6 +182,14 @@ export function recommendModel(
   for (const candidate of MODELS) {
     // Skip if context would exceed model's effective window
     if (estimatedInputTokens > candidate.effectiveContextWindow) continue
+
+    // For temporal queries, skip models with stale knowledge cutoff
+    if (isTemporalQuery && candidate.capabilities?.knowledgeCutoff) {
+      const cutoffDate = new Date(candidate.capabilities.knowledgeCutoff + "-01")
+      const ageMs = Date.now() - cutoffDate.getTime()
+      const ageMonths = ageMs / (30 * 24 * 60 * 60 * 1000)
+      if (ageMonths > CUTOFF_MAX_AGE_MONTHS) continue
+    }
 
     const score = scoreModelForQuery(candidate, query)
     if (score < minScore) continue
