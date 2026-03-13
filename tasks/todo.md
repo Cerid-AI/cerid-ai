@@ -723,6 +723,19 @@
 - [x] `.env.example` Port Overrides section
 - [x] `docs/ENV_CONVENTIONS.md` Port Overrides table + naming rule
 
+### Backlog
+
+#### Verification UX
+- [ ] Verification pane should show cards for the most recent response only; clicking a previous assistant reply should swap to that message's verification cards (currently verification state does not clear and re-run per reply)
+
+#### Attachment & Privacy
+- [ ] Attachment hand-off across model switches — ensure the next model receives the attachment (or relevant extracted data) when Bifrost routes to a different provider mid-conversation
+- [ ] Privacy-aware attachment processing — pre-process attachments into KB artifact facts/context selections before outbound LLM calls, avoiding full-file transmission while keeping the UX seamless ("it just works")
+
+#### Chat / History UX
+- [ ] History pane: show trash/delete icon on mouseover of each conversation line item (not always visible)
+- [ ] Move "New Chat" button out of the history list — place it near the top beside the Chat tab for easier access
+
 ### Dropped
 - [x] ~~D2: Conversation fork/branch UI~~ — Dropped (2026-03-08). Core model-switch UX complete; fork UI has unclear ROI for 40-60 hrs
 
