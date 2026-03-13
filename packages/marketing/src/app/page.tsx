@@ -17,45 +17,45 @@ import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/ca
 const VALUE_PROPS = [
   {
     icon: Search,
-    title: "RAG-Powered Retrieval",
+    title: "Instant Knowledge Search",
     description:
-      "Hybrid BM25s + vector search with semantic chunking. Your knowledge base, instantly accessible.",
+      "Ask questions in plain English and get answers from your own files, notes, and documents in seconds.",
   },
   {
     icon: Bot,
-    title: "9 Intelligent Agents",
+    title: "Smart Assistants That Work Together",
     description:
-      "Query, triage, curator, rectify, audit, maintenance, hallucination, memory, and Self-RAG agents work together.",
+      "Specialized AI agents handle different tasks — from finding information to checking facts to organizing your knowledge.",
   },
   {
     icon: Database,
-    title: "Multi-Domain Knowledge",
+    title: "All Your Knowledge, One Place",
     description:
-      "Code, finance, projects, artifacts — unify all your knowledge in one context-aware system.",
+      "Bring together code, documents, financial data, project notes — everything searchable in one private system.",
   },
   {
     icon: Shield,
-    title: "Streaming Verification",
+    title: "Built-In Fact Checking",
     description:
-      "Real-time claim verification with 4 claim types: evasion, citation, recency, and ignorance detection.",
+      "Every AI response is automatically verified in real time. See which claims are confirmed, uncertain, or need attention.",
   },
   {
     icon: GitBranch,
-    title: "Knowledge Graph",
+    title: "See How Ideas Connect",
     description:
-      "Neo4j-backed relationships between artifacts. See connections across your entire knowledge base.",
+      "Your knowledge isn't just stored — it's connected. Discover relationships between topics, projects, and documents.",
   },
   {
     icon: Zap,
-    title: "Smart Model Routing",
+    title: "Always the Right AI Model",
     description:
-      "Capability-based model scoring with three-way routing. The right model for every query.",
+      "Automatically picks the best AI model for each question — fast models for simple tasks, powerful ones for complex analysis.",
   },
   {
     icon: Layers,
-    title: "Advanced RAG Pipeline",
+    title: "Deeply Understands Your Questions",
     description:
-      "6-stage adaptive pipeline with query decomposition, MMR diversity, late interaction scoring, and semantic cache.",
+      "Breaks down complex questions, finds diverse sources, and assembles comprehensive answers — not just keyword matching.",
   },
 ]
 
@@ -77,9 +77,9 @@ export default function Home() {
           </h1>
 
           <p className="animate-in fade-in slide-in-from-bottom-4 fill-mode-both duration-700 delay-300 mx-auto mt-6 max-w-2xl text-lg text-muted-foreground">
-            Cerid AI unifies your knowledge bases into a context-aware LLM
-            interface with a 6-stage adaptive RAG pipeline, 9 intelligent agents,
-            and real-time verification. All data stays on your machine.
+            Cerid AI turns your personal files, notes, and documents into a
+            searchable AI assistant that actually verifies its answers.
+            Everything runs on your computer — your data never leaves your machine.
           </p>
 
           <div className="animate-in fade-in slide-in-from-bottom-4 fill-mode-both duration-700 delay-500 mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
@@ -102,15 +102,13 @@ export default function Home() {
 
           {/* Stats strip */}
           <div className="mx-auto mt-12 flex max-w-lg flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
-            <span>Phase 37</span>
+            <span>1,300+ tests</span>
             <span className="text-border">·</span>
-            <span>1,302 tests</span>
+            <span>9 AI agents</span>
             <span className="text-border">·</span>
-            <span>9 agents</span>
+            <span>18 tools</span>
             <span className="text-border">·</span>
-            <span>18 MCP tools</span>
-            <span className="text-border">·</span>
-            <span>6-stage RAG</span>
+            <span>Verified responses</span>
           </div>
         </div>
       </section>
@@ -120,11 +118,11 @@ export default function Home() {
         <div className="mx-auto max-w-6xl px-6">
           <div className="text-center">
             <h2 className="text-3xl font-bold tracking-tight">
-              Everything you need for AI-powered knowledge
+              Everything you need, nothing you don&apos;t
             </h2>
             <p className="mx-auto mt-4 max-w-2xl text-muted-foreground">
-              A complete system for ingesting, organizing, retrieving, and
-              verifying knowledge — built for privacy and performance.
+              A complete system for searching, organizing, and verifying your
+              knowledge — built for privacy and designed to be simple.
             </p>
           </div>
 
@@ -155,18 +153,18 @@ export default function Home() {
                 Built on proven foundations
               </h2>
               <p className="mt-4 text-muted-foreground">
-                Microservices architecture with Docker Compose orchestration.
-                FastAPI backend, React 19 frontend, Neo4j knowledge graph,
-                ChromaDB vector store, and Redis caching — all running locally.
+                Multiple services work together on your machine — a modern API
+                server, a knowledge graph, a search engine, and a smart AI model
+                router. One command starts everything.
               </p>
               <ul className="mt-6 space-y-3 text-sm text-muted-foreground">
                 <li className="flex items-center gap-2">
                   <Brain className="h-4 w-4 text-primary" />
-                  FastAPI + Python 3.11 MCP Server
+                  Fast, modern API server
                 </li>
                 <li className="flex items-center gap-2">
                   <Database className="h-4 w-4 text-primary" />
-                  Neo4j Graph + ChromaDB Vectors + Redis Cache
+                  Knowledge graph + search engine + fast cache
                 </li>
                 <li className="flex items-center gap-2">
                   <Lock className="h-4 w-4 text-primary" />
@@ -174,28 +172,17 @@ export default function Home() {
                 </li>
                 <li className="flex items-center gap-2">
                   <Zap className="h-4 w-4 text-primary" />
-                  Bifrost LLM gateway with semantic routing
+                  Smart AI model router
                 </li>
               </ul>
             </div>
-            <div className="rounded-lg border border-border bg-card p-6 font-mono text-sm">
-              <div className="text-muted-foreground">
-                <p className="text-foreground">$ ./scripts/start-cerid.sh</p>
-                <p className="mt-2 text-green-600 dark:text-green-400">
-                  [1/4] Infrastructure ✓
-                </p>
-                <p className="text-green-600 dark:text-green-400">
-                  [2/4] Bifrost LLM Gateway ✓
-                </p>
-                <p className="text-green-600 dark:text-green-400">
-                  [3/4] MCP Server ✓
-                </p>
-                <p className="text-green-600 dark:text-green-400">
-                  [4/4] React GUI ✓
-                </p>
-                <p className="mt-2 text-foreground">
-                  All services healthy. Open http://localhost:3000
-                </p>
+            <div className="rounded-lg border border-border bg-gradient-to-br from-card to-muted/50 p-6">
+              <div className="aspect-[16/10] flex items-center justify-center rounded-md bg-muted/30 border border-dashed border-border">
+                <div className="text-center text-muted-foreground">
+                  <Brain className="mx-auto h-8 w-8 mb-2" />
+                  <p className="text-sm font-medium">App Screenshot</p>
+                  <p className="text-xs">Coming soon</p>
+                </div>
               </div>
             </div>
           </div>

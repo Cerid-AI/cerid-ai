@@ -330,7 +330,7 @@ class TestStreamingTimeouts:
                 "domain": "general",
             }]
 
-        async def _mock_external(claim, model=None, force_web_search=False, streaming=False):
+        async def _mock_external(claim, model=None, force_web_search=False, streaming=False, expert_mode=False):
             external_calls.append({"force_web_search": force_web_search, "streaming": streaming})
             return {
                 "status": "uncertain",

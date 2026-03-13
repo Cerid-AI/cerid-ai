@@ -695,6 +695,7 @@ async def _verify_claim_externally(
     generating_model: str | None = None,
     force_web_search: bool = False,
     streaming: bool = False,
+    expert_mode: bool = False,
 ) -> dict[str, Any]:
     """Direct structured cross-model verification for a single claim.
 
@@ -720,6 +721,10 @@ async def _verify_claim_externally(
     When ``streaming`` is True, the function uses fewer LLM retries and
     skips the staleness-escalation recursive call to avoid compounding
     delays in the SSE streaming path.
+
+    When ``expert_mode`` is True, the expert-tier model (Grok 4) is used
+    for all claim types, overriding pool-based selection.  For claims
+    requiring web search, the ``:online`` suffix is appended.
 
     Pipeline:
     1. Check feature flag (early return if disabled)
@@ -796,6 +801,15 @@ async def _verify_claim_externally(
             verify_model = _pick_verification_model(generating_model)
             verification_method = "cross_model"
         system_prompt = _SYSTEM_DIRECT_VERIFICATION
+
+    # Expert mode: override model selection with the expert-tier model
+    if expert_mode:
+        if is_current_event:
+            # Append :online for web-search-capable verification
+            verify_model = config.VERIFICATION_EXPERT_MODEL + ":online"
+        else:
+            verify_model = config.VERIFICATION_EXPERT_MODEL
+        logger.debug("Expert mode: using %s for claim verification", verify_model)
 
     sem = _get_ext_verify_semaphore()
 
@@ -1026,6 +1040,7 @@ async def verify_claim(
     threshold: float | None = None,
     model: str | None = None,
     streaming: bool = False,
+    expert_mode: bool = False,
 ) -> dict[str, Any]:
     """Verify a single claim against the knowledge base and user memories.
 
@@ -1045,6 +1060,9 @@ async def verify_claim(
     When ``streaming`` is True, the function limits external verification
     to a single call per fallback path (skipping fallback 4's secondary
     web search escalation) to avoid compounding delays in the SSE path.
+
+    When ``expert_mode`` is True, all external verification calls use the
+    expert-tier model (Grok 4) instead of the default model pool.
     """
     from agents.query_agent import lightweight_kb_query
 
@@ -1093,6 +1111,7 @@ async def verify_claim(
         if not all_results:
             ext_result = await _verify_claim_externally(
                 claim, model, force_web_search=True, streaming=streaming,
+                expert_mode=expert_mode,
             )
             return {
                 "claim": claim,
@@ -1115,6 +1134,7 @@ async def verify_claim(
         if escalation_similarity < ext_kb_threshold:
             ext_result = await _verify_claim_externally(
                 claim, model, streaming=streaming,
+                expert_mode=expert_mode,
             )
             # Use external result if it provides a stronger signal than KB
             if ext_result["confidence"] > raw_similarity:
@@ -1126,7 +1146,6 @@ async def verify_claim(
                     "verification_method": ext_result.get("verification_method", "none"),
                     "verification_model": ext_result.get("verification_model"),
                     "source_urls": ext_result.get("source_urls", []),
-                    **_kb_source_fields(top_result),
                 }
 
         # Apply multi-result confidence calibration
@@ -1150,6 +1169,7 @@ async def verify_claim(
             # --- Fallback 3: KB says "unverified" → try external ---
             ext_result = await _verify_claim_externally(
                 claim, model, streaming=streaming,
+                expert_mode=expert_mode,
             )
             if ext_result.get("status") in ("verified", "unverified"):
                 return {
@@ -1160,7 +1180,6 @@ async def verify_claim(
                     "verification_method": ext_result.get("verification_method", "none"),
                     "verification_model": ext_result.get("verification_model"),
                     "source_urls": ext_result.get("source_urls", []),
-                    **_kb_source_fields(top_result),
                 }
             return {
                 "claim": claim,
@@ -1176,6 +1195,7 @@ async def verify_claim(
             # definitive answer before falling back to KB-only uncertain ---
             ext_result = await _verify_claim_externally(
                 claim, model, streaming=streaming,
+                expert_mode=expert_mode,
             )
             if ext_result.get("status") in ("verified", "unverified"):
                 return {
@@ -1186,7 +1206,6 @@ async def verify_claim(
                     "verification_method": ext_result.get("verification_method", "none"),
                     "verification_model": ext_result.get("verification_model"),
                     "source_urls": ext_result.get("source_urls", []),
-                    **_kb_source_fields(top_result),
                 }
             # External also uncertain — try web search as final escalation.
             # In streaming mode, skip this second external call to avoid
@@ -1197,6 +1216,7 @@ async def verify_claim(
             ):
                 web_result = await _verify_claim_externally(
                     claim, model, force_web_search=True,
+                    expert_mode=expert_mode,
                 )
                 if web_result.get("status") in ("verified", "unverified"):
                     return {
@@ -1209,7 +1229,6 @@ async def verify_claim(
                         ),
                         "verification_model": web_result.get("verification_model"),
                         "source_urls": web_result.get("source_urls", []),
-                        **_kb_source_fields(top_result),
                     }
             # All methods exhausted — return uncertain with all available context
             return {

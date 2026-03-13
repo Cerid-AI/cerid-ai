@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
-import { Database, Zap, Sparkles, MessageSquarePlus, Clock } from "lucide-react"
+import { Database, Zap, Sparkles, MessageSquarePlus, Clock, ShieldCheck } from "lucide-react"
 import { ChatToolbar } from "./chat-toolbar"
 import { ChatMessages } from "./chat-messages"
 import { ChatInput } from "./chat-input"
@@ -67,6 +67,7 @@ export function ChatPanel() {
     hallucinationEnabled, toggleHallucinationEnabled,
     memoryExtraction, toggleMemoryExtraction,
     inlineMarkups, toggleInlineMarkups,
+    expertVerification, toggleExpertVerification,
   } = useSettings()
 
   const { send, stop, isStreaming } = useChat({
@@ -79,6 +80,7 @@ export function ChatPanel() {
   const [selectedModel, setSelectedModel] = useState(MODELS[0].id)
   const [showKB, setShowKB] = useState(() => window.innerWidth >= 1024)
   const [pendingChatFiles, setPendingChatFiles] = useState<File[]>([])
+  const [focusedClaimIndex, setFocusedClaimIndex] = useState<number | null>(null)
 
   const currentModelObj = useMemo(() => MODELS.find((m) => m.id === selectedModel) ?? MODELS[0], [selectedModel])
 
@@ -92,12 +94,16 @@ export function ChatPanel() {
     verificationRecBanner,
     setVerificationRecBanner,
     handleVerifyMessage,
+    selectedVerificationMsgId,
+    setSelectedVerificationMsgId,
+    allVerificationReports,
   } = useVerificationOrchestrator({
     activeMessages: active?.messages,
     activeId: activeId ?? null,
     isStreaming,
     hallucinationEnabled,
     currentModel: currentModelObj,
+    expertVerification,
   })
 
   // --- KB context ---
@@ -308,6 +314,8 @@ export function ChatPanel() {
         toggleHallucinationEnabled={toggleHallucinationEnabled}
         inlineMarkups={inlineMarkups}
         toggleInlineMarkups={toggleInlineMarkups}
+        expertVerification={expertVerification}
+        toggleExpertVerification={toggleExpertVerification}
         onVerifyMessage={handleVerifyMessage}
         feedbackLoop={feedbackLoop}
         toggleFeedbackLoop={toggleFeedbackLoop}
@@ -394,20 +402,36 @@ export function ChatPanel() {
         </div>
       )}
 
+      {/* Expert verification cost indicator */}
+      {!isSimple && expertVerification && hallucinationEnabled && verification.phase !== "idle" && verification.phase !== "done" && (
+        <div className="flex items-center gap-2 px-3 py-1 text-[11px] text-amber-500 bg-amber-500/5 border-b border-amber-500/10">
+          <ShieldCheck className="h-3 w-3" />
+          Expert verification active — ~15× standard cost
+        </div>
+      )}
+
       {/* Messages */}
       <ChatMessages
         messages={active?.messages ?? []}
         isStreaming={isStreaming}
-        lastAssistantMsgId={lastAssistantMsgId}
+        selectedVerificationMsgId={selectedVerificationMsgId}
         verificationStatusForMsg={verificationStatusForMsg}
         halReport={halReport}
-        hallucinationEnabled={hallucinationEnabled}
         inlineMarkups={inlineMarkups}
+        allVerificationReports={allVerificationReports}
         onCorrect={handleCorrection}
-        onVerify={handleVerifyMessage}
+        onToggleMarkup={toggleInlineMarkups}
+        onClaimFocus={(idx) => {
+          setFocusedClaimIndex(idx)
+          if (isNarrow) setShowKB(true)
+        }}
         onArtifactClick={(artifactId) => {
           kbContext.setSelectedArtifactId(artifactId)
           setShowKB(true)
+        }}
+        onSelectVerificationMsg={(msgId) => {
+          setSelectedVerificationMsgId(msgId)
+          setFocusedClaimIndex(null)
         }}
       />
 
@@ -503,6 +527,7 @@ export function ChatPanel() {
           if (lastAutoInjectCount > 0) resetAutoInjectCount()
         }}
         onFileDrop={handleChatFileDrop}
+        onArtifactDrop={(artifact) => kbContext.injectResult(artifact)}
       />
     </div>
   )
@@ -517,6 +542,13 @@ export function ChatPanel() {
           featureEnabled={hallucinationEnabled}
           conversationId={activeId ?? undefined}
           streamingClaims={verification.phase !== "idle" && verification.phase !== "done" ? verification.claims : undefined}
+          focusedClaimIndex={focusedClaimIndex}
+          onClaimFocus={setFocusedClaimIndex}
+          onClose={() => setShowKB(false)}
+          expertVerification={expertVerification}
+          toggleExpertVerification={toggleExpertVerification}
+          inlineMarkups={inlineMarkups}
+          toggleInlineMarkups={toggleInlineMarkups}
         />
       </Panel>
       <PanelSeparator className="h-1 bg-border transition-colors hover:bg-primary/20 active:bg-primary/30" />

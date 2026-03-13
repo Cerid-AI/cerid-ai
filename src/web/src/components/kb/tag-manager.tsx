@@ -22,9 +22,11 @@ import type { TagInfo } from "@/lib/api"
 interface TagManagerProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Locally-known tags from displayed artifacts, used as fallback when API returns empty. */
+  localTags?: Array<[string, number]>
 }
 
-export function TagManager({ open, onOpenChange }: TagManagerProps) {
+export function TagManager({ open, onOpenChange, localTags }: TagManagerProps) {
   const queryClient = useQueryClient()
   const [filter, setFilter] = useState("")
   const [mergeSource, setMergeSource] = useState<string | null>(null)
@@ -39,7 +41,18 @@ export function TagManager({ open, onOpenChange }: TagManagerProps) {
     staleTime: 30_000,
   })
 
-  const filteredTags = (tags ?? []).filter(
+  // Merge API tags with local fallback tags (local tags fill gaps when API returns empty)
+  const mergedTags: TagInfo[] = (() => {
+    const apiTags = tags ?? []
+    if (apiTags.length > 0) return apiTags
+    // Fallback: convert locally-known tags to TagInfo format
+    if (localTags && localTags.length > 0) {
+      return localTags.map(([name, count]) => ({ name, usage_count: count }))
+    }
+    return []
+  })()
+
+  const filteredTags = mergedTags.filter(
     (t) => !filter || t.name.toLowerCase().includes(filter.toLowerCase()),
   )
 
@@ -152,7 +165,8 @@ export function TagManager({ open, onOpenChange }: TagManagerProps) {
 
         <DialogFooter>
           <p className="text-xs text-muted-foreground">
-            {tags ? `${tags.length} tags total` : ""}
+            {mergedTags.length > 0 ? `${mergedTags.length} tags total` : ""}
+            {mergedTags.length > 0 && (!tags || tags.length === 0) && " (from artifacts)"}
           </p>
         </DialogFooter>
       </DialogContent>

@@ -49,27 +49,35 @@ type LoadState = "loading" | "error" | "ready"
 
 type SectionKey = "connection" | "knowledge_ingestion" | "features" | "retrieval" | "search" | "taxonomy" | "infra_sync" | "kb_admin"
 
+const SETTINGS_SECTIONS_VERSION = 2 // Bump to force new defaults on existing users
+
 function readSectionState(): Record<SectionKey, boolean> {
   const defaults: Record<SectionKey, boolean> = {
     connection: true, knowledge_ingestion: true, features: true,
-    retrieval: false, search: false, taxonomy: true, infra_sync: false,
+    retrieval: true, search: true, taxonomy: true, infra_sync: true,
     kb_admin: true,
   }
   try {
-    const raw = localStorage.getItem("cerid-settings-sections")
-    if (raw) {
-      const parsed = JSON.parse(raw) as Record<string, boolean>
-      // Migrate: drop legacy keys, merge with new defaults
-      return { ...defaults, ...Object.fromEntries(
-        Object.entries(parsed).filter(([k]) => k in defaults)
-      ) }
+    const ver = localStorage.getItem("cerid-settings-sections-v")
+    if (ver && parseInt(ver, 10) >= SETTINGS_SECTIONS_VERSION) {
+      const raw = localStorage.getItem("cerid-settings-sections")
+      if (raw) {
+        const parsed = JSON.parse(raw) as Record<string, boolean>
+        // Migrate: drop legacy keys, merge with new defaults
+        return { ...defaults, ...Object.fromEntries(
+          Object.entries(parsed).filter(([k]) => k in defaults)
+        ) }
+      }
     }
   } catch { /* noop */ }
   return defaults
 }
 
 function persistSectionState(state: Record<SectionKey, boolean>) {
-  try { localStorage.setItem("cerid-settings-sections", JSON.stringify(state)) } catch { /* noop */ }
+  try {
+    localStorage.setItem("cerid-settings-sections", JSON.stringify(state))
+    localStorage.setItem("cerid-settings-sections-v", String(SETTINGS_SECTIONS_VERSION))
+  } catch { /* noop */ }
 }
 
 function formatFlagName(flag: string): string {

@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useEffect, useCallback, useRef } from "react"
-import { ExternalLink } from "lucide-react"
+import { ExternalLink, ChevronDown, ChevronUp, Search } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { DomainBadge } from "@/components/ui/domain-badge"
 import { cn } from "@/lib/utils"
+import { findModel } from "@/lib/types"
 import type { HallucinationClaim } from "@/lib/types"
 import {
   getClaimDisplayStatus,
@@ -15,10 +16,21 @@ import {
   type ClaimSpan,
 } from "@/lib/verification-utils"
 
+/** Extract a human-readable model name from a model ID string. */
+function displayModelName(modelId: string | undefined): string | null {
+  if (!modelId) return null
+  const known = findModel(modelId)
+  if (known) return known.label
+  // Fallback: strip "openrouter/" prefix and extract last segment
+  const segments = modelId.replace(/^openrouter\//, "").split("/")
+  return segments[segments.length - 1] ?? modelId
+}
+
 interface ClaimOverlayProps {
   container: HTMLDivElement | null
   claims: HallucinationClaim[]
   claimSpans: ClaimSpan[]
+  onClaimFocus?: (index: number) => void
   onArtifactClick?: (artifactId: string) => void
 }
 
@@ -27,9 +39,15 @@ interface ActiveClaim {
   rect: DOMRect
 }
 
-export function ClaimOverlay({ container, claims, claimSpans, onArtifactClick }: ClaimOverlayProps) {
+/** Extract hostname from a URL for display. */
+function hostname(url: string): string {
+  try { return new URL(url).hostname.replace(/^www\./, "") } catch { return url }
+}
+
+export function ClaimOverlay({ container, claims, claimSpans, onClaimFocus, onArtifactClick }: ClaimOverlayProps) {
   const [active, setActive] = useState<ActiveClaim | null>(null)
   const [hovered, setHovered] = useState<{ index: number; rect: DOMRect } | null>(null)
+  const [expanded, setExpanded] = useState(false)
   const popoverRef = useRef<HTMLDivElement>(null)
 
   const handleMarkClick = useCallback((e: Event) => {
@@ -38,7 +56,10 @@ export function ClaimOverlay({ container, claims, claimSpans, onArtifactClick }:
     if (idx < 0 || idx >= claimSpans.length) return
     const rect = el.getBoundingClientRect()
     setActive((prev) => prev?.index === idx ? null : { index: idx, rect })
-  }, [claimSpans.length])
+    setExpanded(false)
+    // Notify parent to focus the corresponding panel card
+    onClaimFocus?.(idx)
+  }, [claimSpans.length, onClaimFocus])
 
   const handleMouseEnter = useCallback((e: Event) => {
     if (active) return
@@ -52,7 +73,8 @@ export function ClaimOverlay({ container, claims, claimSpans, onArtifactClick }:
     setHovered(null)
   }, [])
 
-  // Attach listeners to marks and footnotes
+  // Attach listeners to marks and footnotes.
+  // claimSpans in the dep array ensures re-attachment after DOM mutation injects marks.
   useEffect(() => {
     if (!container) return
     const marks = container.querySelectorAll<HTMLElement>("[data-cerid-claim]")
@@ -72,7 +94,7 @@ export function ClaimOverlay({ container, claims, claimSpans, onArtifactClick }:
         el.removeEventListener("mouseleave", handleMouseLeave)
       }
     }
-  }, [container, handleMarkClick, handleMouseEnter, handleMouseLeave])
+  }, [container, claimSpans, handleMarkClick, handleMouseEnter, handleMouseLeave])
 
   // Dismiss on click outside, Escape, or scroll/resize (stale DOMRect)
   useEffect(() => {
@@ -112,7 +134,8 @@ export function ClaimOverlay({ container, claims, claimSpans, onArtifactClick }:
     const span = claimSpans[hovered.index]
     if (!span) return null
     const claim = resolveClaimData(hovered.index)
-    const label = span.displayStatus + (claim?.source_domain ? ` · ${claim.source_domain}` : "")
+    const domainSuffix = claim?.verification_method === "kb" && claim?.source_domain ? ` · ${claim.source_domain}` : ""
+    const label = span.displayStatus + domainSuffix
 
     return (
       <div
@@ -154,7 +177,7 @@ export function ClaimOverlay({ container, claims, claimSpans, onArtifactClick }:
       className="fixed z-50 w-[300px] rounded-lg border bg-popover p-3 text-popover-foreground shadow-lg animate-in fade-in-0 zoom-in-95"
       style={{ left: popoverLeft, top: Math.max(8, popoverTop) }}
     >
-      {/* Status badges */}
+      {/* Compact view: status + truncated claim + method badge */}
       <div className="flex items-center gap-1.5">
         <Badge
           variant="outline"
@@ -167,75 +190,120 @@ export function ClaimOverlay({ container, claims, claimSpans, onArtifactClick }:
             {claim.claim_type}
           </Badge>
         )}
-      </div>
-
-      {/* Claim text */}
-      <p className="mt-2 text-xs leading-relaxed">
-        {claim.claim.length > 200 ? claim.claim.slice(0, 200) + "…" : claim.claim}
-      </p>
-
-      {/* Source info */}
-      <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
-        {claim.source_filename && (
-          claim.source_artifact_id && onArtifactClick ? (
-            <button
-              className="text-primary hover:underline"
-              onClick={() => { onArtifactClick(claim.source_artifact_id!); setActive(null) }}
-            >
-              {claim.source_filename}
-            </button>
-          ) : (
-            <span>{claim.source_filename}</span>
-          )
-        )}
-        {claim.source_domain && <DomainBadge domain={claim.source_domain} />}
         {methodLabel && (
           <Badge variant="outline" className={`text-[10px] px-1 py-0 ${methodColor}`}>
             {methodLabel}
           </Badge>
         )}
-        {claim.similarity > 0 && (
-          <span className="tabular-nums">{Math.round(claim.similarity * 100)}% match</span>
-        )}
       </div>
 
-      {/* Source snippet */}
-      {claim.source_snippet && (
-        <p className="mt-1.5 line-clamp-2 text-[11px] text-muted-foreground/70 italic leading-relaxed">
-          &ldquo;{claim.source_snippet.slice(0, 150)}&rdquo;
-        </p>
-      )}
+      <p className="mt-2 text-xs leading-relaxed">
+        {expanded
+          ? claim.claim
+          : claim.claim.length > 100 ? claim.claim.slice(0, 100) + "…" : claim.claim}
+      </p>
 
-      {/* External source URLs */}
-      {claim.source_urls && claim.source_urls.length > 0 && (
-        <div className="mt-1.5 flex flex-wrap gap-1.5">
-          {claim.source_urls.map((url, i) => {
-            let host: string
-            try { host = new URL(url).hostname.replace(/^www\./, "") } catch { host = url }
-            return (
+      {/* Expand/collapse toggle */}
+      <button
+        className="mt-1.5 inline-flex items-center gap-0.5 text-[11px] text-yellow-400 hover:text-yellow-300"
+        onClick={() => setExpanded((prev) => !prev)}
+      >
+        {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+        {expanded ? "Less" : "More"}
+      </button>
+
+      {/* Expanded details */}
+      {expanded && (
+        <>
+          {/* KB-verified claims: artifact link + snippet */}
+          {claim.verification_method === "kb" && (
+            <>
+              <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                {claim.source_filename && (
+                  claim.source_artifact_id && onArtifactClick ? (
+                    <button
+                      className="text-primary hover:underline"
+                      onClick={() => { onArtifactClick(claim.source_artifact_id!); setActive(null) }}
+                    >
+                      {claim.source_filename}
+                    </button>
+                  ) : (
+                    <span>{claim.source_filename}</span>
+                  )
+                )}
+                {claim.source_domain && <DomainBadge domain={claim.source_domain} />}
+                {claim.similarity > 0 && (
+                  <span className="tabular-nums">{Math.round(claim.similarity * 100)}% match</span>
+                )}
+              </div>
+              {claim.source_snippet && (
+                <p className="mt-1.5 line-clamp-3 text-[11px] text-muted-foreground/70 italic leading-relaxed">
+                  &ldquo;{claim.source_snippet.slice(0, 150)}&rdquo;
+                </p>
+              )}
+            </>
+          )}
+
+          {/* Externally-verified claims: model + reasoning */}
+          {claim.verification_method !== "kb" && (
+            <>
+              <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                {displayModelName(claim.verification_model) && (
+                  <span className="text-muted-foreground/60">{displayModelName(claim.verification_model)}</span>
+                )}
+                {claim.similarity > 0 && (
+                  <span className="tabular-nums">{Math.round(claim.similarity * 100)}% confidence</span>
+                )}
+              </div>
+              {claim.reason && (
+                <p className="mt-1.5 text-[11px] text-muted-foreground/70 leading-relaxed">
+                  {claim.reason.slice(0, 200)}
+                </p>
+              )}
+            </>
+          )}
+
+          {/* Ignorance claim: show found answer */}
+          {claim.claim_type === "ignorance" && claim.status === "unverified" && claim.verification_answer && (
+            <div className="mt-2 rounded bg-green-500/10 px-2 py-1.5">
+              <span className="text-[10px] font-medium text-green-400">Found answer: </span>
+              <span className="text-[11px] leading-tight text-green-300/80">
+                {claim.verification_answer.slice(0, 300)}
+              </span>
+            </div>
+          )}
+
+          {/* References section */}
+          <div className="mt-2 border-t border-border/50 pt-2">
+            <p className="text-[10px] font-medium text-muted-foreground mb-1">References</p>
+            {claim.source_urls && claim.source_urls.length > 0 ? (
+              <div className="flex flex-col gap-1">
+                {claim.source_urls.slice(0, 5).map((url, i) => (
+                  <a
+                    key={i}
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-[11px] text-blue-500 hover:text-blue-400 truncate"
+                  >
+                    <ExternalLink className="h-2.5 w-2.5 shrink-0" />
+                    {hostname(url)}
+                  </a>
+                ))}
+              </div>
+            ) : (
               <a
-                key={i}
-                href={url}
+                href={`https://www.google.com/search?q=${encodeURIComponent(claim.claim)}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-0.5 text-[11px] text-blue-400 hover:text-blue-300"
+                className="inline-flex items-center gap-1 text-[11px] text-blue-500 hover:text-blue-400"
               >
-                <ExternalLink className="h-2.5 w-2.5" />
-                {host}
+                <Search className="h-2.5 w-2.5" />
+                Search for references
               </a>
-            )
-          })}
-        </div>
-      )}
-
-      {/* Ignorance claim: show found answer */}
-      {claim.claim_type === "ignorance" && claim.status === "unverified" && claim.verification_answer && (
-        <div className="mt-2 rounded bg-green-500/10 px-2 py-1.5">
-          <span className="text-[10px] font-medium text-green-400">Found answer: </span>
-          <span className="text-[11px] leading-tight text-green-300/80">
-            {claim.verification_answer.slice(0, 300)}
-          </span>
-        </div>
+            )}
+          </div>
+        </>
       )}
     </div>
   )

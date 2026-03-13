@@ -174,6 +174,10 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
         setLastAutoInjectCount(autoInjectedCount)
       }
 
+      if (allMessages[0]?.role === "system") {
+        console.log(`[kb-inject] System message (${allMessages[0].content.length} chars) with ${dedupedSources.length} sources`)
+      }
+
       allMessages.push(...(options.activeMessages ?? []), userMsg)
 
       // ── Proactive history pruning ──

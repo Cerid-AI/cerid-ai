@@ -12,31 +12,48 @@ import { MessageBubble, type MessageVerificationStatus } from "./message-bubble"
 import { ModelSwitchDivider } from "./model-switch-divider"
 import type { ChatMessage, HallucinationReport } from "@/lib/types"
 
+/** Build a compact verification badge status from a stored report. */
+function buildStatusFromReport(report: HallucinationReport): MessageVerificationStatus {
+  if (report.skipped || report.summary.total === 0) return null
+  return {
+    state: "done",
+    verified: report.summary.verified,
+    unverified: report.summary.unverified,
+    uncertain: report.summary.uncertain,
+    total: report.summary.total,
+  }
+}
+
 interface ChatMessagesProps {
   messages: ChatMessage[]
   isStreaming: boolean
-  /** ID of the latest assistant message (for attaching verification data). */
-  lastAssistantMsgId: string | null
+  /** ID of the currently selected verification message (for full inline markup). */
+  selectedVerificationMsgId: string | null
   verificationStatusForMsg: MessageVerificationStatus
   halReport: HallucinationReport | null
-  hallucinationEnabled: boolean
   inlineMarkups: boolean
+  /** All stored verification reports keyed by message ID. */
+  allVerificationReports: Record<string, HallucinationReport>
   onCorrect: (messageId: string, correction: string) => void
-  onVerify: () => void
+  onToggleMarkup?: () => void
+  onClaimFocus?: (index: number) => void
   onArtifactClick: (artifactId: string) => void
+  onSelectVerificationMsg?: (msgId: string) => void
 }
 
 export function ChatMessages({
   messages,
   isStreaming,
-  lastAssistantMsgId,
+  selectedVerificationMsgId,
   verificationStatusForMsg,
   halReport,
-  hallucinationEnabled,
   inlineMarkups,
+  allVerificationReports,
   onCorrect,
-  onVerify,
+  onToggleMarkup,
+  onClaimFocus,
   onArtifactClick,
+  onSelectVerificationMsg,
 }: ChatMessagesProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -73,16 +90,34 @@ export function ChatMessages({
               )
             }
           }
+
+          // Determine verification props for this message
+          const isSelected = msg.id === selectedVerificationMsgId
+          const storedReport = allVerificationReports[msg.id]
+          const msgVerificationStatus = isSelected
+            ? verificationStatusForMsg
+            : storedReport
+              ? buildStatusFromReport(storedReport)
+              : undefined
+          const msgClaims = isSelected && halReport?.claims ? halReport.claims : undefined
+          const msgInlineMarkups = isSelected ? inlineMarkups : undefined
+
           return (
             <div key={msg.id}>
               {divider}
               <MessageBubble
                 message={msg}
-                verificationStatus={msg.id === lastAssistantMsgId ? verificationStatusForMsg : undefined}
-                verificationClaims={msg.id === lastAssistantMsgId && halReport?.claims ? halReport.claims : undefined}
-                inlineMarkups={msg.id === lastAssistantMsgId ? inlineMarkups : undefined}
+                verificationStatus={msgVerificationStatus}
+                verificationClaims={msgClaims}
+                inlineMarkups={msgInlineMarkups}
                 onCorrect={msg.role === "assistant" && !isStreaming ? onCorrect : undefined}
-                onVerify={msg.role === "assistant" && !isStreaming && hallucinationEnabled && msg.id === lastAssistantMsgId ? onVerify : undefined}
+                onToggleMarkup={isSelected ? onToggleMarkup : undefined}
+                onSelectForVerification={
+                  msg.role === "assistant" && storedReport && !isSelected
+                    ? () => onSelectVerificationMsg?.(msg.id)
+                    : undefined
+                }
+                onClaimFocus={isSelected ? onClaimFocus : undefined}
                 onArtifactClick={msg.role === "assistant" ? onArtifactClick : undefined}
               />
             </div>

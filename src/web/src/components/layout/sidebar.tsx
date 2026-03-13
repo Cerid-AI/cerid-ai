@@ -120,7 +120,7 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
                 className="h-6 flex-1 justify-start gap-1.5 px-1 text-xs text-muted-foreground"
                 onClick={toggleHistory}
               >
-                {historyExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
+                {historyExpanded ? <ChevronUp className="h-3 w-3 text-yellow-400" /> : <ChevronDown className="h-3 w-3 text-yellow-400" />}
                 History
               </Button>
               <Tooltip>

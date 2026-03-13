@@ -1,20 +1,20 @@
 // Copyright (c) 2026 Justin Michaels. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useCallback, useRef, useMemo, lazy, Suspense } from "react"
+import { useState, useCallback, useRef, useMemo, lazy, Suspense, useEffect } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Badge } from "@/components/ui/badge"
-import { Search, X, Loader2, AlertCircle, RefreshCcw, Upload, CheckCircle, Tag, Settings2 } from "lucide-react"
+import { Search, X, Loader2, AlertCircle, RefreshCcw, Upload, CheckCircle, Tag, Settings2, ArrowUpDown, ArrowDownAZ, CalendarArrowDown, Star, FileUp, Clock } from "lucide-react"
 import { ArtifactCard } from "./artifact-card"
 import { TaxonomyTree } from "./taxonomy-tree"
 import { GraphPreview } from "./graph-preview"
 import { UploadDialog } from "./upload-dialog"
 import { TagManager } from "./tag-manager"
-import { fetchArtifacts, queryKB, uploadFile, recategorizeArtifact } from "@/lib/api"
+import { fetchArtifacts, queryKB, uploadFile, recategorizeArtifact, adminDeleteArtifact, updateArtifactTags } from "@/lib/api"
 import { useKBInjection } from "@/contexts/kb-injection-context"
 import { useDragDrop } from "@/hooks/use-drag-drop"
 import type { KBQueryResult, Artifact } from "@/lib/types"
@@ -73,14 +73,33 @@ export function KnowledgePane() {
   })
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null)
   const [activeTag, setActiveTag] = useState<string | null>(null)
+  const [sortBy, setSortBy] = useState<"relevance" | "quality" | "date" | "name">("relevance")
   const [previewArtifactId, setPreviewArtifactId] = useState<string | null>(null)
   const [tagManagerOpen, setTagManagerOpen] = useState(false)
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "success" | "error">("idle")
   const [uploadMessage, setUploadMessage] = useState("")
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  const [ingestionLog, setIngestionLog] = useState<Array<{ name: string; time: number; status: "success" | "error" }>>([])
   const { isDragOver, dragHandlers } = useDragDrop(setPendingFiles)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const queryClient = useQueryClient()
+
+  // Load ingestion log from sessionStorage on mount
+  useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem("cerid-ingestion-log")
+      if (stored) setIngestionLog(JSON.parse(stored))
+    } catch { /* ignore */ }
+  }, [])
+
+  // Persist ingestion log to sessionStorage
+  const addToIngestionLog = useCallback((name: string, status: "success" | "error") => {
+    setIngestionLog((prev) => {
+      const next = [{ name, time: Date.now(), status }, ...prev].slice(0, 10)
+      try { sessionStorage.setItem("cerid-ingestion-log", JSON.stringify(next)) } catch { /* ignore */ }
+      return next
+    })
+  }, [])
 
   const activeDomain = taxonomyFilter.domain
 
@@ -96,6 +115,45 @@ export function KnowledgePane() {
       const result = await uploadFile(file, { domain, categorizeMode: categorize_mode })
       setUploadStatus("success")
       setUploadMessage(`${result.filename} ingested (${result.chunks} chunks)`)
+      addToIngestionLog(result.filename ?? file.name, "success")
+      queryClient.invalidateQueries({ queryKey: ["artifacts"] })
+      setTimeout(() => setUploadStatus("idle"), UPLOAD_STATUS_RESET_MS)
+    } catch (err) {
+      setUploadStatus("error")
+      setUploadMessage(err instanceof Error ? err.message : "Upload failed")
+      addToIngestionLog(file.name, "error")
+      setTimeout(() => setUploadStatus("idle"), UPLOAD_STATUS_RESET_MS)
+    }
+  }, [activeDomain, queryClient, addToIngestionLog])
+
+  const handleUploadConfirm = useCallback(async (
+    options: { domain?: string; categorize_mode?: string },
+  ) => {
+    const files = pendingFiles
+    setPendingFiles([])
+    setUploadStatus("uploading")
+    setUploadMessage(`Uploading ${files.length} files...`)
+    try {
+      const results = await Promise.allSettled(
+        files.map((file) => {
+          const domain = options.domain ?? activeDomain ?? undefined
+          const categorize_mode = options.categorize_mode
+          return uploadFile(file, { domain, categorizeMode: categorize_mode })
+        }),
+      )
+      const succeeded = results.filter((r) => r.status === "fulfilled").length
+      const failed = results.filter((r) => r.status === "rejected").length
+      // Log each file result
+      results.forEach((r, i) => {
+        addToIngestionLog(files[i]?.name ?? "unknown", r.status === "fulfilled" ? "success" : "error")
+      })
+      if (failed === 0) {
+        setUploadStatus("success")
+        setUploadMessage(`${succeeded} file${succeeded !== 1 ? "s" : ""} ingested successfully`)
+      } else {
+        setUploadStatus(succeeded > 0 ? "success" : "error")
+        setUploadMessage(`${succeeded} succeeded, ${failed} failed`)
+      }
       queryClient.invalidateQueries({ queryKey: ["artifacts"] })
       setTimeout(() => setUploadStatus("idle"), UPLOAD_STATUS_RESET_MS)
     } catch (err) {
@@ -103,17 +161,7 @@ export function KnowledgePane() {
       setUploadMessage(err instanceof Error ? err.message : "Upload failed")
       setTimeout(() => setUploadStatus("idle"), UPLOAD_STATUS_RESET_MS)
     }
-  }, [activeDomain, queryClient])
-
-  const handleUploadConfirm = useCallback(async (
-    options: { domain?: string; categorize_mode?: string },
-  ) => {
-    const files = pendingFiles
-    setPendingFiles([])
-    for (const file of files) {
-      await handleFileUpload(file, options)
-    }
-  }, [pendingFiles, handleFileUpload])
+  }, [pendingFiles, activeDomain, queryClient, addToIngestionLog])
 
   const {
     data: artifacts,
@@ -149,8 +197,9 @@ export function KnowledgePane() {
   const errorDetail = activeSearch ? searchErrorDetail : browseErrorDetail
   const refetch = activeSearch ? refetchSearch : refetchArtifacts
 
+  const MIN_RELEVANCE = 0.35
   const allResults: KBQueryResult[] = activeSearch
-    ? deduplicateByArtifact(searchResults?.results ?? [])
+    ? deduplicateByArtifact(searchResults?.results ?? []).filter((r) => r.relevance >= MIN_RELEVANCE)
     : (artifacts ?? [])
         .filter((a) => !activeDomain || a.domain === activeDomain)
         .filter((a) => !taxonomyFilter.subCategory || a.sub_category === taxonomyFilter.subCategory)
@@ -174,6 +223,19 @@ export function KnowledgePane() {
     queryClient.invalidateQueries({ queryKey: ["taxonomy"] })
   }, [queryClient])
 
+  const handleDelete = useCallback(async (artifactId: string) => {
+    await adminDeleteArtifact(artifactId)
+    queryClient.invalidateQueries({ queryKey: ["artifacts"] })
+    queryClient.invalidateQueries({ queryKey: ["taxonomy"] })
+    queryClient.invalidateQueries({ queryKey: ["kb-search"] })
+  }, [queryClient])
+
+  const handleUpdateTags = useCallback(async (artifactId: string, tags: string[]) => {
+    await updateArtifactTags(artifactId, tags)
+    queryClient.invalidateQueries({ queryKey: ["artifacts"] })
+    queryClient.invalidateQueries({ queryKey: ["kb-search"] })
+  }, [queryClient])
+
   const availableTags = useMemo(() => {
     const tagCounts = new Map<string, number>()
     for (const r of allResults) {
@@ -184,9 +246,34 @@ export function KnowledgePane() {
     return [...tagCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12)
   }, [allResults])
 
-  const results = activeTag
+  const filteredByTag = activeTag
     ? allResults.filter((r) => r.tags?.includes(activeTag))
     : allResults
+
+  const results = useMemo(() => {
+    const sorted = [...filteredByTag]
+    switch (sortBy) {
+      case "quality":
+        sorted.sort((a, b) => (b.quality_score ?? 0) - (a.quality_score ?? 0))
+        break
+      case "date":
+        sorted.sort((a, b) => {
+          const da = a.ingested_at ? new Date(a.ingested_at).getTime() : 0
+          const db = b.ingested_at ? new Date(b.ingested_at).getTime() : 0
+          return db - da
+        })
+        break
+      case "name":
+        sorted.sort((a, b) => (a.filename ?? "").localeCompare(b.filename ?? ""))
+        break
+      case "relevance":
+      default:
+        // Search results already sorted by relevance; browse mode by name
+        if (!activeSearch) sorted.sort((a, b) => (a.filename ?? "").localeCompare(b.filename ?? ""))
+        break
+    }
+    return sorted
+  }, [filteredByTag, sortBy, activeSearch])
 
   const executeSearch = useCallback(() => {
     if (searchInput.trim().length > 2) {
@@ -234,11 +321,18 @@ export function KnowledgePane() {
           <input
             ref={fileInputRef}
             type="file"
+            multiple
             className="sr-only"
-            aria-label="Upload file"
+            aria-label="Upload files"
             onChange={(e) => {
-              const file = e.target.files?.[0]
-              if (file) handleFileUpload(file)
+              const files = e.target.files
+              if (files && files.length > 0) {
+                if (files.length === 1) {
+                  handleFileUpload(files[0])
+                } else {
+                  setPendingFiles([...files])
+                }
+              }
               e.target.value = ""
             }}
           />
@@ -328,6 +422,87 @@ export function KnowledgePane() {
         )}
       </div>
 
+      {/* Sort controls */}
+      {allResults.length > 1 && (
+        <div className="flex items-center gap-1 border-b px-4 py-1.5">
+          <ArrowUpDown className="h-3 w-3 text-muted-foreground shrink-0" />
+          <span className="text-[10px] text-muted-foreground mr-1">Sort:</span>
+          {activeSearch && (
+            <Button
+              variant={sortBy === "relevance" ? "secondary" : "ghost"}
+              size="xs"
+              className="h-5 text-[10px] gap-0.5"
+              onClick={() => setSortBy("relevance")}
+            >
+              <Star className="h-2.5 w-2.5" />
+              Relevance
+            </Button>
+          )}
+          <Button
+            variant={sortBy === "quality" ? "secondary" : "ghost"}
+            size="xs"
+            className="h-5 text-[10px] gap-0.5"
+            onClick={() => setSortBy("quality")}
+          >
+            <Star className="h-2.5 w-2.5" />
+            Quality
+          </Button>
+          <Button
+            variant={sortBy === "date" ? "secondary" : "ghost"}
+            size="xs"
+            className="h-5 text-[10px] gap-0.5"
+            onClick={() => setSortBy("date")}
+          >
+            <CalendarArrowDown className="h-2.5 w-2.5" />
+            Date
+          </Button>
+          <Button
+            variant={sortBy === "name" ? "secondary" : "ghost"}
+            size="xs"
+            className="h-5 text-[10px] gap-0.5"
+            onClick={() => setSortBy("name")}
+          >
+            <ArrowDownAZ className="h-2.5 w-2.5" />
+            Name
+          </Button>
+        </div>
+      )}
+
+      {/* Drop zone + ingestion log */}
+      <div className="border-b px-4 py-2 space-y-2">
+        <div
+          className="flex items-center justify-center gap-2 rounded-lg border-2 border-dashed border-muted-foreground/30 bg-muted/20 px-3 py-3 text-muted-foreground transition-colors hover:border-primary/40 hover:bg-primary/5 cursor-pointer"
+          onClick={() => fileInputRef.current?.click()}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fileInputRef.current?.click() } }}
+        >
+          <FileUp className="h-4 w-4 shrink-0" />
+          <span className="text-xs">Drop files here or click to upload</span>
+        </div>
+        {ingestionLog.length > 0 && (
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-1">
+              <Clock className="h-2.5 w-2.5 text-muted-foreground" />
+              <span className="text-[10px] text-muted-foreground font-medium">Recent uploads</span>
+            </div>
+            {ingestionLog.slice(0, 5).map((entry) => (
+              <div key={`${entry.name}-${entry.time}`} className="flex items-center gap-1.5 text-[10px]">
+                {entry.status === "success" ? (
+                  <CheckCircle className="h-2.5 w-2.5 shrink-0 text-green-500" />
+                ) : (
+                  <AlertCircle className="h-2.5 w-2.5 shrink-0 text-destructive" />
+                )}
+                <span className="min-w-0 truncate text-muted-foreground">{entry.name}</span>
+                <span className="ml-auto shrink-0 text-muted-foreground/60">
+                  {new Date(entry.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Results */}
       <ScrollArea className="min-h-0 flex-1">
         <div className="min-w-0 max-w-full space-y-2 overflow-hidden p-4">
@@ -374,6 +549,8 @@ export function KnowledgePane() {
               domains={domainList}
               onRecategorize={handleRecategorize}
               onPreview={setPreviewArtifactId}
+              onDelete={handleDelete}
+              onUpdateTags={handleUpdateTags}
             />
           ))}
         </div>
@@ -410,7 +587,7 @@ export function KnowledgePane() {
         onCancel={() => setPendingFiles([])}
       />
 
-      <TagManager open={tagManagerOpen} onOpenChange={setTagManagerOpen} />
+      <TagManager open={tagManagerOpen} onOpenChange={setTagManagerOpen} localTags={availableTags} />
     </div>
   )
 }

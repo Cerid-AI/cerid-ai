@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useCallback, useRef, useEffect } from "react"
-import type { Conversation, ChatMessage } from "@/lib/types"
+import type { Conversation, ChatMessage, HallucinationReport } from "@/lib/types"
 import { MODELS } from "@/lib/types"
 import { uuid } from "@/lib/utils"
 
@@ -12,7 +12,8 @@ const SAVE_DEBOUNCE_MS = 500
 
 const VALID_MODEL_IDS = new Set(MODELS.map((m) => m.id))
 
-/** Migrate old model IDs (missing openrouter/ prefix) and validate against current MODELS list */
+/** Migrate old model IDs (missing openrouter/ prefix), validate against current MODELS list,
+ *  and migrate singular verificationReport → plural verificationReports. */
 function migrateConversations(convos: Conversation[]): Conversation[] {
   let changed = false
   const migrated = convos.map((c) => {
@@ -23,6 +24,17 @@ function migrateConversations(convos: Conversation[]): Conversation[] {
     }
     if (model && !VALID_MODEL_IDS.has(model)) {
       model = MODELS[0].id
+      changed = true
+    }
+    // Migrate singular verificationReport → plural verificationReports
+    const legacy = c as unknown as Record<string, unknown>
+    if (legacy.verificationReport && !c.verificationReports) {
+      const lastAssistant = c.messages
+        .filter((m) => m.role === "assistant" && m.content).pop()
+      if (lastAssistant) {
+        c.verificationReports = { [lastAssistant.id]: legacy.verificationReport as HallucinationReport }
+      }
+      delete legacy.verificationReport
       changed = true
     }
     return model !== c.model ? { ...c, model } : c
@@ -210,10 +222,41 @@ export function useConversations() {
     })
   }, [])
 
+  /** Persist a verification report for a specific message in localStorage. */
+  const saveVerification = useCallback((convoId: string, msgId: string, report: HallucinationReport | null) => {
+    setConversations((prev) => {
+      const next = prev.map((c) => {
+        if (c.id !== convoId) return c
+        const reports = { ...(c.verificationReports ?? {}) }
+        if (report) {
+          reports[msgId] = report
+        } else {
+          delete reports[msgId]
+        }
+        return { ...c, verificationReports: reports, updatedAt: Date.now() }
+      })
+      saveConversations(next)
+      return next
+    })
+  }, [])
+
+  /** Get the stored verification report for a specific message. */
+  const getVerification = useCallback((convoId: string, msgId: string): HallucinationReport | null => {
+    const convo = conversations.find((c) => c.id === convoId)
+    return convo?.verificationReports?.[msgId] ?? null
+  }, [conversations])
+
+  /** Get all stored verification reports for a conversation (keyed by message ID). */
+  const getAllVerificationReports = useCallback((convoId: string): Record<string, HallucinationReport> => {
+    const convo = conversations.find((c) => c.id === convoId)
+    return convo?.verificationReports ?? {}
+  }, [conversations])
+
   return {
     conversations, active, activeId, setActiveId,
     create, addMessage, updateLastMessage, updateLastMessageModel, updateModel, remove,
     replaceMessages, clearMessages,
     verifiedConversations, markVerified, clearVerified,
+    saveVerification, getVerification, getAllVerificationReports,
   }
 }

@@ -382,6 +382,7 @@ class VerifyStreamRequest(BaseModel):
     conversation_history: list[dict[str, str]] | None = Field(
         None, description="Prior conversation messages for consistency checking"
     )
+    expert_mode: bool = Field(False, description="Use expert-tier model (Grok 4) for all verification")
 
 
 _STREAM_END = object()  # Sentinel for generator exhaustion
@@ -434,6 +435,7 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
                 model=req.model,
                 user_query=req.user_query,
                 conversation_history=req.conversation_history,
+                expert_mode=req.expert_mode,
             )
 
             # Read events with a keepalive timeout — if no event arrives

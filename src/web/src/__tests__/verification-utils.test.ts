@@ -110,4 +110,30 @@ describe("matchClaimsToText", () => {
     expect(spans).toHaveLength(1)
     expect(spans[0].displayStatus).toBe("evasion")
   })
+
+  it("matches with whitespace-optional (DOM block boundaries)", () => {
+    // DOM textContent often has no spaces between block elements
+    const domText = "First paragraph.Second paragraph with important claim here."
+    const claims = [{ claim: "important claim here", status: "verified" }]
+    const spans = matchClaimsToText("", claims, domText)
+    expect(spans).toHaveLength(1)
+  })
+
+  it("matches via longest contiguous word sequence", () => {
+    const text = "Python was created by Guido van Rossum in the Netherlands in 1991."
+    // LLM paraphrases but 4+ words match verbatim
+    const claims = [{ claim: "Python was initially designed by Guido van Rossum in 1991", status: "verified" }]
+    const spans = matchClaimsToText(text, claims)
+    expect(spans).toHaveLength(1)
+  })
+
+  it("uses domTextContent for position coordinates when provided", () => {
+    const rawMd = "**Bold claim** is important."
+    const domText = "Bold claim is important."
+    const claims = [{ claim: "Bold claim is important", status: "verified" }]
+    const spans = matchClaimsToText(rawMd, claims, domText)
+    expect(spans).toHaveLength(1)
+    expect(spans[0].start).toBe(0)
+    expect(spans[0].end).toBe(23)
+  })
 })

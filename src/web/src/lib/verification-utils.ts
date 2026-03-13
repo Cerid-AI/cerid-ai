@@ -33,38 +33,115 @@ function normalizeWS(s: string): string {
   return s.replace(/\s+/g, " ").trim()
 }
 
+/** Escape special regex characters in a string. */
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
 /**
  * Match verification claims to positions in the response text.
  * Returns sorted, non-overlapping ClaimSpan[].
+ *
+ * When `domTextContent` is provided, positions are in the RAW textContent
+ * coordinate system (matching the DOM TreeWalker), NOT normalized.
+ *
+ * Matching tiers (tried in order):
+ * 1. Exact case-insensitive substring
+ * 2. Whitespace-flexible regex (words joined by \s+)
+ * 3. Whitespace-optional regex (words joined by \s* — handles DOM textContent
+ *    missing spaces between block elements like <p>…</p><p>…</p>)
+ * 4. First 5 significant words (>2 chars) with flexible whitespace
+ * 5. Longest common contiguous word sequence (≥4 words)
  */
-export function matchClaimsToText(text: string, claims: ClaimLike[]): ClaimSpan[] {
-  if (!text || !claims || claims.length === 0) return []
+export function matchClaimsToText(text: string, claims: ClaimLike[], domTextContent?: string): ClaimSpan[] {
+  if ((!text && !domTextContent) || !claims || claims.length === 0) return []
 
-  const normText = normalizeWS(text)
-  const normLower = normText.toLowerCase()
+  // Use raw DOM text when available — positions must match DOM walker coordinates.
+  // Do NOT normalize: the DOM walker uses raw textContent offsets.
+  const searchText = domTextContent ?? normalizeWS(text)
+  const searchLower = searchText.toLowerCase()
   const rawSpans: ClaimSpan[] = []
 
   for (const c of claims) {
-    const normClaim = normalizeWS(c.claim)
-    if (!normClaim) continue
+    // Strip markdown formatting from claim since DOM text has no markdown
+    const claimText = stripMarkdown(c.claim).trim()
+    if (!claimText) continue
 
     const displayStatus = getClaimDisplayStatus(c.status, c.verification_method, c.claim_type)
+    const claimLower = claimText.toLowerCase()
 
-    // Try exact substring match (case-insensitive)
-    const claimLower = normClaim.toLowerCase()
-    let idx = normLower.indexOf(claimLower)
+    // Tier 1: exact substring match (case-insensitive)
+    let idx = searchLower.indexOf(claimLower)
     if (idx >= 0) {
       rawSpans.push({ start: idx, end: idx + claimLower.length, claim: c.claim, displayStatus })
       continue
     }
 
-    // Fallback: match first 5 significant words (>2 chars)
-    const words = normClaim.split(/\s+/).filter((w) => w.length > 2)
-    const prefix = words.slice(0, 5).join(" ").toLowerCase()
-    if (prefix.length >= 8) {
-      idx = normLower.indexOf(prefix)
-      if (idx >= 0) {
-        rawSpans.push({ start: idx, end: idx + prefix.length, claim: c.claim, displayStatus })
+    const words = claimLower.split(/\s+/).filter((w) => w.length > 0)
+
+    // Tier 2: whitespace-flexible match: words separated by \s+ regex
+    if (words.length >= 2) {
+      const flexPattern = words.map(escapeRegex).join("\\s+")
+      try {
+        const re = new RegExp(flexPattern, "i")
+        const match = re.exec(searchText)
+        if (match) {
+          rawSpans.push({ start: match.index, end: match.index + match[0].length, claim: c.claim, displayStatus })
+          continue
+        }
+      } catch { /* invalid regex, skip */ }
+    }
+
+    // Tier 3: whitespace-optional match — handles DOM textContent missing
+    // spaces between block elements (e.g., "paragraph.Next paragraph")
+    if (words.length >= 2) {
+      const optPattern = words.map(escapeRegex).join("\\s*")
+      try {
+        const re = new RegExp(optPattern, "i")
+        const match = re.exec(searchText)
+        if (match) {
+          rawSpans.push({ start: match.index, end: match.index + match[0].length, claim: c.claim, displayStatus })
+          continue
+        }
+      } catch { /* invalid regex, skip */ }
+    }
+
+    // Tier 4: first 5 significant words (>2 chars) with flexible whitespace
+    const sigWords = words.filter((w) => w.length > 2).slice(0, 5)
+    if (sigWords.length >= 3) {
+      const prefixPattern = sigWords.map(escapeRegex).join("\\s+")
+      try {
+        const re = new RegExp(prefixPattern, "i")
+        const match = re.exec(searchText)
+        if (match) {
+          rawSpans.push({ start: match.index, end: match.index + match[0].length, claim: c.claim, displayStatus })
+          continue
+        }
+      } catch { /* skip */ }
+    }
+
+    // Tier 5: longest contiguous word sequence (≥4 words) — handles LLM
+    // paraphrasing by finding the longest verbatim subsequence
+    if (words.length >= 4) {
+      let bestMatch: { start: number; end: number } | null = null
+      let bestLen = 0
+      for (let wStart = 0; wStart <= words.length - 4; wStart++) {
+        for (let wEnd = words.length; wEnd >= wStart + 4; wEnd--) {
+          const subPattern = words.slice(wStart, wEnd).map(escapeRegex).join("\\s+")
+          try {
+            const re = new RegExp(subPattern, "i")
+            const match = re.exec(searchText)
+            if (match && match[0].length > bestLen) {
+              bestMatch = { start: match.index, end: match.index + match[0].length }
+              bestLen = match[0].length
+              break // Found longest from this wStart
+            }
+          } catch { /* skip */ }
+        }
+        if (bestMatch) break // Use first (leftmost) best match
+      }
+      if (bestMatch) {
+        rawSpans.push({ start: bestMatch.start, end: bestMatch.end, claim: c.claim, displayStatus })
       }
     }
   }
@@ -146,4 +223,23 @@ export function verificationMethodColor(method?: string): string {
   if (method === "web_search") return "bg-blue-500/15 text-blue-400 border-blue-500/30"
   if (method === "kb") return "bg-cyan-500/15 text-cyan-400 border-cyan-500/30"
   return "bg-muted text-muted-foreground border-border"
+}
+
+/**
+ * Strip common Markdown formatting from claim text for clean display.
+ * Handles bold, italic, inline code, links, headers, and list markers.
+ */
+export function stripMarkdown(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, "$1")       // **bold**
+    .replace(/__(.+?)__/g, "$1")            // __bold__
+    .replace(/\*(.+?)\*/g, "$1")            // *italic*
+    .replace(/_(.+?)_/g, "$1")              // _italic_
+    .replace(/`([^`]+)`/g, "$1")            // `inline code`
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // [text](url)
+    .replace(/^#{1,6}\s+/gm, "")            // # headers
+    .replace(/^[-*+]\s+/gm, "")             // - list items
+    .replace(/^\d+\.\s+/gm, "")             // 1. ordered list
+    .replace(/^>\s+/gm, "")                 // > blockquote
+    .trim()
 }

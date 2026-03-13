@@ -173,6 +173,14 @@ VERIFICATION_COMPLEX_MODEL = os.getenv(
     "openrouter/google/gemini-2.5-flash",
 )
 
+# Expert-tier verification model — high-capability reasoning model for
+# users who want maximum verification quality at higher cost.
+# Grok 4: $3/$15 per 1M tokens (vs $0.15/$0.60 for GPT-4o-mini pool).
+VERIFICATION_EXPERT_MODEL = os.getenv(
+    "VERIFICATION_EXPERT_MODEL",
+    "openrouter/x-ai/grok-4",
+)
+
 # ---------------------------------------------------------------------------
 # External (Cross-Model) Verification
 # ---------------------------------------------------------------------------

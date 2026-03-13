@@ -48,6 +48,7 @@ async def check_hallucinations(
     threshold: float | None = None,
     model: str | None = None,
     user_query: str | None = None,
+    expert_mode: bool = False,
 ) -> dict[str, Any]:
     """Extract claims, verify each against KB, and store results in Redis."""
     if threshold is None:
@@ -82,7 +83,7 @@ async def check_hallucinations(
         async with sem:
             return await verify_claim(
                 claim_text, chroma_client, neo4j_driver, redis_client,
-                threshold, model=model,
+                threshold, model=model, expert_mode=expert_mode,
             )
 
     results = await asyncio.gather(*[_limited_verify(c) for c in claims])
@@ -150,11 +151,15 @@ async def verify_response_streaming(
     model: str | None = None,
     user_query: str | None = None,
     conversation_history: list[dict[str, str]] | None = None,
+    expert_mode: bool = False,
 ):
     """Streaming verification generator — yields claim results as they are verified.
 
     Results are yielded as they complete (parallel execution), then persisted
     to Redis after the final summary for audit analytics and conversation revisits.
+
+    When ``expert_mode`` is True, all claims are verified using the expert-tier
+    model (Grok 4) instead of the default model pool.
     """
     if threshold is None:
         threshold = config.HALLUCINATION_THRESHOLD
@@ -248,6 +253,7 @@ async def verify_response_streaming(
                     verify_claim(
                         claim_text, chroma_client, neo4j_driver, redis_client,
                         threshold, model=model, streaming=True,
+                        expert_mode=expert_mode,
                     ),
                     timeout=config.STREAMING_PER_CLAIM_TIMEOUT,
                 )

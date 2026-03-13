@@ -83,11 +83,22 @@ export function useSettings() {
   })
   const [autoInjectThreshold, setAutoInjectThresholdState] = useState(() => readFloat("cerid-auto-inject-threshold", 0.82))
 
-  const [inlineMarkups, setInlineMarkupsState] = useState(() => readBool("cerid-inline-markups"))
+  const [inlineMarkups, setInlineMarkupsState] = useState(() => {
+    try { const v = localStorage.getItem("cerid-inline-markups"); return v === null ? true : v === "true" } catch { return true }
+  })
   const toggleInlineMarkups = useCallback(() => {
     setInlineMarkupsState((prev) => {
       const next = !prev
       persist("cerid-inline-markups", String(next))
+      return next
+    })
+  }, [])
+
+  const [expertVerification, setExpertVerificationState] = useState(() => readBool("cerid-expert-verification"))
+  const toggleExpertVerification = useCallback(() => {
+    setExpertVerificationState((prev) => {
+      const next = !prev
+      persist("cerid-expert-verification", String(next))
       return next
     })
   }, [])
@@ -198,5 +209,6 @@ export function useSettings() {
     hallucinationEnabled, toggleHallucinationEnabled,
     memoryExtraction, toggleMemoryExtraction,
     inlineMarkups, toggleInlineMarkups,
+    expertVerification, toggleExpertVerification,
   }
 }

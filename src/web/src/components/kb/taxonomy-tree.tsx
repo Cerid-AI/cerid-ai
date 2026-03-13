@@ -201,9 +201,9 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts }: Taxonom
                       aria-label={isExpanded ? "Collapse" : "Expand"}
                     >
                       {isExpanded ? (
-                        <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                        <ChevronDown className="h-3 w-3 text-yellow-400" />
                       ) : (
-                        <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                        <ChevronRight className="h-3 w-3 text-yellow-400" />
                       )}
                     </span>
                     {isExpanded ? (

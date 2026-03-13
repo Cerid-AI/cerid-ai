@@ -117,6 +117,8 @@ describe("ClaimOverlay", () => {
     )
 
     fireEvent.click(container.querySelector("[data-cerid-claim]")!)
+    // Expand details to see source info
+    fireEvent.click(screen.getByText("More"))
     const sourceButton = screen.getByText("notes.pdf")
     expect(sourceButton).toBeInTheDocument()
     // Clicking source should call onArtifactClick
@@ -193,6 +195,8 @@ describe("ClaimOverlay", () => {
     )
 
     fireEvent.click(container.querySelector("[data-cerid-claim]")!)
+    // Expand details to see source snippet
+    fireEvent.click(screen.getByText("More"))
     expect(screen.getByText(/Paris is the capital city/)).toBeInTheDocument()
 
     document.body.removeChild(container)
@@ -212,6 +216,8 @@ describe("ClaimOverlay", () => {
     )
 
     fireEvent.click(container.querySelector("[data-cerid-claim]")!)
+    // Expand details to see similarity
+    fireEvent.click(screen.getByText("More"))
     expect(screen.getByText("87% match")).toBeInTheDocument()
 
     document.body.removeChild(container)

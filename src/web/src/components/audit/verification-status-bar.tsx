@@ -9,7 +9,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import type { HallucinationReport, StreamingClaim } from "@/lib/types"
 import type { VerificationPhase } from "@/hooks/use-verification-stream"
-import { getClaimDisplayStatus, type ClaimDisplayStatus } from "@/lib/verification-utils"
+import { getClaimDisplayStatus, stripMarkdown, type ClaimDisplayStatus } from "@/lib/verification-utils"
 import { cn, getAccuracyTier } from "@/lib/utils"
 
 interface VerificationStatusBarProps {
@@ -105,7 +105,10 @@ export function VerificationStatusBar({
             Verifying {verifiedCount}/{totalClaims} claims
             {extractionMethod && <span className="ml-1 text-muted-foreground/60">({extractionMethod})</span>}
           </span>
-          {expanded ? <ChevronUp className="h-3 w-3 text-muted-foreground" /> : <ChevronDown className="h-3 w-3 text-muted-foreground" />}
+          <span className="flex items-center gap-1 text-yellow-400 transition-colors">
+            <span className="text-[11px] font-medium">{expanded ? "Less" : "More"}</span>
+            {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          </span>
         </button>
         {expanded && (
           <div className="border-t border-border/50 px-4 py-1.5">
@@ -117,7 +120,7 @@ export function VerificationStatusBar({
                     <div className="flex items-start gap-1.5">
                       <ClaimStatusIcon displayStatus={ds} />
                       <span className={cn("flex-1 leading-tight", claimStatusColor(ds))}>
-                        {c.claim}
+                        {stripMarkdown(c.claim)}
                       </span>
                       {c.claim_type === "evasion" && (
                         <span className="shrink-0 rounded bg-orange-500/15 px-1 text-[10px] text-orange-400">evasion</span>
@@ -152,7 +155,7 @@ export function VerificationStatusBar({
                     {c.claim_type === "ignorance" && c.status === "unverified" && c.verification_answer && (
                       <div className="ml-[18px] rounded bg-green-500/10 px-2 py-1">
                         <span className="text-[10px] font-medium text-green-400">Found answer: </span>
-                        <span className="text-[10px] leading-tight text-green-300/80">{c.verification_answer.slice(0, 300)}</span>
+                        <span className="text-[10px] leading-tight text-green-300/80">{stripMarkdown(c.verification_answer.slice(0, 300))}</span>
                       </div>
                     )}
                   </li>
@@ -352,9 +355,10 @@ export function VerificationStatusBar({
         {/* Expand toggle */}
         <div className="flex-1" />
         {hasClaims && (
-          expanded
-            ? <ChevronUp className="h-3 w-3 text-muted-foreground" />
-            : <ChevronDown className="h-3 w-3 text-muted-foreground" />
+          <span className="flex items-center gap-1 text-yellow-400 transition-colors">
+            <span className="text-[11px] font-medium">{expanded ? "Less" : "More"}</span>
+            {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          </span>
         )}
       </button>
       </TooltipProvider>
@@ -370,7 +374,7 @@ export function VerificationStatusBar({
                   <div className="flex items-start gap-1.5">
                     <ClaimStatusIcon displayStatus={ds} />
                     <span className={cn("flex-1 leading-tight", claimStatusColor(ds))}>
-                      {c.claim}
+                      {stripMarkdown(c.claim)}
                     </span>
                     {c.verification_method === "cross_model" && (
                       <span className="shrink-0 rounded bg-purple-500/15 px-1 text-[10px] text-purple-400">cross-model</span>
@@ -425,7 +429,7 @@ export function VerificationStatusBar({
                   {c.claim_type === "ignorance" && c.status === "unverified" && c.verification_answer && (
                     <div className="ml-[18px] mt-0.5 rounded bg-green-500/10 px-2 py-1">
                       <span className="text-[10px] font-medium text-green-400">Found answer: </span>
-                      <span className="text-[10px] leading-tight text-green-300/80">{c.verification_answer.slice(0, 300)}</span>
+                      <span className="text-[10px] leading-tight text-green-300/80">{stripMarkdown(c.verification_answer.slice(0, 300))}</span>
                     </div>
                   )}
                 </li>

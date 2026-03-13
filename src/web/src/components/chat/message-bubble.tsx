@@ -6,7 +6,8 @@ import remarkGfm from "remark-gfm"
 import { lazy, Suspense, useState, useCallback, useMemo, useRef, useEffect, isValidElement, type ReactNode } from "react"
 import { Copy, Check, User, Bot, ShieldCheck, ShieldAlert, Loader2, Pencil, Shield, ExternalLink } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { cn, formatCost } from "@/lib/utils"
 
 /** Lazy-load PrismLight (25 common languages, ~200KB) instead of full Prism (~1.6MB) */
 const LazySyntaxHighlighter = lazy(() =>
@@ -21,14 +22,15 @@ import { matchClaimsToText, type ClaimDisplayStatus } from "@/lib/verification-u
 import { SourceAttribution } from "./source-attribution"
 import { ClaimOverlay } from "./claim-overlay"
 
-const MARKUP_COLORS: Record<ClaimDisplayStatus, string> = {
-  verified: "bg-green-500/20",
-  refuted: "bg-red-500/20",
-  unverified: "bg-yellow-500/20",
-  evasion: "bg-orange-500/20",
-  citation: "bg-purple-500/20",
-  uncertain: "bg-gray-500/20",
-  pending: "bg-gray-500/10",
+/** Inline styles for <mark> elements — avoids prose class specificity overriding Tailwind utilities. */
+const MARKUP_STYLES: Record<ClaimDisplayStatus, React.CSSProperties> = {
+  verified: { backgroundColor: "rgba(34,197,94,0.2)" },
+  refuted: { backgroundColor: "rgba(239,68,68,0.2)" },
+  unverified: { backgroundColor: "rgba(234,179,8,0.2)" },
+  evasion: { backgroundColor: "rgba(249,115,22,0.2)" },
+  citation: { backgroundColor: "rgba(168,85,247,0.2)" },
+  uncertain: { backgroundColor: "rgba(107,114,128,0.2)" },
+  pending: { backgroundColor: "rgba(107,114,128,0.1)" },
 }
 
 /** Code block fallback while SyntaxHighlighter loads */
@@ -290,7 +292,7 @@ export type MessageVerificationStatus =
   | { state: "done"; verified: number; unverified: number; uncertain: number; total: number }
   | null
 
-function VerificationBadge({ status }: { status: MessageVerificationStatus }) {
+function VerificationBadge({ status, onClick }: { status: MessageVerificationStatus; onClick?: () => void }) {
   if (!status) return null
 
   if (status.state === "loading") {
@@ -307,14 +309,16 @@ function VerificationBadge({ status }: { status: MessageVerificationStatus }) {
   const hasIssues = unverified > 0
 
   return (
-    <span
+    <button
+      type="button"
+      onClick={onClick}
       className={cn(
-        "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+        "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium transition-colors",
         hasIssues
-          ? "bg-red-500/10 text-red-400"
+          ? "bg-red-500/10 text-red-400 hover:bg-red-500/20"
           : accuracy >= 80
-            ? "bg-green-500/10 text-green-400"
-            : "bg-yellow-500/10 text-yellow-400",
+            ? "bg-green-500/10 text-green-400 hover:bg-green-500/20"
+            : "bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20",
       )}
     >
       {hasIssues
@@ -322,7 +326,7 @@ function VerificationBadge({ status }: { status: MessageVerificationStatus }) {
         : <ShieldCheck className="h-2.5 w-2.5" />
       }
       {verified}/{total} verified
-    </span>
+    </button>
   )
 }
 
@@ -332,11 +336,14 @@ interface MessageBubbleProps {
   verificationClaims?: HallucinationClaim[]
   inlineMarkups?: boolean
   onCorrect?: (messageId: string, correction: string) => void
-  onVerify?: (messageId: string) => void
+  onToggleMarkup?: () => void
+  /** Switch the verification panel to this message's report (non-selected messages). */
+  onSelectForVerification?: () => void
+  onClaimFocus?: (index: number) => void
   onArtifactClick?: (artifactId: string) => void
 }
 
-export function MessageBubble({ message, verificationStatus, verificationClaims, inlineMarkups, onCorrect, onVerify, onArtifactClick }: MessageBubbleProps) {
+export function MessageBubble({ message, verificationStatus, verificationClaims, inlineMarkups, onCorrect, onToggleMarkup, onSelectForVerification, onClaimFocus, onArtifactClick }: MessageBubbleProps) {
   const isUser = message.role === "user"
   const [correcting, setCorrecting] = useState(false)
   const [correctionText, setCorrectionText] = useState("")
@@ -348,37 +355,61 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
     setProseContainer(node)
   }, [])
 
-  // Memoize claim span matching — used by both inline markup effect and ClaimOverlay
-  const claimSpans = useMemo(
-    () => (verificationClaims?.length ? matchClaimsToText(message.content, verificationClaims) : []),
-    [message.content, verificationClaims],
-  )
+  // Claim span matching — runs after DOM render to access rendered text for accurate positions.
+  // Depends on proseContainer (not just proseRef) so it re-runs when the DOM node attaches.
+  const [claimSpans, setClaimSpans] = useState<ReturnType<typeof matchClaimsToText>>([])
+  useEffect(() => {
+    if (!verificationClaims?.length) { setClaimSpans([]); return }
+    const domText = proseContainer?.textContent ?? undefined
+    if (!domText) { setClaimSpans([]); return }
+    const spans = matchClaimsToText(message.content, verificationClaims, domText)
+    if (import.meta.env.DEV && verificationClaims.length > 0) {
+      console.warn(`[inline-markup] claims=${verificationClaims.length} spans=${spans.length} domLen=${domText.length} sample="${verificationClaims[0]?.claim?.slice(0, 60)}"`)
+    }
+    setClaimSpans(spans)
+  }, [message.content, verificationClaims, proseContainer])
 
-  // Inline verification markups via DOM text node highlighting
+  // Inline verification markups via DOM text node highlighting.
+  // Process spans in REVERSE order so DOM mutations (mark + footnote insertion)
+  // only affect positions to the RIGHT of the current span, which have already
+  // been processed.  Rebuild the text walker before each span to get fresh
+  // text-node boundaries after prior mutations.
+  // Uses inline styles (not Tailwind classes) so prose mark styles can't override.
   useEffect(() => {
     const container = proseRef.current
     if (!container || !inlineMarkups || !verificationClaims || verificationClaims.length === 0) return
 
     const spans = claimSpans
-    if (spans.length === 0) return
+    if (spans.length === 0) {
+      if (import.meta.env.DEV) {
+        console.warn("[inline-markup] effect fired but claimSpans is empty")
+      }
+      return
+    }
 
-    // Walk text nodes and find match positions
-    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT)
-    const textNodes: { node: Text; start: number; end: number }[] = []
-    let offset = 0
-    while (walker.nextNode()) {
-      const node = walker.currentNode as Text
-      const len = node.textContent?.length ?? 0
-      textNodes.push({ node, start: offset, end: offset + len })
-      offset += len + 1 // +1 for normalized whitespace between nodes
+    if (import.meta.env.DEV) {
+      console.warn(`[inline-markup] applying ${spans.length} marks to DOM`)
     }
 
     // Track created elements for cleanup
     const createdEls: HTMLElement[] = []
+    let marksCreated = 0
 
-    for (let i = 0; i < spans.length; i++) {
+    for (let i = spans.length - 1; i >= 0; i--) {
       const span = spans[i]
-      // Find the text node(s) containing this span
+
+      // Rebuild text nodes from fresh DOM state after each modification
+      const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT)
+      const textNodes: { node: Text; start: number; end: number }[] = []
+      let offset = 0
+      while (walker.nextNode()) {
+        const node = walker.currentNode as Text
+        const len = node.textContent?.length ?? 0
+        textNodes.push({ node, start: offset, end: offset + len })
+        offset += len
+      }
+
+      // Find the text node containing this span
       for (const tn of textNodes) {
         if (tn.end <= span.start || tn.start >= span.end) continue
 
@@ -391,11 +422,18 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
           range.setEnd(tn.node, localEnd)
 
           const mark = document.createElement("mark")
-          mark.className = `${MARKUP_COLORS[span.displayStatus]} cursor-pointer rounded px-0.5`
+          // Use inline styles to bypass prose mark specificity
+          const styleObj = MARKUP_STYLES[span.displayStatus] ?? MARKUP_STYLES.uncertain
+          Object.assign(mark.style, styleObj, {
+            cursor: "pointer",
+            borderRadius: "2px",
+            paddingInline: "2px",
+          })
           mark.dataset.ceridClaim = "true"
           mark.dataset.claimIndex = String(i)
           range.surroundContents(mark)
           createdEls.push(mark)
+          marksCreated++
 
           // Add footnote superscript after mark
           const sup = document.createElement("sup")
@@ -407,8 +445,12 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
         } catch {
           // surroundContents can fail if range crosses element boundaries
         }
-        break // Only mark in the first matching text node
+        break // Only mark in the first matching text node per span
       }
+    }
+
+    if (import.meta.env.DEV) {
+      console.warn(`[inline-markup] created ${marksCreated}/${spans.length} marks`)
     }
 
     return () => {
@@ -484,6 +526,7 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
             container={proseContainer}
             claims={verificationClaims}
             claimSpans={claimSpans}
+            onClaimFocus={onClaimFocus}
             onArtifactClick={onArtifactClick}
           />
         )}
@@ -500,17 +543,6 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
                 onClick={() => setCorrecting(true)}
               >
                 <Pencil className="h-3 w-3" />
-              </Button>
-            )}
-            {onVerify && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6"
-                aria-label="Verify this response"
-                onClick={() => onVerify(message.id)}
-              >
-                <Shield className="h-3 w-3" />
               </Button>
             )}
           </div>
@@ -569,7 +601,18 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
 
         <div className="flex items-center gap-1.5">
           {message.model && <ModelBadge modelId={message.model} />}
-          {!isUser && verificationStatus && <VerificationBadge status={verificationStatus} />}
+          {!isUser && verificationStatus && <VerificationBadge status={verificationStatus} onClick={onSelectForVerification ?? onToggleMarkup} />}
+          {!isUser && onToggleMarkup && verificationClaims && verificationClaims.length > 0 && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn("h-5 w-5", inlineMarkups ? "text-brand bg-brand/10" : "text-muted-foreground")}
+              aria-label={inlineMarkups ? "Hide inline verification" : "Show inline verification"}
+              onClick={onToggleMarkup}
+            >
+              {inlineMarkups ? <ShieldCheck className="h-3 w-3" /> : <Shield className="h-3 w-3" />}
+            </Button>
+          )}
         </div>
       </div>
     </div>
@@ -579,13 +622,44 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
 function ModelBadge({ modelId }: { modelId: string }) {
   const model = findModel(modelId)
   const label = model?.label ?? modelId.split("/").pop() ?? modelId
-  const provider = model?.provider ?? ""
-  const colorClass = PROVIDER_COLORS[provider] ?? "bg-muted text-muted-foreground"
+  const provider = model?.provider ?? modelId.split("/")[0]?.replace("openrouter", "OpenRouter") ?? ""
+  const colorClass = PROVIDER_COLORS[provider] ?? PROVIDER_COLORS[model?.provider ?? ""] ?? "bg-muted text-muted-foreground"
 
-  return (
+  const badge = (
     <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium", colorClass)}>
       {label}
     </span>
+  )
+
+  const caps = model?.capabilities
+  const ctxK = model ? Math.round(model.contextWindow / 1000) : null
+  const costIn = model ? formatCost(model.inputCostPer1M / 1000) : null
+  const costOut = model ? formatCost(model.outputCostPer1M / 1000) : null
+
+  return (
+    <TooltipProvider delayDuration={300}>
+      <Tooltip>
+        <TooltipTrigger asChild>{badge}</TooltipTrigger>
+        <TooltipContent side="bottom" className="max-w-xs text-xs">
+          <p className="font-medium">{model?.label ?? label}</p>
+          <p className="text-muted-foreground">
+            {provider}{ctxK ? ` · ${ctxK}K context` : ""}
+          </p>
+          {caps && (
+            <p className="mt-0.5 text-muted-foreground">
+              Reason {caps.reasoning} · Code {caps.coding} · Creative {caps.creative} · Facts {caps.factual}
+              {caps.webSearch && " · Web"}
+              {caps.vision && " · Vision"}
+            </p>
+          )}
+          {costIn && costOut && (
+            <p className="mt-0.5 text-muted-foreground">
+              Cost: {costIn}/1K in · {costOut}/1K out
+            </p>
+          )}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   )
 }
 

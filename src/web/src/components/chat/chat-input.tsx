@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Justin Michaels. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useRef, useCallback, type KeyboardEvent } from "react"
+import { useState, useRef, useCallback, type KeyboardEvent, type DragEvent } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -10,6 +10,7 @@ import { Send, Square } from "lucide-react"
 import { DomainBadge } from "@/components/ui/domain-badge"
 import { useDragDrop } from "@/hooks/use-drag-drop"
 import { cn } from "@/lib/utils"
+import type { KBQueryResult } from "@/lib/types"
 
 interface InjectedSource {
   filename: string
@@ -26,14 +27,42 @@ interface ChatInputProps {
   injectedSources?: InjectedSource[]
   onInputChange?: (text: string) => void
   onFileDrop?: (files: File[]) => void
+  onArtifactDrop?: (artifact: KBQueryResult) => void
 }
 
-export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount = 0, injectedSources, onInputChange, onFileDrop }: ChatInputProps) {
+export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount = 0, injectedSources, onInputChange, onFileDrop, onArtifactDrop }: ChatInputProps) {
   const [input, setInput] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [isArtifactDragOver, setIsArtifactDragOver] = useState(false)
 
   const handleFiles = useCallback((files: File[]) => onFileDrop?.(files), [onFileDrop])
   const { isDragOver, dragHandlers } = useDragDrop(handleFiles)
+
+  // Artifact drag-drop handlers (KB cards dragged to chat input)
+  const handleArtifactDragOver = useCallback((e: DragEvent) => {
+    if (e.dataTransfer.types.includes("application/cerid-artifact")) {
+      e.preventDefault()
+      e.dataTransfer.dropEffect = "copy"
+      setIsArtifactDragOver(true)
+    }
+  }, [])
+
+  const handleArtifactDrop = useCallback((e: DragEvent) => {
+    const data = e.dataTransfer.getData("application/cerid-artifact")
+    if (data) {
+      e.preventDefault()
+      e.stopPropagation()
+      setIsArtifactDragOver(false)
+      try {
+        const artifact = JSON.parse(data) as KBQueryResult
+        onArtifactDrop?.(artifact)
+      } catch { /* ignore malformed data */ }
+    }
+  }, [onArtifactDrop])
+
+  const handleArtifactDragLeave = useCallback(() => {
+    setIsArtifactDragOver(false)
+  }, [])
 
   const handleSend = useCallback(() => {
     const trimmed = input.trim()
@@ -64,8 +93,15 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount
 
   return (
     <div
-      className={cn("flex items-end gap-2 border-t bg-background p-4", isDragOver && "ring-2 ring-primary ring-inset")}
+      className={cn(
+        "flex items-end gap-2 border-t bg-background p-4",
+        isDragOver && "ring-2 ring-primary ring-inset",
+        isArtifactDragOver && "ring-2 ring-brand ring-inset bg-brand/5",
+      )}
       {...dragHandlers}
+      onDragOver={(e) => { dragHandlers.onDragOver?.(e); handleArtifactDragOver(e) }}
+      onDrop={(e) => { handleArtifactDrop(e); dragHandlers.onDrop?.(e) }}
+      onDragLeave={(e) => { dragHandlers.onDragLeave?.(e); handleArtifactDragLeave() }}
     >
       <textarea
         ref={textareaRef}

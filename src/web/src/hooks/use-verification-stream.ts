@@ -67,6 +67,8 @@ export function useVerificationStream(
   userQuery?: string,
   /** Prior assistant messages for history consistency checking. */
   conversationHistory?: Array<{ role: string; content: string }>,
+  /** Use expert-tier model (Grok 4) for all verification. */
+  expertMode?: boolean,
 ): UseVerificationStreamReturn {
   const [claims, setClaims] = useState<StreamingClaim[]>([])
   const [phase, setPhase] = useState<VerificationPhase>("idle")
@@ -81,6 +83,8 @@ export function useVerificationStream(
   useEffect(() => { userQueryRef.current = userQuery }, [userQuery])
   const historyRef = useRef(conversationHistory)
   useEffect(() => { historyRef.current = conversationHistory }, [conversationHistory])
+  const expertModeRef = useRef(expertMode)
+  useEffect(() => { expertModeRef.current = expertMode }, [expertMode])
   // enabled is read via ref so that toggling verification mid-stream does NOT
   // abort the running stream.  Only checked at stream-start time.  This
   // prevents settings hydration (fetchSettings → hydrateHallucination) from
@@ -149,7 +153,7 @@ export function useVerificationStream(
     setSummary(null)
     setExtractionMethod(null)
 
-    const { response, abort } = streamVerification(text, conversationId, undefined, modelRef.current, query, historyRef.current)
+    const { response, abort } = streamVerification(text, conversationId, undefined, modelRef.current, query, historyRef.current, expertModeRef.current)
     abortRef.current = abort
 
     let cancelled = false

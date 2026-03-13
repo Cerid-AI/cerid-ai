@@ -28,6 +28,8 @@ export interface Conversation {
   model: string
   createdAt: number
   updatedAt: number
+  /** Per-message verification reports — keyed by assistant message ID. */
+  verificationReports?: Record<string, HallucinationReport>
 }
 
 export interface ModelCapabilities {

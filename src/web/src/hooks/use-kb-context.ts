@@ -105,11 +105,17 @@ export function useKBContext(
     setActiveManualQuery("")
   }, [])
 
-  // Client-side tag filtering
+  // Client-side relevance + tag filtering
   const rawResults = data?.results ?? []
+  const MIN_RELEVANCE = 0.35
   const filteredResults = useMemo(() => {
-    if (activeTags.length === 0) return rawResults
-    return rawResults.filter((r) => {
+    let results = rawResults
+    // Filter out low-relevance results (skip if all relevance=0, e.g., browse mode)
+    if (results.some((r) => r.relevance > 0)) {
+      results = results.filter((r) => r.relevance >= MIN_RELEVANCE)
+    }
+    if (activeTags.length === 0) return results
+    return results.filter((r) => {
       const rTags = r.tags ?? []
       return activeTags.every((t) => rTags.includes(t))
     })

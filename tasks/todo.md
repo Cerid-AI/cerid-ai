@@ -1,12 +1,12 @@
 # Cerid AI — Task Tracker
 
 > **Last updated:** 2026-03-12
-> **Current status:** Phase 38 complete. 1302 Python tests, 414 frontend tests.
+> **Current status:** Phase 38D complete. 1302 Python tests, 417 frontend tests.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md) — 0 open
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](../docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
 
-## Current: Phase 38 — MCP Server Performance Optimization Complete
+## Current: Phase 38D — Expert Verification, UX Enhancements & Per-Message Verification Complete
 
 ### Multi-User Authentication (opt-in) ✅
 - [x] Create `models/user.py` — User/Tenant Pydantic schemas (52 lines)
