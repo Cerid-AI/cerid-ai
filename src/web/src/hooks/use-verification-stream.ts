@@ -75,6 +75,7 @@ export function useVerificationStream(
   const [summary, setSummary] = useState<StreamingSummary | null>(null)
   const [extractionMethod, setExtractionMethod] = useState<string | null>(null)
   const abortRef = useRef<(() => void) | null>(null)
+  const hasReceivedEventsRef = useRef(false)
   const responseTextRef = useRef(responseText)
   useEffect(() => { responseTextRef.current = responseText }, [responseText])
   const modelRef = useRef(model)
@@ -211,6 +212,7 @@ export function useVerificationStream(
                 case "extraction_complete":
                   setExtractionMethod(event.method ?? null)
                   setPhase("verifying")
+                  hasReceivedEventsRef.current = true
                   break
 
                 case "claim_extracted":
@@ -310,12 +312,15 @@ export function useVerificationStream(
       }
     }
 
+    hasReceivedEventsRef.current = false
     processStream()
 
     return () => {
-      cancelled = true
       clearTimeout(timeoutId)
-      abort()
+      if (!hasReceivedEventsRef.current) {
+        cancelled = true
+        abort()
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- responseText/userQuery/enabled read via refs to prevent mid-stream restarts
   }, [conversationId, triggerKey])

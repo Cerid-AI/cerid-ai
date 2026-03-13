@@ -217,16 +217,24 @@ describe("useVerificationStream", () => {
 
   // --- Cleanup ---
 
-  it("aborts stream on unmount", () => {
-    const stream = makeSSEStream(HAPPY_EVENTS)
-    mockStreamFn.mockReturnValue(stream)
+  it("aborts stream on unmount before events received", () => {
+    const abortFn = vi.fn()
+    const body = new ReadableStream<Uint8Array>({
+      start() {
+        // Never enqueue anything — simulates slow backend
+      },
+    })
+    mockStreamFn.mockReturnValue({
+      response: Promise.resolve({ ok: true, status: 200, body } as unknown as Response),
+      abort: abortFn,
+    })
 
     const { unmount } = renderHook(() =>
-      useVerificationStream("text", "conv-1", true, 1),
+      useVerificationStream("text", "conv-abort-1", true, 1),
     )
 
     unmount()
-    expect(stream.abort).toHaveBeenCalled()
+    expect(abortFn).toHaveBeenCalled()
   })
 
   // --- Conversation switch ---
@@ -294,6 +302,53 @@ describe("useVerificationStream", () => {
     expect(report.summary.total).toBe(2)
     expect(report.summary.verified).toBe(1)
     expect(report.summary.unverified).toBe(1)
+  })
+
+  // --- Cancellation resilience ---
+
+  it("does NOT abort stream when verification is in progress (verifying phase)", async () => {
+    let resolveStream: () => void
+    const streamComplete = new Promise<void>((resolve) => { resolveStream = resolve })
+    const abortFn = vi.fn()
+
+    const body = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const events = [
+          { type: "extraction_complete", method: "llm", count: 1 },
+          { type: "claim_extracted", claim: "Claim A", index: 0, claim_type: "factual" },
+        ]
+        for (const event of events) {
+          controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`))
+        }
+        await streamComplete
+        const remaining = [
+          { type: "claim_verified", index: 0, claim: "Claim A", claim_type: "factual", status: "verified", confidence: 0.9, source: "", reason: "OK", verification_method: "cross_model" },
+          { type: "summary", verified: 1, unverified: 0, uncertain: 0, total: 1, overall_confidence: 0.9, extraction_method: "llm" },
+        ]
+        for (const event of remaining) {
+          controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`))
+        }
+        controller.close()
+      },
+    })
+
+    mockStreamFn.mockReturnValue({
+      response: Promise.resolve({ ok: true, status: 200, body } as unknown as Response),
+      abort: abortFn,
+    })
+
+    const { result, unmount } = renderHook(() =>
+      useVerificationStream("text", "conv-cancel-1", true, 1),
+    )
+
+    await waitFor(() => {
+      expect(result.current.phase).toBe("verifying")
+    })
+
+    unmount()
+    expect(abortFn).not.toHaveBeenCalled()
+
+    resolveStream!()
   })
 
   // --- SSE keepalive comment handling ---
