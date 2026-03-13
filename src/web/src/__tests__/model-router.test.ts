@@ -705,3 +705,18 @@ describe("cost sensitivity interaction with scoring", () => {
     )
   })
 })
+
+// ---------------------------------------------------------------------------
+// streamChat fallback handling
+// ---------------------------------------------------------------------------
+
+describe("streamChat fallback handling", () => {
+  it("ChatModelInfo type includes optional fallback_model", () => {
+    const info: import("@/lib/types").ChatModelInfo = {
+      requested_model: "test",
+      resolved_model: "test",
+      fallback_model: "openai/gpt-4o-mini",
+    }
+    expect(info.fallback_model).toBe("openai/gpt-4o-mini")
+  })
+})

@@ -56,6 +56,7 @@ import type {
   UploadResult,
   SynopsisEstimate,
   TagSuggestion,
+  ChatModelInfo,
 } from "./types"
 
 export async function fetchHealth(): Promise<HealthResponse> {
@@ -623,11 +624,6 @@ export async function uploadFile(
 
 // --- Chat ---
 
-interface ChatModelInfo {
-  requested_model: string
-  resolved_model: string
-}
-
 export async function streamChat(
   messages: Pick<ChatMessage, "role" | "content">[],
   model: string,
@@ -684,11 +680,20 @@ export async function streamChat(
           }
           // OpenRouter may substitute a different model — update if so
           if (parsed.cerid_meta_update) {
-            const updated: ChatModelInfo = {
-              requested_model: lastModelInfo?.requested_model ?? "",
-              resolved_model: parsed.cerid_meta_update.actual_model,
+            if (parsed.cerid_meta_update.actual_model) {
+              onModelInfo?.({ ...lastModelInfo!, actual_model: parsed.cerid_meta_update.actual_model })
             }
-            onModelInfo?.(updated)
+            if (parsed.cerid_meta_update.fallback_model) {
+              onModelInfo?.({
+                ...lastModelInfo!,
+                resolved_model: parsed.cerid_meta_update.fallback_model,
+                fallback_model: parsed.cerid_meta_update.fallback_model,
+                original_error: parsed.cerid_meta_update.original_error,
+              })
+              console.warn(
+                `[chat] Model fallback: original failed (${parsed.cerid_meta_update.original_error}), using ${parsed.cerid_meta_update.fallback_model}`,
+              )
+            }
             continue
           }
           if (parsed.error) {

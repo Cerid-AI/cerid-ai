@@ -691,3 +691,11 @@ export const CONFLICT_STRATEGIES: { value: ConflictStrategy; label: string; desc
   { value: "manual_review", label: "Manual Review", description: "Flag conflicts for manual resolution" },
 ]
 
+export interface ChatModelInfo {
+  requested_model: string
+  resolved_model: string
+  actual_model?: string
+  fallback_model?: string
+  original_error?: number
+}
+
