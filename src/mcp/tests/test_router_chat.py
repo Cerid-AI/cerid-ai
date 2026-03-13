@@ -38,6 +38,7 @@ class TestChatStreamEndpoint:
         # Mock httpx to return a simple stream
         mock_response = AsyncMock()
         mock_response.status_code = 200
+        mock_response.aclose = AsyncMock()
 
         async def fake_aiter():
             yield b'data: {"choices":[{"delta":{"content":"Hi"}}]}\n\n'
@@ -51,8 +52,8 @@ class TestChatStreamEndpoint:
 
             with patch("routers.chat.httpx.AsyncClient") as mock_client_cls:
                 mock_client = AsyncMock()
-                mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-                mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+                mock_client.aclose = AsyncMock()
+                mock_client_cls.return_value = mock_client
 
                 mock_stream_ctx = AsyncMock()
                 mock_stream_ctx.__aenter__ = AsyncMock(return_value=mock_response)
@@ -87,6 +88,7 @@ class TestChatStreamEndpoint:
         """When OpenRouter returns a different model, emit cerid_meta_update."""
         mock_response = AsyncMock()
         mock_response.status_code = 200
+        mock_response.aclose = AsyncMock()
 
         async def fake_aiter():
             # OpenRouter returns a different model than requested
@@ -101,8 +103,8 @@ class TestChatStreamEndpoint:
 
             with patch("routers.chat.httpx.AsyncClient") as mock_client_cls:
                 mock_client = AsyncMock()
-                mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-                mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+                mock_client.aclose = AsyncMock()
+                mock_client_cls.return_value = mock_client
 
                 mock_stream_ctx = AsyncMock()
                 mock_stream_ctx.__aenter__ = AsyncMock(return_value=mock_response)
@@ -133,6 +135,7 @@ class TestChatStreamEndpoint:
         """No cerid_meta_update when upstream model matches the request."""
         mock_response = AsyncMock()
         mock_response.status_code = 200
+        mock_response.aclose = AsyncMock()
 
         async def fake_aiter():
             yield b'data: {"model":"anthropic/claude-sonnet-4.6","choices":[{"delta":{"content":"Hi"}}]}\n\n'
@@ -146,8 +149,8 @@ class TestChatStreamEndpoint:
 
             with patch("routers.chat.httpx.AsyncClient") as mock_client_cls:
                 mock_client = AsyncMock()
-                mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-                mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+                mock_client.aclose = AsyncMock()
+                mock_client_cls.return_value = mock_client
 
                 mock_stream_ctx = AsyncMock()
                 mock_stream_ctx.__aenter__ = AsyncMock(return_value=mock_response)
@@ -214,11 +217,12 @@ class TestChatRequestValidation:
 
             with patch("routers.chat.httpx.AsyncClient") as mock_client_cls:
                 mock_client = AsyncMock()
-                mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-                mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+                mock_client.aclose = AsyncMock()
+                mock_client_cls.return_value = mock_client
 
                 mock_resp = AsyncMock()
                 mock_resp.status_code = 200
+                mock_resp.aclose = AsyncMock()
 
                 async def empty_stream():
                     yield b"data: [DONE]\n\n"
