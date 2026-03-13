@@ -219,16 +219,16 @@ def build_triage_graph() -> StateGraph:
 
     Error handling: any node can set status="error", routing to error_end.
     """
-    graph = StateGraph(dict)
+    graph = StateGraph(dict)  # type: ignore[type-var]
 
     # Add nodes
-    graph.add_node("validate", validate_node)
-    graph.add_node("parse", parse_node)
-    graph.add_node("route_categorization", route_categorization)
-    graph.add_node("categorize", categorize_node)
-    graph.add_node("extract_metadata", extract_metadata_node)
-    graph.add_node("chunk", chunk_node)
-    graph.add_node("error_end", lambda state: state)  # passthrough for errors
+    graph.add_node("validate", validate_node)  # type: ignore[type-var]
+    graph.add_node("parse", parse_node)  # type: ignore[type-var]
+    graph.add_node("route_categorization", route_categorization)  # type: ignore[type-var]
+    graph.add_node("categorize", categorize_node)  # type: ignore[type-var]
+    graph.add_node("extract_metadata", extract_metadata_node)  # type: ignore[type-var]
+    graph.add_node("chunk", chunk_node)  # type: ignore[type-var]
+    graph.add_node("error_end", lambda state: state)  # type: ignore[type-var]
 
     # Set entry point
     graph.set_entry_point("validate")
