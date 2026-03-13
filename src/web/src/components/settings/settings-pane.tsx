@@ -5,7 +5,8 @@ import { useCallback, useEffect, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { fetchSettings, updateSettings, fetchKBStats, adminRebuildIndexes, adminRescore, adminRegenerateSummaries, adminClearDomain } from "@/lib/api"
 import type { KBStats } from "@/lib/api"
-import type { ServerSettings, SettingsUpdate } from "@/lib/types"
+import type { ServerSettings, SettingsUpdate, RoutingMode } from "@/lib/types"
+import { useSettings } from "@/hooks/use-settings"
 import { cn } from "@/lib/utils"
 import { PRESETS, detectActivePreset } from "@/lib/settings-presets"
 import { USER_PRESETS } from "@/lib/user-presets"
@@ -97,6 +98,7 @@ export default function SettingsPane() {
   const [kbResult, setKBResult] = useState("")
   const [clearConfirmDomain, setClearConfirmDomain] = useState<string | null>(null)
   const [pipelineCustomize, setPipelineCustomize] = useState(false)
+  const { routingMode, setRoutingMode } = useSettings()
   const { mode: uiMode, setMode: setUIMode } = useUIMode()
   const [activeTab, setActiveTab] = useState<string>(() => {
     try { return localStorage.getItem("cerid-settings-tab") ?? "essentials" } catch { return "essentials" }
@@ -383,11 +385,8 @@ export default function SettingsPane() {
                   <div className="flex items-center justify-between">
                     <LabelWithInfo label="Model Router" info="Manual: no suggestions. Recommend: shows switch banner. Auto: silently picks the best model." />
                     <Select
-                      value={settings.enable_model_router ? "recommend" : "manual"}
-                      onValueChange={(v) => {
-                        patch({ enable_model_router: v !== "manual" })
-                        try { localStorage.setItem("cerid-routing-mode", v) } catch { /* noop */ }
-                      }}
+                      value={routingMode}
+                      onValueChange={(v) => setRoutingMode(v as RoutingMode)}
                     >
                       <SelectTrigger size="sm" className="w-32">
                         <SelectValue />

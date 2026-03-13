@@ -76,6 +76,19 @@ describe("useSettings", () => {
     expect(result.current.routingMode).toBe("manual")
   })
 
+  it("setRoutingMode sets mode and persists to localStorage", () => {
+    const { result } = renderHook(() => useSettings())
+    act(() => { result.current.setRoutingMode("auto") })
+    expect(result.current.routingMode).toBe("auto")
+    expect(localStorage.getItem("cerid-routing-mode")).toBe("auto")
+
+    act(() => { result.current.setRoutingMode("recommend") })
+    expect(result.current.routingMode).toBe("recommend")
+
+    act(() => { result.current.setRoutingMode("manual") })
+    expect(result.current.routingMode).toBe("manual")
+  })
+
   it("migrates old autoModelSwitch boolean to routingMode", () => {
     localStorage.setItem("cerid-auto-model-switch", "true")
     const { result } = renderHook(() => useSettings())
