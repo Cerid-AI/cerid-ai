@@ -89,7 +89,6 @@ export function ChatPanel() {
     halReport,
     halLoading,
     verification,
-    lastAssistantMsgId,
     verificationStatusForMsg,
     verificationRecBanner,
     setVerificationRecBanner,
