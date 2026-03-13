@@ -206,6 +206,27 @@ export interface MaintenanceHealth {
   }
 }
 
+export interface DigestArtifact {
+  id: string
+  filename: string
+  domain: string
+  summary: string
+  ingested_at: string
+}
+
+export interface DigestResponse {
+  period_hours: number
+  generated_at: string
+  artifacts: {
+    count: number
+    items: DigestArtifact[]
+    by_domain: Record<string, number>
+  }
+  relationships: { new_count: number }
+  health: MaintenanceHealth
+  recent_events: number
+}
+
 export interface MaintenanceCollections {
   collections: Record<string, { chunks: number }>
   total_chunks: number
