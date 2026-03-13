@@ -165,12 +165,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Lint Dockerfiles (hadolint)
-        uses: hadolint/hadolint-action@v3.1.0
+        uses: hadolint/hadolint-action@v3.3.0
         with:
           dockerfile: src/mcp/Dockerfile
           ignore: DL3008,DL3013,DL3059
       - name: Lint Web Dockerfile (hadolint)
-        uses: hadolint/hadolint-action@v3.1.0
+        uses: hadolint/hadolint-action@v3.3.0
         with:
           dockerfile: src/web/Dockerfile
           ignore: DL3008,DL3018,DL3059
