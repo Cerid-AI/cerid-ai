@@ -3,7 +3,6 @@
 
 import { describe, it, expect, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
 import { DigestCard } from "@/components/monitoring/digest-card"
 import type { DigestResponse } from "@/lib/types"
 
@@ -32,8 +31,9 @@ const makeDigest = (overrides: Partial<DigestResponse> = {}): DigestResponse => 
   },
   relationships: { new_count: 8 },
   health: {
-    status: "healthy",
+    overall: "healthy",
     services: { chromadb: "connected", neo4j: "connected", redis: "connected" },
+    data: { collections: 5, total_chunks: 100, collection_sizes: {}, artifacts: 12, domains: 3, audit_log_entries: 47 },
   },
   recent_events: 47,
   ...overrides,
