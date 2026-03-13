@@ -587,6 +587,50 @@ describe("scoreModelForQuery", () => {
     expect(withScore).toBeGreaterThan(withoutScore)
   })
 
+  it("gives strong web search bonus for 'as of' temporal queries", () => {
+    const withSearch: ModelOption = {
+      id: "test/search",
+      label: "Search",
+      provider: "test",
+      contextWindow: 128_000,
+      effectiveContextWindow: 102_400,
+      maxOutputTokens: 4_096,
+      inputCostPer1M: 0.15,
+      outputCostPer1M: 0.60,
+      capabilities: { reasoning: 70, coding: 70, creative: 70, factual: 70, webSearch: true, vision: false, knowledgeCutoff: "2026-03" },
+    }
+    const noSearch: ModelOption = {
+      ...withSearch,
+      id: "test/no-search",
+      capabilities: { ...withSearch.capabilities!, webSearch: false },
+    }
+    const withScore = scoreModelForQuery(withSearch, "as of 2025, what is the population?")
+    const withoutScore = scoreModelForQuery(noSearch, "as of 2025, what is the population?")
+    expect(withScore - withoutScore).toBeGreaterThanOrEqual(20)
+  })
+
+  it("gives strong web search bonus for 'right now' queries", () => {
+    const withSearch: ModelOption = {
+      id: "test/search",
+      label: "Search",
+      provider: "test",
+      contextWindow: 128_000,
+      effectiveContextWindow: 102_400,
+      maxOutputTokens: 4_096,
+      inputCostPer1M: 0.15,
+      outputCostPer1M: 0.60,
+      capabilities: { reasoning: 70, coding: 70, creative: 70, factual: 70, webSearch: true, vision: false, knowledgeCutoff: "2026-03" },
+    }
+    const noSearch: ModelOption = {
+      ...withSearch,
+      id: "test/no-search",
+      capabilities: { ...withSearch.capabilities!, webSearch: false },
+    }
+    const withScore = scoreModelForQuery(withSearch, "what's happening right now with AI regulation?")
+    const withoutScore = scoreModelForQuery(noSearch, "what's happening right now with AI regulation?")
+    expect(withScore - withoutScore).toBeGreaterThanOrEqual(20)
+  })
+
   it("returns score capped at 100", () => {
     const superModel: ModelOption = {
       id: "test/super",

@@ -88,7 +88,7 @@ const CODING_RE = /\b(code|function|class|algorithm|debug|refactor|implement|api
 const REASONING_RE = /\b(explain|analyze|compare|evaluate|why|how does|trade-?offs?|reason|logic|math|calculate|prove|solve|think|step.by.step)\b/i
 const CREATIVE_RE = /\b(write|story|brainstorm|creative|poem|essay|draft|blog|article|copy|narrative|imagine|rewrite|rephrase)\b/i
 const FACTUAL_RE = /\b(what is|define|when|where|list|name|who|facts|history|date|capital|population|tell me about)\b/i
-const CURRENT_INFO_RE = /\b(latest|current|today|recent|news|2026|now|this week|this month)\b/i
+const CURRENT_INFO_RE = /\b(latest|current|today|recent|news|202[5-9]|203\d|now|right now|this week|this month|as of|trending|what's new|what's happening)\b/i
 const VISION_RE = /\b(image|photo|picture|screenshot|diagram|chart|graph|visual)\b/i
 
 /**
@@ -130,7 +130,7 @@ export function scoreModelForQuery(
     weights.factual * caps.factual
 
   // Bonus for special capabilities relevant to the query
-  if (caps.webSearch && CURRENT_INFO_RE.test(query)) score += 10
+  if (caps.webSearch && CURRENT_INFO_RE.test(query)) score += 25
   if (caps.vision && VISION_RE.test(query)) score += 5
 
   return Math.min(100, score)
