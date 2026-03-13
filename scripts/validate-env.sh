@@ -182,6 +182,33 @@ if [ "$QUICK" = false ]; then
         fail "Data directory not found at $DATA_ROOT — run 'mkdir -p $DATA_ROOT/{neo4j,neo4j-logs,chroma,redis}'"
     fi
 
+    # ── Check 8: Knowledge archive symlink ────────────────────────────────────
+    ARCHIVE_DIR="$HOME/cerid-archive"
+    DROPBOX_ARCHIVE="$HOME/Dropbox/cerid-archive"
+
+    if [ -L "$ARCHIVE_DIR" ]; then
+        LINK_TARGET="$(readlink "$ARCHIVE_DIR")"
+        if [ -d "$ARCHIVE_DIR" ]; then
+            FILE_COUNT="$(find -L "$ARCHIVE_DIR" -type f 2>/dev/null | wc -l | tr -d ' ')"
+            pass "Archive symlink: $ARCHIVE_DIR → $LINK_TARGET ($FILE_COUNT files)"
+        else
+            fail "Archive symlink exists but target is missing: $ARCHIVE_DIR → $LINK_TARGET"
+        fi
+    elif [ -d "$ARCHIVE_DIR" ]; then
+        if [ -d "$DROPBOX_ARCHIVE" ]; then
+            fail "~/cerid-archive is a regular directory, not a symlink — run: rm -rf ~/cerid-archive && ln -s ~/Dropbox/cerid-archive ~/cerid-archive"
+        else
+            warn "~/cerid-archive exists as a directory (no Dropbox sync) — KB won't sync across machines"
+            PASS=$((PASS + 1))
+        fi
+    else
+        if [ -d "$DROPBOX_ARCHIVE" ]; then
+            fail "Archive directory missing — run: ln -s ~/Dropbox/cerid-archive ~/cerid-archive"
+        else
+            fail "Archive directory missing — create ~/cerid-archive with domain subdirectories (coding, finance, general, inbox, personal, projects)"
+        fi
+    fi
+
     # ── Check 9: Sync directory ───────────────────────────────────────────────
     SYNC_DIR="${CERID_SYNC_DIR:-}"
     DEFAULT_SYNC="$HOME/Dropbox/cerid-sync"
