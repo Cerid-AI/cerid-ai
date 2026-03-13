@@ -214,3 +214,13 @@
 2. Update all consumers to import from the new path
 3. Leave a re-export in the old location for backward compatibility: `export { DomainBadge } from "@/components/ui/domain-badge"`
 **Benefit:** Zero risk of breakage from missed imports, serves as documentation for anyone reading the old module.
+
+---
+
+## Model Routing
+
+### Chat model router vs verification pipeline have separate routing
+**When:** Debugging "model X can't handle query Y" — e.g., temporal claims marked uncertain, real-time queries not routed to web-search models.
+**Problem:** The verification pipeline has its own separate routing that already handles temporal claims correctly via `_is_current_event_claim()`. The bug was in the CHAT model router scoring/filtering, not verification.
+**Fix:** Check the chat model router scoring and filtering first. The chat router (`model-router.ts`) controls which model receives the initial query; the verification pipeline (`use-verification-stream.ts`) only validates the response afterward. Fixing the wrong layer wastes time.
+**Reference:** `src/web/src/lib/model-router.ts` (chat routing), `src/web/src/hooks/use-verification-stream.ts` (verification routing)

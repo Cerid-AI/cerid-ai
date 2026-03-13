@@ -1,10 +1,22 @@
 # Cerid AI — Task Tracker
 
 > **Last updated:** 2026-03-13
-> **Current status:** Phase 38D complete. 1302 Python tests, 418 frontend tests.
+> **Current status:** Phase 38D complete. 1302 Python tests, 440 frontend tests.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md) — 0 open
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](../docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
+
+## Bugfix: Model Router Resilience (2026-03-13) ✅
+
+- [x] Strengthen temporal query detection + web search routing bonus in chat model router (D4, D5)
+- [x] Exclude stale-cutoff models from temporal query routing (D4, D5)
+- [x] Add model fallback retry on chat stream errors in chat proxy (D6)
+- [x] Handle model fallback metadata in frontend chat stream (D6)
+- [x] Fix verification stream abort after extraction starts
+- [x] Update docs — 3 new resolved issues, test count 440
+- 6 new frontend tests (434 → 440)
+
+---
 
 ## Bugfix: Model Router Auto Mode (2026-03-13) ✅
 

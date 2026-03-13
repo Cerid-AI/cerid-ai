@@ -2,7 +2,7 @@
 
 > **Created:** 2026-02-25
 > **Last updated:** 2026-03-13
-> **Status:** Phase 38D complete. 77 resolved, 6 open. 1302 Python tests, 434 frontend tests.
+> **Status:** Phase 38D complete. 80 resolved, 6 open. 1302 Python tests, 440 frontend tests.
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21 roadmap)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](COMPLETED_PHASES.md)
 > **Purpose:** Track known bugs, feature gaps, structural issues, and architecture evaluations for upcoming phases.
@@ -148,6 +148,39 @@ No agent exists for improving artifact quality. Current artifact cards show raw 
 **Resolution:** Settings Pane now uses `useSettings()` hook's `routingMode` / `setRoutingMode` (backed by localStorage with server boolean sync) instead of deriving from the binary server field. This matches how the toolbar cycle already worked. Frontend-only fix, 3 lines changed. 1 new test added.
 
 **Files changed:** `settings-pane.tsx` (import + hook call + Select value/handler), `use-settings.test.ts` (new test)
+
+### D4. Data Verification Temporal Claims Marked Uncertain
+
+**Severity:** Medium
+**Status:** ✅ Resolved (2026-03-13)
+
+**Problem:** When asking about current/temporal events (e.g., "Who is the current PM of Canada?"), the chat model router scored temporal queries too low for web-search-capable models. The verification pipeline's `_is_current_event_claim()` handled temporal detection correctly, but the chat routing sent queries to models without real-time data access, causing verification to flag responses as uncertain.
+
+**Resolution:** Strengthened temporal query detection in the chat model router with expanded keyword patterns and increased web search routing bonus from 0.15 to 0.25. Added stale-cutoff filtering to exclude models with outdated training data from temporal query routing. 4 new frontend tests.
+
+**Files changed:** `model-router.ts`, `model-router.test.ts`
+
+### D5. Auto Model Router Doesn't Re-Route for Real-Time Data Queries
+
+**Severity:** Medium
+**Status:** ✅ Resolved (2026-03-13)
+
+**Problem:** The auto model router failed to route real-time data queries (news, stock prices, current events) to web-search-capable models. The web search bonus (0.15) was too small to overcome base model scoring, and models with stale training cutoffs were still eligible for temporal queries.
+
+**Resolution:** Increased web search routing bonus to 0.25 and added stale-cutoff model filtering for temporal queries. Models whose training data cutoff predates the query's temporal scope are now excluded from scoring. Same fix as D4 — both symptoms had the same root cause.
+
+**Files changed:** `model-router.ts`, `model-router.test.ts`
+
+### D6. Llama Model Failed With Error, No Retry
+
+**Severity:** Medium
+**Status:** ✅ Resolved (2026-03-13)
+
+**Problem:** When the auto-routed model (e.g., Llama) failed with a streaming error, the chat proxy returned the error directly with no fallback. Users had to manually switch models. The frontend had no mechanism to detect or display model fallback metadata.
+
+**Resolution:** Added model fallback retry logic in the chat proxy (`chat.py`) — on stream error, retries with a fallback model and includes fallback metadata in the SSE stream. Frontend updated to parse `model_fallback` metadata from the stream and display it. 2 new frontend tests.
+
+**Files changed:** `chat.py`, `types.ts`, `api.ts`, `api.test.ts`
 
 ---
 
@@ -872,8 +905,9 @@ Verification results only appear in the status bar and hallucination panel sideb
 J1 (verification OOM optimization) — Medium severity, mitigated via concurrency semaphore
 K1–K4, K7 (deferred backlog) — Low severity, nice-to-have improvements
 
-### Resolved (77 items)
+### Resolved (80 items)
 
+**Phase 38D+** (3 items): D4 (temporal claims uncertain), D5 (auto router real-time queries), D6 (Llama fallback retry)
 **Phase 39** (2 items): K5 (digest view), K6 (batch triage UI)
 **Phase 38D** (1 item): D3 (model router auto mode)
 **Phase 30** (0 new issues): Codebase audit & cleanup — no new issues filed; structural debt reduced
