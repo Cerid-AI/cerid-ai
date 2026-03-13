@@ -71,7 +71,7 @@ export function matchClaimsToText(text: string, claims: ClaimLike[], domTextCont
     const claimLower = claimText.toLowerCase()
 
     // Tier 1: exact substring match (case-insensitive)
-    let idx = searchLower.indexOf(claimLower)
+    const idx = searchLower.indexOf(claimLower)
     if (idx >= 0) {
       rawSpans.push({ start: idx, end: idx + claimLower.length, claim: c.claim, displayStatus })
       continue
