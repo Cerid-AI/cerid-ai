@@ -2,7 +2,7 @@
 
 > **Created:** 2026-02-25
 > **Last updated:** 2026-03-13
-> **Status:** Phase 38D complete. 75 resolved, 8 open. 1302 Python tests, 418 frontend tests.
+> **Status:** Phase 38D complete. 77 resolved, 6 open. 1302 Python tests, 434 frontend tests.
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21 roadmap)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](COMPLETED_PHASES.md)
 > **Purpose:** Track known bugs, feature gaps, structural issues, and architecture evaluations for upcoming phases.
@@ -846,14 +846,16 @@ Verification results only appear in the status bar and hallucination panel sideb
 ### K5. Digest View / Generation
 
 **Severity:** Low | **Effort:** ~3–4 hrs
-**Status:** 🔲 Open
-**Notes:** New component for periodic knowledge digest summaries.
+**Status:** ✅ Resolved (2026-03-13)
+**Resolution:** DigestCard component added to Monitoring pane. Shows summary stats (artifacts, domains, relationships, events), domain breakdown badges, and recent artifacts list with time-period selector (24h/3d/7d). Uses existing `GET /digest` API. 8 new tests.
+**Files:** `digest-card.tsx` (new), `monitoring-pane.tsx`, `types.ts`, `api.ts`, `digest-card.test.tsx` (new)
 
 ### K6. Batch Triage UI
 
 **Severity:** Low | **Effort:** ~4–6 hrs
-**Status:** 🔲 Open
-**Notes:** Requires container-side archive paths to be accessible from frontend.
+**Status:** ✅ Resolved (2026-03-13)
+**Resolution:** UploadDialog enhanced with batch mode (≥3 files). Shows expanded file list with sizes, batch header with file count, "Start Batch" button. Progress counter in KnowledgePane shows "Uploaded X of N…" during parallel upload. 8 new tests.
+**Files:** `upload-dialog.tsx`, `knowledge-pane.tsx`, `upload-dialog.test.tsx` (new)
 
 ### K7. Multi-Stage MCP Dockerfile
 
@@ -865,13 +867,14 @@ Verification results only appear in the status bar and hallucination panel sideb
 
 ## Priority Order
 
-### Open Items (8)
+### Open Items (6)
 
 J1 (verification OOM optimization) — Medium severity, mitigated via concurrency semaphore
-K1–K7 (deferred backlog) — Low severity, nice-to-have improvements
+K1–K4, K7 (deferred backlog) — Low severity, nice-to-have improvements
 
-### Resolved (75 items)
+### Resolved (77 items)
 
+**Phase 39** (2 items): K5 (digest view), K6 (batch triage UI)
 **Phase 38D** (1 item): D3 (model router auto mode)
 **Phase 30** (0 new issues): Codebase audit & cleanup — no new issues filed; structural debt reduced
 **Phase 29** (1 item): V21 (advanced response formatting + inline verification)

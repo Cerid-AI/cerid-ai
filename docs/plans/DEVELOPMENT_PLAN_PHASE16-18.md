@@ -515,8 +515,8 @@ Research finding: "80% of RAG failures trace back to chunking decisions" — CDC
 | Dependency license scanning | 1-2 hrs | 🔲 Open — see ISSUES.md E2 |
 | Additional ReDoS regex audit | 2-3 hrs | 🔲 Open — see ISSUES.md E3 |
 | Plugin management UI | 4-6 hrs | 🔲 Open — see ISSUES.md E4 |
-| Digest view/generation | 3-4 hrs | 🔲 Open — see ISSUES.md E5 |
-| Batch triage UI | 4-6 hrs | 🔲 Open — see ISSUES.md E6 |
+| Digest view/generation | 3-4 hrs | ✅ Phase 39 (DigestCard in Monitoring pane) |
+| Batch triage UI | 4-6 hrs | ✅ Phase 39 (batch mode in UploadDialog) |
 | MongoDB auth | 2-3 hrs | ✅ Phase 23 (service deprecated Phase 27) |
 | Multi-stage MCP Dockerfile | 2-3 hrs | 🔲 Open — see ISSUES.md E7 |
 
