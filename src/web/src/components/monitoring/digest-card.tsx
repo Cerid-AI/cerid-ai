@@ -79,6 +79,11 @@ export function DigestCard({ digest, isLoading, onPeriodChange }: DigestCardProp
             ))}
           </SelectContent>
         </Select>
+        {digest?.generated_at && (
+          <span className="text-[10px] tabular-nums text-muted-foreground">
+            {formatRelativeTime(digest.generated_at)}
+          </span>
+        )}
       </CardHeader>
       <CardContent>
         {isLoading ? (
@@ -155,6 +160,11 @@ export function DigestCard({ digest, isLoading, onPeriodChange }: DigestCardProp
                     </li>
                   ))}
                 </ul>
+                {digest.artifacts.items.length > 10 && (
+                  <p className="mt-1 text-[10px] text-muted-foreground">
+                    {digest.artifacts.items.length - 10} more…
+                  </p>
+                )}
               </div>
             )}
           </div>
