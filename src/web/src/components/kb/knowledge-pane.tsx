@@ -132,13 +132,21 @@ export function KnowledgePane() {
     const files = pendingFiles
     setPendingFiles([])
     setUploadStatus("uploading")
-    setUploadMessage(`Uploading ${files.length} files...`)
+    setUploadMessage(`Uploading 1 of ${files.length}...`)
+    let completed = 0
     try {
       const results = await Promise.allSettled(
-        files.map((file) => {
+        files.map(async (file) => {
           const domain = options.domain ?? activeDomain ?? undefined
           const categorize_mode = options.categorize_mode
-          return uploadFile(file, { domain, categorizeMode: categorize_mode })
+          try {
+            return await uploadFile(file, { domain, categorizeMode: categorize_mode })
+          } finally {
+            completed++
+            if (completed < files.length) {
+              setUploadMessage(`Uploading ${completed + 1} of ${files.length}...`)
+            }
+          }
         }),
       )
       const succeeded = results.filter((r) => r.status === "fulfilled").length
