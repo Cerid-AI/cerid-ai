@@ -187,6 +187,8 @@ jobs:
           CVE-2026-0861
           # wheel privilege escalation — build-time only, not exploitable at runtime
           CVE-2026-24049
+          # systemd CVE in Debian 13 base — D-Bus RegisterMachine not reachable in container
+          CVE-2026-4105
           # libxml2 CVEs in Alpine base — nginx serves static files only, no XML parsing
           CVE-2025-32414
           CVE-2025-32415
