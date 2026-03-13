@@ -29,6 +29,30 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
 router = APIRouter(tags=["chat"])
 
+# Models to try when the primary model fails with a retryable error.
+CHAT_FALLBACK_POOL = [
+    "openai/gpt-4o-mini",
+    "google/gemini-2.5-flash",
+    "x-ai/grok-4.1-fast",
+    "anthropic/claude-sonnet-4.6",
+]
+
+RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+
+
+def _model_family(model_id: str) -> str:
+    """Extract provider family: 'openai/gpt-4o-mini' -> 'openai'."""
+    return model_id.split("/")[0] if "/" in model_id else model_id
+
+
+def _pick_fallback(failed_model: str) -> str | None:
+    """Pick the first fallback model from a different provider family."""
+    failed_family = _model_family(failed_model)
+    for candidate in CHAT_FALLBACK_POOL:
+        if _model_family(candidate) != failed_family:
+            return candidate
+    return None
+
 
 # ---------------------------------------------------------------------------
 # Request / Response models
@@ -79,28 +103,27 @@ def _resolve_api_key(request: Request) -> str:
     return OPENROUTER_API_KEY
 
 
-async def _proxy_stream(req: ChatRequest, request_id: str, api_key: str = "") -> AsyncGenerator[bytes, None]:
-    """Stream chat completion from OpenRouter, prepending a metadata event."""
+async def _attempt_stream(
+    req: ChatRequest,
+    bare_model: str,
+    request_id: str,
+    api_key: str,
+) -> AsyncGenerator[bytes, None] | int:
+    """Single streaming attempt against OpenRouter.
+
+    Returns an async generator of SSE bytes on success or a non-retryable
+    error, or an ``int`` HTTP status code when the error is retryable.
+    """
     effective_key = api_key or OPENROUTER_API_KEY
-    bare_model = _strip_prefix(req.model)
 
-    # Emit metadata event so the frontend knows the resolved model
-    meta = json.dumps({
-        "cerid_meta": {
-            "requested_model": req.model,
-            "resolved_model": bare_model,
-        }
-    })
-    yield f"data: {meta}\n\n".encode()
-
-    payload: dict = {
+    payload_dict: dict = {
         "model": bare_model,
         "messages": [{"role": m.role, "content": m.content} for m in req.messages],
         "temperature": req.temperature,
         "stream": True,
     }
     if req.max_tokens is not None:
-        payload["max_tokens"] = req.max_tokens
+        payload_dict["max_tokens"] = req.max_tokens
 
     headers = {
         "Authorization": f"Bearer {effective_key}",
@@ -114,40 +137,52 @@ async def _proxy_stream(req: ChatRequest, request_id: str, api_key: str = "") ->
     timeout = httpx.Timeout(120.0, connect=10.0)
 
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            async with client.stream(
-                "POST",
-                f"{OPENROUTER_BASE}/chat/completions",
-                json=payload,
-                headers=headers,
-            ) as response:
-                if response.status_code != 200:
-                    error_body = (await response.aread()).decode(errors="replace")[:500]
-                    logger.error(
-                        "OpenRouter error %d for model=%s: %s",
-                        response.status_code, bare_model, error_body,
-                    )
-                    err = json.dumps({
-                        "error": {
-                            "message": f"Upstream error ({response.status_code})",
-                            "type": "upstream_error",
-                        }
-                    })
-                    yield f"data: {err}\n\ndata: [DONE]\n\n".encode()
-                    return
+        client = httpx.AsyncClient(timeout=timeout)
+        response = await client.stream(
+            "POST",
+            f"{OPENROUTER_BASE}/chat/completions",
+            json=payload_dict,
+            headers=headers,
+        ).__aenter__()
 
+        status = response.status_code
+        if status != 200:
+            error_body = (await response.aread()).decode(errors="replace")[:500]
+            logger.error(
+                "OpenRouter error %d for model=%s: %s",
+                status, bare_model, error_body,
+            )
+            await response.aclose()
+            await client.aclose()
+
+            if status in RETRYABLE_STATUS_CODES:
+                return status
+
+            # Non-retryable — return a generator that emits the error event
+            async def _error_gen() -> AsyncGenerator[bytes, None]:
+                err = json.dumps({
+                    "error": {
+                        "message": f"Upstream error ({status})",
+                        "type": "upstream_error",
+                    }
+                })
+                yield f"data: {err}\n\ndata: [DONE]\n\n".encode()
+
+            return _error_gen()
+
+        # Success — return a streaming generator
+        async def _success_gen() -> AsyncGenerator[bytes, None]:
+            try:
                 actual_model_emitted = False
                 async for chunk in response.aiter_bytes():
-                    # Parse actual model from the first upstream data event.
-                    # OpenRouter may substitute a different model than requested.
                     if not actual_model_emitted:
                         try:
                             text = chunk.decode(errors="replace")
                             for line in text.split("\n"):
                                 stripped = line.strip()
                                 if stripped.startswith("data: ") and stripped != "data: [DONE]":
-                                    payload = json.loads(stripped[6:])
-                                    actual = payload.get("model")
+                                    parsed = json.loads(stripped[6:])
+                                    actual = parsed.get("model")
                                     if actual and actual != bare_model:
                                         update = json.dumps(
                                             {"cerid_meta_update": {"actual_model": actual}}
@@ -158,18 +193,64 @@ async def _proxy_stream(req: ChatRequest, request_id: str, api_key: str = "") ->
                         except (json.JSONDecodeError, UnicodeDecodeError):
                             pass
                     yield chunk
-    except httpx.ConnectError as exc:
-        logger.error("OpenRouter connection error: %s", exc)
+            finally:
+                await response.aclose()
+                await client.aclose()
+
+        return _success_gen()
+
+    except (httpx.ConnectError, httpx.ReadTimeout) as exc:
+        logger.error("OpenRouter connection/timeout error for model=%s: %s", bare_model, exc)
+        return 503
+
+
+async def _proxy_stream(req: ChatRequest, request_id: str, api_key: str = "") -> AsyncGenerator[bytes, None]:
+    """Stream chat completion from OpenRouter with one fallback retry."""
+    bare_model = _strip_prefix(req.model)
+
+    # Emit metadata event so the frontend knows the resolved model
+    meta = json.dumps({
+        "cerid_meta": {
+            "requested_model": req.model,
+            "resolved_model": bare_model,
+        }
+    })
+    yield f"data: {meta}\n\n".encode()
+
+    # --- First attempt ---
+    result = await _attempt_stream(req, bare_model, request_id, api_key)
+
+    if isinstance(result, int):
+        original_status = result
+        fallback = _pick_fallback(bare_model)
+        if fallback:
+            logger.info(
+                "Retrying with fallback model=%s after %d on model=%s",
+                fallback, original_status, bare_model,
+            )
+            update = json.dumps({
+                "cerid_meta_update": {
+                    "fallback_model": fallback,
+                    "original_error": original_status,
+                }
+            })
+            yield f"data: {update}\n\n".encode()
+
+            # --- Fallback attempt ---
+            result = await _attempt_stream(req, fallback, request_id, api_key)
+
+    # Final evaluation
+    if isinstance(result, int):
         err = json.dumps({
-            "error": {"message": "Failed to connect to OpenRouter", "type": "connection_error"}
+            "error": {
+                "message": f"Upstream error ({result}) — all models failed",
+                "type": "upstream_error",
+            }
         })
         yield f"data: {err}\n\ndata: [DONE]\n\n".encode()
-    except httpx.ReadTimeout:
-        logger.error("OpenRouter read timeout for model=%s", bare_model)
-        err = json.dumps({
-            "error": {"message": "OpenRouter read timeout", "type": "timeout"}
-        })
-        yield f"data: {err}\n\ndata: [DONE]\n\n".encode()
+    else:
+        async for chunk in result:
+            yield chunk
 
 
 # ---------------------------------------------------------------------------
