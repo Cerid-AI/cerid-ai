@@ -132,7 +132,7 @@ export function KnowledgePane() {
     const files = pendingFiles
     setPendingFiles([])
     setUploadStatus("uploading")
-    setUploadMessage(`Uploading 1 of ${files.length}...`)
+    setUploadMessage(`Uploaded 0 of ${files.length}…`)
     let completed = 0
     try {
       const results = await Promise.allSettled(
@@ -144,7 +144,7 @@ export function KnowledgePane() {
           } finally {
             completed++
             if (completed < files.length) {
-              setUploadMessage(`Uploading ${completed + 1} of ${files.length}...`)
+              setUploadMessage(`Uploaded ${completed} of ${files.length}…`)
             }
           }
         }),
