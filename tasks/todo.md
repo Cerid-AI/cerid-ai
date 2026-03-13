@@ -1,10 +1,18 @@
 # Cerid AI — Task Tracker
 
-> **Last updated:** 2026-03-12
-> **Current status:** Phase 38D complete. 1302 Python tests, 417 frontend tests.
+> **Last updated:** 2026-03-13
+> **Current status:** Phase 38D complete. 1302 Python tests, 418 frontend tests.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md) — 0 open
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](../docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
+
+## Bugfix: Model Router Auto Mode (2026-03-13) ✅
+
+- [x] Fix Settings Pane Select to use `useSettings()` hook instead of boolean server field (D3)
+- [x] Add `setRoutingMode` test — 418 frontend tests passing
+- [x] Update `docs/ISSUES.md` — D3 resolved
+
+---
 
 ## Current: Phase 38D — Expert Verification, UX Enhancements & Per-Message Verification Complete
 

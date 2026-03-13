@@ -500,24 +500,25 @@ Research finding: "80% of RAG failures trace back to chunking decisions" — CDC
 
 ## Deferred / Future
 
-Items deferred to post-Phase 21 or tracked as nice-to-have:
+> **Archived 2026-03-13.** Items originally deferred post-Phase 21. Seven completed in
+> later phases; seven remain open (tracked in [`docs/ISSUES.md`](../ISSUES.md) § E).
 
-| Item | Effort | Notes |
-|------|--------|-------|
-| D2: Conversation fork/branch UI | 40-60 hrs | Exploratory; complex state management |
-| Frontend component tests (40+ untested) | 20-30 hrs | Nice-to-have, not gating releases |
-| CHANGELOG.md | 2-3 hrs | Retroactive from git history |
-| Env var naming standardization doc | 1-2 hrs | Prefix policy (`CERID_*`, `LLM_*`) |
-| mypy/pyright type checking | 4-6 hrs | Too many untyped third-party libs |
-| Self-RAG validation loop | 8-12 hrs | Context grading + output validation |
-| Codecov XML reports | 1 hr | Already have XML output |
-| Dependency license scanning | 1-2 hrs | `pip-licenses` or `license-report` |
-| Additional ReDoS regex audit | 2-3 hrs | Low risk given current patterns |
-| Plugin management UI | 4-6 hrs | No backend plugin API exists yet |
-| Digest view/generation | 3-4 hrs | New component, lower priority |
-| Batch triage UI | 4-6 hrs | Requires container-side paths |
-| MongoDB auth | 2-3 hrs | Only affects LibreChat |
-| Multi-stage MCP Dockerfile | 2-3 hrs | Minor image size savings |
+| Item | Effort | Status |
+|------|--------|--------|
+| D2: Conversation fork/branch UI | 40-60 hrs | ❌ Dropped (Phase 31) |
+| Frontend component tests (40+ untested) | 20-30 hrs | ✅ Phase 22 (now 418 tests) |
+| CHANGELOG.md | 2-3 hrs | ✅ Phase 22 |
+| Env var naming standardization doc | 1-2 hrs | ✅ Phase 22 (`docs/ENV_CONVENTIONS.md`) |
+| mypy/pyright type checking | 4-6 hrs | ✅ Phase 22 (mypy in CI) |
+| Self-RAG validation loop | 8-12 hrs | ✅ Phase 22 (`agents/self_rag.py`) |
+| Codecov XML reports | 1 hr | 🔲 Open — see ISSUES.md E1 |
+| Dependency license scanning | 1-2 hrs | 🔲 Open — see ISSUES.md E2 |
+| Additional ReDoS regex audit | 2-3 hrs | 🔲 Open — see ISSUES.md E3 |
+| Plugin management UI | 4-6 hrs | 🔲 Open — see ISSUES.md E4 |
+| Digest view/generation | 3-4 hrs | 🔲 Open — see ISSUES.md E5 |
+| Batch triage UI | 4-6 hrs | 🔲 Open — see ISSUES.md E6 |
+| MongoDB auth | 2-3 hrs | ✅ Phase 23 (service deprecated Phase 27) |
+| Multi-stage MCP Dockerfile | 2-3 hrs | 🔲 Open — see ISSUES.md E7 |
 
 ---
 

@@ -65,6 +65,12 @@
 
 ## Code Quality
 
+### Don't derive multi-state UI from a boolean server field
+**When:** A UI control has 3+ states but the server API stores a boolean.
+**Problem:** Settings Pane derived model router Select value from `enable_model_router: boolean` — `true` mapped to "Recommend", `false` to "Manual". "Auto" could never be displayed. The Select snapped back to "Recommend" on every render.
+**Fix:** Use the canonical local state source (the `useSettings` hook's `routingMode`, backed by localStorage) which already tracks all 3 states. The hook syncs the boolean to the server. Don't duplicate state derivation logic in the consuming component.
+**Pattern:** When server state is less expressive than UI state, treat localStorage (or a React hook) as the source of truth for the richer state, and sync the simplified version to the server.
+
 ### Check for latent bugs during structural splits
 **When:** Splitting a large file into sub-modules.
 **Lesson:** The mechanical process of splitting reveals bugs that were hidden in the original monolith. During the sync lib split, found 3 instances of `collection_name` (undefined) instead of `coll_name` (the correct local variable) in error logging paths. Also found duplicated utility functions (`_utcnow_iso()`) that should use the canonical version.
@@ -101,6 +107,23 @@
 **When:** CI job verifies `requirements.lock` matches `pip-compile` output.
 **Problem:** `actions/setup-python@v5` installs a different Python 3.11.x micro-version than the `python:3.11-slim` Docker image. Different micro-versions produce different wheel hashes from `pip-compile`, causing the lock-sync diff to fail on 2-3 hashes.
 **Fix:** Use `container: python:3.11-slim` in the CI lock-sync job to match the Dockerfile exactly. Do not rely on `actions/setup-python` for hash-sensitive operations.
+
+### pip-compile without `--upgrade` reuses stale resolution
+**When:** Regenerating `requirements.lock` locally to match CI's lock-sync check.
+**Problem:** `pip-compile` without `--upgrade` reuses pinned versions from the existing lock file. CI compiles from scratch into `/tmp/requirements.lock` (no existing lock), so it resolves the latest versions within ranges. This causes persistent diffs (e.g., `chromadb 0.5.20` locally vs `0.5.23` in CI, `huggingface-hub 1.7.1` vs `0.36.2`).
+**Fix:** Always use `pip-compile --upgrade` when regenerating the lock file locally. This forces fresh latest-within-range resolution, matching CI's from-scratch behavior.
+**Command:** `docker run --rm -v "$(pwd)/src/mcp:/work" -w /work python:3.11-slim bash -c "pip install -q pip-tools==7.5.3 && pip-compile --upgrade --generate-hashes --no-header --allow-unsafe -o requirements.lock requirements.txt"`
+
+### LangGraph StateGraph(dict) type suppression needs per-call ignores
+**When:** Using `StateGraph(dict)` with mypy and newer langgraph versions.
+**Problem:** Adding `# type: ignore[type-var]` only to the `StateGraph(dict)` line suppresses the construction error, but the bad type propagates — every subsequent `graph.add_node()` call also produces `[type-var]` errors.
+**Fix:** Add `# type: ignore[type-var]` to each `graph.add_node()` call individually. A TypedDict approach is impractical when the graph uses dynamic state keys throughout its node functions.
+
+### Dependabot version ranges may break transitive dependencies
+**When:** Dependabot widens version ranges (e.g., `chromadb>=0.5,<0.6` → `chromadb>=0.5,<1.6`).
+**Problem:** Major version bumps can drop transitive deps. chromadb 1.x removed `chroma-hnswlib` (used by `import hnswlib` in semantic_cache.py), causing 10 test failures.
+**Fix:** Always review Dependabot's upper bound changes against breaking change notes. For libraries with known API/dep breaks across majors, keep conservative upper bounds (e.g., `<0.6` not `<1.6`).
+**Also:** eslint 10.x broke `eslint-plugin-react-hooks@7.0.1` (peer requires `^3-^9`). Same pattern — revert to `^9.x`.
 
 ### Trivy `.trivyignore` must be referenced in EACH scan step
 **When:** Adding a `.trivyignore` file to suppress known CVEs in Trivy container scanning.

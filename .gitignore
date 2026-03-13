@@ -33,6 +33,7 @@ pgdata*
 /chroma/
 /redis/
 stacks/infrastructure/data/
+stacks/librechat/
 artifacts/
 
 # Node
@@ -62,13 +63,6 @@ venv/
 *.swp
 *~
 Thumbs.db
-
-# Symlinks to runtime
-stacks/librechat/runtime/
-
-# MongoDB runtime data
-stacks/librechat/data-node/
-**/data-node/
 
 # Runtime logs
 **/*.log

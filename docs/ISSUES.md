@@ -1,8 +1,8 @@
 # Cerid AI — Issues & Backlog
 
 > **Created:** 2026-02-25
-> **Last updated:** 2026-03-12
-> **Status:** Phase 38 complete. 73 resolved, 0 open. 1302 Python tests, 414 frontend tests.
+> **Last updated:** 2026-03-13
+> **Status:** Phase 38D complete. 75 resolved, 8 open. 1302 Python tests, 418 frontend tests.
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21 roadmap)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](COMPLETED_PHASES.md)
 > **Purpose:** Track known bugs, feature gaps, structural issues, and architecture evaluations for upcoming phases.
@@ -137,6 +137,17 @@ No agent exists for improving artifact quality. Current artifact cards show raw 
 - ~~Conversation fork/branch UI~~ — **Dropped** (2026-03-08). Exploratory 40-60 hr effort with unclear ROI. All core model-switch UX (badges, dividers, summarize-and-switch, start fresh) already shipped.
 
 **Files:** Same as B3 + D1.
+
+### D3. Model Router Auto Mode Broken in Settings Pane
+
+**Severity:** Medium
+**Status:** ✅ Resolved (2026-03-13)
+
+**Problem:** Settings Pane dropdown derived its value from `settings.enable_model_router` (a boolean), so `true` always mapped to "Recommend" — "Auto" could never be displayed. Selecting "Auto" wrote to localStorage but the Select snapped back to "Recommend" on re-render.
+
+**Resolution:** Settings Pane now uses `useSettings()` hook's `routingMode` / `setRoutingMode` (backed by localStorage with server boolean sync) instead of deriving from the binary server field. This matches how the toolbar cycle already worked. Frontend-only fix, 3 lines changed. 1 new test added.
+
+**Files changed:** `settings-pane.tsx` (import + hook call + Select value/handler), `use-settings.test.ts` (new test)
 
 ---
 
@@ -804,14 +815,64 @@ Verification results only appear in the status bar and hallucination panel sideb
 
 ---
 
+## K. Deferred Backlog (from Phase 16–18 Plan)
+
+> Originally deferred post-Phase 21. Archived 2026-03-13. See [`docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md`](plans/DEVELOPMENT_PLAN_PHASE16-18.md) for context.
+
+### K1. Codecov XML Reports
+
+**Severity:** Low | **Effort:** ~1 hr
+**Status:** 🔲 Open
+**Notes:** CI already produces XML coverage output. Needs Codecov integration for PR coverage gates.
+
+### K2. Dependency License Scanning
+
+**Severity:** Low | **Effort:** ~1–2 hrs
+**Status:** 🔲 Open
+**Notes:** Add `pip-licenses` (Python) and `license-report` (Node) to CI. Catch GPL-incompatible deps.
+
+### K3. ReDoS Regex Audit
+
+**Severity:** Low | **Effort:** ~2–3 hrs
+**Status:** 🔲 Open
+**Notes:** Low risk given current regex patterns. Audit with `rxxr2` or `safe-regex` for completeness.
+
+### K4. Plugin Management UI
+
+**Severity:** Low | **Effort:** ~4–6 hrs
+**Status:** 🔲 Open
+**Notes:** No backend plugin API exists yet. Scaffold needed before UI work.
+
+### K5. Digest View / Generation
+
+**Severity:** Low | **Effort:** ~3–4 hrs
+**Status:** 🔲 Open
+**Notes:** New component for periodic knowledge digest summaries.
+
+### K6. Batch Triage UI
+
+**Severity:** Low | **Effort:** ~4–6 hrs
+**Status:** 🔲 Open
+**Notes:** Requires container-side archive paths to be accessible from frontend.
+
+### K7. Multi-Stage MCP Dockerfile
+
+**Severity:** Low | **Effort:** ~2–3 hrs
+**Status:** 🔲 Open
+**Notes:** Minor image size savings. Current single-stage image works but is larger than necessary.
+
+---
+
 ## Priority Order
 
-### Open Items (1)
+### Open Items (8)
 
 J1 (verification OOM optimization) — Medium severity, mitigated via concurrency semaphore
+K1–K7 (deferred backlog) — Low severity, nice-to-have improvements
 
-### Resolved (73 items)
+### Resolved (75 items)
 
+**Phase 38D** (1 item): D3 (model router auto mode)
 **Phase 30** (0 new issues): Codebase audit & cleanup — no new issues filed; structural debt reduced
 **Phase 29** (1 item): V21 (advanced response formatting + inline verification)
 **Phase 26** (14 items): V1a, V2, V4, V5, V7, V8, V9, V10, V11, V12, V15, V16, V17, V18
