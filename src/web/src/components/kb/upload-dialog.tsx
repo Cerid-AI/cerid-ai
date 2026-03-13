@@ -19,9 +19,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { FileUp } from "lucide-react"
+import { FileUp, Layers } from "lucide-react"
 import { DOMAINS } from "@/lib/types"
 import { formatFileSize } from "@/lib/utils"
+
+const BATCH_THRESHOLD = 3
 
 interface UploadDialogProps {
   files: File[]
@@ -35,6 +37,7 @@ export function UploadDialog({ files, defaultDomain, onConfirm, onCancel }: Uplo
   const [categorizeMode, setCategorizeMode] = useState("smart")
 
   const open = files.length > 0
+  const isBatch = files.length >= BATCH_THRESHOLD
 
   const handleConfirm = () => {
     onConfirm({
@@ -47,19 +50,30 @@ export function UploadDialog({ files, defaultDomain, onConfirm, onCancel }: Uplo
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onCancel() }}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className={isBatch ? "sm:max-w-lg" : "sm:max-w-md"}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <FileUp className="h-4 w-4" />
-            Upload {files.length === 1 ? "File" : `${files.length} Files`}
+            {isBatch ? (
+              <>
+                <Layers className="h-4 w-4" />
+                Batch Upload — {files.length} Files
+              </>
+            ) : (
+              <>
+                <FileUp className="h-4 w-4" />
+                Upload {files.length === 1 ? "File" : `${files.length} Files`}
+              </>
+            )}
           </DialogTitle>
           <DialogDescription>
-            Choose ingestion options before uploading.
+            {isBatch
+              ? `${files.length} files (${formatFileSize(totalSize)}) will be uploaded in parallel.`
+              : "Choose ingestion options before uploading."}
           </DialogDescription>
         </DialogHeader>
 
         {/* File list */}
-        <div className="max-h-32 space-y-1 overflow-y-auto rounded-md border p-2">
+        <div className={`space-y-1 overflow-y-auto rounded-md border p-2 ${isBatch ? "max-h-48" : "max-h-32"}`}>
           {files.map((file, i) => (
             <div key={i} className="flex items-center justify-between text-xs">
               <span className="min-w-0 truncate text-muted-foreground">{file.name}</span>
@@ -117,7 +131,9 @@ export function UploadDialog({ files, defaultDomain, onConfirm, onCancel }: Uplo
         <DialogFooter>
           <Button variant="outline" onClick={onCancel}>Cancel</Button>
           <Button onClick={handleConfirm}>
-            Upload {files.length === 1 ? "File" : `${files.length} Files`}
+            {isBatch
+              ? `Start Batch (${files.length})`
+              : `Upload ${files.length === 1 ? "File" : `${files.length} Files`}`}
           </Button>
         </DialogFooter>
       </DialogContent>

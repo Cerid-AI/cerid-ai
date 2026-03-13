@@ -22,7 +22,7 @@ describe("UploadDialog", () => {
           onCancel={vi.fn()}
         />,
       )
-      expect(screen.getByText(/Upload File/)).toBeInTheDocument()
+      expect(screen.getByRole("heading", { name: /Upload File/ })).toBeInTheDocument()
     })
 
     it("renders title with 2 files", () => {
@@ -34,7 +34,7 @@ describe("UploadDialog", () => {
           onCancel={vi.fn()}
         />,
       )
-      expect(screen.getByText(/Upload 2 Files/)).toBeInTheDocument()
+      expect(screen.getByRole("heading", { name: /Upload 2 Files/ })).toBeInTheDocument()
     })
 
     it("keeps simple mode for ≤2 files", () => {
@@ -68,9 +68,8 @@ describe("UploadDialog", () => {
           onCancel={vi.fn()}
         />,
       )
-      // Batch header should contain "Batch Upload" and the count "3"
-      expect(screen.getByText(/Batch Upload/)).toBeInTheDocument()
-      expect(screen.getByText(/3/)).toBeInTheDocument()
+      // Batch header should contain "Batch Upload" and the file count
+      expect(screen.getByText(/Batch Upload — 3 Files/)).toBeInTheDocument()
     })
 
     it("renders per-file rows with filenames", () => {
