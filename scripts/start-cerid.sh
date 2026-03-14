@@ -169,6 +169,12 @@ else
 fi
 echo "[net] CERID_HOST=$CERID_HOST (source: $_host_source)"
 
+# When LAN access is enabled, bind to all interfaces
+if [[ -n "$CERID_HOST" && "$CERID_HOST" != "localhost" && "$CERID_HOST" != "127.0.0.1" ]]; then
+  export CERID_BIND_ADDR="${CERID_BIND_ADDR:-0.0.0.0}"
+  echo "    LAN mode: binding to all interfaces (CERID_BIND_ADDR=$CERID_BIND_ADDR)"
+fi
+
 # Set runtime URLs for web container based on CERID_HOST
 export VITE_MCP_URL="http://${CERID_HOST}:${CERID_PORT_MCP}"
 

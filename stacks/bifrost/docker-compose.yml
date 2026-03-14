@@ -3,7 +3,7 @@ services:
     image: maximhq/bifrost:latest@sha256:0fa2596eb2d05cf2f58b6d7b31076b0cc153f2c60972e83eb1f634bccd0372df
     container_name: bifrost
     ports:
-      - "${CERID_PORT_BIFROST:-8080}:8080"
+      - "${CERID_BIND_ADDR:-127.0.0.1}:${CERID_PORT_BIFROST:-8080}:8080"
     volumes:
       - ./data/config.json:/app/data/config.json
       - ./data:/app/data

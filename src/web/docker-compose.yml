@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile
     container_name: cerid-web
     ports:
-      - "${CERID_PORT_GUI:-3000}:80"
+      - "${CERID_BIND_ADDR:-127.0.0.1}:${CERID_PORT_GUI:-3000}:80"
     environment:
       - VITE_MCP_URL=${VITE_MCP_URL:-/api/mcp}
     networks:
