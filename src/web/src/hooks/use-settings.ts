@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useCallback, useEffect, useRef } from "react"
-import { fetchSettings, updateSettings } from "@/lib/api"
+import { fetchSettings, updateSettings, syncPreferences, fetchUserState } from "@/lib/api"
 import type { RoutingMode, SettingsUpdate } from "@/lib/types"
 
 function readBool(key: string): boolean {
@@ -90,6 +90,7 @@ export function useSettings() {
     setInlineMarkupsState((prev) => {
       const next = !prev
       persist("cerid-inline-markups", String(next))
+      syncPreferences({ inline_markups: next }).catch(() => { /* fire-and-forget */ })
       return next
     })
   }, [])
@@ -99,6 +100,7 @@ export function useSettings() {
     setExpertVerificationState((prev) => {
       const next = !prev
       persist("cerid-expert-verification", String(next))
+      syncPreferences({ expert_verification: next }).catch(() => { /* fire-and-forget */ })
       return next
     })
   }, [])
@@ -162,6 +164,31 @@ export function useSettings() {
         }
       })
       .catch(() => { /* Server unavailable — use localStorage values */ })
+
+    // Hydrate UI preferences from cloud sync
+    fetchUserState()
+      .then((state) => {
+        if (!state.preferences) return
+        const p = state.preferences as Record<string, unknown>
+        if (p.routing_mode && !localStorage.getItem("cerid-routing-mode")) {
+          const m = p.routing_mode as string
+          if (m === "manual" || m === "recommend" || m === "auto") {
+            setRoutingModeState(m as RoutingMode)
+            persist("cerid-routing-mode", m)
+          }
+        }
+        if (p.expert_verification !== undefined && localStorage.getItem("cerid-expert-verification") === null) {
+          const v = Boolean(p.expert_verification)
+          setExpertVerificationState(v)
+          persist("cerid-expert-verification", String(v))
+        }
+        if (p.inline_markups !== undefined && localStorage.getItem("cerid-inline-markups") === null) {
+          const v = Boolean(p.inline_markups)
+          setInlineMarkupsState(v)
+          persist("cerid-inline-markups", String(v))
+        }
+      })
+      .catch(() => { /* noop */ })
   }, [hydrateFeedback, hydrateAutoInject, hydrateHallucination, hydrateMemory])
 
   const toggleDashboard = useCallback(() => {
@@ -176,6 +203,7 @@ export function useSettings() {
     setRoutingModeState(mode)
     persist("cerid-routing-mode", mode)
     updateSettings({ enable_model_router: mode !== "manual" }).catch(() => { /* noop */ })
+    syncPreferences({ routing_mode: mode }).catch(() => { /* fire-and-forget */ })
   }, [])
 
   const cycleRoutingMode = useCallback(() => {
@@ -183,6 +211,7 @@ export function useSettings() {
       const next: RoutingMode = prev === "manual" ? "recommend" : prev === "recommend" ? "auto" : "manual"
       persist("cerid-routing-mode", next)
       updateSettings({ enable_model_router: next !== "manual" }).catch(() => { /* noop */ })
+      syncPreferences({ routing_mode: next }).catch(() => { /* fire-and-forget */ })
       return next
     })
   }, [])

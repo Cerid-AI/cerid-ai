@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createContext, useContext, useState, useCallback, type ReactNode } from "react"
+import { syncPreferences } from "@/lib/api"
 
 type UIMode = "simple" | "advanced"
 
@@ -32,12 +33,14 @@ export function UIModeProvider({ children }: { children: ReactNode }) {
   const setMode = useCallback((m: UIMode) => {
     setModeState(m)
     try { localStorage.setItem("cerid-ui-mode", m) } catch { /* noop */ }
+    syncPreferences({ ui_mode: m }).catch(() => { /* fire-and-forget */ })
   }, [])
 
   const toggle = useCallback(() => {
     setModeState((prev) => {
       const next = prev === "simple" ? "advanced" : "simple"
       try { localStorage.setItem("cerid-ui-mode", next) } catch { /* noop */ }
+      syncPreferences({ ui_mode: next }).catch(() => { /* fire-and-forget */ })
       return next
     })
   }, [])
