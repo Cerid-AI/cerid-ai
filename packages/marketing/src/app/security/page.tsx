@@ -21,9 +21,9 @@ import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/ca
 const SECURITY_FEATURES = [
   {
     icon: Lock,
-    title: "Data Stays Local",
+    title: "Knowledge Stays Local",
     description:
-      "All your knowledge, embeddings, and metadata live on your machine. Nothing is sent to external servers except LLM API calls.",
+      "Your documents, embeddings, and metadata live on your machine. Only relevant context from queries is sent to your chosen LLM provider for processing.",
   },
   {
     icon: Key,
@@ -121,20 +121,19 @@ export default function SecurityPage() {
             What leaves your machine?
           </h2>
           <p className="mx-auto mt-4 max-w-xl text-center text-muted-foreground">
-            Only LLM API calls go external. Everything else stays local.
+            Your knowledge base and credentials stay local. Chat context is sent to your chosen LLM provider. Optional Dropbox sync is encrypted when configured.
           </p>
 
-          <div className="mt-10 grid grid-cols-1 gap-6 md:grid-cols-2">
+          <div className="mt-10 grid grid-cols-1 gap-6 md:grid-cols-3">
             <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-6">
               <h3 className="font-semibold text-green-600 dark:text-green-400">
                 Stays on your machine
               </h3>
               <ul className="mt-4 space-y-2 text-sm text-muted-foreground">
-                <li>Your documents and files</li>
+                <li>Your original documents and files</li>
                 <li>Knowledge base embeddings</li>
                 <li>Knowledge graph relationships</li>
                 <li>Search indices and caches</li>
-                <li>Conversation history</li>
                 <li>User accounts and API keys</li>
                 <li>Audit logs and usage data</li>
               </ul>
@@ -142,17 +141,24 @@ export default function SecurityPage() {
 
             <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-6">
               <h3 className="font-semibold text-amber-600 dark:text-amber-400">
-                Sent externally (encrypted)
+                Sent to LLM provider (your choice)
               </h3>
               <ul className="mt-4 space-y-2 text-sm text-muted-foreground">
-                <li>LLM prompts via HTTPS to OpenRouter</li>
-                <li>Your chosen LLM provider processes the query</li>
-                <li>Responses streamed back over HTTPS</li>
+                <li>Chat messages and query context</li>
+                <li>Relevant KB snippets for answering</li>
+                <li>Claims for verification checks</li>
               </ul>
-              <p className="mt-4 text-xs text-muted-foreground">
-                You choose the LLM provider. Use your own API key. No data is
-                stored by the gateway.
-              </p>
+            </div>
+
+            <div className="rounded-lg border border-blue-500/30 bg-blue-500/5 p-6">
+              <h3 className="font-semibold text-blue-600 dark:text-blue-400">
+                Optional cloud sync (your Dropbox)
+              </h3>
+              <ul className="mt-4 space-y-2 text-sm text-muted-foreground">
+                <li>Conversation history</li>
+                <li>Settings and preferences</li>
+                <li>Encrypted when key is configured</li>
+              </ul>
             </div>
           </div>
         </div>

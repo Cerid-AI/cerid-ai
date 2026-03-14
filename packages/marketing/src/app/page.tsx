@@ -79,7 +79,8 @@ export default function Home() {
           <p className="animate-in fade-in slide-in-from-bottom-4 fill-mode-both duration-700 delay-300 mx-auto mt-6 max-w-2xl text-lg text-muted-foreground">
             Cerid AI turns your personal files, notes, and documents into a
             searchable AI assistant that actually verifies its answers.
-            Everything runs on your computer — your data never leaves your machine.
+            Everything runs on your computer — your knowledge base stays local,
+            only query context is sent to the LLM provider you choose.
           </p>
 
           <div className="animate-in fade-in slide-in-from-bottom-4 fill-mode-both duration-700 delay-500 mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
@@ -168,7 +169,7 @@ export default function Home() {
                 </li>
                 <li className="flex items-center gap-2">
                   <Lock className="h-4 w-4 text-primary" />
-                  Your data never leaves your machine
+                  Your knowledge base stays on your machine
                 </li>
                 <li className="flex items-center gap-2">
                   <Zap className="h-4 w-4 text-primary" />
