@@ -193,6 +193,17 @@ async def _attempt_stream(
                         except (json.JSONDecodeError, UnicodeDecodeError):
                             pass
                     yield chunk
+            except (httpx.ReadError, httpx.RemoteProtocolError, httpx.ReadTimeout) as exc:
+                logger.warning(
+                    "Stream interrupted for model=%s: %s", bare_model, exc,
+                )
+                err = json.dumps({
+                    "error": {
+                        "message": f"Stream interrupted ({type(exc).__name__})",
+                        "type": "stream_error",
+                    }
+                })
+                yield f"data: {err}\n\ndata: [DONE]\n\n".encode()
             finally:
                 await response.aclose()
                 await client.aclose()
