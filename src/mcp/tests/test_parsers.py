@@ -440,8 +440,10 @@ class TestParseEml:
     def test_eml_headers(self, tmp_path):
         path = self._make_eml(tmp_path, from_addr="sender@test.com", to_addr="rcpt@test.com")
         result = parse_file(path)
-        assert "sender@test.com" in result["text"]
-        assert "rcpt@test.com" in result["text"]
+        # Email anonymization replaces local-part but keeps domain
+        assert "@test.com" in result["text"]
+        assert "From:" in result["text"]
+        assert "To:" in result["text"]
 
     def test_eml_html_body_stripped(self, tmp_path):
         path = self._make_eml(tmp_path, body=None,

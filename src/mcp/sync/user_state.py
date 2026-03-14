@@ -53,7 +53,7 @@ _SYNC_METADATA_KEYS = frozenset({
 
 def _encrypt_dict(d: dict) -> dict:
     """Encrypt string values in a dict, skipping metadata keys."""
-    result = {}
+    result: dict[str, object] = {}
     for k, v in d.items():
         if k in _SYNC_METADATA_KEYS:
             result[k] = v
@@ -75,7 +75,7 @@ def _encrypt_dict(d: dict) -> dict:
 
 def _decrypt_dict(d: dict) -> dict:
     """Decrypt string values in a dict."""
-    result = {}
+    result: dict[str, object] = {}
     for k, v in d.items():
         if isinstance(v, str):
             result[k] = _decrypt_value(v)
