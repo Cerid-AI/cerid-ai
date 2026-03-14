@@ -5,6 +5,11 @@ import { useState, useCallback, useRef, useEffect } from "react"
 import type { Conversation, ChatMessage, HallucinationReport } from "@/lib/types"
 import { MODELS } from "@/lib/types"
 import { uuid } from "@/lib/utils"
+import {
+  syncConversation,
+  deleteConversationSync,
+  fetchSyncedConversations,
+} from "@/lib/api"
 
 const STORAGE_KEY = "cerid-conversations"
 const MAX_CONVERSATIONS = 50
@@ -107,11 +112,33 @@ export function useConversations() {
     }
   }, [])
 
+  // Cloud sync: fire-and-forget server persistence (debounced for streaming)
+  const serverSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingServerSyncRef = useRef<Conversation | null>(null)
+
+  const syncToServer = useCallback((convo: Conversation) => {
+    pendingServerSyncRef.current = convo
+    if (!serverSyncTimerRef.current) {
+      serverSyncTimerRef.current = setTimeout(() => {
+        serverSyncTimerRef.current = null
+        const pending = pendingServerSyncRef.current
+        if (pending) {
+          pendingServerSyncRef.current = null
+          syncConversation(pending).catch(() => { /* fire-and-forget */ })
+        }
+      }, 2000)
+    }
+  }, [])
+
   // Flush any pending save on unmount
   useEffect(() => {
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
       if (pendingRef.current) saveConversations(pendingRef.current)
+      if (serverSyncTimerRef.current) clearTimeout(serverSyncTimerRef.current)
+      if (pendingServerSyncRef.current) {
+        syncConversation(pendingServerSyncRef.current).catch(() => {})
+      }
     }
   }, [])
 
@@ -127,6 +154,7 @@ export function useConversations() {
     setConversations((prev) => {
       const next = [convo, ...prev]
       saveConversations(next)
+      syncConversation(convo).catch(() => { /* fire-and-forget */ })
       return next
     })
     setActiveId(convo.id)
@@ -144,9 +172,11 @@ export function useConversations() {
         return { ...c, messages, title, updatedAt: Date.now() }
       })
       saveConversations(next)
+      const updated = next.find((c) => c.id === convoId)
+      if (updated) syncToServer(updated)
       return next
     })
-  }, [])
+  }, [syncToServer])
 
   const updateLastMessage = useCallback((convoId: string, content: string) => {
     setConversations((prev) => {
@@ -159,9 +189,11 @@ export function useConversations() {
         return { ...c, messages, updatedAt: Date.now() }
       })
       debouncedSave(next)
+      const updated = next.find((c) => c.id === convoId)
+      if (updated) syncToServer(updated)
       return next
     })
-  }, [debouncedSave])
+  }, [debouncedSave, syncToServer])
 
   const updateLastMessageModel = useCallback((convoId: string, model: string) => {
     setConversations((prev) => {
@@ -193,6 +225,7 @@ export function useConversations() {
     setConversations((prev) => {
       const next = prev.filter((c) => c.id !== convoId)
       saveConversations(next)
+      deleteConversationSync(convoId).catch(() => { /* fire-and-forget */ })
       // Derive next active ID from fresh state (avoids stale closure)
       setActiveId((currentId) => {
         if (currentId !== convoId) return currentId
@@ -236,9 +269,11 @@ export function useConversations() {
         return { ...c, verificationReports: reports, updatedAt: Date.now() }
       })
       saveConversations(next)
+      const updated = next.find((c) => c.id === convoId)
+      if (updated) syncToServer(updated)
       return next
     })
-  }, [])
+  }, [syncToServer])
 
   /** Get the stored verification report for a specific message. */
   const getVerification = useCallback((convoId: string, msgId: string): HallucinationReport | null => {
@@ -251,6 +286,28 @@ export function useConversations() {
     const convo = conversations.find((c) => c.id === convoId)
     return convo?.verificationReports ?? {}
   }, [conversations])
+
+  // Hydrate from server on mount — merge server conversations with localStorage
+  const serverHydratedRef = useRef(false)
+  useEffect(() => {
+    if (serverHydratedRef.current) return
+    serverHydratedRef.current = true
+
+    fetchSyncedConversations()
+      .then((serverConvos) => {
+        if (!serverConvos.length) return
+        setConversations((local) => {
+          const localIds = new Set(local.map((c) => c.id))
+          const newFromServer = serverConvos.filter((sc) => !localIds.has(sc.id))
+          if (newFromServer.length === 0) return local
+
+          const merged = [...local, ...newFromServer].slice(0, MAX_CONVERSATIONS)
+          saveConversations(merged)
+          return merged
+        })
+      })
+      .catch(() => { /* Server unavailable */ })
+  }, [])
 
   return {
     conversations, active, activeId, setActiveId,
