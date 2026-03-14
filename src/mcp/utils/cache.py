@@ -55,6 +55,7 @@ def log_event(
     try:
         redis_client.lpush(config.REDIS_INGEST_LOG, payload)
         redis_client.ltrim(config.REDIS_INGEST_LOG, 0, config.REDIS_LOG_MAX - 1)
+        redis_client.expire(config.REDIS_INGEST_LOG, 86400 * 30)  # 30-day TTL
     except Exception as e:
         logger.error(f"Failed to log event to Redis: {e}")
 
