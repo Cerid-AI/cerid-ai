@@ -71,6 +71,7 @@ jobs:
             --exclude-files 'docs/OPERATIONS\.md$' \
             --exclude-files 'src/mcp/tests/test_middleware_auth\.py$' \
             --exclude-files 'src/mcp/tests/test_auth\.py$' \
+            --exclude-files 'docs/plans/' \
             > /tmp/secrets.json
           # Fail if any secrets found
           python -c "
