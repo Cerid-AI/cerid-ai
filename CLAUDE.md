@@ -202,7 +202,7 @@ Frontend tests: `cd src/web && npx vitest run`
 
 ## Conventions
 
-- **Session start:** Run `./scripts/validate-env.sh --quick` at the beginning of every session
+- **Session start:** Run `./scripts/validate-env.sh --quick` at the beginning of every session. If the session-start hook reports missing plugins or MCP servers, run `bash ~/dotfiles/install.sh` before proceeding with any other work
 - Docker services use container-name-based discovery on `llm-network`
 - MCP protocol uses SSE transport with session-based message queuing
 - Secrets go in root `.env`, encrypted as `.env.age` via `age`. Key at `~/.config/cerid/age-key.txt`
