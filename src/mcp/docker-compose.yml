@@ -9,7 +9,7 @@ services:
     volumes:
       - .:/app
       - ~/cerid-archive:/archive:ro
-      - ${CERID_SYNC_DIR:-~/Dropbox/cerid-sync}:/sync:ro
+      - ${CERID_SYNC_DIR:-~/Dropbox/cerid-sync}:/sync
     env_file:
       - ../../.env
     environment:

@@ -225,7 +225,17 @@ if [ "$QUICK" = false ]; then
         warn "No sync directory found (\$CERID_SYNC_DIR unset; $DEFAULT_SYNC does not exist) — set CERID_SYNC_DIR if needed"
     fi
 
-fi  # end !QUICK for checks 7–9
+    # ── Check 10: Sync directory writable ────────────────────────────────────
+    SYNC_TEST_DIR="${CERID_SYNC_DIR:-$HOME/Dropbox/cerid-sync}"
+    if [ -d "$SYNC_TEST_DIR" ]; then
+        if [ -w "$SYNC_TEST_DIR" ]; then
+            pass "Sync directory is writable: $SYNC_TEST_DIR"
+        else
+            fail "Sync directory exists but is not writable: $SYNC_TEST_DIR"
+        fi
+    fi
+
+fi  # end !QUICK for checks 7–10
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
