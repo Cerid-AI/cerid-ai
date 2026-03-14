@@ -149,25 +149,50 @@ curl http://localhost:8888/artifacts
 
 ## Claude Code Setup (New Machine)
 
+> **Global setup applies first** — see `~/Develop/CLAUDE_CODE_SETUP.md` for global plugins and MCP servers shared across all projects.
+
+### Project Setup
+
 1. **Verify prerequisites:** Docker running, `.env` decrypted, `age` installed, archive directory exists
-2. **Run `./scripts/validate-env.sh`** to check all 14 environment validations
-3. **If containers are down:** `./scripts/start-cerid.sh` (or `--build` after a `git pull`)
-4. **Check `.claude/settings.json`** — shared hooks config is committed; per-machine permissions go in `.claude/settings.local.json` (gitignored)
-5. **MCP server is at `http://localhost:8888/mcp/sse`** — configured in `.mcp.json` (committed), exposes 18 `pkb_*` tools
-6. **React GUI dev server:** configured in `.claude/launch.json` (committed) — Vite on port 5173
+2. **Install global plugins + MCP servers** — follow `~/Develop/CLAUDE_CODE_SETUP.md`
+3. **Run `./scripts/validate-env.sh`** to check all 14 environment validations
+4. **If containers are down:** `./scripts/start-cerid.sh` (or `--build` after a `git pull`)
 
-**Key files for Claude Code:**
-- `.mcp.json` — MCP server connection (Cerid KB tools)
-- `.claude/settings.json` — shared hooks config (session-start, safety-check, typecheck, pythonlint)
-- `.claude/settings.local.json` — per-machine permission allowlist (gitignored, create from scratch)
-- `.claude/launch.json` — React dev server config
-- `.claudeignore` — excludes node_modules, dist, runtime data, binaries, lock files
+### Project-Level Config (committed, auto-applied)
 
-**Hooks (4 total, run automatically):**
-- `session-start.sh` (SessionStart) — Docker + MCP + GUI health check
-- `safety-check.sh` (PreToolUse/Bash) — blocks destructive commands
-- `typecheck.sh` (PostToolUse/Edit|Write) — `npx tsc --noEmit` for `.ts`/`.tsx` in `src/web/`
-- `pythonlint.sh` (PostToolUse/Edit|Write) — `ruff check` for `.py` in `src/mcp/`
+| File | Purpose |
+|------|---------|
+| `.mcp.json` | Cerid KB MCP at `http://localhost:8888/mcp/sse` (18 `pkb_*` tools) |
+| `.claude/settings.json` | Hooks config (session-start, safety-check, typecheck, pythonlint) |
+| `.claude/hooks/session-start.sh` | SessionStart — Docker + MCP + GUI health check |
+| `.claude/hooks/safety-check.sh` | PreToolUse/Bash — blocks destructive commands |
+| `.claude/hooks/typecheck.sh` | PostToolUse/Edit\|Write — `npx tsc --noEmit` for `.ts`/`.tsx` in `src/web/` |
+| `.claude/hooks/pythonlint.sh` | PostToolUse/Edit\|Write — `ruff check` for `.py` in `src/mcp/` |
+| `.claude/commands/` | Custom commands: stack, test, sync, lock |
+| `.claude/launch.json` | Dev server configs (cerid-web, react-gui, marketing) |
+| `.claudeignore` | Excludes node_modules, dist, runtime data, binaries, lock files |
+
+### Per-Machine Config (gitignored)
+
+| File | Purpose |
+|------|---------|
+| `.claude/settings.local.json` | Bash permission allowlists (auto-populated as you approve commands) |
+
+### Global Plugins Required
+
+See `~/Develop/CLAUDE_CODE_SETUP.md` for full list. Key plugins for this project:
+
+- `superpowers` — plan execution, TDD, code review, debugging workflows
+- `pyright-lsp` — Python type checking
+- `frontend-design` — React GUI development
+- `claude-md-management` — CLAUDE.md maintenance
+
+### Global MCP Servers Required
+
+See `~/Develop/CLAUDE_CODE_SETUP.md` for install commands:
+
+- **context7** — live docs for React, FastAPI, pydantic, ChromaDB, Neo4j
+- **github-mcp** — GitHub issues, PRs, actions
 
 **Tests:** Run Python tests in Docker (`host macOS lacks chromadb`):
 ```bash
