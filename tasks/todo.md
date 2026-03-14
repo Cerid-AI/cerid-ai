@@ -6,6 +6,18 @@
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](../docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
 
+## Phase 39: Privacy Hardening (2026-03-14) ✅
+
+- [x] Tighten CORS default from wildcard to localhost
+- [x] Bind service ports to localhost by default (CERID_BIND_ADDR)
+- [x] Add email header anonymization (CERID_ANONYMIZE_EMAIL_HEADERS)
+- [x] Add 30-day TTL to Redis ingest audit log
+- [x] Add sync directory encryption (auto-enabled with CERID_ENCRYPTION_KEY)
+- [x] Add KB context injection transparency indicator in chat
+- [x] Update marketing site and CLAUDE.md privacy claims
+
+---
+
 ## Feature: Multi-Session Cloud Sync (2026-03-14) ✅
 
 - [x] User state file I/O module (sync/user_state.py) — settings, conversations, preferences

@@ -2,7 +2,7 @@
 
 > **Created:** 2026-02-25
 > **Last updated:** 2026-03-14
-> **Status:** Phase 38D complete. 81 resolved, 6 open. 1340 Python tests, 453 frontend tests.
+> **Status:** Phase 39 complete. 88 resolved, 6 open. 1340 Python tests, 453 frontend tests.
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21 roadmap)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](COMPLETED_PHASES.md)
 > **Purpose:** Track known bugs, feature gaps, structural issues, and architecture evaluations for upcoming phases.
@@ -898,6 +898,87 @@ Verification results only appear in the status bar and hallucination panel sideb
 
 ---
 
+## L. Phase 39 — Privacy Hardening
+
+### L1. CORS Wildcard Default
+
+**Severity:** Medium (security)
+**Status:** ✅ Resolved (Phase 39, 2026-03-14)
+
+**Problem:** `CORS_ORIGINS` defaulted to `*`, allowing any origin to make credentialed requests to the MCP API. While acceptable for local-only use, this was inconsistent with the project's privacy-first posture and risky if the API was exposed on a LAN.
+
+**Resolution:** Changed `CORS_ORIGINS` default from `*` to `http://localhost:3000,http://localhost:5173` (React GUI production + Vite dev). Users can override via env var. Existing `CORS_ORIGINS=*` in `.env` files continue to work.
+
+**Files:** `src/mcp/main.py`, `src/mcp/config/settings.py`
+
+### L2. Service Ports Bound to 0.0.0.0
+
+**Severity:** Medium (security)
+**Status:** ✅ Resolved (Phase 39, 2026-03-14)
+
+**Problem:** All Docker Compose port mappings used `0.0.0.0` (implicit default), exposing services (MCP 8888, Neo4j 7474/7687, ChromaDB 8001, Redis 6379) to the entire LAN. Any device on the network could connect directly to databases.
+
+**Resolution:** Added `CERID_BIND_ADDR` env var (default `127.0.0.1`). All `docker-compose.yml` port mappings now use `${CERID_BIND_ADDR:-127.0.0.1}:port:port`. Users who need LAN access can set `CERID_BIND_ADDR=0.0.0.0`.
+
+**Files:** `src/mcp/docker-compose.yml`, `src/web/docker-compose.yml`, `stacks/infrastructure/docker-compose.yml`, `stacks/bifrost/docker-compose.yml`, `.env.example`
+
+### L3. Email Header PII Exposure
+
+**Severity:** Medium (privacy)
+**Status:** ✅ Resolved (Phase 39, 2026-03-14)
+
+**Problem:** The email parser stored full sender/recipient email addresses and display names in ChromaDB metadata and Neo4j. Ingesting personal email archives exposed PII in the knowledge base that could surface in RAG context injections.
+
+**Resolution:** Added `CERID_ANONYMIZE_EMAIL_HEADERS` env var (default `true`). When enabled, the email parser hashes email addresses with SHA-256 (first 8 chars) and strips display names before storing metadata. Existing ingested emails are not retroactively anonymized.
+
+**Files:** `src/mcp/parsers/email.py`, `src/mcp/config/settings.py`
+
+### L4. Redis Audit Log No TTL
+
+**Severity:** Low (privacy)
+**Status:** ✅ Resolved (Phase 39, 2026-03-14)
+
+**Problem:** The Redis ingest audit log (`ingest:audit:*` keys) accumulated indefinitely with no expiration. Over time, this created an unbounded record of every file ingested, including filenames and paths — a privacy concern for users who expect data minimization.
+
+**Resolution:** Added 30-day TTL to all `ingest:audit:*` keys using `EXPIRE` after each write. Configurable via `CERID_AUDIT_TTL_DAYS` env var.
+
+**Files:** `src/mcp/services/ingestion.py`, `src/mcp/config/settings.py`
+
+### L5. Sync Directory Unencrypted
+
+**Severity:** Medium (privacy)
+**Status:** ✅ Resolved (Phase 39, 2026-03-14)
+
+**Problem:** The cloud sync directory (`~/cerid-archive/sync/`) stored user state files (conversations, settings, preferences) in plaintext JSON. When synced via Dropbox, this meant sensitive data was readable by the cloud provider and anyone with Dropbox access.
+
+**Resolution:** Added at-rest encryption for sync directory files using Fernet (symmetric, from `cryptography` library). Auto-enabled when `CERID_ENCRYPTION_KEY` is set. Reuses existing `utils/encryption.py` infrastructure. Files are encrypted before write and decrypted on read, transparent to the rest of the application.
+
+**Files:** `src/mcp/sync/user_state.py`, `src/mcp/utils/encryption.py`, `src/mcp/config/settings.py`
+
+### L6. KB Injection Not Transparent to User
+
+**Severity:** Low (UX)
+**Status:** ✅ Resolved (Phase 39, 2026-03-14)
+
+**Problem:** When the KB context injection system added knowledge base content to a chat prompt, the user had no indication that their query was being augmented. This made it difficult to understand why the model's response referenced specific documents.
+
+**Resolution:** Added a transparency indicator in the chat UI that shows when KB context has been injected, including the number of chunks and source documents. Visible as a small badge on messages that received KB augmentation.
+
+**Files:** `src/web/src/components/chat/chat-message.tsx`, `src/web/src/contexts/KBInjectionContext.tsx`
+
+### L7. Marketing Privacy Claims Inaccurate
+
+**Severity:** Medium (docs)
+**Status:** ✅ Resolved (Phase 39, 2026-03-14)
+
+**Problem:** The marketing site (cerid.ai) and CLAUDE.md claimed "all data stays local" and "never leaves your machine," but Phase 38D added cloud sync via Dropbox, which uploads user state to a third-party service. The privacy claims had drifted from the actual data flow.
+
+**Resolution:** Updated marketing copy and CLAUDE.md to accurately describe the data flow: local-first with optional encrypted cloud sync. Added nuance about what goes where — LLM API calls are external, sync is opt-in and encrypted, raw knowledge base stays local.
+
+**Files:** `packages/marketing/src/app/page.tsx`, `CLAUDE.md`
+
+---
+
 ## Priority Order
 
 ### Open Items (6)
@@ -905,11 +986,11 @@ Verification results only appear in the status bar and hallucination panel sideb
 J1 (verification OOM optimization) — Medium severity, mitigated via concurrency semaphore
 K1–K4, K7 (deferred backlog) — Low severity, nice-to-have improvements
 
-### Resolved (80 items)
+### Resolved (88 items)
 
+**Phase 39** (7 items): L1 (CORS wildcard), L2 (port binding), L3 (email PII), L4 (audit TTL), L5 (sync encryption), L6 (KB injection transparency), L7 (marketing claims)
 **Phase 38D+** (3 items): D4 (temporal claims uncertain), D5 (auto router real-time queries), D6 (Llama fallback retry)
-**Phase 39** (2 items): K5 (digest view), K6 (batch triage UI)
-**Phase 38D** (1 item): D3 (model router auto mode)
+**Phase 38D** (3 items): D3 (model router auto mode), K5 (digest view), K6 (batch triage UI)
 **Phase 30** (0 new issues): Codebase audit & cleanup — no new issues filed; structural debt reduced
 **Phase 29** (1 item): V21 (advanced response formatting + inline verification)
 **Phase 26** (14 items): V1a, V2, V4, V5, V7, V8, V9, V10, V11, V12, V15, V16, V17, V18

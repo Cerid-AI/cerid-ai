@@ -232,6 +232,26 @@
 
 ---
 
+## Privacy & Security
+
+### Default to most restrictive setting, let users opt-in to openness
+**When:** Configuring network exposure, CORS, port binding, or any security-relevant default.
+**Problem:** CORS defaulted to `*` and ports bound to `0.0.0.0`, exposing services to the entire LAN. Convenient for development but inconsistent with a privacy-first product.
+**Fix:** Default to the most locked-down setting (`localhost` CORS origins, `127.0.0.1` bind address). Provide env vars for users who need broader access to opt in explicitly.
+**Pattern:** Restrictive defaults + opt-in openness is safer than permissive defaults + opt-out hardening. Users who need LAN access will set the env var; users who don't will never know they were protected.
+
+### Audit privacy claims against actual data flows — claims drift as features are added
+**When:** Adding features that change where data flows (e.g., cloud sync, analytics, telemetry).
+**Problem:** Marketing site and CLAUDE.md claimed "all data stays local" but Phase 38D added Dropbox cloud sync, uploading user state to a third-party service. Nobody updated the privacy claims when the sync feature shipped.
+**Fix:** Treat privacy claims as code — they need to be updated in the same PR that changes data flow. Add a mental checklist item: "Does this feature change where data goes? If yes, update marketing + CLAUDE.md."
+
+### Use existing encryption infrastructure rather than adding new crypto
+**When:** Adding encryption to a new feature (e.g., sync directory at-rest encryption).
+**Problem:** Tempting to reach for a new encryption approach or library for each new encryption need.
+**Fix:** Reuse `utils/encryption.py` (Fernet symmetric encryption from the `cryptography` library) which was already battle-tested for API key encryption. Same key management, same patterns, no new dependencies.
+
+---
+
 ## Model Routing
 
 ### Chat model router vs verification pipeline have separate routing
