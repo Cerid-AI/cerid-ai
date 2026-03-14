@@ -323,6 +323,14 @@ REDIS_INGEST_LOG = "ingest:log"
 REDIS_LOG_MAX = 10_000
 
 # ---------------------------------------------------------------------------
+# Privacy — Email Header Anonymization
+# ---------------------------------------------------------------------------
+# When true, From/To/Cc headers in .eml/.mbox files are redacted during
+# ingestion to prevent PII leakage into vector/graph stores and LLM prompts.
+# Domain is preserved for context (e.g. "[redacted]@example.com").
+ANONYMIZE_EMAIL_HEADERS: bool = os.getenv("CERID_ANONYMIZE_EMAIL_HEADERS", "true").lower() == "true"
+
+# ---------------------------------------------------------------------------
 # Storage
 # ---------------------------------------------------------------------------
 # "extract_only" = parse text and discard the original file (default)

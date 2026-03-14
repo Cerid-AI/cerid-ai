@@ -5,11 +5,26 @@
 
 from __future__ import annotations
 
+import re as _re
 from pathlib import Path
 from typing import Any
 
+import config as _config
 from parsers._utils import _strip_html_tags
 from parsers.registry import _MAX_TEXT_CHARS, register_parser
+
+_ANONYMIZE_KEYS = {"From", "To", "Cc"}
+
+
+def _anonymize_header(value: str) -> str:
+    """Replace email addresses with redacted form, preserving domain for context."""
+    if not _config.ANONYMIZE_EMAIL_HEADERS:
+        return value
+    return _re.sub(
+        r"[a-zA-Z0-9._%+\-]+@([a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})",
+        r"[redacted]@\1",
+        value,
+    )
 
 
 @register_parser([".eml"])
@@ -34,7 +49,7 @@ def parse_eml(file_path: str) -> dict[str, Any]:
     for key in ("From", "To", "Cc", "Subject", "Date", "Message-ID"):
         val = msg.get(key, "")
         if val:
-            headers[key] = str(val)
+            headers[key] = _anonymize_header(str(val)) if key in _ANONYMIZE_KEYS else str(val)
 
     header_text = "\n".join(f"{k}: {v}" for k, v in headers.items())
 
@@ -112,7 +127,7 @@ def parse_mbox(file_path: str) -> dict[str, Any]:
             continue  # count but don't extract
 
         subject = msg.get("Subject", "(no subject)")
-        from_addr = msg.get("From", "")
+        from_addr = _anonymize_header(msg.get("From", ""))
         date = msg.get("Date", "")
 
         body = ""
