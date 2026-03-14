@@ -5,6 +5,21 @@
 
 ---
 
+## State Sync Architecture
+
+### Use file-based sync for user state, not database
+**When:** Building cross-machine sync for self-hosted single-user apps.
+**Problem:** Considered SQLite or Postgres for user state persistence, but it adds infrastructure complexity for <50 conversations + 15 settings.
+**Fix:** JSON files in a synced directory (Dropbox) are simpler and more portable. One file per conversation avoids merge conflicts. Dropbox handles transport + conflict detection for free.
+**Pattern:** localStorage is the immediate cache (fast reads, offline resilience). Server writes to sync dir fire-and-forget. On mount, server data fills gaps in localStorage; localStorage wins on conflict by `updatedAt`.
+
+### Don't mount sync volumes read-only if the server needs to write
+**When:** Docker volume mounts for sync directories.
+**Problem:** Sync dir was mounted `:ro` but the MCP server needed to write user state files.
+**Fix:** Remove `:ro` when the application needs write access. Validate writability in `validate-env.sh`.
+
+---
+
 ## Python Packaging
 
 ### `import *` skips underscore-prefixed names

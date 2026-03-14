@@ -1,10 +1,25 @@
 # Cerid AI — Task Tracker
 
-> **Last updated:** 2026-03-13
-> **Current status:** Phase 38D complete. 1302 Python tests, 440 frontend tests.
-> **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md) — 0 open
+> **Last updated:** 2026-03-14
+> **Current status:** Phase 38D complete. 1340 Python tests, 453 frontend tests.
+> **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md) — 6 open
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](../docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
+
+## Feature: Multi-Session Cloud Sync (2026-03-14) ✅
+
+- [x] User state file I/O module (sync/user_state.py) — settings, conversations, preferences
+- [x] User state API router — CRUD endpoints at /user-state/*
+- [x] Settings persistence to sync dir on PATCH (survives restarts)
+- [x] Startup hydration from sync dir (restores settings across machines)
+- [x] Docker volume mount change (sync dir now read-write)
+- [x] Frontend API client additions (6 new sync functions)
+- [x] Conversation cloud sync in useConversations hook
+- [x] UI mode + preferences cloud sync
+- [x] Sync dir writable validation check
+- 38 new Python tests, 13 new frontend tests (1340 + 453 total)
+
+---
 
 ## Bugfix: Model Router Resilience (2026-03-13) ✅
 
