@@ -338,5 +338,13 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
             detail="No valid fields provided. See API docs for updatable fields.",
         )
 
+    # Persist to sync directory for cross-machine/restart durability
+    try:
+        if getattr(config, "SYNC_DIR", ""):
+            from sync.user_state import write_settings
+            write_settings(config.SYNC_DIR, updated)
+    except Exception as exc:
+        logger.warning("Failed to persist settings to sync dir: %s", exc)
+
     logger.info(f"Settings updated: {updated}")
     return {"status": "success", "updated": updated}
