@@ -20,6 +20,7 @@ import type { ChatMessage, HallucinationClaim } from "@/lib/types"
 import { findModel, PROVIDER_COLORS } from "@/lib/types"
 import { matchClaimsToText, type ClaimDisplayStatus } from "@/lib/verification-utils"
 import { SourceAttribution } from "./source-attribution"
+import { KBContextIndicator } from "./kb-context-indicator"
 import { ClaimOverlay } from "./claim-overlay"
 
 /** Inline styles for <mark> elements — avoids prose class specificity overriding Tailwind utilities. */
@@ -596,7 +597,10 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
         )}
 
         {!isUser && message.sourcesUsed && message.sourcesUsed.length > 0 && message.content !== "" && (
-          <SourceAttribution sources={message.sourcesUsed} />
+          <>
+            <KBContextIndicator sources={message.sourcesUsed} />
+            <SourceAttribution sources={message.sourcesUsed} />
+          </>
         )}
 
         <div className="flex items-center gap-1.5">
