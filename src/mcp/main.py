@@ -250,7 +250,8 @@ app = FastAPI(
 
 # Middleware stack (LIFO in Starlette — last added runs first)
 # 1. CORS (added first, runs last — wraps response headers)
-_cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "*").split(",") if o.strip()]
+_DEFAULT_CORS = "http://localhost:3000,http://localhost:5173,http://localhost:8888"
+_cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", _DEFAULT_CORS).split(",") if o.strip()]
 _wildcard = _cors_origins == ["*"]
 app.add_middleware(
     CORSMiddleware,
