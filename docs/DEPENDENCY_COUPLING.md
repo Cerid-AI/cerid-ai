@@ -73,3 +73,47 @@ pip-compile requirements-dev.txt -o requirements-dev.lock --generate-hashes --no
 ```
 
 The pre-commit hook and CI `lock-sync` job enforce that lock files stay in sync.
+
+## Cross-Project: cerid-trading-agent
+
+The [cerid-trading-agent](https://github.com/sunrunnerfire/cerid-trading-agent) depends on cerid-ai's MCP API for knowledge base enrichment. Changes to cerid-ai must not break this integration.
+
+### Coupled Interfaces
+
+| Interface | cerid-ai Side | cerid-trading-agent Side | Notes |
+|-----------|---------------|--------------------------|-------|
+| MCP API endpoint | `POST /tools/pkb_query` (`src/mcp/routers/tools.py`) | `CeridClient._query()` (`src/utils/cerid_client.py`) | JSON body: `{"name": "pkb_query", "arguments": {"query": "..."}}` |
+| Health check | `GET /health` (`src/mcp/routers/health.py`) | `CeridClient.health_check()` | Returns `{"status": "ok", ...}` |
+| Default URL | Listens on `127.0.0.1:8888` | Connects to `http://localhost:8888` | Compatible — both resolve to loopback |
+| Docker network | `llm-network` bridge | Joins same `llm-network`, uses container name `cerid-mcp` | Bypasses host port binding entirely |
+| Encryption key | `~/.config/cerid/age-key.txt` | Same key path (shared `.env.age` pattern) | Same `age` key decrypts both projects' secrets |
+
+### Safe to Change (No Impact)
+
+- **CORS origins** — `CeridClient` uses httpx (not a browser), so CORS headers are irrelevant
+- **Port binding address** (`CERID_BIND_ADDR`) — Docker containers communicate via `llm-network` container names, not host ports
+- **Sync encryption** — Trading agent does not use Dropbox sync
+- **Email anonymization** — Trading agent does not ingest email
+- **JWT/multi-user auth** — Trading agent does not send auth headers (would need `X-API-Key` if `CERID_API_KEY` is set)
+- **Redis, Neo4j, ChromaDB internals** — Trading agent only touches the HTTP API layer
+
+### Breaking Changes (Require Coordination)
+
+| Change | Impact | Mitigation |
+|--------|--------|------------|
+| Rename `/tools/pkb_query` endpoint | `CeridClient._query()` 404s | Update `cerid_client.py` endpoint path |
+| Change `/tools` request schema | Query silently fails or errors | Update `CeridClient._query()` payload |
+| Change `/health` response shape | Health check may false-fail | Trading agent checks `status == "ok"` — keep that key |
+| Enable `CERID_API_KEY` | All unauthenticated requests rejected (401) | Set same key in trading agent's `.env` as `CERID_API_KEY` and add `X-API-Key` header to `CeridClient` |
+| Remove `llm-network` Docker network | Container-name routing breaks | Trading agent falls back to `localhost:8888` but only if port is exposed |
+| Change MCP container name from `cerid-mcp` | Docker DNS resolution fails | Update trading agent's `docker-compose.yml` `cerid_mcp_url` |
+
+### Graceful Degradation
+
+The trading agent handles cerid-ai unavailability via `AsyncCircuitBreaker` (5 failures → 60s open → half-open probe). When the circuit is open, the agent skips KB enrichment and operates on its own context alone. No crash, no retry storm.
+
+### Future Considerations
+
+- **Separate machine deployment**: If cerid-ai runs on a different host, the trading agent needs `CERID_MCP_URL` pointed to the LAN IP and cerid-ai needs `CERID_BIND_ADDR=0.0.0.0`
+- **API key auth**: When `CERID_API_KEY` is enabled on cerid-ai, add the key to trading agent's `.env` and wire it into `CeridClient` headers
+- **Rate limiting**: Trading agent's query frequency is low (once per cycle), well within the 20 req/min `/agent/` limit
