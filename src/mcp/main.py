@@ -48,6 +48,83 @@ logging.basicConfig(
 logger = logging.getLogger("ai-companion")
 
 
+def _hydrate_settings_from_sync() -> None:
+    """Apply user settings from the sync directory to runtime config.
+
+    Reads ``user/settings.json`` from :pydata:`config.SYNC_DIR` and applies
+    boolean toggles, categorical values, and numeric parameters so that a
+    second machine picks up the same configuration automatically.
+    """
+    import config
+
+    try:
+        sync_dir = config.SYNC_DIR
+        if not sync_dir:
+            return
+
+        from sync.user_state import read_settings
+        settings = read_settings(sync_dir)
+        if not settings:
+            return
+
+        from utils.features import set_toggle
+
+        hydrated = 0
+
+        # ── Boolean toggles ─────────────────────────────────────────────
+        _toggle_keys = (
+            "enable_feedback_loop",
+            "enable_hallucination_check",
+            "enable_memory_extraction",
+            "enable_auto_inject",
+            "enable_model_router",
+            "enable_self_rag",
+            "enable_contextual_chunks",
+            "enable_adaptive_retrieval",
+            "enable_query_decomposition",
+            "enable_mmr_diversity",
+            "enable_intelligent_assembly",
+            "enable_late_interaction",
+            "enable_semantic_cache",
+        )
+        for key in _toggle_keys:
+            if key in settings and isinstance(settings[key], bool):
+                set_toggle(key, settings[key])
+                hydrated += 1
+
+        # ── Categorical values ───────────────────────────────────────────
+        _categorical = {
+            "categorize_mode": ("manual", "smart", "pro"),
+            "cost_sensitivity": ("low", "medium", "high"),
+            "storage_mode": ("extract_only", "archive"),
+        }
+        for key, allowed in _categorical.items():
+            if key in settings and settings[key] in allowed:
+                setattr(config, key.upper(), settings[key])
+                hydrated += 1
+
+        # ── Numeric values with range validation ─────────────────────────
+        _numeric = {
+            "hallucination_threshold": (0.0, 1.0),
+            "auto_inject_threshold": (0.5, 1.0),
+            "hybrid_vector_weight": (0.0, 1.0),
+            "hybrid_keyword_weight": (0.0, 1.0),
+            "rerank_llm_weight": (0.0, 1.0),
+            "rerank_original_weight": (0.0, 1.0),
+        }
+        for key, (lo, hi) in _numeric.items():
+            if key in settings:
+                val = settings[key]
+                if isinstance(val, (int, float)) and lo <= val <= hi:
+                    setattr(config, key.upper(), float(val))
+                    hydrated += 1
+
+        if hydrated:
+            logger.info("Hydrated %d settings from sync directory", hydrated)
+    except Exception as e:
+        logger.warning("Failed to hydrate settings from sync directory: %s", e)
+
+
 def _signal_handler(signum: int, frame) -> None:
     """Log signal receipt with stack trace for debugging container restarts."""
     sig_name = signal.Signals(signum).name
@@ -101,6 +178,9 @@ async def lifespan(app: FastAPI):
         auto_import_if_empty()
     except Exception as e:
         logger.warning(f"Sync auto-import check failed: {e}")
+
+    # Hydrate user settings from sync directory (before logging toggle states)
+    _hydrate_settings_from_sync()
 
     # Log feature toggle states
     from config.features import log_feature_toggles
