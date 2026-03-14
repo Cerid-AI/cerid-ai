@@ -57,6 +57,7 @@ import type {
   SynopsisEstimate,
   TagSuggestion,
   ChatModelInfo,
+  Conversation,
 } from "./types"
 
 export async function fetchHealth(): Promise<HealthResponse> {
@@ -988,4 +989,54 @@ export async function adminDeleteArtifact(artifactId: string): Promise<{ deleted
   })
   if (!res.ok) throw new Error(await extractError(res, "Failed to delete artifact"))
   return res.json()
+}
+
+// ── User State Sync ─────────────────────────────────────────────────────────
+
+export async function fetchUserState(): Promise<{
+  settings: Record<string, unknown>
+  preferences: Record<string, unknown>
+  conversation_ids: string[]
+}> {
+  const res = await fetch(`${MCP_BASE}/user-state`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to fetch user state"))
+  return res.json()
+}
+
+export async function fetchSyncedConversations(): Promise<Conversation[]> {
+  const res = await fetch(`${MCP_BASE}/user-state/conversations`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to fetch conversations"))
+  const data = await res.json()
+  return data.conversations ?? []
+}
+
+export async function syncConversation(conversation: Conversation): Promise<void> {
+  await fetch(`${MCP_BASE}/user-state/conversations`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(conversation),
+  })
+}
+
+export async function syncConversationsBulk(conversations: Conversation[]): Promise<void> {
+  await fetch(`${MCP_BASE}/user-state/conversations/bulk`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(conversations),
+  })
+}
+
+export async function deleteConversationSync(convId: string): Promise<void> {
+  await fetch(`${MCP_BASE}/user-state/conversations/${convId}`, {
+    method: "DELETE",
+    headers: mcpHeaders(),
+  })
+}
+
+export async function syncPreferences(prefs: Record<string, unknown>): Promise<void> {
+  await fetch(`${MCP_BASE}/user-state/preferences`, {
+    method: "PATCH",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(prefs),
+  })
 }
