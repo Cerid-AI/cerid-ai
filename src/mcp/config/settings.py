@@ -349,6 +349,11 @@ SYNC_CONFLICT_STRATEGY = os.getenv("CERID_CONFLICT_STRATEGY", "remote_wins")
 TOMBSTONE_TTL_DAYS = int(os.getenv("TOMBSTONE_TTL_DAYS", "90"))
 TOMBSTONE_LOG_PATH = os.path.join(os.getenv("DATA_DIR", "data"), "tombstones.jsonl")
 
+# Auto-enable sync encryption when encryption key is available
+ENCRYPT_SYNC: bool = os.getenv("CERID_ENCRYPT_SYNC", "").lower() in ("true", "1", "yes") or bool(
+    os.getenv("CERID_ENCRYPTION_KEY", "")
+)
+
 # ---------------------------------------------------------------------------
 # Startup validation — normalize and warn on unrecognized values
 # ---------------------------------------------------------------------------
