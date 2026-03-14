@@ -12,7 +12,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from routers.user_state import router, _sync_dir  # noqa: F401
+from routers.user_state import _sync_dir, router  # noqa: F401
 
 
 @pytest.fixture()
