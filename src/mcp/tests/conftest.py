@@ -19,8 +19,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # ---------------------------------------------------------------------------
 
 def _ensure_stub(name, stub_module):
-    """Register a stub module only if the real one isn't already available."""
-    if name not in sys.modules:
+    """Register a stub module only if the real one isn't importable."""
+    try:
+        __import__(name)
+    except ImportError:
         sys.modules[name] = stub_module
 
 

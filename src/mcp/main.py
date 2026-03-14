@@ -37,6 +37,7 @@ from routers import (
     sync,
     taxonomy,
     upload,
+    user_state,
 )
 from scheduler import start_scheduler, stop_scheduler
 
@@ -206,6 +207,7 @@ _api_routers = [
     memories.router,
     sync.router,
     kb_admin.router,
+    user_state.router,
 ]
 for r in _api_routers:
     app.include_router(r)
