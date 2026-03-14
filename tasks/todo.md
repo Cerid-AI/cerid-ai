@@ -284,9 +284,9 @@
 
 #### 16A: Security & Infrastructure Hardening (Critical) ✅
 - [x] Pin Bifrost Docker image (SHA256 digest)
-- [x] Pin LibreChat + RAG API Docker images (SHA256 digests)
-- [x] Externalize PostgreSQL credentials to .env (with dev defaults)
-- [x] Add Meilisearch master key env var support
+- [x] ~~Pin LibreChat + RAG API Docker images~~ *(deprecated in Phase 27)*
+- [x] ~~Externalize PostgreSQL credentials~~ *(deprecated in Phase 27)*
+- [x] ~~Add Meilisearch master key env var~~ *(deprecated in Phase 27)*
 - [x] Add OPENROUTER_API_KEY startup validation warning
 - [x] Add credential vars to .env.example
 - [x] Add secret detection to CI (detect-secrets in security job)

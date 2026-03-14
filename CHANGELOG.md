@@ -39,7 +39,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 - **Phase 23:** Production Hardening — infrastructure security, CI/CD improvements, concurrency fixes, operational improvements, test coverage
 - Redis authentication (`--requirepass` + `REDIS_PASSWORD` env var with backward-compatible default)
-- MongoDB authentication (`MONGO_INITDB_ROOT_*` env vars, auth-enabled connection strings)
 - ChromaDB `ALLOW_RESET=false` (prevents accidental/malicious DB wipe)
 - Caddy security headers (HSTS, X-Content-Type-Options, X-Frame-Options, CSP, Referrer-Policy)
 - Port binding restrictions — Neo4j, Redis, ChromaDB bound to `127.0.0.1` (not `0.0.0.0`)
@@ -98,7 +97,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [0.6.0] - 2026-03-02
 
 ### Added
-- **Phase 16A:** Security hardening — Bifrost/LibreChat/RAG API Docker image SHA pinning, PostgreSQL/Meilisearch credential externalization, secret detection in CI, runtime MCP_URL config for web container
+- **Phase 16A:** Security hardening — Bifrost Docker image SHA pinning, secret detection in CI, runtime MCP_URL config for web container *(LibreChat/RAG API/PostgreSQL/Meilisearch were also hardened but later deprecated in Phase 27)*
 - **Phase 16B:** Dead code cleanup — removed 6 unused frontend API functions, orphaned tests, unused imports
 - **Phase 16C:** Backend code quality — extracted `_format_chroma_result()` helper, `defaultdict(Counter)`, `scan_iter()`, try/except on Neo4j delete, `get_chroma()` factory usage
 - **Phase 16D:** Frontend code quality — extracted `tokenCost()`, `getAccuracyTier()`, `parseTags()` shared utilities, `useMemo` optimization, unstable React key fix

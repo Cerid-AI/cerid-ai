@@ -27,13 +27,10 @@ stacks/bifrost/data/*
 !stacks/bifrost/data/config.json
 uploads/
 logs/
-meili_data*
-pgdata*
 /neo4j/
 /chroma/
 /redis/
 stacks/infrastructure/data/
-stacks/librechat/
 artifacts/
 
 # Node

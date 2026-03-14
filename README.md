@@ -750,7 +750,7 @@ Auto-import on startup: when MCP starts with an empty Neo4j database and a valid
 - [x] CHANGELOG.md, ENV_CONVENTIONS.md, mypy type checking, frontend tests (271), Self-RAG validation loop
 
 ### Phase 23: Production Hardening ✅
-- [x] Redis/MongoDB/ChromaDB auth, port binding, resource limits, CI timeouts, concurrency fixes
+- [x] Redis/ChromaDB auth, port binding, resource limits, CI timeouts, concurrency fixes
 
 ### Phase 24: RAG Evolution — Expanded Verification ✅
 - [x] Four new claim type detectors (evasion, citation, recency, ignorance), verdict inversion, context-aware streaming
