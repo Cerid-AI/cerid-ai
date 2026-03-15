@@ -82,7 +82,9 @@ The [cerid-trading-agent](https://github.com/sunrunnerfire/cerid-trading-agent) 
 
 | Interface | cerid-ai Side | cerid-trading-agent Side | Notes |
 |-----------|---------------|--------------------------|-------|
-| MCP API endpoint | `POST /tools/pkb_query` (`src/mcp/routers/tools.py`) | `CeridClient._query()` (`src/utils/cerid_client.py`) | JSON body: `{"name": "pkb_query", "arguments": {"query": "..."}}` |
+| KB query | `POST /agent/query` (`src/mcp/routers/agents.py`) | `CeridClient.agent_query()` | Body: `{"query": "...", "top_k": 5, "domains": [...]}` |
+| Hallucination check | `POST /agent/hallucination` (`src/mcp/routers/agents.py`) | `CeridClient.hallucination_check()` | Body: `{"response_text": "...", "conversation_id": "..."}` |
+| Memory extraction | `POST /agent/memory/extract` (`src/mcp/routers/agents.py`) | `CeridClient.memory_extract()` | Body: `{"response_text": "...", "conversation_id": "..."}` |
 | Health check | `GET /health` (`src/mcp/routers/health.py`) | `CeridClient.health_check()` | Returns `{"status": "ok", ...}` |
 | Default URL | Listens on `127.0.0.1:8888` | Connects to `http://localhost:8888` | Compatible — both resolve to loopback |
 | Docker network | `llm-network` bridge | Joins same `llm-network`, uses container name `cerid-mcp` | Bypasses host port binding entirely |
@@ -101,8 +103,10 @@ The [cerid-trading-agent](https://github.com/sunrunnerfire/cerid-trading-agent) 
 
 | Change | Impact | Mitigation |
 |--------|--------|------------|
-| Rename `/tools/pkb_query` endpoint | `CeridClient._query()` 404s | Update `cerid_client.py` endpoint path |
-| Change `/tools` request schema | Query silently fails or errors | Update `CeridClient._query()` payload |
+| Rename `/agent/query` endpoint | `CeridClient.agent_query()` 404s | Update `cerid_client.py` endpoint path |
+| Change `/agent/query` request schema | Query silently fails or 422s | Update `CeridClient.agent_query()` payload |
+| Change `/agent/hallucination` request schema | Hallucination check 422s | Update `CeridClient.hallucination_check()` payload (fields: `response_text`, `conversation_id`) |
+| Change `/agent/memory/extract` request schema | Memory extraction 422s | Update `CeridClient.memory_extract()` payload (fields: `response_text`, `conversation_id`) |
 | Change `/health` response shape | Health check may false-fail | Trading agent checks `status == "ok"` — keep that key |
 | Enable `CERID_API_KEY` | All unauthenticated requests rejected (401) | Set same key in trading agent's `.env` as `CERID_API_KEY` and add `X-API-Key` header to `CeridClient` |
 | Remove `llm-network` Docker network | Container-name routing breaks | Trading agent falls back to `localhost:8888` but only if port is exposed |
