@@ -82,13 +82,18 @@ The [cerid-trading-agent](https://github.com/sunrunnerfire/cerid-trading-agent) 
 
 | Interface | cerid-ai Side | cerid-trading-agent Side | Notes |
 |-----------|---------------|--------------------------|-------|
-| KB query | `POST /agent/query` (`src/mcp/routers/agents.py`) | `CeridClient.agent_query()` | Body: `{"query": "...", "top_k": 5, "domains": [...]}` |
-| Hallucination check | `POST /agent/hallucination` (`src/mcp/routers/agents.py`) | `CeridClient.hallucination_check()` | Body: `{"response_text": "...", "conversation_id": "..."}` |
-| Memory extraction | `POST /agent/memory/extract` (`src/mcp/routers/agents.py`) | `CeridClient.memory_extract()` | Body: `{"response_text": "...", "conversation_id": "..."}` |
-| Health check | `GET /health` (`src/mcp/routers/health.py`) | `CeridClient.health_check()` | Returns `{"status": "ok", ...}` |
+| KB query | `POST /sdk/v1/query` (`src/mcp/routers/sdk.py`) | `CeridClient.agent_query()` | Body: `{"query": "...", "top_k": 5, "domains": [...]}` |
+| Hallucination check | `POST /sdk/v1/hallucination` (`src/mcp/routers/sdk.py`) | `CeridClient.hallucination_check()` | Body: `{"response_text": "...", "conversation_id": "..."}` |
+| Memory extraction | `POST /sdk/v1/memory/extract` (`src/mcp/routers/sdk.py`) | `CeridClient.memory_extract()` | Body: `{"response_text": "...", "conversation_id": "..."}` |
+| Health check | `GET /sdk/v1/health` (`src/mcp/routers/sdk.py`) | `CeridClient.health_check()` | Returns `{"status": "ok", "version": "...", "features": {...}}` |
+| Client ID | `X-Client-ID` header (middleware) | `X-Client-ID: trading-agent` (httpx default header) | Per-client rate limiting; default `"gui"` if absent |
 | Default URL | Listens on `127.0.0.1:8888` | Connects to `http://localhost:8888` | Compatible — both resolve to loopback |
 | Docker network | `llm-network` bridge | Joins same `llm-network`, uses container name `cerid-mcp` | Bypasses host port binding entirely |
 | Encryption key | `~/.config/cerid/age-key.txt` | Same key path (shared `.env.age` pattern) | Same `age` key decrypts both projects' secrets |
+
+**SDK Router:** The `/sdk/v1/` prefix is a stable contract for external consumers. The `/agent/` paths remain available for backward compatibility but may change during internal refactoring. New consumers should prefer `/sdk/v1/`.
+
+**Per-client rate limiting:** Each `X-Client-ID` gets an independent rate budget configured in `config/settings.py:CLIENT_RATE_LIMITS`. GUI gets 20 req/min on `/agent/`, trading-agent gets 30 req/min. Unrecognized clients default to 10 req/min.
 
 ### Safe to Change (No Impact)
 
@@ -120,4 +125,5 @@ The trading agent handles cerid-ai unavailability via `AsyncCircuitBreaker` (5 f
 
 - **Separate machine deployment**: If cerid-ai runs on a different host, the trading agent needs `CERID_MCP_URL` pointed to the LAN IP and cerid-ai needs `CERID_BIND_ADDR=0.0.0.0`
 - **API key auth**: When `CERID_API_KEY` is enabled on cerid-ai, add the key to trading agent's `.env` and wire it into `CeridClient` headers
-- **Rate limiting**: Trading agent's query frequency is low (once per cycle), well within the 20 req/min `/agent/` limit
+- **Rate limiting**: Trading agent has a dedicated 30 req/min budget via `X-Client-ID: trading-agent`. Adjust in `config/settings.py:CLIENT_RATE_LIMITS`
+- **New cerid-series consumers**: Send `X-Client-ID: <project-name>` header and add an entry to `CLIENT_RATE_LIMITS`. Use `/sdk/v1/` endpoints for stability

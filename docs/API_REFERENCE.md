@@ -8,7 +8,7 @@
 ## MCP Server API (src/mcp/main.py)
 
 **Core endpoints:**
-- `GET /health` — DB connectivity check
+- `GET /health` — DB connectivity check (returns `version`, `services` status)
 - `GET /collections` — List ChromaDB collections
 - `POST /query` — Query knowledge base (domain, top_k)
 - `POST /ingest` — Ingest text content
@@ -88,6 +88,25 @@
 - `pkb_check_hallucinations` — Verify LLM claims against KB (Phase 7A)
 - `pkb_memory_extract` — Extract memories from conversations (Phase 7C)
 - `pkb_memory_archive` — Archive old conversation memories (Phase 7C)
+
+### SDK Router (`/sdk/v1/`) — Stable External API
+
+Versioned facade for cerid-series consumers (trading-agent, future projects). Delegates to existing agent endpoints but provides a stable contract that survives internal refactoring.
+
+- `POST /sdk/v1/query` — KB query with reranking (delegates to `/agent/query`)
+- `POST /sdk/v1/hallucination` — Hallucination detection (delegates to `/agent/hallucination`)
+- `POST /sdk/v1/memory/extract` — Memory extraction (delegates to `/agent/memory/extract`)
+- `GET /sdk/v1/health` — Health check with `version`, `services`, and `features` (subset of feature toggles relevant to consumers)
+
+**Client identification:** Send `X-Client-ID` header to get per-client rate limiting. Each client ID gets an independent rate budget:
+
+| Client ID | `/agent/` & `/sdk/` | `/ingest` | `/recategorize` |
+|-----------|---------------------|-----------|-----------------|
+| `gui` (default) | 20 req/min | 10 req/min | 10 req/min |
+| `trading-agent` | 30 req/min | — | — |
+| `_default` (unknown) | 10 req/min | 5 req/min | 5 req/min |
+
+Configured in `config/settings.py:CLIENT_RATE_LIMITS`. Add new consumers by extending this dict.
 
 ---
 

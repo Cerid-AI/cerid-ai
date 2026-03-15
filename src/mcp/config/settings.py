@@ -366,6 +366,31 @@ if CATEGORIZE_MODE not in ("manual", "smart", "pro"):
     )
     CATEGORIZE_MODE = "smart"
 
+# ---------------------------------------------------------------------------
+# Per-client rate limits (keyed by X-Client-ID header value)
+# ---------------------------------------------------------------------------
+# Each entry maps path prefixes to (max_requests, window_seconds).
+# "gui" is the default for the cerid-ai React GUI (no header sent).
+# "_default" is the fallback for unrecognized client IDs.
+CLIENT_RATE_LIMITS: dict[str, dict[str, tuple[int, int]]] = {
+    "gui": {
+        "/agent/": (20, 60),
+        "/sdk/": (20, 60),
+        "/ingest": (10, 60),
+        "/recategorize": (10, 60),
+    },
+    "trading-agent": {
+        "/agent/": (30, 60),
+        "/sdk/": (30, 60),
+    },
+    "_default": {
+        "/agent/": (10, 60),
+        "/sdk/": (10, 60),
+        "/ingest": (5, 60),
+        "/recategorize": (5, 60),
+    },
+}
+
 if not NEO4J_PASSWORD:
     _config_logger.warning(
         "NEO4J_PASSWORD is empty — Neo4j queries will fail with auth errors. "

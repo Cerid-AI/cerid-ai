@@ -120,6 +120,7 @@ def get_redis() -> redis.Redis:
                 _redis = redis.from_url(
                     config.REDIS_URL, decode_responses=True,
                     socket_connect_timeout=5, socket_timeout=10,
+                    max_connections=20,
                 )
                 _retry(_redis.ping, "Redis")
                 logger.info("Redis connected")
@@ -136,7 +137,10 @@ def get_neo4j():
                         "NEO4J_PASSWORD is empty — check .env file and docker-compose env_file"
                     )
                 driver = GraphDatabase.driver(
-                    config.NEO4J_URI, auth=(config.NEO4J_USER, config.NEO4J_PASSWORD)
+                    config.NEO4J_URI,
+                    auth=(config.NEO4J_USER, config.NEO4J_PASSWORD),
+                    max_connection_pool_size=25,
+                    connection_acquisition_timeout=30,
                 )
                 # verify_connectivity only checks transport, not auth.
                 # Run a simple query to validate credentials.

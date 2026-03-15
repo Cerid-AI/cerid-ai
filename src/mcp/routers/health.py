@@ -38,6 +38,7 @@ def health_check() -> dict:
         status["neo4j"] = f"error: {exc}"
     return {
         "status": "healthy" if all(v == "connected" for v in status.values()) else "degraded",
+        "version": "1.0.0",
         "services": status,
     }
 

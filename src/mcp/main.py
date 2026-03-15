@@ -33,6 +33,7 @@ from routers import (
     mcp_sse,
     memories,
     query,
+    sdk,
     settings,
     sync,
     taxonomy,
@@ -293,6 +294,9 @@ _api_routers = [
 for r in _api_routers:
     app.include_router(r)
     app.include_router(r, prefix="/api/v1")
+
+# SDK router — stable external contract (manages its own /sdk/v1/ prefix)
+app.include_router(sdk.router)
 
 # MCP transport stays at root only (not versioned)
 app.include_router(mcp_sse.router)

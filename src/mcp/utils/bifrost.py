@@ -36,7 +36,7 @@ def get_bifrost_client() -> httpx.AsyncClient:
     global _client
     if _client is None or _client.is_closed:
         _client = httpx.AsyncClient(
-            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+            limits=httpx.Limits(max_connections=30, max_keepalive_connections=15),
             timeout=config.BIFROST_TIMEOUT,
         )
     return _client

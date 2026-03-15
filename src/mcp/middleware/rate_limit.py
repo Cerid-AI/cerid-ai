@@ -2,13 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-In-memory sliding window rate limiter.
+In-memory sliding window rate limiter with per-client isolation.
 
-Rate limits:
-  /agent/       → 20 requests per 60 seconds
-  /ingest       → 10 requests per 60 seconds
-  /recategorize → 10 requests per 60 seconds
+Each ``X-Client-ID`` value gets its own independent rate bucket so that
+one consumer (e.g. the GUI) cannot starve another (e.g. trading-agent).
 
+Limits are configured in ``config.settings.CLIENT_RATE_LIMITS``.
 Supports X-Forwarded-For behind trusted proxies (TRUSTED_PROXIES env var).
 Adds IETF RateLimit-* response headers on rate-limited paths.
 """
@@ -78,14 +77,18 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
     async def dispatch(self, request: Request, call_next):
-        path = request.url.path
-        # Use user_id (if authenticated) for rate limiting; fall back to IP
-        user_id = getattr(request.state, "user_id", None) if hasattr(request, "state") else None
-        client_key = f"user:{user_id}" if user_id else get_client_ip(request)
+        from config.settings import CLIENT_RATE_LIMITS
 
-        for prefix, (max_req, window) in RATE_LIMITS.items():
+        path = request.url.path
+        # Per-client isolation via X-Client-ID (set by RequestIDMiddleware)
+        client_id = getattr(request.state, "client_id", "gui") if hasattr(request, "state") else "gui"
+        client_limits = CLIENT_RATE_LIMITS.get(
+            client_id, CLIENT_RATE_LIMITS.get("_default", {}),
+        )
+
+        for prefix, (max_req, window) in client_limits.items():
             if path.startswith(prefix):
-                key = f"{client_key}:{prefix}"
+                key = f"client:{client_id}:{prefix}"
                 async with self._locks[key]:
                     now = time.time()
                     self._hits[key] = [t for t in self._hits[key] if now - t < window]
