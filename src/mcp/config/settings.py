@@ -118,7 +118,7 @@ GRAPH_RELATIONSHIP_TYPES = [
 # HuggingFace repo ID.  "all-MiniLM-L6-v2" uses ChromaDB's built-in server-side
 # embedding (backward compatible, no migration needed).  Any other model triggers
 # client-side ONNX embedding via utils/embeddings.py.
-# Recommended upgrade: "Snowflake/snowflake-arctic-embed-m-v1.5" (768d, 8192 ctx)
+# Default: Snowflake Arctic Embed M v1.5 (768d, 8192 ctx, client-side ONNX)
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "Snowflake/snowflake-arctic-embed-m-v1.5")
 # Target dimensions (0 = use model's native output).  Matryoshka-capable models
 # support truncation (e.g. 768→256 for speed).
