@@ -14,7 +14,9 @@ services:
       - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD}
       - NEO4J_PLUGINS=["apoc"]
       - NEO4J_server_memory_heap_max__size=1G
-      - NEO4J_server_memory_pagecache_size=512M
+      # Mac Pro has 160 GB RAM — pagecache of 2G keeps the full graph in
+      # memory and eliminates disk reads from the ~600ms graph traversal.
+      - NEO4J_server_memory_pagecache_size=2G
     networks:
       - llm-network
     restart: unless-stopped
@@ -22,7 +24,7 @@ services:
       resources:
         limits:
           cpus: '4.0'
-          memory: 2G
+          memory: 4G  # 1G heap + 2G pagecache + JVM overhead
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:7474 || exit 1"]
       interval: 30s

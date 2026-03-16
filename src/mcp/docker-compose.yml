@@ -21,6 +21,8 @@ services:
       - BIFROST_URL=http://bifrost:8080/v1
       - ARCHIVE_PATH=/archive
       - CERID_SYNC_DIR=/sync
+      # Performance tuning
+      - ENABLE_SEMANTIC_CACHE=true
       # NEO4J_PASSWORD, CATEGORIZE_MODE, CERID_API_KEY, CORS_ORIGINS
       # are loaded from env_file above — do NOT override here, as
       # ${VAR} interpolation fails when running without --env-file.
