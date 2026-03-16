@@ -45,6 +45,16 @@ jobs:
       - run: pip install pytest pytest-asyncio httpx pytest-cov
       - name: Run tests with coverage
         run: cd src/mcp && python -m pytest tests/ -v --tb=short --cov=. --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=70
+      - name: Upload coverage to Codecov
+        if: success()
+        uses: codecov/codecov-action@v5
+        with:
+          files: src/mcp/coverage.xml
+          fail_ci_if_error: false
+      - name: License audit (Python)
+        run: |
+          pip install pip-licenses
+          pip-licenses --fail-on="GPL-2.0-only;GPL-3.0-only" --format=table
 
   security:
     runs-on: ubuntu-latest
@@ -104,6 +114,10 @@ jobs:
             --ignore-vuln CVE-2025-64439 \
             --ignore-vuln CVE-2026-27794 \
             --ignore-vuln CVE-2026-28277
+      - name: ReDoS regex audit (dlint)
+        run: |
+          pip install dlint flake8
+          python -m flake8 --select=DUO138 src/mcp/
 
   lock-sync:
     runs-on: ubuntu-latest
@@ -158,6 +172,8 @@ jobs:
           if [ "$fail" -eq 1 ]; then exit 1; fi
       - name: NPM dependency audit
         run: npm audit --audit-level=high
+      - name: License audit (Node)
+        run: npx license-checker --failOn "GPL-2.0;GPL-3.0" --production
 
   # Docker
   docker:
