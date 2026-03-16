@@ -2,7 +2,7 @@
 
 > **Created:** 2026-02-25
 > **Last updated:** 2026-03-14
-> **Status:** Phase 39B complete. 88 resolved, 7 open. 1340 Python tests, 453 frontend tests.
+> **Status:** Phase 40 complete. 94 resolved, 1 open. 1340 Python tests, 453 frontend tests.
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21 roadmap)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](COMPLETED_PHASES.md)
 > **Purpose:** Track known bugs, feature gaps, structural issues, and architecture evaluations for upcoming phases.
@@ -824,11 +824,13 @@ Verification results only appear in the status bar and hallucination panel sideb
 ### J1. Verification Stream OOM — Memory Optimization Needed
 
 **Severity:** Medium
-**Status:** 🔓 Open (Phase 35, 2026-03-10)
+**Status:** ✅ Resolved (Phase 40, 2026-03-16)
 
 **Problem:** Verification of LLM responses with 10+ factual claims causes the MCP container to OOM-kill under the 2 GB memory limit. Each claim verification loads a BM25 index (bm25s library), runs ONNX cross-encoder reranking (ms-marco-MiniLM-L-6-v2), and issues ChromaDB vector queries — all memory-intensive. When 10+ claims run in parallel via `asyncio.gather()`, peak memory exceeds 2 GB and the Linux OOM killer sends SIGKILL (uncatchable, exit code 137).
 
 **Mitigated (not fully fixed):** Added `VERIFY_CLAIM_MAX_CONCURRENT=3` semaphore to bound parallelism. This keeps peak memory at ~1.84 GB under a 2 GB limit — functional but leaves only ~160 MB headroom. A response with 15+ claims or concurrent users could still OOM.
+
+**Resolution:** Raised container memory 3G→4G. Added cgroup-aware memory guard (`_wait_for_memory`) that pauses verification when available container memory drops below 512MB. Uses cgroup v2 files — no-op on host.
 
 **Root cause details:**
 - `docker inspect` shows `OOMKilled=false` and `ExitCode=0` after container auto-restart — misleading. Only `docker events` reveals the truth (`container oom` + `exitCode=137`).
@@ -855,20 +857,20 @@ Verification results only appear in the status bar and hallucination panel sideb
 ### K1. Codecov XML Reports
 
 **Severity:** Low | **Effort:** ~1 hr
-**Status:** 🔲 Open
-**Notes:** CI already produces XML coverage output. Needs Codecov integration for PR coverage gates.
+**Status:** ✅ Resolved (Phase 40, 2026-03-16)
+**Notes:** CI already produces XML coverage output. Needs Codecov integration for PR coverage gates. **Resolution:** Added `codecov/codecov-action@v5` to CI test job.
 
 ### K2. Dependency License Scanning
 
 **Severity:** Low | **Effort:** ~1–2 hrs
-**Status:** 🔲 Open
-**Notes:** Add `pip-licenses` (Python) and `license-report` (Node) to CI. Catch GPL-incompatible deps.
+**Status:** ✅ Resolved (Phase 40, 2026-03-16)
+**Notes:** Add `pip-licenses` (Python) and `license-report` (Node) to CI. Catch GPL-incompatible deps. **Resolution:** Added `pip-licenses` + `license-checker` to CI.
 
 ### K3. ReDoS Regex Audit
 
 **Severity:** Low | **Effort:** ~2–3 hrs
-**Status:** 🔲 Open
-**Notes:** Low risk given current regex patterns. Audit with `rxxr2` or `safe-regex` for completeness.
+**Status:** ✅ Resolved (Phase 40, 2026-03-16)
+**Notes:** Low risk given current regex patterns. Audit with `rxxr2` or `safe-regex` for completeness. **Resolution:** Added `dlint DUO138` ReDoS audit to CI security job.
 
 ### K4. Plugin Management UI
 
@@ -893,8 +895,8 @@ Verification results only appear in the status bar and hallucination panel sideb
 ### K7. Multi-Stage MCP Dockerfile
 
 **Severity:** Low | **Effort:** ~2–3 hrs
-**Status:** 🔲 Open
-**Notes:** Minor image size savings. Current single-stage image works but is larger than necessary.
+**Status:** ✅ Resolved (Phase 40, 2026-03-16)
+**Notes:** Minor image size savings. Current single-stage image works but is larger than necessary. **Resolution:** Converted to 3-stage Dockerfile (builder, models, runtime). ~200MB image reduction.
 
 ---
 
@@ -984,7 +986,7 @@ Verification results only appear in the status bar and hallucination panel sideb
 ### M1. Semantic Cache Silently Inactive
 
 **Severity:** Low (performance)
-**Status:** 🔓 Open (2026-03-16)
+**Status:** ✅ Resolved (Phase 40, 2026-03-16)
 
 **Problem:** `ENABLE_SEMANTIC_CACHE=true` is set in `src/mcp/docker-compose.yml` but the semantic cache never activates. The cache (`utils/semantic_cache.py`) requires a client-side embedding function to compute query embeddings for HNSW similarity matching. The default embedding model (`all-MiniLM-L6-v2`) runs server-side inside ChromaDB — `get_embedding_function()` in `deps.py` returns `None` when the server-side default is in use, so no query embedding is ever computed and the HNSW index is never populated or consulted.
 
@@ -1002,19 +1004,19 @@ Verification results only appear in the status bar and hallucination panel sideb
 
 **Files:** `src/mcp/deps.py`, `src/mcp/utils/semantic_cache.py`, `src/mcp/utils/embeddings.py`, `src/mcp/config/features.py`, `src/mcp/Dockerfile`
 
+**Resolution:** Switched to Snowflake Arctic Embed M v1.5 (client-side ONNX, 768d). Updated SEMANTIC_CACHE_DIM default to 768. Multi-stage Dockerfile bakes model at build time. Requires destructive KB re-ingest.
+
 ---
 
 ## Priority Order
 
-### Open Items (7)
+### Open Items (1)
 
-J1 (verification OOM optimization) — Medium severity, mitigated via concurrency semaphore
-K1–K4, K7 (deferred backlog) — Low severity, nice-to-have improvements
-M1 (semantic cache inactive) — Low severity, requires embedding model migration + KB re-ingest
+K4 (plugin management UI) — Low severity, no backend plugin API exists yet
 
-### Resolved (88 items)
+### Resolved (94 items)
 
-**Phase 39B** (0 resolved — M1 remains open)
+**Phase 40** (6 items): M1 (semantic cache), J1 (verification OOM), K1 (Codecov), K2 (license scanning), K3 (ReDoS audit), K7 (multi-stage Dockerfile)
 **Phase 39** (7 items): L1 (CORS wildcard), L2 (port binding), L3 (email PII), L4 (audit TTL), L5 (sync encryption), L6 (KB injection transparency), L7 (marketing claims)
 **Phase 38D+** (3 items): D4 (temporal claims uncertain), D5 (auto router real-time queries), D6 (Llama fallback retry)
 **Phase 38D** (3 items): D3 (model router auto mode), K5 (digest view), K6 (batch triage UI)

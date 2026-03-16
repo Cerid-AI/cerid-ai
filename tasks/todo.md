@@ -1,10 +1,38 @@
 # Cerid AI — Task Tracker
 
 > **Last updated:** 2026-03-16
-> **Current status:** Phase 39B complete. 1340 Python tests, 453 frontend tests.
-> **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md) — 7 open
+> **Current status:** Phase 40 complete. 1340 Python tests, 453 frontend tests.
+> **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md) — 1 open
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](../docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
+
+## Phase 40: Semantic Cache, Verification OOM, CI/Docker Hardening (2026-03-16) ✅
+
+### M1: Semantic Cache Activation
+- [x] Multi-stage Dockerfile with Arctic Embed M v1.5 ONNX pre-download
+- [x] Switch EMBEDDING_MODEL default to Snowflake/snowflake-arctic-embed-m-v1.5
+- [x] Update _HNSW_DIM default from 384 to 768
+- [x] Add EMBEDDING_MODEL + SEMANTIC_CACHE_DIM env vars to docker-compose.yml
+- [x] Add 3 dimension config tests
+
+### J1: Verification OOM Fix
+- [x] Raise MCP container memory limit 3G → 4G
+- [x] Add cgroup-aware memory guard (_wait_for_memory) with VERIFY_MEMORY_FLOOR_MB=512
+- [x] Add 5 memory guard tests
+
+### CI/Docker Hardening
+- [x] K7: Convert MCP Dockerfile to 3-stage build (~200MB image reduction)
+- [x] K1: Add Codecov upload to CI test job
+- [x] K2: Add pip-licenses (Python) + license-checker (Node) to CI
+- [x] K3: Add dlint DUO138 ReDoS regex audit to CI security job
+
+### Operational (Post-Deploy)
+- [ ] Run `./scripts/backup-kb.sh` before re-ingest
+- [ ] Clear all 6 domains via `/kb-admin/clear-domain/{domain}`
+- [ ] Re-ingest from `~/cerid-archive/` via file watcher
+- [ ] Verify semantic cache activates: `ENABLE_STEP_TIMER=true`, check for `semantic_cache: hit`
+
+---
 
 ## Phase 39B: MCP Performance & Rate Limiting Overhaul (2026-03-16) ✅
 
