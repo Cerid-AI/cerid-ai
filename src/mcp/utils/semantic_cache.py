@@ -39,7 +39,7 @@ _LABELS_KEY = _CACHE_PREFIX + "labels"  # Hash: label_id -> entry_id
 
 # HNSW tuning parameters (sized for ~500-entry cache)
 _HNSW_SPACE = "cosine"
-_HNSW_DIM = int(os.getenv("SEMANTIC_CACHE_DIM", "384"))  # MiniLM-L6 default
+_HNSW_DIM = int(os.getenv("SEMANTIC_CACHE_DIM", "768"))  # Arctic Embed M v1.5 default
 _HNSW_EF_CONSTRUCTION = 100
 _HNSW_M = 16
 _HNSW_EF = int(os.getenv("SEMANTIC_CACHE_HNSW_EF", "50"))

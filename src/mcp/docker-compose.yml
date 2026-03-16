@@ -24,6 +24,8 @@ services:
       # Performance tuning
       - ENABLE_SEMANTIC_CACHE=true
       - RERANK_ONNX_FILENAME=onnx/model_quint8_avx2.onnx
+      - EMBEDDING_MODEL=Snowflake/snowflake-arctic-embed-m-v1.5
+      - SEMANTIC_CACHE_DIM=768
       # NEO4J_PASSWORD, CATEGORIZE_MODE, CERID_API_KEY, CORS_ORIGINS
       # are loaded from env_file above — do NOT override here, as
       # ${VAR} interpolation fails when running without --env-file.
@@ -34,7 +36,7 @@ services:
       resources:
         limits:
           cpus: '4.0'
-          memory: 3G
+          memory: 4G
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8888/health"]
       interval: 30s

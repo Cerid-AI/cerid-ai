@@ -119,7 +119,7 @@ GRAPH_RELATIONSHIP_TYPES = [
 # embedding (backward compatible, no migration needed).  Any other model triggers
 # client-side ONNX embedding via utils/embeddings.py.
 # Recommended upgrade: "Snowflake/snowflake-arctic-embed-m-v1.5" (768d, 8192 ctx)
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "Snowflake/snowflake-arctic-embed-m-v1.5")
 # Target dimensions (0 = use model's native output).  Matryoshka-capable models
 # support truncation (e.g. 768→256 for speed).
 EMBEDDING_DIMENSIONS = int(os.getenv("EMBEDDING_DIMENSIONS", "0"))
