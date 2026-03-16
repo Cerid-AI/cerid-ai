@@ -24,9 +24,12 @@ Switch to client-side Snowflake Arctic Embed M v1.5 (768d, 8192 ctx, MTEB SOTA f
 | File | Change | Lines |
 |------|--------|-------|
 | `src/mcp/Dockerfile` | Add Arctic ONNX model + tokenizer pre-download | +3 |
-| `src/mcp/docker-compose.yml` | Set `EMBEDDING_MODEL` env var | +1 |
+| `src/mcp/docker-compose.yml` | Set `EMBEDDING_MODEL` + `SEMANTIC_CACHE_DIM` env vars | +2 |
 | `src/mcp/config/features.py` | Change `SEMANTIC_CACHE_DIM` default 384 → 768 | 1 |
 | `src/mcp/config/settings.py` | Change `EMBEDDING_MODEL` default to Arctic v1.5 | 1 |
+| `src/mcp/utils/semantic_cache.py` | Change `_HNSW_DIM` default from 384 → 768 | 1 |
+
+> **Note:** `semantic_cache.py` reads `SEMANTIC_CACHE_DIM` via its own `os.getenv()` call at module level, bypassing `features.py`. Both the module default AND `docker-compose.yml` env var must be updated to ensure consistency regardless of how the container is started.
 
 ### Dockerfile Addition
 
@@ -44,6 +47,7 @@ hf_hub_download('Snowflake/snowflake-arctic-embed-m-v1.5', 'tokenizer.json')"
 ```yaml
 environment:
   - EMBEDDING_MODEL=Snowflake/snowflake-arctic-embed-m-v1.5
+  - SEMANTIC_CACHE_DIM=768
 ```
 
 ### config/features.py Change
@@ -61,8 +65,8 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "Snowflake/snowflake-arctic-embed
 ### What Already Works (No Changes)
 
 - `utils/embeddings.py` — `OnnxEmbeddingFunction` loads ONNX, applies Arctic query prefix (`"Represent this sentence for searching relevant passages: "`), mean pooling + L2 normalization, Matryoshka truncation support
-- `deps.py` — `_EmbeddingAwareClient` detects non-default model, auto-injects embedding function into all ChromaDB collection calls
-- `utils/semantic_cache.py` — HNSW index uses `embed_fn` from deps, stores/retrieves with configured dimension, Redis persistence every 5 inserts
+- `deps.py` — `_EmbeddingAwareClient` detects non-default model, auto-injects embedding function into all ChromaDB collection calls (ingestion + retrieval paths)
+- `utils/semantic_cache.py` — HNSW index operates on pre-computed `np.ndarray` embeddings passed in by callers. The cache itself does not call `get_embedding_function()` — the query pipeline computes embeddings upstream and passes them to `cache_lookup()`/`cache_store()`
 - All query paths flow through `get_chroma()` which returns the embedding-aware client
 
 ### Operational Steps (Post-Deploy)
@@ -93,17 +97,15 @@ Verification of LLM responses with 10+ factual claims causes MCP container OOM-k
 
 ### Solution
 
-Two-part fix: increase container limit + add memory-aware safety valve.
+Two-part fix: increase container limit + add cgroup-aware memory guard.
 
 ### Files Changed
 
 | File | Change | Lines |
 |------|--------|-------|
 | `src/mcp/docker-compose.yml` | Raise memory limit 3g → 4g | 1 |
-| `src/mcp/agents/hallucination/streaming.py` | Add memory-aware guard before semaphore acquire | +12 |
+| `src/mcp/agents/hallucination/streaming.py` | Add cgroup-aware memory guard before semaphore acquire | +25 |
 | `src/mcp/config/settings.py` | Add `VERIFY_MEMORY_FLOOR_MB` setting | +3 |
-| `src/mcp/requirements.txt` | Add `psutil` (if not already present) | +1 |
-| `src/mcp/requirements.lock` | Regenerate with psutil pinned | regen |
 
 ### Container Limit Change
 
@@ -115,36 +117,56 @@ deploy:
       memory: 4g  # was 3g
 ```
 
-### Memory-Aware Guard
+### Cgroup-Aware Memory Guard
 
-In `streaming.py`, add a pre-semaphore memory check. If available container memory drops below `VERIFY_MEMORY_FLOOR_MB` (default 512MB), pause verification until memory frees up. This prevents OOM even with cascading fallbacks.
+In `streaming.py`, add a pre-semaphore memory check using Linux cgroup v2 files (not `psutil.virtual_memory()` which reports host memory, not container-constrained memory).
 
 ```python
-import psutil
+import pathlib
+
+_CGROUP_MEMORY_MAX = pathlib.Path("/sys/fs/cgroup/memory.max")
+_CGROUP_MEMORY_CURRENT = pathlib.Path("/sys/fs/cgroup/memory.current")
+
+
+def _container_memory_available_mb() -> float | None:
+    """Return available memory in MB within the container cgroup, or None if not in a cgroup."""
+    try:
+        max_bytes = _CGROUP_MEMORY_MAX.read_text().strip()
+        if max_bytes == "max":
+            return None  # no limit set
+        current_bytes = int(_CGROUP_MEMORY_CURRENT.read_text().strip())
+        return (int(max_bytes) - current_bytes) / (1024 * 1024)
+    except (FileNotFoundError, ValueError):
+        return None  # not running in a cgroup-limited container
+
 
 async def _wait_for_memory(floor_mb: int, label: str) -> None:
-    """Block until available memory exceeds floor_mb."""
-    while psutil.virtual_memory().available < floor_mb * 1024 * 1024:
-        logger.warning("Verification paused (%s): available memory below %dMB floor", label, floor_mb)
+    """Block until available container memory exceeds floor_mb. No-op outside containers."""
+    while True:
+        available = _container_memory_available_mb()
+        if available is None or available >= floor_mb:
+            return
+        logger.warning("Verification paused (%s): container memory %.0fMB < %dMB floor", label, available, floor_mb)
         await asyncio.sleep(1.0)
 ```
 
-Called before `async with sem:` in `_verify_indexed()`.
+Called before `async with sem:` in `_verify_indexed()`. Falls back to no-op when running outside Docker (cgroup files don't exist). No new dependencies required — uses stdlib `pathlib` only.
 
 ### Settings Addition
 
 ```python
-# Minimum available memory (MB) before allowing a new claim verification
+# Minimum available container memory (MB) before allowing a new claim verification
 VERIFY_MEMORY_FLOOR_MB = int(os.getenv("VERIFY_MEMORY_FLOOR_MB", "512"))
 ```
 
 ### Why Not More Complex Solutions
 
 - Singleton ONNX/BM25 already exists — verified in exploration
+- No new dependencies needed (no `psutil`) — cgroup files are the correct source for container memory
 - `gc.collect()` after each claim adds ~50ms latency for marginal benefit
 - Streaming path already uses `asyncio.as_completed()` — task creation is fine
 - Batch processing restructure would require significant refactor of the streaming SSE pipeline for minimal gain
-- The real fix is adequate headroom (4GB on 160GB host is trivial) + a safety valve
+- The real fix is adequate headroom (4GB on 160GB host is trivial) + a cgroup-aware safety valve
 
 ---
 
@@ -154,24 +176,24 @@ VERIFY_MEMORY_FLOOR_MB = int(os.getenv("VERIFY_MEMORY_FLOOR_MB", "512"))
 
 **Problem:** CI generates `coverage.xml` but doesn't upload to Codecov for PR coverage gates.
 
-**Fix:** Add `codecov/codecov-action@v5` step after test job in `.github/workflows/ci.yml`.
+**Fix:** Add `codecov/codecov-action@v5` step inside the `test` job in `.github/workflows/ci.yml`, immediately after the pytest step that generates `coverage.xml`.
 
 ```yaml
 - name: Upload coverage to Codecov
-  if: always()
+  if: success()  # only upload when tests pass (coverage.xml exists)
   uses: codecov/codecov-action@v5
   with:
     files: coverage.xml
     fail_ci_if_error: false
 ```
 
-Note: Requires `CODECOV_TOKEN` secret in GitHub repo settings. `fail_ci_if_error: false` prevents CI breakage if Codecov is down.
+Note: Requires `CODECOV_TOKEN` secret in GitHub repo settings. `fail_ci_if_error: false` prevents CI breakage if Codecov is down. Uses `if: success()` (not `always()`) because `coverage.xml` only exists when pytest completes successfully.
 
 ### K2: Dependency License Scanning
 
 **Problem:** No license compatibility scanning. GPL-incompatible deps could slip in.
 
-**Fix:** Add two steps to CI security job:
+**Fix:** Add two steps to the CI `test` job (where Python dependencies are already installed), or install project deps in the security job first. Placing in the `test` job is simpler since `requirements.txt` is already installed there.
 
 ```yaml
 - name: License audit (Python)
@@ -183,6 +205,8 @@ Note: Requires `CODECOV_TOKEN` secret in GitHub repo settings. `fail_ci_if_error
   working-directory: src/web
   run: npx license-checker --failOn "GPL-2.0;GPL-3.0" --production
 ```
+
+> **Important:** `pip-licenses` scans the current environment's installed packages. This step must run after `pip install -r requirements.txt` (already done in the `test` job). If placed in the `security` job, add `pip install -r src/mcp/requirements.txt` first.
 
 ### K3: ReDoS Regex Audit
 
@@ -231,6 +255,7 @@ COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/pytho
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=models /root/.cache/huggingface /home/cerid/.cache/huggingface
 RUN chown -R cerid:cerid /home/cerid/.cache
+WORKDIR /app
 COPY --chown=cerid:cerid . .
 USER cerid
 EXPOSE 8888
