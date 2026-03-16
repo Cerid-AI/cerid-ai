@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import pathlib
 import time
 from typing import Any
 
@@ -33,6 +34,34 @@ from agents.hallucination.verification import (
 from utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.hallucination")
+
+_CGROUP_MEMORY_MAX = pathlib.Path("/sys/fs/cgroup/memory.max")
+_CGROUP_MEMORY_CURRENT = pathlib.Path("/sys/fs/cgroup/memory.current")
+
+
+def _container_memory_available_mb() -> float | None:
+    """Return available memory in MB within the container cgroup, or None if not in a cgroup."""
+    try:
+        max_bytes = _CGROUP_MEMORY_MAX.read_text().strip()
+        if max_bytes == "max":
+            return None  # no limit set
+        current_bytes = int(_CGROUP_MEMORY_CURRENT.read_text().strip())
+        return (int(max_bytes) - current_bytes) / (1024 * 1024)
+    except (FileNotFoundError, ValueError):
+        return None  # not running in a cgroup-limited container
+
+
+async def _wait_for_memory(floor_mb: int, label: str) -> None:
+    """Block until available container memory exceeds floor_mb. No-op outside containers."""
+    while True:
+        available = _container_memory_available_mb()
+        if available is None or available >= floor_mb:
+            return
+        logger.warning(
+            "Verification paused (%s): container memory %.0fMB < %dMB floor",
+            label, available, floor_mb,
+        )
+        await asyncio.sleep(1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -246,6 +275,7 @@ async def verify_response_streaming(
 
     async def _verify_indexed(idx: int, claim_text: str) -> tuple[int, dict[str, Any]]:
         """Verify a single claim with a per-claim timeout and concurrency limit."""
+        await _wait_for_memory(config.VERIFY_MEMORY_FLOOR_MB, f"claim-{idx}")
         sem = _get_claim_verify_semaphore()
         try:
             async with sem:

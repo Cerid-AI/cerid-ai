@@ -195,6 +195,9 @@ EXTERNAL_VERIFY_MAX_CONCURRENT = int(os.getenv("EXTERNAL_VERIFY_MAX_CONCURRENT",
 # which is memory-intensive.  With 10+ claims, unbounded parallelism can OOM
 # a 2 GB container.  Default 3 keeps peak memory well under 1 GB.
 VERIFY_CLAIM_MAX_CONCURRENT = int(os.getenv("VERIFY_CLAIM_MAX_CONCURRENT", "3"))
+# Minimum available container memory (MB) before allowing a new claim verification.
+# Uses cgroup v2 files — no-op when running outside a memory-limited container.
+VERIFY_MEMORY_FLOOR_MB = int(os.getenv("VERIFY_MEMORY_FLOOR_MB", "512"))
 EXTERNAL_VERIFY_RETRY_ATTEMPTS = 3
 EXTERNAL_VERIFY_RETRY_BASE_DELAY = 2.0  # seconds — defense-in-depth (1000 RPM models)
 VERIFICATION_MIN_RELEVANCE = float(os.getenv("VERIFICATION_MIN_RELEVANCE", "0.35"))
