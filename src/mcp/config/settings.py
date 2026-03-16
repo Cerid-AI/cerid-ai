@@ -380,8 +380,11 @@ CLIENT_RATE_LIMITS: dict[str, dict[str, tuple[int, int]]] = {
         "/recategorize": (10, 60),
     },
     "trading-agent": {
-        "/agent/": (60, 60),
-        "/sdk/": (60, 60),
+        # Worst-case burst: 5 sessions × (3 oracle + 2 memory) = 67.5 calls/min.
+        # 80/min gives 12.5/min headroom; client pools (50 oracle + 20 memory)
+        # are the actual binding constraints, so this is defense-in-depth.
+        "/agent/": (80, 60),
+        "/sdk/": (80, 60),
     },
     "_default": {
         "/agent/": (10, 60),
