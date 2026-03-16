@@ -101,6 +101,15 @@ Single `.env` file at repo root, encrypted with `age`. Key at `~/.config/cerid/a
 ./scripts/start-cerid.sh --build    # rebuild images after code changes
 ```
 
+### KB Backup and Restore
+
+```bash
+./scripts/backup-kb.sh              # snapshot neo4j + chroma + redis to ~/cerid-archive/backups/
+./scripts/restore-kb.sh <timestamp> # restore from a specific snapshot
+```
+
+Backups pause containers, copy data directories, and trigger Redis BGSAVE. Stored at `~/cerid-archive/backups/YYYY-MM-DDTHH-MM-SS/`.
+
 Startup order: `[1/4]` Infrastructure (Neo4j, ChromaDB, Redis) → `[2/4]` Bifrost → `[3/4]` MCP → `[4/4]` React GUI.
 
 ### Environment Validation
@@ -162,7 +171,7 @@ curl http://localhost:8888/artifacts
 
 | File | Purpose |
 |------|---------|
-| `.mcp.json` | Cerid KB MCP at `http://localhost:8888/mcp/sse` (18 `pkb_*` tools) |
+| `.mcp.json` | Cerid KB MCP at `http://localhost:8888/mcp/sse` (18 `pkb_*` tools) — Claude Code runs on the host so `localhost` is correct here |
 | `.claude/settings.json` | Hooks config (session-start, safety-check, typecheck, pythonlint) |
 | `.claude/hooks/session-start.sh` | SessionStart — Docker + MCP + GUI health check |
 | `.claude/hooks/safety-check.sh` | PreToolUse/Bash — blocks destructive commands |
@@ -170,6 +179,7 @@ curl http://localhost:8888/artifacts
 | `.claude/hooks/pythonlint.sh` | PostToolUse/Edit\|Write — `ruff check` for `.py` in `src/mcp/` |
 | `.claude/commands/` | Custom commands: stack, test, sync, lock |
 | `.claude/launch.json` | Dev server configs (cerid-web, react-gui, marketing) |
+| `.claude/agents/kb-curator.md` | Opus subagent for KB schema-aware curation, dedup, and cross-store consistency checks |
 | `.claudeignore` | Excludes node_modules, dist, runtime data, binaries, lock files |
 
 ### Per-Machine Config (gitignored)
