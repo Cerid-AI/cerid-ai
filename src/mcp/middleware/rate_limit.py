@@ -25,7 +25,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 RATE_LIMITS: dict[str, tuple[int, int]] = {
-    "/agent/": (20, 60),
+    "/agent/": (60, 60),
     "/ingest": (10, 60),
     "/recategorize": (10, 60),
 }

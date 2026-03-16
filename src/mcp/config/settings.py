@@ -380,8 +380,8 @@ CLIENT_RATE_LIMITS: dict[str, dict[str, tuple[int, int]]] = {
         "/recategorize": (10, 60),
     },
     "trading-agent": {
-        "/agent/": (30, 60),
-        "/sdk/": (30, 60),
+        "/agent/": (60, 60),
+        "/sdk/": (60, 60),
     },
     "_default": {
         "/agent/": (10, 60),
