@@ -18,10 +18,11 @@ RUN apt-get purge -y --auto-remove gcc build-essential && rm -rf /var/lib/apt/li
 RUN useradd -m -u 1000 cerid && chown -R cerid:cerid /app
 USER cerid
 
-# Pre-download cross-encoder reranker model (baked into image, ~91 MB)
+# Pre-download cross-encoder reranker models (float32 fallback + quantized AVX2)
 RUN python -c "\
 from huggingface_hub import hf_hub_download; \
 hf_hub_download('cross-encoder/ms-marco-MiniLM-L-6-v2', 'onnx/model.onnx'); \
+hf_hub_download('cross-encoder/ms-marco-MiniLM-L-6-v2', 'onnx/model_quint8_avx2.onnx'); \
 hf_hub_download('cross-encoder/ms-marco-MiniLM-L-6-v2', 'tokenizer.json')"
 
 COPY --chown=cerid:cerid . .

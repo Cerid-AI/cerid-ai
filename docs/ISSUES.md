@@ -2,7 +2,7 @@
 
 > **Created:** 2026-02-25
 > **Last updated:** 2026-03-14
-> **Status:** Phase 39 complete. 88 resolved, 6 open. 1340 Python tests, 453 frontend tests.
+> **Status:** Phase 39B complete. 88 resolved, 7 open. 1340 Python tests, 453 frontend tests.
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21 roadmap)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](COMPLETED_PHASES.md)
 > **Purpose:** Track known bugs, feature gaps, structural issues, and architecture evaluations for upcoming phases.
@@ -979,15 +979,42 @@ Verification results only appear in the status bar and hallucination panel sideb
 
 ---
 
+## M. Phase 39B — Rate Limiting & Performance
+
+### M1. Semantic Cache Silently Inactive
+
+**Severity:** Low (performance)
+**Status:** 🔓 Open (2026-03-16)
+
+**Problem:** `ENABLE_SEMANTIC_CACHE=true` is set in `src/mcp/docker-compose.yml` but the semantic cache never activates. The cache (`utils/semantic_cache.py`) requires a client-side embedding function to compute query embeddings for HNSW similarity matching. The default embedding model (`all-MiniLM-L6-v2`) runs server-side inside ChromaDB — `get_embedding_function()` in `deps.py` returns `None` when the server-side default is in use, so no query embedding is ever computed and the HNSW index is never populated or consulted.
+
+**Impact:** All `agent_query()` calls pay full retrieval pipeline cost even when semantically identical queries repeat (e.g., the same market event phrased slightly differently across 5 trading sessions). Only the exact-match Redis cache (`utils/query_cache.py`) is active.
+
+**Root cause:** `_EmbeddingAwareClient` in `deps.py` uses `get_embedding_function()` which returns `None` for `all-MiniLM-L6-v2` (ChromaDB's built-in server-side model). `semantic_cache.py` short-circuits with `if embed_fn is None: return None` before any lookup. The HNSW index is always empty.
+
+**Fix required:**
+1. Migrate to a client-side ONNX embedding model (`Snowflake/snowflake-arctic-embed-m-v1.5` at 768d recommended)
+2. Update `SEMANTIC_CACHE_DIM` to match the new model's output dimension
+3. Re-ingest full KB (existing vectors use incompatible server-side embeddings at different dimensions)
+4. Bake embedding model ONNX into Dockerfile alongside the reranker
+
+**Full implementation plan:** `tasks/todo.md` → "Task: Activate Semantic Cache"
+
+**Files:** `src/mcp/deps.py`, `src/mcp/utils/semantic_cache.py`, `src/mcp/utils/embeddings.py`, `src/mcp/config/features.py`, `src/mcp/Dockerfile`
+
+---
+
 ## Priority Order
 
-### Open Items (6)
+### Open Items (7)
 
 J1 (verification OOM optimization) — Medium severity, mitigated via concurrency semaphore
 K1–K4, K7 (deferred backlog) — Low severity, nice-to-have improvements
+M1 (semantic cache inactive) — Low severity, requires embedding model migration + KB re-ingest
 
 ### Resolved (88 items)
 
+**Phase 39B** (0 resolved — M1 remains open)
 **Phase 39** (7 items): L1 (CORS wildcard), L2 (port binding), L3 (email PII), L4 (audit TTL), L5 (sync encryption), L6 (KB injection transparency), L7 (marketing claims)
 **Phase 38D+** (3 items): D4 (temporal claims uncertain), D5 (auto router real-time queries), D6 (Llama fallback retry)
 **Phase 38D** (3 items): D3 (model router auto mode), K5 (digest view), K6 (batch triage UI)

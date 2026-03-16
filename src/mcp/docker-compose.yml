@@ -23,6 +23,7 @@ services:
       - CERID_SYNC_DIR=/sync
       # Performance tuning
       - ENABLE_SEMANTIC_CACHE=true
+      - RERANK_ONNX_FILENAME=onnx/model_quint8_avx2.onnx
       # NEO4J_PASSWORD, CATEGORIZE_MODE, CERID_API_KEY, CORS_ORIGINS
       # are loaded from env_file above — do NOT override here, as
       # ${VAR} interpolation fails when running without --env-file.

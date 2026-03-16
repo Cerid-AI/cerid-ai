@@ -240,7 +240,7 @@ async def multi_domain_query(
 
             from utils import bm25 as bm25_mod
             if bm25_mod.is_available():
-                bm25_hits = bm25_mod.search_bm25(domain, query, top_k=top_k)
+                bm25_hits = await asyncio.to_thread(bm25_mod.search_bm25, domain, query, top_k)
                 if bm25_hits:
                     bm25_map = dict(bm25_hits)
 
@@ -354,7 +354,8 @@ async def graph_expand_results(
         return results
 
     try:
-        related = find_related_artifacts(
+        related = await asyncio.to_thread(
+            find_related_artifacts,
             neo4j_driver,
             artifact_ids=initial_ids,
             depth=config.GRAPH_TRAVERSAL_DEPTH,
@@ -995,7 +996,7 @@ async def agent_query(
 
     # Step 5.5: Quality boost + summary enrichment — single Neo4j round-trip
     with timer.step("quality_boost"):
-        results = _apply_quality_and_summaries(results, neo4j_driver=neo4j_driver)
+        results = await asyncio.to_thread(_apply_quality_and_summaries, results, neo4j_driver)
         results = sorted(results, key=lambda x: x["relevance"], reverse=True)
 
     # Step 5.6: MMR diversity reordering — reduce redundancy in top results

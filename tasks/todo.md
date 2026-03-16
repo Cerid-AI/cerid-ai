@@ -1,10 +1,84 @@
 # Cerid AI — Task Tracker
 
-> **Last updated:** 2026-03-14
-> **Current status:** Phase 38D complete. 1340 Python tests, 453 frontend tests.
-> **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md) — 6 open
+> **Last updated:** 2026-03-16
+> **Current status:** Phase 39B complete. 1340 Python tests, 453 frontend tests.
+> **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md) — 7 open
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](../docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
+
+## Phase 39B: MCP Performance & Rate Limiting Overhaul (2026-03-16) ✅
+
+Systemic evaluation and optimization of rate limiting, circuit breakers, and server-side
+infrastructure for the cerid-ai / cerid-trading-agent integration (5 sessions, up to 67.5 calls/min worst-case burst).
+
+### Trading Agent Client Fixes
+- [x] Memory queries bypass oracle circuit breaker (`oracle.py`) — non-critical memory failures no longer trip the oracle breaker
+- [x] Circuit breaker recovery timeout 60s → 20s (`settings.py`) — ample for local Docker restart + health check
+- [x] Split rate limiter into oracle (50/min) + memory (20/min) independent pools (`cerid_client.py`) — oracle queries cannot be starved by background memory calls
+- [x] Oracle result cache with 20s TTL (`cerid_client.py`) — 5 sessions hitting same signal = 1 cerid call instead of 5
+- [x] 2-second session start stagger (`manager.py`) — eliminates t=0 startup burst
+
+### Server-Side Fixes (cerid-ai)
+- [x] Raise `trading-agent` rate limit 60 → 80 req/min (`config/settings.py`) — server no longer the binding constraint (client pools = 70/min are)
+- [x] Neo4j pagecache 512 MB → 2 GB, container limit 2G → 4G (`infrastructure/docker-compose.yml`) — full graph in memory, ~600ms disk-read penalty eliminated
+- [x] Graph traversal wrapped in `asyncio.to_thread()` (`query_agent.py:357`) — event loop freed during Neo4j Bolt call
+- [x] Quality/summaries Neo4j call wrapped in `asyncio.to_thread()` (`query_agent.py:999`) — second blocking call offloaded to thread pool
+- [x] BM25 search wrapped in `asyncio.to_thread()` (`query_agent.py:243`) — tokenization no longer blocks event loop
+- [x] Quantized int8 ONNX reranker `model_quint8_avx2.onnx` (23 MB) replaces float32 `model.onnx` (91 MB) (`Dockerfile`, `docker-compose.yml`) — 3-4× faster cross-encoder inference
+
+### Performance Results
+| Metric | Before | After |
+|--------|--------|-------|
+| Cold query latency | ~2.0s | ~1.7-1.8s |
+| ONNX model size | 91 MB | 22 MB |
+| Concurrent throughput | Serialized (event loop blocked) | Parallel (3 ops offloaded) |
+| Oracle calls for 5-session signal burst | 5 | 1 (cache) |
+| Circuit breaker recovery | 60s | 20s |
+
+---
+
+## Task: Activate Semantic Cache (Phase 40 Candidate)
+
+**Status:** Blocked — requires embedding model migration
+**Tracked in:** `docs/ISSUES.md` → M1
+
+**Why blocked:** `ENABLE_SEMANTIC_CACHE=true` is set but the cache never activates. It requires a
+client-side embedding function to compute query embeddings for HNSW similarity matching. The default
+embedding model (`all-MiniLM-L6-v2`) runs server-side inside ChromaDB — `get_embedding_function()`
+returns `None`, so no query embedding is ever computed and the HNSW index is never populated.
+
+### Implementation Steps
+
+- [ ] **1. Choose client-side embedding model**
+  - Recommended: `Snowflake/snowflake-arctic-embed-m-v1.5` (768d, 8192 ctx, MTEB SOTA for its size)
+  - Alternative: `sentence-transformers/all-MiniLM-L6-v2` ONNX (384d, faster, backward compatible dim)
+  - Set `EMBEDDING_MODEL=Snowflake/snowflake-arctic-embed-m-v1.5` in `.env` (or docker-compose.yml)
+
+- [ ] **2. Update Dockerfile**
+  - Add ONNX model download for chosen embedding model (alongside reranker downloads)
+  - Use quantized variant if available (same pattern as `model_quint8_avx2.onnx`)
+
+- [ ] **3. Update `SEMANTIC_CACHE_DIM` in `config/features.py`**
+  - Match the model's output dimension: 768 for Arctic, 384 for MiniLM
+  - `SEMANTIC_CACHE_DIM = int(os.getenv("SEMANTIC_CACHE_DIM", "768"))`
+
+- [ ] **4. Re-ingest full KB**
+  - Existing ChromaDB collections use server-side embeddings — incompatible dimension/space
+  - Per-domain: `DELETE /kb-admin/clear-domain/{domain}` then re-run file watcher / manual ingest
+  - Zero-downtime option: create new `-v2` collections, cut over, delete old (more complex)
+
+- [ ] **5. Verify cache activates**
+  - Enable `ENABLE_STEP_TIMER=true` temporarily
+  - Check `semantic_cache` step in query response latency breakdown
+  - Second semantically similar query should show cache hit in logs (`semantic_cache: hit`)
+
+- [ ] **6. Benchmark**
+  - Warm cache query: should fall between Redis exact-match (~7ms) and full retrieval (~1.7s)
+  - Measure HNSW hit rate across real trading agent queries
+
+**Files:** `config/features.py`, `Dockerfile`, `docker-compose.yml`, `utils/embeddings.py`, `utils/semantic_cache.py`, `deps.py`
+
+---
 
 ## Phase 39: Privacy Hardening (2026-03-14) ✅
 
