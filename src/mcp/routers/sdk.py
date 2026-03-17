@@ -67,3 +67,53 @@ def sdk_health():
 def _app_version() -> str:
     """Read version from the FastAPI app metadata."""
     return "1.0.0"
+
+
+# ---------------------------------------------------------------------------
+# Trading SDK facades (cerid-trading-agent stable contract)
+# ---------------------------------------------------------------------------
+
+from models.trading import (
+    CascadeConfirmRequest,
+    HerdDetectRequest,
+    KellySizeRequest,
+    LongshotSurfaceRequest,
+    TradingSignalRequest,
+)
+from routers.agents import (
+    trading_cascade_confirm_endpoint,
+    trading_herd_detect_endpoint,
+    trading_kelly_size_endpoint,
+    trading_longshot_surface_endpoint,
+    trading_signal_endpoint,
+)
+
+
+@router.post("/trading/signal")
+async def sdk_trading_signal(req: TradingSignalRequest):
+    """Trading signal enrichment — stable contract for cerid-trading-agent."""
+    return await trading_signal_endpoint(req)
+
+
+@router.post("/trading/herd-detect")
+async def sdk_trading_herd_detect(req: HerdDetectRequest):
+    """Herd behavior detection — stable contract for cerid-trading-agent."""
+    return await trading_herd_detect_endpoint(req)
+
+
+@router.post("/trading/kelly-size")
+async def sdk_trading_kelly_size(req: KellySizeRequest):
+    """Kelly sizing — stable contract for cerid-trading-agent."""
+    return await trading_kelly_size_endpoint(req)
+
+
+@router.post("/trading/cascade-confirm")
+async def sdk_trading_cascade_confirm(req: CascadeConfirmRequest):
+    """Cascade confirmation — stable contract for cerid-trading-agent."""
+    return await trading_cascade_confirm_endpoint(req)
+
+
+@router.post("/trading/longshot-surface")
+async def sdk_trading_longshot_surface(req: LongshotSurfaceRequest):
+    """Longshot surface query — stable contract for cerid-trading-agent."""
+    return await trading_longshot_surface_endpoint(req)

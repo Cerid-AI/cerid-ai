@@ -86,6 +86,11 @@ The [cerid-trading-agent](https://github.com/sunrunnerfire/cerid-trading-agent) 
 | Hallucination check | `POST /sdk/v1/hallucination` (`src/mcp/routers/sdk.py`) | `CeridClient.hallucination_check()` | Body: `{"response_text": "...", "conversation_id": "..."}` |
 | Memory extraction | `POST /sdk/v1/memory/extract` (`src/mcp/routers/sdk.py`) | `CeridClient.memory_extract()` | Body: `{"response_text": "...", "conversation_id": "..."}` |
 | Health check | `GET /sdk/v1/health` (`src/mcp/routers/sdk.py`) | `CeridClient.health_check()` | Returns `{"status": "ok", "version": "...", "features": {...}}` |
+| Trading signal enrich | `POST /sdk/v1/trading/signal` (`src/mcp/routers/sdk.py`) | `CeridClient.trading_signal()` | Body: `{"query": "...", "signal_data": {...}, "domains": [...], "top_k": 5}` |
+| Herd detection | `POST /sdk/v1/trading/herd-detect` (`src/mcp/routers/sdk.py`) | `CeridClient.herd_detect()` | Body: `{"asset": "ETH", "sentiment_data": {...}}` |
+| Kelly sizing | `POST /sdk/v1/trading/kelly-size` (`src/mcp/routers/sdk.py`) | `CeridClient.kelly_size()` | Body: `{"strategy": "...", "confidence": 0.75, "win_loss_ratio": 1.5}` |
+| Cascade confirm | `POST /sdk/v1/trading/cascade-confirm` (`src/mcp/routers/sdk.py`) | `CeridClient.cascade_confirm()` | Body: `{"asset": "ETH", "liquidation_events": [...]}` |
+| Longshot surface | `POST /sdk/v1/trading/longshot-surface` (`src/mcp/routers/sdk.py`) | `CeridClient.longshot_surface()` | Body: `{"asset": "ETH", "date_range": "30d"}` |
 | Client ID | `X-Client-ID` header (middleware) | `X-Client-ID: trading-agent` (httpx default header) | Per-client rate limiting; default `"gui"` if absent |
 | Default URL | Listens on `127.0.0.1:8888` | Connects to `http://localhost:8888` | Compatible — both resolve to loopback |
 | Docker network | `llm-network` bridge | Joins same `llm-network`, uses container name `cerid-mcp` | Bypasses host port binding entirely |

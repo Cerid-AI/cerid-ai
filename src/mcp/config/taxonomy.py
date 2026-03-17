@@ -19,7 +19,7 @@ TAXONOMY = {
     "finance": {
         "description": "Financial documents, tax records, budgets",
         "icon": "dollar-sign",
-        "sub_categories": ["tax", "investments", "budgets", "receipts", "general"],
+        "sub_categories": ["tax", "investments", "budgets", "receipts", "trading", "market-analysis", "risk-management", "general"],
     },
     "projects": {
         "description": "Project plans, meeting notes, specifications",
@@ -117,6 +117,8 @@ TAG_VOCABULARY: dict[str, list[str]] = {
         "tax-return", "invoice", "receipt", "budget", "investment",
         "expense", "income", "bank-statement", "tax-deduction", "payroll",
         "insurance", "retirement", "mortgage", "credit-card", "report",
+        "trading-signal", "herd-detection", "kelly-sizing", "cascade-liquidation",
+        "longshot-surface", "market-analysis", "risk-management", "position-sizing",
     ],
     "projects": [
         "meeting-notes", "specification", "proposal", "roadmap", "design",

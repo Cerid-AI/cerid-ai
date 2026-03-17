@@ -329,6 +329,91 @@ MCP_TOOLS = [
             },
         },
     },
+    {
+        "name": "pkb_trading_signal",
+        "description": "Enrich a trading signal with KB context from ChromaDB and historical trades from Neo4j",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Natural language query describing the trading signal"},
+                "signal_data": {
+                    "type": "object",
+                    "description": "Signal metadata (asset, direction, confidence, etc.)",
+                    "default": {},
+                },
+                "domains": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Knowledge domains to search",
+                    "default": ["finance", "trading"],
+                },
+                "top_k": {"type": "integer", "description": "Number of KB results", "default": 5},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "pkb_herd_detect",
+        "description": "Detect herd behavior by checking correlation graph violations and sentiment extremes",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "asset": {"type": "string", "description": "Asset symbol (e.g. ETH, BTC)"},
+                "sentiment_data": {
+                    "type": "object",
+                    "description": "Sentiment indicators (fear_greed_index, etc.)",
+                    "default": {},
+                },
+            },
+            "required": ["asset"],
+        },
+    },
+    {
+        "name": "pkb_kelly_size",
+        "description": "Compute Kelly-criterion position size using historical CV_edge from calibration data",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "strategy": {"type": "string", "description": "Strategy/session name for calibration lookup"},
+                "confidence": {"type": "number", "description": "Win probability (0-1)"},
+                "win_loss_ratio": {"type": "number", "description": "Average win / average loss ratio"},
+            },
+            "required": ["strategy", "confidence", "win_loss_ratio"],
+        },
+    },
+    {
+        "name": "pkb_cascade_confirm",
+        "description": "Confirm a liquidation cascade pattern against historical cascade events",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "asset": {"type": "string", "description": "Asset symbol (e.g. ETH, BTC)"},
+                "liquidation_events": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "List of liquidation events with venue and size_usd",
+                    "default": [],
+                },
+            },
+            "required": ["asset"],
+        },
+    },
+    {
+        "name": "pkb_longshot_surface",
+        "description": "Query stored calibration surface (implied vs actual probabilities) from Neo4j",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "asset": {"type": "string", "description": "Asset symbol (e.g. ETH, BTC)"},
+                "date_range": {
+                    "type": "string",
+                    "description": "Lookback period (7d, 14d, 30d, 90d)",
+                    "default": "30d",
+                },
+            },
+            "required": ["asset"],
+        },
+    },
 ]
 
 
@@ -451,5 +536,44 @@ async def execute_tool(name: str, arguments: dict) -> Any:
         return await archive_old_memories(
             neo4j_driver=get_neo4j(),
             retention_days=arguments.get("retention_days", 180),
+        )
+    elif name == "pkb_trading_signal":
+        from agents.trading_agent import trading_signal_enrich
+        return await trading_signal_enrich(
+            query=arguments.get("query", ""),
+            signal_data=arguments.get("signal_data", {}),
+            domains=arguments.get("domains", ["finance", "trading"]),
+            chroma=get_chroma(),
+            neo4j=get_neo4j(),
+            top_k=arguments.get("top_k", 5),
+        )
+    elif name == "pkb_herd_detect":
+        from agents.trading_agent import herd_detect
+        return await herd_detect(
+            asset=arguments.get("asset", ""),
+            sentiment_data=arguments.get("sentiment_data", {}),
+            neo4j=get_neo4j(),
+        )
+    elif name == "pkb_kelly_size":
+        from agents.trading_agent import kelly_size
+        return await kelly_size(
+            strategy=arguments.get("strategy", ""),
+            confidence=arguments.get("confidence", 0.5),
+            win_loss_ratio=arguments.get("win_loss_ratio", 1.0),
+            neo4j=get_neo4j(),
+        )
+    elif name == "pkb_cascade_confirm":
+        from agents.trading_agent import cascade_confirm
+        return await cascade_confirm(
+            asset=arguments.get("asset", ""),
+            liquidation_events=arguments.get("liquidation_events", []),
+            neo4j=get_neo4j(),
+        )
+    elif name == "pkb_longshot_surface":
+        from agents.trading_agent import longshot_surface_query
+        return await longshot_surface_query(
+            asset=arguments.get("asset", ""),
+            date_range=arguments.get("date_range", "30d"),
+            neo4j=get_neo4j(),
         )
     raise ValueError(f"Unknown tool: {name}")
