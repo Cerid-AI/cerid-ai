@@ -309,6 +309,15 @@ SCHEDULE_STALE_DETECTION = os.getenv("SCHEDULE_STALE_DETECTION", "0 4 * * 0")  #
 SCHEDULE_STALE_DAYS = int(os.getenv("SCHEDULE_STALE_DAYS", "90"))
 
 # ---------------------------------------------------------------------------
+# Trading Agent Integration
+# ---------------------------------------------------------------------------
+CERID_TRADING_ENABLED = os.getenv("CERID_TRADING_ENABLED", "false").lower() in ("true", "1")
+TRADING_AGENT_URL = os.getenv("TRADING_AGENT_URL", "http://localhost:8090")
+SCHEDULE_TRADING_AUTORESEARCH = os.getenv("SCHEDULE_TRADING_AUTORESEARCH", "0 1 * * *")
+SCHEDULE_PLATT_MIRROR = os.getenv("SCHEDULE_PLATT_MIRROR", "0 2 * * *")
+SCHEDULE_LONGSHOT_SURFACE = os.getenv("SCHEDULE_LONGSHOT_SURFACE", "30 2 * * *")
+
+# ---------------------------------------------------------------------------
 # Webhooks
 # ---------------------------------------------------------------------------
 # List of webhook endpoints. Each entry: {"url": "...", "events": ["ingestion.complete", ...]}

@@ -168,6 +168,64 @@ async def _run_tombstone_purge() -> None:
         logger.error("Scheduled tombstone purge failed: %s", e)
 
 
+async def _run_trading_autoresearch() -> None:
+    """Pull performance summary from trading agent and store in KB."""
+    start = time.time()
+    try:
+        from agents.trading_scheduler_jobs import run_trading_autoresearch
+        result = await run_trading_autoresearch(
+            trading_agent_url=config.TRADING_AGENT_URL,
+            neo4j=get_neo4j(),
+        )
+        status = result.get("status", "unknown")
+        duration = time.time() - start
+        _log_execution("trading_autoresearch", status, duration)
+        logger.info(f"Scheduled trading autoresearch: {status} in {duration:.1f}s")
+    except Exception as e:
+        duration = time.time() - start
+        _log_execution("trading_autoresearch", "error", duration, str(e))
+        logger.error(f"Scheduled trading autoresearch failed: {e}")
+
+
+async def _run_platt_scaling_mirror() -> None:
+    """Mirror Platt calibration params from trading agent to Neo4j."""
+    start = time.time()
+    try:
+        from agents.trading_scheduler_jobs import run_platt_scaling_mirror
+        result = await run_platt_scaling_mirror(
+            trading_agent_url=config.TRADING_AGENT_URL,
+            neo4j=get_neo4j(),
+        )
+        mirrored = result.get("mirrored", 0)
+        duration = time.time() - start
+        _log_execution("platt_scaling_mirror", result.get("status", "unknown"), duration, f"{mirrored} mirrored")
+        logger.info(f"Scheduled Platt mirror: {mirrored} mirrored in {duration:.1f}s")
+    except Exception as e:
+        duration = time.time() - start
+        _log_execution("platt_scaling_mirror", "error", duration, str(e))
+        logger.error(f"Scheduled Platt mirror failed: {e}")
+
+
+async def _run_longshot_surface_rebuild() -> None:
+    """Rebuild calibration surface from trading agent data."""
+    start = time.time()
+    try:
+        from agents.trading_scheduler_jobs import run_longshot_surface_rebuild
+        result = await run_longshot_surface_rebuild(
+            trading_agent_url=config.TRADING_AGENT_URL,
+            neo4j=get_neo4j(),
+        )
+        status = result.get("status", "unknown")
+        points = result.get("points_stored", 0)
+        duration = time.time() - start
+        _log_execution("longshot_surface_rebuild", status, duration, f"{points} points")
+        logger.info(f"Scheduled longshot surface rebuild: {status} ({points} points) in {duration:.1f}s")
+    except Exception as e:
+        duration = time.time() - start
+        _log_execution("longshot_surface_rebuild", "error", duration, str(e))
+        logger.error(f"Scheduled longshot surface rebuild failed: {e}")
+
+
 def start_scheduler() -> AsyncIOScheduler:
     """Create and start the scheduler with configured jobs."""
     global _scheduler
@@ -216,6 +274,31 @@ def start_scheduler() -> AsyncIOScheduler:
         name="Weekly tombstone purge",
         replace_existing=True,
     )
+
+    # Trading jobs (gated by CERID_TRADING_ENABLED)
+    if getattr(config, "CERID_TRADING_ENABLED", False):
+        _scheduler.add_job(
+            _run_trading_autoresearch,
+            CronTrigger.from_crontab(config.SCHEDULE_TRADING_AUTORESEARCH),
+            id="trading_autoresearch",
+            name="Trading auto-research",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_platt_scaling_mirror,
+            CronTrigger.from_crontab(config.SCHEDULE_PLATT_MIRROR),
+            id="platt_scaling_mirror",
+            name="Platt scaling mirror",
+            replace_existing=True,
+        )
+        _scheduler.add_job(
+            _run_longshot_surface_rebuild,
+            CronTrigger.from_crontab(config.SCHEDULE_LONGSHOT_SURFACE),
+            id="longshot_surface_rebuild",
+            name="Longshot surface rebuild",
+            replace_existing=True,
+        )
+        logger.info("Trading scheduler jobs registered (CERID_TRADING_ENABLED=true)")
 
     _scheduler.start()
     logger.info("Scheduler started with %d jobs", len(_scheduler.get_jobs()))
