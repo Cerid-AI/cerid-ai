@@ -18,7 +18,8 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 - **React GUI** at port 3000 — streaming chat, knowledge browser, monitoring & audit dashboards
 - **Multi-Provider LLM Access** via Bifrost gateway (Claude, GPT, Grok, Gemini, DeepSeek, Llama)
 - **9 Intelligent Agents** — Query (LLM reranking), Triage (LangGraph), Rectification, Audit, Maintenance, Hallucination Detection, Memory Extraction, Curation, Self-RAG
-- **18 MCP Tools** for knowledge base operations via MCP protocol
+- **Trading Agent Integration** — 5 MCP tools + SDK endpoints for signal enrichment, herd detection, Kelly sizing, cascade confirmation, and longshot calibration (opt-in via `CERID_TRADING_ENABLED`)
+- **23 MCP Tools** for knowledge base and trading operations via MCP protocol
 - **Hallucination Detection** — claim extraction + KB verification with per-message truth audit
 - **Memory Extraction** — facts, decisions, preferences extracted from conversations and stored as KB artifacts
 - **Smart Model Router** — complexity scoring, cost sensitivity, auto-switch recommendations
@@ -33,7 +34,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 - **Multi-Machine Sync** via Dropbox — JSONL export/import with auto-import on startup
 - **Source Attribution** — collapsible source references with relevance scores on chat responses
 - **Model Context Breaks** — provider-colored model badges, switch dividers between model changes
-- **GitHub Actions CI/CD** with 1,297 tests (950 pytest + 347 vitest)
+- **GitHub Actions CI/CD** with 1,308 tests (961 pytest + 347 vitest)
 - **Three-Tier AI Categorization** (manual, smart, pro) via Bifrost
 - **Obsidian Vault Integration** — auto-sync vault notes into knowledge base
 - **Reproducible Builds** — pip-compile lock files with hashes, pinned Docker images, Dependabot
