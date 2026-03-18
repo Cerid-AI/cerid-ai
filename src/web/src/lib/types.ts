@@ -517,6 +517,8 @@ export interface ServerSettings {
   late_interaction_blend_weight?: number
   enable_semantic_cache?: boolean
   semantic_cache_threshold?: number
+  // Trading agent integration
+  trading_enabled?: boolean
 }
 
 export interface SettingsUpdate {

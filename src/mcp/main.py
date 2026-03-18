@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config.features import CERID_MULTI_USER
+from config.settings import CERID_TRADING_ENABLED
 from db import neo4j as graph
 from deps import close_chroma, close_neo4j, close_redis, get_neo4j
 from middleware.auth import APIKeyMiddleware
@@ -306,6 +307,11 @@ if CERID_MULTI_USER:
     from routers import auth as auth_router
     app.include_router(auth_router.router)
     app.include_router(auth_router.router, prefix="/api/v1")
+
+# Trading proxy (only when trading agent integration is enabled)
+if CERID_TRADING_ENABLED:
+    from routers import trading_proxy
+    app.include_router(trading_proxy.router)
 
 
 @app.get("/")

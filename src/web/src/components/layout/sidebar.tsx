@@ -5,6 +5,7 @@ import { useState } from "react"
 import {
   MessageSquare, Database, HeartPulse, BarChart3, Brain, Settings,
   Sun, Moon, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Plus, History,
+  TrendingUp,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -16,7 +17,7 @@ import { useUIMode } from "@/contexts/ui-mode-context"
 import { MODELS } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-export type Pane = "chat" | "knowledge" | "monitoring" | "audit" | "memories" | "settings"
+export type Pane = "chat" | "knowledge" | "monitoring" | "audit" | "memories" | "trading" | "settings"
 
 interface SidebarProps {
   activePane: Pane
@@ -25,6 +26,7 @@ interface SidebarProps {
   onToggleCollapse: () => void
   theme: "dark" | "light"
   onToggleTheme: () => void
+  tradingEnabled?: boolean
 }
 
 const NAV_ITEMS: { pane: Pane; icon: typeof MessageSquare; label: string }[] = [
@@ -45,12 +47,15 @@ function readBool(key: string, fallback: boolean): boolean {
 
 const SIMPLE_PANES = new Set<Pane>(["chat", "memories", "settings"])
 
-export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse, theme, onToggleTheme }: SidebarProps) {
+export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse, theme, onToggleTheme, tradingEnabled }: SidebarProps) {
   const { conversations, activeId, setActiveId, create, remove } = useConversationsContext()
   const { toggle: toggleMode, isSimple } = useUIMode()
   const [historyExpanded, setHistoryExpanded] = useState(() => readBool("cerid-sidebar-history", true))
 
-  const visibleNav = isSimple ? NAV_ITEMS.filter((n) => SIMPLE_PANES.has(n.pane)) : NAV_ITEMS
+  const allNav = tradingEnabled
+    ? [...NAV_ITEMS.slice(0, -1), { pane: "trading" as Pane, icon: TrendingUp, label: "Trading" }, NAV_ITEMS[NAV_ITEMS.length - 1]]
+    : NAV_ITEMS
+  const visibleNav = isSimple ? allNav.filter((n) => SIMPLE_PANES.has(n.pane)) : allNav
 
   const toggleHistory = () => {
     setHistoryExpanded((prev) => {

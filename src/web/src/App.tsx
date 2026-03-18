@@ -18,6 +18,7 @@ const MonitoringPane = lazy(() => import("@/components/monitoring/monitoring-pan
 const AuditPane = lazy(() => import("@/components/audit/audit-pane"))
 const MemoriesPane = lazy(() => import("@/components/memories/memories-pane"))
 const SettingsPane = lazy(() => import("@/components/settings/settings-pane"))
+const TradingPane = lazy(() => import("@/components/trading/trading-pane"))
 
 function PaneLoader() {
   return (
@@ -30,6 +31,7 @@ function PaneLoader() {
 
 export default function App() {
   const [multiUser, setMultiUser] = useState(false)
+  const [tradingEnabled, setTradingEnabled] = useState(false)
   const [showOnboarding, setShowOnboarding] = useState(() => {
     try { return !localStorage.getItem("cerid-onboarding-complete") } catch { return false }
   })
@@ -38,7 +40,10 @@ export default function App() {
 
   useEffect(() => {
     fetchSettings()
-      .then((s) => setMultiUser(!!s.multi_user))
+      .then((s) => {
+        setMultiUser(!!s.multi_user)
+        setTradingEnabled(!!s.trading_enabled)
+      })
       .catch(() => {})
   }, [])
 
@@ -49,7 +54,7 @@ export default function App() {
     {showOnboarding && <OnboardingDialog open={showOnboarding} onComplete={handleOnboardingComplete} />}
     <ConversationsProvider>
     <KBInjectionProvider>
-    <AppLayout>
+    <AppLayout tradingEnabled={tradingEnabled}>
       {(activePane) => {
         switch (activePane) {
           case "chat":
@@ -58,6 +63,7 @@ export default function App() {
           case "monitoring":
           case "audit":
           case "memories":
+          case "trading":
           case "settings":
             return (
               <Suspense fallback={<PaneLoader />}>
@@ -65,6 +71,7 @@ export default function App() {
                 {activePane === "monitoring" && <MonitoringPane />}
                 {activePane === "audit" && <AuditPane />}
                 {activePane === "memories" && <MemoriesPane />}
+                {activePane === "trading" && <TradingPane />}
                 {activePane === "settings" && <SettingsPane />}
               </Suspense>
             )
