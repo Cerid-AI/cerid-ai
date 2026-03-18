@@ -4,7 +4,7 @@
 import { type FC } from 'react'
 import { TradingKPIs } from './trading-kpis'
 import { SessionDetail } from './session-detail'
-import { useTradingData, type TradingData, type TradingSession } from '@/hooks/use-trading-data'
+import { useTradingData, type TradingData } from '@/hooks/use-trading-data'
 
 interface TradingPaneProps {
   data?: TradingData

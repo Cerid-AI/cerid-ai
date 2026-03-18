@@ -12,6 +12,7 @@ Consumers should send ``X-Client-ID`` to get per-client rate limiting.
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
+
 from models.trading import (
     CascadeConfirmRequest,
     HerdDetectRequest,
@@ -20,20 +21,17 @@ from models.trading import (
     TradingSignalRequest,
 )
 from routers.agents import (
-    trading_cascade_confirm_endpoint,
-    trading_herd_detect_endpoint,
-    trading_kelly_size_endpoint,
-    trading_longshot_surface_endpoint,
-    trading_signal_endpoint,
-)
-
-from routers.agents import (
     AgentQueryRequest,
     HallucinationCheckRequest,
     MemoryExtractionRequest,
     agent_query_endpoint,
     hallucination_check_endpoint,
     memory_extract_endpoint,
+    trading_cascade_confirm_endpoint,
+    trading_herd_detect_endpoint,
+    trading_kelly_size_endpoint,
+    trading_longshot_surface_endpoint,
+    trading_signal_endpoint,
 )
 from routers.health import health_check
 

@@ -9,9 +9,10 @@ import pytest
 class TestTradingAutoresearch:
     @pytest.mark.asyncio
     async def test_stores_performance_in_neo4j(self) -> None:
-        from agents.trading_scheduler_jobs import run_trading_autoresearch
         import httpx
         import respx
+
+        from agents.trading_scheduler_jobs import run_trading_autoresearch
 
         with respx.mock:
             respx.get("http://localhost:8090/aggregate/performance").mock(
@@ -24,9 +25,10 @@ class TestTradingAutoresearch:
 
     @pytest.mark.asyncio
     async def test_handles_api_failure(self) -> None:
-        from agents.trading_scheduler_jobs import run_trading_autoresearch
         import httpx
         import respx
+
+        from agents.trading_scheduler_jobs import run_trading_autoresearch
 
         with respx.mock:
             respx.get("http://localhost:8090/aggregate/performance").mock(
@@ -40,9 +42,10 @@ class TestTradingAutoresearch:
 class TestPlattScalingMirror:
     @pytest.mark.asyncio
     async def test_mirrors_platt_params(self) -> None:
-        from agents.trading_scheduler_jobs import run_platt_scaling_mirror
         import httpx
         import respx
+
+        from agents.trading_scheduler_jobs import run_platt_scaling_mirror
 
         with respx.mock:
             respx.get("http://localhost:8090/sessions").mock(
@@ -60,9 +63,10 @@ class TestPlattScalingMirror:
 class TestLongshotSurfaceRebuild:
     @pytest.mark.asyncio
     async def test_stores_calibration_points(self) -> None:
-        from agents.trading_scheduler_jobs import run_longshot_surface_rebuild
         import httpx
         import respx
+
+        from agents.trading_scheduler_jobs import run_longshot_surface_rebuild
 
         with respx.mock:
             respx.post("http://localhost:8090/sdk/v1/trading/longshot-surface").mock(

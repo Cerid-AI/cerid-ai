@@ -1,6 +1,7 @@
 """Tests for cgroup-aware memory guard in verification streaming."""
 import asyncio
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 
