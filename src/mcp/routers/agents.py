@@ -13,6 +13,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 import config
+from deps import get_chroma, get_neo4j, get_redis
 from models.trading import (
     CascadeConfirmRequest,
     HerdDetectRequest,
@@ -20,7 +21,6 @@ from models.trading import (
     LongshotSurfaceRequest,
     TradingSignalRequest,
 )
-from deps import get_chroma, get_neo4j, get_redis
 from services.ingestion import ingest_content, validate_file_path
 
 router = APIRouter()

@@ -4,20 +4,7 @@
 import { type FC } from 'react'
 import { TradingKPIs } from './trading-kpis'
 import { SessionDetail } from './session-detail'
-import { useTradingData } from '@/hooks/use-trading-data'
-
-interface TradingSession {
-  name: string
-  pnl?: number
-  open_positions?: number
-  signals_today?: number
-  status?: string
-}
-
-interface TradingData {
-  aggregate?: { total_pnl?: number; daily_pnl?: number; sharpe?: number; max_drawdown?: number }
-  sessions?: TradingSession[]
-}
+import { useTradingData, type TradingData, type TradingSession } from '@/hooks/use-trading-data'
 
 interface TradingPaneProps {
   data?: TradingData

@@ -3,9 +3,17 @@
 
 import { useState, useEffect, useCallback } from 'react'
 
-interface TradingData {
-  aggregate: Record<string, unknown>
-  sessions: Array<Record<string, unknown>>
+export interface TradingSession {
+  name: string
+  pnl?: number
+  open_positions?: number
+  signals_today?: number
+  status?: string
+}
+
+export interface TradingData {
+  aggregate?: { total_pnl?: number; daily_pnl?: number; sharpe?: number; max_drawdown?: number }
+  sessions?: TradingSession[]
 }
 
 export function useTradingData(refreshInterval = 10000) {
