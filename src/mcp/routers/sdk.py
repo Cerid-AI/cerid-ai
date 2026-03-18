@@ -12,6 +12,20 @@ Consumers should send ``X-Client-ID`` to get per-client rate limiting.
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
+from models.trading import (
+    CascadeConfirmRequest,
+    HerdDetectRequest,
+    KellySizeRequest,
+    LongshotSurfaceRequest,
+    TradingSignalRequest,
+)
+from routers.agents import (
+    trading_cascade_confirm_endpoint,
+    trading_herd_detect_endpoint,
+    trading_kelly_size_endpoint,
+    trading_longshot_surface_endpoint,
+    trading_signal_endpoint,
+)
 
 from routers.agents import (
     AgentQueryRequest,
@@ -72,22 +86,6 @@ def _app_version() -> str:
 # ---------------------------------------------------------------------------
 # Trading SDK facades (cerid-trading-agent stable contract)
 # ---------------------------------------------------------------------------
-
-from models.trading import (
-    CascadeConfirmRequest,
-    HerdDetectRequest,
-    KellySizeRequest,
-    LongshotSurfaceRequest,
-    TradingSignalRequest,
-)
-from routers.agents import (
-    trading_cascade_confirm_endpoint,
-    trading_herd_detect_endpoint,
-    trading_kelly_size_endpoint,
-    trading_longshot_surface_endpoint,
-    trading_signal_endpoint,
-)
-
 
 @router.post("/trading/signal")
 async def sdk_trading_signal(req: TradingSignalRequest):

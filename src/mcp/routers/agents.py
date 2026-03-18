@@ -13,6 +13,13 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 import config
+from models.trading import (
+    CascadeConfirmRequest,
+    HerdDetectRequest,
+    KellySizeRequest,
+    LongshotSurfaceRequest,
+    TradingSignalRequest,
+)
 from deps import get_chroma, get_neo4j, get_redis
 from services.ingestion import ingest_content, validate_file_path
 
@@ -669,15 +676,6 @@ async def curate_estimate_endpoint(req: CurateEstimateRequest):
 # ---------------------------------------------------------------------------
 # Trading agent endpoints (cerid-trading-agent KB enrichment)
 # ---------------------------------------------------------------------------
-
-from models.trading import (
-    CascadeConfirmRequest,
-    HerdDetectRequest,
-    KellySizeRequest,
-    LongshotSurfaceRequest,
-    TradingSignalRequest,
-)
-
 
 @router.post("/agent/trading/signal")
 async def trading_signal_endpoint(req: TradingSignalRequest):

@@ -9,7 +9,7 @@ interface TradingData {
 }
 
 export function useTradingData(refreshInterval = 10000) {
-  const [data, setData] = useState<TradingData | null>(null)
+  const [data, setData] = useState<TradingData | undefined>(undefined)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
