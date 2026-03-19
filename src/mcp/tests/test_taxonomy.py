@@ -83,7 +83,7 @@ class TestTaxonomyConfig:
         """TAXONOMY contains all expected domains."""
         import config
 
-        expected = {"coding", "finance", "projects", "personal", "general", "conversations"}
+        expected = {"coding", "finance", "projects", "personal", "general", "conversations", "trading"}
         assert expected == set(config.TAXONOMY.keys())
 
     def test_domains_derived_from_taxonomy(self):
