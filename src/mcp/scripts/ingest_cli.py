@@ -34,6 +34,7 @@ import config
 
 MCP_URL = os.getenv("MCP_URL", "http://localhost:8888")
 REQUEST_DELAY = 0.3  # seconds between requests to avoid server overload
+REQUEST_HEADERS = {"X-Client-ID": "cli-ingest"}
 
 # Thread-safe counters
 _print_lock = Lock()
@@ -108,6 +109,7 @@ def _ingest_one(
         time.sleep(REQUEST_DELAY)  # avoid hammering the server
         resp = requests.post(
             f"{MCP_URL}/ingest_file",
+            headers=REQUEST_HEADERS,
             json={
                 "file_path": container_path,
                 "domain": file_domain,

@@ -154,7 +154,7 @@ class OnnxEmbeddingFunction:
             norms = np.linalg.norm(embeddings, axis=1, keepdims=True).clip(min=1e-12)
             embeddings = embeddings / norms
 
-        return embeddings.tolist()
+        return [embeddings[i] for i in range(embeddings.shape[0])]
 
     def embed_query(self, query: str) -> list[float]:
         """Embed a single query, applying query prefix if configured."""

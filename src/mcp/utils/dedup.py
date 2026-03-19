@@ -45,7 +45,7 @@ def check_semantic_duplicate(
             include=["metadatas", "distances"],
         )
 
-        if not results or not results.get("ids") or not results["ids"][0]:
+        if not results or not results.get("ids") or len(results["ids"]) == 0 or not results["ids"][0]:
             return None
 
         # L2 distance -> approximate similarity: 1 / (1 + distance)

@@ -24,6 +24,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+# DEPRECATED: This dict is unused. CLIENT_RATE_LIMITS in config/settings.py
+# is the source of truth for per-client rate limits.
 RATE_LIMITS: dict[str, tuple[int, int]] = {
     "/agent/": (20, 60),
     "/ingest": (10, 60),
@@ -81,7 +83,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         path = request.url.path
         # Per-client isolation via X-Client-ID (set by RequestIDMiddleware)
-        client_id = getattr(request.state, "client_id", "gui") if hasattr(request, "state") else "gui"
+        client_id = request.headers.get("x-client-id", "gui")
         client_limits = CLIENT_RATE_LIMITS.get(
             client_id, CLIENT_RATE_LIMITS.get("_default", {}),
         )

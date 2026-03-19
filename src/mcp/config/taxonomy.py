@@ -19,7 +19,7 @@ TAXONOMY = {
     "finance": {
         "description": "Financial documents, tax records, budgets",
         "icon": "dollar-sign",
-        "sub_categories": ["tax", "investments", "budgets", "receipts", "trading", "market-analysis", "risk-management", "general"],
+        "sub_categories": ["tax", "investments", "budgets", "receipts", "general"],
     },
     "projects": {
         "description": "Project plans, meeting notes, specifications",
@@ -40,6 +40,14 @@ TAXONOMY = {
         "description": "Extracted memories from chat sessions",
         "icon": "message-circle",
         "sub_categories": ["facts", "decisions", "preferences", "action-items", "general"],
+    },
+    "trading": {
+        "description": "Automated trading signals, market analysis, execution logs, and strategy research",
+        "icon": "trending-up",
+        "sub_categories": [
+            "signals", "market-analysis", "execution", "post-analysis",
+            "strategy-research", "risk-analysis", "general",
+        ],
     },
 }
 
@@ -92,7 +100,8 @@ SUPPORTED_EXTENSIONS = {
 DOMAIN_AFFINITY = {
     "coding":        {"projects": 0.6},
     "projects":      {"coding": 0.6, "finance": 0.4},
-    "finance":       {"projects": 0.4},
+    "finance":       {"projects": 0.4, "trading": 0.3},
+    "trading":       {"finance": 0.3},
     "personal":      {"general": 0.5, "conversations": 0.3},
     "general":       {"personal": 0.5, "conversations": 0.3},
     "conversations": {"personal": 0.3, "general": 0.3},
@@ -117,8 +126,6 @@ TAG_VOCABULARY: dict[str, list[str]] = {
         "tax-return", "invoice", "receipt", "budget", "investment",
         "expense", "income", "bank-statement", "tax-deduction", "payroll",
         "insurance", "retirement", "mortgage", "credit-card", "report",
-        "trading-signal", "herd-detection", "kelly-sizing", "cascade-liquidation",
-        "longshot-surface", "market-analysis", "risk-management", "position-sizing",
     ],
     "projects": [
         "meeting-notes", "specification", "proposal", "roadmap", "design",
@@ -137,5 +144,11 @@ TAG_VOCABULARY: dict[str, list[str]] = {
     "conversations": [
         "fact", "decision", "preference", "action-item", "insight",
         "question", "recommendation", "follow-up", "context", "memory",
+    ],
+    "trading": [
+        "trading-signal", "herd-detection", "kelly-sizing", "cascade-liquidation",
+        "longshot-surface", "market-analysis", "risk-management", "position-sizing",
+        "entry-trigger", "exit-strategy", "backtest", "performance-analysis",
+        "volatility", "sentiment", "correlation", "arbitrage", "execution-log",
     ],
 }

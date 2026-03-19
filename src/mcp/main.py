@@ -167,7 +167,7 @@ async def lifespan(app: FastAPI):
             ensure_default_tenant(driver, _cfg.DEFAULT_TENANT_ID)
             logger.info("Multi-user mode enabled — default tenant ensured")
             if not _cfg.CERID_JWT_SECRET:
-                logger.error(
+                raise RuntimeError(
                     "CERID_JWT_SECRET is required when CERID_MULTI_USER=true. "
                     "Generate with: python -c \"import secrets; print(secrets.token_urlsafe(64))\""
                 )

@@ -259,3 +259,35 @@
 **Problem:** The verification pipeline has its own separate routing that already handles temporal claims correctly via `_is_current_event_claim()`. The bug was in the CHAT model router scoring/filtering, not verification.
 **Fix:** Check the chat model router scoring and filtering first. The chat router (`model-router.ts`) controls which model receives the initial query; the verification pipeline (`use-verification-stream.ts`) only validates the response afterward. Fixing the wrong layer wastes time.
 **Reference:** `src/web/src/lib/model-router.ts` (chat routing), `src/web/src/hooks/use-verification-stream.ts` (verification routing)
+
+## Session: 2026-03-18/19 — Cross-Project Audit & Pipeline Fixes
+
+### Trading Agent Module: Use Correct Neo4j Session API
+- **Problem:** `trading_agent.py` called `neo4j.execute_read()` which doesn't exist on `BoltDriver`. Also called `chroma.query()` on the client wrapper instead of getting a collection first.
+- **Fix:** Created `_neo4j_query()` helper using `driver.session().run()`. Changed ChromaDB to use `chroma.get_collection(name).query()` per domain.
+- **Rule:** When writing functions that receive dependency-injected clients, check what API the injected object actually exposes. Don't assume method names.
+
+### structlog Missing from Docker Container
+- **Problem:** `structlog` was in `requirements.txt` but not in `requirements.lock` (hash-pinned). Dockerfile installs from lock file only.
+- **Fix:** Generated hash for structlog and appended to `requirements.lock`.
+- **Rule:** After adding a dependency to `requirements.txt`, always regenerate `requirements.lock` before building Docker images. Use `make lock-python`.
+
+### Rate Limiting Middleware: Don't Depend on request.state From Other Middleware
+- **Problem:** `RateLimitMiddleware` read `request.state.client_id` which was set by `RequestIDMiddleware`. But middleware executes LIFO — rate limiting ran before the ID was set. All clients got default limits.
+- **Fix:** Read `X-Client-ID` directly from `request.headers` instead of `request.state`.
+- **Rule:** Middleware should read from immutable request data (headers, URL), not from mutable state set by other middleware. Order-dependent state sharing between middleware is fragile.
+
+### Keywords Metadata Key Mismatch
+- **Problem:** `ingest_file()` stored keywords as `meta["keywords"]` but `ingest_content()` read `meta.get("keywords_json")`. AI-categorized keywords silently lost to Neo4j.
+- **Fix:** Standardized on `keywords_json` everywhere (5 locations).
+- **Rule:** Use a single canonical field name. Grep for all access patterns before adding new metadata fields.
+
+### Embedding Dimension: Return list[np.ndarray] for ChromaDB 0.5.x
+- **Problem:** `OnnxEmbeddingFunction.__call__()` returned `list[list[float]]` via `.tolist()`, but ChromaDB 0.5.23 `validate_embeddings()` requires `list[np.ndarray]`.
+- **Fix:** Return `[embeddings[i] for i in range(embeddings.shape[0])]` — individual numpy array slices.
+- **Rule:** Check the exact type contract of the library's validation function, not just the protocol type hints.
+
+### New "trading" Domain for KB Segregation
+- **What:** Added a dedicated `trading` domain to taxonomy with its own sub-categories and tag vocabulary. Moved trading-specific tags from `finance` to `trading`.
+- **Why:** Trading agent queries were matching personal tax documents. Domain segregation ensures trading KB enrichment only searches trading-relevant content.
+- **Reference:** `src/mcp/config/taxonomy.py` — TAXONOMY["trading"], TAG_VOCABULARY["trading"]

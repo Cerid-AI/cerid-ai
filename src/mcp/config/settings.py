@@ -398,6 +398,10 @@ CLIENT_RATE_LIMITS: dict[str, dict[str, tuple[int, int]]] = {
         "/agent/": (80, 60),
         "/sdk/": (80, 60),
     },
+    "cli-ingest": {
+        "/ingest": (60, 60),
+        "/recategorize": (30, 60),
+    },
     "_default": {
         "/agent/": (10, 60),
         "/sdk/": (10, 60),

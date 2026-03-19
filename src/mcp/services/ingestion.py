@@ -161,7 +161,7 @@ def _reingest_artifact(
         graph.update_artifact(
             get_neo4j(),
             artifact_id=artifact_id,
-            keywords_json=base_meta.get("keywords", "[]"),
+            keywords_json=base_meta.get("keywords_json", "[]"),
             summary=base_meta.get("summary", content[:200]),
             chunk_count=len(chunks),
             chunk_ids_json=json.dumps(chunk_ids),
@@ -297,7 +297,7 @@ def ingest_content(
             artifact_id=artifact_id,
             filename=base_meta.get("filename", "text_input"),
             domain=domain,
-            keywords_json=base_meta.get("keywords", "[]"),
+            keywords_json=base_meta.get("keywords_json", "[]"),
             summary=base_meta.get("summary", content[:200]),
             chunk_count=len(chunks),
             chunk_ids_json=json.dumps(chunk_ids),
@@ -351,7 +351,7 @@ def ingest_content(
                 artifact_id=artifact_id,
                 filename=base_meta.get("filename", "text_input"),
                 domain=domain,
-                keywords_json=base_meta.get("keywords", "[]"),
+                keywords_json=base_meta.get("keywords_json", "[]"),
                 content=content[:5000],  # limit content scan for performance
             )
         except Exception as e:
@@ -429,7 +429,7 @@ async def ingest_file(
             meta["ai_categorized"] = "true"
             meta["categorize_mode"] = mode
         if ai_result.get("keywords"):
-            meta["keywords"] = json.dumps(ai_result["keywords"])
+            meta["keywords_json"] = json.dumps(ai_result["keywords"])
         if ai_result.get("summary"):
             meta["summary"] = ai_result["summary"]
         # Sub-category and tags from AI
@@ -457,7 +457,7 @@ async def ingest_file(
     result["categorize_mode"] = mode
     result["metadata"] = {
         k: v for k, v in meta.items()
-        if k in ("filename", "domain", "sub_category", "keywords", "summary", "tags_json", "file_type", "estimated_tokens")
+        if k in ("filename", "domain", "sub_category", "keywords_json", "summary", "tags_json", "file_type", "estimated_tokens")
     }
     return result
 
