@@ -13,6 +13,7 @@ import { CollectionChart } from "./collection-chart"
 import { IngestionTimeline } from "./ingestion-timeline"
 import { SchedulerStatus } from "./scheduler-status"
 import { KBOperations } from "./kb-operations"
+import { ObservabilityDashboard } from "./observability-dashboard"
 import { fetchMaintenance, fetchIngestLog, fetchSchedulerStatus, fetchDigest } from "@/lib/api"
 
 export function MonitoringPane() {
@@ -61,6 +62,9 @@ export function MonitoringPane() {
           <div className="space-y-4 p-4">
             <PaneErrorBoundary label="Knowledge Digest">
               <DigestCard digest={digest} isLoading={loadingDigest} onPeriodChange={setDigestHours} />
+            </PaneErrorBoundary>
+            <PaneErrorBoundary label="Observability">
+              <ObservabilityDashboard />
             </PaneErrorBoundary>
             <PaneErrorBoundary label="Health Cards">
               <HealthCards health={maintenance?.health} />
