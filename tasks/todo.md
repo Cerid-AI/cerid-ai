@@ -49,24 +49,35 @@ Roadmap covers two tracks: **Infrastructure** (deployment, BYOK, packaging, repo
   - A2A client for remote agent discovery/invocation (Sprint 5)
   - Dual MCP + A2A = first personal KB with both protocols (Sprint 5)
 
-- [ ] **Phase C: Repo Architecture Separation** (8-12 days)
-  - Restructure: `core/` (Apache-2.0 KB engine), `app/` (Apache-2.0 application), `plugins/` (BSL-1.1 paid), `enterprise/` (commercial)
-  - 6 atomic PRs with re-export bridges — tests pass at every step
-  - License key validation for pro/enterprise features (offline signed JWT, no phone-home)
-  - Plugin packaging: manifest.json standard, loader, tier-gated registration
-  - Key files: all `src/mcp/` moves to `core/src/` + `app/api/`
+- [x] **Phase C: Repo Architecture Separation** ✅ 2026-03-21
+  - Restructured: `core/` (Apache-2.0), `app/` (Apache-2.0), `plugins/` (BSL-1.1), `enterprise/` (commercial)
+  - License files per directory, re-export bridges, CI paths updated (Sprint 6)
 
 ### P2 — Valuable
 
-- [ ] **Phase 46: Multi-Modal KB** (8-12 days) — Activate OCR (already built), add audio (faster-whisper), image (vision LLM). Paid plugins.
-- [ ] **Phase 47: Observability Dashboard** (4-6 days) — Real-time metrics: latency, cost, retrieval quality, NDCG@5. Basic=core, advanced=paid.
-- [ ] **Phase 48: Local LLM via Ollama** (3-5 days) — Add as provider in BYOK system. Air-gapped deployment.
-- [ ] **Phase D: Electron Desktop App** (10-14 days) — .dmg/.exe wrapping Docker lifecycle, system tray, auto-update via GitHub Releases. Uses `dockerode` for container management.
+- [x] **Phase 46: Multi-Modal KB** ✅ 2026-03-21
+  - OCR (pytesseract), audio (faster-whisper), vision (LLM) plugins — all BSL-1.1 pro-tier
+  - Plugin loader: dual-directory scanning, pkb_ingest_multimodal MCP tool, 26 tests
+- [x] **Phase 47: Observability Dashboard** ✅ 2026-03-21
+  - MetricsCollector: 8 Redis time-series metrics (latency, cost, NDCG, cache, verification)
+  - React dashboard: 6 metric cards with SVG sparklines, health score A-F, 25 tests
+- [x] **Phase 48: Local LLM via Ollama** ✅ 2026-03-21
+  - Ollama proxy router: /ollama/chat (streaming), /ollama/models, /ollama/pull
+  - Circuit breaker, OLLAMA_ENABLED gate, 15 tests
+- [x] **Phase D: Electron Desktop App** ✅ 2026-03-21
+  - Main process, Docker lifecycle (dockerode), system tray, auto-updater
+  - CI/CD: electron-build.yml for macOS + Windows, 8,357 lines
 
 ### P3 — Long-Term
 
-- [ ] **Phase 49: Plugin Foundation** (6-10 days) — Plugin packaging, loader, management API and GUI
-- [ ] **Phase 50: Visual Workflow Builder** (15-20 days) — Pipeline visualizer → stage toggles → custom DAG composition. Paid feature.
+- [x] **Phase 49: Plugin Foundation** ✅ 2026-03-21
+  - Plugin management router: 7 endpoints (list, enable/disable, config CRUD, scan)
+  - React settings: Plugins tab with card grid, status badges, tier gating, 15 tests
+- [x] **Phase 50: Visual Workflow Builder** ✅ 2026-03-21
+  - Workflow engine: CRUD, Kahn's DAG validation, topological execution, 4 templates
+  - SVG canvas: drag-to-reposition, type-colored nodes, live execution status
+  - Editor: add/delete nodes+edges, config sidebar, template selector, 30+ tests
+  - BSL-1.1 pro-tier plugin wrapper
 
 ### Execution Dependencies
 
