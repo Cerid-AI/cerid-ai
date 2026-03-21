@@ -36,6 +36,8 @@ from routers import (
     mcp_sse,
     memories,
     models,
+    observability,
+    ollama_proxy,
     providers,
     query,
     sdk,
@@ -274,17 +276,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-# 2. Rate limiting (added second)
+# 2. Metrics collection (added second — records latency/throughput, non-blocking)
+from middleware.metrics import MetricsMiddleware
+app.add_middleware(MetricsMiddleware)
+# 3. Rate limiting (added third)
 app.add_middleware(RateLimitMiddleware)
-# 3. API key auth (added third, runs first among auth/rate — rejects unauthenticated before rate check)
+# 4. API key auth (rejects unauthenticated before rate check)
 app.add_middleware(APIKeyMiddleware)
-# 4. JWT auth (only active when CERID_MULTI_USER=true — validates Bearer tokens, sets request.state)
+# 5. JWT auth (only active when CERID_MULTI_USER=true — validates Bearer tokens, sets request.state)
 if CERID_MULTI_USER:
     from middleware.jwt_auth import JWTAuthMiddleware
     app.add_middleware(JWTAuthMiddleware)
-# 5. Tenant context (sets tenant_id/user_id contextvars from request.state for downstream code)
+# 6. Tenant context (sets tenant_id/user_id contextvars from request.state for downstream code)
 app.add_middleware(TenantContextMiddleware)
-# 6. Request ID (added last, runs first — sets X-Request-ID for all subsequent middleware)
+# 7. Request ID (added last, runs first — sets X-Request-ID for all subsequent middleware)
 app.add_middleware(RequestIDMiddleware)
 
 # Register routers at root (backward compatibility) and /api/v1/ prefix
@@ -316,6 +321,14 @@ app.include_router(providers.router)
 app.include_router(providers.router, prefix="/api/v1")
 app.include_router(models.router)
 app.include_router(models.router, prefix="/api/v1")
+
+# Observability dashboard API (real-time metrics, health score, cost, quality)
+app.include_router(observability.router)
+app.include_router(observability.router, prefix="/api/v1")
+
+# Ollama local LLM proxy (always registered; endpoints gate on OLLAMA_ENABLED)
+app.include_router(ollama_proxy.router)
+app.include_router(ollama_proxy.router, prefix="/api/v1")
 
 # SDK router — stable external contract (manages its own /sdk/v1/ prefix)
 app.include_router(sdk.router)

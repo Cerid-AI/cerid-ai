@@ -76,15 +76,18 @@ PROVIDER_REGISTRY: dict[str, dict] = {
     "ollama": {
         "name": "ollama",
         "display_name": "Ollama (Local)",
-        "base_url": "http://localhost:11434",
-        "env_var": "",
+        "base_url": os.getenv("OLLAMA_URL", "http://localhost:11434"),
+        "env_var": "OLLAMA_URL",
         "test_endpoint": "/api/tags",
         "requires_api_key": False,
         "models": [
+            "llama3.2",
             "llama3.3",
             "mistral",
             "codellama",
+            "gemma2",
             "phi3",
+            "qwen2.5",
         ],
     },
 }

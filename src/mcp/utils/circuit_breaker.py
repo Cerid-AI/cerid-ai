@@ -215,6 +215,7 @@ _bifrost_verify = AsyncCircuitBreaker("bifrost-verify", failure_threshold=5, rec
 _bifrost_synopsis = AsyncCircuitBreaker("bifrost-synopsis", failure_threshold=3, recovery_timeout=60)
 _bifrost_memory = AsyncCircuitBreaker("bifrost-memory", failure_threshold=3, recovery_timeout=60)
 _neo4j = AsyncCircuitBreaker("neo4j", failure_threshold=5, recovery_timeout=30)
+_ollama = AsyncCircuitBreaker("ollama", failure_threshold=3, recovery_timeout=30)
 
 
 def get_breaker(name: str) -> AsyncCircuitBreaker:
@@ -226,6 +227,7 @@ def get_breaker(name: str) -> AsyncCircuitBreaker:
         "bifrost-synopsis": _bifrost_synopsis,
         "bifrost-memory": _bifrost_memory,
         "neo4j": _neo4j,
+        "ollama": _ollama,
     }
     breaker = _breakers.get(name)
     if breaker is None:
