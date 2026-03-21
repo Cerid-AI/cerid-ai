@@ -94,16 +94,75 @@ def translate_path(host_path: str) -> str:
     return abs_path
 
 
-def ingest_via_api(container_path: str, domain: str, sub_category: str) -> dict:
-    """Call the MCP /ingest_file API."""
-    payload = {
-        "file_path": container_path,
-        "domain": domain or "",
-        "sub_category": sub_category or "",
-        "categorize_mode": "smart",
-    }
+def ingest_via_api(host_path: str, domain: str, sub_category: str) -> dict:
+    """Read file on host, parse content, send via /ingest (content-based).
+
+    This avoids macOS Docker virtiofs Errno 35 issues with /ingest_file,
+    which reads files inside the container via the bind mount.
+    """
+    filename = os.path.basename(host_path)
     headers = {"Content-Type": "application/json", "X-Client-ID": "folder_scanner"}
-    resp = requests.post(f"{MCP_URL}/ingest_file", json=payload, headers=headers, timeout=120)
+
+    # Try /ingest_file first (works on Linux Docker, native installs)
+    container_path = translate_path(host_path)
+    try:
+        resp = requests.post(
+            f"{MCP_URL}/ingest_file",
+            json={"file_path": container_path, "domain": domain or "", "sub_category": sub_category or "", "categorize_mode": "smart"},
+            headers=headers,
+            timeout=120,
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except (requests.ConnectionError, requests.HTTPError):
+        pass
+
+    # Fallback: read file on host and send content via /ingest
+    with open(host_path, "rb") as f:
+        content = f.read()
+
+    # For text-based files, decode and send as content
+    ext = os.path.splitext(filename)[1].lower()
+    text_extensions = {".txt", ".md", ".rst", ".log", ".py", ".js", ".ts", ".jsx", ".tsx",
+                       ".java", ".go", ".rs", ".rb", ".cpp", ".c", ".h", ".cs", ".sql",
+                       ".r", ".swift", ".kt", ".sh", ".bash", ".json", ".yaml", ".yml",
+                       ".toml", ".ini", ".cfg", ".csv", ".tsv", ".xml", ".html", ".htm"}
+
+    if ext in text_extensions:
+        try:
+            text = content.decode("utf-8", errors="replace")
+        except Exception:
+            text = content.decode("latin-1", errors="replace")
+
+        resp = requests.post(
+            f"{MCP_URL}/ingest",
+            json={"content": text, "filename": filename, "domain": domain or "", "tags": [], "sub_category": sub_category or ""},
+            headers=headers,
+            timeout=120,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    # For binary files (PDF, DOCX, EPUB), use multipart upload
+    resp = requests.post(
+        f"{MCP_URL}/ingest/upload",
+        files={"file": (filename, content)},
+        data={"domain": domain or "", "sub_category": sub_category or ""},
+        headers={"X-Client-ID": "folder_scanner"},
+        timeout=120,
+    )
+    if resp.status_code == 404:
+        # /ingest/upload not available — try reading as text anyway
+        try:
+            text = content.decode("utf-8", errors="replace")
+        except Exception:
+            text = content.decode("latin-1", errors="replace")
+        resp = requests.post(
+            f"{MCP_URL}/ingest",
+            json={"content": text[:50000], "filename": filename, "domain": domain or "", "tags": []},
+            headers=headers,
+            timeout=120,
+        )
     resp.raise_for_status()
     return resp.json()
 
@@ -192,10 +251,9 @@ def scan_directory(
             # Brief pause between files to respect rate limits
             time.sleep(1)
 
-            # Ingest via API
-            container_path = translate_path(fpath)
+            # Ingest via API (reads file on host, sends to MCP)
             try:
-                result = ingest_via_api(container_path, domain, sub_cat)
+                result = ingest_via_api(fpath, domain, sub_cat)
                 status = result.get("status", "unknown")
                 if status == "duplicate":
                     stats["duplicates"] += 1
