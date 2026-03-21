@@ -74,6 +74,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         from config.settings import CLIENT_RATE_LIMITS
 
         path = request.url.path
+        method = request.method
+
+        # GET requests are read-only lookups — exempt from rate limiting
+        # to avoid exhausting the budget with report fetches, health checks, etc.
+        if method == "GET":
+            return await call_next(request)
+
         # Per-client isolation via X-Client-ID (set by RequestIDMiddleware)
         client_id = request.headers.get("x-client-id", "gui")
         client_limits = CLIENT_RATE_LIMITS.get(
