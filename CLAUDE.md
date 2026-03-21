@@ -245,3 +245,18 @@ Frontend tests: `cd src/web && npx vitest run`
 - **Workflow engine (`routers/workflows.py`):** DAG validation via Kahn's algorithm (rejects cycles). Topological execution order. 4 built-in templates (research, ingest, verify, custom). Nodes are typed (query, ingest, verify, transform, notify). SVG canvas for visual editing. BSL-1.1 pro-tier via `plugins/workflow/`.
 - **Observability (`routers/observability.py`):** `MetricsCollector` writes 8 Redis time-series metrics (latency, cost, NDCG, cache hit rate, verification accuracy, error rate, throughput, memory usage). Health score computed as weighted A-F grade. Dashboard endpoint returns sparkline data for configurable time windows.
 - **A2A Protocol (`routers/a2a.py`):** Agent Card served at `/.well-known/agent.json`. Task lifecycle: create → status → cancel with Redis-backed storage. A2A client (`utils/a2a_client.py`) discovers remote agents and invokes tasks. Cerid is the first personal KB with dual MCP + A2A protocol support.
+
+## Dependency Sync Guide
+
+See [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) for the full developer reference.
+
+**Critical sync points when making changes:**
+- **New MCP tool** — update `tools.py` + tool count in `CLAUDE.md` and `README.md`
+- **New endpoint** — register in `main.py` + update `docs/API_REFERENCE.md`
+- **New env var** — add to `settings.py` + `.env.example`
+- **Python deps** — edit `requirements.txt` then `make lock-python`
+- **Backend schema change** — manually update `src/web/src/lib/types.ts`
+- **SDK contract change** — update `docs/DEPENDENCY_COUPLING.md` + coordinate with external consumers
+- **Version bump** — `pyproject.toml` + git tag
+
+**Version coupling:** Python 3.11 (Dockerfile + CI + pyproject.toml), Node 22 (.nvmrc + Dockerfile), ChromaDB client >=0.5,<0.6 must match server 0.5.23.
