@@ -701,3 +701,30 @@ export interface ChatModelInfo {
   original_error?: number
 }
 
+// -- Setup Wizard types (first-run) -------------------------------------------
+
+export interface SetupStatus {
+  setup_required: boolean
+  configured_providers: string[]
+}
+
+export interface KeyValidation {
+  valid: boolean
+  provider: string
+  error?: string
+}
+
+export interface SetupConfig {
+  keys: Record<string, string>
+}
+
+export interface SetupServiceHealth {
+  name: string
+  status: "healthy" | "degraded" | "error" | "connected"
+}
+
+export interface SetupHealth {
+  all_healthy: boolean
+  services: SetupServiceHealth[]
+}
+

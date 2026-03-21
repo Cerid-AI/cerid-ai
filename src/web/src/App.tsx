@@ -10,8 +10,9 @@ import { ConversationsProvider } from "@/contexts/conversations-context"
 import { AuthProvider } from "@/contexts/auth-context"
 import { UIModeProvider } from "@/contexts/ui-mode-context"
 import { ProtectedRoute } from "@/components/auth/protected-route"
-import { fetchSettings } from "@/lib/api"
+import { fetchSettings, fetchSetupStatus } from "@/lib/api"
 import { OnboardingDialog } from "@/components/onboarding/onboarding-dialog"
+import { SetupWizard } from "@/components/setup/setup-wizard"
 
 const KnowledgePane = lazy(() => import("@/components/kb/knowledge-pane"))
 const MonitoringPane = lazy(() => import("@/components/monitoring/monitoring-pane"))
@@ -32,13 +33,29 @@ function PaneLoader() {
 export default function App() {
   const [multiUser, setMultiUser] = useState(false)
   const [tradingEnabled, setTradingEnabled] = useState(false)
+  const [setupRequired, setSetupRequired] = useState<boolean | null>(null)
   const [showOnboarding, setShowOnboarding] = useState(() => {
     try { return !localStorage.getItem("cerid-onboarding-complete") } catch { return false }
   })
 
   const handleOnboardingComplete = useCallback(() => setShowOnboarding(false), [])
+  const handleSetupComplete = useCallback(() => setSetupRequired(false), [])
 
   useEffect(() => {
+    // Check setup status first, then load settings
+    fetchSetupStatus()
+      .then((status) => {
+        if (status.setup_required) {
+          setSetupRequired(true)
+        } else {
+          setSetupRequired(false)
+        }
+      })
+      .catch(() => {
+        // Backend unreachable — skip setup check, show main app
+        setSetupRequired(false)
+      })
+
     fetchSettings()
       .then((s) => {
         setMultiUser(!!s.multi_user)
@@ -46,6 +63,21 @@ export default function App() {
       })
       .catch(() => {})
   }, [])
+
+  // Show nothing while checking setup status
+  if (setupRequired === null) {
+    return (
+      <div className="flex h-screen items-center justify-center text-muted-foreground">
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+        Loading...
+      </div>
+    )
+  }
+
+  // Show setup wizard if backend reports no API keys configured
+  if (setupRequired) {
+    return <SetupWizard open onComplete={handleSetupComplete} />
+  }
 
   return (
     <AuthProvider>

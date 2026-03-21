@@ -59,6 +59,10 @@ import type {
   TagSuggestion,
   ChatModelInfo,
   Conversation,
+  SetupStatus,
+  KeyValidation,
+  SetupConfig,
+  SetupHealth,
 } from "./types"
 
 export async function fetchHealth(): Promise<HealthResponse> {
@@ -1058,4 +1062,40 @@ export async function fetchTradingSessions(): Promise<unknown[]> {
     headers: mcpHeaders(),
   })
   return res.ok ? res.json() : []
+}
+
+// ---------------------------------------------------------------------------
+// Setup Wizard (first-run configuration)
+// ---------------------------------------------------------------------------
+
+export async function fetchSetupStatus(): Promise<SetupStatus> {
+  const res = await fetch(`${MCP_BASE}/setup/status`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Setup status check failed: ${res.status}`))
+  return res.json()
+}
+
+export async function validateProviderKey(provider: string, apiKey: string): Promise<KeyValidation> {
+  const res = await fetch(`${MCP_BASE}/setup/validate-key`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ provider, api_key: apiKey }),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Key validation failed: ${res.status}`))
+  return res.json()
+}
+
+export async function applySetupConfig(config: SetupConfig): Promise<{ success: boolean }> {
+  const res = await fetch(`${MCP_BASE}/setup/configure`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(config),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Setup configure failed: ${res.status}`))
+  return res.json()
+}
+
+export async function fetchSetupHealth(): Promise<SetupHealth> {
+  const res = await fetch(`${MCP_BASE}/setup/health`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Setup health check failed: ${res.status}`))
+  return res.json()
 }

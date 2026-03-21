@@ -1,0 +1,73 @@
+# Bifrost Configuration - Semantic Routing with Enhanced Intent Classification
+# Primary: LLM-based semantic intent detection (detailed zero-shot prompt)
+# Secondary: Cost-aware fallback routing
+# Dashboard: Enabled on port 8080
+# Budget: ${{ monthly_budget | default(20.0) }} monthly cap with 80% alert
+#
+# AUTO-GENERATED from config.yaml.template — do not edit directly.
+# Edit model assignments via the /models/assignments API or the Settings GUI.
+
+providers:
+  openrouter:
+    api_key: ${BIFROST_OPENROUTER_API_KEY}
+    base_url: https://openrouter.ai/api/v1
+
+routing:
+  strategy: semantic-intent
+  classifier_model: {{ classifier_model | default("meta-llama/llama-3.3-70b-instruct") }}   # Free-tier, used only for intent classification
+  classifier_prompt: >-
+    Classify this prompt into exactly one category:
+    - coding (technical scripting, algorithms, code writing/debugging, config changes, implementation, programming-related tasks)
+    - research (current events, science, news, data lookup, real-time information, "what's new", "recent developments", scientific inquiry)
+    - simple (factual questions, basic math, definitions, quick calculations, "what is", "how many", "capital of", trivial lookups)
+    - general (creative writing, storytelling, philosophy, uncategorized, open-ended discussion, large/complex projects without clear sub-intent)
+
+    Respond with **only** the category name in lowercase. No explanation, no quotes, no extra words.
+
+    Examples:
+    - "Write a Python function to reverse a string" → coding
+    - "Latest news on xAI Grok model" → research
+    - "What is the capital of France?" → simple
+    - "Explain quantum computing in simple terms" → general
+    - "Debug this error message in my code" → coding
+    - "What are people saying about Grok on X right now?" → research
+    - "2 + 2 equals?" → simple
+    - "Generate a fantasy story about dragons" → general
+    - "Update my YAML config for RAG integration" → coding
+    - "Best LLM for scientific research in 2026" → research
+    - "How many planets are in the solar system?" → simple
+    - "Plan a 30-day trip itinerary" → general
+    - "Code review latest Grok update" → research  # Hybrid example → prefers Grok's real-time strength
+    - "Analyze this 10k-token codebase" → coding
+    - "Summarize a 50-page research paper" → general
+
+    Prompt: {prompt}
+
+  # NOTE: Bifrost is now used only for internal backend LLM calls (agents, verification, etc).
+  # User chat goes through MCP /chat/stream proxy → OpenRouter directly.
+  intent_categories:
+    - name: coding
+      target_model: {{ coding_model | default("anthropic/claude-sonnet-4.6") }}
+    - name: research
+      target_model: {{ research_model | default("x-ai/grok-4.1-fast") }}
+    - name: simple
+      target_model: {{ simple_model | default("google/gemini-2.5-flash") }}
+    - name: general
+      target_model: {{ general_model | default("openai/gpt-4o-mini") }}
+
+  fallback_models: {{ fallback_models | default('["openai/gpt-4o-mini", "google/gemini-2.5-flash"]') }}
+
+observability:
+  enabled: true
+  dashboard_port: 8080
+  metrics:
+    - token_usage
+    - cost_per_request
+    - latency
+    - error_rate
+    - intent_distribution   # Tracks how often each category is classified
+
+budget:
+  monthly_limit: {{ monthly_budget | default(20.0) }}
+  alert_threshold: 0.8
+  alert_emails: []  # Add your email if you want notifications
