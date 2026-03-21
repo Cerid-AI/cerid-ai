@@ -89,12 +89,10 @@ export function useVerificationOrchestrator({
 
   const streamTriggerKey = useMemo(() => {
     if (!activeMessages || isStreaming) return 0
-    // Prevent re-triggering verification for conversations that already completed
-    if (activeId && verifiedConversations.has(activeId)) return 0
-    // Prevent re-triggering when module-level cache already has the report for latest message
+    // Only skip if the LATEST message already has a cached report (per-message, not per-conversation)
     if (activeId && lastAssistantMsgId && reportCache.has(cacheKey(activeId, lastAssistantMsgId))) return 0
     return activeMessages.filter((m) => m.role === "assistant").length
-  }, [activeMessages, isStreaming, activeId, verifiedConversations, lastAssistantMsgId])
+  }, [activeMessages, isStreaming, activeId, lastAssistantMsgId])
 
   const latestUserQuery = useMemo(() => {
     if (!activeMessages) return undefined
