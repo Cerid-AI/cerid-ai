@@ -32,6 +32,7 @@ from agents.hallucination.patterns import (
     _pick_verification_model,
 )
 from utils.circuit_breaker import CircuitOpenError, get_breaker
+from utils.claim_cache import cache_verdict, get_cached_verdict
 from utils.llm_parsing import parse_llm_json
 
 logger = logging.getLogger("ai-companion.hallucination")
@@ -1071,6 +1072,22 @@ async def verify_claim(
     unverified_threshold = config.HALLUCINATION_UNVERIFIED_THRESHOLD
     ext_kb_threshold = config.EXTERNAL_VERIFY_KB_THRESHOLD
 
+    # --- Fact-level cache: skip re-verification for previously seen claims ---
+    cached = await get_cached_verdict(redis_client, claim)
+    if cached and cached.get("status") in ("verified", "unverified"):
+        logger.info("Claim cache hit: '%s' -> %s", claim[:50], cached["status"])
+        return {
+            **cached,
+            "claim": claim,
+            "cached": True,
+        }
+
+    async def _cache_result(result: dict[str, Any]) -> dict[str, Any]:
+        """Cache the verdict (fire-and-forget) and return the result unchanged."""
+        if result.get("status") in ("verified", "unverified"):
+            await cache_verdict(redis_client, claim, result)
+        return result
+
     try:
         # Exclude 'conversations' domain from general KB query to avoid
         # self-verification against feedback-ingested LLM responses.
@@ -1113,7 +1130,7 @@ async def verify_claim(
                 claim, model, force_web_search=True, streaming=streaming,
                 expert_mode=expert_mode,
             )
-            return {
+            return await _cache_result({
                 "claim": claim,
                 "status": ext_result["status"],
                 "similarity": ext_result["confidence"],
@@ -1121,7 +1138,7 @@ async def verify_claim(
                 "verification_method": ext_result.get("verification_method", "none"),
                 "verification_model": ext_result.get("verification_model"),
                 "source_urls": ext_result.get("source_urls", []),
-            }
+            })
 
         top_results = all_results[:3]
         top_result = top_results[0]
@@ -1138,7 +1155,7 @@ async def verify_claim(
             )
             # Use external result if it provides a stronger signal than KB
             if ext_result["confidence"] > raw_similarity:
-                return {
+                return await _cache_result({
                     "claim": claim,
                     "status": ext_result["status"],
                     "similarity": ext_result["confidence"],
@@ -1146,14 +1163,14 @@ async def verify_claim(
                     "verification_method": ext_result.get("verification_method", "none"),
                     "verification_model": ext_result.get("verification_model"),
                     "source_urls": ext_result.get("source_urls", []),
-                }
+                })
 
         # Apply multi-result confidence calibration
         similarity = _compute_adjusted_confidence(claim, top_results, raw_similarity)
         details = _build_verification_details(claim, top_results)
 
         if similarity >= threshold:
-            return {
+            return await _cache_result({
                 "claim": claim,
                 "status": "verified",
                 "similarity": round(similarity, 3),
@@ -1164,7 +1181,7 @@ async def verify_claim(
                 "memory_source": bool(top_result.get("memory_source")),
                 "verification_details": details,
                 "verification_method": "kb",
-            }
+            })
         elif similarity < unverified_threshold:
             # --- Fallback 3: KB says "unverified" → try external ---
             ext_result = await _verify_claim_externally(
@@ -1172,7 +1189,7 @@ async def verify_claim(
                 expert_mode=expert_mode,
             )
             if ext_result.get("status") in ("verified", "unverified"):
-                return {
+                return await _cache_result({
                     "claim": claim,
                     "status": ext_result["status"],
                     "similarity": ext_result["confidence"],
@@ -1180,8 +1197,8 @@ async def verify_claim(
                     "verification_method": ext_result.get("verification_method", "none"),
                     "verification_model": ext_result.get("verification_model"),
                     "source_urls": ext_result.get("source_urls", []),
-                }
-            return {
+                })
+            return await _cache_result({
                 "claim": claim,
                 "status": "unverified",
                 "similarity": round(similarity, 3),
@@ -1189,7 +1206,7 @@ async def verify_claim(
                 "verification_details": details,
                 "verification_method": "kb",
                 **_kb_source_fields(top_result),
-            }
+            })
         else:
             # --- Fallback 4: KB says "uncertain" → try external for a
             # definitive answer before falling back to KB-only uncertain ---
@@ -1198,7 +1215,7 @@ async def verify_claim(
                 expert_mode=expert_mode,
             )
             if ext_result.get("status") in ("verified", "unverified"):
-                return {
+                return await _cache_result({
                     "claim": claim,
                     "status": ext_result["status"],
                     "similarity": ext_result["confidence"],
@@ -1206,7 +1223,7 @@ async def verify_claim(
                     "verification_method": ext_result.get("verification_method", "none"),
                     "verification_model": ext_result.get("verification_model"),
                     "source_urls": ext_result.get("source_urls", []),
-                }
+                })
             # External also uncertain — try web search as final escalation.
             # In streaming mode, skip this second external call to avoid
             # compounding delays (each call can take 20-40s + retries).
@@ -1219,7 +1236,7 @@ async def verify_claim(
                     expert_mode=expert_mode,
                 )
                 if web_result.get("status") in ("verified", "unverified"):
-                    return {
+                    return await _cache_result({
                         "claim": claim,
                         "status": web_result["status"],
                         "similarity": web_result["confidence"],
@@ -1229,7 +1246,7 @@ async def verify_claim(
                         ),
                         "verification_model": web_result.get("verification_model"),
                         "source_urls": web_result.get("source_urls", []),
-                    }
+                    })
             # All methods exhausted — return uncertain with all available context
             return {
                 "claim": claim,
