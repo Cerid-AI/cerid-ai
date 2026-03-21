@@ -823,6 +823,8 @@ async def agent_query(
     redis_client: Any | None = None,
     neo4j_driver: Any | None = None,
     debug_timing: bool = False,
+    allowed_domains: list[str] | None = None,
+    strict_domains: bool = False,
 ) -> dict[str, Any]:
     """Execute multi-domain query with reranking, graph expansion, and context assembly."""
     timer = StepTimer(enabled=debug_timing)
@@ -891,6 +893,27 @@ async def agent_query(
     if effective_domains is None and conversation_messages:
         effective_domains = [d for d in config.DOMAINS if d != "conversations"]
 
+    # Consumer domain isolation: restrict to allowed domains if configured
+    if allowed_domains is not None:
+        if effective_domains is not None:
+            effective_domains = [d for d in effective_domains if d in allowed_domains]
+        else:
+            effective_domains = list(allowed_domains)
+        if not effective_domains:
+            logger.info("Consumer domain filter removed all requested domains")
+            return {
+                "context": "",
+                "sources": [],
+                "confidence": 0.0,
+                "domains_searched": [],
+                "total_results": 0,
+                "token_budget_used": 0,
+                "graph_results": 0,
+                "results": [],
+                "retrieval_skipped": True,
+                "retrieval_reason": "consumer_domain_restricted",
+            }
+
     # Step 0.5: Query decomposition — may split into parallel sub-queries
     _skip_normal_retrieval = False
     with timer.step("vector_search"):
@@ -918,8 +941,9 @@ async def agent_query(
                 chroma_client=chroma_client,
             )
 
-    # Search adjacent domains at reduced weight when specific domains are requested
-    if domains and set(domains) != set(DOMAINS):
+    # Search adjacent domains at reduced weight when specific domains are requested.
+    # Skipped when strict_domains=True (consumer isolation — no cross-domain bleed).
+    if not strict_domains and domains and set(domains) != set(DOMAINS):
         adjacent = _get_adjacent_domains(domains)
         if adjacent:
             cross_results = await multi_domain_query(

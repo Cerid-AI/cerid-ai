@@ -1,10 +1,26 @@
 # Cerid AI — Task Tracker
 
-> **Last updated:** 2026-03-16
-> **Current status:** Phase 40 complete. 1340 Python tests, 453 frontend tests.
+> **Last updated:** 2026-03-21
+> **Current status:** Phase 41 complete. 1376+ Python tests, 545+ frontend tests.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md) — 1 open
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](../docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
+
+## Phase 41: SDK Hardening & Multi-Agent Extensibility (2026-03-21) ✅
+
+- [x] Typed Pydantic response models for all 9 SDK endpoints (`models/sdk.py`)
+- [x] OpenAPI descriptions, summaries, and error codes on SDK router
+- [x] CONSUMER_REGISTRY with per-consumer `allowed_domains` and `strict_domains`
+- [x] Domain access control enforced in query pipeline (consumer isolation)
+- [x] Trading SDK/proxy endpoints gated by `CERID_TRADING_ENABLED`
+- [x] `outputSchema` on all 23 MCP tools
+- [x] SDK test suite (`tests/test_router_sdk.py`, 15+ tests)
+- [x] Integration guide for new cerid-series agents (`docs/INTEGRATION_GUIDE.md`)
+- [x] CeridClient API key auth wired in cerid-trading-agent
+- [x] Documentation updated (CLAUDE.md, ISSUES.md, DEPENDENCY_COUPLING.md, tasks/todo.md)
+- [x] Code quality: docstrings + structlog on trading proxy endpoints
+
+---
 
 ## Phase 40: Semantic Cache, Verification OOM, CI/Docker Hardening (2026-03-16) ✅
 

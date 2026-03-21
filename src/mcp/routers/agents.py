@@ -36,6 +36,7 @@ class AgentQueryRequest(BaseModel):
     response_text: str | None = Field(None, description="LLM response text for Self-RAG validation")
     model: str | None = Field(None, description="Generating model (for Self-RAG metadata)")
     enable_self_rag: bool | None = Field(None, description="Override Self-RAG toggle (None = use server config)")
+    strict_domains: bool | None = Field(None, description="When True, disables cross-domain affinity bleed. None = use consumer default.")
 
 
 class TriageFileRequest(BaseModel):
@@ -159,6 +160,15 @@ async def agent_query_endpoint(req: AgentQueryRequest, request: Request):
 
         debug_timing = request.headers.get("X-Debug-Timing", "").lower() == "true"
 
+        # Consumer domain isolation: look up allowed_domains and strict_domains
+        from config.settings import CONSUMER_REGISTRY
+        client_id = request.headers.get("x-client-id", "gui")
+        consumer = CONSUMER_REGISTRY.get(client_id, CONSUMER_REGISTRY.get("_default", {}))
+        allowed_domains = consumer.get("allowed_domains")
+        # Per-request strict_domains can only tighten (True), never loosen the consumer default
+        consumer_strict = consumer.get("strict_domains", False)
+        strict_domains = req.strict_domains if req.strict_domains else consumer_strict
+
         from agents.query_agent import agent_query
         result = await agent_query(
             query=req.query,
@@ -170,6 +180,8 @@ async def agent_query_endpoint(req: AgentQueryRequest, request: Request):
             redis_client=get_redis(),
             neo4j_driver=get_neo4j(),
             debug_timing=debug_timing,
+            allowed_domains=allowed_domains,
+            strict_domains=strict_domains,
         )
 
         # Self-RAG: validate claims and refine retrieval if enabled

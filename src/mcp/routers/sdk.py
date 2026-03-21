@@ -7,12 +7,27 @@ These thin facades delegate to the existing agent/health endpoints,
 providing a versioned contract (``/sdk/v1/``) that survives internal
 refactoring of the ``/agent/`` paths.
 
-Consumers should send ``X-Client-ID`` to get per-client rate limiting.
+Consumers should send ``X-Client-ID`` for per-client rate limiting and
+domain access control.  See ``config.settings.CONSUMER_REGISTRY`` for
+the per-consumer configuration and ``docs/INTEGRATION_GUIDE.md`` for
+adding new cerid-series consumers.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
+from config.settings import CERID_TRADING_ENABLED
+from models.sdk import (
+    SDKCascadeConfirmResponse,
+    SDKHallucinationResponse,
+    SDKHealthResponse,
+    SDKHerdDetectResponse,
+    SDKKellySizeResponse,
+    SDKLongshotSurfaceResponse,
+    SDKMemoryExtractResponse,
+    SDKQueryResponse,
+    SDKTradingSignalResponse,
+)
 from models.trading import (
     CascadeConfirmRequest,
     HerdDetectRequest,
@@ -27,43 +42,70 @@ from routers.agents import (
     agent_query_endpoint,
     hallucination_check_endpoint,
     memory_extract_endpoint,
-    trading_cascade_confirm_endpoint,
-    trading_herd_detect_endpoint,
-    trading_kelly_size_endpoint,
-    trading_longshot_surface_endpoint,
-    trading_signal_endpoint,
 )
 from routers.health import health_check
 
 router = APIRouter(prefix="/sdk/v1", tags=["SDK"])
 
+_VERSION = "1.1.0"  # Phase 41: typed response models, consumer domain isolation
 
-@router.post("/query")
+_503 = {"description": "One or more backend services unavailable"}
+_422 = {"description": "Invalid request parameters"}
+
+
+# ---------------------------------------------------------------------------
+# Core endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/query",
+    response_model=SDKQueryResponse,
+    summary="KB Query",
+    description="Multi-domain knowledge base search with hybrid BM25+vector retrieval and optional LLM reranking. "
+    "Results are scoped by the consumer's allowed_domains in CONSUMER_REGISTRY.",
+    responses={422: _422, 503: _503},
+)
 async def sdk_query(req: AgentQueryRequest, request: Request):
-    """KB query with reranking — stable contract for external consumers."""
     return await agent_query_endpoint(req, request)
 
 
-@router.post("/hallucination")
+@router.post(
+    "/hallucination",
+    response_model=SDKHallucinationResponse,
+    summary="Hallucination Detection",
+    description="Verify factual claims in a response against the KB. Returns per-claim status "
+    "(verified/unverified/uncertain) with sources and confidence scores.",
+    responses={422: _422, 503: _503},
+)
 async def sdk_hallucination(req: HallucinationCheckRequest):
-    """Hallucination detection — stable contract for external consumers."""
     return await hallucination_check_endpoint(req)
 
 
-@router.post("/memory/extract")
+@router.post(
+    "/memory/extract",
+    response_model=SDKMemoryExtractResponse,
+    summary="Memory Extraction",
+    description="Extract facts, decisions, and preferences from conversation text and store as KB artifacts. "
+    "Deduplicates against existing memories automatically.",
+    responses={422: _422, 503: _503},
+)
 async def sdk_memory_extract(req: MemoryExtractionRequest):
-    """Memory extraction — stable contract for external consumers."""
     return await memory_extract_endpoint(req)
 
 
-@router.get("/health")
+@router.get(
+    "/health",
+    response_model=SDKHealthResponse,
+    summary="Health Check",
+    description="Service connectivity and consumer-relevant feature flags. "
+    "Returns 'healthy' when all services are connected, 'degraded' otherwise.",
+)
 def sdk_health():
-    """Health check with version and feature flags."""
     from config.features import FEATURE_TOGGLES
 
     base = health_check()
-    base["version"] = _app_version()
-    # Expose only toggles relevant to external consumers
+    base["version"] = _VERSION
     base["features"] = {
         k: v for k, v in FEATURE_TOGGLES.items()
         if k in (
@@ -76,40 +118,72 @@ def sdk_health():
     return base
 
 
-def _app_version() -> str:
-    """Read version from the FastAPI app metadata."""
-    return "1.0.0"
-
-
 # ---------------------------------------------------------------------------
-# Trading SDK facades (cerid-trading-agent stable contract)
+# Trading endpoints — gated by CERID_TRADING_ENABLED
 # ---------------------------------------------------------------------------
 
-@router.post("/trading/signal")
-async def sdk_trading_signal(req: TradingSignalRequest):
-    """Trading signal enrichment — stable contract for cerid-trading-agent."""
-    return await trading_signal_endpoint(req)
+
+def _require_trading() -> None:
+    """Raise 404 if trading integration is disabled."""
+    if not CERID_TRADING_ENABLED:
+        raise HTTPException(status_code=404, detail="Trading integration disabled")
 
 
-@router.post("/trading/herd-detect")
-async def sdk_trading_herd_detect(req: HerdDetectRequest):
-    """Herd behavior detection — stable contract for cerid-trading-agent."""
-    return await trading_herd_detect_endpoint(req)
+if CERID_TRADING_ENABLED:
+    from routers.agents import (
+        trading_cascade_confirm_endpoint,
+        trading_herd_detect_endpoint,
+        trading_kelly_size_endpoint,
+        trading_longshot_surface_endpoint,
+        trading_signal_endpoint,
+    )
 
+    @router.post(
+        "/trading/signal",
+        response_model=SDKTradingSignalResponse,
+        summary="Trading Signal Enrichment",
+        description="Enrich a trading signal with KB context — historical trades, domain knowledge, and confidence scoring.",
+        responses={422: _422, 503: _503},
+    )
+    async def sdk_trading_signal(req: TradingSignalRequest):
+        return await trading_signal_endpoint(req)
 
-@router.post("/trading/kelly-size")
-async def sdk_trading_kelly_size(req: KellySizeRequest):
-    """Kelly sizing — stable contract for cerid-trading-agent."""
-    return await trading_kelly_size_endpoint(req)
+    @router.post(
+        "/trading/herd-detect",
+        response_model=SDKHerdDetectResponse,
+        summary="Herd Behavior Detection",
+        description="Detect herd behavior patterns by analyzing correlation graph violations and historical herd events.",
+        responses={422: _422, 503: _503},
+    )
+    async def sdk_trading_herd_detect(req: HerdDetectRequest):
+        return await trading_herd_detect_endpoint(req)
 
+    @router.post(
+        "/trading/kelly-size",
+        response_model=SDKKellySizeResponse,
+        summary="Kelly Criterion Sizing",
+        description="Compute Kelly fraction for position sizing using historical win/loss data from KB.",
+        responses={422: _422, 503: _503},
+    )
+    async def sdk_trading_kelly_size(req: KellySizeRequest):
+        return await trading_kelly_size_endpoint(req)
 
-@router.post("/trading/cascade-confirm")
-async def sdk_trading_cascade_confirm(req: CascadeConfirmRequest):
-    """Cascade confirmation — stable contract for cerid-trading-agent."""
-    return await trading_cascade_confirm_endpoint(req)
+    @router.post(
+        "/trading/cascade-confirm",
+        response_model=SDKCascadeConfirmResponse,
+        summary="Cascade Pattern Confirmation",
+        description="Confirm whether a liquidation cascade pattern matches historical cascade events in the KB.",
+        responses={422: _422, 503: _503},
+    )
+    async def sdk_trading_cascade_confirm(req: CascadeConfirmRequest):
+        return await trading_cascade_confirm_endpoint(req)
 
-
-@router.post("/trading/longshot-surface")
-async def sdk_trading_longshot_surface(req: LongshotSurfaceRequest):
-    """Longshot surface query — stable contract for cerid-trading-agent."""
-    return await trading_longshot_surface_endpoint(req)
+    @router.post(
+        "/trading/longshot-surface",
+        response_model=SDKLongshotSurfaceResponse,
+        summary="Longshot Calibration Surface",
+        description="Query the calibration surface for longshot probability estimates from historical prediction market data.",
+        responses={422: _422, 503: _503},
+    )
+    async def sdk_trading_longshot_surface(req: LongshotSurfaceRequest):
+        return await trading_longshot_surface_endpoint(req)

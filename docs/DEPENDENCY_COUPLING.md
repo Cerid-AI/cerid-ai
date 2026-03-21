@@ -98,7 +98,7 @@ The [cerid-trading-agent](https://github.com/sunrunnerfire/cerid-trading-agent) 
 
 **SDK Router:** The `/sdk/v1/` prefix is a stable contract for external consumers. The `/agent/` paths remain available for backward compatibility but may change during internal refactoring. New consumers should prefer `/sdk/v1/`.
 
-**Per-client rate limiting:** Each `X-Client-ID` gets an independent rate budget configured in `config/settings.py:CLIENT_RATE_LIMITS`. GUI gets 20 req/min on `/agent/`, trading-agent gets 30 req/min. Unrecognized clients default to 10 req/min.
+**Per-client rate limiting:** Each `X-Client-ID` gets an independent rate budget configured in `config/settings.py:CLIENT_RATE_LIMITS`. GUI gets 20 req/min on `/agent/`, trading-agent gets 80 req/min. Unrecognized clients default to 10 req/min.
 
 ### Safe to Change (No Impact)
 
@@ -130,5 +130,37 @@ The trading agent handles cerid-ai unavailability via `AsyncCircuitBreaker` (5 f
 
 - **Separate machine deployment**: If cerid-ai runs on a different host, the trading agent needs `CERID_MCP_URL` pointed to the LAN IP and cerid-ai needs `CERID_BIND_ADDR=0.0.0.0`
 - **API key auth**: When `CERID_API_KEY` is enabled on cerid-ai, add the key to trading agent's `.env` and wire it into `CeridClient` headers
-- **Rate limiting**: Trading agent has a dedicated 30 req/min budget via `X-Client-ID: trading-agent`. Adjust in `config/settings.py:CLIENT_RATE_LIMITS`
-- **New cerid-series consumers**: Send `X-Client-ID: <project-name>` header and add an entry to `CLIENT_RATE_LIMITS`. Use `/sdk/v1/` endpoints for stability
+- **Rate limiting**: Trading agent has a dedicated 80 req/min budget via `X-Client-ID: trading-agent`. Adjust in `CONSUMER_REGISTRY` (or legacy `CLIENT_RATE_LIMITS`) in `config/settings.py`
+- **New cerid-series consumers**: Send `X-Client-ID: <project-name>` header and add an entry to `CONSUMER_REGISTRY`. Use `/sdk/v1/` endpoints for stability
+
+---
+
+## New Consumer Integration
+
+For a complete 13-step checklist on adding a new cerid-series agent integration (feature flag, domain, consumer registration, endpoints, MCP tools, tests, and documentation), see [`docs/INTEGRATION_GUIDE.md`](INTEGRATION_GUIDE.md).
+
+## CONSUMER_REGISTRY Structure
+
+`CONSUMER_REGISTRY` in `config/settings.py` defines per-consumer access control and rate limiting. Each entry is keyed by the `X-Client-ID` header value:
+
+```python
+CONSUMER_REGISTRY = {
+    "trading-agent": {
+        "rate_limit": 80,                              # req/min
+        "allowed_domains": ["trading", "finance"],     # KB domains this consumer can query
+        "strict_domains": True,                        # disables cross-domain affinity bleed
+        "description": "Cerid trading agent",
+    },
+    "gui": {
+        "rate_limit": 20,
+        "allowed_domains": None,                       # None = all domains (GUI has full access)
+        "strict_domains": False,
+        "description": "React GUI",
+    },
+}
+```
+
+- **`rate_limit`:** Requests per minute for this consumer.
+- **`allowed_domains`:** List of KB domains the consumer can query. `None` means unrestricted.
+- **`strict_domains`:** When `True`, disables `DOMAIN_AFFINITY` bleed into domains not in `allowed_domains`.
+- **Default behavior:** Unrecognized `X-Client-ID` values get 10 req/min and full domain access (for backward compatibility).

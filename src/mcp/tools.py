@@ -37,6 +37,16 @@ MCP_TOOLS = [
             },
             "required": ["query"],
         },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "results": {"type": "array", "items": {"type": "object"}, "description": "Matching chunks with relevance scores"},
+                "context": {"type": "string", "description": "Assembled context string"},
+                "confidence": {"type": "number", "description": "Average relevance 0.0-1.0"},
+                "domains_searched": {"type": "array", "items": {"type": "string"}},
+                "total_results": {"type": "integer"},
+            },
+        },
     },
     {
         "name": "pkb_ingest",
@@ -52,6 +62,15 @@ MCP_TOOLS = [
                 },
             },
             "required": ["content"],
+        },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string"},
+                "artifact_id": {"type": "string"},
+                "chunks": {"type": "integer"},
+                "domain": {"type": "string"},
+            },
         },
     },
     {
@@ -77,16 +96,39 @@ MCP_TOOLS = [
             },
             "required": ["file_path"],
         },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string"},
+                "artifact_id": {"type": "string"},
+                "chunks": {"type": "integer"},
+                "domain": {"type": "string"},
+            },
+        },
     },
     {
         "name": "pkb_health",
         "description": "Check knowledge base service health",
         "inputSchema": {"type": "object", "properties": {}},
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string"},
+                "services": {"type": "object"},
+            },
+        },
     },
     {
         "name": "pkb_collections",
         "description": "List available knowledge base collections",
         "inputSchema": {"type": "object", "properties": {}},
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string"},
+                "services": {"type": "object"},
+            },
+        },
     },
     {
         "name": "pkb_agent_query",
@@ -113,6 +155,16 @@ MCP_TOOLS = [
             },
             "required": ["query"],
         },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "results": {"type": "array", "items": {"type": "object"}, "description": "Matching chunks with relevance scores"},
+                "context": {"type": "string", "description": "Assembled context string"},
+                "confidence": {"type": "number", "description": "Average relevance 0.0-1.0"},
+                "domains_searched": {"type": "array", "items": {"type": "string"}},
+                "total_results": {"type": "integer"},
+            },
+        },
     },
     {
         "name": "pkb_artifacts",
@@ -131,6 +183,10 @@ MCP_TOOLS = [
                     "default": 50,
                 },
             },
+        },
+        "outputSchema": {
+            "type": "array",
+            "items": {"type": "object"},
         },
     },
     {
@@ -154,6 +210,9 @@ MCP_TOOLS = [
                 },
             },
             "required": ["artifact_id", "new_domain"],
+        },
+        "outputSchema": {
+            "type": "object",
         },
     },
     {
@@ -179,6 +238,15 @@ MCP_TOOLS = [
             },
             "required": ["file_path"],
         },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string"},
+                "artifact_id": {"type": "string"},
+                "chunks": {"type": "integer"},
+                "domain": {"type": "string"},
+            },
+        },
     },
     {
         "name": "pkb_rectify",
@@ -203,6 +271,13 @@ MCP_TOOLS = [
                 },
             },
         },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "timestamp": {"type": "string"},
+                "findings": {"type": "object"},
+            },
+        },
     },
     {
         "name": "pkb_audit",
@@ -220,6 +295,13 @@ MCP_TOOLS = [
                     "description": "Time window in hours for activity report",
                     "default": 24,
                 },
+            },
+        },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "timestamp": {"type": "string"},
+                "findings": {"type": "object"},
             },
         },
     },
@@ -246,6 +328,13 @@ MCP_TOOLS = [
                 },
             },
         },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "timestamp": {"type": "string"},
+                "findings": {"type": "object"},
+            },
+        },
     },
     {
         "name": "pkb_curate",
@@ -265,6 +354,13 @@ MCP_TOOLS = [
                 },
             },
         },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "timestamp": {"type": "string"},
+                "findings": {"type": "object"},
+            },
+        },
     },
     {
         "name": "pkb_digest",
@@ -279,11 +375,25 @@ MCP_TOOLS = [
                 },
             },
         },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "timestamp": {"type": "string"},
+                "findings": {"type": "object"},
+            },
+        },
     },
     {
         "name": "pkb_scheduler_status",
         "description": "Get the status of scheduled maintenance jobs",
         "inputSchema": {"type": "object", "properties": {}},
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string"},
+                "services": {"type": "object"},
+            },
+        },
     },
     {
         "name": "pkb_check_hallucinations",
@@ -301,6 +411,15 @@ MCP_TOOLS = [
             },
             "required": ["response_text", "conversation_id"],
         },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "claims": {"type": "array", "items": {"type": "object"}},
+                "summary": {"type": "object"},
+                "conversation_id": {"type": "string"},
+                "skipped": {"type": "boolean"},
+            },
+        },
     },
     {
         "name": "pkb_memory_extract",
@@ -313,6 +432,13 @@ MCP_TOOLS = [
                 "model": {"type": "string", "description": "Model that generated the response", "default": "unknown"},
             },
             "required": ["response_text", "conversation_id"],
+        },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "memories_stored": {"type": "integer"},
+                "results": {"type": "array", "items": {"type": "object"}},
+            },
         },
     },
     {
@@ -328,10 +454,17 @@ MCP_TOOLS = [
                 },
             },
         },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "memories_stored": {"type": "integer"},
+                "results": {"type": "array", "items": {"type": "object"}},
+            },
+        },
     },
     {
         "name": "pkb_trading_signal",
-        "description": "Enrich a trading signal with KB context from ChromaDB and historical trades from Neo4j",
+        "description": "Enrich a trading signal with KB context from ChromaDB and historical trades from Neo4j. Example signal_data: {\"asset\": \"ETH\", \"direction\": \"long\", \"confidence\": 0.82}",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -351,10 +484,19 @@ MCP_TOOLS = [
             },
             "required": ["query"],
         },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "answer": {"type": "string"},
+                "confidence": {"type": "number"},
+                "sources": {"type": "array"},
+                "historical_trades": {"type": "array"},
+            },
+        },
     },
     {
         "name": "pkb_herd_detect",
-        "description": "Detect herd behavior by checking correlation graph violations and sentiment extremes",
+        "description": "Detect herd behavior by checking correlation graph violations and sentiment extremes. Example sentiment_data: {\"finbert_score\": 0.7, \"fear_greed\": 45}",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -367,10 +509,18 @@ MCP_TOOLS = [
             },
             "required": ["asset"],
         },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "violations": {"type": "array"},
+                "historical_matches": {"type": "array"},
+                "sentiment_extreme": {"type": "boolean"},
+            },
+        },
     },
     {
         "name": "pkb_kelly_size",
-        "description": "Compute Kelly-criterion position size using historical CV_edge from calibration data",
+        "description": "Compute Kelly-criterion position size using historical CV_edge from calibration data. Example values: strategy: \"herd-fade\", confidence: 0.75, win_loss_ratio: 1.5",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -380,10 +530,19 @@ MCP_TOOLS = [
             },
             "required": ["strategy", "confidence", "win_loss_ratio"],
         },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "kelly_fraction": {"type": "number"},
+                "cv_edge": {"type": "number"},
+                "kelly_raw": {"type": "number"},
+                "strategy": {"type": "string"},
+            },
+        },
     },
     {
         "name": "pkb_cascade_confirm",
-        "description": "Confirm a liquidation cascade pattern against historical cascade events",
+        "description": "Confirm a liquidation cascade pattern against historical cascade events. liquidation_events shape: [{\"venue\": \"binance\", \"size_usd\": 500000, \"timestamp\": \"...\"}]",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -397,10 +556,18 @@ MCP_TOOLS = [
             },
             "required": ["asset"],
         },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "confirmation_score": {"type": "number"},
+                "historical_cascades": {"type": "integer"},
+                "match_quality": {"type": "string"},
+            },
+        },
     },
     {
         "name": "pkb_longshot_surface",
-        "description": "Query stored calibration surface (implied vs actual probabilities) from Neo4j",
+        "description": "Query stored calibration surface (implied vs actual probabilities) from Neo4j. date_range format: \"2026-03-01/2026-03-15\" or shorthand \"7d\", \"14d\", \"30d\", \"90d\"",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -412,6 +579,15 @@ MCP_TOOLS = [
                 },
             },
             "required": ["asset"],
+        },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "calibration_points": {"type": "array"},
+                "count": {"type": "integer"},
+                "asset": {"type": "string"},
+                "date_range": {"type": "string"},
+            },
         },
     },
 ]

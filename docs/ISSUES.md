@@ -1,8 +1,8 @@
 # Cerid AI — Issues & Backlog
 
 > **Created:** 2026-02-25
-> **Last updated:** 2026-03-14
-> **Status:** Phase 40 complete. 94 resolved, 1 open. 1340 Python tests, 453 frontend tests.
+> **Last updated:** 2026-03-21
+> **Status:** Phase 41 complete. 100 resolved, 1 open. 1376+ Python tests, 545+ frontend tests.
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21 roadmap)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](COMPLETED_PHASES.md)
 > **Purpose:** Track known bugs, feature gaps, structural issues, and architecture evaluations for upcoming phases.
@@ -1008,18 +1008,77 @@ Verification results only appear in the status bar and hallucination panel sideb
 
 ---
 
+## N. Phase 41 — SDK Hardening & Multi-Agent Extensibility
+
+### N1. SDK Typed Response Models
+
+**Severity:** Medium
+**Status:** Resolved (Phase 41, 2026-03-21)
+
+**Resolution:** SDK endpoints now have typed Pydantic response models in `models/sdk.py`. All `/sdk/v1/` endpoints return structured, validated responses instead of raw dicts.
+
+**Files:** `src/mcp/models/sdk.py`, `src/mcp/routers/sdk.py`
+
+### N2. Consumer Domain Access Control
+
+**Severity:** Medium
+**Status:** Resolved (Phase 41, 2026-03-21)
+
+**Resolution:** Added `CONSUMER_REGISTRY` to `config/settings.py` with per-consumer `allowed_domains` and `strict_domains` fields. Consumers can only query KB domains explicitly listed in their `allowed_domains`. When `strict_domains: True`, cross-domain affinity bleed is disabled for that consumer. Personal data (personal, conversations) is never accessible to non-GUI consumers unless explicitly configured.
+
+**Files:** `src/mcp/config/settings.py`, `src/mcp/middleware/rate_limit.py`, `src/mcp/routers/sdk.py`
+
+### N3. Trading SDK Feature Flag Gating
+
+**Severity:** Medium
+**Status:** Resolved (Phase 41, 2026-03-21)
+
+**Resolution:** All 5 trading SDK endpoints (`/sdk/v1/trading/*`) and 5 MCP tools (`pkb_trading_*`) are gated by `CERID_TRADING_ENABLED` feature flag. Endpoints return 404 when disabled. Default is `false` (backward-compatible).
+
+**Files:** `src/mcp/routers/sdk.py`, `src/mcp/tools.py`, `src/mcp/config/settings.py`
+
+### N4. MCP Tools outputSchema
+
+**Severity:** Low
+**Status:** Resolved (Phase 41, 2026-03-21)
+
+**Resolution:** All 23 MCP tools now include `outputSchema` definitions alongside existing `inputSchema`. Enables better client-side validation and documentation generation.
+
+**Files:** `src/mcp/tools.py`
+
+### N5. SDK Test Suite
+
+**Severity:** Medium
+**Status:** Resolved (Phase 41, 2026-03-21)
+
+**Resolution:** Created `tests/test_router_sdk.py` with tests covering all SDK endpoints, feature flag gating, domain access control, and rate limiting per consumer.
+
+**Files:** `src/mcp/tests/test_router_sdk.py`
+
+### N6. Integration Guide
+
+**Severity:** Low (docs)
+**Status:** Resolved (Phase 41, 2026-03-21)
+
+**Resolution:** Created `docs/INTEGRATION_GUIDE.md` with a canonical 13-step checklist for adding new cerid-series agent integrations. Covers feature flags, domain setup, consumer registration, endpoints, MCP tools, proxy routes, scheduler jobs, tests, and documentation. Includes domain segregation rules, client authentication, and the trading-agent reference implementation.
+
+**Files:** `docs/INTEGRATION_GUIDE.md`, `CLAUDE.md`, `docs/DEPENDENCY_COUPLING.md`
+
+---
+
 ## Priority Order
 
 ### Open Items (1)
 
 K4 (plugin management UI) — Low severity, no backend plugin API exists yet
 
-### Resolved (94 items)
+### Resolved (100 items)
 
 **Phase 40** (6 items): M1 (semantic cache), J1 (verification OOM), K1 (Codecov), K2 (license scanning), K3 (ReDoS audit), K7 (multi-stage Dockerfile)
 **Phase 39** (7 items): L1 (CORS wildcard), L2 (port binding), L3 (email PII), L4 (audit TTL), L5 (sync encryption), L6 (KB injection transparency), L7 (marketing claims)
 **Phase 38D+** (3 items): D4 (temporal claims uncertain), D5 (auto router real-time queries), D6 (Llama fallback retry)
 **Phase 38D** (3 items): D3 (model router auto mode), K5 (digest view), K6 (batch triage UI)
+**Phase 41** (6 items resolved): SDK hardening & multi-agent extensibility — typed response models (`models/sdk.py`), consumer domain access control (`CONSUMER_REGISTRY` with `allowed_domains`/`strict_domains`), trading endpoints gated by `CERID_TRADING_ENABLED`, MCP `outputSchema` on all 23 tools, SDK test suite (`test_router_sdk.py`), integration guide (`docs/INTEGRATION_GUIDE.md`)
 **Phase 30** (0 new issues): Codebase audit & cleanup — no new issues filed; structural debt reduced
 **Phase 29** (1 item): V21 (advanced response formatting + inline verification)
 **Phase 26** (14 items): V1a, V2, V4, V5, V7, V8, V9, V10, V11, V12, V15, V16, V17, V18

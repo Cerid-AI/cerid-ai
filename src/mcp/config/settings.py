@@ -379,35 +379,62 @@ if CATEGORIZE_MODE not in ("manual", "smart", "pro"):
     CATEGORIZE_MODE = "smart"
 
 # ---------------------------------------------------------------------------
-# Per-client rate limits (keyed by X-Client-ID header value)
+# Consumer registry (keyed by X-Client-ID header value)
 # ---------------------------------------------------------------------------
-# Each entry maps path prefixes to (max_requests, window_seconds).
+# Each consumer entry specifies:
+#   rate_limits     — path prefix → (max_requests, window_seconds)
+#   allowed_domains — list of KB domains the consumer may query (None = all)
+#   strict_domains  — when True, disables cross-domain affinity bleed
+#
 # "gui" is the default for the cerid-ai React GUI (no header sent).
-# "_default" is the fallback for unrecognized client IDs.
-CLIENT_RATE_LIMITS: dict[str, dict[str, tuple[int, int]]] = {
+# "_default" is the fallback for unrecognized consumer IDs.
+# See docs/INTEGRATION_GUIDE.md for adding new cerid-series consumers.
+
+CONSUMER_REGISTRY: dict[str, dict] = {
     "gui": {
-        "/agent/": (20, 60),
-        "/sdk/": (20, 60),
-        "/ingest": (10, 60),
-        "/recategorize": (10, 60),
+        "rate_limits": {
+            "/agent/": (20, 60),
+            "/sdk/": (20, 60),
+            "/ingest": (10, 60),
+            "/recategorize": (10, 60),
+        },
+        "allowed_domains": None,     # Full access to all domains
+        "strict_domains": False,     # Cross-domain affinity enabled
     },
     "trading-agent": {
-        # Worst-case burst: 5 sessions × (3 oracle + 2 memory) = 67.5 calls/min.
-        # 80/min gives 12.5/min headroom; client pools (50 oracle + 20 memory)
-        # are the actual binding constraints, so this is defense-in-depth.
-        "/agent/": (80, 60),
-        "/sdk/": (80, 60),
+        "rate_limits": {
+            # Worst-case burst: 5 sessions × (3 oracle + 2 memory) = 67.5 calls/min.
+            # 80/min gives 12.5/min headroom; client pools (50 oracle + 20 memory)
+            # are the actual binding constraints, so this is defense-in-depth.
+            "/agent/": (80, 60),
+            "/sdk/": (80, 60),
+        },
+        "allowed_domains": ["trading", "finance"],  # Scoped: no access to personal/coding/etc.
+        "strict_domains": True,      # No cross-domain bleed into personal data
     },
     "cli-ingest": {
-        "/ingest": (60, 60),
-        "/recategorize": (30, 60),
+        "rate_limits": {
+            "/ingest": (60, 60),
+            "/recategorize": (30, 60),
+        },
+        "allowed_domains": None,     # Ingest into any domain
+        "strict_domains": False,
     },
     "_default": {
-        "/agent/": (10, 60),
-        "/sdk/": (10, 60),
-        "/ingest": (5, 60),
-        "/recategorize": (5, 60),
+        "rate_limits": {
+            "/agent/": (10, 60),
+            "/sdk/": (10, 60),
+            "/ingest": (5, 60),
+            "/recategorize": (5, 60),
+        },
+        "allowed_domains": None,
+        "strict_domains": False,
     },
+}
+
+# Backward-compatible accessor — rate_limit.py reads this shape unchanged.
+CLIENT_RATE_LIMITS: dict[str, dict[str, tuple[int, int]]] = {
+    k: v["rate_limits"] for k, v in CONSUMER_REGISTRY.items()
 }
 
 if not NEO4J_PASSWORD:
