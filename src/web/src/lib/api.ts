@@ -63,6 +63,9 @@ import type {
   KeyValidation,
   SetupConfig,
   SetupHealth,
+  Automation,
+  AutomationCreate,
+  AutomationRun,
 } from "./types"
 
 export async function fetchHealth(): Promise<HealthResponse> {
@@ -1097,5 +1100,73 @@ export async function applySetupConfig(config: SetupConfig): Promise<{ success: 
 export async function fetchSetupHealth(): Promise<SetupHealth> {
   const res = await fetch(`${MCP_BASE}/setup/health`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, `Setup health check failed: ${res.status}`))
+  return res.json()
+}
+
+// ---------------------------------------------------------------------------
+// Automations
+// ---------------------------------------------------------------------------
+
+export async function fetchAutomations(): Promise<Automation[]> {
+  const res = await fetch(`${MCP_BASE}/automations`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Fetch automations failed: ${res.status}`))
+  return res.json()
+}
+
+export async function createAutomation(data: AutomationCreate): Promise<Automation> {
+  const res = await fetch(`${MCP_BASE}/automations`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Create automation failed: ${res.status}`))
+  return res.json()
+}
+
+export async function updateAutomation(id: string, data: Partial<AutomationCreate>): Promise<Automation> {
+  const res = await fetch(`${MCP_BASE}/automations/${id}`, {
+    method: "PATCH",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Update automation failed: ${res.status}`))
+  return res.json()
+}
+
+export async function deleteAutomation(id: string): Promise<void> {
+  const res = await fetch(`${MCP_BASE}/automations/${id}`, {
+    method: "DELETE",
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Delete automation failed: ${res.status}`))
+}
+
+export async function toggleAutomation(id: string, enabled: boolean): Promise<void> {
+  const res = await fetch(`${MCP_BASE}/automations/${id}/toggle`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ enabled }),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Toggle automation failed: ${res.status}`))
+}
+
+export async function runAutomation(id: string): Promise<AutomationRun> {
+  const res = await fetch(`${MCP_BASE}/automations/${id}/run`, {
+    method: "POST",
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Run automation failed: ${res.status}`))
+  return res.json()
+}
+
+export async function fetchAutomationHistory(id: string): Promise<AutomationRun[]> {
+  const res = await fetch(`${MCP_BASE}/automations/${id}/history`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Fetch automation history failed: ${res.status}`))
+  return res.json()
+}
+
+export async function fetchAutomationPresets(): Promise<Record<string, { label: string; cron: string }>> {
+  const res = await fetch(`${MCP_BASE}/automations/presets`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Fetch automation presets failed: ${res.status}`))
   return res.json()
 }

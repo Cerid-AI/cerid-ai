@@ -309,6 +309,11 @@ SYNOPSIS_MODEL_OPTIONS = {
 # ---------------------------------------------------------------------------
 MEMORY_RETENTION_DAYS = int(os.getenv("MEMORY_RETENTION_DAYS", "180"))
 
+# Memory Conflict Detection & Decay (Phase 44)
+MEMORY_CONFLICT_THRESHOLD = float(os.getenv("MEMORY_CONFLICT_THRESHOLD", "0.85"))
+MEMORY_HALF_LIFE_DAYS = float(os.getenv("MEMORY_HALF_LIFE_DAYS", "30.0"))
+MEMORY_MIN_RECALL_SCORE = float(os.getenv("MEMORY_MIN_RECALL_SCORE", "0.3"))
+
 # ---------------------------------------------------------------------------
 # Scheduled Maintenance — cron expressions
 # ---------------------------------------------------------------------------

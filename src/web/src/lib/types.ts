@@ -728,3 +728,41 @@ export interface SetupHealth {
   services: SetupServiceHealth[]
 }
 
+// -- Automations types --------------------------------------------------------
+
+export interface Automation {
+  id: string
+  name: string
+  description: string
+  prompt: string
+  schedule: string
+  action: "notify" | "digest" | "ingest"
+  domains: string[]
+  enabled: boolean
+  created_at: string
+  updated_at: string
+  last_run_at: string | null
+  last_status: string | null
+  run_count: number
+}
+
+export interface AutomationCreate {
+  name: string
+  description?: string
+  prompt: string
+  schedule: string
+  action: "notify" | "digest" | "ingest"
+  domains?: string[]
+  enabled?: boolean
+}
+
+export interface AutomationRun {
+  automation_id: string
+  run_id: string
+  started_at: string
+  completed_at: string | null
+  status: "running" | "success" | "error"
+  result: Record<string, unknown> | null
+  error: string | null
+}
+

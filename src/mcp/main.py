@@ -26,6 +26,7 @@ from middleware.tenant_context import TenantContextMiddleware
 from routers import (
     agents,
     artifacts,
+    automations,
     chat,
     digest,
     health,
@@ -206,6 +207,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Scheduler start failed (server runs without it): {e}")
 
+    # Register user-facing automations with scheduler
+    try:
+        from routers.automations import register_all_automations
+        register_all_automations()
+    except Exception as e:
+        logger.warning(f"Automation registration failed (server runs without it): {e}")
+
     # Pre-warm connections and models for faster first request
     try:
         from config.taxonomy import DOMAINS, collection_name
@@ -285,6 +293,7 @@ _api_routers = [
     ingestion.router,
     artifacts.router,
     agents.router,
+    automations.router,
     chat.router,
     digest.router,
     taxonomy.router,
