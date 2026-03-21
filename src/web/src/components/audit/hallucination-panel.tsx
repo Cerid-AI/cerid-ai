@@ -84,16 +84,19 @@ function ClaimBadge({
       <span className="shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
         {index + 1}
       </span>
-      <Badge
-        variant="outline"
-        className={`shrink-0 ${DISPLAY_STATUS_COLORS[displayStatus] ?? DISPLAY_STATUS_COLORS.error}`}
-      >
-        {displayStatus}
-      </Badge>
-      {expertVerified && (
-        <Badge variant="outline" className="shrink-0 border-purple-500/40 bg-purple-500/10 text-purple-400 text-[10px] px-1.5 py-0">
-          <Sparkles className="mr-0.5 h-2.5 w-2.5" />
-          expert
+      {expertVerified ? (
+        <Badge variant="outline" className="shrink-0 border-purple-500/40 bg-purple-500/10 text-purple-400 text-[10px] px-1.5 py-0.5 leading-tight text-center">
+          <span className="flex flex-col items-center gap-0">
+            <span className="flex items-center gap-0.5"><Sparkles className="h-2.5 w-2.5" />expert</span>
+            <span>{displayStatus}</span>
+          </span>
+        </Badge>
+      ) : (
+        <Badge
+          variant="outline"
+          className={`shrink-0 ${DISPLAY_STATUS_COLORS[displayStatus] ?? DISPLAY_STATUS_COLORS.error}`}
+        >
+          {displayStatus}
         </Badge>
       )}
       <div className="min-w-0 flex-1">
@@ -185,7 +188,7 @@ function ClaimBadge({
               title="Re-verify with Grok 4 expert mode"
             >
               <Sparkles className="h-3 w-3" />
-              Expert verify
+              Verify
             </Button>
           )}
           {conversationId && (

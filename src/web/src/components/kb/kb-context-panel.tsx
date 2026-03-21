@@ -1,13 +1,13 @@
 // Copyright (c) 2026 Justin Michaels. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect } from "react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { X, Search, Loader2, Zap, Upload } from "lucide-react"
+import { X, Search, Loader2, Zap, Upload, Database, FileText, Layers, Archive, FileInput } from "lucide-react"
 import { ArtifactCard } from "./artifact-card"
 import { DomainFilter } from "./domain-filter"
 import { TagFilter } from "./tag-filter"
@@ -16,7 +16,8 @@ import { UploadDialog } from "./upload-dialog"
 import { useSettings } from "@/hooks/use-settings"
 import { useDragDrop } from "@/hooks/use-drag-drop"
 import type { UseKBContextReturn } from "@/hooks/use-kb-context"
-import { uploadFile } from "@/lib/api"
+import { uploadFile, fetchKBStats } from "@/lib/api"
+import type { KBStats } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 interface KBContextPanelProps extends UseKBContextReturn {
@@ -50,6 +51,13 @@ export function KBContextPanel({
   // Drag-drop for file ingestion
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const { isDragOver, dragHandlers } = useDragDrop(setPendingFiles)
+
+  // KB stats
+  const [kbStats, setKbStats] = useState<KBStats | null>(null)
+  const [archiveMode, setArchiveMode] = useState(false)
+  useEffect(() => {
+    fetchKBStats().then(setKbStats).catch(() => {})
+  }, [])
 
   const handleUploadConfirm = useCallback(
     async (options: { domain?: string; categorize_mode?: string }) => {
@@ -211,12 +219,67 @@ export function KBContextPanel({
         )}
       </ScrollArea>
 
-      {/* Injected count */}
-      {injectedContext.length > 0 && (
-        <div className="border-t px-3 py-1.5 text-xs text-muted-foreground">
-          {injectedContext.length} source{injectedContext.length !== 1 ? "s" : ""} ready to inject
+      {/* KB Dashboard Footer */}
+      <div className="border-t bg-muted/30">
+        {/* Injected count */}
+        {injectedContext.length > 0 && (
+          <div className="border-b px-3 py-1.5 text-xs text-muted-foreground">
+            {injectedContext.length} source{injectedContext.length !== 1 ? "s" : ""} ready to inject
+          </div>
+        )}
+
+        {/* KB Metrics */}
+        {kbStats && (
+          <div className="grid grid-cols-3 gap-px px-3 py-2">
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <FileText className="h-3 w-3 shrink-0 text-teal-500" />
+              <span className="tabular-nums font-medium text-foreground">{kbStats.total_artifacts}</span>
+              <span className="hidden min-[320px]:inline">docs</span>
+            </div>
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Layers className="h-3 w-3 shrink-0 text-teal-500" />
+              <span className="tabular-nums font-medium text-foreground">{kbStats.total_chunks}</span>
+              <span className="hidden min-[320px]:inline">vectors</span>
+            </div>
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Database className="h-3 w-3 shrink-0 text-teal-500" />
+              <span className="tabular-nums font-medium text-foreground">{Object.keys(kbStats.domains).length}</span>
+              <span className="hidden min-[320px]:inline">domains</span>
+            </div>
+          </div>
+        )}
+
+        {/* Storage mode toggle + drag-drop hint */}
+        <div className="flex items-center justify-between gap-2 border-t px-3 py-2">
+          <TooltipProvider delayDuration={0}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-colors",
+                    archiveMode
+                      ? "bg-teal-500/10 text-teal-500 border border-teal-500/30"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted",
+                  )}
+                  onClick={() => setArchiveMode(!archiveMode)}
+                >
+                  {archiveMode ? <Archive className="h-3 w-3" /> : <FileInput className="h-3 w-3" />}
+                  {archiveMode ? "Archive" : "Extract only"}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-[200px] text-xs">
+                {archiveMode
+                  ? "Files are archived to ~/cerid-archive/ and extracted for KB"
+                  : "Files are parsed for KB data only — originals are not stored"}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          <span className="flex items-center gap-1 text-[11px] text-muted-foreground/60">
+            <Upload className="h-3 w-3" />
+            Drop files to ingest
+          </span>
         </div>
-      )}
+      </div>
     </div>
   )
 }
