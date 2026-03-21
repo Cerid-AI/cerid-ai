@@ -5,9 +5,10 @@
 # Cerid AI - Startup Script
 #
 # Usage:
-#   ./scripts/start-cerid.sh           # start all services
+#   ./scripts/start-cerid.sh           # start all services (unified compose)
 #   ./scripts/start-cerid.sh --build   # rebuild images before starting (after code changes)
 #   ./scripts/start-cerid.sh --force   # bypass pre-flight checks
+#   ./scripts/start-cerid.sh --legacy  # use legacy 4-step compose startup
 
 set -euo pipefail
 CERID_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -15,13 +16,15 @@ ENV_FILE="$CERID_ROOT/.env"
 
 BUILD_FLAG=""
 FORCE_FLAG=""
+LEGACY_FLAG=""
 for arg in "$@"; do
     case "$arg" in
         --build) BUILD_FLAG="--build" ;;
         --force) FORCE_FLAG="1" ;;
+        --legacy) LEGACY_FLAG="1" ;;
         *)
             echo "Unknown option: $arg"
-            echo "Usage: $0 [--build] [--force]"
+            echo "Usage: $0 [--build] [--force] [--legacy]"
             exit 1
             ;;
     esac
@@ -187,25 +190,36 @@ if [ -n "$CURRENT_MCP_URL" ] && [ "$CURRENT_MCP_URL" != "$VITE_MCP_URL" ]; then
     WEB_RECREATE="--force-recreate"
 fi
 
-# Ensure network exists
+# Ensure network exists (only needed for legacy mode; unified compose creates it)
 docker network create llm-network 2>/dev/null || true
 
 if [ -n "$BUILD_FLAG" ]; then
     echo "[build] Rebuilding images with local Dockerfiles..."
 fi
 
-# Start in dependency order — all stacks read .env from repo root
-echo "[1/4] Starting Infrastructure (Neo4j, ChromaDB, Redis)..."
-docker compose -f "$CERID_ROOT/stacks/infrastructure/docker-compose.yml" --env-file "$ENV_FILE" up -d
+UNIFIED_COMPOSE="$CERID_ROOT/docker-compose.yml"
 
-echo "[2/4] Starting Bifrost (LLM Gateway)..."
-docker compose -f "$CERID_ROOT/stacks/bifrost/docker-compose.yml" --env-file "$ENV_FILE" up -d
+if [ -z "$LEGACY_FLAG" ] && [ -f "$UNIFIED_COMPOSE" ]; then
+    # --- Unified compose: single command starts everything ---
+    echo "[unified] Starting all services via root docker-compose.yml..."
+    echo "  Startup order: Neo4j, ChromaDB, Redis → Bifrost → MCP → Web"
+    echo "  (depends_on healthchecks enforce correct ordering)"
+    docker compose -f "$UNIFIED_COMPOSE" --env-file "$ENV_FILE" up -d $BUILD_FLAG $WEB_RECREATE
+else
+    # --- Legacy 4-step startup (preserved for backward compatibility) ---
+    echo "[legacy] Starting services in 4-step order..."
+    echo "[1/4] Starting Infrastructure (Neo4j, ChromaDB, Redis)..."
+    docker compose -f "$CERID_ROOT/stacks/infrastructure/docker-compose.yml" --env-file "$ENV_FILE" up -d
 
-echo "[3/4] Starting MCP Server..."
-docker compose -f "$CERID_ROOT/src/mcp/docker-compose.yml" --env-file "$ENV_FILE" up -d $BUILD_FLAG
+    echo "[2/4] Starting Bifrost (LLM Gateway)..."
+    docker compose -f "$CERID_ROOT/stacks/bifrost/docker-compose.yml" --env-file "$ENV_FILE" up -d
 
-echo "[4/4] Starting React GUI..."
-docker compose -f "$CERID_ROOT/src/web/docker-compose.yml" --env-file "$ENV_FILE" up -d $BUILD_FLAG $WEB_RECREATE
+    echo "[3/4] Starting MCP Server..."
+    docker compose -f "$CERID_ROOT/src/mcp/docker-compose.yml" --env-file "$ENV_FILE" up -d $BUILD_FLAG
+
+    echo "[4/4] Starting React GUI..."
+    docker compose -f "$CERID_ROOT/src/web/docker-compose.yml" --env-file "$ENV_FILE" up -d $BUILD_FLAG $WEB_RECREATE
+fi
 
 # Optional: Caddy reverse proxy for local HTTPS
 GATEWAY_ENABLED=$(grep -s '^CERID_GATEWAY=true' "$ENV_FILE" 2>/dev/null || echo "")

@@ -33,9 +33,11 @@ from routers import (
     kb_admin,
     mcp_sse,
     memories,
+    providers,
     query,
     sdk,
     settings,
+    setup,
     sync,
     taxonomy,
     upload,
@@ -295,6 +297,12 @@ _api_routers = [
 for r in _api_routers:
     app.include_router(r)
     app.include_router(r, prefix="/api/v1")
+
+# Setup and provider routers — first-run wizard and BYOK model configuration
+app.include_router(setup.router)
+app.include_router(setup.router, prefix="/api/v1")
+app.include_router(providers.router)
+app.include_router(providers.router, prefix="/api/v1")
 
 # SDK router — stable external contract (manages its own /sdk/v1/ prefix)
 app.include_router(sdk.router)
