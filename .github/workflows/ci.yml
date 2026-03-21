@@ -54,7 +54,7 @@ jobs:
       - name: License audit (Python)
         run: |
           pip install pip-licenses
-          pip-licenses --fail-on="GPL-2.0-only;GPL-3.0-only" --format=table
+          pip-licenses --fail-on="GPL-2.0-only;GPL-3.0-only" --format=plain
 
   security:
     runs-on: ubuntu-latest
