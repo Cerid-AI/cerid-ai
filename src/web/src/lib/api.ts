@@ -654,17 +654,22 @@ export async function streamChat(
   onChunk: (text: string) => void,
   signal?: AbortSignal,
   onModelInfo?: (info: ChatModelInfo) => void,
+  chatSettings?: { temperature?: number; top_p?: number },
 ): Promise<void> {
   const url = `${MCP_BASE}/chat/stream`
+  const payload: Record<string, unknown> = {
+    model,
+    messages: messages.map((m) => ({ role: m.role, content: m.content })),
+    temperature: chatSettings?.temperature ?? 0.7,
+    stream: true,
+  }
+  if (chatSettings?.top_p != null) {
+    payload.top_p = chatSettings.top_p
+  }
   const res = await fetch(url, {
     method: "POST",
     headers: mcpHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({
-      model,
-      messages: messages.map((m) => ({ role: m.role, content: m.content })),
-      temperature: 0.7,
-      stream: true,
-    }),
+    body: JSON.stringify(payload),
     signal,
   })
 

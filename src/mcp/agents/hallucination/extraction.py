@@ -263,6 +263,14 @@ async def _extract_claims_llm(response_text: str, max_claims: int) -> list[str]:
         "Include knowledge-cutoff admissions and data-availability claims "
         "(e.g., 'As of my last update...', 'I don't have access to...').\n"
         "For list items that contain facts, extract the factual part as a standalone claim.\n\n"
+        "Examples:\n"
+        'Input: "Paris is the capital of France. I hope this helps!"\n'
+        'Output: [{"claim": "Paris is the capital of France", "type": "general"}]\n\n'
+        'Input: "The temperature is 72\u00b0F. However, I should note that weather data changes frequently."\n'
+        'Output: [{"claim": "The temperature is 72\u00b0F", "type": "statistic"}]\n\n'
+        'Input: "I don\'t have access to that information, but generally speaking, '
+        'water boils at 100\u00b0C at sea level."\n'
+        'Output: [{"claim": "Water boils at 100\u00b0C at sea level", "type": "technical"}]\n\n'
         f"Text:\n{response_text[:5000]}\n\n"
         "JSON array:"
     )
@@ -277,6 +285,7 @@ async def _extract_claims_llm(response_text: str, max_claims: int) -> list[str]:
             model=config.VERIFICATION_MODEL,
             temperature=0.1,
             max_tokens=1200,
+            extra_payload={"response_format": {"type": "json_object"}},
         )
         content = extract_content(data)
         raw = parse_llm_json(content)

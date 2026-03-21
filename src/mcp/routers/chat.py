@@ -67,6 +67,7 @@ class ChatRequest(BaseModel):
     model: str
     messages: list[_ChatMessage]
     temperature: float = 0.7
+    top_p: float | None = None
     max_tokens: int | None = None
     stream: bool = True
 
@@ -124,6 +125,8 @@ async def _attempt_stream(
     }
     if req.max_tokens is not None:
         payload_dict["max_tokens"] = req.max_tokens
+    if req.top_p is not None:
+        payload_dict["top_p"] = req.top_p
 
     headers = {
         "Authorization": f"Bearer {effective_key}",

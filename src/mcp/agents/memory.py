@@ -64,6 +64,7 @@ async def extract_memories(
             breaker_name="bifrost-memory",
             temperature=0.1,
             max_tokens=1000,
+            extra_payload={"response_format": {"type": "json_object"}},
         )
         content = extract_content(data)
         memories = parse_llm_json(content)
@@ -388,6 +389,7 @@ async def resolve_memory_conflict(
             breaker_name="bifrost-memory",
             temperature=0.0,
             max_tokens=500,
+            extra_payload={"response_format": {"type": "json_object"}},
         )
         content = extract_content(data)
         parsed = parse_llm_json(content)
