@@ -8,6 +8,13 @@ import logging as _logging
 import os
 
 # ---------------------------------------------------------------------------
+# PDF Parsing (memory-safe chunked extraction)
+# ---------------------------------------------------------------------------
+PDF_MAX_PAGES = int(os.getenv("PDF_MAX_PAGES", "200"))
+PDF_MEMORY_LIMIT_MB = int(os.getenv("PDF_MEMORY_LIMIT_MB", "1024"))  # 1GB per PDF
+PDF_LITE_THRESHOLD_PAGES = int(os.getenv("PDF_LITE_THRESHOLD_PAGES", "50"))
+
+# ---------------------------------------------------------------------------
 # Chunking
 # ---------------------------------------------------------------------------
 CHUNK_MAX_TOKENS = 512
