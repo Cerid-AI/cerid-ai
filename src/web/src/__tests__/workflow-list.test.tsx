@@ -12,10 +12,11 @@ vi.mock("@/lib/api", () => ({
 
 import { fetchWorkflows } from "@/lib/api"
 import WorkflowList from "@/components/workflows/workflow-list"
+import type { Workflow } from "@/lib/types"
 
 const noop = () => {}
 
-const mockWorkflows = [
+const mockWorkflows: Workflow[] = [
   {
     id: "wf-1",
     name: "Ingestion Pipeline",

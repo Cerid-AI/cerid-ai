@@ -41,8 +41,6 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
 
   const canProceedFromKeys = keys.openrouter.valid
 
-  const validProviders = Object.entries(keys).filter(([, v]) => v.valid)
-
   const handleApply = useCallback(async () => {
     setApplying(true)
     setApplyError(null)

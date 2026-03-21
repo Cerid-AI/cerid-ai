@@ -10,7 +10,6 @@ import {
   Clock,
   DollarSign,
   Gauge,
-  Loader2,
   ShieldCheck,
   TrendingDown,
   TrendingUp,
@@ -21,7 +20,7 @@ import {
   fetchObservabilityMetrics,
   fetchObservabilityHealthScore,
 } from "@/lib/api"
-import type { MetricAggregation, TimeSeriesPoint } from "@/lib/types"
+import type { MetricAggregation } from "@/lib/types"
 
 // ---------------------------------------------------------------------------
 // Time window options
