@@ -188,7 +188,7 @@ services:
       resources:
         limits:
           cpus: '2.0'
-          memory: 4G
+          memory: 6G
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8888/health"]
       interval: 30s
