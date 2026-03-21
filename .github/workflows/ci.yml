@@ -213,6 +213,8 @@ jobs:
           CVE-2025-49795
           CVE-2025-49796
           CVE-2025-6021
+          # jaraco.context path traversal via tar — build-time pip dependency, not runtime-exploitable
+          CVE-2026-23949
           EOF
       - name: Scan MCP Docker image
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1

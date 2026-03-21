@@ -25,7 +25,7 @@ from utils.semantic_cache import (
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _random_embedding(dim: int = 384, seed: int = 42) -> np.ndarray:
+def _random_embedding(dim: int = 768, seed: int = 42) -> np.ndarray:
     rng = np.random.RandomState(seed)
     emb = rng.randn(dim).astype(np.float32)
     return emb / np.linalg.norm(emb)
@@ -190,13 +190,13 @@ class TestHNSWIndex:
 class TestCacheLookup:
     def test_empty_cache_returns_none(self):
         redis = _mock_redis()
-        emb = _random_embedding(dim=384)
+        emb = _random_embedding()
         result = cache_lookup(emb, redis)
         assert result is None
 
     def test_hit_above_threshold(self):
         redis = _mock_redis()
-        emb = _random_embedding(dim=384, seed=10)
+        emb = _random_embedding(seed=10)
         payload = {"context": "cached context", "sources": []}
 
         cache_store("test query", emb, payload, redis, ttl=300)
@@ -207,8 +207,8 @@ class TestCacheLookup:
 
     def test_miss_below_threshold(self):
         redis = _mock_redis()
-        emb1 = _random_embedding(dim=384, seed=10)
-        emb2 = _random_embedding(dim=384, seed=99)
+        emb1 = _random_embedding(seed=10)
+        emb2 = _random_embedding(seed=99)
 
         cache_store("query one", emb1, {"answer": "yes"}, redis, ttl=300)
         result = cache_lookup(emb2, redis, threshold=0.99)
@@ -218,7 +218,7 @@ class TestCacheLookup:
 class TestCacheStore:
     def test_stores_entry(self):
         redis = _mock_redis()
-        emb = _random_embedding(dim=384, seed=5)
+        emb = _random_embedding(seed=5)
         cache_store("test query", emb, {"context": "result"}, redis, ttl=60)
         redis.setex.assert_called_once()
         # HNSW label→entry_id mapping should be stored
@@ -226,8 +226,8 @@ class TestCacheStore:
 
     def test_store_multiple_find_best(self):
         redis = _mock_redis()
-        emb1 = _random_embedding(dim=384, seed=1)
-        emb2 = emb1 + np.random.RandomState(2).randn(384).astype(np.float32) * 0.01
+        emb1 = _random_embedding(seed=1)
+        emb2 = emb1 + np.random.RandomState(2).randn(768).astype(np.float32) * 0.01
         emb2 = (emb2 / np.linalg.norm(emb2)).astype(np.float32)
 
         cache_store("query alpha", emb1, {"answer": "alpha"}, redis, ttl=300)
@@ -241,7 +241,7 @@ class TestCacheStore:
 class TestInvalidateCache:
     def test_clears_keys_and_reinits_index(self):
         redis = _mock_redis()
-        emb = _random_embedding(dim=384, seed=5)
+        emb = _random_embedding(seed=5)
 
         cache_store("test query", emb, {"answer": "yes"}, redis, ttl=300)
         count = invalidate_cache(redis)
@@ -265,7 +265,7 @@ class TestThreadSafety:
 
         def worker(seed: int):
             try:
-                emb = _random_embedding(dim=384, seed=seed)
+                emb = _random_embedding(seed=seed)
                 cache_store(f"query_{seed}", emb, {"seed": seed}, redis, ttl=300)
             except Exception as e:
                 errors.append(e)
@@ -287,7 +287,7 @@ class TestEdgeCases:
     def test_missing_label_mapping_returns_none(self):
         """If HNSW finds a match but the label mapping is gone, returns None."""
         redis = _mock_redis()
-        emb = _random_embedding(dim=384, seed=42)
+        emb = _random_embedding(seed=42)
 
         # Store normally
         cache_store("test query", emb, {"answer": "yes"}, redis, ttl=300)
@@ -301,7 +301,7 @@ class TestEdgeCases:
     def test_expired_entry_returns_none(self):
         """If HNSW finds a match but the result payload expired, returns None."""
         redis = _mock_redis()
-        emb = _random_embedding(dim=384, seed=42)
+        emb = _random_embedding(seed=42)
 
         cache_store("test query", emb, {"answer": "yes"}, redis, ttl=300)
 
