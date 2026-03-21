@@ -26,6 +26,7 @@ const mockPlugins = [
     tier_required: "community",
     capabilities: ["parser"],
     file_types: [".png", ".jpg"],
+    config_schema: null,
   },
   {
     name: "audio-transcribe",
@@ -36,6 +37,7 @@ const mockPlugins = [
     tier_required: "pro",
     capabilities: ["parser"],
     file_types: [".mp3", ".wav"],
+    config_schema: null,
   },
 ]
 
@@ -45,28 +47,28 @@ beforeEach(() => {
 
 describe("PluginsSection", () => {
   it("renders plugin cards after loading", async () => {
-    vi.mocked(fetchPlugins).mockResolvedValue({ plugins: mockPlugins })
+    vi.mocked(fetchPlugins).mockResolvedValue({ plugins: mockPlugins, total: mockPlugins.length })
     render(<PluginsSection />)
     expect(await screen.findByText("ocr-plugin")).toBeInTheDocument()
     expect(screen.getByText("audio-transcribe")).toBeInTheDocument()
   })
 
   it("shows plugin count badge", async () => {
-    vi.mocked(fetchPlugins).mockResolvedValue({ plugins: mockPlugins })
+    vi.mocked(fetchPlugins).mockResolvedValue({ plugins: mockPlugins, total: mockPlugins.length })
     render(<PluginsSection />)
     await screen.findByText("ocr-plugin")
     expect(screen.getByText("2")).toBeInTheDocument()
   })
 
   it("shows Scan for Plugins button", async () => {
-    vi.mocked(fetchPlugins).mockResolvedValue({ plugins: mockPlugins })
+    vi.mocked(fetchPlugins).mockResolvedValue({ plugins: mockPlugins, total: mockPlugins.length })
     render(<PluginsSection />)
     await screen.findByText("ocr-plugin")
     expect(screen.getByText("Scan for Plugins")).toBeInTheDocument()
   })
 
   it("shows empty state when no plugins", async () => {
-    vi.mocked(fetchPlugins).mockResolvedValue({ plugins: [] })
+    vi.mocked(fetchPlugins).mockResolvedValue({ plugins: [], total: 0 })
     render(<PluginsSection />)
     await waitFor(() => {
       expect(screen.getByText("No plugins installed")).toBeInTheDocument()

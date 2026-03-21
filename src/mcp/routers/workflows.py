@@ -311,10 +311,10 @@ async def _execute_agent_node(name: str, input_data: dict[str, Any]) -> dict[str
 
     elif name == "memory":
         from agents.memory import extract_memories
-        return await extract_memories(
+        return {"results": await extract_memories(
             response_text=query_text,
             conversation_id=input_data.get("conversation_id", "workflow"),
-        )
+        )}
 
     elif name == "self_rag":
         from agents.self_rag import self_rag_enhance

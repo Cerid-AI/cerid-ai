@@ -21,7 +21,8 @@ const mockAutomations = [
     id: "auto-1",
     name: "Daily Digest",
     description: "Summarizes daily activity",
-    action: "digest",
+    prompt: "Summarize today's activity across all domains",
+    action: "digest" as const,
     schedule: "0 9 * * *",
     domains: ["coding"],
     enabled: true,
@@ -29,6 +30,7 @@ const mockAutomations = [
     last_run_at: "2026-03-20T09:00:00Z",
     last_status: "success",
     created_at: "2026-03-01T00:00:00Z",
+    updated_at: "2026-03-01T00:00:00Z",
   },
 ]
 

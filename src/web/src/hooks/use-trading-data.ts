@@ -28,7 +28,7 @@ export function useTradingData(refreshInterval = 10000) {
         fetchTradingAggregate(),
         fetchTradingSessions(),
       ])
-      setData({ aggregate, sessions })
+      setData({ aggregate, sessions: sessions as TradingSession[] })
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to fetch trading data')

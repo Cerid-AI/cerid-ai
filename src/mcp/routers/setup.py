@@ -347,7 +347,7 @@ async def configure(req: ConfigureRequest) -> ConfigureResponse:
 
         if req.neo4j_password:
             if req.neo4j_password == "auto":
-                updates["NEO4J_PASSWORD"] = secrets.token_hex(16)
+                updates["NEO4J_PASSWORD"] = secrets.token_hex(16)  # pragma: allowlist secret
             else:
                 updates["NEO4J_PASSWORD"] = req.neo4j_password
 

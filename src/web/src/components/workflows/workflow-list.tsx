@@ -177,14 +177,9 @@ export default function WorkflowList({ onEdit, onCreate, onDuplicate }: Workflow
 
       {workflows.length === 0 ? (
         <EmptyState
-          icon={<GitBranch className="h-8 w-8" />}
+          icon={GitBranch}
           title="No workflows yet"
           description="Create a workflow to visually compose agent pipelines"
-          action={
-            <Button size="sm" onClick={onCreate}>
-              <Plus className="h-3.5 w-3.5 mr-1" /> Create Workflow
-            </Button>
-          }
         />
       ) : (
         <ScrollArea className="flex-1">

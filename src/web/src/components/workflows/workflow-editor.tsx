@@ -22,7 +22,6 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import WorkflowCanvas from "./workflow-canvas"
 import {
   Plus,
@@ -30,7 +29,6 @@ import {
   Save,
   Play,
   Loader2,
-  MousePointer2,
   ArrowRight,
   ChevronDown,
   X,
