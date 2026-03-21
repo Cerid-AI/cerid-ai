@@ -35,6 +35,7 @@ function ClaimBadge({
   onFocus,
   onRetry,
   retrying,
+  expertVerified,
 }: {
   claim: HallucinationClaim
   index: number
@@ -43,6 +44,7 @@ function ClaimBadge({
   onFocus?: (index: number | null) => void
   onRetry?: () => void
   retrying?: boolean
+  expertVerified?: boolean
 }) {
   const [feedback, setFeedback] = useState<"correct" | "incorrect" | null>(
     claim.user_feedback ?? null,
@@ -88,7 +90,20 @@ function ClaimBadge({
       >
         {displayStatus}
       </Badge>
+      {expertVerified && (
+        <Badge variant="outline" className="shrink-0 border-purple-500/40 bg-purple-500/10 text-purple-400 text-[10px] px-1.5 py-0">
+          <Sparkles className="mr-0.5 h-2.5 w-2.5" />
+          expert
+        </Badge>
+      )}
       <div className="min-w-0 flex-1">
+        {/* Re-verifying banner */}
+        {retrying && (
+          <div className="mb-2 flex items-center gap-2 rounded-md border border-purple-500/30 bg-purple-500/5 px-2.5 py-2 text-xs text-purple-400">
+            <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+            <span>Re-verifying with expert analysis (Grok 4)...</span>
+          </div>
+        )}
         {/* Compact: claim text (clamped) + method badge */}
         <p className={cn("text-sm leading-relaxed", !expanded && "line-clamp-1")}>{stripMarkdown(claim.claim)}</p>
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
@@ -159,18 +174,18 @@ function ClaimBadge({
           </div>
         )}
         {/* Action buttons — below claim text to avoid constraining it */}
-        <div className="mt-1.5 flex items-center gap-0.5">
-          {onRetry && (
+        <div className="mt-1.5 flex items-center gap-1">
+          {onRetry && !retrying && (
             <Button
               variant="ghost"
-              size="icon"
-              className={cn("h-6 w-6 text-muted-foreground hover:text-brand", retrying && "animate-spin text-brand")}
-              onClick={(e) => { e.stopPropagation(); if (!retrying) onRetry() }}
-              disabled={retrying}
+              size="sm"
+              className="h-6 px-2 text-[11px] text-muted-foreground hover:text-purple-400 hover:bg-purple-500/10 gap-1"
+              onClick={(e) => { e.stopPropagation(); onRetry() }}
               aria-label="Re-verify this claim with expert analysis"
-              title="Re-verify this claim with expert mode"
+              title="Re-verify with Grok 4 expert mode"
             >
-              {retrying ? <Loader2 className="h-3 w-3" /> : <RefreshCw className="h-3 w-3" />}
+              <Sparkles className="h-3 w-3" />
+              Expert verify
             </Button>
           )}
           {conversationId && (
@@ -314,6 +329,7 @@ export function HallucinationPanel({
   // Per-claim expert retry state
   const [retryingClaims, setRetryingClaims] = useState<Set<number>>(new Set())
   const [claimUpdates, setClaimUpdates] = useState<Map<number, Partial<HallucinationClaim>>>(new Map())
+  const [expertVerifiedClaims, setExpertVerifiedClaims] = useState<Set<number>>(new Set())
 
   // Reset updates when report changes (new verification run)
   const reportRef = useRef(report)
@@ -322,6 +338,7 @@ export function HallucinationPanel({
       reportRef.current = report
       setClaimUpdates(new Map())
       setRetryingClaims(new Set())
+      setExpertVerifiedClaims(new Set())
     }
   }, [report])
 
@@ -334,6 +351,7 @@ export function HallucinationPanel({
       const result = await verifySingleClaim(claims[index].claim, conversationId)
       if (result) {
         setClaimUpdates((prev) => new Map(prev).set(index, result))
+        setExpertVerifiedClaims((prev) => new Set(prev).add(index))
       }
     } catch { /* ignore */ }
     setRetryingClaims((prev) => { const next = new Set(prev); next.delete(index); return next })
@@ -471,6 +489,7 @@ export function HallucinationPanel({
                 onFocus={onClaimFocus}
                 onRetry={() => handleRetryClaim(i)}
                 retrying={retryingClaims.has(i)}
+                expertVerified={expertVerifiedClaims.has(i)}
               />
             )
           })}
