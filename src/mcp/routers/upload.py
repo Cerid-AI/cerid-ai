@@ -60,27 +60,41 @@ async def upload_file_endpoint(
     if len(content) == 0:
         raise HTTPException(status_code=400, detail="Empty file")
 
-    # Save to a temp directory inside the archive path so it passes path validation
-    archive_root = Path(config.ARCHIVE_PATH)
-    upload_dir = archive_root / "_uploads"
-    upload_dir.mkdir(parents=True, exist_ok=True)
-
+    # Save to /tmp (always writable) — the archive mount may be read-only on macOS Docker
     tmp_path = None
     try:
-        # Use tempfile to avoid collisions, but keep the original extension
-        fd, tmp_path = tempfile.mkstemp(suffix=suffix, prefix="upload_", dir=str(upload_dir))
+        fd, tmp_path = tempfile.mkstemp(suffix=suffix, prefix="upload_")
         os.write(fd, content)
         os.close(fd)
 
         logger.info(f"Upload received: {file.filename} ({len(content)} bytes) -> {tmp_path}")
 
-        result = await ingest_file(
-            file_path=tmp_path,
-            domain=domain,
-            sub_category=sub_category,
-            tags=tags,
-            categorize_mode=categorize_mode,
+        # Parse file from /tmp, then ingest the extracted text content
+        # (bypasses archive path validation which requires files under ARCHIVE_PATH)
+        from parsers import parse_file as _parse_file
+        from services.ingestion import ingest_content
+
+        parsed = _parse_file(tmp_path)
+        text = parsed.get("text", "")
+        if not text.strip():
+            raise ValueError(f"No text extracted from '{file.filename}'")
+
+        metadata = {
+            "filename": file.filename,
+            "file_type": parsed.get("file_type", ""),
+            "page_count": parsed.get("page_count"),
+            "table_count": parsed.get("table_count"),
+            "form_field_count": parsed.get("form_field_count"),
+            "sub_category": sub_category,
+            "client_source": "upload",
+        }
+        result = ingest_content(
+            text,
+            domain or "general",
+            metadata,
         )
+        result["categorize_mode"] = categorize_mode or "smart"
+        result["metadata"] = metadata
 
         # Override filename in result with the original upload name
         result["filename"] = file.filename
