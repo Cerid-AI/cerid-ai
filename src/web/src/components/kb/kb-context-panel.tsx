@@ -82,7 +82,7 @@ export function KBContextPanel({
         <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center rounded-lg border-2 border-dashed border-primary bg-primary/10">
           <div className="flex flex-col items-center gap-2 text-primary">
             <Upload className="h-8 w-8" />
-            <span className="text-sm font-medium">Drop to ingest & inject</span>
+            <span className="text-sm font-medium">Drop to ingest</span>
           </div>
         </div>
       )}
