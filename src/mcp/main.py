@@ -41,6 +41,7 @@ from routers import (
     plugins,
     providers,
     query,
+    scanner,
     sdk,
     settings,
     setup,
@@ -328,6 +329,7 @@ _api_routers = [
     kb_admin.router,
     user_state.router,
     plugins.router,
+    scanner.router,
     workflows.router,
 ]
 for r in _api_routers:

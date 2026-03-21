@@ -323,6 +323,15 @@ SCHEDULE_STALE_DETECTION = os.getenv("SCHEDULE_STALE_DETECTION", "0 4 * * 0")  #
 SCHEDULE_STALE_DAYS = int(os.getenv("SCHEDULE_STALE_DAYS", "90"))
 
 # ---------------------------------------------------------------------------
+# Folder Scanning
+# ---------------------------------------------------------------------------
+SCAN_PATHS = os.getenv("SCAN_PATHS", ARCHIVE_PATH)  # colon-separated directories to scan
+SCAN_MIN_QUALITY = float(os.getenv("SCAN_MIN_QUALITY", "0.4"))  # min quality score (0-1)
+SCAN_MAX_FILE_SIZE_MB = int(os.getenv("SCAN_MAX_FILE_SIZE_MB", "50"))
+SCAN_EXCLUDE_PATTERNS = [p for p in os.getenv("SCAN_EXCLUDE_PATTERNS", "").split(",") if p]
+SCHEDULE_FOLDER_SCAN = os.getenv("SCHEDULE_FOLDER_SCAN", "")  # cron expr, empty=disabled
+
+# ---------------------------------------------------------------------------
 # Trading Agent Integration
 # ---------------------------------------------------------------------------
 CERID_TRADING_ENABLED = os.getenv("CERID_TRADING_ENABLED", "false").lower() in ("true", "1")

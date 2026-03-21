@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import time
+from pathlib import Path
 from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -226,6 +227,42 @@ async def _run_longshot_surface_rebuild() -> None:
         logger.error(f"Scheduled longshot surface rebuild failed: {e}")
 
 
+async def _run_folder_scan() -> None:
+    """Scheduled folder scan — ingests new files from configured paths."""
+    start = time.time()
+    try:
+        from services.folder_scanner import scan_folder, get_scan_state
+
+        scan_paths = config.SCAN_PATHS.split(":") if hasattr(config, "SCAN_PATHS") else [config.ARCHIVE_PATH]
+        total_ingested = 0
+        total_skipped = 0
+        total_errored = 0
+
+        for path in scan_paths:
+            if not Path(path).is_dir():
+                logger.warning(f"Scan path not found: {path}")
+                continue
+            async for result in scan_folder(
+                path,
+                min_quality=getattr(config, "SCAN_MIN_QUALITY", 0.4),
+                max_file_size_mb=getattr(config, "SCAN_MAX_FILE_SIZE_MB", 50),
+            ):
+                if result.status == "ingested":
+                    total_ingested += 1
+                elif result.status in ("duplicate", "low_quality", "skipped"):
+                    total_skipped += 1
+                elif result.status == "error":
+                    total_errored += 1
+
+        duration = time.time() - start
+        detail = f"ingested={total_ingested} skipped={total_skipped} errored={total_errored}"
+        _log_execution("folder_scan", "success", duration, detail)
+        logger.info(f"Folder scan complete: {detail} ({duration:.1f}s)")
+    except Exception as e:
+        _log_execution("folder_scan", "error", time.time() - start, str(e))
+        logger.error(f"Folder scan failed: {e}")
+
+
 def start_scheduler() -> AsyncIOScheduler:
     """Create and start the scheduler with configured jobs."""
     global _scheduler
@@ -299,6 +336,18 @@ def start_scheduler() -> AsyncIOScheduler:
             replace_existing=True,
         )
         logger.info("Trading scheduler jobs registered (CERID_TRADING_ENABLED=true)")
+
+    # Folder scan (opt-in — empty SCHEDULE_FOLDER_SCAN disables)
+    scan_cron = getattr(config, "SCHEDULE_FOLDER_SCAN", "")
+    if scan_cron:
+        _scheduler.add_job(
+            _run_folder_scan,
+            CronTrigger.from_crontab(scan_cron),
+            id="folder_scan",
+            name="Autonomous folder scan",
+            replace_existing=True,
+        )
+        logger.info(f"Folder scan scheduled: {scan_cron}")
 
     _scheduler.start()
     logger.info("Scheduler started with %d jobs", len(_scheduler.get_jobs()))
