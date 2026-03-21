@@ -6,6 +6,57 @@
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](../docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
 
+## Development Roadmap: Phases 42-50
+
+Competitive analysis (2026-03-21) against Dify (134K stars), Open WebUI (128K), RAGFlow (76K), Mem0 (51K), Khoj (34K), and others. Cerid's moat: hallucination detection, GraphRAG, Self-RAG, 9 agents, typed SDK. No competitor has all of these. Roadmap deepens the moat rather than chasing breadth.
+
+### P0 — Critical
+
+- [ ] **Phase 42: Agentic Web Search Fallback** (3-5 days)
+  - Resolve "ignorance" claims detected by hallucination pipeline via web search
+  - `WebSearchProvider` abstraction (Tavily primary, SearXNG self-hosted alt)
+  - Web results verified through Self-RAG before surfacing (unique differentiator)
+  - New `pkb_web_search` MCP tool; optional auto-ingest (`ENABLE_AUTO_LEARN`)
+  - Key files: `agents/hallucination/streaming.py`, new `utils/web_search.py`
+
+### P1 — High Value
+
+- [ ] **Phase 43: User-Facing Scheduled Automations** (5-7 days)
+  - Expose scheduler infrastructure to users (only Khoj has this among competitors)
+  - CRUD API at `/automations`, Redis-backed, cron presets
+  - Actions: notify (SSE push), digest (accumulate summary), ingest (auto-store)
+  - Automations run full agent pipeline (query + hallucination + Self-RAG)
+  - Key files: `scheduler.py`, new `routers/automations.py`
+
+- [ ] **Phase 44: Enhanced Memory Layer** (4-6 days)
+  - Conflict detection: embed new memory → search existing at >0.85 sim → LLM classify (supersede/coexist/merge)
+  - Decay/reinforcement scoring: `base * (1 + log(accesses)) * decay(age)`
+  - Neo4j `:Memory` nodes with relationships to `:Artifact` and `:Conversation`
+  - New `pkb_memory_recall` MCP tool for context-aware retrieval
+  - Key files: `agents/memory.py`, `db/neo4j/`
+
+- [ ] **Phase 45: A2A (Agent-to-Agent) Protocol** (5-8 days)
+  - Agent Card at `/.well-known/agent.json` advertising cerid capabilities
+  - Task lifecycle: create, status, cancel (thin wrappers around agent calls)
+  - A2A client for discovering and invoking other A2A agents
+  - Dual MCP + A2A = first personal KB platform with both protocols
+  - Key files: new `routers/a2a.py`, new `utils/a2a_client.py`
+
+### P2 — Valuable
+
+- [ ] **Phase 46: Multi-Modal KB** (8-12 days) — Activate OCR (already built), add audio (faster-whisper), image (vision LLM)
+- [ ] **Phase 47: Observability Dashboard** (4-6 days) — Real-time metrics: latency, cost, retrieval quality, NDCG@5
+- [ ] **Phase 48: Local LLM via Ollama** (3-5 days) — Air-gapped deployment, `LLM_PROVIDER=openrouter|ollama|auto`
+
+### P3 — Long-Term
+
+- [ ] **Phase 49: Plugin Foundation** (6-10 days) — Plugin packaging, loader, management API and GUI
+- [ ] **Phase 50: Visual Workflow Builder** (15-20 days) — Pipeline visualizer → stage toggles → custom DAG composition
+
+**P0+P1 estimate:** 17-26 days. All P1 phases parallelizable (different subsystems).
+
+---
+
 ## Phase 41: SDK Hardening & Multi-Agent Extensibility (2026-03-21) ✅
 
 - [x] Typed Pydantic response models for all 9 SDK endpoints (`models/sdk.py`)
