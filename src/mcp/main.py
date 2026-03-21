@@ -38,6 +38,7 @@ from routers import (
     models,
     observability,
     ollama_proxy,
+    plugins,
     providers,
     query,
     sdk,
@@ -309,6 +310,7 @@ _api_routers = [
     sync.router,
     kb_admin.router,
     user_state.router,
+    plugins.router,
 ]
 for r in _api_routers:
     app.include_router(r)

@@ -45,6 +45,7 @@ import {
   Trash2,
 } from "lucide-react"
 import { SyncSection } from "./sync-section"
+import { PluginsSection } from "./plugins-section"
 
 type LoadState = "loading" | "error" | "ready"
 
@@ -266,6 +267,7 @@ export default function SettingsPane() {
                 <TabsTrigger value="essentials" className="flex-1">Essentials</TabsTrigger>
                 <TabsTrigger value="pipeline" className="flex-1">Pipeline</TabsTrigger>
                 <TabsTrigger value="system" className="flex-1">System</TabsTrigger>
+                <TabsTrigger value="plugins" className="flex-1">Plugins</TabsTrigger>
               </TabsList>
 
               {/* ── Essentials Tab ── */}
@@ -850,6 +852,11 @@ export default function SettingsPane() {
               </Card>
             )}
 
+              </TabsContent>
+
+              {/* ── Plugins Tab ── */}
+              <TabsContent value="plugins" className="space-y-1 pt-2">
+                <PluginsSection />
               </TabsContent>
             </Tabs>
           </div>

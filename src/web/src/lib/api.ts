@@ -66,6 +66,14 @@ import type {
   Automation,
   AutomationCreate,
   AutomationRun,
+  Plugin,
+  PluginConfig,
+  PluginListResponse,
+  AggregatedMetricsResponse,
+  TimeSeriesResponse,
+  HealthScoreResponse,
+  CostBreakdownResponse,
+  QualityMetricsResponse,
 } from "./types"
 
 export async function fetchHealth(): Promise<HealthResponse> {
@@ -1168,5 +1176,96 @@ export async function fetchAutomationHistory(id: string): Promise<AutomationRun[
 export async function fetchAutomationPresets(): Promise<Record<string, { label: string; cron: string }>> {
   const res = await fetch(`${MCP_BASE}/automations/presets`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, `Fetch automation presets failed: ${res.status}`))
+  return res.json()
+}
+
+// --- Plugins ---
+
+export async function fetchPlugins(): Promise<PluginListResponse> {
+  const res = await fetch(`${MCP_BASE}/plugins`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Fetch plugins failed: ${res.status}`))
+  return res.json()
+}
+
+export async function fetchPlugin(name: string): Promise<Plugin> {
+  const res = await fetch(`${MCP_BASE}/plugins/${encodeURIComponent(name)}`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Fetch plugin failed: ${res.status}`))
+  return res.json()
+}
+
+export async function enablePlugin(name: string): Promise<Plugin> {
+  const res = await fetch(`${MCP_BASE}/plugins/${encodeURIComponent(name)}/enable`, {
+    method: "POST",
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Enable plugin failed: ${res.status}`))
+  return res.json()
+}
+
+export async function disablePlugin(name: string): Promise<Plugin> {
+  const res = await fetch(`${MCP_BASE}/plugins/${encodeURIComponent(name)}/disable`, {
+    method: "POST",
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Disable plugin failed: ${res.status}`))
+  return res.json()
+}
+
+export async function getPluginConfig(name: string): Promise<PluginConfig> {
+  const res = await fetch(`${MCP_BASE}/plugins/${encodeURIComponent(name)}/config`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Get plugin config failed: ${res.status}`))
+  return res.json()
+}
+
+export async function updatePluginConfig(name: string, config: PluginConfig): Promise<PluginConfig> {
+  const res = await fetch(`${MCP_BASE}/plugins/${encodeURIComponent(name)}/config`, {
+    method: "PUT",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(config),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Update plugin config failed: ${res.status}`))
+  return res.json()
+}
+
+export async function scanPlugins(): Promise<PluginListResponse> {
+  const res = await fetch(`${MCP_BASE}/plugins/scan`, {
+    method: "POST",
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Scan plugins failed: ${res.status}`))
+  return res.json()
+}
+
+// ---------------------------------------------------------------------------
+// Observability (Phase 47)
+// ---------------------------------------------------------------------------
+
+export async function fetchObservabilityMetrics(windowMinutes = 60): Promise<AggregatedMetricsResponse> {
+  const res = await fetch(`${MCP_BASE}/observability/metrics?window_minutes=${windowMinutes}`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Observability metrics fetch failed: ${res.status}`))
+  return res.json()
+}
+
+export async function fetchObservabilityTimeSeries(name: string, windowMinutes = 60): Promise<TimeSeriesResponse> {
+  const res = await fetch(`${MCP_BASE}/observability/metrics/${encodeURIComponent(name)}?window_minutes=${windowMinutes}`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Metric time series fetch failed: ${res.status}`))
+  return res.json()
+}
+
+export async function fetchObservabilityHealthScore(windowMinutes = 60): Promise<HealthScoreResponse> {
+  const res = await fetch(`${MCP_BASE}/observability/health-score?window_minutes=${windowMinutes}`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Health score fetch failed: ${res.status}`))
+  return res.json()
+}
+
+export async function fetchObservabilityCost(windowMinutes = 60): Promise<CostBreakdownResponse> {
+  const res = await fetch(`${MCP_BASE}/observability/cost?window_minutes=${windowMinutes}`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Cost breakdown fetch failed: ${res.status}`))
+  return res.json()
+}
+
+export async function fetchObservabilityQuality(windowMinutes = 60): Promise<QualityMetricsResponse> {
+  const res = await fetch(`${MCP_BASE}/observability/quality?window_minutes=${windowMinutes}`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Quality metrics fetch failed: ${res.status}`))
   return res.json()
 }

@@ -766,3 +766,81 @@ export interface AutomationRun {
   error: string | null
 }
 
+// ── Observability (Phase 47) ─────────────────────────────────────────────────
+
+export interface MetricAggregation {
+  avg: number | null
+  p50: number | null
+  p95: number | null
+  p99: number | null
+  min: number | null
+  max: number | null
+  count: number
+}
+
+export interface AggregatedMetricsResponse {
+  window_minutes: number
+  timestamp: string
+  metrics: Record<string, MetricAggregation>
+}
+
+export interface TimeSeriesPoint {
+  timestamp: number
+  value: number
+  tags: Record<string, string>
+}
+
+export interface TimeSeriesResponse {
+  name: string
+  window_minutes: number
+  points: TimeSeriesPoint[]
+  count: number
+}
+
+export interface HealthScoreResponse {
+  score: number
+  grade: string
+  factors: Record<string, Record<string, number | string | null>>
+  timestamp: string
+}
+
+export interface CostBreakdownResponse {
+  window_minutes: number
+  total_cost_usd: number
+  by_model: Record<string, number>
+  timestamp: string
+}
+
+export interface QualityMetricsResponse {
+  window_minutes: number
+  retrieval_ndcg: MetricAggregation
+  verification_accuracy: MetricAggregation
+  cache_hit_rate: MetricAggregation
+  timestamp: string
+}
+
+// ── Plugins ──────────────────────────────────────────────────────────────────
+
+export type PluginStatus = "installed" | "active" | "error" | "disabled" | "requires_pro"
+
+export interface Plugin {
+  name: string
+  version: string
+  description: string
+  tier_required: string
+  enabled: boolean
+  status: PluginStatus
+  file_types: string[]
+  config_schema: Record<string, unknown> | null
+  capabilities: string[]
+}
+
+export interface PluginConfig {
+  values: Record<string, unknown>
+}
+
+export interface PluginListResponse {
+  plugins: Plugin[]
+  total: number
+}
+
