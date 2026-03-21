@@ -231,7 +231,7 @@ async def _run_folder_scan() -> None:
     """Scheduled folder scan — ingests new files from configured paths."""
     start = time.time()
     try:
-        from services.folder_scanner import scan_folder, get_scan_state
+        from services.folder_scanner import scan_folder
 
         scan_paths = config.SCAN_PATHS.split(":") if hasattr(config, "SCAN_PATHS") else [config.ARCHIVE_PATH]
         total_ingested = 0

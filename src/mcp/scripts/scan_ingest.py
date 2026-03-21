@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
 import os
 import sys
 import time
@@ -269,18 +268,18 @@ def scan_directory(
                 stats["errors"] += 1
                 print(f"  ERROR: {fname} → MCP connection lost (PDF may be too complex)")
                 # Wait for MCP to recover from potential OOM restart
-                print(f"  Waiting 30s for MCP recovery...")
+                print("  Waiting 30s for MCP recovery...")
                 time.sleep(30)
                 # Verify MCP is back
                 for attempt in range(5):
                     try:
                         requests.get(f"{MCP_URL}/health", timeout=5)
-                        print(f"  MCP recovered. Continuing scan.")
+                        print("  MCP recovered. Continuing scan.")
                         break
                     except requests.ConnectionError:
                         time.sleep(10)
                 else:
-                    print(f"\nERROR: MCP did not recover after 80s. Aborting scan.")
+                    print("\nERROR: MCP did not recover after 80s. Aborting scan.")
                     sys.exit(1)
 
     return stats

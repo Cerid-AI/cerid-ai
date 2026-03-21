@@ -16,16 +16,13 @@ import hashlib
 import json
 import logging
 import os
-import time
-import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncIterator
 
 import config
 from config.taxonomy import SUPPORTED_EXTENSIONS
-from deps import get_chroma, get_neo4j, get_redis
-from parsers import parse_file
+from deps import get_redis
 from parsers import parse_file as _parse_file
 from services.ingestion import ingest_content, ingest_file
 from utils.time import utcnow_iso
@@ -372,7 +369,6 @@ async def preview_folder(
             continue
 
     # Rough chunk estimate: ~500 tokens per chunk, ~4 chars per token, ~2000 chars per chunk
-    avg_file_size = (total_size / total_files) if total_files else 0
     estimated_chunks = int((total_size / 2000) * 1.2) if total_size else 0  # 20% overlap
 
     return {
