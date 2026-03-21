@@ -11,6 +11,7 @@ import { uuid } from "@/lib/utils"
 
 function mcpHeaders(extra: Record<string, string> = {}): Record<string, string> {
   const headers: Record<string, string> = { ...extra }
+  headers["X-Client-ID"] = "gui"
   if (API_KEY) headers["X-API-Key"] = API_KEY
   headers["X-Request-ID"] = uuid()
   // Add JWT Bearer token if authenticated (multi-user mode)
@@ -1039,4 +1040,22 @@ export async function syncPreferences(prefs: Record<string, unknown>): Promise<v
     headers: mcpHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(prefs),
   })
+}
+
+// ---------------------------------------------------------------------------
+// Trading proxy (routed through MCP server's /api/trading/* proxy)
+// ---------------------------------------------------------------------------
+
+export async function fetchTradingAggregate(): Promise<Record<string, unknown>> {
+  const res = await fetch(`${MCP_BASE}/api/trading/aggregate/portfolio`, {
+    headers: mcpHeaders(),
+  })
+  return res.ok ? res.json() : {}
+}
+
+export async function fetchTradingSessions(): Promise<unknown[]> {
+  const res = await fetch(`${MCP_BASE}/api/trading/sessions`, {
+    headers: mcpHeaders(),
+  })
+  return res.ok ? res.json() : []
 }

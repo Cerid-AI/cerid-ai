@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useEffect, useCallback } from 'react'
+import { fetchTradingAggregate, fetchTradingSessions } from '@/lib/api'
 
 export interface TradingSession {
   name: string
@@ -23,12 +24,10 @@ export function useTradingData(refreshInterval = 10000) {
 
   const fetchData = useCallback(async () => {
     try {
-      const [aggRes, sessRes] = await Promise.all([
-        fetch('/api/trading/aggregate/portfolio'),
-        fetch('/api/trading/sessions'),
+      const [aggregate, sessions] = await Promise.all([
+        fetchTradingAggregate(),
+        fetchTradingSessions(),
       ])
-      const aggregate = aggRes.ok ? await aggRes.json() : {}
-      const sessions = sessRes.ok ? await sessRes.json() : []
       setData({ aggregate, sessions })
       setError(null)
     } catch (e) {
