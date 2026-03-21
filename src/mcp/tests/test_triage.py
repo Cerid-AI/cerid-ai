@@ -7,6 +7,8 @@ Tests focus on individual node functions and routing decisions rather than
 the full compiled graph (which requires langgraph runtime).
 """
 
+import os
+import tempfile
 from unittest.mock import patch
 
 from agents.triage import (
@@ -105,7 +107,7 @@ class TestParseNode:
             "text": "parsed content here",
             "file_type": "txt",
         }
-        state = _base_state(file_path="/tmp/test.txt")
+        state = _base_state(file_path=os.path.join(tempfile.gettempdir(), "test.txt"))
         result = parse_node(state)
         assert result["status"] == "parsed"
         assert result["parsed_text"] == "parsed content here"
@@ -113,7 +115,7 @@ class TestParseNode:
     @patch("agents.triage.parse_file")
     def test_parse_error(self, mock_parse):
         mock_parse.side_effect = ValueError("Bad file format")
-        state = _base_state(file_path="/tmp/test.txt")
+        state = _base_state(file_path=os.path.join(tempfile.gettempdir(), "test.txt"))
         result = parse_node(state)
         assert result["status"] == "error"
         assert "Bad file format" in result["error"]
@@ -125,7 +127,7 @@ class TestParseNode:
             "file_type": "pdf",
             "table_count": 3,
         }
-        state = _base_state(file_path="/tmp/test.pdf")
+        state = _base_state(file_path=os.path.join(tempfile.gettempdir(), "test.pdf"))
         result = parse_node(state)
         assert result["is_structured"] is True
 
@@ -135,14 +137,14 @@ class TestParseNode:
             "text": "spreadsheet data",
             "file_type": "xlsx",
         }
-        state = _base_state(file_path="/tmp/test.xlsx", file_type="xlsx")
+        state = _base_state(file_path=os.path.join(tempfile.gettempdir(), "test.xlsx"), file_type="xlsx")
         result = parse_node(state)
         assert result["is_structured"] is True
 
     @patch("agents.triage.parse_file")
     def test_unexpected_error_caught(self, mock_parse):
         mock_parse.side_effect = RuntimeError("unexpected")
-        state = _base_state(file_path="/tmp/test.txt")
+        state = _base_state(file_path=os.path.join(tempfile.gettempdir(), "test.txt"))
         result = parse_node(state)
         assert result["status"] == "error"
         assert "Parse failed" in result["error"]

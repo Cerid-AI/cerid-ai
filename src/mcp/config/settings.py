@@ -52,6 +52,8 @@ LLM_INTERNAL_MODEL = CATEGORIZE_MODELS["smart"]
 
 # ---------------------------------------------------------------------------
 # Paths
+# Cross-platform: os.path.expanduser handles ~ on all platforms (macOS, Linux, Windows).
+# Windows users should set explicit paths in .env (e.g., WATCH_FOLDER=C:\Users\Name\cerid-archive)
 # ---------------------------------------------------------------------------
 ARCHIVE_PATH = os.getenv("ARCHIVE_PATH", "/archive")       # container-side mount
 WATCH_FOLDER = os.getenv("WATCH_FOLDER", os.path.expanduser("~/cerid-archive"))  # host-side
@@ -413,6 +415,7 @@ STORAGE_MODE = os.getenv("CERID_STORAGE_MODE", "extract_only")
 
 # ---------------------------------------------------------------------------
 # Sync
+# Cross-platform: os.path.expanduser handles ~ on all platforms.
 # ---------------------------------------------------------------------------
 SYNC_DIR = os.path.expanduser(os.getenv("CERID_SYNC_DIR", "~/Dropbox/cerid-sync"))
 MACHINE_ID = os.getenv("CERID_MACHINE_ID", os.uname().nodename.split(".")[0])

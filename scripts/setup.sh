@@ -65,7 +65,8 @@ if [ -t 0 ]; then
     neo4j_pass=$(grep "^NEO4J_PASSWORD=" "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- || echo "")
     if [ -z "$neo4j_pass" ]; then
         neo4j_pass=$(openssl rand -hex 12 2>/dev/null || head -c 24 /dev/urandom | base64 | tr -d '/+=' | head -c 24)
-        sed -i.bak "s|^NEO4J_PASSWORD=.*|NEO4J_PASSWORD=$neo4j_pass|" "$ENV_FILE" && rm -f "$ENV_FILE.bak"
+        # Cross-platform sed in-place: use temp file (works on macOS, Linux, WSL)
+        sed "s|^NEO4J_PASSWORD=.*|NEO4J_PASSWORD=$neo4j_pass|" "$ENV_FILE" > "$ENV_FILE.tmp" && mv "$ENV_FILE.tmp" "$ENV_FILE"
         echo "  Generated NEO4J_PASSWORD (random)"
     fi
 
@@ -78,7 +79,8 @@ if [ -t 0 ]; then
         echo ""
         read -rp "  Enter your OpenRouter API key (or press Enter to skip): " or_key
         if [ -n "$or_key" ]; then
-            sed -i.bak "s|^OPENROUTER_API_KEY=.*|OPENROUTER_API_KEY=$or_key|" "$ENV_FILE" && rm -f "$ENV_FILE.bak"
+            # Cross-platform sed in-place: use temp file (works on macOS, Linux, WSL)
+            sed "s|^OPENROUTER_API_KEY=.*|OPENROUTER_API_KEY=$or_key|" "$ENV_FILE" > "$ENV_FILE.tmp" && mv "$ENV_FILE.tmp" "$ENV_FILE"
             echo "  Saved OPENROUTER_API_KEY"
         else
             echo "  Skipped — you can set OPENROUTER_API_KEY in .env later"

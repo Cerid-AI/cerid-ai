@@ -137,7 +137,22 @@ Consumer configuration lives in `CONSUMER_REGISTRY` in `src/mcp/config/settings.
 
 ---
 
-## 6. Development Workflow
+## 6. Cross-Platform Development
+
+All scripts and configuration must work on macOS, Linux (Ubuntu/Debian), and Windows (WSL2). Follow these rules:
+
+- **Shell scripts:** Use cross-platform patterns. No macOS-only flags (e.g., `sed -i.bak`, `df -g`, `readlink` without `-f` fallback). Use temp file pattern for in-place sed: `sed '...' "$f" > "$f.tmp" && mv "$f.tmp" "$f"`
+- **Port detection:** Use `ss` (Linux) with `lsof` (macOS) fallback, not `lsof` alone
+- **Network detection:** Check `ip route` first (Linux/WSL), then `ipconfig` (macOS), then `hostname -I` (Linux fallback)
+- **Python paths:** Use `pathlib.Path` or `os.path.expanduser()` for `~` expansion. Never hardcode `/tmp/` -- use `tempfile.gettempdir()`
+- **Docker Compose volumes:** Use `${HOME}/` not `~/` for tilde expansion (tilde expansion is not guaranteed in YAML)
+- **Test fixtures:** Use `tempfile` module for temp paths, not hardcoded `/tmp/`
+- **CI workflows:** Use `$(mktemp)` for temp files, not `/tmp/filename`
+- **Disk space checks:** `df -g` is macOS-only. Use `df` with 1K-blocks and convert on Linux
+
+---
+
+## 7. Development Workflow
 
 ### Setup
 

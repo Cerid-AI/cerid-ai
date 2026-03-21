@@ -29,6 +29,15 @@ for arg in "$@"; do
     esac
 done
 
+# Cross-platform readlink — GNU readlink -f works on Linux, BSD readlink on macOS
+resolve_link() {
+    if readlink -f "$1" &>/dev/null; then
+        readlink -f "$1"  # GNU readlink (Linux)
+    else
+        readlink "$1"      # BSD readlink (macOS)
+    fi
+}
+
 PASS=0
 FAIL=0
 
@@ -187,7 +196,7 @@ if [ "$QUICK" = false ]; then
     DROPBOX_ARCHIVE="$HOME/Dropbox/cerid-archive"
 
     if [ -L "$ARCHIVE_DIR" ]; then
-        LINK_TARGET="$(readlink "$ARCHIVE_DIR")"
+        LINK_TARGET="$(resolve_link "$ARCHIVE_DIR")"
         if [ -d "$ARCHIVE_DIR" ]; then
             FILE_COUNT="$(find -L "$ARCHIVE_DIR" -type f 2>/dev/null | wc -l | tr -d ' ')"
             pass "Archive symlink: $ARCHIVE_DIR → $LINK_TARGET ($FILE_COUNT files)"

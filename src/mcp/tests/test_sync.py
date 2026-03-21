@@ -9,6 +9,7 @@ and core export/import paths with mocked services.
 
 import hashlib
 import json
+import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -135,11 +136,11 @@ class TestWriteJsonl:
     def test_non_serializable_uses_str(self, tmp_path):
         """Non-JSON-serializable values should fallback to str()."""
         f = tmp_path / "out.jsonl"
-        rows = [{"path": Path("/tmp/test")}]
+        rows = [{"path": Path(tempfile.gettempdir()) / "test"}]
         count = _write_jsonl(str(f), rows)
         assert count == 1
         parsed = json.loads(f.read_text().strip())
-        assert "/tmp/test" in parsed["path"]
+        assert "test" in parsed["path"]
 
     def test_round_trip_with_iter(self, tmp_path):
         f = tmp_path / "round.jsonl"

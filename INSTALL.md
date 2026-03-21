@@ -2,12 +2,30 @@
 
 ## System Requirements
 
+### macOS
+
 | Requirement | Minimum | Recommended |
 |-------------|---------|-------------|
 | macOS | 12 (Monterey) or later | 14 (Sonoma) or later |
 | RAM | 8 GB | 16 GB |
 | Disk Space | 10 GB free | 20 GB free |
 | Processor | Intel or Apple Silicon | Apple Silicon |
+
+### Linux (Ubuntu/Debian)
+
+| Requirement | Minimum | Recommended |
+|-------------|---------|-------------|
+| Ubuntu | 22.04 LTS | 24.04 LTS |
+| RAM | 8 GB | 16 GB |
+| Disk Space | 10 GB free | 20 GB free |
+
+### Windows
+
+| Requirement | Minimum | Recommended |
+|-------------|---------|-------------|
+| Windows | 10 (21H2) with WSL2 | 11 with WSL2 |
+| RAM | 8 GB | 16 GB |
+| Disk Space | 15 GB free | 25 GB free |
 
 ## Step 1: Install Docker Desktop
 
@@ -38,6 +56,81 @@ Download the latest `.dmg` from [GitHub Releases](https://github.com/sunrunnerfi
    - Verifying all services are healthy
 
 After the first-run wizard completes, Cerid AI is ready to use.
+
+---
+
+## Windows Installation (Docker Desktop + WSL2)
+
+### Step 1: Install WSL2
+
+Open PowerShell as Administrator and run:
+
+```powershell
+wsl --install
+```
+
+Reboot when prompted. After reboot, a Ubuntu terminal will open to create your Linux user.
+
+### Step 2: Install Docker Desktop for Windows
+
+Download and install [Docker Desktop for Windows (AMD64)](https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe).
+
+After installation, open Docker Desktop and enable WSL2 integration:
+
+1. Go to **Settings > General** and ensure "Use the WSL 2 based engine" is checked
+2. Go to **Settings > Resources > WSL Integration** and enable integration with your Ubuntu distro
+3. Click **Apply & Restart**
+
+### Step 3: Clone and Setup (in WSL2 terminal)
+
+All remaining commands must be run in a WSL2 terminal (Ubuntu), not PowerShell:
+
+```bash
+git clone git@github.com:sunrunnerfire/cerid-ai.git ~/cerid-ai
+cd ~/cerid-ai
+bash scripts/setup.sh
+```
+
+The setup wizard will guide you through API key configuration and starting the stack.
+
+> **Important:** Clone the repo inside WSL2 (`~/cerid-ai`), not on the Windows filesystem (`/mnt/c/...`). Docker volume performance is significantly better on the native WSL2 filesystem.
+
+---
+
+## Linux Installation (Ubuntu/Debian)
+
+### Step 1: Install Docker
+
+```bash
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+```
+
+Log out and back in for the group change to take effect.
+
+### Step 2: Install Docker Compose v2
+
+Docker Compose v2 is included with modern Docker Engine installs. Verify:
+
+```bash
+docker compose version
+```
+
+If missing, install the plugin:
+
+```bash
+sudo apt update && sudo apt install docker-compose-plugin
+```
+
+### Step 3: Clone and Setup
+
+```bash
+git clone git@github.com:sunrunnerfire/cerid-ai.git ~/cerid-ai
+cd ~/cerid-ai
+bash scripts/setup.sh
+```
+
+---
 
 ## Troubleshooting
 

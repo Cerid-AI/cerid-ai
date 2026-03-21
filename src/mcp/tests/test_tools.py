@@ -4,6 +4,8 @@
 """Tests for tools.py — MCP tool registry and execute_tool() dispatcher."""
 
 import asyncio
+import os
+import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -191,7 +193,7 @@ class TestExecuteToolTriage:
         with patch("agents.triage.triage_file", new_callable=AsyncMock) as mock_tf:
             mock_tf.return_value = triage_result
             result = asyncio.get_event_loop().run_until_complete(
-                execute_tool("pkb_triage", {"file_path": "/tmp/nope.txt"})
+                execute_tool("pkb_triage", {"file_path": os.path.join(tempfile.gettempdir(), "nope.txt")})
             )
 
         assert result["status"] == "error"
@@ -213,7 +215,7 @@ class TestExecuteToolTriage:
         with patch("agents.triage.triage_file", new_callable=AsyncMock) as mock_tf:
             mock_tf.return_value = triage_result
             result = asyncio.get_event_loop().run_until_complete(
-                execute_tool("pkb_triage", {"file_path": "/tmp/test.py"})
+                execute_tool("pkb_triage", {"file_path": os.path.join(tempfile.gettempdir(), "test.py")})
             )
 
         assert result["filename"] == "test.py"

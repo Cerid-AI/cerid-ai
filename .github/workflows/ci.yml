@@ -69,6 +69,7 @@ jobs:
       - name: Secret detection (detect-secrets)
         run: |
           pip install detect-secrets==1.5.0
+          TMPFILE=$(mktemp)
           # Scan only git-tracked files (--all-files walks filesystem and enters .git/)
           git ls-files -z | xargs -0 detect-secrets scan \
             --exclude-files '\.env\.age$' \
@@ -83,11 +84,11 @@ jobs:
             --exclude-files 'src/mcp/tests/test_auth\.py$' \
             --exclude-files 'docs/plans/' \
             --exclude-files 'src/mcp/routers/setup\.py$' \
-            > /tmp/secrets.json
+            > "$TMPFILE"
           # Fail if any secrets found
           python -c "
-          import json, sys
-          with open('/tmp/secrets.json') as f:
+          import json, sys, os
+          with open(os.environ['TMPFILE']) as f:
               results = json.load(f)
           secrets = {k: v for k, v in results.get('results', {}).items() if v}
           if secrets:
@@ -98,6 +99,7 @@ jobs:
               sys.exit(1)
           print('No secrets detected.')
           "
+          rm -f "$TMPFILE"
       - name: Python security scan (bandit)
         run: pip install bandit==1.9.4 && bandit -r src/mcp/ -ll --skip B101,B615 -x src/mcp/tests
       - name: Python dependency audit (including transitive deps)

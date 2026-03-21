@@ -32,24 +32,24 @@ docker pause ai-companion-neo4j 2>/dev/null || echo "  (neo4j not running — co
 cp -r "$INFRA_DATA/neo4j" "$BACKUP_DIR/neo4j"
 cp -r "$INFRA_DATA/neo4j-logs" "$BACKUP_DIR/neo4j-logs" 2>/dev/null || true
 docker unpause ai-companion-neo4j 2>/dev/null || true
-echo "  ✅ Neo4j backed up ($(du -sh "$BACKUP_DIR/neo4j" | cut -f1))"
+echo "  ✅ Neo4j backed up ($(du -sh "$BACKUP_DIR/neo4j" | awk '{print $1}'))"
 
 # --- ChromaDB ---
 echo "[2/3] Backing up ChromaDB..."
 docker pause ai-companion-chroma 2>/dev/null || echo "  (chroma not running — copying as-is)"
 cp -r "$INFRA_DATA/chroma" "$BACKUP_DIR/chroma"
 docker unpause ai-companion-chroma 2>/dev/null || true
-echo "  ✅ ChromaDB backed up ($(du -sh "$BACKUP_DIR/chroma" | cut -f1))"
+echo "  ✅ ChromaDB backed up ($(du -sh "$BACKUP_DIR/chroma" | awk '{print $1}'))"
 
 # --- Redis ---
 echo "[3/3] Backing up Redis..."
 docker exec ai-companion-redis redis-cli -a "${REDIS_PASSWORD:-cerid-dev}" BGSAVE 2>/dev/null || echo "  (redis exec failed — copying as-is)"
 sleep 2
 cp -r "$INFRA_DATA/redis" "$BACKUP_DIR/redis"
-echo "  ✅ Redis backed up ($(du -sh "$BACKUP_DIR/redis" | cut -f1))"
+echo "  ✅ Redis backed up ($(du -sh "$BACKUP_DIR/redis" | awk '{print $1}'))"
 
 # --- Summary ---
-TOTAL_SIZE=$(du -sh "$BACKUP_DIR" | cut -f1)
+TOTAL_SIZE=$(du -sh "$BACKUP_DIR" | awk '{print $1}')
 echo ""
 echo "=== Backup complete ==="
 echo "Location: $BACKUP_DIR"

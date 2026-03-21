@@ -77,20 +77,30 @@ preflight_checks() {
 
     # Check port conflicts (skip ports owned by our containers)
     local our_containers="ai-companion-mcp|ai-companion-neo4j|ai-companion-chroma|ai-companion-redis|bifrost|cerid-web"
+
+    # Cross-platform port listener detection (macOS lsof, Linux ss/netstat)
+    _port_in_use() {
+        local port=$1
+        if command -v ss &>/dev/null; then
+            ss -tlnp 2>/dev/null | grep -q ":${port} " && return 0
+        elif command -v lsof &>/dev/null; then
+            lsof -i ":${port}" -sTCP:LISTEN -t &>/dev/null && return 0
+        elif command -v netstat &>/dev/null; then
+            netstat -tlnp 2>/dev/null | grep -q ":${port} " && return 0
+        fi
+        return 1
+    }
+
     check_port() {
         local port=$1 service=$2
-        local pid
-        pid=$(lsof -i ":$port" -sTCP:LISTEN -t 2>/dev/null | head -1 || echo "")
-        if [ -n "$pid" ]; then
-            local proc
-            proc=$(ps -p "$pid" -o comm= 2>/dev/null || echo "unknown")
-            # Skip if it's one of our own containers (com.docker.backend)
+        if _port_in_use "$port"; then
+            # Skip if it's one of our own containers
             local cid
             cid=$(docker ps --filter "publish=$port" --format '{{.Names}}' 2>/dev/null || echo "")
             if echo "$cid" | grep -qE "$our_containers" 2>/dev/null; then
                 return 0  # Our container — not a conflict
             fi
-            echo "  ERROR: Port $port ($service) in use by $proc (PID $pid)"
+            echo "  ERROR: Port $port ($service) is already in use"
             echo "    Fix: Stop the process or set CERID_PORT_${service^^} in .env"
             fail=1
         fi
@@ -101,10 +111,17 @@ preflight_checks() {
     check_port "$CERID_PORT_NEO4J" "neo4j"
     check_port "$CERID_PORT_CHROMA" "chroma"
 
-    # Disk space warning (Docker data root)
+    # Disk space warning (Docker data root) — cross-platform
     local docker_root avail_gb
     docker_root=$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || echo "/var/lib/docker")
-    avail_gb=$(df -g "$docker_root" 2>/dev/null | awk 'NR==2{print $4}' || echo "999")
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        avail_gb=$(df -g "$docker_root" 2>/dev/null | awk 'NR==2{print $4}' || echo "999")
+    else
+        # Linux df returns 1K-blocks by default
+        local avail_kb
+        avail_kb=$(df "$docker_root" 2>/dev/null | awk 'NR==2{print $4}' || echo "999999999")
+        avail_gb=$((avail_kb / 1024 / 1024))
+    fi
     if [ "${avail_gb:-999}" -lt 2 ] 2>/dev/null; then
         echo "  WARNING: Low disk space (${avail_gb}GB free) on Docker data root"
     fi
@@ -136,7 +153,14 @@ fi
 
 # --- Detect LAN IP for remote access (iPad, other machines) ---
 detect_lan_ip() {
-    # macOS: try common interfaces, then scan all
+    # Cross-platform LAN IP detection
+    # 1. Linux: ip route (most reliable on Linux/WSL)
+    if command -v ip &>/dev/null; then
+        local ip_route
+        ip_route=$(ip -4 route get 1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')
+        [ -n "$ip_route" ] && echo "ip-route:$ip_route" && return
+    fi
+    # 2. macOS: ipconfig on common interfaces
     if command -v ipconfig &>/dev/null; then
         for iface in en0 en1 en2 en3 en4 en5; do
             local ip
@@ -147,7 +171,7 @@ detect_lan_ip() {
         scan_ip=$(ifconfig 2>/dev/null | grep 'inet ' | grep -v '127\.' | grep -v '169\.254\.' | grep -v '172\.17\.' | awk '{print $2}' | head -1)
         [ -n "$scan_ip" ] && echo "ifconfig-scan:$scan_ip" && return
     fi
-    # Linux: hostname -I gives space-separated list of all IPs
+    # 3. Linux fallback: hostname -I
     if command -v hostname &>/dev/null; then
         local linux_ip
         linux_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
