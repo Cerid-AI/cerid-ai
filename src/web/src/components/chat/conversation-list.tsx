@@ -38,12 +38,12 @@ export function ConversationList({ conversations, activeId, onSelect, onDelete }
             onClick={() => onSelect(convo.id)}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(convo.id) } }}
           >
-            <span className="flex-1 truncate">{convo.title}</span>
+            <span className="min-w-0 flex-1 truncate">{convo.title}</span>
             <Button
               variant="ghost"
               size="icon"
               aria-label="Delete conversation"
-              className="h-6 w-6 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 [@media(pointer:coarse)]:opacity-60"
+              className="h-6 w-6 flex-shrink-0 opacity-0 transition-opacity group-hover:opacity-100 [@media(pointer:coarse)]:opacity-60"
               onClick={(e) => {
                 e.stopPropagation()
                 onDelete(convo.id)

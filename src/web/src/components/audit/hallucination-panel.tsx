@@ -71,7 +71,7 @@ function ClaimBadge({
     <div
       data-claim-index={index}
       className={cn(
-        "flex items-start gap-2 rounded-lg border p-3 transition-all cursor-pointer",
+        "flex items-start gap-2 rounded-lg border px-3 py-3 transition-all cursor-pointer",
         focused && "ring-2 ring-brand bg-brand/5",
       )}
       onClick={() => {
@@ -90,21 +90,21 @@ function ClaimBadge({
       </Badge>
       <div className="min-w-0 flex-1">
         {/* Compact: claim text (clamped) + method badge */}
-        <p className={cn("text-sm leading-relaxed", !expanded && "line-clamp-2")}>{stripMarkdown(claim.claim)}</p>
-        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+        <p className={cn("text-sm leading-relaxed", !expanded && "line-clamp-1")}>{stripMarkdown(claim.claim)}</p>
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
           <VerificationMethodBadge method={claim.verification_method} model={claim.verification_model} />
           {claim.similarity > 0 && <span>({Math.round(claim.similarity * 100)}% match)</span>}
           <span className="inline-flex items-center gap-0.5 text-yellow-400">
             {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-            {expanded ? "Less" : "More"}
+            {expanded ? "Hide details" : "Show details"}
           </span>
         </div>
 
         {/* Expanded details */}
         {expanded && (
-          <>
+          <div className="mt-2 space-y-2">
             {claim.source_filename && (
-              <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+              <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                 <span>Source: {claim.source_filename}</span>
                 {claim.source_domain && (
                   <Badge variant="outline" className="text-[10px] px-1 py-0">{claim.source_domain}</Badge>
@@ -112,22 +112,22 @@ function ClaimBadge({
               </div>
             )}
             {claim.source_snippet && (
-              <p className="mt-1 line-clamp-3 text-xs text-muted-foreground/70 italic leading-relaxed">
+              <p className="line-clamp-3 text-xs text-muted-foreground/70 italic leading-relaxed">
                 &ldquo;{claim.source_snippet.slice(0, 150)}&rdquo;
               </p>
             )}
             {claim.reason && !claim.source_filename && (
-              <p className="mt-1 text-xs text-muted-foreground">{stripMarkdown(claim.reason)}</p>
+              <p className="text-xs leading-relaxed text-muted-foreground">{stripMarkdown(claim.reason)}</p>
             )}
             {claim.consistency_issue && (
-              <div className="mt-1 flex items-start gap-1 text-xs text-amber-400">
+              <div className="flex items-start gap-1 text-xs text-amber-400">
                 <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-                <span>{stripMarkdown(claim.consistency_issue)}</span>
+                <span className="leading-relaxed">{stripMarkdown(claim.consistency_issue)}</span>
               </div>
             )}
 
             {/* References section */}
-            <div className="mt-1.5 border-t border-border/50 pt-1.5">
+            <div className="border-t border-border/50 pt-2">
               <p className="text-[10px] font-medium text-muted-foreground mb-1">References</p>
               {claim.source_urls && claim.source_urls.length > 0 ? (
                 <div className="flex flex-col gap-0.5">
@@ -156,35 +156,35 @@ function ClaimBadge({
                 </a>
               )}
             </div>
-          </>
+          </div>
         )}
-      </div>
-      <div className="flex shrink-0 gap-0.5">
-        {onRetry && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className={cn("h-6 w-6 text-muted-foreground hover:text-brand", retrying && "animate-spin text-brand")}
-            onClick={(e) => { e.stopPropagation(); if (!retrying) onRetry() }}
-            disabled={retrying}
-            aria-label="Re-verify this claim with expert analysis"
-            title="Re-verify this claim with expert mode"
-          >
-            {retrying ? <Loader2 className="h-3 w-3" /> : <RefreshCw className="h-3 w-3" />}
-          </Button>
-        )}
-        {conversationId && (
-          <>
+        {/* Action buttons — below claim text to avoid constraining it */}
+        <div className="mt-1.5 flex items-center gap-0.5">
+          {onRetry && (
             <Button
               variant="ghost"
               size="icon"
-              className={cn(
-                "h-6 w-6",
-                feedback === "correct" && "text-green-500",
-              )}
-              onClick={(e) => { e.stopPropagation(); handleFeedback(true) }}
-              disabled={!!feedback}
-              aria-label="Mark as correct"
+              className={cn("h-6 w-6 text-muted-foreground hover:text-brand", retrying && "animate-spin text-brand")}
+              onClick={(e) => { e.stopPropagation(); if (!retrying) onRetry() }}
+              disabled={retrying}
+              aria-label="Re-verify this claim with expert analysis"
+              title="Re-verify this claim with expert mode"
+            >
+              {retrying ? <Loader2 className="h-3 w-3" /> : <RefreshCw className="h-3 w-3" />}
+            </Button>
+          )}
+          {conversationId && (
+            <>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn(
+                  "h-6 w-6",
+                  feedback === "correct" && "text-green-500",
+                )}
+                onClick={(e) => { e.stopPropagation(); handleFeedback(true) }}
+                disabled={!!feedback}
+                aria-label="Mark as correct"
               title="Help improve accuracy: mark this claim as correct"
             >
               <ThumbsUp className="h-3 w-3" />
@@ -205,6 +205,7 @@ function ClaimBadge({
             </Button>
           </>
         )}
+        </div>
       </div>
     </div>
   )
@@ -217,7 +218,7 @@ function StreamingClaimBadge({ claim }: { claim: StreamingClaim }) {
     : getClaimDisplayStatus(rawStatus, claim.verification_method, claim.claim_type)
 
   return (
-    <div className="flex items-start gap-2 rounded-lg border p-3">
+    <div className="flex items-start gap-2 rounded-lg border px-3 py-3">
       <span className="shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
         {claim.index + 1}
       </span>
@@ -235,7 +236,7 @@ function StreamingClaimBadge({ claim }: { claim: StreamingClaim }) {
         )}
       </Badge>
       <div className="min-w-0 flex-1">
-        <p className="text-sm leading-relaxed">{stripMarkdown(claim.claim)}</p>
+        <p className="text-sm leading-relaxed line-clamp-2">{stripMarkdown(claim.claim)}</p>
         <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
           {claim.source && (
             <span>Source: {claim.source}</span>

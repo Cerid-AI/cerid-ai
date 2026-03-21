@@ -5,21 +5,129 @@
  * Top toolbar for the chat panel — new-chat button, feature toggles (KB, verification,
  * feedback, dashboard, routing), overflow menu on narrow viewports, and model selector.
  *
- * Each feature toggle uses a primary click action + right-click context menu for settings.
+ * Each feature toggle uses a primary click action + a visible "..." settings menu (Popover)
+ * that appears on hover. Replaces previous right-click context menu pattern for better
+ * cross-platform compatibility (touch devices, accessibility).
  */
 
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover"
-import {
-  ContextMenu, ContextMenuTrigger, ContextMenuContent,
-  ContextMenuItem, ContextMenuCheckboxItem, ContextMenuRadioGroup,
-  ContextMenuRadioItem, ContextMenuSeparator, ContextMenuLabel,
-} from "@/components/ui/context-menu"
 import { Badge } from "@/components/ui/badge"
-import { Plus, Database, Rss, LayoutDashboard, Zap, Shield, ShieldCheck, MoreVertical, Brain } from "lucide-react"
+import { Separator } from "@/components/ui/separator"
+import { Plus, Database, Rss, LayoutDashboard, Zap, Shield, ShieldCheck, MoreVertical, Brain, MoreHorizontal, Check } from "lucide-react"
 import { ModelSelect } from "./model-select"
 import { cn } from "@/lib/utils"
+
+/* ── Reusable menu primitives (replaces ContextMenu items) ── */
+
+function MenuItem({ children, onClick, className }: { children: React.ReactNode; onClick?: () => void; className?: string }) {
+  return (
+    <button
+      className={cn(
+        "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none",
+        "hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent",
+        className,
+      )}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  )
+}
+
+function MenuCheckboxItem({ children, checked, onCheckedChange }: { children: React.ReactNode; checked: boolean; onCheckedChange: () => void }) {
+  return (
+    <button
+      className="flex w-full items-center gap-2 rounded-sm py-1.5 pr-2 pl-7 text-sm outline-none select-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent relative"
+      onClick={onCheckedChange}
+    >
+      {checked && (
+        <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
+          <Check className="h-4 w-4" />
+        </span>
+      )}
+      {children}
+    </button>
+  )
+}
+
+function MenuRadioItem({ children, checked, onClick }: { children: React.ReactNode; checked: boolean; onClick: () => void }) {
+  return (
+    <button
+      className="flex w-full items-center gap-2 rounded-sm py-1.5 pr-2 pl-7 text-sm outline-none select-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent relative"
+      onClick={onClick}
+    >
+      {checked && (
+        <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
+          <span className="h-2 w-2 rounded-full bg-current" />
+        </span>
+      )}
+      {children}
+    </button>
+  )
+}
+
+function MenuLabel({ children }: { children: React.ReactNode }) {
+  return <div className="px-2 py-1.5 text-xs text-muted-foreground">{children}</div>
+}
+
+function MenuSeparator() {
+  return <Separator className="-mx-1 my-1" />
+}
+
+/** Toolbar button with a settings popover that appears via a "..." trigger on hover. */
+function ToolbarButtonWithMenu({
+  icon,
+  active,
+  onClick,
+  tooltip,
+  ariaLabel,
+  menuContent,
+  className,
+}: {
+  icon: React.ReactNode
+  active: boolean
+  onClick: () => void
+  tooltip: string
+  ariaLabel: string
+  menuContent: React.ReactNode
+  className?: string
+}) {
+  return (
+    <div className="group/tb relative flex items-center">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn("h-8 w-8", active && "text-brand hover:text-brand bg-brand/10", className)}
+            onClick={onClick}
+            aria-label={ariaLabel}
+          >
+            {icon}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{tooltip}</TooltipContent>
+      </Tooltip>
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-5 w-5 opacity-0 transition-opacity group-hover/tb:opacity-100 [@media(pointer:coarse)]:opacity-60"
+            aria-label={`${ariaLabel} settings`}
+          >
+            <MoreHorizontal className="h-3 w-3 text-muted-foreground" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-52">
+          {menuContent}
+        </PopoverContent>
+      </Popover>
+    </div>
+  )
+}
 
 interface ChatToolbarProps {
   isNarrow: boolean
@@ -83,120 +191,91 @@ export function ChatToolbar({
         {/* Advanced-only toggles */}
         {!isSimple && (
         <>
-        {/* KB toggle (right-click: auto-inject settings) */}
-        <ContextMenu>
-          <ContextMenuTrigger asChild>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className={cn("h-8 w-8", showKB && "text-brand hover:text-brand bg-brand/10")}
-                  onClick={onToggleKB}
-                  aria-label={showKB ? "Hide knowledge context" : "Show knowledge context"}
-                >
-                  <Database className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {showKB ? "Hide knowledge context" : "Show knowledge context"}
-              </TooltipContent>
-            </Tooltip>
-          </ContextMenuTrigger>
-          <ContextMenuContent>
-            <ContextMenuCheckboxItem checked={autoInject} onCheckedChange={toggleAutoInject}>
-              Auto-inject KB context
-            </ContextMenuCheckboxItem>
-            <ContextMenuSeparator />
-            <ContextMenuLabel>Injection threshold</ContextMenuLabel>
-            <ContextMenuRadioGroup
-              value={String(autoInjectThreshold)}
-              onValueChange={(v) => setAutoInjectThreshold(parseFloat(v))}
-            >
+        {/* KB toggle + settings menu */}
+        <ToolbarButtonWithMenu
+          icon={<Database className="h-4 w-4" />}
+          active={showKB}
+          onClick={onToggleKB}
+          ariaLabel={showKB ? "Hide knowledge context" : "Show knowledge context"}
+          tooltip={showKB ? "Hide knowledge context" : "Show knowledge context"}
+          menuContent={
+            <>
+              <MenuCheckboxItem checked={autoInject} onCheckedChange={toggleAutoInject}>
+                Auto-inject KB context
+              </MenuCheckboxItem>
+              <MenuSeparator />
+              <MenuLabel>Injection threshold</MenuLabel>
               {[0.70, 0.80, 0.85, 0.90].map((t) => (
-                <ContextMenuRadioItem key={t} value={String(t)}>
+                <MenuRadioItem key={t} checked={autoInjectThreshold === t} onClick={() => setAutoInjectThreshold(t)}>
                   {Math.round(t * 100)}% relevance
-                </ContextMenuRadioItem>
+                </MenuRadioItem>
               ))}
-            </ContextMenuRadioGroup>
-          </ContextMenuContent>
-        </ContextMenu>
+            </>
+          }
+        />
 
-        {/* Verification toggle (right-click: verify + inline markups) */}
-        <ContextMenu>
-          <ContextMenuTrigger asChild>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className={cn("h-8 w-8 relative", hallucinationEnabled && "text-brand hover:text-brand bg-brand/10")}
-                  onClick={toggleHallucinationEnabled}
-                  aria-label={hallucinationEnabled ? "Disable response verification" : "Enable response verification"}
-                >
-                  {expertVerification && hallucinationEnabled && (
-                    <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-amber-500" />
-                  )}
-                  {expertVerification && hallucinationEnabled ? <ShieldCheck className="h-4 w-4" /> : <Shield className="h-4 w-4" />}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {hallucinationEnabled
-                  ? expertVerification
-                    ? "Expert verification: ON (right-click for settings)"
-                    : "Response verification: ON (right-click for settings)"
-                  : "Response verification: OFF (right-click for settings)"}
-              </TooltipContent>
-            </Tooltip>
-          </ContextMenuTrigger>
-          <ContextMenuContent>
-            <ContextMenuItem onClick={onVerifyMessage}>
-              Verify last response
-            </ContextMenuItem>
-            <ContextMenuSeparator />
-            <ContextMenuCheckboxItem checked={inlineMarkups} onCheckedChange={toggleInlineMarkups}>
-              Inline claim markups
-            </ContextMenuCheckboxItem>
-            <ContextMenuSeparator />
-            <ContextMenuCheckboxItem checked={expertVerification} onCheckedChange={toggleExpertVerification}>
-              Expert verification (Grok 4)
-              <Badge variant="outline" className="text-[9px] ml-1 px-1 py-0 text-amber-500">~15× cost</Badge>
-            </ContextMenuCheckboxItem>
-          </ContextMenuContent>
-        </ContextMenu>
+        {/* Verification toggle + settings menu */}
+        <ToolbarButtonWithMenu
+          icon={
+            <>
+              {expertVerification && hallucinationEnabled && (
+                <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-amber-500" />
+              )}
+              {expertVerification && hallucinationEnabled ? <ShieldCheck className="h-4 w-4" /> : <Shield className="h-4 w-4" />}
+            </>
+          }
+          active={hallucinationEnabled}
+          onClick={toggleHallucinationEnabled}
+          ariaLabel={hallucinationEnabled ? "Disable response verification" : "Enable response verification"}
+          tooltip={
+            hallucinationEnabled
+              ? expertVerification
+                ? "Expert verification: ON"
+                : "Response verification: ON"
+              : "Response verification: OFF"
+          }
+          className="relative"
+          menuContent={
+            <>
+              <MenuItem onClick={onVerifyMessage}>
+                Verify last response
+              </MenuItem>
+              <MenuSeparator />
+              <MenuCheckboxItem checked={inlineMarkups} onCheckedChange={toggleInlineMarkups}>
+                Inline claim markups
+              </MenuCheckboxItem>
+              <MenuSeparator />
+              <MenuCheckboxItem checked={expertVerification} onCheckedChange={toggleExpertVerification}>
+                <span className="flex items-center gap-1">
+                  Expert verification (Grok 4)
+                  <Badge variant="outline" className="text-[9px] ml-1 px-1 py-0 text-amber-500">~15x cost</Badge>
+                </span>
+              </MenuCheckboxItem>
+            </>
+          }
+        />
 
         {/* Wide viewport: inline buttons */}
         {!isNarrow && (
           <>
             {/* Feedback + Memory */}
-            <ContextMenu>
-              <ContextMenuTrigger asChild>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className={cn("h-8 w-8", feedbackLoop && "text-brand hover:text-brand bg-brand/10")}
-                      onClick={toggleFeedbackLoop}
-                      aria-label={feedbackLoop ? "Disable feedback loop" : "Enable feedback loop"}
-                    >
-                      <Rss className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {feedbackLoop ? "Feedback loop: ON (responses saved to KB)" : "Feedback loop: OFF"}
-                  </TooltipContent>
-                </Tooltip>
-              </ContextMenuTrigger>
-              <ContextMenuContent>
-                <ContextMenuCheckboxItem checked={feedbackLoop} onCheckedChange={toggleFeedbackLoop}>
-                  Feedback loop
-                </ContextMenuCheckboxItem>
-                <ContextMenuCheckboxItem checked={memoryExtraction} onCheckedChange={toggleMemoryExtraction}>
-                  Memory extraction
-                </ContextMenuCheckboxItem>
-              </ContextMenuContent>
-            </ContextMenu>
+            <ToolbarButtonWithMenu
+              icon={<Rss className="h-4 w-4" />}
+              active={feedbackLoop}
+              onClick={toggleFeedbackLoop}
+              ariaLabel={feedbackLoop ? "Disable feedback loop" : "Enable feedback loop"}
+              tooltip={feedbackLoop ? "Feedback loop: ON (responses saved to KB)" : "Feedback loop: OFF"}
+              menuContent={
+                <>
+                  <MenuCheckboxItem checked={feedbackLoop} onCheckedChange={toggleFeedbackLoop}>
+                    Feedback loop
+                  </MenuCheckboxItem>
+                  <MenuCheckboxItem checked={memoryExtraction} onCheckedChange={toggleMemoryExtraction}>
+                    Memory extraction
+                  </MenuCheckboxItem>
+                </>
+              }
+            />
 
             {/* Dashboard */}
             <Tooltip>
@@ -217,34 +296,21 @@ export function ChatToolbar({
             </Tooltip>
 
             {/* Routing */}
-            <ContextMenu>
-              <ContextMenuTrigger asChild>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className={cn("h-8 w-8", routingMode !== "manual" && "text-brand hover:text-brand bg-brand/10")}
-                      onClick={cycleRoutingMode}
-                      aria-label={`Smart routing: ${routingMode}`}
-                    >
-                      <Zap className="h-4 w-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {routingMode === "manual" ? "Smart routing: OFF" : routingMode === "recommend" ? "Smart routing: Recommend" : "Smart routing: Auto"}
-                  </TooltipContent>
-                </Tooltip>
-              </ContextMenuTrigger>
-              <ContextMenuContent>
-                <ContextMenuLabel>Routing mode</ContextMenuLabel>
-                <ContextMenuRadioGroup value={routingMode} onValueChange={(v) => setRoutingMode(v as "manual" | "recommend" | "auto")}>
-                  <ContextMenuRadioItem value="manual">Manual</ContextMenuRadioItem>
-                  <ContextMenuRadioItem value="recommend">Recommend</ContextMenuRadioItem>
-                  <ContextMenuRadioItem value="auto">Auto</ContextMenuRadioItem>
-                </ContextMenuRadioGroup>
-              </ContextMenuContent>
-            </ContextMenu>
+            <ToolbarButtonWithMenu
+              icon={<Zap className="h-4 w-4" />}
+              active={routingMode !== "manual"}
+              onClick={cycleRoutingMode}
+              ariaLabel={`Smart routing: ${routingMode}`}
+              tooltip={routingMode === "manual" ? "Smart routing: OFF" : routingMode === "recommend" ? "Smart routing: Recommend" : "Smart routing: Auto"}
+              menuContent={
+                <>
+                  <MenuLabel>Routing mode</MenuLabel>
+                  <MenuRadioItem checked={routingMode === "manual"} onClick={() => setRoutingMode("manual")}>Manual</MenuRadioItem>
+                  <MenuRadioItem checked={routingMode === "recommend"} onClick={() => setRoutingMode("recommend")}>Recommend</MenuRadioItem>
+                  <MenuRadioItem checked={routingMode === "auto"} onClick={() => setRoutingMode("auto")}>Auto</MenuRadioItem>
+                </>
+              }
+            />
           </>
         )}
 
