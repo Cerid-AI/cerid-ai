@@ -88,6 +88,46 @@ async def list_configured_providers():
     return {"providers": configured, "total": len(configured)}
 
 
+@router.get("/internal")
+async def get_internal_provider():
+    """Return the configured internal LLM provider for pipeline operations."""
+    import os
+
+    ollama_available = False
+    try:
+        import httpx
+        ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+        resp = httpx.get(f"{ollama_url}/api/tags", timeout=3)
+        ollama_available = resp.status_code == 200
+    except Exception:
+        pass
+
+    return {
+        "provider": getattr(config, "INTERNAL_LLM_PROVIDER", "bifrost"),
+        "model": getattr(config, "INTERNAL_LLM_MODEL", ""),
+        "intelligence_model": getattr(config, "INTELLIGENCE_MODEL", ""),
+        "ollama_available": ollama_available,
+    }
+
+
+@router.put("/internal")
+async def set_internal_provider(body: dict):
+    """Update internal LLM provider configuration (runtime, not persisted to .env)."""
+    provider = body.get("provider", "bifrost")
+    model = body.get("model", "")
+    intelligence_model = body.get("intelligence_model", "")
+
+    if provider not in ("bifrost", "ollama"):
+        raise HTTPException(status_code=400, detail="Provider must be 'bifrost' or 'ollama'")
+
+    config.INTERNAL_LLM_PROVIDER = provider
+    config.INTERNAL_LLM_MODEL = model
+    if intelligence_model:
+        config.INTELLIGENCE_MODEL = intelligence_model
+
+    return {"status": "updated", "provider": provider, "model": model}
+
+
 @router.get("/{name}")
 async def get_provider(name: str):
     """Get details for a single provider including available models."""
