@@ -332,6 +332,12 @@ SCHEDULE_PLATT_MIRROR = os.getenv("SCHEDULE_PLATT_MIRROR", "0 2 * * *")
 SCHEDULE_LONGSHOT_SURFACE = os.getenv("SCHEDULE_LONGSHOT_SURFACE", "30 2 * * *")
 
 # ---------------------------------------------------------------------------
+# Boardroom Integration
+# ---------------------------------------------------------------------------
+CERID_BOARDROOM_ENABLED = os.getenv("CERID_BOARDROOM_ENABLED", "false").lower() in ("true", "1")
+CERID_BOARDROOM_TIER = os.getenv("CERID_BOARDROOM_TIER", "foundation")
+
+# ---------------------------------------------------------------------------
 # Webhooks
 # ---------------------------------------------------------------------------
 # List of webhook endpoints. Each entry: {"url": "...", "events": ["ingestion.complete", ...]}
@@ -433,6 +439,19 @@ CONSUMER_REGISTRY: dict[str, dict] = {
         },
         "allowed_domains": None,     # Ingest into any domain
         "strict_domains": False,
+    },
+    "boardroom-agent": {
+        "description": "Cerid Boardroom business operations agent",
+        "rate_limits": {
+            # 4 client-side pools: strategy (40), research (30), analytics (20), ingest (15)
+            # Server-side: 40/min foundation → 100/min boardroom (tier-dependent)
+            "/agent/": (40, 60),
+            "/sdk/": (40, 60),
+            "/ingest": (20, 60),
+        },
+        "allowed_domains": ["strategy", "competitive_intel", "marketing", "advertising",
+                            "finance", "operations", "audit", "general"],
+        "strict_domains": True,      # No bleed into personal/conversations/coding
     },
     "a2a-agent": {
         "rate_limits": {
