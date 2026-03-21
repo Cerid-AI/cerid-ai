@@ -198,8 +198,9 @@ export function useVerificationOrchestrator({
       return
     }
 
-    // Only fetch from API when stream is idle (not resetting)
+    // Only fetch from API when stream is idle and no claims have been streamed yet
     if (verification.phase !== "idle") return
+    if (verification.claims && verification.claims.length > 0) return
 
     // 3. Fetch from API (Redis → Neo4j fallback) — only for latest message
     let cancelled = false
