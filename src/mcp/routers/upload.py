@@ -82,12 +82,14 @@ async def upload_file_endpoint(
         metadata = {
             "filename": file.filename,
             "file_type": parsed.get("file_type", ""),
-            "page_count": parsed.get("page_count"),
-            "table_count": parsed.get("table_count"),
-            "form_field_count": parsed.get("form_field_count"),
             "sub_category": sub_category,
             "client_source": "upload",
         }
+        # Add optional parsed fields, filtering out None (ChromaDB rejects None)
+        for key in ("page_count", "table_count", "form_field_count"):
+            val = parsed.get(key)
+            if val is not None:
+                metadata[key] = val
         result = ingest_content(
             text,
             domain or "general",
