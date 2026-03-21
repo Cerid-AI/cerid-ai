@@ -386,7 +386,6 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
 
     // Track created elements for cleanup
     const createdEls: HTMLElement[] = []
-    let marksCreated = 0
 
     for (let i = spans.length - 1; i >= 0; i--) {
       const span = spans[i]
@@ -426,7 +425,6 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
           mark.dataset.claimIndex = String(i)
           range.surroundContents(mark)
           createdEls.push(mark)
-          marksCreated++
 
           // Add footnote superscript after mark
           const sup = document.createElement("sup")

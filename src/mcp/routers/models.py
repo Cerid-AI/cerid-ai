@@ -149,8 +149,9 @@ def generate_bifrost_config(assignments: dict[str, str]) -> str:
     }
 
     try:
-        env = Environment(
+        env = Environment(  # nosec B701 — YAML config template, not HTML
             loader=FileSystemLoader(str(_TEMPLATE_DIR)),
+            autoescape=False,  # YAML template, XSS not applicable
             keep_trailing_newline=True,
         )
         template = env.get_template(_TEMPLATE_NAME)

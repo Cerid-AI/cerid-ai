@@ -43,7 +43,7 @@ function cronToHuman(cron: string): string {
   const parts = cron.trim().split(/\s+/)
   if (parts.length !== 5) return cron
 
-  const [minute, hour, dayOfMonth, _month, dayOfWeek] = parts
+  const [minute, hour, dayOfMonth, , dayOfWeek] = parts
 
   const h = parseInt(hour, 10)
   const m = parseInt(minute, 10)
