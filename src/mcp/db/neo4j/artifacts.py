@@ -28,6 +28,7 @@ def create_artifact(
     sub_category: str = "",
     tags_json: str = "[]",
     quality_score: float = 0.5,
+    client_source: str = "",
 ) -> str:
     """Create an Artifact node and link it to its Domain (and optionally SubCategory/Tags)."""
     sub_cat = sub_category or config.DEFAULT_SUB_CATEGORY
@@ -49,6 +50,7 @@ def create_artifact(
                 chunk_ids: $chunk_ids_json,
                 content_hash: $content_hash,
                 quality_score: $quality_score,
+                client_source: $client_source,
                 ingested_at: $ingested_at,
                 updated_at: $ingested_at
             })
@@ -66,6 +68,7 @@ def create_artifact(
             chunk_ids_json=chunk_ids_json,
             content_hash=content_hash,
             quality_score=quality_score,
+            client_source=client_source,
             ingested_at=now,
         )
         record = result.single()
@@ -201,12 +204,16 @@ def list_artifacts(
     domain: str | None = None,
     sub_category: str | None = None,
     tag: str | None = None,
+    client_source: str | None = None,
+    since: str | None = None,
+    min_quality: float | None = None,
+    offset: int = 0,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
-    """List artifacts, optionally filtered by domain, sub_category, and/or tag."""
+    """List artifacts, optionally filtered by domain, sub_category, tag, client_source, date, and quality."""
     base_query = "MATCH (a:Artifact)-[:BELONGS_TO]->(d:Domain) "
     conditions = []
-    params: dict[str, Any] = {"limit": limit}
+    params: dict[str, Any] = {"limit": limit, "offset": offset}
 
     if domain:
         conditions.append("d.name = $domain")
@@ -221,6 +228,15 @@ def list_artifacts(
             "(a)-[:TAGGED_WITH]->(t:Tag {name: $tag}) "
         )
         params["tag"] = tag.strip().lower()
+    if client_source:
+        conditions.append("a.client_source = $client_source")
+        params["client_source"] = client_source
+    if since:
+        conditions.append("a.ingested_at >= $since")
+        params["since"] = since
+    if min_quality is not None:
+        conditions.append("a.quality_score >= $min_quality")
+        params["min_quality"] = min_quality
 
     if conditions:
         base_query += "WHERE " + " AND ".join(conditions) + " "
@@ -231,8 +247,9 @@ def list_artifacts(
         "a.keywords AS keywords, a.summary AS summary, "
         "a.chunk_count AS chunk_count, a.chunk_ids AS chunk_ids, "
         "a.ingested_at AS ingested_at, a.recategorized_at AS recategorized_at, "
+        "a.quality_score AS quality_score, a.client_source AS client_source, "
         "d.name AS domain_name "
-        "ORDER BY a.ingested_at DESC LIMIT $limit"
+        "ORDER BY a.ingested_at DESC SKIP $offset LIMIT $limit"
     )
 
     with driver.session() as session:
@@ -250,6 +267,8 @@ def list_artifacts(
                 "chunk_ids": record["chunk_ids"],
                 "ingested_at": record["ingested_at"],
                 "recategorized_at": record["recategorized_at"],
+                "quality_score": record["quality_score"],
+                "client_source": record["client_source"] or "",
             }
             for record in result
         ]

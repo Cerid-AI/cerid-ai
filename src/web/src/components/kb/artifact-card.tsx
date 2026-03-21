@@ -6,13 +6,33 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { PlusCircle, GitBranch, Globe, ArrowRightLeft, Loader2, X, Eye, Trash2, Tags, Check } from "lucide-react"
+import { PlusCircle, GitBranch, Globe, ArrowRightLeft, Loader2, X, Eye, Trash2, Tags, Check, RefreshCw, Layers } from "lucide-react"
 import { DomainBadge } from "@/components/ui/domain-badge"
 import type { KBQueryResult } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 /** Touch device detection — pointer type is static per device, so module-level is fine. */
 const isTouchDevice = typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches
+
+/** Returns a human-readable relative time string like "3d ago", "2h ago", "5m ago". */
+function timeAgo(date: string): string {
+  const now = Date.now()
+  const then = new Date(date).getTime()
+  if (isNaN(then)) return ""
+  const diffMs = now - then
+  const seconds = Math.floor(diffMs / 1000)
+  if (seconds < 60) return "just now"
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  if (days < 30) return `${days}d ago`
+  const months = Math.floor(days / 30)
+  if (months < 12) return `${months}mo ago`
+  const years = Math.floor(months / 12)
+  return `${years}y ago`
+}
 
 interface ArtifactCardProps {
   result: KBQueryResult
@@ -24,9 +44,12 @@ interface ArtifactCardProps {
   onPreview?: (artifactId: string) => void
   onDelete?: (artifactId: string) => Promise<void>
   onUpdateTags?: (artifactId: string, tags: string[]) => Promise<void>
+  onReIngest?: (artifactId: string) => Promise<void>
+  /** When true, show the client_source badge on each card. */
+  showSource?: boolean
 }
 
-export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, onRecategorize, onPreview, onDelete, onUpdateTags }: ArtifactCardProps) {
+export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, onRecategorize, onPreview, onDelete, onUpdateTags, onReIngest, showSource }: ArtifactCardProps) {
   const [expanded, setExpanded] = useState(false)
   const [showRecategorize, setShowRecategorize] = useState(false)
   const [recategorizing, setRecategorizing] = useState(false)
@@ -36,6 +59,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
   const [tagInput, setTagInput] = useState("")
   const [editedTags, setEditedTags] = useState<string[]>([])
   const [savingTags, setSavingTags] = useState(false)
+  const [reIngesting, setReIngesting] = useState(false)
   const cardRef = useRef<HTMLDivElement>(null)
 
   // Scroll card into view when expanding via card click
@@ -57,9 +81,11 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
     .replace(/[|]{2,}/g, "")
     .trim()
     .replace(/[-–]\s*$/, "...")
-  const dateStr = result.ingested_at
-    ? new Date(result.ingested_at).toLocaleDateString()
-    : null
+
+  // Metadata from result — chunk_count comes through when using artifactToResult
+  const metadata = (result as Record<string, unknown>)
+  const chunkCount = typeof metadata.chunk_count === "number" ? metadata.chunk_count : undefined
+  const clientSource = typeof metadata.client_source === "string" ? metadata.client_source : undefined
 
   return (
     <Card
@@ -96,11 +122,21 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
         {/* Header row */}
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium">{result.filename}</p>
+            <div className="flex items-center gap-1.5">
+              <p className="min-w-0 truncate text-sm font-medium">{result.filename}</p>
+              {chunkCount != null && (
+                <Badge variant="outline" className="shrink-0 gap-0.5 text-[9px] px-1.5 py-0">
+                  <Layers className="h-2.5 w-2.5" />
+                  {chunkCount}
+                </Badge>
+              )}
+            </div>
             <div className="mt-1 flex flex-wrap items-center gap-1.5">
               <DomainBadge domain={result.domain} />
-              {dateStr && (
-                <span className="text-[10px] text-muted-foreground">{dateStr}</span>
+              {result.ingested_at && (
+                <span className="text-[10px] text-muted-foreground" title={new Date(result.ingested_at).toLocaleString()}>
+                  {timeAgo(result.ingested_at)}
+                </span>
               )}
               {result.graph_source && (
                 <Badge variant="outline" className="gap-1 text-xs">
@@ -117,6 +153,12 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
               {result.sub_category && result.sub_category !== "general" && (
                 <Badge variant="secondary" className="text-[10px]">
                   {result.sub_category}
+                </Badge>
+              )}
+              {/* Client source badge — shown when showSource is true and source is non-gui */}
+              {showSource && clientSource && clientSource !== "gui" && (
+                <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-teal-500/40 text-teal-600 dark:text-teal-400">
+                  {clientSource}
                 </Badge>
               )}
             </div>
@@ -334,6 +376,26 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
               title="Edit tags"
             >
               <Tags className="h-3 w-3" />
+            </Button>
+          )}
+          {onReIngest && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="artifact-action-btn h-6 w-6"
+              disabled={reIngesting}
+              onClick={async (e) => {
+                e.stopPropagation()
+                setReIngesting(true)
+                try {
+                  await onReIngest(result.artifact_id)
+                } finally {
+                  setReIngesting(false)
+                }
+              }}
+              title="Re-ingest artifact"
+            >
+              {reIngesting ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
             </Button>
           )}
           {onDelete && (

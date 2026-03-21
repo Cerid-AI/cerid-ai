@@ -261,6 +261,10 @@ def ingest_content(
     if metadata:
         base_meta.update(metadata)
 
+    # Propagate client_source for provenance tracking
+    if metadata and metadata.get("client_source"):
+        base_meta["client_source"] = metadata["client_source"]
+
     # Tag near-duplicate in metadata
     if near_dup:
         base_meta["near_duplicate_of"] = near_dup["artifact_id"]
@@ -305,6 +309,7 @@ def ingest_content(
             sub_category=base_meta.get("sub_category", config.DEFAULT_SUB_CATEGORY),
             tags_json=base_meta.get("tags_json", "[]"),
             quality_score=quality_score,
+            client_source=base_meta.get("client_source", ""),
         )
         artifact_created = True
     except Exception as e:
@@ -410,6 +415,7 @@ async def ingest_file(
     sub_category: str = "",
     tags: str = "",
     categorize_mode: str = "",
+    client_source: str = "",
 ) -> dict:
     """Parse a file, extract metadata, optionally AI-categorize, chunk, and store."""
     validate_file_path(file_path)
@@ -450,6 +456,8 @@ async def ingest_file(
     meta["file_type"] = parsed.get("file_type", "")
     if parsed.get("page_count") is not None:
         meta["page_count"] = parsed["page_count"]
+    if client_source:
+        meta["client_source"] = client_source
     # Run sync ingest_content in thread pool to avoid blocking the event loop
     # (I/O-bound: Neo4j, ChromaDB, Redis writes + CPU-bound tiktoken chunking)
     result = await asyncio.to_thread(ingest_content, text, domain, meta)

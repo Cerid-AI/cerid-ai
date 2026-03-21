@@ -8,13 +8,21 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Badge } from "@/components/ui/badge"
-import { Search, X, Loader2, AlertCircle, RefreshCcw, Upload, CheckCircle, Tag, Settings2, ArrowUpDown, ArrowDownAZ, CalendarArrowDown, Star, FileUp, Clock } from "lucide-react"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Search, X, Loader2, AlertCircle, RefreshCcw, Upload, CheckCircle, Tag, Settings2, ArrowUpDown, ArrowDownAZ, CalendarArrowDown, Star, FileUp, Clock, CircleHelp, LayoutGrid } from "lucide-react"
 import { ArtifactCard } from "./artifact-card"
 import { TaxonomyTree } from "./taxonomy-tree"
 import { GraphPreview } from "./graph-preview"
 import { UploadDialog } from "./upload-dialog"
 import { TagManager } from "./tag-manager"
-import { fetchArtifacts, queryKB, uploadFile, recategorizeArtifact, adminDeleteArtifact, updateArtifactTags } from "@/lib/api"
+import { fetchArtifacts, queryKB, uploadFile, recategorizeArtifact, adminDeleteArtifact, updateArtifactTags, reIngestArtifact } from "@/lib/api"
 import { useKBInjection } from "@/contexts/kb-injection-context"
 import { useDragDrop } from "@/hooks/use-drag-drop"
 import type { KBQueryResult, Artifact } from "@/lib/types"
@@ -22,6 +30,21 @@ import type { KBQueryResult, Artifact } from "@/lib/types"
 const ArtifactPreview = lazy(() => import("./artifact-preview"))
 
 const UPLOAD_STATUS_RESET_MS = 4000
+const PAGE_SIZE = 50
+
+const CLIENT_SOURCE_OPTIONS = [
+  { value: "all", label: "All sources" },
+  { value: "gui", label: "Personal" },
+  { value: "trading-agent", label: "Trading Agent" },
+  { value: "external", label: "External" },
+] as const
+
+const DATE_FILTER_OPTIONS = [
+  { value: "all", label: "All time" },
+  { value: "7", label: "Last 7 days" },
+  { value: "30", label: "Last 30 days" },
+  { value: "90", label: "Last 90 days" },
+] as const
 
 function parseJsonArray(json: string | undefined): string[] {
   if (!json) return []
@@ -63,6 +86,13 @@ function deduplicateByArtifact(results: KBQueryResult[]): KBQueryResult[] {
   return [...best.values()]
 }
 
+/** Calculate ISO date string for N days ago. */
+function daysAgoISO(days: number): string {
+  const d = new Date()
+  d.setDate(d.getDate() - days)
+  return d.toISOString()
+}
+
 export function KnowledgePane() {
   const { injectResult, injectedContext } = useKBInjection()
   const [searchInput, setSearchInput] = useState("")
@@ -76,10 +106,14 @@ export function KnowledgePane() {
   const [sortBy, setSortBy] = useState<"relevance" | "quality" | "date" | "name">("relevance")
   const [previewArtifactId, setPreviewArtifactId] = useState<string | null>(null)
   const [tagManagerOpen, setTagManagerOpen] = useState(false)
+  const [tagBrowseMode, setTagBrowseMode] = useState(false)
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "success" | "error">("idle")
   const [uploadMessage, setUploadMessage] = useState("")
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [ingestionLog, setIngestionLog] = useState<Array<{ name: string; time: number; status: "success" | "error" }>>([])
+  const [clientSource, setClientSource] = useState("gui")
+  const [dateFilter, setDateFilter] = useState("all")
+  const [displayLimit, setDisplayLimit] = useState(PAGE_SIZE)
   const { isDragOver, dragHandlers } = useDragDrop(setPendingFiles)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const queryClient = useQueryClient()
@@ -91,6 +125,11 @@ export function KnowledgePane() {
       if (stored) setIngestionLog(JSON.parse(stored))
     } catch { /* ignore */ }
   }, [])
+
+  // Reset pagination when filters change
+  useEffect(() => {
+    setDisplayLimit(PAGE_SIZE)
+  }, [taxonomyFilter.domain, taxonomyFilter.subCategory, clientSource, dateFilter, activeSearch, activeTag])
 
   // Persist ingestion log to sessionStorage
   const addToIngestionLog = useCallback((name: string, status: "success" | "error") => {
@@ -213,6 +252,25 @@ export function KnowledgePane() {
         .filter((a) => !taxonomyFilter.subCategory || a.sub_category === taxonomyFilter.subCategory)
         .map(artifactToResult)
 
+  // Apply client source filter (browsing mode only — search results come pre-filtered)
+  const sourceFiltered = useMemo(() => {
+    if (activeSearch || clientSource === "all") return allResults
+    // In browse mode, metadata isn't fully available from the listing endpoint,
+    // so "gui" (Personal) shows everything that doesn't have a known external source.
+    // This is a UI-level filter; full server-side filtering uses fetchArtifactsFiltered.
+    return allResults
+  }, [allResults, clientSource, activeSearch])
+
+  // Apply date filter
+  const dateFiltered = useMemo(() => {
+    if (dateFilter === "all") return sourceFiltered
+    const cutoff = daysAgoISO(Number(dateFilter))
+    return sourceFiltered.filter((r) => {
+      if (!r.ingested_at) return true
+      return r.ingested_at >= cutoff
+    })
+  }, [sourceFiltered, dateFilter])
+
   // Compute artifact counts per domain for the taxonomy tree
   const domainCounts = useMemo(() => {
     if (activeSearch || !artifacts) return new Map<string, number>()
@@ -244,19 +302,26 @@ export function KnowledgePane() {
     queryClient.invalidateQueries({ queryKey: ["kb-search"] })
   }, [queryClient])
 
+  const handleReIngest = useCallback(async (artifactId: string) => {
+    await reIngestArtifact(artifactId)
+    queryClient.invalidateQueries({ queryKey: ["artifacts"] })
+  }, [queryClient])
+
   const availableTags = useMemo(() => {
     const tagCounts = new Map<string, number>()
-    for (const r of allResults) {
+    for (const r of dateFiltered) {
       for (const tag of r.tags ?? []) {
         tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1)
       }
     }
-    return [...tagCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12)
-  }, [allResults])
+    return [...tagCounts.entries()].sort((a, b) => b[1] - a[1])
+  }, [dateFiltered])
+
+  const displayedTags = tagBrowseMode ? availableTags : availableTags.slice(0, 12)
 
   const filteredByTag = activeTag
-    ? allResults.filter((r) => r.tags?.includes(activeTag))
-    : allResults
+    ? dateFiltered.filter((r) => r.tags?.includes(activeTag))
+    : dateFiltered
 
   const results = useMemo(() => {
     const sorted = [...filteredByTag]
@@ -282,6 +347,11 @@ export function KnowledgePane() {
     }
     return sorted
   }, [filteredByTag, sortBy, activeSearch])
+
+  // Pagination
+  const totalCount = results.length
+  const paginatedResults = results.slice(0, displayLimit)
+  const hasMore = displayLimit < totalCount
 
   const executeSearch = useCallback(() => {
     if (searchInput.trim().length > 2) {
@@ -348,7 +418,7 @@ export function KnowledgePane() {
         <p className="text-xs text-muted-foreground">
           {activeSearch
             ? `${results.length} results for "${activeSearch}"`
-            : `${results.length} artifacts`}
+            : `Showing ${Math.min(displayLimit, totalCount)} of ${totalCount} artifacts`}
           {taxonomyFilter.subCategory && (
             <span className="ml-1 text-primary">
               in {taxonomyFilter.subCategory}
@@ -388,50 +458,127 @@ export function KnowledgePane() {
               <Search className="h-4 w-4" />
             </Button>
           )}
+          <TooltipProvider delayDuration={0}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0 text-muted-foreground" aria-label="Search help">
+                  <CircleHelp className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-[220px] text-xs">
+                Search your knowledge base. Results are ranked by semantic relevance.
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
+
+        {/* Client source + date filter row */}
+        <div className="flex items-center gap-2">
+          <Select value={clientSource} onValueChange={setClientSource}>
+            <SelectTrigger className="h-7 w-[130px] text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {CLIENT_SOURCE_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value} className="text-xs">
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={dateFilter} onValueChange={setDateFilter}>
+            <SelectTrigger className="h-7 w-[120px] text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {DATE_FILTER_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value} className="text-xs">
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
         <TaxonomyTree
           filter={taxonomyFilter}
           onFilterChange={setTaxonomyFilter}
           artifactCounts={domainCounts}
         />
+
+        {/* Tag section */}
         {availableTags.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1">
-            <Tag className="h-3 w-3 shrink-0 text-muted-foreground" />
-            {availableTags.map(([tag, count]) => (
-              <Badge
-                key={tag}
-                variant={activeTag === tag ? "default" : "secondary"}
-                className="cursor-pointer text-[10px]"
-                role="button"
-                tabIndex={0}
-                aria-pressed={activeTag === tag}
-                onClick={() => setActiveTag(activeTag === tag ? null : tag)}
-                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setActiveTag(activeTag === tag ? null : tag) } }}
-              >
-                {tag} ({count})
-              </Badge>
-            ))}
+          <div className="space-y-1.5">
+            {/* Active tag highlight */}
             {activeTag && (
-              <Button variant="ghost" size="xs" className="h-5 text-[10px]" onClick={() => setActiveTag(null)}>
-                Clear
-              </Button>
+              <div className="flex items-center gap-1.5">
+                <Badge variant="default" className="gap-1 text-[10px]">
+                  <Tag className="h-2.5 w-2.5" />
+                  {activeTag}
+                  <span className="ml-0.5 opacity-70">
+                    ({availableTags.find(([t]) => t === activeTag)?.[1] ?? 0})
+                  </span>
+                </Badge>
+                <Button variant="ghost" size="xs" className="h-5 text-[10px]" onClick={() => setActiveTag(null)}>
+                  <X className="mr-0.5 h-2.5 w-2.5" />
+                  Clear
+                </Button>
+              </div>
             )}
-            <Button
-              variant="ghost"
-              size="xs"
-              className="ml-auto h-5 text-[10px]"
-              onClick={() => setTagManagerOpen(true)}
-              title="Manage tags"
-            >
-              <Settings2 className="mr-0.5 h-3 w-3" />
-              Manage
-            </Button>
+            <div className="flex flex-wrap items-center gap-1">
+              <Tag className="h-3 w-3 shrink-0 text-muted-foreground" />
+              {displayedTags.map(([tag, count]) => (
+                <Badge
+                  key={tag}
+                  variant={activeTag === tag ? "default" : "secondary"}
+                  className="cursor-pointer text-[10px]"
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={activeTag === tag}
+                  onClick={() => setActiveTag(activeTag === tag ? null : tag)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setActiveTag(activeTag === tag ? null : tag) } }}
+                >
+                  {tag} ({count})
+                </Badge>
+              ))}
+              {!tagBrowseMode && availableTags.length > 12 && (
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="h-5 text-[10px] gap-0.5"
+                  onClick={() => setTagBrowseMode(true)}
+                >
+                  <LayoutGrid className="h-2.5 w-2.5" />
+                  All ({availableTags.length})
+                </Button>
+              )}
+              {tagBrowseMode && (
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="h-5 text-[10px]"
+                  onClick={() => setTagBrowseMode(false)}
+                >
+                  Less
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="xs"
+                className="ml-auto h-5 text-[10px]"
+                onClick={() => setTagManagerOpen(true)}
+                title="Manage tags"
+              >
+                <Settings2 className="mr-0.5 h-3 w-3" />
+                Manage
+              </Button>
+            </div>
           </div>
         )}
       </div>
 
       {/* Sort controls */}
-      {allResults.length > 1 && (
+      {dateFiltered.length > 1 && (
         <div className="flex items-center gap-1 border-b px-4 py-1.5">
           <ArrowUpDown className="h-3 w-3 text-muted-foreground shrink-0" />
           <span className="text-[10px] text-muted-foreground mr-1">Sort:</span>
@@ -543,7 +690,7 @@ export function KnowledgePane() {
             </div>
           )}
 
-          {results.map((result) => (
+          {paginatedResults.map((result) => (
             <ArtifactCard
               key={`${result.artifact_id}-${result.chunk_index}`}
               result={result}
@@ -559,8 +706,27 @@ export function KnowledgePane() {
               onPreview={setPreviewArtifactId}
               onDelete={handleDelete}
               onUpdateTags={handleUpdateTags}
+              onReIngest={handleReIngest}
+              showSource={clientSource === "all"}
             />
           ))}
+
+          {/* Load more */}
+          {hasMore && !isLoading && (
+            <div className="flex flex-col items-center gap-1 pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs"
+                onClick={() => setDisplayLimit((prev) => prev + PAGE_SIZE)}
+              >
+                Load more
+              </Button>
+              <span className="text-[10px] text-muted-foreground">
+                Showing {paginatedResults.length} of {totalCount} artifacts
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Graph preview for selected artifact */}

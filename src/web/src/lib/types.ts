@@ -911,3 +911,21 @@ export interface WorkflowTemplate {
   edges: WorkflowEdge[]
 }
 
+// KB parser capabilities
+export interface ParserCapability {
+  extension: string
+  parser: string
+  tier: "community" | "pro"
+  available?: boolean
+}
+
+// Artifact with client source
+export interface ArtifactFilterParams {
+  domain?: string
+  client_source?: string
+  since?: string
+  min_quality?: number
+  limit?: number
+  offset?: number
+}
+

@@ -85,9 +85,132 @@ class KBStatsResponse(BaseModel):
     domains: dict[str, Any]
 
 
+class ParserCapability(BaseModel):
+    extension: str
+    parser: str
+    tier: str = "community"
+    available: bool = True
+
+
+class ParserCapabilitiesResponse(BaseModel):
+    capabilities: list[ParserCapability]
+    tier: str
+
+
+class ReingestResponse(BaseModel):
+    status: str
+    artifact_id: str
+    domain: str
+    chunks: int
+    timestamp: str
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+
+@router.get("/admin/kb/capabilities", response_model=ParserCapabilitiesResponse)
+async def get_parser_capabilities():
+    """Return supported file types and which parser/plugin handles each."""
+    import os
+
+    from parsers.registry import PARSER_REGISTRY
+
+    capabilities: list[dict[str, Any]] = []
+    for ext, parser_fn in PARSER_REGISTRY.items():
+        capabilities.append({
+            "extension": ext,
+            "parser": parser_fn.__module__.split(".")[-1],
+            "tier": "community",
+            "available": True,
+        })
+
+    # Pro-tier plugins (OCR, audio transcription)
+    pro_extensions = {
+        ".png": "ocr", ".jpg": "ocr", ".jpeg": "ocr", ".tiff": "ocr", ".bmp": "ocr",
+        ".mp3": "audio", ".wav": "audio", ".m4a": "audio", ".ogg": "audio", ".flac": "audio",
+    }
+    tier = os.getenv("CERID_TIER", "community")
+    registered_exts = {c["extension"] for c in capabilities}
+    for ext, plugin in pro_extensions.items():
+        if ext not in registered_exts:
+            capabilities.append({
+                "extension": ext,
+                "parser": plugin,
+                "tier": "pro",
+                "available": tier == "pro",
+            })
+
+    return ParserCapabilitiesResponse(
+        capabilities=[ParserCapability(**c) for c in capabilities],
+        tier=tier,
+    )
+
+
+@router.post("/admin/artifacts/{artifact_id}/reingest", response_model=ReingestResponse)
+async def reingest_artifact(artifact_id: str):
+    """Re-parse and re-embed an existing artifact from its source file."""
+    from pathlib import Path
+
+    from services.ingestion import ingest_file
+
+    try:
+        neo4j = get_neo4j()
+        artifact = list_artifacts(neo4j, limit=10000)
+        # Find the specific artifact
+        target = None
+        for a in artifact:
+            if a["id"] == artifact_id:
+                target = a
+                break
+
+        if not target:
+            raise HTTPException(status_code=404, detail=f"Artifact not found: {artifact_id}")
+
+        filename = target.get("filename", "")
+        domain = target.get("domain", "")
+        if not filename:
+            raise HTTPException(status_code=400, detail="Artifact has no filename — cannot reingest")
+
+        # Locate source file in archive
+        archive_root = Path(config.ARCHIVE_PATH).resolve()
+        source_path = archive_root / filename
+        if not source_path.exists():
+            # Try domain subdirectory
+            source_path = archive_root / domain / filename
+        if not source_path.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Source file not found in archive: {filename}",
+            )
+
+        # Re-ingest (ingest_file handles dedup via content hash — same filename
+        # with different content triggers _reingest_artifact internally)
+        result = await ingest_file(
+            file_path=str(source_path),
+            domain=domain,
+            sub_category=target.get("sub_category", ""),
+        )
+
+        await invalidate_cache_non_blocking()
+
+        return ReingestResponse(
+            status=result.get("status", "success"),
+            artifact_id=result.get("artifact_id", artifact_id),
+            domain=result.get("domain", domain),
+            chunks=result.get("chunks", 0),
+            timestamp=result.get("timestamp", ""),
+        )
+    except HTTPException:
+        raise
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("Failed to reingest artifact %s: %s", artifact_id[:8], e)
+        raise HTTPException(status_code=500, detail=f"Failed to reingest: {e}")
 
 
 @router.post("/admin/kb/rebuild-index", response_model=RebuildIndexResponse)

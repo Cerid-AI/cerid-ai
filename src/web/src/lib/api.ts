@@ -79,6 +79,8 @@ import type {
   WorkflowRun,
   WorkflowListResponse,
   WorkflowTemplate,
+  ParserCapability,
+  ArtifactFilterParams,
 } from "./types"
 
 export async function fetchHealth(): Promise<HealthResponse> {
@@ -1339,4 +1341,34 @@ export async function fetchWorkflowTemplates(): Promise<WorkflowTemplate[]> {
   const res = await fetch(`${MCP_BASE}/workflows/templates`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, `Fetch workflow templates failed: ${res.status}`))
   return res.json()
+}
+
+// --- KB Parser Capabilities ---
+
+export async function fetchParserCapabilities(): Promise<{ capabilities: ParserCapability[]; tier: string }> {
+  const res = await fetch(`${MCP_BASE}/admin/kb/capabilities`, { headers: mcpHeaders() })
+  if (!res.ok) return { capabilities: [], tier: "community" }
+  return res.json()
+}
+
+export async function reIngestArtifact(artifactId: string): Promise<void> {
+  const res = await fetch(`${MCP_BASE}/admin/artifacts/${artifactId}/reingest`, {
+    method: "POST",
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Re-ingest failed"))
+}
+
+export async function fetchArtifactsFiltered(params: ArtifactFilterParams): Promise<Artifact[]> {
+  const qs = new URLSearchParams()
+  if (params.domain) qs.set("domain", params.domain)
+  if (params.client_source) qs.set("client_source", params.client_source)
+  if (params.since) qs.set("since", params.since)
+  if (params.min_quality != null) qs.set("min_quality", String(params.min_quality))
+  qs.set("limit", String(params.limit ?? 50))
+  qs.set("offset", String(params.offset ?? 0))
+  const res = await fetch(`${MCP_BASE}/artifacts?${qs}`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to fetch artifacts"))
+  const artifacts: Artifact[] = await res.json()
+  return artifacts.map((a) => ({ ...a, tags: parseTags(a.tags) }))
 }

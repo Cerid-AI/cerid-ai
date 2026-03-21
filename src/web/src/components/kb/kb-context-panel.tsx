@@ -274,10 +274,15 @@ export function KBContextPanel({
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
-          <span className="flex items-center gap-1 text-[11px] text-muted-foreground/60">
-            <Upload className="h-3 w-3" />
-            Drop files to ingest
-          </span>
+          <div className="flex flex-col items-end gap-0.5">
+            <span className="flex items-center gap-1 text-[11px] text-muted-foreground/60">
+              <Upload className="h-3 w-3" />
+              Drop files to ingest
+            </span>
+            <span className="text-[10px] text-muted-foreground/40">
+              PDF &bull; DOCX &bull; TXT &bull; CSV &bull; JSON &bull; EPUB
+            </span>
+          </div>
         </div>
       </div>
     </div>

@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 import config
@@ -68,9 +68,11 @@ class BatchIngestRequest(BaseModel):
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
 @router.post("/ingest")
-async def ingest_endpoint(req: IngestRequest):
+async def ingest_endpoint(req: IngestRequest, request: Request):
+    client_source = request.headers.get("X-Client-ID", "")
+    metadata = {"client_source": client_source} if client_source else None
     async with _ingest_semaphore:
-        result = await asyncio.to_thread(ingest_content, req.content, req.domain)
+        result = await asyncio.to_thread(ingest_content, req.content, req.domain, metadata)
     try:
         from utils.query_cache import invalidate_all
         invalidate_all()
@@ -80,7 +82,7 @@ async def ingest_endpoint(req: IngestRequest):
 
 
 @router.post("/ingest_file")
-async def ingest_file_endpoint(req: IngestFileRequest):
+async def ingest_file_endpoint(req: IngestFileRequest, request: Request):
     try:
         async with _ingest_semaphore:
             result = await ingest_file(
@@ -89,6 +91,7 @@ async def ingest_file_endpoint(req: IngestFileRequest):
                 sub_category=req.sub_category,
                 tags=req.tags,
                 categorize_mode=req.categorize_mode,
+                client_source=request.headers.get("X-Client-ID", ""),
             )
         try:
             from utils.query_cache import invalidate_all

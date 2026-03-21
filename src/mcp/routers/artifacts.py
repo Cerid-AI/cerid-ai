@@ -201,12 +201,24 @@ async def list_artifacts_endpoint(
     domain: str | None = Query(None, description="Filter by domain"),
     sub_category: str | None = Query(None, description="Filter by sub-category"),
     tag: str | None = Query(None, description="Filter by tag"),
+    client_source: str | None = Query(None, description="Filter by ingestion client (e.g. 'gui', 'trading-agent')"),
+    since: str | None = Query(None, description="ISO date — only return artifacts ingested after this date"),
+    min_quality: float | None = Query(None, ge=0, le=1, description="Minimum quality score (0-1)"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
     limit: int = Query(50, ge=1, le=500),
 ):
     try:
         driver = get_neo4j()
         return graph.list_artifacts(
-            driver, domain=domain, sub_category=sub_category, tag=tag, limit=limit,
+            driver,
+            domain=domain,
+            sub_category=sub_category,
+            tag=tag,
+            client_source=client_source,
+            since=since,
+            min_quality=min_quality,
+            offset=offset,
+            limit=limit,
         )
     except Exception as e:
         logger.error(f"List artifacts error: {e}")
