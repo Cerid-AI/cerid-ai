@@ -470,6 +470,14 @@ CONSUMER_REGISTRY: dict[str, dict] = {
         "allowed_domains": None,     # A2A peers get full domain access
         "strict_domains": False,
     },
+    "folder_scanner": {
+        "rate_limits": {
+            "/ingest": (60, 60),     # 60 req/min — bulk ingestion
+            "/admin/": (30, 60),
+        },
+        "allowed_domains": None,     # Scanner can write to all domains
+        "strict_domains": False,
+    },
     "_default": {
         "rate_limits": {
             "/agent/": (10, 60),
