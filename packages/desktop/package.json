@@ -1,0 +1,53 @@
+{
+  "name": "cerid-desktop",
+  "version": "0.1.0",
+  "description": "Cerid AI Desktop — Personal AI Knowledge Companion",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "package:mac": "electron-builder --mac",
+    "package:win": "electron-builder --win",
+    "typecheck": "tsc --noEmit"
+  },
+  "build": {
+    "appId": "ai.cerid.desktop",
+    "productName": "Cerid AI",
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg"
+      ],
+      "icon": "resources/icon.icns"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "resources/icon.ico"
+    },
+    "files": [
+      "dist/**/*"
+    ],
+    "extraResources": [
+      "resources/**"
+    ],
+    "publish": {
+      "provider": "github",
+      "owner": "sunrunnerfire",
+      "repo": "cerid-ai"
+    }
+  },
+  "devDependencies": {
+    "@types/dockerode": "^4.0.1",
+    "@types/node": "^22.0.0",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0",
+    "electron-vite": "^3.0.0",
+    "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "dockerode": "^4.0.0",
+    "electron-updater": "^6.3.0"
+  }
+}
