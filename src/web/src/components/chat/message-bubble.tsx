@@ -39,6 +39,7 @@ function CodeFallback({ code }: { code: string }) {
   return <pre className="rounded-lg bg-[#282c34] p-4 text-sm text-gray-300 overflow-x-auto !my-0"><code>{code}</code></pre>
 }
 
+const COPY_FEEDBACK_MS = 2000
 const MAX_CODE_LINES = 25
 
 function CollapsibleCodeBlock({ language, code }: { language: string; code: string }) {
@@ -275,7 +276,7 @@ function CopyButton({ text }: { text: string }) {
       await navigator.clipboard.writeText(text)
       setCopied(true)
       if (timerRef.current) clearTimeout(timerRef.current)
-      timerRef.current = setTimeout(() => setCopied(false), 2000)
+      timerRef.current = setTimeout(() => setCopied(false), COPY_FEEDBACK_MS)
     } catch {
       // Clipboard API may fail in insecure contexts
     }

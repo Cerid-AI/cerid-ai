@@ -166,7 +166,7 @@ export default function WorkflowList({ onEdit, onCreate, onDuplicate }: Workflow
           <Badge variant="outline" className="ml-1.5 text-[10px]">{workflows.length}</Badge>
         </h2>
         <div className="flex gap-1.5">
-          <Button variant="ghost" size="sm" onClick={load}>
+          <Button variant="ghost" size="sm" aria-label="Refresh workflows" onClick={load}>
             <RefreshCw className="h-3.5 w-3.5" />
           </Button>
           <Button size="sm" onClick={onCreate}>
@@ -217,16 +217,17 @@ export default function WorkflowList({ onEdit, onCreate, onDuplicate }: Workflow
                     </div>
 
                     <div className="flex items-center gap-1 shrink-0">
-                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => onEdit(wf)}>
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" aria-label="Edit workflow" onClick={() => onEdit(wf)}>
                         <Pencil className="h-3.5 w-3.5 text-zinc-400" />
                       </Button>
-                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => onDuplicate(wf)}>
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" aria-label="Duplicate workflow" onClick={() => onDuplicate(wf)}>
                         <Copy className="h-3.5 w-3.5 text-zinc-400" />
                       </Button>
                       <Button
                         variant="ghost"
                         size="sm"
                         className="h-7 w-7 p-0"
+                        aria-label="Delete workflow"
                         onClick={() => handleDelete(wf)}
                         disabled={deleting === wf.id}
                       >

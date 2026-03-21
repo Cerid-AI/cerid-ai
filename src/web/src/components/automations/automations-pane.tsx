@@ -238,7 +238,7 @@ export default function AutomationsPane() {
           )}
         </div>
         <div className="flex items-center gap-1.5">
-          <Button variant="ghost" size="icon" onClick={load} disabled={loadState === "loading"} className="h-7 w-7">
+          <Button variant="ghost" size="icon" aria-label="Refresh automations" onClick={load} disabled={loadState === "loading"} className="h-7 w-7">
             <RefreshCw className={cn("h-3.5 w-3.5", loadState === "loading" && "animate-spin")} />
           </Button>
           <Button size="sm" onClick={openCreate} className="h-7 gap-1 px-2 text-xs">

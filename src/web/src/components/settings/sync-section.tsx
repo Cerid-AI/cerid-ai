@@ -29,6 +29,8 @@ import type {
   ConflictStrategy,
 } from "@/lib/types"
 
+const STATUS_RESET_MS = 8000
+
 type OpState = "idle" | "running" | "success" | "error"
 
 export function SyncSection() {
@@ -81,7 +83,7 @@ export function SyncSection() {
       setExportResult(result)
       setExportState("success")
       loadStatus()
-      timeoutRefs.current.push(setTimeout(() => setExportState("idle"), 8000))
+      timeoutRefs.current.push(setTimeout(() => setExportState("idle"), STATUS_RESET_MS))
     } catch (e) {
       setExportError(e instanceof Error ? e.message : "Export failed")
       setExportState("error")
@@ -98,7 +100,7 @@ export function SyncSection() {
       setImportResult(result)
       setImportState("success")
       loadStatus()
-      timeoutRefs.current.push(setTimeout(() => setImportState("idle"), 8000))
+      timeoutRefs.current.push(setTimeout(() => setImportState("idle"), STATUS_RESET_MS))
     } catch (e) {
       setImportError(e instanceof Error ? e.message : "Import failed")
       setImportState("error")

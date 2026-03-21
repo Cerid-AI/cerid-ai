@@ -407,7 +407,7 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
                 <Settings2 className="h-3.5 w-3.5 text-teal-400" />
                 Node Config
               </h3>
-              <button onClick={() => setSelectedNodeId(null)} className="text-zinc-500 hover:text-zinc-300">
+              <button aria-label="Close node config" onClick={() => setSelectedNodeId(null)} className="text-zinc-500 hover:text-zinc-300">
                 <X className="h-3.5 w-3.5" />
               </button>
             </div>
@@ -458,6 +458,7 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
                         {e.source_id === selectedNode.id ? `→ ${e.target_id}` : `← ${e.source_id}`}
                       </span>
                       <button
+                        aria-label="Remove connection"
                         className="text-red-500/60 hover:text-red-400"
                         onClick={() =>
                           setEdges((prev) =>

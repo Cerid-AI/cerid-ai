@@ -20,6 +20,7 @@ interface ProviderKey {
   valid: boolean
 }
 
+const STEP_TRANSITION_MS = 800
 const TOTAL_STEPS = 4
 
 export function SetupWizard({ open, onComplete }: SetupWizardProps) {
@@ -54,7 +55,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
       if (result.success) {
         setApplied(true)
         // Auto-advance to health step after a short delay
-        setTimeout(() => setStep(3), 800)
+        setTimeout(() => setStep(3), STEP_TRANSITION_MS)
       } else {
         setApplyError("Configuration failed — check backend logs")
       }

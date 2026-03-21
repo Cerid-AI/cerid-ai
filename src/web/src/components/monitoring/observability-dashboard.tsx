@@ -10,6 +10,7 @@ import {
   Clock,
   DollarSign,
   Gauge,
+  Loader2,
   ShieldCheck,
   TrendingDown,
   TrendingUp,
@@ -203,7 +204,7 @@ function formatCount(val: number | null | undefined): string {
 export function ObservabilityDashboard() {
   const [windowMinutes, setWindowMinutes] = useState(60)
 
-  const { data: metricsData, dataUpdatedAt: metricsUpdatedAt } = useQuery({
+  const { data: metricsData, isLoading: metricsLoading } = useQuery({
     queryKey: ["observability-metrics", windowMinutes],
     queryFn: () => fetchObservabilityMetrics(windowMinutes),
     refetchInterval: 10_000,
@@ -275,6 +276,34 @@ export function ObservabilityDashboard() {
       )}
 
       {/* Metric cards grid */}
+      {metricsLoading && (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Card key={i}>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 p-3 pb-1">
+                <div className="h-3 w-20 animate-pulse rounded bg-muted" />
+                <div className="h-4 w-4 animate-pulse rounded bg-muted" />
+              </CardHeader>
+              <CardContent className="p-3 pt-0">
+                <div className="h-7 w-16 animate-pulse rounded bg-muted" />
+                <div className="mt-1.5 h-2.5 w-24 animate-pulse rounded bg-muted" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {!metricsLoading && !metrics && (
+        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-muted-foreground/25 py-12 text-center">
+          <Activity className="mb-3 h-8 w-8 text-muted-foreground/50" />
+          <p className="text-sm font-medium text-muted-foreground">No metrics data available yet</p>
+          <p className="mt-1 max-w-xs text-xs text-muted-foreground/70">
+            Metrics are collected as queries are processed.
+          </p>
+        </div>
+      )}
+
+      {!metricsLoading && metrics && (
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
         <MetricCard
           title="Query Latency (p50)"
@@ -332,6 +361,7 @@ export function ObservabilityDashboard() {
           accentColor="text-teal-500"
         />
       </div>
+      )}
     </div>
   )
 }

@@ -49,6 +49,17 @@ Constraints that span multiple files. When updating one side, check the other.
 
 **Rule:** The `pip-compile` version used locally must match the CI `lock-sync` job. Version mismatches cause non-deterministic lock files and CI failures.
 
+## Neo4j ↔ APOC Compatibility
+
+| Neo4j Version | APOC Version | Notes |
+|---------------|-------------|-------|
+| 5.x | 5.x (matching major) | Auto-installed via NEO4J_PLUGINS=["apoc"] |
+| 4.4.x | 4.4.x | Legacy, not supported |
+
+APOC is installed automatically by the Neo4j Docker image when `NEO4J_PLUGINS=["apoc"]` is set.
+The APOC version must match the Neo4j major version. When upgrading Neo4j, verify APOC compatibility
+at https://neo4j.com/labs/apoc/current/.
+
 ## Bifrost LLM Gateway
 
 | Component | File | Current |

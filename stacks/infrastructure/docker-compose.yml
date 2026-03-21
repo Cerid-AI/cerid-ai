@@ -69,7 +69,7 @@ services:
       - ./data/redis:/data
     environment:
       - REDIS_PASSWORD=${REDIS_PASSWORD:-cerid-dev}
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-cerid-dev}
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-cerid-dev} --maxmemory 1gb --maxmemory-policy allkeys-lru
     networks:
       - llm-network
     restart: unless-stopped
@@ -77,7 +77,7 @@ services:
       resources:
         limits:
           cpus: '1.0'
-          memory: 4G
+          memory: 2G
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping || exit 1"]
       interval: 30s

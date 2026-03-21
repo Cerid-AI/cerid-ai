@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Justin Michaels. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import type { WorkflowNode, WorkflowEdge, WorkflowRunStatus } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -9,6 +9,9 @@ import { cn } from "@/lib/utils"
 // Constants
 // ---------------------------------------------------------------------------
 
+const CANVAS_MIN_WIDTH = 400
+const NARROW_VIEWPORT_THRESHOLD = 640
+const NARROW_SCALE = 0.85
 const NODE_W = 160
 const NODE_H = 56
 const NODE_COLORS: Record<string, { bg: string; border: string; text: string }> = {
@@ -76,7 +79,25 @@ export default function WorkflowCanvas({
   className,
 }: WorkflowCanvasProps) {
   const svgRef = useRef<SVGSVGElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   const [dragging, setDragging] = useState<{ id: string; offsetX: number; offsetY: number } | null>(null)
+  const [containerWidth, setContainerWidth] = useState(800)
+
+  // Track container width for responsive scaling
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setContainerWidth(entry.contentRect.width)
+      }
+    })
+    observer.observe(el)
+    setContainerWidth(el.clientWidth)
+    return () => observer.disconnect()
+  }, [])
+
+  const isNarrow = containerWidth < NARROW_VIEWPORT_THRESHOLD
 
   // Build node map for edge lookups
   const nodeMap = new Map(nodes.map((n) => [n.id, n]))
@@ -117,14 +138,55 @@ export default function WorkflowCanvas({
     setDragging(null)
   }, [])
 
+  // ── Touch handlers for mobile drag ─────────────────────────────────────
+
+  const handleTouchStart = useCallback(
+    (e: React.TouchEvent, nodeId: string) => {
+      if (e.touches.length !== 1) return
+      e.stopPropagation()
+      const touch = e.touches[0]
+      const node = nodeMap.get(nodeId)
+      if (!node || !svgRef.current) return
+      const pt = svgRef.current.createSVGPoint()
+      pt.x = touch.clientX
+      pt.y = touch.clientY
+      const svgP = pt.matrixTransform(svgRef.current.getScreenCTM()?.inverse())
+      setDragging({ id: nodeId, offsetX: svgP.x - node.position.x, offsetY: svgP.y - node.position.y })
+    },
+    [nodeMap],
+  )
+
+  const handleTouchMove = useCallback(
+    (e: React.TouchEvent) => {
+      if (!dragging || !svgRef.current || !onNodeMove || e.touches.length !== 1) return
+      e.preventDefault()
+      const touch = e.touches[0]
+      const pt = svgRef.current.createSVGPoint()
+      pt.x = touch.clientX
+      pt.y = touch.clientY
+      const svgP = pt.matrixTransform(svgRef.current.getScreenCTM()?.inverse())
+      onNodeMove(dragging.id, Math.max(0, svgP.x - dragging.offsetX), Math.max(0, svgP.y - dragging.offsetY))
+    },
+    [dragging, onNodeMove],
+  )
+
+  const handleTouchEnd = useCallback(() => {
+    setDragging(null)
+  }, [])
+
   return (
+    <div ref={containerRef} className={cn("w-full h-full", className)} style={{ minWidth: CANVAS_MIN_WIDTH }}>
     <svg
       ref={svgRef}
       viewBox={`0 0 ${maxX} ${maxY}`}
-      className={cn("w-full h-full min-h-[400px] bg-zinc-950/50 rounded-lg border border-zinc-800", className)}
+      className="w-full h-full min-h-[400px] bg-zinc-950/50 rounded-lg border border-zinc-800"
+      style={isNarrow ? { transform: `scale(${NARROW_SCALE})`, transformOrigin: "top left" } : undefined}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchEnd}
     >
       {/* Arrowhead marker */}
       <defs>
@@ -179,6 +241,7 @@ export default function WorkflowCanvas({
             transform={`translate(${node.position.x}, ${node.position.y})`}
             className="cursor-pointer"
             onMouseDown={(e) => handleMouseDown(e, node.id)}
+            onTouchStart={(e) => handleTouchStart(e, node.id)}
             onClick={() => onNodeClick?.(node.id)}
           >
             {/* Node body */}
@@ -242,5 +305,6 @@ export default function WorkflowCanvas({
         )
       })}
     </svg>
+    </div>
   )
 }
