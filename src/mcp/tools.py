@@ -669,6 +669,50 @@ MCP_TOOLS = [
             },
         },
     },
+    {
+        "name": "pkb_ingest_multimodal",
+        "description": (
+            "Ingest images or audio files into the KB by routing through "
+            "the appropriate plugin (OCR, audio transcription, or vision LLM). "
+            "Requires CERID_TIER=pro."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to image or audio file",
+                },
+                "domain": {
+                    "type": "string",
+                    "description": f"Knowledge domain ({', '.join(config.DOMAINS)})",
+                    "default": "general",
+                },
+                "tags": {
+                    "type": "string",
+                    "description": "Comma-separated tags for the artifact",
+                    "default": "",
+                },
+                "plugin": {
+                    "type": "string",
+                    "description": "Force a specific plugin: 'ocr', 'audio', or 'vision'. Empty for auto-detect.",
+                    "default": "",
+                },
+            },
+            "required": ["file_path"],
+        },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string"},
+                "artifact_id": {"type": "string"},
+                "chunks": {"type": "integer"},
+                "domain": {"type": "string"},
+                "plugin_used": {"type": "string"},
+                "extracted_chars": {"type": "integer"},
+            },
+        },
+    },
 ]
 
 
@@ -865,5 +909,13 @@ async def execute_tool(name: str, arguments: dict) -> Any:
             redis_client=get_redis(),
             max_results=arguments.get("max_results", 5),
             auto_ingest=arguments.get("auto_ingest", False),
+        )
+    elif name == "pkb_ingest_multimodal":
+        from services.multimodal import ingest_multimodal
+        return await ingest_multimodal(
+            file_path=arguments.get("file_path", ""),
+            domain=arguments.get("domain", "general"),
+            tags=arguments.get("tags", ""),
+            plugin_override=arguments.get("plugin", ""),
         )
     raise ValueError(f"Unknown tool: {name}")

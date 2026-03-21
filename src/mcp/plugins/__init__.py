@@ -169,27 +169,10 @@ def _load_single_plugin(plugin_dir: Path) -> dict[str, Any] | None:
     }
 
 
-def load_plugins(plugin_dir: str | None = None) -> list[str]:
-    """
-    Discover and load all plugins from the plugin directory.
-
-    Args:
-        plugin_dir: Override path to plugin directory. Defaults to config.PLUGIN_DIR.
-
-    Returns:
-        List of successfully loaded plugin names.
-    """
-    base_dir = Path(plugin_dir or config.PLUGIN_DIR)
-
-    if not base_dir.exists():
-        logger.debug(f"Plugin directory does not exist: {base_dir}")
-        return []
-
-    if not base_dir.is_dir():
-        logger.warning(f"Plugin path is not a directory: {base_dir}")
-        return []
-
-    loaded = []
+def _scan_directory(base_dir: Path, loaded: list[str]) -> None:
+    """Scan a single directory for plugins and load them."""
+    if not base_dir.exists() or not base_dir.is_dir():
+        return
 
     for entry in sorted(base_dir.iterdir()):
         if not entry.is_dir() or entry.name.startswith(("_", ".")):
@@ -205,6 +188,35 @@ def load_plugins(plugin_dir: str | None = None) -> list[str]:
         except Exception as e:
             logger.error(f"Unexpected error loading plugin from {entry}: {e}")
 
+
+def load_plugins(plugin_dir: str | None = None) -> list[str]:
+    """
+    Discover and load all plugins from the plugin directory.
+
+    Scans both the configured PLUGIN_DIR (defaults to src/mcp/plugins/)
+    and the top-level plugins/ directory (BSL-1.1 commercial plugins).
+
+    Args:
+        plugin_dir: Override path to plugin directory. Defaults to config.PLUGIN_DIR.
+
+    Returns:
+        List of successfully loaded plugin names.
+    """
+    loaded: list[str] = []
+
+    # Primary: configured plugin directory (in-tree at src/mcp/plugins/)
+    primary = Path(plugin_dir or config.PLUGIN_DIR)
+    _scan_directory(primary, loaded)
+
+    # Secondary: top-level plugins/ directory (BSL-1.1 commercial plugins)
+    # Only scan if not already covered by the primary path and no override
+    if plugin_dir is None:
+        repo_root = Path(config.PLUGIN_DIR).parent.parent.parent
+        secondary = repo_root / "plugins"
+        if secondary.exists() and secondary.resolve() != primary.resolve():
+            logger.debug(f"Also scanning external plugin directory: {secondary}")
+            _scan_directory(secondary, loaded)
+
     if loaded:
         logger.info(f"Loaded {len(loaded)} plugin(s): {', '.join(loaded)}")
     else:
@@ -219,3 +231,45 @@ def get_loaded_plugins() -> dict[str, dict[str, Any]]:
         name: {k: v for k, v in info.items() if k != "module"}
         for name, info in _loaded_plugins.items()
     }
+
+
+def discover_plugins(plugin_dir: str | None = None) -> list[dict[str, Any]]:
+    """
+    Scan a directory for plugin manifests without loading them.
+
+    Returns a list of manifest dicts for each valid plugin found.
+    Useful for UI display of available (but not necessarily loaded) plugins.
+    """
+    base_dir = Path(plugin_dir or config.PLUGIN_DIR)
+
+    if not base_dir.exists() or not base_dir.is_dir():
+        return []
+
+    manifests = []
+    for entry in sorted(base_dir.iterdir()):
+        if not entry.is_dir() or entry.name.startswith(("_", ".")):
+            continue
+
+        manifest_path = entry / "manifest.json"
+        if not manifest_path.exists():
+            continue
+
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["_dir"] = str(entry)
+            manifest["_loaded"] = manifest.get("name", "") in _loaded_plugins
+            manifests.append(manifest)
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Failed to read manifest at %s: %s", manifest_path, e)
+
+    return manifests
+
+
+def register_all_plugins(plugin_dir: str | None = None) -> list[str]:
+    """
+    Convenience function for startup — discovers and loads all plugins.
+
+    This is the main entry point called during app lifespan startup.
+    Equivalent to load_plugins() but with a clearer name for the startup path.
+    """
+    return load_plugins(plugin_dir)

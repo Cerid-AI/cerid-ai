@@ -1,10 +1,11 @@
 {
-  "name": "cerid-plugin-ocr",
+  "name": "cerid-ocr",
   "version": "0.1.0",
-  "description": "OCR parsing plugin for Cerid AI — extract text from images and scanned documents",
+  "type": "parser",
+  "tier": "pro",
+  "description": "OCR text extraction from images and scanned PDFs",
   "license": "BSL-1.1",
-  "tier_required": "pro",
-  "dependencies": ["pytesseract>=0.3", "Pillow>=10.0"],
+  "requires": ["pytesseract", "PIL"],
   "entry_point": "plugin.py",
-  "capabilities": ["parser"]
+  "file_types": [".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp"]
 }

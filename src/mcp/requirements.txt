@@ -45,3 +45,11 @@ Jinja2>=3.1,<4
 # Utilities
 cryptography>=42,<48
 python-multipart
+
+# Plugins (optional — install for CERID_TIER=pro features)
+# OCR: also requires tesseract-ocr system package
+# pytesseract>=0.3.10
+# Pillow>=10.0
+# Audio transcription: also requires ffmpeg for non-WAV formats
+# faster-whisper>=1.0.0
+# Vision: uses httpx (already in core) + Bifrost/OpenRouter — no extra deps

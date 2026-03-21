@@ -1,10 +1,11 @@
 {
-  "name": "cerid-plugin-audio",
+  "name": "cerid-audio",
   "version": "0.1.0",
-  "description": "Audio transcription plugin for Cerid AI — convert audio files to searchable text",
+  "type": "parser",
+  "tier": "pro",
+  "description": "Audio transcription via Whisper",
   "license": "BSL-1.1",
-  "tier_required": "pro",
-  "dependencies": ["faster-whisper>=1.0"],
+  "requires": ["faster_whisper"],
   "entry_point": "plugin.py",
-  "capabilities": ["parser"]
+  "file_types": [".mp3", ".wav", ".m4a", ".ogg", ".flac", ".webm"]
 }
