@@ -156,7 +156,7 @@ services:
       - "${CERID_BIND_ADDR:-127.0.0.1}:${CERID_PORT_MCP:-8888}:8888"
     volumes:
       - ./src/mcp:/app
-      - ~/cerid-archive:/archive:ro
+      - ~/cerid-archive:/archive:cached
       - ${CERID_SYNC_DIR:-~/Dropbox/cerid-sync}:/sync
     env_file:
       - .env
