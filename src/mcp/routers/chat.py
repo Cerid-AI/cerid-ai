@@ -138,12 +138,13 @@ async def _attempt_stream(
 
     try:
         client = httpx.AsyncClient(timeout=timeout)
-        response = await client.stream(
+        req_obj = client.build_request(
             "POST",
             f"{OPENROUTER_BASE}/chat/completions",
             json=payload_dict,
             headers=headers,
-        ).__aenter__()
+        )
+        response = await client.send(req_obj, stream=True)
 
         status = response.status_code
         if status != 200:
@@ -193,9 +194,9 @@ async def _attempt_stream(
                         except (json.JSONDecodeError, UnicodeDecodeError):
                             pass
                     yield chunk
-            except (httpx.ReadError, httpx.RemoteProtocolError, httpx.ReadTimeout) as exc:
+            except (httpx.ReadError, httpx.RemoteProtocolError, httpx.ReadTimeout, httpx.StreamClosed) as exc:
                 logger.warning(
-                    "Stream interrupted for model=%s: %s", bare_model, exc,
+                    "Stream interrupted for model=%s: %s(%s)", bare_model, type(exc).__name__, exc,
                 )
                 err = json.dumps({
                     "error": {
