@@ -751,20 +751,16 @@ class TestParsePdf:
         f = tmp_path / "form.pdf"
         f.write_text("dummy")
 
+        # Single-pass: form fields extracted during page iteration
         page = self._mock_page(text="Form page")
-        annot_page = self._mock_page()
-        annot_page.annots = [
+        page.annots = [
             {"T": "Name", "V": "Alice"},
             {"T": "Email", "V": "alice@test.com"},
         ]
 
-        mock_pdf1 = MagicMock()
-        mock_pdf1.pages = [page]
-        mock_pdf2 = MagicMock()
-        mock_pdf2.pages = [annot_page]
-
-        # First call for text extraction, second for form fields
-        mock_open.side_effect = [mock_pdf1, mock_pdf2]
+        mock_pdf = MagicMock()
+        mock_pdf.pages = [page]
+        mock_open.return_value = mock_pdf
 
         result = parse_file(str(f))
         assert result.get("form_field_count") == 2

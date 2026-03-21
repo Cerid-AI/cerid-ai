@@ -59,7 +59,7 @@ function getFileExtension(filename: string): string {
 
 function getFileTypeLabel(filename: string): string {
   const ext = getFileExtension(filename)
-  return FILE_TYPE_ICONS[ext] ?? ext.replace(".", "").toUpperCase() || "FILE"
+  return FILE_TYPE_ICONS[ext] ?? (ext.replace(".", "").toUpperCase() || "FILE")
 }
 
 function isProType(filename: string): boolean {

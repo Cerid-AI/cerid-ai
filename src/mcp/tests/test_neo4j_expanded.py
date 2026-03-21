@@ -296,7 +296,7 @@ class TestListArtifacts:
             sub_category="general", tags='[]', keywords='[]',
             summary="", chunk_count=1, chunk_ids='[]',
             ingested_at="2026-01-01", recategorized_at=None,
-            domain_name="coding",
+            domain_name="coding", quality_score=0.5, client_source="",
         )
         self._setup_results(session, [record])
 

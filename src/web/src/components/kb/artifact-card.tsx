@@ -83,7 +83,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
     .replace(/[-–]\s*$/, "...")
 
   // Metadata from result — chunk_count comes through when using artifactToResult
-  const metadata = (result as Record<string, unknown>)
+  const metadata = (result as unknown as Record<string, unknown>)
   const chunkCount = typeof metadata.chunk_count === "number" ? metadata.chunk_count : undefined
   const clientSource = typeof metadata.client_source === "string" ? metadata.client_source : undefined
 

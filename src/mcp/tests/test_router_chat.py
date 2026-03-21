@@ -19,6 +19,18 @@ def _make_app():
     return app
 
 
+def _setup_mock_client(mock_client_cls, mock_response):
+    """Configure a mock httpx.AsyncClient that uses build_request + send."""
+    mock_client = AsyncMock()
+    mock_client.aclose = AsyncMock()
+    mock_client_cls.return_value = mock_client
+
+    mock_request = MagicMock()
+    mock_client.build_request = MagicMock(return_value=mock_request)
+    mock_client.send = AsyncMock(return_value=mock_response)
+    return mock_client
+
+
 class TestChatStreamEndpoint:
     """POST /chat/stream"""
 
@@ -35,10 +47,10 @@ class TestChatStreamEndpoint:
 
     def test_emits_cerid_meta_event(self):
         """The first SSE event should be a cerid_meta with model info."""
-        # Mock httpx to return a simple stream
         mock_response = AsyncMock()
         mock_response.status_code = 200
         mock_response.aclose = AsyncMock()
+        mock_response.aread = AsyncMock(return_value=b"")
 
         async def fake_aiter():
             yield b'data: {"choices":[{"delta":{"content":"Hi"}}]}\n\n'
@@ -51,14 +63,7 @@ class TestChatStreamEndpoint:
             client = TestClient(app)
 
             with patch("routers.chat.httpx.AsyncClient") as mock_client_cls:
-                mock_client = AsyncMock()
-                mock_client.aclose = AsyncMock()
-                mock_client_cls.return_value = mock_client
-
-                mock_stream_ctx = AsyncMock()
-                mock_stream_ctx.__aenter__ = AsyncMock(return_value=mock_response)
-                mock_stream_ctx.__aexit__ = AsyncMock(return_value=False)
-                mock_client.stream = MagicMock(return_value=mock_stream_ctx)
+                _setup_mock_client(mock_client_cls, mock_response)
 
                 resp = client.post("/chat/stream", json={
                     "model": "openrouter/anthropic/claude-sonnet-4.6",
@@ -89,6 +94,7 @@ class TestChatStreamEndpoint:
         mock_response = AsyncMock()
         mock_response.status_code = 200
         mock_response.aclose = AsyncMock()
+        mock_response.aread = AsyncMock(return_value=b"")
 
         async def fake_aiter():
             # OpenRouter returns a different model than requested
@@ -102,14 +108,7 @@ class TestChatStreamEndpoint:
             client = TestClient(app)
 
             with patch("routers.chat.httpx.AsyncClient") as mock_client_cls:
-                mock_client = AsyncMock()
-                mock_client.aclose = AsyncMock()
-                mock_client_cls.return_value = mock_client
-
-                mock_stream_ctx = AsyncMock()
-                mock_stream_ctx.__aenter__ = AsyncMock(return_value=mock_response)
-                mock_stream_ctx.__aexit__ = AsyncMock(return_value=False)
-                mock_client.stream = MagicMock(return_value=mock_stream_ctx)
+                _setup_mock_client(mock_client_cls, mock_response)
 
                 resp = client.post("/chat/stream", json={
                     "model": "openrouter/anthropic/claude-sonnet-4.6",
@@ -136,6 +135,7 @@ class TestChatStreamEndpoint:
         mock_response = AsyncMock()
         mock_response.status_code = 200
         mock_response.aclose = AsyncMock()
+        mock_response.aread = AsyncMock(return_value=b"")
 
         async def fake_aiter():
             yield b'data: {"model":"anthropic/claude-sonnet-4.6","choices":[{"delta":{"content":"Hi"}}]}\n\n'
@@ -148,14 +148,7 @@ class TestChatStreamEndpoint:
             client = TestClient(app)
 
             with patch("routers.chat.httpx.AsyncClient") as mock_client_cls:
-                mock_client = AsyncMock()
-                mock_client.aclose = AsyncMock()
-                mock_client_cls.return_value = mock_client
-
-                mock_stream_ctx = AsyncMock()
-                mock_stream_ctx.__aenter__ = AsyncMock(return_value=mock_response)
-                mock_stream_ctx.__aexit__ = AsyncMock(return_value=False)
-                mock_client.stream = MagicMock(return_value=mock_stream_ctx)
+                _setup_mock_client(mock_client_cls, mock_response)
 
                 resp = client.post("/chat/stream", json={
                     "model": "openrouter/anthropic/claude-sonnet-4.6",
@@ -203,23 +196,17 @@ class TestChatRequestValidation:
             client = TestClient(app)
 
             with patch("routers.chat.httpx.AsyncClient") as mock_client_cls:
-                mock_client = AsyncMock()
-                mock_client.aclose = AsyncMock()
-                mock_client_cls.return_value = mock_client
-
                 mock_resp = AsyncMock()
                 mock_resp.status_code = 200
                 mock_resp.aclose = AsyncMock()
+                mock_resp.aread = AsyncMock(return_value=b"")
 
                 async def empty_stream():
                     yield b"data: [DONE]\n\n"
 
                 mock_resp.aiter_bytes = empty_stream
 
-                mock_ctx = AsyncMock()
-                mock_ctx.__aenter__ = AsyncMock(return_value=mock_resp)
-                mock_ctx.__aexit__ = AsyncMock(return_value=False)
-                mock_client.stream = MagicMock(return_value=mock_ctx)
+                _setup_mock_client(mock_client_cls, mock_resp)
 
                 resp = client.post("/chat/stream", json={
                     "model": "openrouter/openai/gpt-4o-mini",
@@ -236,23 +223,17 @@ class TestChatRequestValidation:
             client = TestClient(app)
 
             with patch("routers.chat.httpx.AsyncClient") as mock_client_cls:
-                mock_client = AsyncMock()
-                mock_client.aclose = AsyncMock()
-                mock_client_cls.return_value = mock_client
-
                 mock_resp = AsyncMock()
                 mock_resp.status_code = 200
                 mock_resp.aclose = AsyncMock()
+                mock_resp.aread = AsyncMock(return_value=b"")
 
                 async def empty_stream():
                     yield b"data: [DONE]\n\n"
 
                 mock_resp.aiter_bytes = empty_stream
 
-                mock_ctx = AsyncMock()
-                mock_ctx.__aenter__ = AsyncMock(return_value=mock_resp)
-                mock_ctx.__aexit__ = AsyncMock(return_value=False)
-                mock_client.stream = MagicMock(return_value=mock_ctx)
+                mock_client = _setup_mock_client(mock_client_cls, mock_resp)
 
                 resp = client.post("/chat/stream", json={
                     "model": "openrouter/openai/gpt-4o-mini",
@@ -262,6 +243,6 @@ class TestChatRequestValidation:
                 assert resp.status_code == 200
 
                 # Verify max_tokens was included in the payload
-                call_kwargs = mock_client.stream.call_args
+                call_kwargs = mock_client.build_request.call_args
                 payload = call_kwargs.kwargs.get("json") or call_kwargs[1].get("json")
                 assert payload["max_tokens"] == 100

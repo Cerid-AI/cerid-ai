@@ -13,7 +13,6 @@ import os
 import time
 import uuid
 from dataclasses import asdict
-from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -152,9 +151,10 @@ async def start_scan(req: ScanRequest) -> dict:
     now = time.time()
     _scan_start_times[scan_id] = now
 
-    from services.folder_scanner import _estimate_file_count, DEFAULT_EXCLUDE_DIRS
-    from config.taxonomy import SUPPORTED_EXTENSIONS
     from pathlib import Path
+
+    from config.taxonomy import SUPPORTED_EXTENSIONS
+    from services.folder_scanner import DEFAULT_EXCLUDE_DIRS, _estimate_file_count
 
     exclude = DEFAULT_EXCLUDE_DIRS | set(req.exclude_patterns or [])
     estimate = _estimate_file_count(Path(req.path), SUPPORTED_EXTENSIONS, exclude)

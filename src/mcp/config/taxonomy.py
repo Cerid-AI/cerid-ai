@@ -217,5 +217,6 @@ TAG_VOCABULARY: dict[str, list[str]] = {
     "audit": [
         "agent-action", "approval-request", "budget-spend", "governance-event",
         "content-review", "kill-switch", "anomaly-alert", "rollback",
+        "compliance-check", "access-log",
     ],
 }

@@ -13,7 +13,6 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 
 import config
-from services.ingestion import ingest_file
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion.upload")
