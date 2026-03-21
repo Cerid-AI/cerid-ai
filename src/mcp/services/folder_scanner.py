@@ -26,7 +26,8 @@ import config
 from config.taxonomy import SUPPORTED_EXTENSIONS
 from deps import get_chroma, get_neo4j, get_redis
 from parsers import parse_file
-from services.ingestion import ingest_file
+from parsers import parse_file as _parse_file
+from services.ingestion import ingest_content, ingest_file
 from utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.scanner")
@@ -246,12 +247,30 @@ async def scan_folder(
 
             async with sem:
                 try:
-                    result = await ingest_file(
-                        file_path=file_path,
-                        domain=domain,
-                        sub_category=sub_cat,
-                        client_source="folder_scanner",
-                    )
+                    # Try ingest_file first; fall back to parse+ingest_content
+                    # if Path.resolve() fails on Docker read-only overlay mounts.
+                    try:
+                        result = await ingest_file(
+                            file_path=file_path,
+                            domain=domain,
+                            sub_category=sub_cat,
+                            client_source="folder_scanner",
+                        )
+                    except (OSError, ValueError):
+                        # Fallback: parse file content, then ingest as text
+                        parsed = await asyncio.to_thread(_parse_file, file_path)
+                        text = parsed.get("text", "")
+                        if not text.strip():
+                            _record_file_scanned(redis, content_hash, file_path, "low_quality")
+                            yield ScanResult(path=file_path, status="low_quality", domain=domain, file_size_bytes=file_size)
+                            continue
+                        filename = Path(file_path).name
+                        result = await asyncio.to_thread(
+                            ingest_content,
+                            text,
+                            domain or "general",
+                            {"filename": filename, "sub_category": sub_cat, "client_source": "folder_scanner"},
+                        )
                     artifact_id = result.get("artifact_id", "")
                     quality = result.get("quality_score", 0.0)
 
