@@ -12,53 +12,42 @@ Competitive analysis (2026-03-21) against Dify (134K stars), Open WebUI (128K), 
 
 Roadmap covers two tracks: **Infrastructure** (deployment, BYOK, packaging, repo architecture) and **Features** (competitive capabilities). Both tracks run in parallel.
 
-### P0 — Critical
+### P0 — Critical (ALL COMPLETE)
 
-- [ ] **Phase A: Unified Docker Compose + First-Run Wizard** (5-7 days)
-  - Merge 4 compose files into single root `docker-compose.yml` with depends_on healthchecks
-  - Setup API (`/setup/*`) for first-run config: key validation, .env generation, health dashboard
-  - MCP "setup mode" when OPENROUTER_API_KEY empty (serves wizard, skips Bifrost)
-  - React first-run wizard: API key entry with inline validation → model prefs → apply → health monitor
-  - Health dashboard component reused in Settings "Infrastructure" tab
-  - Key files: new `/docker-compose.yml`, new `routers/setup.py`, new `components/setup/`
+- [x] **Phase A: Unified Docker Compose + First-Run Wizard** ✅ 2026-03-21
+  - Root `docker-compose.yml` with depends_on healthchecks (Sprint 1)
+  - Setup API (`/setup/*`) for first-run config (Sprint 1)
+  - React 4-step setup wizard (Sprint 2)
+  - Model assignment backend + Bifrost templating (Sprint 2)
 
-- [ ] **Phase B: BYOK Model Configuration** (5-7 days)
-  - Provider management backend: configure/validate/rotate API keys for OpenRouter, OpenAI, Anthropic, xAI, Ollama
-  - `PROVIDER_REGISTRY` config defining supported providers, base URLs, test endpoints
-  - Model assignment backend: user-configurable per-task model selection (chat, verification, categorization, reranking)
-  - Bifrost config.yaml generated from template + user preferences (not hardcoded YAML)
-  - Settings UI: "Providers & Models" tab with provider cards + model dropdowns
-  - Key files: new `routers/providers.py`, new `config/providers.py`, new `stacks/bifrost/config.yaml.template`
+- [x] **Phase B: BYOK Model Configuration** ✅ 2026-03-21
+  - `PROVIDER_REGISTRY` for 5 providers + async key validation (Sprint 1)
+  - `routers/providers.py` REST API (Sprint 1)
+  - Bifrost `config.yaml.template` + model assignment UI (Sprint 2)
 
-- [ ] **Phase 42: Agentic Web Search Fallback** (3-5 days)
-  - Resolve "ignorance" claims detected by hallucination pipeline via web search
-  - `WebSearchProvider` abstraction (Tavily primary, SearXNG self-hosted alt)
-  - Web results verified through Self-RAG before surfacing (unique differentiator)
-  - New `pkb_web_search` MCP tool; optional auto-ingest (`ENABLE_AUTO_LEARN`)
-  - Key files: `agents/hallucination/streaming.py`, new `utils/web_search.py`
+- [x] **Phase 42: Agentic Web Search Fallback** ✅ 2026-03-21
+  - `WebSearchProvider` (Tavily, SearXNG, OpenRouter online) (Sprint 3)
+  - `pkb_web_search` MCP tool #24 (Sprint 3)
+  - Auto-ingest via `ENABLE_AUTO_LEARN` (Sprint 3)
 
-### P1 — High Value
+### P1 — High Value (Phases 43-45 COMPLETE, Phase C pending)
 
-- [ ] **Phase 43: User-Facing Scheduled Automations** (5-7 days)
-  - Expose scheduler infrastructure to users (only Khoj has this among competitors)
-  - CRUD API at `/automations`, Redis-backed, cron presets
-  - Actions: notify (SSE push), digest (accumulate summary), ingest (auto-store)
-  - Automations run full agent pipeline (query + hallucination + Self-RAG)
-  - Key files: `scheduler.py`, new `routers/automations.py`
+- [x] **Phase 43: User-Facing Scheduled Automations** ✅ 2026-03-21
+  - CRUD API + Redis persistence + APScheduler integration (Sprint 4)
+  - 3 action types: notify, digest, ingest (Sprint 4)
+  - React automations management GUI (Sprint 4)
 
-- [ ] **Phase 44: Enhanced Memory Layer** (4-6 days)
-  - Conflict detection: embed new memory → search existing at >0.85 sim → LLM classify (supersede/coexist/merge)
-  - Decay/reinforcement scoring: `base * (1 + log(accesses)) * decay(age)`
-  - Neo4j `:Memory` nodes with relationships to `:Artifact` and `:Conversation`
-  - New `pkb_memory_recall` MCP tool for context-aware retrieval
-  - Key files: `agents/memory.py`, `db/neo4j/`
+- [x] **Phase 44: Enhanced Memory Layer** ✅ 2026-03-21
+  - Conflict detection + LLM resolution (supersede/coexist/merge) (Sprint 4)
+  - Decay/reinforcement scoring formula (Sprint 4)
+  - Neo4j `:Memory` nodes + relationships (Sprint 5)
+  - `pkb_memory_recall` MCP tool #25 (Sprint 5)
 
-- [ ] **Phase 45: A2A (Agent-to-Agent) Protocol** (5-8 days)
-  - Agent Card at `/.well-known/agent.json` advertising cerid capabilities
-  - Task lifecycle: create, status, cancel (thin wrappers around agent calls)
-  - A2A client for discovering and invoking other A2A agents
-  - Dual MCP + A2A = first personal KB platform with both protocols
-  - Key files: new `routers/a2a.py`, new `utils/a2a_client.py`
+- [x] **Phase 45: A2A (Agent-to-Agent) Protocol** ✅ 2026-03-21
+  - Agent Card at `/.well-known/agent.json` (Sprint 5)
+  - Task lifecycle (create/status/cancel) with Redis storage (Sprint 5)
+  - A2A client for remote agent discovery/invocation (Sprint 5)
+  - Dual MCP + A2A = first personal KB with both protocols (Sprint 5)
 
 - [ ] **Phase C: Repo Architecture Separation** (8-12 days)
   - Restructure: `core/` (Apache-2.0 KB engine), `app/` (Apache-2.0 application), `plugins/` (BSL-1.1 paid), `enterprise/` (commercial)
