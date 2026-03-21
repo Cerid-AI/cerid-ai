@@ -174,7 +174,7 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
         setLastAutoInjectCount(autoInjectedCount)
       }
 
-      if (allMessages[0]?.role === "system") {
+      if (import.meta.env.DEV && allMessages[0]?.role === "system") {
         console.log(`[kb-inject] System message (${allMessages[0].content.length} chars) with ${dedupedSources.length} sources`)
       }
 
@@ -212,13 +212,17 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
                 timestamp: Date.now() - (result.messages.length - i) * 1000,
               }))
               options.replaceMessages!(capturedConvoId, compressed)
-              console.log(
-                `[history] Compressed ${result.original_tokens} → ${result.compressed_tokens} tokens ` +
-                `(${Math.round((1 - result.compressed_tokens / result.original_tokens) * 100)}% reduction)`,
-              )
+              if (import.meta.env.DEV) {
+                console.log(
+                  `[history] Compressed ${result.original_tokens} → ${result.compressed_tokens} tokens ` +
+                  `(${Math.round((1 - result.compressed_tokens / result.original_tokens) * 100)}% reduction)`,
+                )
+              }
             })
             .catch((err) => {
-              console.warn("[history] Backend compression failed, using sliding window:", err)
+              if (import.meta.env.DEV) {
+                console.warn("[history] Backend compression failed, using sliding window:", err)
+              }
             })
             .finally(() => {
               compressingRef.current = false

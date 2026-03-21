@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Justin Michaels. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -45,6 +45,9 @@ export function SyncSection() {
   const [importError, setImportError] = useState("")
 
   const [conflictStrategy, setConflictStrategy] = useState<ConflictStrategy>("remote_wins")
+  const timeoutRefs = useRef<ReturnType<typeof setTimeout>[]>([])
+
+  useEffect(() => () => timeoutRefs.current.forEach(clearTimeout), [])
 
   const loadStatus = useCallback(async () => {
     setStatusLoading(true)
@@ -78,11 +81,11 @@ export function SyncSection() {
       setExportResult(result)
       setExportState("success")
       loadStatus()
-      setTimeout(() => setExportState("idle"), 8000)
+      timeoutRefs.current.push(setTimeout(() => setExportState("idle"), 8000))
     } catch (e) {
       setExportError(e instanceof Error ? e.message : "Export failed")
       setExportState("error")
-      setTimeout(() => setExportState("idle"), 5000)
+      timeoutRefs.current.push(setTimeout(() => setExportState("idle"), 5000))
     }
   }
 
@@ -95,11 +98,11 @@ export function SyncSection() {
       setImportResult(result)
       setImportState("success")
       loadStatus()
-      setTimeout(() => setImportState("idle"), 8000)
+      timeoutRefs.current.push(setTimeout(() => setImportState("idle"), 8000))
     } catch (e) {
       setImportError(e instanceof Error ? e.message : "Import failed")
       setImportState("error")
-      setTimeout(() => setImportState("idle"), 5000)
+      timeoutRefs.current.push(setTimeout(() => setImportState("idle"), 5000))
     }
   }
 

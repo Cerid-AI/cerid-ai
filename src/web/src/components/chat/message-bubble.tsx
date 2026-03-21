@@ -364,8 +364,8 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
     const domText = proseContainer?.textContent ?? undefined
     if (!domText) { setClaimSpans([]); return }
     const spans = matchClaimsToText(message.content, verificationClaims, domText)
-    if (import.meta.env.DEV && verificationClaims.length > 0) {
-      console.warn(`[inline-markup] claims=${verificationClaims.length} spans=${spans.length} domLen=${domText.length} sample="${verificationClaims[0]?.claim?.slice(0, 60)}"`)
+    if (import.meta.env.DEV && verificationClaims.length > 0 && spans.length !== verificationClaims.length) {
+      console.warn(`[inline-markup] mismatch: claims=${verificationClaims.length} spans=${spans.length}`)
     }
     setClaimSpans(spans)
   }, [message.content, verificationClaims, proseContainer])
@@ -381,16 +381,7 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
     if (!container || !inlineMarkups || !verificationClaims || verificationClaims.length === 0) return
 
     const spans = claimSpans
-    if (spans.length === 0) {
-      if (import.meta.env.DEV) {
-        console.warn("[inline-markup] effect fired but claimSpans is empty")
-      }
-      return
-    }
-
-    if (import.meta.env.DEV) {
-      console.warn(`[inline-markup] applying ${spans.length} marks to DOM`)
-    }
+    if (spans.length === 0) return
 
     // Track created elements for cleanup
     const createdEls: HTMLElement[] = []
@@ -448,10 +439,6 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
         }
         break // Only mark in the first matching text node per span
       }
-    }
-
-    if (import.meta.env.DEV) {
-      console.warn(`[inline-markup] created ${marksCreated}/${spans.length} marks`)
     }
 
     return () => {

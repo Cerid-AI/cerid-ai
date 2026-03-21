@@ -85,7 +85,7 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
 
   // Load templates on mount
   useEffect(() => {
-    fetchWorkflowTemplates().then(setTemplates).catch(() => {})
+    fetchWorkflowTemplates().then(setTemplates).catch((e) => console.error("Failed to load workflow templates:", e))
   }, [])
 
   // Reset state when workflow changes

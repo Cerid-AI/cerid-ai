@@ -54,9 +54,9 @@ export function useModelSwitch({
             }))
             onReplaceMessages(compressedMsgs)
             onModelChange(targetModelId)
-            console.log(`[model-switch] Auto-compressed: ${historyTokens} → ${threshold} tokens target`)
+            if (import.meta.env.DEV) console.log(`[model-switch] Auto-compressed: ${historyTokens} → ${threshold} tokens target`)
           }).catch((err) => {
-            console.warn("[model-switch] Auto-compress failed, switching without compression:", err)
+            if (import.meta.env.DEV) console.warn("[model-switch] Auto-compress failed, switching without compression:", err)
             onModelChange(targetModelId)
           })
           return
@@ -99,7 +99,7 @@ export function useModelSwitch({
             onReplaceMessages([summaryMessage])
             onModelChange(targetModelId)
           } catch (err) {
-            console.error("[model-switch] Summarization failed, falling back to continue:", err)
+            if (import.meta.env.DEV) console.error("[model-switch] Summarization failed, falling back to continue:", err)
             onModelChange(targetModelId)
           } finally {
             setIsSummarizing(false)

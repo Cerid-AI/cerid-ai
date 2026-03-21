@@ -67,8 +67,6 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
 
   const handleFinish = useCallback(() => {
     onComplete()
-    // Reload to pick up new config
-    window.location.reload()
   }, [onComplete])
 
   const handleAllHealthy = useCallback(() => {
