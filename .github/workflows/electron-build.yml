@@ -22,7 +22,13 @@ jobs:
           cache: 'npm'
           cache-dependency-path: packages/desktop/package-lock.json
 
-      - name: Install dependencies
+      - name: Build React GUI
+        working-directory: src/web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install desktop dependencies
         working-directory: packages/desktop
         run: npm ci
 
@@ -30,19 +36,24 @@ jobs:
         working-directory: packages/desktop
         run: npm run build
 
-      - name: Package for macOS
+      - name: Package for macOS (universal)
         working-directory: packages/desktop
         run: npm run package:mac
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.MAC_CERTIFICATE }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
       - name: Upload macOS artifacts to release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            packages/desktop/dist/*.dmg
-            packages/desktop/dist/*.zip
-            packages/desktop/dist/*.yml
+            packages/desktop/release/*.dmg
+            packages/desktop/release/*.zip
+            packages/desktop/release/*.yml
 
   build-windows:
     runs-on: windows-latest
@@ -57,7 +68,13 @@ jobs:
           cache: 'npm'
           cache-dependency-path: packages/desktop/package-lock.json
 
-      - name: Install dependencies
+      - name: Build React GUI
+        working-directory: src/web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install desktop dependencies
         working-directory: packages/desktop
         run: npm ci
 
@@ -75,5 +92,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            packages/desktop/dist/*.exe
-            packages/desktop/dist/*.yml
+            packages/desktop/release/*.exe
+            packages/desktop/release/*.yml

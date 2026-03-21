@@ -63,6 +63,43 @@ const ceridBridge = {
         ipcRenderer.removeListener('docker:logs:error', handler)
       }
     },
+
+    /** Get the platform-specific Docker Desktop download URL */
+    downloadUrl: (): Promise<string> => ipcRenderer.invoke('docker:downloadUrl'),
+
+    /** Attempt to start Docker Desktop and wait for daemon */
+    startDesktop: (): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('docker:startDesktop'),
+
+    /** Pull all required Docker images (progress sent via events) */
+    pullImages: (): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('docker:pullImages'),
+
+    /** Subscribe to image pull progress events */
+    onPullProgress: (
+      cb: (data: { service: string; status: string; percent: number }) => void,
+    ): (() => void) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        data: { service: string; status: string; percent: number },
+      ): void => {
+        cb(data)
+      }
+      ipcRenderer.on('docker:pull:progress', handler)
+      return () => {
+        ipcRenderer.removeListener('docker:pull:progress', handler)
+      }
+    },
+  },
+
+  system: {
+    /** Check system requirements (RAM, disk space) */
+    requirements: (): Promise<{
+      ram_gb: number
+      disk_free_gb: number
+      ram_sufficient: boolean
+      disk_sufficient: boolean
+    }> => ipcRenderer.invoke('system:requirements'),
   },
 
   app: {
@@ -76,6 +113,10 @@ const ceridBridge = {
     /** Get the current platform */
     platform: (): Promise<NodeJS.Platform> =>
       ipcRenderer.invoke('app:platform'),
+
+    /** Open a URL in the system browser */
+    openExternal: (url: string): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('app:openExternal', url),
 
     /** Listen for update check requests from tray */
     onCheckUpdate: (callback: () => void): (() => void) => {

@@ -16,10 +16,25 @@
     "mac": {
       "category": "public.app-category.productivity",
       "target": [
-        "dmg"
+        { "target": "dmg", "arch": ["universal"] }
       ],
-      "icon": "resources/icon.icns"
+      "icon": "resources/icon.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "resources/entitlements.mac.plist",
+      "entitlementsInherit": "resources/entitlements.mac.plist",
+      "notarize": false
     },
+    "dmg": {
+      "background": "resources/dmg-background.png",
+      "iconSize": 80,
+      "iconTextSize": 12,
+      "contents": [
+        { "x": 130, "y": 220 },
+        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+      ]
+    },
+    "afterSign": "scripts/notarize.js",
     "win": {
       "target": [
         "nsis"
@@ -30,8 +45,12 @@
       "dist/**/*"
     ],
     "extraResources": [
-      "resources/**"
+      "resources/**",
+      { "from": "../../src/web/dist", "to": "web", "filter": ["**/*"] }
     ],
+    "directories": {
+      "output": "release"
+    },
     "publish": {
       "provider": "github",
       "owner": "sunrunnerfire",
@@ -39,6 +58,7 @@
     }
   },
   "devDependencies": {
+    "@electron/notarize": "^2.5.0",
     "@types/dockerode": "^4.0.1",
     "@types/node": "^22.0.0",
     "electron": "^33.0.0",

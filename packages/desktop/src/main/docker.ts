@@ -1,7 +1,9 @@
 import Dockerode from 'dockerode'
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
+import os from 'node:os'
 import path from 'node:path'
+import { statfs } from 'node:fs/promises'
 
 const execFileAsync = promisify(execFile)
 
@@ -158,6 +160,162 @@ export async function restartContainer(
     const message = error instanceof Error ? error.message : String(error)
     console.error(`[desktop:docker] Failed to restart ${name}:`, message)
     return { success: false, error: message }
+  }
+}
+
+// ── Enhanced Docker Detection + Guided Install ──────────────────────────────
+
+/** Returns a platform-specific Docker Desktop download URL */
+export function getDockerDesktopDownloadUrl(): string {
+  if (process.platform === 'darwin') {
+    return os.arch() === 'arm64'
+      ? 'https://desktop.docker.com/mac/main/arm64/Docker.dmg'
+      : 'https://desktop.docker.com/mac/main/amd64/Docker.dmg'
+  }
+  if (process.platform === 'win32') {
+    return 'https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe'
+  }
+  // Linux fallback — Docker Engine install docs
+  return 'https://docs.docker.com/engine/install/'
+}
+
+/** Attempt to launch Docker Desktop and wait for the daemon to respond */
+export async function startDockerDesktop(): Promise<{ success: boolean; error?: string }> {
+  try {
+    // Check if already running
+    const alreadyRunning = await isDockerRunning()
+    if (alreadyRunning) {
+      return { success: true }
+    }
+
+    // Launch Docker Desktop
+    if (process.platform === 'darwin') {
+      await execFileAsync('open', ['-a', 'Docker'])
+    } else if (process.platform === 'win32') {
+      const exePath = 'C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe'
+      spawn(exePath, [], { detached: true, stdio: 'ignore' }).unref()
+    } else {
+      return { success: false, error: 'Unsupported platform for Docker Desktop launch' }
+    }
+
+    // Poll docker.ping() every 2s for up to 30s
+    const maxAttempts = 15
+    for (let i = 0; i < maxAttempts; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+      try {
+        await docker.ping()
+        return { success: true }
+      } catch {
+        // Daemon not ready yet, keep polling
+      }
+    }
+
+    return { success: false, error: 'Docker Desktop started but daemon did not respond within 30 seconds' }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error('[desktop:docker] Failed to start Docker Desktop:', message)
+    return { success: false, error: message }
+  }
+}
+
+/** Images to pull for a complete cerid stack */
+const CERID_IMAGES = [
+  'neo4j:5',
+  'chromadb/chroma:0.5.23',
+  'redis:7-alpine',
+  'maximhq/bifrost:latest',
+  'python:3.11-slim',
+  'nginx:1.29-alpine',
+] as const
+
+export type PullProgressCallback = (service: string, status: string, percent: number) => void
+
+/** Pull all required Docker images sequentially with progress reporting */
+export async function pullImagesWithProgress(
+  onProgress: PullProgressCallback,
+): Promise<{ success: boolean; error?: string }> {
+  for (const image of CERID_IMAGES) {
+    const serviceName = image.split(':')[0].split('/').pop() ?? image
+    onProgress(serviceName, 'pulling', 0)
+
+    try {
+      const stream = await docker.pull(image)
+
+      await new Promise<void>((resolve, reject) => {
+        // Track layer progress for percent estimation
+        const layerProgress = new Map<string, { current: number; total: number }>()
+
+        docker.modem.followProgress(
+          stream,
+          (err: Error | null) => {
+            if (err) {
+              reject(err)
+            } else {
+              onProgress(serviceName, 'complete', 100)
+              resolve()
+            }
+          },
+          (event: { id?: string; status?: string; progressDetail?: { current?: number; total?: number } }) => {
+            // Parse progress from Docker pull events
+            if (event.progressDetail?.total && event.id) {
+              layerProgress.set(event.id, {
+                current: event.progressDetail.current ?? 0,
+                total: event.progressDetail.total,
+              })
+
+              // Calculate aggregate percent across all layers
+              let totalBytes = 0
+              let downloadedBytes = 0
+              for (const [, layer] of layerProgress) {
+                totalBytes += layer.total
+                downloadedBytes += layer.current
+              }
+
+              const percent = totalBytes > 0 ? Math.round((downloadedBytes / totalBytes) * 100) : 0
+              onProgress(serviceName, event.status ?? 'downloading', Math.min(percent, 99))
+            } else if (event.status) {
+              onProgress(serviceName, event.status, -1)
+            }
+          },
+        )
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.error(`[desktop:docker] Failed to pull ${image}:`, message)
+      onProgress(serviceName, 'error', -1)
+      return { success: false, error: `Failed to pull ${image}: ${message}` }
+    }
+  }
+
+  return { success: true }
+}
+
+export interface SystemRequirements {
+  ram_gb: number
+  disk_free_gb: number
+  ram_sufficient: boolean
+  disk_sufficient: boolean
+}
+
+/** Check if the machine meets minimum requirements to run cerid */
+export async function getSystemRequirements(): Promise<SystemRequirements> {
+  const ramBytes = os.totalmem()
+  const ram_gb = Math.round((ramBytes / (1024 ** 3)) * 10) / 10
+
+  let disk_free_gb = 0
+  try {
+    // Check free space on the root filesystem (where Docker stores data)
+    const stats = await statfs(process.platform === 'win32' ? 'C:\\' : '/')
+    disk_free_gb = Math.round((Number(stats.bfree) * Number(stats.bsize) / (1024 ** 3)) * 10) / 10
+  } catch {
+    console.error('[desktop:docker] Failed to check disk space')
+  }
+
+  return {
+    ram_gb,
+    disk_free_gb,
+    ram_sufficient: ram_gb >= 8,
+    disk_sufficient: disk_free_gb >= 10,
   }
 }
 

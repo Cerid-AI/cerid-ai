@@ -6,6 +6,12 @@ import {
   stopContainers,
   restartContainer,
   streamLogs,
+  getDockerDesktopDownloadUrl,
+  startDockerDesktop,
+  pullImagesWithProgress,
+  getSystemRequirements,
+  isDockerInstalled,
+  isDockerRunning,
 } from './docker'
 import { createTray, destroyTray } from './tray'
 import { initAutoUpdater, checkForUpdates, destroyUpdater } from './updater'
@@ -126,6 +132,35 @@ function registerIpcHandlers(): void {
   ipcMain.handle('app:platform', () => {
     return process.platform
   })
+
+  ipcMain.handle('docker:downloadUrl', () => {
+    return getDockerDesktopDownloadUrl()
+  })
+
+  ipcMain.handle('docker:startDesktop', () => {
+    return startDockerDesktop()
+  })
+
+  ipcMain.handle('docker:pullImages', (event) => {
+    pullImagesWithProgress((service, status, percent) => {
+      event.sender.send('docker:pull:progress', { service, status, percent })
+    }).catch((error) => {
+      console.error('[desktop:main] Pull images failed:', error)
+    })
+    return { success: true }
+  })
+
+  ipcMain.handle('system:requirements', () => {
+    return getSystemRequirements()
+  })
+
+  ipcMain.handle('app:openExternal', (_event, url: string) => {
+    if (typeof url !== 'string' || url.length === 0) {
+      return { success: false, error: 'URL is required' }
+    }
+    shell.openExternal(url).catch(console.error)
+    return { success: true }
+  })
 }
 
 // ── App Lifecycle ───────────────────────────────────────────────────────────
@@ -137,6 +172,28 @@ app.whenReady().then(async () => {
 
   await createTray(mainWindow)
   initAutoUpdater(mainWindow)
+
+  // Best-effort Docker Desktop startup — non-blocking
+  // The React GUI setup wizard handles the rest if this fails
+  try {
+    const installed = await isDockerInstalled()
+    if (installed) {
+      const running = await isDockerRunning()
+      if (!running) {
+        console.log('[desktop:main] Docker installed but not running, attempting to start Docker Desktop...')
+        const result = await startDockerDesktop()
+        if (result.success) {
+          console.log('[desktop:main] Docker Desktop started successfully')
+        } else {
+          console.warn('[desktop:main] Could not auto-start Docker Desktop:', result.error)
+        }
+      }
+    } else {
+      console.log('[desktop:main] Docker not installed — GUI setup wizard will guide the user')
+    }
+  } catch (error) {
+    console.warn('[desktop:main] Docker pre-check failed (non-fatal):', error)
+  }
 
   // macOS: re-create window when dock icon clicked
   app.on('activate', () => {
