@@ -42,7 +42,7 @@ class TestSDKQuery:
             "graph_results": 0,
             "results": [{"content": "chunk", "relevance": 0.9}],
         }
-        with patch("routers.agents.agent_query_endpoint", new_callable=AsyncMock, return_value=mock_result):
+        with patch("routers.sdk.agent_query_endpoint", new_callable=AsyncMock, return_value=mock_result):
             app = _make_app()
             client = TestClient(app)
             resp = client.post("/sdk/v1/query", json={"query": "test query"})
@@ -71,7 +71,7 @@ class TestSDKQuery:
             "graph_results": 0,
             "results": [],
         }
-        with patch("routers.agents.agent_query_endpoint", new_callable=AsyncMock, return_value=mock_result):
+        with patch("routers.sdk.agent_query_endpoint", new_callable=AsyncMock, return_value=mock_result):
             app = _make_app()
             client = TestClient(app)
             resp = client.post("/sdk/v1/query", json={"query": "test"})
@@ -93,7 +93,7 @@ class TestSDKHallucination:
             "claims": [],
             "summary": {"total": 0, "verified": 0, "unverified": 0, "uncertain": 0},
         }
-        with patch("routers.agents.hallucination_check_endpoint", new_callable=AsyncMock, return_value=mock_result):
+        with patch("routers.sdk.hallucination_check_endpoint", new_callable=AsyncMock, return_value=mock_result):
             app = _make_app()
             client = TestClient(app)
             resp = client.post("/sdk/v1/hallucination", json={
@@ -118,7 +118,7 @@ class TestSDKMemoryExtract:
             "skipped_duplicates": 1,
             "results": [{"memory_type": "fact", "summary": "Test", "status": "success"}],
         }
-        with patch("routers.agents.memory_extract_endpoint", new_callable=AsyncMock, return_value=mock_result):
+        with patch("routers.sdk.memory_extract_endpoint", new_callable=AsyncMock, return_value=mock_result):
             app = _make_app()
             client = TestClient(app)
             resp = client.post("/sdk/v1/memory/extract", json={
@@ -173,7 +173,7 @@ class TestSDKTradingGate:
             "domains_searched": ["trading", "finance"],
         }
         try:
-            with patch("routers.agents.trading_signal_endpoint", new_callable=AsyncMock, return_value=mock_result):
+            with patch("routers.sdk.trading_signal_endpoint", new_callable=AsyncMock, return_value=mock_result):
                 app = _make_app(trading_enabled=True)
                 client = TestClient(app)
                 resp = client.post("/sdk/v1/trading/signal", json={
@@ -193,7 +193,7 @@ class TestSDKTradingGate:
     async def test_trading_herd_detect(self) -> None:
         mock_result = {"violations": [], "historical_matches": [], "sentiment_extreme": False}
         try:
-            with patch("routers.agents.trading_herd_detect_endpoint", new_callable=AsyncMock, return_value=mock_result):
+            with patch("routers.sdk.trading_herd_detect_endpoint", new_callable=AsyncMock, return_value=mock_result):
                 app = _make_app(trading_enabled=True)
                 client = TestClient(app)
                 resp = client.post("/sdk/v1/trading/herd-detect", json={
@@ -212,7 +212,7 @@ class TestSDKTradingGate:
     async def test_trading_kelly_size(self) -> None:
         mock_result = {"kelly_fraction": 0.15, "cv_edge": 0.08, "kelly_raw": 0.22, "strategy": "herd-fade"}
         try:
-            with patch("routers.agents.trading_kelly_size_endpoint", new_callable=AsyncMock, return_value=mock_result):
+            with patch("routers.sdk.trading_kelly_size_endpoint", new_callable=AsyncMock, return_value=mock_result):
                 app = _make_app(trading_enabled=True)
                 client = TestClient(app)
                 resp = client.post("/sdk/v1/trading/kelly-size", json={
@@ -232,7 +232,7 @@ class TestSDKTradingGate:
     async def test_trading_cascade_confirm(self) -> None:
         mock_result = {"confirmation_score": 0.7, "historical_cascades": 3, "match_quality": "good"}
         try:
-            with patch("routers.agents.trading_cascade_confirm_endpoint", new_callable=AsyncMock, return_value=mock_result):
+            with patch("routers.sdk.trading_cascade_confirm_endpoint", new_callable=AsyncMock, return_value=mock_result):
                 app = _make_app(trading_enabled=True)
                 client = TestClient(app)
                 resp = client.post("/sdk/v1/trading/cascade-confirm", json={
@@ -251,7 +251,7 @@ class TestSDKTradingGate:
     async def test_trading_longshot_surface(self) -> None:
         mock_result = {"calibration_points": [], "count": 0, "asset": "ETH", "date_range": "2026-03-01/2026-03-15"}
         try:
-            with patch("routers.agents.trading_longshot_surface_endpoint", new_callable=AsyncMock, return_value=mock_result):
+            with patch("routers.sdk.trading_longshot_surface_endpoint", new_callable=AsyncMock, return_value=mock_result):
                 app = _make_app(trading_enabled=True)
                 client = TestClient(app)
                 resp = client.post("/sdk/v1/trading/longshot-surface", json={
@@ -282,7 +282,7 @@ class TestConsumerDomainIsolation:
             "graph_results": 0, "results": [],
             "retrieval_skipped": True, "retrieval_reason": "consumer_domain_restricted",
         }
-        with patch("routers.agents.agent_query_endpoint", new_callable=AsyncMock, return_value=mock_result):
+        with patch("routers.sdk.agent_query_endpoint", new_callable=AsyncMock, return_value=mock_result):
             app = _make_app()
             client = TestClient(app)
             resp = client.post(
@@ -303,7 +303,7 @@ class TestConsumerDomainIsolation:
             "total_results": 1, "token_budget_used": 100, "graph_results": 0,
             "results": [{"content": "diary"}],
         }
-        with patch("routers.agents.agent_query_endpoint", new_callable=AsyncMock, return_value=mock_result):
+        with patch("routers.sdk.agent_query_endpoint", new_callable=AsyncMock, return_value=mock_result):
             app = _make_app()
             client = TestClient(app)
             resp = client.post(
@@ -323,7 +323,7 @@ class TestConsumerDomainIsolation:
             "domains_searched": ["trading"], "total_results": 0,
             "token_budget_used": 0, "graph_results": 0, "results": [],
         }
-        with patch("routers.agents.agent_query_endpoint", new_callable=AsyncMock, return_value=mock_result):
+        with patch("routers.sdk.agent_query_endpoint", new_callable=AsyncMock, return_value=mock_result):
             app = _make_app()
             client = TestClient(app)
             resp = client.post(
