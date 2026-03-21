@@ -9,6 +9,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+import config
 from config.providers import (
     PROVIDER_REGISTRY,
     get_configured_providers,
@@ -136,3 +137,50 @@ async def validate_key(name: str, req: ValidateKeyRequest):
         valid=valid,
         error=error if not valid else None,
     )
+
+
+# ── Internal LLM provider endpoints ─────────────────────────────────────────
+
+
+def _check_ollama_available() -> bool:
+    """Quick check if Ollama is reachable."""
+    import os
+
+    try:
+        import httpx
+
+        ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+        resp = httpx.get(f"{ollama_url}/api/tags", timeout=3)
+        return resp.status_code == 200
+    except Exception:
+        return False
+
+
+@router.get("/internal")
+async def get_internal_provider():
+    """Return the configured internal LLM provider for pipeline operations."""
+    return {
+        "provider": getattr(config, "INTERNAL_LLM_PROVIDER", "bifrost"),
+        "model": getattr(config, "INTERNAL_LLM_MODEL", ""),
+        "intelligence_model": getattr(config, "INTELLIGENCE_MODEL", ""),
+        "ollama_available": _check_ollama_available(),
+    }
+
+
+@router.put("/internal")
+async def set_internal_provider(body: dict):
+    """Update internal LLM provider configuration (runtime only, not persisted to .env)."""
+    provider = body.get("provider", "bifrost")
+    model = body.get("model", "")
+    intelligence_model = body.get("intelligence_model", "")
+
+    if provider not in ("bifrost", "ollama"):
+        raise HTTPException(status_code=400, detail="Provider must be 'bifrost' or 'ollama'")
+
+    # Update runtime config
+    config.INTERNAL_LLM_PROVIDER = provider
+    config.INTERNAL_LLM_MODEL = model
+    if intelligence_model:
+        config.INTELLIGENCE_MODEL = intelligence_model
+
+    return {"status": "updated", "provider": provider, "model": model}

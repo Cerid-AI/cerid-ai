@@ -457,6 +457,18 @@ async def rerank_results(
     results = sorted(results, key=lambda x: x["relevance"], reverse=True)
 
     mode = config.RERANK_MODE
+
+    # When RERANK_PREFER_LOCAL is true and the local cross-encoder is
+    # available, always use it regardless of RERANK_MODE — faster and free.
+    if getattr(config, "RERANK_PREFER_LOCAL", False) and mode == "llm":
+        try:
+            from utils.reranker import is_model_loaded
+            if is_model_loaded():
+                logger.debug("RERANK_PREFER_LOCAL: overriding llm → cross_encoder")
+                return await _rerank_cross_encoder(results, query)
+        except (ImportError, AttributeError):
+            pass  # Fall through to configured mode
+
     if mode == "cross_encoder":
         return await _rerank_cross_encoder(results, query)
     if mode == "llm":
@@ -964,12 +976,21 @@ async def agent_query(
 
     with timer.step("graph_expansion"):
         graph_count_before = len(results)
-        results = await graph_expand_results(
-            results=results,
-            query=query,
-            chroma_client=chroma_client,
-            neo4j_driver=neo4j_driver,
-        )
+        # Early-exit: skip graph expansion when vector search already returned
+        # enough high-confidence results (saves a Neo4j round-trip).
+        _high_conf = [r for r in results if r.get("relevance", 0) > 0.8]
+        if len(_high_conf) >= effective_top_k:
+            logger.debug(
+                "Skipping graph expansion: %d/%d results above 0.8 confidence",
+                len(_high_conf), effective_top_k,
+            )
+        else:
+            results = await graph_expand_results(
+                results=results,
+                query=query,
+                chroma_client=chroma_client,
+                neo4j_driver=neo4j_driver,
+            )
         graph_results_added = len(results) - graph_count_before
 
     from utils.temporal import is_within_window, parse_temporal_intent, recency_score

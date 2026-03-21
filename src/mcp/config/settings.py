@@ -339,6 +339,32 @@ SCAN_EXCLUDE_PATTERNS = [p for p in os.getenv("SCAN_EXCLUDE_PATTERNS", "").split
 SCHEDULE_FOLDER_SCAN = os.getenv("SCHEDULE_FOLDER_SCAN", "")  # cron expr, empty=disabled
 
 # ---------------------------------------------------------------------------
+# Pipeline Tuning — latency vs quality trade-offs
+# ---------------------------------------------------------------------------
+# Semantic cache: threshold for embedding similarity match (0.0-1.0)
+SEMANTIC_CACHE_THRESHOLD = float(os.getenv("SEMANTIC_CACHE_THRESHOLD", "0.92"))
+SEMANTIC_CACHE_TTL = int(os.getenv("SEMANTIC_CACHE_TTL", "300"))  # 5 minutes
+
+# Query decomposition: max sub-queries to generate
+QUERY_DECOMPOSITION_MAX = int(os.getenv("QUERY_DECOMPOSITION_MAX", "3"))
+
+# Reranking: prefer local cross-encoder over LLM for speed
+RERANK_PREFER_LOCAL = os.getenv("RERANK_PREFER_LOCAL", "true").lower() == "true"
+
+# Parallel retrieval: max concurrent domain queries
+PARALLEL_RETRIEVAL_MAX = int(os.getenv("PARALLEL_RETRIEVAL_MAX", "4"))
+
+# Internal LLM: model to use for pipeline intelligence operations
+# (categorization, decomposition, contextual chunks, claim extraction)
+# Options: "bifrost" (default, uses Bifrost routing), "ollama" (local), or specific model ID
+INTERNAL_LLM_PROVIDER = os.getenv("INTERNAL_LLM_PROVIDER", "bifrost")
+INTERNAL_LLM_MODEL = os.getenv("INTERNAL_LLM_MODEL", "")  # empty = provider default
+
+# User-configurable default model for high-value intelligence tasks
+# (verification, expert analysis, complex reasoning)
+INTELLIGENCE_MODEL = os.getenv("INTELLIGENCE_MODEL", "")  # empty = auto-select
+
+# ---------------------------------------------------------------------------
 # Trading Agent Integration
 # ---------------------------------------------------------------------------
 CERID_TRADING_ENABLED = os.getenv("CERID_TRADING_ENABLED", "false").lower() in ("true", "1")
