@@ -43,7 +43,7 @@ services:
           cpus: '4.0'
           memory: 4G
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:7474 || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:7474 || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -137,7 +137,7 @@ services:
           cpus: '2.0'
           memory: 1G
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8080/api/providers || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/api/providers || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -221,7 +221,7 @@ services:
           cpus: '1.0'
           memory: 256M
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:80/ || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/ || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
