@@ -6,11 +6,29 @@
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](../docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
 
-## Development Roadmap: Phases 42-50
+## Development Roadmap: Phases A-D + 42-50
 
-Competitive analysis (2026-03-21) against Dify (134K stars), Open WebUI (128K), RAGFlow (76K), Mem0 (51K), Khoj (34K), and others. Cerid's moat: hallucination detection, GraphRAG, Self-RAG, 9 agents, typed SDK. No competitor has all of these. Roadmap deepens the moat rather than chasing breadth.
+Competitive analysis (2026-03-21) against Dify (134K stars), Open WebUI (128K), RAGFlow (76K), Mem0 (51K), Khoj (34K). Cerid's moat: hallucination detection, GraphRAP, Self-RAG, 9 agents, typed SDK. No competitor has all of these.
+
+Roadmap covers two tracks: **Infrastructure** (deployment, BYOK, packaging, repo architecture) and **Features** (competitive capabilities). Both tracks run in parallel.
 
 ### P0 — Critical
+
+- [ ] **Phase A: Unified Docker Compose + First-Run Wizard** (5-7 days)
+  - Merge 4 compose files into single root `docker-compose.yml` with depends_on healthchecks
+  - Setup API (`/setup/*`) for first-run config: key validation, .env generation, health dashboard
+  - MCP "setup mode" when OPENROUTER_API_KEY empty (serves wizard, skips Bifrost)
+  - React first-run wizard: API key entry with inline validation → model prefs → apply → health monitor
+  - Health dashboard component reused in Settings "Infrastructure" tab
+  - Key files: new `/docker-compose.yml`, new `routers/setup.py`, new `components/setup/`
+
+- [ ] **Phase B: BYOK Model Configuration** (5-7 days)
+  - Provider management backend: configure/validate/rotate API keys for OpenRouter, OpenAI, Anthropic, xAI, Ollama
+  - `PROVIDER_REGISTRY` config defining supported providers, base URLs, test endpoints
+  - Model assignment backend: user-configurable per-task model selection (chat, verification, categorization, reranking)
+  - Bifrost config.yaml generated from template + user preferences (not hardcoded YAML)
+  - Settings UI: "Providers & Models" tab with provider cards + model dropdowns
+  - Key files: new `routers/providers.py`, new `config/providers.py`, new `stacks/bifrost/config.yaml.template`
 
 - [ ] **Phase 42: Agentic Web Search Fallback** (3-5 days)
   - Resolve "ignorance" claims detected by hallucination pipeline via web search
@@ -42,18 +60,40 @@ Competitive analysis (2026-03-21) against Dify (134K stars), Open WebUI (128K), 
   - Dual MCP + A2A = first personal KB platform with both protocols
   - Key files: new `routers/a2a.py`, new `utils/a2a_client.py`
 
+- [ ] **Phase C: Repo Architecture Separation** (8-12 days)
+  - Restructure: `core/` (Apache-2.0 KB engine), `app/` (Apache-2.0 application), `plugins/` (BSL-1.1 paid), `enterprise/` (commercial)
+  - 6 atomic PRs with re-export bridges — tests pass at every step
+  - License key validation for pro/enterprise features (offline signed JWT, no phone-home)
+  - Plugin packaging: manifest.json standard, loader, tier-gated registration
+  - Key files: all `src/mcp/` moves to `core/src/` + `app/api/`
+
 ### P2 — Valuable
 
-- [ ] **Phase 46: Multi-Modal KB** (8-12 days) — Activate OCR (already built), add audio (faster-whisper), image (vision LLM)
-- [ ] **Phase 47: Observability Dashboard** (4-6 days) — Real-time metrics: latency, cost, retrieval quality, NDCG@5
-- [ ] **Phase 48: Local LLM via Ollama** (3-5 days) — Air-gapped deployment, `LLM_PROVIDER=openrouter|ollama|auto`
+- [ ] **Phase 46: Multi-Modal KB** (8-12 days) — Activate OCR (already built), add audio (faster-whisper), image (vision LLM). Paid plugins.
+- [ ] **Phase 47: Observability Dashboard** (4-6 days) — Real-time metrics: latency, cost, retrieval quality, NDCG@5. Basic=core, advanced=paid.
+- [ ] **Phase 48: Local LLM via Ollama** (3-5 days) — Add as provider in BYOK system. Air-gapped deployment.
+- [ ] **Phase D: Electron Desktop App** (10-14 days) — .dmg/.exe wrapping Docker lifecycle, system tray, auto-update via GitHub Releases. Uses `dockerode` for container management.
 
 ### P3 — Long-Term
 
 - [ ] **Phase 49: Plugin Foundation** (6-10 days) — Plugin packaging, loader, management API and GUI
-- [ ] **Phase 50: Visual Workflow Builder** (15-20 days) — Pipeline visualizer → stage toggles → custom DAG composition
+- [ ] **Phase 50: Visual Workflow Builder** (15-20 days) — Pipeline visualizer → stage toggles → custom DAG composition. Paid feature.
 
-**P0+P1 estimate:** 17-26 days. All P1 phases parallelizable (different subsystems).
+### Execution Dependencies
+
+- **Phases A + B** can run in parallel (infrastructure vs settings)
+- **Phase C** comes after A+B merge (moves files they modify)
+- **Phase D** starts after A is done (needs unified compose)
+- **Feature phases (42-50)** are independent of infrastructure phases
+- **Phase 48** (Ollama) implements as a BYOK provider from Phase B
+- **Phase 46** (multi-modal) requires Phase C4 plugin packaging
+
+### Business Model
+
+- **Core + App** (Apache-2.0): KB, RAG, verification, SDK, GUI — always free
+- **Plugins** (BSL-1.1): Multi-modal, advanced analytics, visual workflow — paid, source-available, converts to Apache-2.0 after 3 years
+- **Enterprise** (Commercial): Team features, SLA, priority support
+- **BYOK**: Users bring their own LLM provider keys. No cerid-hosted LLM costs.
 
 ---
 
