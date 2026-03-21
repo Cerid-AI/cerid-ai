@@ -214,6 +214,15 @@ STREAMING_TOTAL_TIMEOUT = float(os.getenv("STREAMING_TOTAL_TIMEOUT", "180"))
 STREAMING_RETRY_ATTEMPTS = int(os.getenv("STREAMING_RETRY_ATTEMPTS", "1"))
 
 # ---------------------------------------------------------------------------
+# Web Search (Phase 42 — agentic web search fallback)
+# ---------------------------------------------------------------------------
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
+SEARXNG_URL = os.getenv("SEARXNG_URL", "")  # e.g. http://localhost:8080
+ENABLE_AUTO_LEARN = os.getenv("ENABLE_AUTO_LEARN", "false").lower() == "true"
+WEB_SEARCH_MAX_RESULTS = int(os.getenv("WEB_SEARCH_MAX_RESULTS", "5"))
+WEB_SEARCH_RATE_LIMIT = int(os.getenv("WEB_SEARCH_RATE_LIMIT", "10"))  # per minute
+
+# ---------------------------------------------------------------------------
 # Self-RAG (retrieval-augmented generation validation loop)
 # ---------------------------------------------------------------------------
 SELF_RAG_MAX_ITERATIONS = int(os.getenv("SELF_RAG_MAX_ITERATIONS", "2"))

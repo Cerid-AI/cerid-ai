@@ -590,6 +590,51 @@ MCP_TOOLS = [
             },
         },
     },
+    {
+        "name": "pkb_web_search",
+        "description": "Search the web for information not in the knowledge base. Results are optionally verified through Self-RAG and can be auto-ingested into the KB.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query — be specific for best results",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum number of results (default: 5, max: 10)",
+                    "default": 5,
+                },
+                "auto_ingest": {
+                    "type": "boolean",
+                    "description": "Auto-ingest verified results into the KB (requires ENABLE_AUTO_LEARN=true)",
+                    "default": False,
+                },
+            },
+            "required": ["query"],
+        },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "url": {"type": "string"},
+                            "snippet": {"type": "string"},
+                            "score": {"type": "number"},
+                        },
+                    },
+                },
+                "provider": {"type": "string"},
+                "ingested_count": {"type": "integer"},
+                "timestamp": {"type": "string"},
+            },
+        },
+    },
 ]
 
 
@@ -751,5 +796,15 @@ async def execute_tool(name: str, arguments: dict) -> Any:
             asset=arguments.get("asset", ""),
             date_range=arguments.get("date_range", "30d"),
             neo4j=get_neo4j(),
+        )
+    elif name == "pkb_web_search":
+        from utils.web_search import search_and_verify
+        return await search_and_verify(
+            query=arguments.get("query", ""),
+            chroma_client=get_chroma(),
+            neo4j_driver=get_neo4j(),
+            redis_client=get_redis(),
+            max_results=arguments.get("max_results", 5),
+            auto_ingest=arguments.get("auto_ingest", False),
         )
     raise ValueError(f"Unknown tool: {name}")
