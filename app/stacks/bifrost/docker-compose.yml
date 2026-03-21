@@ -1,0 +1,34 @@
+services:
+  bifrost:
+    image: maximhq/bifrost:latest@sha256:0fa2596eb2d05cf2f58b6d7b31076b0cc153f2c60972e83eb1f634bccd0372df
+    container_name: bifrost
+    ports:
+      - "${CERID_BIND_ADDR:-127.0.0.1}:${CERID_PORT_BIFROST:-8080}:8080"
+    volumes:
+      - ./data/config.json:/app/data/config.json
+      - ./data:/app/data
+    env_file:
+      - ../../.env
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - APP_HOST=0.0.0.0
+      - APP_PORT=8080
+      - LOG_LEVEL=info
+    networks:
+      - llm-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+    healthcheck:
+      test: ["CMD", "wget", "-qO/dev/null", "http://localhost:8080/api/providers"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  llm-network:
+    external: true

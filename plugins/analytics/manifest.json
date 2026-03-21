@@ -1,0 +1,10 @@
+{
+  "name": "cerid-plugin-analytics",
+  "version": "0.1.0",
+  "description": "Advanced analytics plugin for Cerid AI — retrieval quality metrics, NDCG dashboards, cost tracking",
+  "license": "BSL-1.1",
+  "tier_required": "pro",
+  "dependencies": [],
+  "entry_point": "plugin.py",
+  "capabilities": ["analytics"]
+}

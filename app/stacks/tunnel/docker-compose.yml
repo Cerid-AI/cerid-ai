@@ -1,0 +1,15 @@
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:2025.4.2
+    container_name: cerid-tunnel
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    networks:
+      - llm-network
+    restart: unless-stopped
+    depends_on: []
+
+networks:
+  llm-network:
+    external: true
