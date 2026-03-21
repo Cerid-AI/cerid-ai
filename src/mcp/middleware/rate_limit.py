@@ -24,14 +24,6 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-# DEPRECATED: This dict is unused. CLIENT_RATE_LIMITS in config/settings.py
-# is the source of truth for per-client rate limits.
-RATE_LIMITS: dict[str, tuple[int, int]] = {
-    "/agent/": (20, 60),
-    "/ingest": (10, 60),
-    "/recategorize": (10, 60),
-}
-
 # Trusted proxy networks — when direct peer is trusted, use X-Forwarded-For.
 # Comma-separated CIDRs or IPs, e.g. "172.17.0.0/16,10.0.0.1"
 _trusted_raw = os.getenv("TRUSTED_PROXIES", "")

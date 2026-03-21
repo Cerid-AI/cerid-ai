@@ -149,7 +149,7 @@ def _list_automations() -> list[Automation]:
         if raw is not None:
             try:
                 automations.append(Automation(**json.loads(raw)))
-            except Exception:
+            except (json.JSONDecodeError, ValueError, KeyError):
                 pass
     automations.sort(key=lambda a: a.created_at, reverse=True)
     return automations
@@ -231,7 +231,7 @@ async def execute_automation(automation: Automation) -> AutomationRun:
             "duration_s": round(duration, 2),
         }
 
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, KeyError, OSError) as e:
         duration = time.time() - start
         _logger.error("Automation %s (%s) failed: %s", automation.id, automation.name, e)
         run.status = "error"
@@ -361,7 +361,7 @@ def _unregister_job(automation_id: str) -> None:
     try:
         sched.remove_job(job_id)
         _logger.info("Removed scheduler job %s", job_id)
-    except Exception:
+    except (KeyError, ValueError):
         pass  # Job may not exist
 
 

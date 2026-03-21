@@ -392,7 +392,7 @@ async def execute_workflow(workflow: Workflow, input_data: dict[str, Any]) -> Wo
         run.status = RunStatus.COMPLETED
         run.results = results
 
-    except Exception as exc:
+    except (KeyError, ValueError, TypeError, RuntimeError, asyncio.CancelledError) as exc:
         _logger.exception("Workflow execution failed: %s", exc)
         run.status = RunStatus.FAILED
         run.error = str(exc)

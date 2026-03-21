@@ -114,7 +114,7 @@ async def _check_service(name: str, url: str, timeout: float = 2.0) -> str:
             if resp.status_code < 500:
                 return "healthy"
             return "unhealthy"
-    except Exception:
+    except (httpx.ConnectError, httpx.TimeoutException, OSError):
         return "unavailable"
 
 
@@ -285,7 +285,7 @@ async def validate_key(req: KeyValidationRequest) -> KeyValidationResponse:
     except ImportError:
         _logger.warning("config.providers not available, falling back to basic validation")
         return await _fallback_validate(req.provider, req.api_key)
-    except Exception as exc:
+    except (httpx.HTTPError, OSError) as exc:
         _logger.exception("Key validation failed for provider=%s", req.provider)
         return KeyValidationResponse(valid=False, error=str(exc))
 
@@ -368,6 +368,6 @@ async def configure(req: ConfigureRequest) -> ConfigureResponse:
 
         return ConfigureResponse(success=True, restart_required=True)
 
-    except Exception as exc:
+    except (OSError, ValueError) as exc:
         _logger.exception("Failed to apply configuration")
         return ConfigureResponse(success=False, error=str(exc))

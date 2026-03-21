@@ -158,6 +158,14 @@ async def lifespan(app: FastAPI):
             "OPENROUTER_API_KEY not set — LLM features (categorization, reranking, "
             "verification, memory extraction) will fail"
         )
+    if not os.getenv("CERID_API_KEY"):
+        logger.warning(
+            "security_notice: API key auth disabled — set CERID_API_KEY to require authentication"
+        )
+    if not os.getenv("REDIS_PASSWORD"):
+        logger.warning(
+            "security_notice: Redis password empty — set REDIS_PASSWORD for production"
+        )
 
     # Startup: initialize Neo4j schema + run migrations
     try:
@@ -247,6 +255,13 @@ async def lifespan(app: FastAPI):
         await close_bifrost_client()
     except Exception:
         pass
+    # Close trading proxy connection pool
+    if CERID_TRADING_ENABLED:
+        try:
+            from routers.trading_proxy import close_trading_proxy_client
+            await close_trading_proxy_client()
+        except Exception:
+            pass
     # Flush semantic cache HNSW index to Redis before closing Redis
     try:
         from deps import get_redis
@@ -353,6 +368,11 @@ if CERID_MULTI_USER:
 if CERID_TRADING_ENABLED:
     from routers import trading_proxy
     app.include_router(trading_proxy.router)
+
+# Eval harness API (only when explicitly enabled)
+if os.getenv("CERID_EVAL_ENABLED", "").lower() in ("1", "true", "yes"):
+    from routers import eval as eval_router
+    app.include_router(eval_router.router)
 
 
 @app.get("/")

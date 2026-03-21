@@ -12,7 +12,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from middleware.rate_limit import RATE_LIMITS, RateLimitMiddleware, get_client_ip
+from middleware.rate_limit import RateLimitMiddleware, get_client_ip
 
 # ---------------------------------------------------------------------------
 # Helper: minimal ASGI app with rate limiter
@@ -284,19 +284,3 @@ class TestGetClientIP:
             assert get_client_ip(request) == "172.17.0.10"
 
 
-# ---------------------------------------------------------------------------
-# Tests: RATE_LIMITS constant
-# ---------------------------------------------------------------------------
-
-class TestRateLimitConstants:
-    def test_agent_limit_defined(self):
-        assert "/agent/" in RATE_LIMITS
-        assert RATE_LIMITS["/agent/"] == (20, 60)
-
-    def test_ingest_limit_defined(self):
-        assert "/ingest" in RATE_LIMITS
-        assert RATE_LIMITS["/ingest"] == (10, 60)
-
-    def test_recategorize_limit_defined(self):
-        assert "/recategorize" in RATE_LIMITS
-        assert RATE_LIMITS["/recategorize"] == (10, 60)

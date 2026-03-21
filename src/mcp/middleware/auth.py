@@ -33,9 +33,14 @@ def _redact_ip(ip: str) -> str:
 
 
 class APIKeyMiddleware(BaseHTTPMiddleware):
+    _warned_no_key: bool = False
+
     def __init__(self, app, api_key: str | None = None):
         super().__init__(app)
         self.api_key = api_key or os.getenv("CERID_API_KEY", "")
+        if not self.api_key and not APIKeyMiddleware._warned_no_key:
+            logger.warning("API key auth is disabled — all requests will pass through unauthenticated")
+            APIKeyMiddleware._warned_no_key = True
 
     async def dispatch(self, request: Request, call_next):
         # Skip auth if no key configured

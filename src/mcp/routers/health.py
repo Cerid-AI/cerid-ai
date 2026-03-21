@@ -36,10 +36,20 @@ def health_check() -> dict:
         status["neo4j"] = "connected"
     except Exception as exc:
         status["neo4j"] = f"error: {exc}"
+    # Bifrost circuit breaker state
+    try:
+        from utils.circuit_breaker import get_breaker
+        bifrost_cb_state = get_breaker("bifrost-rerank").state.value
+    except (ValueError, ImportError):
+        bifrost_cb_state = "unknown"
+
     return {
         "status": "healthy" if all(v == "connected" for v in status.values()) else "degraded",
         "version": "1.0.0",
         "services": status,
+        "circuit_breakers": {
+            "bifrost": bifrost_cb_state,
+        },
     }
 
 
