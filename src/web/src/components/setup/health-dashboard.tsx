@@ -38,6 +38,8 @@ export function HealthDashboard({ polling = true, interval = 2000, onAllHealthy 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const notifiedRef = useRef(false)
+  const onAllHealthyRef = useRef(onAllHealthy)
+  onAllHealthyRef.current = onAllHealthy
 
   const checkHealth = useCallback(async () => {
     try {
@@ -45,17 +47,16 @@ export function HealthDashboard({ polling = true, interval = 2000, onAllHealthy 
       setHealth(data)
       setError(null)
 
-      // Check if all services are healthy
       if (data.all_healthy && !notifiedRef.current) {
         notifiedRef.current = true
-        onAllHealthy?.()
+        onAllHealthyRef.current?.()
       }
     } catch {
       setError("Cannot reach backend")
     } finally {
       setLoading(false)
     }
-  }, [onAllHealthy])
+  }, [])
 
   useEffect(() => {
     checkHealth()
