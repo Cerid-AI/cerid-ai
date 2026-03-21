@@ -48,6 +48,7 @@ from routers import (
     taxonomy,
     upload,
     user_state,
+    workflows,
 )
 from scheduler import start_scheduler, stop_scheduler
 
@@ -311,6 +312,7 @@ _api_routers = [
     kb_admin.router,
     user_state.router,
     plugins.router,
+    workflows.router,
 ]
 for r in _api_routers:
     app.include_router(r)

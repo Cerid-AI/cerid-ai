@@ -74,6 +74,11 @@ import type {
   HealthScoreResponse,
   CostBreakdownResponse,
   QualityMetricsResponse,
+  Workflow,
+  WorkflowCreate,
+  WorkflowRun,
+  WorkflowListResponse,
+  WorkflowTemplate,
 } from "./types"
 
 export async function fetchHealth(): Promise<HealthResponse> {
@@ -1267,5 +1272,71 @@ export async function fetchObservabilityCost(windowMinutes = 60): Promise<CostBr
 export async function fetchObservabilityQuality(windowMinutes = 60): Promise<QualityMetricsResponse> {
   const res = await fetch(`${MCP_BASE}/observability/quality?window_minutes=${windowMinutes}`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, `Quality metrics fetch failed: ${res.status}`))
+  return res.json()
+}
+
+// ---------------------------------------------------------------------------
+// Workflows (Phase 50)
+// ---------------------------------------------------------------------------
+
+export async function fetchWorkflows(): Promise<WorkflowListResponse> {
+  const res = await fetch(`${MCP_BASE}/workflows`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Fetch workflows failed: ${res.status}`))
+  return res.json()
+}
+
+export async function fetchWorkflow(id: string): Promise<Workflow> {
+  const res = await fetch(`${MCP_BASE}/workflows/${id}`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Fetch workflow failed: ${res.status}`))
+  return res.json()
+}
+
+export async function createWorkflow(data: WorkflowCreate): Promise<Workflow> {
+  const res = await fetch(`${MCP_BASE}/workflows`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Create workflow failed: ${res.status}`))
+  return res.json()
+}
+
+export async function updateWorkflow(id: string, data: Partial<WorkflowCreate>): Promise<Workflow> {
+  const res = await fetch(`${MCP_BASE}/workflows/${id}`, {
+    method: "PUT",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Update workflow failed: ${res.status}`))
+  return res.json()
+}
+
+export async function deleteWorkflow(id: string): Promise<void> {
+  const res = await fetch(`${MCP_BASE}/workflows/${id}`, {
+    method: "DELETE",
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Delete workflow failed: ${res.status}`))
+}
+
+export async function runWorkflow(id: string, input?: Record<string, unknown>): Promise<WorkflowRun> {
+  const res = await fetch(`${MCP_BASE}/workflows/${id}/run`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(input ?? {}),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Run workflow failed: ${res.status}`))
+  return res.json()
+}
+
+export async function fetchWorkflowRuns(id: string, limit = 20): Promise<WorkflowRun[]> {
+  const res = await fetch(`${MCP_BASE}/workflows/${id}/runs?limit=${limit}`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Fetch workflow runs failed: ${res.status}`))
+  return res.json()
+}
+
+export async function fetchWorkflowTemplates(): Promise<WorkflowTemplate[]> {
+  const res = await fetch(`${MCP_BASE}/workflows/templates`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Fetch workflow templates failed: ${res.status}`))
   return res.json()
 }

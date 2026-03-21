@@ -1,0 +1,19 @@
+{
+  "name": "cerid-workflow-builder",
+  "version": "0.1.0",
+  "description": "Visual Workflow Builder — DAG composition and execution engine for agent pipelines",
+  "tier_required": "pro",
+  "capabilities": ["workflow-visualization", "dag-composition", "pipeline-execution"],
+  "config_schema": {
+    "max_nodes_per_workflow": {
+      "type": "integer",
+      "default": 50,
+      "description": "Maximum number of nodes allowed in a single workflow"
+    },
+    "run_ttl_days": {
+      "type": "integer",
+      "default": 7,
+      "description": "Number of days to retain workflow run history in Redis"
+    }
+  }
+}

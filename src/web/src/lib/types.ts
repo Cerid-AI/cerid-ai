@@ -844,3 +844,70 @@ export interface PluginListResponse {
   total: number
 }
 
+// ── Workflows (Phase 50) ────────────────────────────────────────────────────
+
+export type WorkflowNodeType = "agent" | "parser" | "tool" | "condition"
+export type WorkflowRunStatus = "pending" | "running" | "completed" | "failed"
+
+export interface WorkflowNodePosition {
+  x: number
+  y: number
+}
+
+export interface WorkflowNode {
+  id: string
+  type: WorkflowNodeType
+  name: string
+  config: Record<string, unknown>
+  position: WorkflowNodePosition
+}
+
+export interface WorkflowEdge {
+  source_id: string
+  target_id: string
+  label: string | null
+  condition: string | null
+}
+
+export interface Workflow {
+  id: string
+  name: string
+  description: string
+  nodes: WorkflowNode[]
+  edges: WorkflowEdge[]
+  created_at: string
+  updated_at: string
+  enabled: boolean
+}
+
+export interface WorkflowCreate {
+  name: string
+  description?: string
+  nodes: WorkflowNode[]
+  edges: WorkflowEdge[]
+  enabled?: boolean
+}
+
+export interface WorkflowRun {
+  id: string
+  workflow_id: string
+  status: WorkflowRunStatus
+  started_at: string
+  finished_at: string | null
+  results: Record<string, unknown>
+  error: string | null
+}
+
+export interface WorkflowListResponse {
+  workflows: Workflow[]
+  total: number
+}
+
+export interface WorkflowTemplate {
+  id: string
+  name: string
+  description: string
+  nodes: WorkflowNode[]
+  edges: WorkflowEdge[]
+}
+
