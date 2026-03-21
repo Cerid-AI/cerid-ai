@@ -24,6 +24,7 @@ from middleware.rate_limit import RateLimitMiddleware
 from middleware.request_id import RequestIDMiddleware
 from middleware.tenant_context import TenantContextMiddleware
 from routers import (
+    a2a,
     agents,
     artifacts,
     automations,
@@ -318,6 +319,9 @@ app.include_router(models.router, prefix="/api/v1")
 
 # SDK router — stable external contract (manages its own /sdk/v1/ prefix)
 app.include_router(sdk.router)
+
+# A2A router — Agent Card at /.well-known/agent.json, tasks at /a2a/* (no prefix)
+app.include_router(a2a.router)
 
 # MCP transport stays at root only (not versioned)
 app.include_router(mcp_sse.router)

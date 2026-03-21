@@ -591,6 +591,40 @@ MCP_TOOLS = [
         },
     },
     {
+        "name": "pkb_memory_recall",
+        "description": "Recall relevant memories with decay-adjusted scoring. Memories are reinforced by access. Returns context-aware results sorted by adjusted relevance.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "What to recall from memory"},
+                "top_k": {"type": "integer", "description": "Max memories to return (default: 10)", "default": 10},
+                "min_score": {"type": "number", "description": "Min adjusted score threshold (default: 0.3)", "default": 0.3},
+            },
+            "required": ["query"],
+        },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "memories": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "text": {"type": "string"},
+                            "score": {"type": "number"},
+                            "access_count": {"type": "integer"},
+                            "source": {"type": "string"},
+                            "created_at": {"type": "string"},
+                        },
+                    },
+                },
+                "total_recalled": {"type": "integer"},
+                "timestamp": {"type": "string"},
+            },
+        },
+    },
+    {
         "name": "pkb_web_search",
         "description": "Search the web for information not in the knowledge base. Results are optionally verified through Self-RAG and can be auto-ingested into the KB.",
         "inputSchema": {
@@ -797,6 +831,31 @@ async def execute_tool(name: str, arguments: dict) -> Any:
             date_range=arguments.get("date_range", "30d"),
             neo4j=get_neo4j(),
         )
+    elif name == "pkb_memory_recall":
+        from agents.memory import recall_memories
+        from utils.time import utcnow_iso as _utcnow_iso
+        results = await recall_memories(
+            query=arguments.get("query", ""),
+            chroma_client=get_chroma(),
+            neo4j_driver=get_neo4j(),
+            top_k=arguments.get("top_k", 10),
+            min_score=arguments.get("min_score"),
+        )
+        return {
+            "memories": [
+                {
+                    "id": m.get("memory_id", ""),
+                    "text": m.get("text", ""),
+                    "score": m.get("adjusted_score", 0.0),
+                    "access_count": m.get("access_count", 0),
+                    "source": m.get("memory_type", "fact"),
+                    "created_at": "",  # not available from vector search metadata
+                }
+                for m in results
+            ],
+            "total_recalled": len(results),
+            "timestamp": _utcnow_iso(),
+        }
     elif name == "pkb_web_search":
         from utils.web_search import search_and_verify
         return await search_and_verify(

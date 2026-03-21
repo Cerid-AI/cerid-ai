@@ -17,6 +17,10 @@ __all__ = [
     # taxonomy
     "get_taxonomy", "create_domain", "create_sub_category",
     "list_tags", "update_artifact_taxonomy",
+    # memory (Phase 44 Part 2)
+    "ensure_memory_schema", "create_memory_node", "update_memory_access",
+    "archive_memory", "link_memory_to_artifact", "supersede_memory",
+    "merge_memory", "get_memory_graph",
 ]
 
 from db.neo4j.artifacts import (  # noqa: F401,E402
@@ -39,6 +43,16 @@ from db.neo4j.relationships import (  # noqa: F401,E402
     create_relationship,
     discover_relationships,
     find_related_artifacts,
+)
+from db.neo4j.memory import (  # noqa: F401,E402
+    archive_memory,
+    create_memory_node,
+    ensure_memory_schema,
+    get_memory_graph,
+    link_memory_to_artifact,
+    merge_memory,
+    supersede_memory,
+    update_memory_access,
 )
 from db.neo4j.schema import init_schema  # noqa: F401,E402
 from db.neo4j.taxonomy import (  # noqa: F401,E402

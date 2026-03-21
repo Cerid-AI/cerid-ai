@@ -127,6 +127,10 @@ def init_schema(driver) -> None:
         if fixed or linked:
             logger.info(f"Backfilled {fixed} sub_category props, {linked} CATEGORIZED_AS rels")
 
+    # --- Memory node schema (Phase 44 Part 2) ---
+    from db.neo4j.memory import ensure_memory_schema
+    ensure_memory_schema(driver)
+
     logger.info(
         f"Neo4j schema initialized with {len(config.TAXONOMY)} domains, "
         f"{sum(len(v.get('sub_categories', [])) for v in config.TAXONOMY.values())} sub-categories"

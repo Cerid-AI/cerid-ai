@@ -434,6 +434,14 @@ CONSUMER_REGISTRY: dict[str, dict] = {
         "allowed_domains": None,     # Ingest into any domain
         "strict_domains": False,
     },
+    "a2a-agent": {
+        "rate_limits": {
+            "/a2a/": (30, 60),
+            "/agent/": (30, 60),
+        },
+        "allowed_domains": None,     # A2A peers get full domain access
+        "strict_domains": False,
+    },
     "_default": {
         "rate_limits": {
             "/agent/": (10, 60),
