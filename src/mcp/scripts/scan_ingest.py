@@ -103,21 +103,25 @@ def ingest_via_api(host_path: str, domain: str, sub_category: str) -> dict:
     filename = os.path.basename(host_path)
     headers = {"Content-Type": "application/json", "X-Client-ID": "folder_scanner"}
 
-    # Try /ingest_file first (works on Linux Docker, native installs)
-    container_path = translate_path(host_path)
-    try:
-        resp = requests.post(
-            f"{MCP_URL}/ingest_file",
-            json={"file_path": container_path, "domain": domain or "", "sub_category": sub_category or "", "categorize_mode": "smart"},
-            headers=headers,
-            timeout=120,
-        )
-        resp.raise_for_status()
-        return resp.json()
-    except (requests.ConnectionError, requests.HTTPError):
-        pass
+    # On macOS Docker, /ingest_file crashes the container due to virtiofs Errno 35.
+    # Skip the path-based approach and always read files on the host side.
+    import platform
+    if platform.system() != "Darwin":
+        # Try /ingest_file first (works on Linux Docker, native installs)
+        container_path = translate_path(host_path)
+        try:
+            resp = requests.post(
+                f"{MCP_URL}/ingest_file",
+                json={"file_path": container_path, "domain": domain or "", "sub_category": sub_category or "", "categorize_mode": "smart"},
+                headers=headers,
+                timeout=120,
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except (requests.ConnectionError, requests.HTTPError):
+            pass
 
-    # Fallback: read file on host and send content via /ingest
+    # Read file on host and send content via /ingest
     with open(host_path, "rb") as f:
         content = f.read()
 
@@ -143,26 +147,14 @@ def ingest_via_api(host_path: str, domain: str, sub_category: str) -> dict:
         resp.raise_for_status()
         return resp.json()
 
-    # For binary files (PDF, DOCX, EPUB), use multipart upload
+    # For binary files (PDF, DOCX, EPUB), use multipart /upload endpoint
     resp = requests.post(
-        f"{MCP_URL}/ingest/upload",
+        f"{MCP_URL}/upload",
         files={"file": (filename, content)},
         data={"domain": domain or "", "sub_category": sub_category or ""},
         headers={"X-Client-ID": "folder_scanner"},
-        timeout=120,
+        timeout=180,
     )
-    if resp.status_code == 404:
-        # /ingest/upload not available — try reading as text anyway
-        try:
-            text = content.decode("utf-8", errors="replace")
-        except Exception:
-            text = content.decode("latin-1", errors="replace")
-        resp = requests.post(
-            f"{MCP_URL}/ingest",
-            json={"content": text[:50000], "filename": filename, "domain": domain or "", "tags": []},
-            headers=headers,
-            timeout=120,
-        )
     resp.raise_for_status()
     return resp.json()
 
@@ -273,9 +265,23 @@ def scan_directory(
                 stats["errors"] += 1
                 print(f"  ERROR: {fname} → {e.response.status_code}: {e.response.text[:200]}")
                 stats["results"].append({"path": fpath, "status": "error", "error": str(e)})
-            except requests.ConnectionError:
-                print(f"\nERROR: Cannot connect to MCP at {MCP_URL}. Is the server running?")
-                sys.exit(1)
+            except (requests.ConnectionError, requests.exceptions.ChunkedEncodingError):
+                stats["errors"] += 1
+                print(f"  ERROR: {fname} → MCP connection lost (PDF may be too complex)")
+                # Wait for MCP to recover from potential OOM restart
+                print(f"  Waiting 30s for MCP recovery...")
+                time.sleep(30)
+                # Verify MCP is back
+                for attempt in range(5):
+                    try:
+                        requests.get(f"{MCP_URL}/health", timeout=5)
+                        print(f"  MCP recovered. Continuing scan.")
+                        break
+                    except requests.ConnectionError:
+                        time.sleep(10)
+                else:
+                    print(f"\nERROR: MCP did not recover after 80s. Aborting scan.")
+                    sys.exit(1)
 
     return stats
 
