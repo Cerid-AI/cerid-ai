@@ -2,7 +2,7 @@
   "name": "cerid-desktop",
   "version": "0.1.0",
   "description": "Cerid AI Desktop — Personal AI Knowledge Companion",
-  "main": "dist/main/main.js",
+  "main": "out/main/main.js",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
@@ -42,7 +42,7 @@
       "icon": "resources/icon.ico"
     },
     "files": [
-      "dist/**/*"
+      "out/**/*"
     ],
     "extraResources": [
       "resources/**",

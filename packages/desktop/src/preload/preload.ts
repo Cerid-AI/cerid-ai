@@ -128,6 +128,10 @@ const ceridBridge = {
         ipcRenderer.removeListener('app:check-update', handler)
       }
     },
+
+    /** Export knowledge base data to a user-chosen directory */
+    exportData: (): Promise<{ success: boolean; path?: string; error?: string }> =>
+      ipcRenderer.invoke('app:exportData'),
   },
 } as const
 

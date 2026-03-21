@@ -76,3 +76,7 @@ cerid-archive/
 inbox/
 .worktrees/
 backups/
+
+# Electron build output
+packages/desktop/out/
+packages/desktop/release/
