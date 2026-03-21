@@ -5,12 +5,10 @@
 
 from __future__ import annotations
 
-import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -45,20 +43,20 @@ class TestOllamaDisabled:
 
     @pytest.mark.asyncio
     async def test_models_disabled(self):
+        from fastapi import HTTPException
+
         from routers.ollama_proxy import list_ollama_models
 
         with _disable_ollama():
-            with pytest.raises(httpx.HTTPStatusError if hasattr(httpx, "HTTPStatusError") else Exception):
-                # Use FastAPI's HTTPException check
-                from fastapi import HTTPException
-                with pytest.raises(HTTPException) as exc_info:
-                    await list_ollama_models()
-                assert exc_info.value.status_code == 503
-                assert "disabled" in exc_info.value.detail.lower()
+            with pytest.raises(HTTPException) as exc_info:
+                await list_ollama_models()
+            assert exc_info.value.status_code == 503
+            assert "disabled" in exc_info.value.detail.lower()
 
     @pytest.mark.asyncio
     async def test_chat_disabled(self):
         from fastapi import HTTPException
+
         from routers.ollama_proxy import ChatMessage, ChatRequest, chat_completion
 
         req = ChatRequest(
@@ -73,6 +71,7 @@ class TestOllamaDisabled:
     @pytest.mark.asyncio
     async def test_pull_disabled(self):
         from fastapi import HTTPException
+
         from routers.ollama_proxy import PullRequest, pull_model
 
         with _disable_ollama():
@@ -114,6 +113,7 @@ class TestListModels:
     @pytest.mark.asyncio
     async def test_list_models_connection_error(self):
         from fastapi import HTTPException
+
         from routers.ollama_proxy import list_ollama_models
 
         mock_client = AsyncMock()
@@ -130,6 +130,7 @@ class TestListModels:
     @pytest.mark.asyncio
     async def test_list_models_timeout(self):
         from fastapi import HTTPException
+
         from routers.ollama_proxy import list_ollama_models
 
         mock_client = AsyncMock()
@@ -193,6 +194,7 @@ class TestChatSync:
     @pytest.mark.asyncio
     async def test_chat_connection_error(self):
         from fastapi import HTTPException
+
         from routers.ollama_proxy import ChatMessage, ChatRequest, chat_completion
 
         mock_client = AsyncMock()
@@ -213,6 +215,7 @@ class TestChatSync:
     @pytest.mark.asyncio
     async def test_chat_circuit_breaker_open(self):
         from fastapi import HTTPException
+
         from routers.ollama_proxy import ChatMessage, ChatRequest, chat_completion
         from utils.circuit_breaker import CircuitState, get_breaker
 
@@ -241,6 +244,7 @@ class TestChatStream:
     @pytest.mark.asyncio
     async def test_stream_circuit_breaker_open(self):
         from fastapi import HTTPException
+
         from routers.ollama_proxy import ChatMessage, ChatRequest, chat_completion
         from utils.circuit_breaker import CircuitState, get_breaker
 

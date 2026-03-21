@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
@@ -210,7 +211,7 @@ async def _execute_verification(input_data: dict) -> dict:
     return result
 
 
-SKILL_MAP: dict[str, object] = {
+SKILL_MAP: dict[str, Callable[[dict], Awaitable[dict]]] = {
     "knowledge-query": _execute_query,
     "document-ingest": _execute_ingest,
     "memory-recall": _execute_recall,

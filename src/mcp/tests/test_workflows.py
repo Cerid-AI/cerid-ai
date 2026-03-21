@@ -4,7 +4,6 @@
 """Tests for routers/workflows.py — DAG composition and execution engine."""
 
 import asyncio
-import json
 from collections import defaultdict
 from unittest.mock import MagicMock, patch
 
@@ -26,7 +25,6 @@ from routers.workflows import (
     topological_sort,
     validate_dag,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

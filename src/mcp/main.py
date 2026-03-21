@@ -294,7 +294,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 # 2. Metrics collection (added second — records latency/throughput, non-blocking)
-from middleware.metrics import MetricsMiddleware
+from middleware.metrics import MetricsMiddleware  # noqa: E402
+
 app.add_middleware(MetricsMiddleware)
 # 3. Rate limiting (added third)
 app.add_middleware(RateLimitMiddleware)

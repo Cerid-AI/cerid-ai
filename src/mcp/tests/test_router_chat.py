@@ -201,13 +201,33 @@ class TestChatRequestValidation:
         with patch("routers.chat.OPENROUTER_API_KEY", "sk-test"):
             app = _make_app()
             client = TestClient(app)
-            resp = client.post("/chat/stream", json={
-                "model": "openrouter/openai/gpt-4o-mini",
-                "messages": [],
-            })
-            # Empty messages list is valid at the schema level,
-            # OpenRouter would reject it — our proxy forwards as-is
-            assert resp.status_code == 200
+
+            with patch("routers.chat.httpx.AsyncClient") as mock_client_cls:
+                mock_client = AsyncMock()
+                mock_client.aclose = AsyncMock()
+                mock_client_cls.return_value = mock_client
+
+                mock_resp = AsyncMock()
+                mock_resp.status_code = 200
+                mock_resp.aclose = AsyncMock()
+
+                async def empty_stream():
+                    yield b"data: [DONE]\n\n"
+
+                mock_resp.aiter_bytes = empty_stream
+
+                mock_ctx = AsyncMock()
+                mock_ctx.__aenter__ = AsyncMock(return_value=mock_resp)
+                mock_ctx.__aexit__ = AsyncMock(return_value=False)
+                mock_client.stream = MagicMock(return_value=mock_ctx)
+
+                resp = client.post("/chat/stream", json={
+                    "model": "openrouter/openai/gpt-4o-mini",
+                    "messages": [],
+                })
+                # Empty messages list is valid at the schema level,
+                # OpenRouter would reject it — our proxy forwards as-is
+                assert resp.status_code == 200
 
     def test_accepts_optional_max_tokens(self):
         """max_tokens is optional and should be forwarded when present."""

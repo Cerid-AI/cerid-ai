@@ -82,7 +82,7 @@ async def run_eval(body: EvalRunRequest) -> EvalRunResponse:
     if not queries:
         raise HTTPException(status_code=400, detail="Benchmark file is empty or contains no valid queries")
 
-    _logger.info("eval_run_started", benchmark=body.benchmark, pipeline=body.pipeline, query_count=len(queries))
+    _logger.info("eval_run_started benchmark=%s pipeline=%s query_count=%d", body.benchmark, body.pipeline, len(queries))
 
     raw_results = await evaluate(queries, pipeline=body.pipeline)
     summary = summarize(raw_results)
@@ -106,7 +106,7 @@ async def run_eval(body: EvalRunRequest) -> EvalRunResponse:
         for r in raw_results
     ]
 
-    _logger.info("eval_run_completed", benchmark=body.benchmark, n=len(results))
+    _logger.info("eval_run_completed benchmark=%s n=%d", body.benchmark, len(results))
 
     return EvalRunResponse(results=results, summary=summary, by_domain=by_domain)
 
@@ -132,5 +132,5 @@ async def list_benchmarks() -> list[BenchmarkFile]:
 
 def _check_enabled() -> None:
     """Raise 403 if eval is not enabled via env var."""
-    if not os.getenv("CERID_EVAL_ENABLED", "").lower() in ("1", "true", "yes"):
+    if os.getenv("CERID_EVAL_ENABLED", "").lower() not in ("1", "true", "yes"):
         raise HTTPException(status_code=403, detail="Eval harness disabled — set CERID_EVAL_ENABLED=true")

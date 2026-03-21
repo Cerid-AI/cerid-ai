@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import uuid
 from collections import defaultdict, deque
@@ -257,43 +256,78 @@ async def _execute_agent_node(name: str, input_data: dict[str, Any]) -> dict[str
     query_text = input_data.get("query", input_data.get("text", ""))
 
     if name == "query":
-        from agents.query_agent import search
-        results = search(query_text, top_k=input_data.get("top_k", 5))
+        from agents.query_agent import lightweight_kb_query
+        results = await lightweight_kb_query(query_text, top_k=input_data.get("top_k", 5))
         return {"results": results, "query": query_text}
 
     elif name == "curator":
         from agents.curator import curate
-        return await curate(query_text) if asyncio.iscoroutinefunction(curate) else curate(query_text)  # type: ignore[arg-type]
+        result = await curate(query_text) if asyncio.iscoroutinefunction(curate) else curate(query_text)
+        return result if isinstance(result, dict) else {"status": str(result)}
 
     elif name == "triage":
-        from agents.triage import triage
-        return triage(input_data)  # type: ignore[return-value]
+        from agents.triage import triage_file
+        file_path = input_data.get("file_path", "")
+        return await triage_file(file_path)
 
     elif name == "rectify":
         from agents.rectify import rectify
-        return rectify(input_data)  # type: ignore[return-value]
+        from deps import get_chroma, get_neo4j, get_redis
+        return await rectify(
+            neo4j_driver=get_neo4j(),
+            chroma_client=get_chroma(),
+            redis_client=get_redis(),
+        )
 
     elif name == "audit":
         from agents.audit import audit
-        return audit(input_data)  # type: ignore[return-value]
+        from deps import get_redis as _get_redis
+        return await audit(redis_client=_get_redis())
 
     elif name == "maintenance":
-        from agents.maintenance import check_health
-        result = check_health()
+        from agents.maintenance import check_system_health
+        from deps import get_chroma as _get_chroma
+        from deps import get_neo4j as _get_neo4j
+        from deps import get_redis as _get_redis2
+        result = check_system_health(
+            neo4j_driver=_get_neo4j(),
+            chroma_client=_get_chroma(),
+            redis_client=_get_redis2(),
+        )
         return result if isinstance(result, dict) else {"status": str(result)}
 
     elif name == "hallucination":
-        from agents.hallucination.detector import check_hallucination
-        claims = input_data.get("claims", [])
-        return await check_hallucination(query_text, claims)
+        from agents.hallucination import check_hallucinations
+        from deps import get_chroma as _gc
+        from deps import get_neo4j as _gn
+        from deps import get_redis as _gr
+        return await check_hallucinations(
+            response_text=query_text,
+            conversation_id=input_data.get("conversation_id", "workflow"),
+            chroma_client=_gc(),
+            neo4j_driver=_gn(),
+            redis_client=_gr(),
+        )
 
     elif name == "memory":
         from agents.memory import extract_memories
-        return await extract_memories(input_data)
+        return await extract_memories(
+            response_text=query_text,
+            conversation_id=input_data.get("conversation_id", "workflow"),
+        )
 
     elif name == "self_rag":
-        from agents.self_rag import validate
-        return await validate(input_data)
+        from agents.self_rag import self_rag_enhance
+        from deps import get_chroma as _gc2
+        from deps import get_neo4j as _gn2
+        from deps import get_redis as _gr2
+        return await self_rag_enhance(
+            query_result=input_data,
+            response_text=query_text,
+            chroma_client=_gc2(),
+            neo4j_driver=_gn2(),
+            redis_client=_gr2(),
+        )
 
     return {"error": f"Unknown agent: {name}", "input": input_data}
 
@@ -429,7 +463,7 @@ async def list_templates():
     """Return predefined workflow templates."""
     templates = []
     for key, tmpl in WORKFLOW_TEMPLATES.items():
-        nodes, edges = _make_chain(tmpl["agents"])
+        nodes, edges = _make_chain(list(tmpl["agents"]))
         templates.append({
             "id": key,
             "name": tmpl["name"],

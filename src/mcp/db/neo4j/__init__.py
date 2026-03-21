@@ -37,13 +37,6 @@ from db.neo4j.artifacts import (  # noqa: F401,E402
     update_artifact,
     update_artifact_summary,
 )
-from db.neo4j.relationships import (  # noqa: F401,E402
-    _extract_references,
-    _parse_keywords,
-    create_relationship,
-    discover_relationships,
-    find_related_artifacts,
-)
 from db.neo4j.memory import (  # noqa: F401,E402
     archive_memory,
     create_memory_node,
@@ -53,6 +46,13 @@ from db.neo4j.memory import (  # noqa: F401,E402
     merge_memory,
     supersede_memory,
     update_memory_access,
+)
+from db.neo4j.relationships import (  # noqa: F401,E402
+    _extract_references,
+    _parse_keywords,
+    create_relationship,
+    discover_relationships,
+    find_related_artifacts,
 )
 from db.neo4j.schema import init_schema  # noqa: F401,E402
 from db.neo4j.taxonomy import (  # noqa: F401,E402
