@@ -434,3 +434,63 @@ make deps-check
 - **Parsers:** Registry pattern in `utils/parsers.py`. PDF uses pdfplumber (structure-aware). Add Docling later for OCR via `@register_parser`.
 - **Domains:** Add to `config.DOMAINS` list. Neo4j nodes auto-created.
 - **File types:** Add to `config.SUPPORTED_EXTENSIONS` + register parser.
+
+---
+
+## Phase 42-50 Endpoints
+
+### Setup & Configuration
+- `GET /setup/status` — Check if system is configured
+- `POST /setup/validate-key` — Test an API key
+- `POST /setup/configure` — Apply initial configuration
+- `GET /setup/health` — Service health dashboard
+
+### Providers (BYOK)
+- `GET /providers` — List configured LLM providers
+- `POST /providers/{name}/validate` — Validate provider API key
+
+### Model Assignments
+- `GET /models/assignments` — Current model assignments per task
+- `PUT /models/assignments` — Update model assignments
+- `GET /models/available` — Available models from configured providers
+
+### Automations
+- `GET /automations` — List user automations
+- `POST /automations` — Create automation
+- `PUT /automations/{id}` — Update automation
+- `DELETE /automations/{id}` — Delete automation
+- `POST /automations/{id}/run` — Manual run
+- `GET /automations/{id}/history` — Run history
+
+### A2A Protocol
+- `GET /.well-known/agent.json` — Agent Card
+- `POST /a2a/tasks` — Create task
+- `GET /a2a/tasks/{id}` — Task status
+
+### Observability
+- `GET /observability/metrics` — Aggregated metrics
+- `GET /observability/health-score` — Composite health score (0-100)
+- `GET /observability/cost` — LLM cost breakdown
+- `GET /observability/quality` — Retrieval quality metrics
+
+### Plugins
+- `GET /plugins` — List plugins with status
+- `POST /plugins/{name}/enable` — Enable plugin
+- `POST /plugins/{name}/disable` — Disable plugin
+
+### Workflows
+- `GET /workflows` — List workflows
+- `POST /workflows` — Create workflow
+- `POST /workflows/{id}/run` — Execute workflow
+- `GET /workflows/templates` — Predefined templates
+
+### Ollama (Local LLM)
+- `GET /ollama/models` — List installed models
+- `POST /ollama/chat` — Chat with local model
+- `POST /ollama/pull` — Pull/download model
+
+### Web Search
+- Tool: `pkb_web_search` — Search web with verification
+
+### Memory Recall
+- Tool: `pkb_memory_recall` — Context-aware memory retrieval with decay scoring

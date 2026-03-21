@@ -23,7 +23,7 @@ services:
           cpus: '2.0'
           memory: 1G
     healthcheck:
-      test: ["CMD", "wget", "-qO/dev/null", "http://localhost:8080/api/providers"]
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8080/api/providers || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3

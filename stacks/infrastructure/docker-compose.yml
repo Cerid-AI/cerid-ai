@@ -26,7 +26,7 @@ services:
           cpus: '4.0'
           memory: 4G  # 1G heap + 2G pagecache + JVM overhead
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:7474 || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -54,7 +54,7 @@ services:
           cpus: '2.0'
           memory: 1G
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/v1/heartbeat"]
       interval: 30s
       timeout: 10s
       retries: 5
