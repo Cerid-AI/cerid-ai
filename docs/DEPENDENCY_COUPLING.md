@@ -60,6 +60,16 @@ APOC is installed automatically by the Neo4j Docker image when `NEO4J_PLUGINS=["
 The APOC version must match the Neo4j major version. When upgrading Neo4j, verify APOC compatibility
 at https://neo4j.com/labs/apoc/current/.
 
+## Ollama (Optional — Local LLM)
+
+| Component | File | Current |
+|-----------|------|---------|
+| Feature gate | `src/mcp/config/settings.py` | `OLLAMA_ENABLED` (default: `false`) |
+| Proxy router | `src/mcp/routers/ollama_proxy.py` | `/ollama/chat`, `/ollama/models`, `/ollama/pull` |
+| Default URL | `.env` / `config/settings.py` | `OLLAMA_URL=http://localhost:11434` |
+
+**Rule:** Ollama is entirely optional. When `OLLAMA_ENABLED=false` (default), all `/ollama/*` endpoints return 404. No Ollama dependency is required in the Docker image or Python requirements. The proxy uses httpx with circuit breaker to communicate with a separately-installed Ollama server.
+
 ## Bifrost LLM Gateway
 
 | Component | File | Current |

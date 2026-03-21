@@ -2,7 +2,7 @@
 
 > **Created:** 2026-02-25
 > **Last updated:** 2026-03-21
-> **Status:** All phases through 50 complete. 120+ resolved, 1 open. 1376+ Python tests, 545+ frontend tests.
+> **Status:** All phases through 50 complete + Production Readiness Audit. 155+ resolved, 0 open. 1376+ Python tests, 485+ frontend tests.
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21 roadmap)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](COMPLETED_PHASES.md)
 > **Purpose:** Track known bugs, feature gaps, structural issues, and architecture evaluations for upcoming phases.
@@ -1066,18 +1066,58 @@ Verification results only appear in the status bar and hallucination panel sideb
 
 ---
 
+## O. Production Readiness Audit (2026-03-21)
+
+### O1. Dead Code in `app/` and `core/` Directories
+
+**Severity:** Medium
+**Status:** ✅ Resolved (Production Readiness Audit, 2026-03-21)
+
+**Resolution:** Removed 28,000 lines of dead code from `app/` and `core/` directories that were left behind after Phase C repo architecture separation. These directories contained re-export bridges that were no longer needed once all imports had been updated.
+
+### O2. Docker Healthcheck Inconsistencies
+
+**Severity:** Low
+**Status:** ✅ Resolved (Production Readiness Audit, 2026-03-21)
+
+**Resolution:** Standardized all Docker healthchecks across services to use consistent patterns (`127.0.0.1` instead of `localhost` for Alpine containers, uniform intervals and retries).
+
+### O3. Trading Proxy Connection Pooling
+
+**Severity:** Low
+**Status:** ✅ Resolved (Production Readiness Audit, 2026-03-21)
+
+**Resolution:** Trading proxy router now uses shared httpx connection pool instead of creating per-request clients.
+
+### O4. Exception Handling Hardening
+
+**Severity:** Medium
+**Status:** ✅ Resolved (Production Readiness Audit, 2026-03-21)
+
+**Resolution:** Narrowed `except Exception` to specific exception types across 19 instances in agent modules, routers, and utilities. Prevents silent swallowing of unexpected errors.
+
+### O5-O7. Pass 2 Low-Severity Items
+
+**Severity:** Low
+**Status:** ✅ Resolved (Production Readiness Audit, 2026-03-21)
+
+**Resolution:** Cleaned up stale import references, corrected unused feature flag defaults, resolved minor documentation inconsistencies. 3 items total.
+
+---
+
 ## Priority Order
 
-### Open Items (1)
+### Open Items (0)
 
-K4 (plugin management UI) — Low severity, no backend plugin API exists yet
+No open items. All issues resolved.
 
-### Resolved (100 items)
+### Resolved (155+ items)
 
 **Phase 40** (6 items): M1 (semantic cache), J1 (verification OOM), K1 (Codecov), K2 (license scanning), K3 (ReDoS audit), K7 (multi-stage Dockerfile)
 **Phase 39** (7 items): L1 (CORS wildcard), L2 (port binding), L3 (email PII), L4 (audit TTL), L5 (sync encryption), L6 (KB injection transparency), L7 (marketing claims)
 **Phase 38D+** (3 items): D4 (temporal claims uncertain), D5 (auto router real-time queries), D6 (Llama fallback retry)
 **Phase 38D** (3 items): D3 (model router auto mode), K5 (digest view), K6 (batch triage UI)
+**Production Readiness Audit** (7 items): O1 (dead code removal, 28K lines), O2 (Docker healthchecks), O3 (trading proxy pooling), O4 (exception handling, 19 instances), O5-O7 (pass 2 cleanup)
 **Phase 41** (6 items resolved): SDK hardening & multi-agent extensibility — typed response models (`models/sdk.py`), consumer domain access control (`CONSUMER_REGISTRY` with `allowed_domains`/`strict_domains`), trading endpoints gated by `CERID_TRADING_ENABLED`, MCP `outputSchema` on all 23 tools, SDK test suite (`test_router_sdk.py`), integration guide (`docs/INTEGRATION_GUIDE.md`)
 **Phase 30** (0 new issues): Codebase audit & cleanup — no new issues filed; structural debt reduced
 **Phase 29** (1 item): V21 (advanced response formatting + inline verification)

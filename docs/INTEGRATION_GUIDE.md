@@ -1,7 +1,7 @@
 # Cerid AI — Integration Guide for New Cerid-Series Agents
 
 > **Last updated:** 2026-03-21
-> **Applies to:** Phase 41+
+> **Applies to:** Phase 50+
 > **Reference implementation:** cerid-trading-agent (`docs/DEPENDENCY_COUPLING.md`)
 
 ---
@@ -15,8 +15,11 @@ Cerid AI is a self-hosted personal AI knowledge companion that exposes a stable 
 - **Verification:** Hallucination detection with 4 claim types, cross-model verification, and web search escalation.
 - **Memory:** Conversation memory extraction, contextual recall, and per-domain tag vocabulary.
 - **SDK API:** Stable `/sdk/v1/` endpoints for external consumers with per-client rate limiting, domain access control, and typed Pydantic response models.
+- **A2A Protocol:** Agent-to-Agent communication via `/.well-known/agent.json` agent cards. Task lifecycle (create/status/cancel) with Redis-backed storage. Remote agent discovery and invocation via A2A client.
+- **Plugin System:** Extend functionality via manifest-based plugins (`plugins/` directory). Plugin management API (7 endpoints), tier gating (community/pro), BSL-1.1 licensing.
+- **26 MCP Tools:** 19 core KB tools + 5 trading tools + `pkb_web_search` + `pkb_memory_recall`.
 
-New cerid-series agents (e.g., trading, compliance, research) integrate by registering as consumers, defining their KB domain, and calling SDK endpoints.
+New cerid-series agents (e.g., trading, compliance, research) integrate by registering as consumers, defining their KB domain, and calling SDK endpoints. Alternatively, agents can discover and invoke cerid-ai via the A2A protocol.
 
 ---
 
@@ -269,6 +272,30 @@ class CeridClient:
 ### Graceful degradation:
 
 The trading agent uses `AsyncCircuitBreaker` (5 failures, 60s open, half-open probe). When cerid-ai is unavailable, the agent skips KB enrichment and operates on its own context alone.
+
+---
+
+## 7. Alternative Integration: A2A Protocol
+
+For agents that prefer standard agent-to-agent communication over direct SDK calls, cerid-ai exposes an A2A-compatible interface:
+
+- **Discovery:** `GET /.well-known/agent.json` returns the agent card with capabilities and supported task types.
+- **Task Creation:** `POST /a2a/tasks` creates a new task (query, ingest, verify).
+- **Task Status:** `GET /a2a/tasks/{task_id}` returns current status and results.
+- **Task Cancellation:** `DELETE /a2a/tasks/{task_id}` cancels a running task.
+
+A2A is complementary to the SDK — use SDK for tight integration with typed responses, A2A for loose coupling with standard protocol compliance.
+
+---
+
+## 8. Extending via Plugins
+
+The plugin system (`plugins/` directory) allows extending cerid-ai without modifying core code:
+
+- **Plugin manifest:** Each plugin has `manifest.json` defining name, version, tier, entry point, and dependencies.
+- **Tier gating:** Plugins are `community` (free) or `pro` (BSL-1.1). Set `CERID_TIER=pro` to enable pro-tier plugins.
+- **Plugin API:** 7 management endpoints via `routers/plugins.py` (list, enable, disable, config get/set, scan, reload).
+- **Current plugins:** Multi-modal KB (OCR, audio, vision), Visual Workflow Builder.
 
 ---
 

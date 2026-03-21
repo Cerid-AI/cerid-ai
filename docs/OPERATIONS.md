@@ -1,7 +1,110 @@
 # Cerid AI — Operations Guide
 
-> **Created:** 2026-02-28
-> **Covers:** API key management, secrets rotation, rate limiting, branch protection, CI pipeline.
+> **Created:** 2026-02-28 | **Updated:** 2026-03-21
+> **Covers:** Startup, API key management, secrets rotation, rate limiting, branch protection, CI pipeline, Ollama, observability, plugins.
+
+---
+
+## Unified Docker Compose (Phase A)
+
+As of Phase A, a single root `docker-compose.yml` replaces the previous 4-step startup sequence. All services (Infrastructure, Bifrost, MCP, React GUI) are defined in one file with `depends_on` healthchecks ensuring correct startup order.
+
+```bash
+# Start everything (preferred)
+docker compose up -d
+
+# Or use the startup script (adds LAN detection, validation, etc.)
+./scripts/start-cerid.sh
+```
+
+The startup script still provides value for LAN IP detection, pre-flight validation, and post-startup reachability checks, but the underlying orchestration now uses the unified compose file.
+
+---
+
+## Local LLM via Ollama (Phase 48)
+
+Ollama enables air-gapped deployment by routing model assignments to a local LLM server.
+
+### Setup
+
+```bash
+# Install Ollama (macOS)
+brew install ollama
+ollama serve
+
+# Pull a model
+ollama pull llama3.1
+
+# Enable in cerid-ai
+# In .env:
+OLLAMA_ENABLED=true
+OLLAMA_URL=http://localhost:11434
+```
+
+### Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/ollama/chat` | POST | Streaming chat completion via local model |
+| `/ollama/models` | GET | List available local models |
+| `/ollama/pull` | POST | Pull a new model from Ollama registry |
+
+Ollama proxy includes a circuit breaker (5 failures → 60s open). When `OLLAMA_ENABLED=false` (default), all endpoints return 404.
+
+---
+
+## Redis Configuration
+
+Redis is configured with memory limits to prevent Docker OOM:
+
+```
+maxmemory 1gb
+maxmemory-policy allkeys-lru
+```
+
+Container memory limit: 4GB (raised from 512MB in Phase 38). Socket timeout: 10s. Authentication via `REDIS_PASSWORD` env var.
+
+---
+
+## Observability Dashboard (Phase 47)
+
+The observability system collects 8 Redis time-series metrics and exposes them via API.
+
+### Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/observability/metrics` | GET | Current metric values + sparkline data |
+| `/observability/health-score` | GET | Weighted A-F health grade |
+
+### Metrics Collected
+
+Latency (P50/P95), LLM cost, NDCG retrieval quality, cache hit rate, verification accuracy, error rate, throughput, memory usage. All stored as Redis time-series with configurable retention.
+
+---
+
+## Plugin Management (Phase 49)
+
+Plugins extend cerid-ai functionality without modifying core code.
+
+### API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/plugins` | GET | List all plugins with status |
+| `/plugins/{id}/enable` | POST | Enable a plugin |
+| `/plugins/{id}/disable` | POST | Disable a plugin |
+| `/plugins/{id}/config` | GET/PUT | Read/update plugin configuration |
+| `/plugins/scan` | POST | Scan for new plugins |
+
+### Configuration
+
+```bash
+# In .env
+CERID_TIER=community          # or "pro" for BSL-1.1 plugins
+CERID_PLUGIN_DIR=plugins      # Plugin directory
+CERID_ENABLED_PLUGINS=        # Comma-separated plugin IDs to auto-enable
+```
 
 ---
 

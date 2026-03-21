@@ -4,7 +4,7 @@
 
 A privacy-first, local-first workspace that unifies multi-domain knowledge bases (code, finance, projects, personal artifacts) into a context-aware LLM interface with RAG-powered retrieval, file ingestion, and intelligent agents.
 
-[![Status](https://img.shields.io/badge/Status-Phase%2030%20Complete-green)]()
+[![Status](https://img.shields.io/badge/Status-Phase%2050%20Complete-green)]()
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue)](LICENSE)
 
 ---
@@ -19,7 +19,13 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 - **Multi-Provider LLM Access** via Bifrost gateway (Claude, GPT, Grok, Gemini, DeepSeek, Llama)
 - **9 Intelligent Agents** — Query (LLM reranking), Triage (LangGraph), Rectification, Audit, Maintenance, Hallucination Detection, Memory Extraction, Curation, Self-RAG
 - **Trading Agent Integration** — 5 MCP tools + SDK endpoints for signal enrichment, herd detection, Kelly sizing, cascade confirmation, and longshot calibration (opt-in via `CERID_TRADING_ENABLED`)
-- **23 MCP Tools** for knowledge base and trading operations via MCP protocol
+- **26 MCP Tools** for knowledge base, trading, web search, and memory operations via MCP protocol
+- **A2A Protocol** — Agent-to-Agent communication for remote agent discovery and task invocation
+- **Plugin System** — Extensible via manifest-based plugins (multi-modal KB, visual workflow builder)
+- **Observability Dashboard** — 8 Redis time-series metrics, health score grading, SVG sparklines
+- **Local LLM via Ollama** — Air-gapped deployment with local model routing
+- **Visual Workflow Builder** — DAG-based workflow engine with drag-and-drop SVG canvas
+- **Electron Desktop App** — Native macOS + Windows app with Docker lifecycle management
 - **Hallucination Detection** — claim extraction + KB verification with per-message truth audit
 - **Memory Extraction** — facts, decisions, preferences extracted from conversations and stored as KB artifacts
 - **Smart Model Router** — complexity scoring, cost sensitivity, auto-switch recommendations

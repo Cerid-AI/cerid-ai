@@ -13,7 +13,7 @@ Cerid AI is a self-hosted, privacy-first Personal AI Knowledge Companion. It uni
 
 **Next:** See [`tasks/todo.md`](tasks/todo.md).
 
-**Open issues:** [`docs/ISSUES.md`](docs/ISSUES.md) (6 open — 1 medium, 5 low/backlog).
+**Open issues:** [`docs/ISSUES.md`](docs/ISSUES.md) (0 open — all resolved).
 
 ## Architecture
 
@@ -47,25 +47,27 @@ React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly
 
 ```
 ├── CLAUDE.md                    # This file
+├── docker-compose.yml           # Unified root compose (replaces 4-step startup)
 ├── .env.age / .env.example      # Encrypted secrets / template
 ├── Makefile                     # lock-python, install-hooks, deps-check
 ├── scripts/                     # start-cerid.sh, validate-env.sh, cerid-sync.py, env-(un)lock.sh
 ├── docs/                        # API_REFERENCE.md, ISSUES.md, OPERATIONS.md, plans/
+├── plugins/                     # BSL-1.1 pro-tier plugins (multimodal/, workflow/)
 ├── src/mcp/                     # FastAPI MCP server (Python 3.11)
 │   ├── main.py                  # Entry point
-│   ├── config/                  # settings.py, taxonomy.py, features.py
-│   ├── db/neo4j/                # schema, artifacts, relationships, taxonomy
+│   ├── config/                  # settings.py, taxonomy.py, features.py, providers.py
+│   ├── db/neo4j/                # schema, artifacts, relationships, taxonomy, memory
 │   ├── sync/                    # export, import_, manifest, status
 │   ├── parsers/                 # registry, pdf, office, structured, email, ebook
 │   ├── services/                # ingestion.py (ingest_content, ingest_file, dedup)
 │   ├── eval/                    # Retrieval evaluation harness (NDCG, MRR, P@K, R@K)
 │   ├── agents/                  # query, curator, triage, rectify, audit, maintenance, hallucination/, memory, self_rag
 │   ├── routers/                 # FastAPI routers (health, query, ingestion, agents, taxonomy, setup, providers, models, automations, a2a, observability, plugins, workflows, ollama_proxy, eval, etc.)
-│   ├── models/                  # user.py (Pydantic schemas)
+│   ├── models/                  # user.py, sdk.py, trading.py (Pydantic schemas)
 │   ├── middleware/              # auth.py, rate_limit.py, request_id.py, jwt_auth.py, tenant_context.py
 │   ├── tools.py                 # MCP tool registry + dispatcher (26 tools)
-│   ├── plugins/                 # Plugin system (OCR scaffold)
-│   ├── utils/                   # bm25, cache, query_cache, embeddings, chunker, dedup, encryption, etc.
+│   ├── plugins/                 # Plugin loader + built-in plugin scaffold
+│   ├── utils/                   # bm25, cache, query_cache, embeddings, chunker, dedup, encryption, web_search, a2a_client, etc.
 │   ├── scripts/                 # watch_ingest.py, watch_obsidian.py, ingest_cli.py
 │   └── requirements.txt/.lock   # Python deps (ranges / pinned with hashes)
 ├── src/web/                     # React GUI (React 19, Vite 7, Tailwind v4, shadcn/ui)
@@ -73,9 +75,10 @@ React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly
 │   ├── src/lib/                 # types.ts, api.ts, model-router.ts
 │   ├── src/hooks/               # use-chat, use-kb-context, use-settings, use-verification-stream, use-drag-drop, use-verification-orchestrator, etc.
 │   ├── src/contexts/            # SettingsContext, KBInjectionContext, ConversationsContext, AuthContext
-│   ├── src/components/          # layout/, chat/, kb/, monitoring/, audit/, memories/, settings/, ui/
-│   └── src/__tests__/           # 434 vitest tests (33 test files)
+│   ├── src/components/          # layout/, chat/, kb/, monitoring/, audit/, memories/, settings/, workflows/, setup/, ui/
+│   └── src/__tests__/           # 485+ vitest tests
 ├── packages/marketing/          # Next.js 16 marketing site (cerid.ai, Vercel)
+├── packages/desktop/            # Electron desktop app (macOS + Windows)
 ├── stacks/                      # infrastructure/ (Neo4j, ChromaDB, Redis), bifrost/
 ├── artifacts/ → ~/Dropbox/AI-Artifacts (symlink)
 └── data/ → src/mcp/data (symlink)
@@ -238,3 +241,7 @@ Frontend tests: `cd src/web && npx vitest run`
 - **JWT startup validation:** When `CERID_MULTI_USER=true`, missing `CERID_JWT_SECRET` raises `RuntimeError` at startup (not just a warning). Prevents running with empty secret.
 - **Rate limit middleware reads X-Client-ID from headers directly**, not from `request.state` — eliminates middleware ordering dependency. Per-client isolation verified: trading-agent=80/min, gui=20/min.
 - **Keywords metadata uses `keywords_json`** (JSON-encoded string) consistently across ingest_file, ingest_content, reingest, and Neo4j artifact creation. Previous inconsistency (`keywords` vs `keywords_json`) caused silent data loss.
+- **Plugin development (`plugins/`):** Each plugin has a `manifest.json` (name, version, tier, description, entry point). BSL-1.1 licensed (converts to Apache-2.0 after 3 years). Plugins are loaded via dual-directory scanning (`src/mcp/plugins/` for built-in, `plugins/` for external). Tier gating enforced at load time (`CERID_TIER`). Plugin management via `routers/plugins.py` (7 endpoints: list, enable/disable, config CRUD, scan).
+- **Workflow engine (`routers/workflows.py`):** DAG validation via Kahn's algorithm (rejects cycles). Topological execution order. 4 built-in templates (research, ingest, verify, custom). Nodes are typed (query, ingest, verify, transform, notify). SVG canvas for visual editing. BSL-1.1 pro-tier via `plugins/workflow/`.
+- **Observability (`routers/observability.py`):** `MetricsCollector` writes 8 Redis time-series metrics (latency, cost, NDCG, cache hit rate, verification accuracy, error rate, throughput, memory usage). Health score computed as weighted A-F grade. Dashboard endpoint returns sparkline data for configurable time windows.
+- **A2A Protocol (`routers/a2a.py`):** Agent Card served at `/.well-known/agent.json`. Task lifecycle: create → status → cancel with Redis-backed storage. A2A client (`utils/a2a_client.py`) discovers remote agents and invokes tasks. Cerid is the first personal KB with dual MCP + A2A protocol support.
