@@ -528,7 +528,7 @@ async def _rerank_llm(
     try:
         content = await call_llm(
             [{"role": "user", "content": prompt}],
-            breaker_name="openrouter-rerank",
+            breaker_name="bifrost-rerank",
             temperature=0.0,
             max_tokens=200,
         )

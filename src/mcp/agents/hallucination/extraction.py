@@ -342,7 +342,7 @@ async def _extract_claims_llm(response_text: str, max_claims: int) -> list[str]:
         try:
             content = await call_llm(
                 messages,
-                breaker_name="openrouter-claims",
+                breaker_name="bifrost-claims",
                 model=model,
                 temperature=0.1,
                 max_tokens=1200,

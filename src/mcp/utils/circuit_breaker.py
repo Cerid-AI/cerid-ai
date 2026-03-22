@@ -228,6 +228,9 @@ _bifrost_synopsis = AsyncCircuitBreaker("bifrost-synopsis", failure_threshold=3,
 _bifrost_memory = AsyncCircuitBreaker("bifrost-memory", failure_threshold=3, recovery_timeout=60)
 _neo4j = AsyncCircuitBreaker("neo4j", failure_threshold=5, recovery_timeout=30)
 _ollama = AsyncCircuitBreaker("ollama", failure_threshold=3, recovery_timeout=30)
+_bifrost_compress = AsyncCircuitBreaker("bifrost-compress", failure_threshold=3, recovery_timeout=60)
+_bifrost_decompose = AsyncCircuitBreaker("bifrost-decompose", failure_threshold=3, recovery_timeout=60)
+_web_search = AsyncCircuitBreaker("web-search", failure_threshold=3, recovery_timeout=30)
 
 
 def get_breaker(name: str) -> AsyncCircuitBreaker:
@@ -238,6 +241,9 @@ def get_breaker(name: str) -> AsyncCircuitBreaker:
         "bifrost-verify": _bifrost_verify,
         "bifrost-synopsis": _bifrost_synopsis,
         "bifrost-memory": _bifrost_memory,
+        "bifrost-compress": _bifrost_compress,
+        "bifrost-decompose": _bifrost_decompose,
+        "web-search": _web_search,
         "neo4j": _neo4j,
         "ollama": _ollama,
     }

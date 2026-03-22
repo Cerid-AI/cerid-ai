@@ -124,7 +124,7 @@ async def decompose_query(
             )
             content = (await call_llm(
                 [{"role": "user", "content": prompt}],
-                breaker_name="openrouter-decompose",
+                breaker_name="bifrost-decompose",
                 temperature=0.1,
                 max_tokens=200,
             )).strip()

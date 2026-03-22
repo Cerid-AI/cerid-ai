@@ -114,7 +114,7 @@ async def _llm_classify(
     try:
         content = await call_llm(
             [{"role": "user", "content": prompt}],
-            breaker_name="openrouter-memory",
+            breaker_name="bifrost-memory",
             temperature=0.0,
             max_tokens=200,
         )

@@ -247,7 +247,7 @@ async def _generate_synopsis(
         try:
             content = await call_llm(
                 [{"role": "user", "content": prompt}],
-                breaker_name="openrouter-synopsis",
+                breaker_name="bifrost-synopsis",
                 model=model,
                 temperature=0.3,
                 max_tokens=max_tokens,

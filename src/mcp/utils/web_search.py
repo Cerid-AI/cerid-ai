@@ -237,7 +237,7 @@ class OpenRouterSearchProvider(WebSearchProvider):
         try:
             content = await call_llm(
                 messages,
-                breaker_name="web_search_openrouter",
+                breaker_name="web-search",
                 model=model,
                 temperature=0.2,
                 max_tokens=1500,

@@ -933,7 +933,7 @@ async def _verify_claim_externally(
                 temperature=config.EXTERNAL_VERIFY_TEMPERATURE,
                 max_tokens=config.EXTERNAL_VERIFY_MAX_TOKENS,
                 timeout=timeout,
-                breaker_name="openrouter-verify",
+                breaker_name="bifrost-verify",
             )
             raw_message = data["choices"][0]["message"]
             raw_answer = raw_message.get("content", "").strip()
@@ -1425,7 +1425,7 @@ async def _check_history_consistency(
             temperature=0.0,
             max_tokens=400,
             timeout=config.BIFROST_TIMEOUT,
-            breaker_name="openrouter-verify",
+            breaker_name="bifrost-verify",
         )
         raw_answer = data["choices"][0]["message"].get("content", "").strip()
 

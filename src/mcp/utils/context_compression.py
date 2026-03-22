@@ -156,7 +156,7 @@ async def _summarize_turns(turns: list[dict]) -> str:
     try:
         return await call_llm(
             [{"role": "user", "content": prompt}],
-            breaker_name="openrouter-compress",
+            breaker_name="bifrost-compress",
             temperature=0.1,
             max_tokens=500,
         )

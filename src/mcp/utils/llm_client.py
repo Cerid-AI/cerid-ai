@@ -14,7 +14,7 @@ Usage::
     answer = await call_llm(
         [{"role": "user", "content": "Summarize this text..."}],
         model="openrouter/openai/gpt-4o-mini",
-        breaker_name="openrouter-verify",
+        breaker_name="bifrost-verify",
     )
 """
 
