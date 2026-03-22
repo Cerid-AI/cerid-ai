@@ -403,6 +403,27 @@ export async function ingestFeedback(
 
 // --- Hallucination Detection ---
 
+/** Normalize verification report shape — backend may return summary fields at top level or nested. */
+function normalizeReport(raw: Record<string, unknown>): HallucinationReport {
+  const claims = Array.isArray(raw.claims) ? raw.claims : []
+  // Backend returns verified/unverified/total at top level; frontend expects nested summary
+  const summary = (raw.summary as HallucinationReport["summary"]) ?? {
+    total: (raw.total as number) ?? claims.length,
+    verified: (raw.verified as number) ?? 0,
+    unverified: (raw.unverified as number) ?? 0,
+    uncertain: (raw.uncertain as number) ?? 0,
+    skipped: (raw.skipped as number) ?? 0,
+  }
+  return {
+    conversation_id: (raw.conversation_id as string) ?? "",
+    timestamp: (raw.created_at as string) ?? (raw.timestamp as string) ?? "",
+    skipped: false,
+    extraction_method: (raw.extraction_method as string) ?? "unknown",
+    claims: claims as HallucinationClaim[],
+    summary,
+  }
+}
+
 export async function fetchHallucinationReport(
   conversationId: string,
 ): Promise<HallucinationReport | null> {
@@ -410,7 +431,7 @@ export async function fetchHallucinationReport(
   const res = await fetch(`${MCP_BASE}/agent/hallucination/${conversationId}`, {
     headers: mcpHeaders(),
   })
-  if (res.ok) return res.json()
+  if (res.ok) return normalizeReport(await res.json())
 
   // Fall back to Neo4j persistence (long-term storage)
   if (res.status === 404) {
@@ -418,7 +439,7 @@ export async function fetchHallucinationReport(
       const neo4jRes = await fetch(`${MCP_BASE}/verification/${conversationId}`, {
         headers: mcpHeaders(),
       })
-      if (neo4jRes.ok) return neo4jRes.json()
+      if (neo4jRes.ok) return normalizeReport(await neo4jRes.json())
     } catch {
       // Neo4j fallback failed — not critical
     }
