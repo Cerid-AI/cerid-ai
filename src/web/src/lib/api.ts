@@ -4,7 +4,23 @@
 // Runtime config (window.__ENV__ from docker-entrypoint.sh) takes precedence
 // over build-time Vite env vars, enabling config changes without rebuild.
 const _env = (globalThis as Record<string, unknown>).__ENV__ as Record<string, string> | undefined
-const MCP_BASE = _env?.VITE_MCP_URL || import.meta.env.VITE_MCP_URL || "/api/mcp"
+const _rawMcpUrl = _env?.VITE_MCP_URL || import.meta.env.VITE_MCP_URL || "/api/mcp"
+
+// Self-healing: if the configured MCP URL points to a non-localhost host:port
+// and we're served from localhost (Docker nginx proxy), prefer /api/mcp.
+// This handles stale env-config.js cached by the browser.
+function _resolveBaseUrl(raw: string): string {
+  if (typeof window === "undefined") return raw
+  // If we're on localhost but MCP URL points elsewhere, use the nginx proxy
+  const isLocalOrigin = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+  const isDirectPort = /^https?:\/\/[\d.]+:\d+/.test(raw) && !raw.includes("localhost") && !raw.includes("127.0.0.1")
+  if (isLocalOrigin && isDirectPort) {
+    return "/api/mcp"
+  }
+  return raw
+}
+
+const MCP_BASE = _resolveBaseUrl(_rawMcpUrl)
 const API_KEY = _env?.VITE_CERID_API_KEY || import.meta.env.VITE_CERID_API_KEY || ""
 
 import { uuid } from "@/lib/utils"
