@@ -452,6 +452,153 @@ async def route(
 
 
 # ---------------------------------------------------------------------------
+# Failover-aware routing (wraps route() with provider resolution)
+# ---------------------------------------------------------------------------
+
+
+def route_with_failover(
+    query: str = "",
+    *,
+    task_type: TaskType = TaskType.CHAT,
+    cost_sensitivity: str = "medium",
+    redis_client=None,  # noqa: ANN001
+) -> RouteDecision:
+    """Route with full failover chain and degraded mode detection.
+
+    This is a synchronous wrapper that:
+    1. Loads the model provider config from Redis
+    2. Checks for degraded mode (no providers configured)
+    3. Calls the async ``route()`` internally via the event loop
+    4. Resolves the actual provider+key for the chosen model
+
+    Note: this function itself is sync because deps.get_redis() returns
+    a synchronous Redis client. The inner ``route()`` call uses the
+    already-running event loop via ``asyncio``.
+    """
+    import asyncio
+
+    from config.model_providers import (
+        get_degraded_status,
+        load_config,
+        resolve_provider_for_model,
+    )
+
+    cfg = load_config(redis_client)
+    degraded = get_degraded_status(cfg)
+
+    if degraded.get("degraded") and task_type == TaskType.CHAT:
+        return RouteDecision(
+            model="none",
+            provider="degraded",
+            reason="No LLM provider configured \u2014 add a provider in Settings",
+            estimated_cost_per_1k=0.0,
+        )
+
+    # Get the ideal route (async function — run in current event loop)
+    loop = asyncio.get_event_loop()
+    if loop.is_running():
+        # We're already inside an async context (FastAPI) — create a task
+        # Instead, provide an async version for callers in async context
+        raise RuntimeError(
+            "route_with_failover() is sync — use aroute_with_failover() in async context"
+        )
+    decision = loop.run_until_complete(
+        route(query, task_type=task_type, cost_sensitivity=cost_sensitivity)
+    )
+
+    # Resolve which provider actually serves this model
+    provider_name, _api_key = resolve_provider_for_model(decision.model, cfg)
+
+    if provider_name == "none":
+        # Try free fallback
+        provider_name, _api_key = resolve_provider_for_model(
+            "meta-llama/llama-3.3-70b-instruct:free", cfg
+        )
+        if provider_name != "none":
+            decision = RouteDecision(
+                model="meta-llama/llama-3.3-70b-instruct",
+                provider=f"{provider_name}_free",
+                reason=f"{decision.reason} (downgraded: no provider for original model)",
+                estimated_cost_per_1k=0.0,
+            )
+        else:
+            decision = RouteDecision(
+                model="none",
+                provider="degraded",
+                reason="No provider available for any model \u2014 configure in Settings",
+                estimated_cost_per_1k=0.0,
+            )
+    else:
+        decision.provider = provider_name
+
+    return decision
+
+
+async def aroute_with_failover(
+    query: str = "",
+    *,
+    task_type: TaskType = TaskType.CHAT,
+    cost_sensitivity: str = "medium",
+    redis_client=None,  # noqa: ANN001
+) -> RouteDecision:
+    """Async version of route_with_failover() for use in FastAPI handlers.
+
+    Failover chain:
+    1. Check degraded mode (no providers configured at all)
+    2. Get ideal route via ``route()``
+    3. Resolve provider: direct key → OpenRouter → free fallback → degraded
+    """
+    from config.model_providers import (
+        get_degraded_status,
+        load_config,
+        resolve_provider_for_model,
+    )
+
+    cfg = load_config(redis_client)
+    degraded = get_degraded_status(cfg)
+
+    if degraded.get("degraded") and task_type == TaskType.CHAT:
+        return RouteDecision(
+            model="none",
+            provider="degraded",
+            reason="No LLM provider configured \u2014 add a provider in Settings",
+            estimated_cost_per_1k=0.0,
+        )
+
+    # Get the ideal route
+    decision = await route(
+        query, task_type=task_type, cost_sensitivity=cost_sensitivity
+    )
+
+    # Resolve which provider actually serves this model
+    provider_name, _api_key = resolve_provider_for_model(decision.model, cfg)
+
+    if provider_name == "none":
+        # Try free fallback
+        provider_name, _api_key = resolve_provider_for_model(
+            "meta-llama/llama-3.3-70b-instruct:free", cfg
+        )
+        if provider_name != "none":
+            decision = RouteDecision(
+                model="meta-llama/llama-3.3-70b-instruct",
+                provider=f"{provider_name}_free",
+                reason=f"{decision.reason} (downgraded: no provider for original model)",
+                estimated_cost_per_1k=0.0,
+            )
+        else:
+            decision = RouteDecision(
+                model="none",
+                provider="degraded",
+                reason="No provider available for any model \u2014 configure in Settings",
+                estimated_cost_per_1k=0.0,
+            )
+    else:
+        decision.provider = provider_name
+
+    return decision
+
+
+# ---------------------------------------------------------------------------
 # Registry export (for Settings UI)
 # ---------------------------------------------------------------------------
 

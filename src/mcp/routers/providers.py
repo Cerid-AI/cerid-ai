@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Provider management endpoints — BYOK provider listing and key validation."""
+"""Provider management endpoints — BYOK provider listing, key validation, and model config."""
 from __future__ import annotations
 
 import logging
@@ -11,6 +11,14 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 import config
+from config.model_providers import (
+    PROVIDER_CONFIGS,
+    ModelProviderConfig,
+    ProviderState,
+    get_degraded_status,
+    load_config,
+    save_config,
+)
 from config.providers import (
     PROVIDER_REGISTRY,
     get_configured_providers,
@@ -207,6 +215,85 @@ async def get_routing_info():
         ),
         "smart_routing_enabled": getattr(config, "SMART_ROUTING_ENABLED", True),
     }
+
+
+@router.get("/config")
+async def get_model_provider_config():
+    """Get the full model provider configuration (keys masked)."""
+    from deps import get_redis
+
+    redis = get_redis()
+    cfg = load_config(redis)
+    result = cfg.to_dict()
+
+    # Mask API keys in response — never send full key to frontend
+    for name, state in result["providers"].items():
+        if state.get("api_key"):
+            key = state["api_key"]
+            state["api_key_preview"] = (
+                f"{key[:4]}...{key[-4:]}" if len(key) > 8 else "****"
+            )
+            state["api_key_set"] = True
+            del state["api_key"]  # Remove full key
+        else:
+            state["api_key_set"] = False
+
+    # Add provider metadata for the frontend
+    result["provider_info"] = {
+        k: {
+            "display_name": v["display_name"],
+            "signup_url": v["signup_url"],
+            "is_aggregator": v.get("is_aggregator", False),
+            "is_local": v.get("is_local", False),
+            "models": v.get("models", []),
+        }
+        for k, v in PROVIDER_CONFIGS.items()
+    }
+
+    result["degraded"] = get_degraded_status(cfg)
+
+    return result
+
+
+@router.put("/config")
+async def update_model_provider_config(body: dict):
+    """Update model provider configuration (persists to Redis)."""
+    from deps import get_redis
+
+    redis = get_redis()
+    cfg = load_config(redis)
+
+    # Update providers
+    providers_update = body.get("providers", {})
+    for pname, updates in providers_update.items():
+        if pname not in cfg.providers:
+            cfg.providers[pname] = ProviderState()
+        state = cfg.providers[pname]
+
+        if "enabled" in updates:
+            state.enabled = updates["enabled"]
+        if "api_key" in updates and updates["api_key"]:
+            state.api_key = updates["api_key"]
+            # Also write to env for backward compatibility with existing code paths
+            env_var = PROVIDER_CONFIGS.get(pname, {}).get("env_var", "")
+            if env_var:
+                os.environ[env_var] = updates["api_key"]
+        if "url" in updates:
+            state.url = updates["url"]
+        if "is_default" in updates:
+            # Only one provider can be default
+            if updates["is_default"]:
+                for p in cfg.providers.values():
+                    p.is_default = False
+            state.is_default = updates["is_default"]
+
+    # Update model overrides
+    if "model_overrides" in body:
+        cfg.model_overrides.update(body["model_overrides"])
+
+    save_config(redis, cfg)
+
+    return {"status": "updated"}
 
 
 @router.get("/{name}")
