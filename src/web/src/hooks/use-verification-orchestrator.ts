@@ -155,35 +155,39 @@ export function useVerificationOrchestrator({
   // Guard: only save once per verification completion (prevents infinite re-render loop)
   const savedForKey = useRef<string>("")
 
-  // Cache completed verification report, mark conversation as completed, and persist to backend + localStorage
+  // Cache completed verification report — uses refs to avoid triggering re-renders
+  const markVerifiedRef = useRef(markVerified)
+  const saveVerificationRef = useRef(saveVerification)
+  markVerifiedRef.current = markVerified
+  saveVerificationRef.current = saveVerification
+
   useEffect(() => {
-    if (verification.phase === "done" && verification.report && activeId && lastAssistantMsgId) {
-      const key = cacheKey(activeId, lastAssistantMsgId)
-      // Skip if already saved for this exact conversation+message (prevents re-render loop)
-      if (savedForKey.current === key) return
-      savedForKey.current = key
+    if (verification.phase !== "done" || !verification.report || !activeId || !lastAssistantMsgId) return
+    const key = cacheKey(activeId, lastAssistantMsgId)
+    if (savedForKey.current === key) return
+    savedForKey.current = key
 
-      reportCache.set(key, verification.report)
-      markVerified(activeId)
+    // Cache in module-level map (instant, no re-render)
+    reportCache.set(key, verification.report)
 
-      // Persist to localStorage alongside chat history
-      saveVerification(activeId, lastAssistantMsgId, verification.report)
+    // Persist via context callbacks using refs (avoids dep array issues)
+    markVerifiedRef.current(activeId)
+    saveVerificationRef.current(activeId, lastAssistantMsgId, verification.report)
 
-      // Persist to Neo4j for long-term storage (fire-and-forget)
-      const r = verification.report
-      if (r.summary && r.claims) {
-        saveVerificationReport({
-          conversation_id: activeId,
-          claims: r.claims as unknown as Array<Record<string, unknown>>,
-          overall_score: (r.summary as Record<string, unknown>).overall_confidence as number ?? 0,
-          verified: r.summary?.verified ?? 0,
-          unverified: r.summary?.unverified ?? 0,
-          uncertain: r.summary?.uncertain ?? 0,
-          total: r.summary?.total ?? 0,
-        }).catch(() => {})
-      }
+    // Persist to Neo4j (fire-and-forget, no state update)
+    const r = verification.report
+    if (r.summary && r.claims) {
+      saveVerificationReport({
+        conversation_id: activeId,
+        claims: r.claims as unknown as Array<Record<string, unknown>>,
+        overall_score: (r.summary as Record<string, unknown>).overall_confidence as number ?? 0,
+        verified: r.summary?.verified ?? 0,
+        unverified: r.summary?.unverified ?? 0,
+        uncertain: r.summary?.uncertain ?? 0,
+        total: r.summary?.total ?? 0,
+      }).catch(() => {})
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- exclude markVerified/saveVerification: they trigger context state updates that cause re-renders. The savedForKey ref guard prevents double execution.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- context callbacks accessed via refs to prevent re-render loops
   }, [verification.phase, verification.report, activeId, lastAssistantMsgId])
 
   // Fetch saved report when switching conversations or selected message changes
