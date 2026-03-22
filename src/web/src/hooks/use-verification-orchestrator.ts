@@ -13,7 +13,7 @@ import { useState, useMemo, useEffect, useCallback, useRef } from "react"
 import { useVerificationStream } from "@/hooks/use-verification-stream"
 import { useConversationsContext } from "@/contexts/conversations-context"
 import { useKBInjection } from "@/contexts/kb-injection-context"
-import { fetchHallucinationReport, saveVerificationReport } from "@/lib/api"
+import { saveVerificationReport } from "@/lib/api"
 import { MODELS } from "@/lib/types"
 import type { ChatMessage, HallucinationReport, ModelOption } from "@/lib/types"
 import type { MessageVerificationStatus } from "@/components/chat/message-bubble"
@@ -67,7 +67,7 @@ export function useVerificationOrchestrator({
 }: UseVerificationOrchestratorOptions): UseVerificationOrchestratorReturn {
   const { markVerified, clearVerified, saveVerification, getVerification, getAllVerificationReports: getAllReports } = useConversationsContext()
   const [savedReport, setSavedReport] = useState<HallucinationReport | null>(null)
-  const [savedReportLoading, setSavedReportLoading] = useState(false)
+  const [savedReportLoading, _setSavedReportLoading] = useState(false)
   const [manualVerifyBump, setManualVerifyBump] = useState(0)
   const [verificationRecBanner, setVerificationRecBanner] = useState<{ model: ModelOption; reason: string } | null>(null)
   const [selectedMsgId, setSelectedMsgId] = useState<string | null>(null)
@@ -162,7 +162,7 @@ export function useVerificationOrchestrator({
       setSavedReport(null)
       setSelectedMsgId(null)
       savedForKey.current = ""  // reset save guard for new verification cycle
-      fetchedForKey.current = ""  // allow re-fetch after new response
+      // fetchedForKey ref removed — no longer fetching saved reports from API
       if (activeId && lastAssistantMsgId) {
         reportCache.delete(cacheKey(activeId, lastAssistantMsgId))
         // Defer context update to avoid re-render during effect

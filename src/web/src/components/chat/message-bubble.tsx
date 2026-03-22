@@ -32,6 +32,7 @@ const MARKUP_STYLES: Record<ClaimDisplayStatus, React.CSSProperties> = {
   citation: { backgroundColor: "rgba(168,85,247,0.2)" },
   uncertain: { backgroundColor: "rgba(107,114,128,0.2)" },
   pending: { backgroundColor: "rgba(107,114,128,0.1)" },
+  skipped: { backgroundColor: "rgba(156,163,175,0.15)" },
 }
 
 /** Code block fallback while SyntaxHighlighter loads */
