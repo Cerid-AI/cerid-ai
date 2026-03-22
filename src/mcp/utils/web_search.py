@@ -24,8 +24,8 @@ from typing import Any
 import httpx
 
 import config.settings as config
-from utils.llm_client import call_llm
 from utils.circuit_breaker import get_breaker
+from utils.llm_client import call_llm
 
 _logger = logging.getLogger("ai-companion.web_search")
 

@@ -65,21 +65,21 @@ FREE_MODELS = {
     "qwen-2.5": "qwen/qwen-2.5-72b-instruct",
 }
 
-CHEAP_MODELS = {
+CHEAP_MODELS: dict[str, dict[str, str | float]] = {
     "gpt-4o-mini": {"id": "openai/gpt-4o-mini", "cost": 0.00015},
     "gemini-flash": {"id": "google/gemini-2.5-flash", "cost": 0.0003},
 }
 
-CAPABLE_MODELS = {
+CAPABLE_MODELS: dict[str, dict[str, str | float]] = {
     "claude-sonnet": {"id": "anthropic/claude-sonnet-4.6", "cost": 0.003},
     "gpt-4o": {"id": "openai/gpt-4o", "cost": 0.0025},
 }
 
-RESEARCH_MODELS = {
+RESEARCH_MODELS: dict[str, dict[str, str | float]] = {
     "grok-online": {"id": "x-ai/grok-4.1-fast:online", "cost": 0.0002},
 }
 
-EXPERT_MODELS = {
+EXPERT_MODELS: dict[str, dict[str, str | float]] = {
     "grok-4": {"id": "x-ai/grok-4:online", "cost": 0.003},
 }
 
@@ -379,13 +379,13 @@ async def route(
         if cs == "high":
             # High cost sensitivity: use cheaper Grok Fast instead of Grok 4
             return RouteDecision(
-                model=RESEARCH_MODELS["grok-online"]["id"],
+                model=str(RESEARCH_MODELS["grok-online"]["id"]),
                 provider="openrouter_paid",
                 reason="research query — using cheaper web model (high cost sensitivity)",
                 estimated_cost_per_1k=0.0002,
             )
         return RouteDecision(
-            model=RESEARCH_MODELS["grok-online"]["id"],
+            model=str(RESEARCH_MODELS["grok-online"]["id"]),
             provider="openrouter_paid",
             reason="research query — real-time data needed",
             estimated_cost_per_1k=0.0002,
@@ -404,7 +404,7 @@ async def route(
         if cs == "high":
             # High cost sensitivity: use cheap model even for complex (trade quality for savings)
             return RouteDecision(
-                model=CHEAP_MODELS["gpt-4o-mini"]["id"],
+                model=str(CHEAP_MODELS["gpt-4o-mini"]["id"]),
                 provider="openrouter_paid",
                 reason="complex query — downgraded to cheap model (high cost sensitivity)",
                 estimated_cost_per_1k=0.00015,
@@ -412,14 +412,14 @@ async def route(
         if cs == "low":
             # Low cost sensitivity: use best available model
             return RouteDecision(
-                model=CAPABLE_MODELS["claude-sonnet"]["id"],
+                model=str(CAPABLE_MODELS["claude-sonnet"]["id"]),
                 provider="openrouter_paid",
                 reason="complex query — best model (low cost sensitivity)",
                 estimated_cost_per_1k=0.003,
             )
         # Medium: capable model (default)
         return RouteDecision(
-            model=CAPABLE_MODELS["claude-sonnet"]["id"],
+            model=str(CAPABLE_MODELS["claude-sonnet"]["id"]),
             provider="openrouter_paid",
             reason="complex query — strong reasoning needed",
             estimated_cost_per_1k=0.003,
@@ -437,14 +437,14 @@ async def route(
     if cs == "low":
         # Low cost sensitivity: upgrade moderate to capable model
         return RouteDecision(
-            model=CHEAP_MODELS["gemini-flash"]["id"],
+            model=str(CHEAP_MODELS["gemini-flash"]["id"]),
             provider="openrouter_paid",
             reason="moderate query — upgraded model (low cost sensitivity)",
             estimated_cost_per_1k=0.0003,
         )
     # Medium: cheap paid model balances quality and cost
     return RouteDecision(
-        model=CHEAP_MODELS["gpt-4o-mini"]["id"],
+        model=str(CHEAP_MODELS["gpt-4o-mini"]["id"]),
         provider="openrouter_paid",
         reason="moderate query — cost-effective balance",
         estimated_cost_per_1k=0.00015,

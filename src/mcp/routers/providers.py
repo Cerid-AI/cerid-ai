@@ -13,7 +13,6 @@ from pydantic import BaseModel, Field
 import config
 from config.model_providers import (
     PROVIDER_CONFIGS,
-    ModelProviderConfig,
     ProviderState,
     get_degraded_status,
     load_config,

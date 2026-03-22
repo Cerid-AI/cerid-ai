@@ -94,73 +94,61 @@ class TestClassifyMemoryWithCandidates:
         }
 
     @pytest.mark.asyncio
-    @patch("utils.memory_consolidation.call_bifrost", new_callable=AsyncMock)
-    async def test_llm_returns_noop(self, mock_bifrost, mock_chroma):
+    @patch("utils.memory_consolidation.call_llm", new_callable=AsyncMock)
+    async def test_llm_returns_noop(self, mock_llm, mock_chroma):
         client, collection = mock_chroma
         collection.query.return_value = self._make_chroma_results()
-        mock_bifrost.return_value = {
-            "choices": [{"message": {"content": '{"action":"NOOP","target_id":null,"reason":"duplicate info"}'}}]
-        }
+        mock_llm.return_value = '{"action":"NOOP","target_id":null,"reason":"duplicate info"}'
         result = await classify_memory("User prefers dark mode", chroma_client=client)
         assert result.action == "NOOP"
         assert result.target_id is None
         assert "duplicate" in result.reason
 
     @pytest.mark.asyncio
-    @patch("utils.memory_consolidation.call_bifrost", new_callable=AsyncMock)
-    async def test_llm_returns_update(self, mock_bifrost, mock_chroma):
+    @patch("utils.memory_consolidation.call_llm", new_callable=AsyncMock)
+    async def test_llm_returns_update(self, mock_llm, mock_chroma):
         client, collection = mock_chroma
         collection.query.return_value = self._make_chroma_results()
-        mock_bifrost.return_value = {
-            "choices": [{"message": {"content": '{"action":"UPDATE","target_id":"art-existing-1","reason":"updated preference"}'}}]
-        }
+        mock_llm.return_value = '{"action":"UPDATE","target_id":"art-existing-1","reason":"updated preference"}'
         result = await classify_memory("User now prefers light mode", chroma_client=client)
         assert result.action == "UPDATE"
         assert result.target_id == "art-existing-1"
 
     @pytest.mark.asyncio
-    @patch("utils.memory_consolidation.call_bifrost", new_callable=AsyncMock)
-    async def test_llm_returns_add(self, mock_bifrost, mock_chroma):
+    @patch("utils.memory_consolidation.call_llm", new_callable=AsyncMock)
+    async def test_llm_returns_add(self, mock_llm, mock_chroma):
         client, collection = mock_chroma
         collection.query.return_value = self._make_chroma_results()
-        mock_bifrost.return_value = {
-            "choices": [{"message": {"content": '{"action":"ADD","target_id":null,"reason":"new info despite similar text"}'}}]
-        }
+        mock_llm.return_value = '{"action":"ADD","target_id":null,"reason":"new info despite similar text"}'
         result = await classify_memory("User prefers dark mode in VS Code", chroma_client=client)
         assert result.action == "ADD"
 
     @pytest.mark.asyncio
-    @patch("utils.memory_consolidation.call_bifrost", new_callable=AsyncMock)
-    async def test_invalid_llm_action_defaults_to_add(self, mock_bifrost, mock_chroma):
+    @patch("utils.memory_consolidation.call_llm", new_callable=AsyncMock)
+    async def test_invalid_llm_action_defaults_to_add(self, mock_llm, mock_chroma):
         client, collection = mock_chroma
         collection.query.return_value = self._make_chroma_results()
-        mock_bifrost.return_value = {
-            "choices": [{"message": {"content": '{"action":"INVALID","reason":"bad"}'}}]
-        }
+        mock_llm.return_value = '{"action":"INVALID","reason":"bad"}'
         result = await classify_memory("some fact", chroma_client=client)
         assert result.action == "ADD"
 
     @pytest.mark.asyncio
-    @patch("utils.memory_consolidation.call_bifrost", new_callable=AsyncMock)
-    async def test_update_invalid_target_falls_back_to_most_similar(self, mock_bifrost, mock_chroma):
+    @patch("utils.memory_consolidation.call_llm", new_callable=AsyncMock)
+    async def test_update_invalid_target_falls_back_to_most_similar(self, mock_llm, mock_chroma):
         """UPDATE with unknown target_id should fall back to most similar candidate."""
         client, collection = mock_chroma
         collection.query.return_value = self._make_chroma_results()
-        mock_bifrost.return_value = {
-            "choices": [{"message": {"content": '{"action":"UPDATE","target_id":"art-nonexistent","reason":"corrected"}'}}]
-        }
+        mock_llm.return_value = '{"action":"UPDATE","target_id":"art-nonexistent","reason":"corrected"}'
         result = await classify_memory("corrected info", chroma_client=client)
         assert result.action == "UPDATE"
         assert result.target_id == "art-existing-1"  # fallback to first candidate
 
     @pytest.mark.asyncio
-    @patch("utils.memory_consolidation.call_bifrost", new_callable=AsyncMock)
-    async def test_non_dict_llm_response_returns_add(self, mock_bifrost, mock_chroma):
+    @patch("utils.memory_consolidation.call_llm", new_callable=AsyncMock)
+    async def test_non_dict_llm_response_returns_add(self, mock_llm, mock_chroma):
         client, collection = mock_chroma
         collection.query.return_value = self._make_chroma_results()
-        mock_bifrost.return_value = {
-            "choices": [{"message": {"content": '"just a string"'}}]
-        }
+        mock_llm.return_value = '"just a string"'
         result = await classify_memory("some fact", chroma_client=client)
         assert result.action == "ADD"
         assert "non-dict" in result.reason
@@ -182,12 +170,12 @@ class TestClassifyMemoryLLMFailures:
         }
 
     @pytest.mark.asyncio
-    @patch("utils.memory_consolidation.call_bifrost", new_callable=AsyncMock)
-    async def test_bifrost_http_error(self, mock_bifrost, mock_chroma):
+    @patch("utils.memory_consolidation.call_llm", new_callable=AsyncMock)
+    async def test_bifrost_http_error(self, mock_llm, mock_chroma):
         import httpx
         client, collection = mock_chroma
         collection.query.return_value = self._make_chroma_results()
-        mock_bifrost.side_effect = httpx.HTTPStatusError(
+        mock_llm.side_effect = httpx.HTTPStatusError(
             "503", request=MagicMock(), response=MagicMock()
         )
         result = await classify_memory("some fact", chroma_client=client)
@@ -195,12 +183,12 @@ class TestClassifyMemoryLLMFailures:
         assert "LLM call failed" in result.reason
 
     @pytest.mark.asyncio
-    @patch("utils.memory_consolidation.call_bifrost", new_callable=AsyncMock)
-    async def test_circuit_open_defaults_to_add(self, mock_bifrost, mock_chroma):
+    @patch("utils.memory_consolidation.call_llm", new_callable=AsyncMock)
+    async def test_circuit_open_defaults_to_add(self, mock_llm, mock_chroma):
         from utils.circuit_breaker import CircuitOpenError
         client, collection = mock_chroma
         collection.query.return_value = self._make_chroma_results()
-        mock_bifrost.side_effect = CircuitOpenError("bifrost-memory", retry_after=30.0)
+        mock_llm.side_effect = CircuitOpenError("bifrost-memory", retry_after=30.0)
         result = await classify_memory("some fact", chroma_client=client)
         assert result.action == "ADD"
         assert "circuit open" in result.reason
@@ -214,8 +202,8 @@ class TestClassifyMemoryMultipleCandidates:
     """Tests with multiple similar memories returned from ChromaDB."""
 
     @pytest.mark.asyncio
-    @patch("utils.memory_consolidation.call_bifrost", new_callable=AsyncMock)
-    async def test_multiple_candidates_sent_to_llm(self, mock_bifrost, mock_chroma):
+    @patch("utils.memory_consolidation.call_llm", new_callable=AsyncMock)
+    async def test_multiple_candidates_sent_to_llm(self, mock_llm, mock_chroma):
         client, collection = mock_chroma
         collection.query.return_value = {
             "ids": [["chunk_1", "chunk_2", "chunk_3"]],
@@ -227,16 +215,14 @@ class TestClassifyMemoryMultipleCandidates:
             ]],
             "distances": [[0.05, 0.08, 0.12]],  # all above threshold
         }
-        mock_bifrost.return_value = {
-            "choices": [{"message": {"content": '{"action":"UPDATE","target_id":"art-2","reason":"supersedes fact B"}'}}]
-        }
+        mock_llm.return_value = '{"action":"UPDATE","target_id":"art-2","reason":"supersedes fact B"}'
         result = await classify_memory("updated fact B", chroma_client=client)
         assert result.action == "UPDATE"
         assert result.target_id == "art-2"
 
     @pytest.mark.asyncio
-    @patch("utils.memory_consolidation.call_bifrost", new_callable=AsyncMock)
-    async def test_mixed_similarity_filters_low(self, mock_bifrost, mock_chroma):
+    @patch("utils.memory_consolidation.call_llm", new_callable=AsyncMock)
+    async def test_mixed_similarity_filters_low(self, mock_llm, mock_chroma):
         """Only candidates above threshold should be sent to LLM."""
         client, collection = mock_chroma
         collection.query.return_value = {
@@ -245,13 +231,11 @@ class TestClassifyMemoryMultipleCandidates:
             "metadatas": [[{"artifact_id": "art-1"}, {"artifact_id": "art-2"}]],
             "distances": [[0.05, 0.5]],  # only first is above threshold
         }
-        mock_bifrost.return_value = {
-            "choices": [{"message": {"content": '{"action":"NOOP","reason":"duplicate"}'}}]
-        }
+        mock_llm.return_value = '{"action":"NOOP","reason":"duplicate"}'
         result = await classify_memory("close match variant", chroma_client=client)
         assert result.action == "NOOP"
         # Verify LLM prompt only includes the close match
-        call_args = mock_bifrost.call_args
+        call_args = mock_llm.call_args
         prompt_text = call_args[0][0][0]["content"]
         assert "art-1" in prompt_text
         assert "art-2" not in prompt_text

@@ -17,9 +17,9 @@ import numpy as np
 import config
 from config import DOMAINS
 from deps import get_chroma
-from utils.llm_client import call_llm
 from utils.cache import log_event
 from utils.circuit_breaker import CircuitOpenError
+from utils.llm_client import call_llm
 from utils.llm_parsing import parse_llm_json
 from utils.text import STOPWORDS as _STOPWORDS
 from utils.text import WORD_RE as _WORD_RE

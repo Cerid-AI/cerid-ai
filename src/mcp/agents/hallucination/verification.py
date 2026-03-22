@@ -33,7 +33,9 @@ from agents.hallucination.patterns import (
     _is_recency_claim,
     _pick_verification_model,
 )
-from utils.circuit_breaker import CircuitOpenError, NonTransientError, get_breaker
+from utils.circuit_breaker import CircuitOpenError, NonTransientError
+from utils.claim_cache import cache_verdict, get_cached_verdict
+from utils.llm_parsing import parse_llm_json
 
 
 class CreditExhaustedError(NonTransientError):
@@ -47,8 +49,6 @@ class CreditExhaustedError(NonTransientError):
     def __init__(self, provider: str = "openrouter"):
         self.provider = provider
         super().__init__(f"{provider} credits exhausted (HTTP 402)")
-from utils.claim_cache import cache_verdict, get_cached_verdict
-from utils.llm_parsing import parse_llm_json
 
 logger = logging.getLogger("ai-companion.hallucination")
 

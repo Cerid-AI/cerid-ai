@@ -19,10 +19,10 @@ from collections.abc import AsyncGenerator
 
 import httpx
 from fastapi import APIRouter, Request
-
-import config
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+
+import config
 
 logger = logging.getLogger("ai-companion.chat")
 

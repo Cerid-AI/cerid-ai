@@ -121,15 +121,18 @@ def pytest_configure(config):
 
 @pytest.fixture(autouse=True)
 def _reset_bifrost_client():
-    """Reset the shared Bifrost httpx.AsyncClient singleton between tests.
+    """Reset the shared Bifrost and LLM httpx.AsyncClient singletons between tests.
 
-    Without this, get_bifrost_client() caches a client from the first test,
-    preventing subsequent tests' httpx.AsyncClient patches from taking effect.
+    Without this, get_bifrost_client() / _get_client() cache a client from the
+    first test, preventing subsequent tests' patches from taking effect.
     """
     import utils.bifrost as _bifrost_mod
+    import utils.llm_client as _llm_mod
     _bifrost_mod._client = None
+    _llm_mod._client = None
     yield
     _bifrost_mod._client = None
+    _llm_mod._client = None
 
 
 @pytest.fixture

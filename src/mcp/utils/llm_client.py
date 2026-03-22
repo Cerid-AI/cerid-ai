@@ -22,11 +22,15 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import TYPE_CHECKING
 
 import httpx
 
 from middleware.request_id import tracing_headers
 from utils.circuit_breaker import CircuitOpenError, get_breaker
+
+if TYPE_CHECKING:
+    from utils.smart_router import RouteDecision
 
 _logger = logging.getLogger("ai-companion.llm_client")
 
@@ -276,7 +280,7 @@ async def route_and_call(
 
     Returns ``(content, route_decision)`` tuple.
     """
-    from utils.smart_router import RouteDecision, TaskType, route
+    from utils.smart_router import TaskType, route
 
     task = TaskType(task_type)
     decision = await route(query, task_type=task)

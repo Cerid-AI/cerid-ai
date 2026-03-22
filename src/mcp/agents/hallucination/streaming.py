@@ -29,9 +29,7 @@ from agents.hallucination.persistence import (
     REDIS_HALLUCINATION_TTL,
 )
 from agents.hallucination.verification import (
-    CreditExhaustedError,
     _check_history_consistency,
-    _verify_claim_externally,
     verify_claim,
 )
 from utils.time import utcnow_iso

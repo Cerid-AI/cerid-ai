@@ -137,10 +137,7 @@ class TestCompressHistory:
             _msg("user", "recent question"),
             _msg("assistant", "recent answer"),
         ]
-        mock_resp = {
-            "choices": [{"message": {"content": "Summary of conversation."}}],
-        }
-        with patch("utils.context_compression.call_bifrost", new_callable=AsyncMock, return_value=mock_resp):
+        with patch("utils.context_compression.call_llm", new_callable=AsyncMock, return_value="Summary of conversation."):
             result = await compress_history(messages, target_tokens=100)
 
         # Should have: system + compressed summary + last 2 pairs (4 messages)
@@ -164,7 +161,7 @@ class TestCompressHistory:
         import httpx
 
         error = httpx.HTTPStatusError("boom", request=httpx.Request("POST", "http://x"), response=httpx.Response(503))
-        with patch("utils.context_compression.call_bifrost", new_callable=AsyncMock, side_effect=error):
+        with patch("utils.context_compression.call_llm", new_callable=AsyncMock, side_effect=error):
             result = await compress_history(messages, target_tokens=10)
 
         # Should still return something (fallback truncation via _summarize_turns)
@@ -229,10 +226,7 @@ class TestCompressEndpoint:
     def test_compresses_long_history(self, client):
         # Build a history that exceeds the target
         messages = [{"role": "user" if i % 2 == 0 else "assistant", "content": f"message {i} " * 100} for i in range(20)]
-        mock_resp = {
-            "choices": [{"message": {"content": "Summarized."}}],
-        }
-        with patch("utils.context_compression.call_bifrost", new_callable=AsyncMock, return_value=mock_resp):
+        with patch("utils.context_compression.call_llm", new_callable=AsyncMock, return_value="Summarized."):
             resp = client.post("/chat/compress", json={
                 "messages": messages,
                 "target_tokens": 100,
@@ -243,7 +237,7 @@ class TestCompressEndpoint:
 
     def test_falls_back_on_llm_failure(self, client):
         messages = [{"role": "user" if i % 2 == 0 else "assistant", "content": f"msg {i} " * 100} for i in range(20)]
-        with patch("utils.context_compression.call_bifrost", new_callable=AsyncMock, side_effect=Exception("LLM down")):
+        with patch("utils.context_compression.call_llm", new_callable=AsyncMock, side_effect=Exception("LLM down")):
             resp = client.post("/chat/compress", json={
                 "messages": messages,
                 "target_tokens": 100,

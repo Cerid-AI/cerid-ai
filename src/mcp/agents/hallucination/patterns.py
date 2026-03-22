@@ -71,8 +71,8 @@ FACTUAL_PATTERNS = [
     re.compile(r"\b(?:is|are|was|were|has|have|had)\b", re.I),  # state verbs
     re.compile(r"\b(?:released|created|founded|introduced|built|developed)\b", re.I),
     re.compile(r"\b(?:supports?|supporting|requires?|includes?|including|provides?|providing|uses?|using|contains?|containing|manages?|managing)\b", re.I),
-    # Entity claims (proper nouns followed by verbs)
-    re.compile(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+(?:is|are|was|were|use|uses|run|runs|has|have)\b"),
+    # Entity claims (proper nouns followed by verbs) — up to 4 proper nouns
+    re.compile(r"\b[A-Z][a-z]+(?:\s[A-Z][a-z]+){0,3}\s(?:is|are|was|were|use|uses|run|runs|has|have)\b"),
     re.compile(r"\b(?:version|v\d)\b", re.I),          # version references
     # Comparisons
     re.compile(r"\b(?:faster|slower|better|worse|larger|smaller|more|fewer|higher|lower)\s+than\b", re.I),

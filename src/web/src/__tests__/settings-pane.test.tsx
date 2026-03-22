@@ -195,9 +195,9 @@ describe("SettingsPane", () => {
     render(<SettingsPane />, { wrapper })
     await screen.findByText("Knowledge & Ingestion")
     // Emoji and label are in separate spans; check for labels only
-    expect(screen.getByText("Casual")).toBeInTheDocument()
-    expect(screen.getByText("Researcher")).toBeInTheDocument()
-    expect(screen.getByText("Power User")).toBeInTheDocument()
+    expect(screen.getByText("Quick")).toBeInTheDocument()
+    expect(screen.getByText("Balanced")).toBeInTheDocument()
+    expect(screen.getByText("Maximum")).toBeInTheDocument()
   })
 
   it("shows Self-RAG toggle in AI Features section", async () => {

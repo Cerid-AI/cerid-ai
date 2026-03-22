@@ -18,9 +18,9 @@ from typing import Any
 import httpx
 
 import config
-from utils.internal_llm import call_internal_llm
 from utils.cache import log_event
 from utils.circuit_breaker import CircuitOpenError
+from utils.internal_llm import call_internal_llm
 from utils.llm_parsing import parse_llm_json
 from utils.time import utcnow, utcnow_iso
 

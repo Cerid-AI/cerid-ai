@@ -1277,13 +1277,11 @@ class TestStalenessEscalation:
     """Test staleness detection and escalation to web search."""
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_staleness_escalates_to_web_search(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_staleness_escalates_to_web_search(self, mock_llm_raw):
         """When static model admits stale knowledge for a current-event claim, should re-verify with web search."""
         # First call: static model returns "supported" but with stale reasoning
-        stale_response = MagicMock()
-        stale_response.raise_for_status = MagicMock()
-        stale_response.json.return_value = {
+        stale_data = {
             "choices": [{
                 "message": {
                     "content": '{"verdict": "supported", "confidence": 0.7, "reasoning": "As of my training data this appears correct, but I cannot verify current information."}'
@@ -1291,9 +1289,7 @@ class TestStalenessEscalation:
             }]
         }
         # Second call (web search): returns a definitive answer
-        web_response = MagicMock()
-        web_response.raise_for_status = MagicMock()
-        web_response.json.return_value = {
+        web_data = {
             "choices": [{
                 "message": {
                     "content": '{"verdict": "refuted", "confidence": 0.95, "reasoning": "Per Reuters, this actually changed in Jan 2026."}',
@@ -1304,18 +1300,8 @@ class TestStalenessEscalation:
             }]
         }
 
-        mock_client = AsyncMock()
-        mock_client.post.side_effect = [stale_response, web_response]
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
+        mock_llm_raw.side_effect = [stale_data, web_data]
 
-        # This claim contains a current-event signal ("trending") but the
-        # initial routing picks cross_model because _is_current_event_claim
-        # might not trigger on first pass. We use a claim with borderline
-        # current-event markers to test the escalation path.
-        # Force the initial path to be cross_model by using a claim that
-        # passes _is_current_event_claim only with the borderline patterns.
         with patch("agents.hallucination.verification._is_current_event_claim") as mock_detect:
             # First call: not detected as current event (goes to cross_model)
             # Second call (inside escalation check): detected as current event
@@ -1903,10 +1889,12 @@ class TestEvasionClaimExtraction:
     """Test that evasion claims are merged into extract_claims output."""
 
     @pytest.mark.asyncio
+    @patch("agents.hallucination.extraction._extract_claims_heuristic")
     @patch("agents.hallucination.extraction._extract_claims_llm")
-    async def test_evasion_returned_when_no_other_claims(self, mock_llm):
+    async def test_evasion_returned_when_no_other_claims(self, mock_llm, mock_heuristic):
         """When LLM+heuristic find nothing, evasion claims returned alone."""
         mock_llm.return_value = []
+        mock_heuristic.return_value = []
         # Response with hedging patterns
         response = (
             "This is a complex and nuanced topic. It's important to note "
