@@ -50,6 +50,15 @@ class CircuitOpenError(Exception):
         super().__init__(f"Circuit '{name}' is open, retry after {retry_after:.0f}s")
 
 
+class NonTransientError(Exception):
+    """Base class for errors that should NOT count as circuit breaker failures.
+
+    Subclass this for errors like 402 (credits exhausted) that are permanent
+    until the user takes external action -- retrying won't help and the circuit
+    breaker shouldn't open because of them.
+    """
+
+
 class AsyncCircuitBreaker:
     """Async circuit breaker with failure counting and automatic recovery."""
 
@@ -211,7 +220,10 @@ def exponential_backoff_with_jitter(
 
 _bifrost_rerank = AsyncCircuitBreaker("bifrost-rerank", failure_threshold=3, recovery_timeout=60)
 _bifrost_claims = AsyncCircuitBreaker("bifrost-claims", failure_threshold=3, recovery_timeout=60)
-_bifrost_verify = AsyncCircuitBreaker("bifrost-verify", failure_threshold=5, recovery_timeout=90)
+_bifrost_verify = AsyncCircuitBreaker(
+    "bifrost-verify", failure_threshold=5, recovery_timeout=90,
+    excluded_exceptions=(NonTransientError,),
+)
 _bifrost_synopsis = AsyncCircuitBreaker("bifrost-synopsis", failure_threshold=3, recovery_timeout=60)
 _bifrost_memory = AsyncCircuitBreaker("bifrost-memory", failure_threshold=3, recovery_timeout=60)
 _neo4j = AsyncCircuitBreaker("neo4j", failure_threshold=5, recovery_timeout=30)

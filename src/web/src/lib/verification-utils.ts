@@ -12,7 +12,7 @@
  * This mapping is frontend-only — zero backend changes needed.
  */
 
-export type ClaimDisplayStatus = "verified" | "refuted" | "unverified" | "uncertain" | "pending" | "evasion" | "citation"
+export type ClaimDisplayStatus = "verified" | "refuted" | "unverified" | "uncertain" | "pending" | "evasion" | "citation" | "skipped"
 
 export interface ClaimSpan {
   start: number
@@ -189,6 +189,7 @@ export function getClaimDisplayStatus(
   )
     return "refuted" // actively found wrong by another model
   if (status === "unverified") return "unverified" // no KB evidence (softer)
+  if (status === "skipped") return "skipped"
   if (status === "uncertain") return "uncertain"
   if (status === "pending") return "pending"
   return "uncertain"
@@ -201,6 +202,7 @@ export const DISPLAY_STATUS_COLORS: Record<ClaimDisplayStatus | "error", string>
   unverified: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
   evasion: "bg-orange-500/20 text-orange-400 border-orange-500/30",
   citation: "bg-purple-500/20 text-purple-400 border-purple-500/30",
+  skipped: "bg-muted/50 text-muted-foreground/60 border-border/50",
   uncertain: "bg-muted/50 text-muted-foreground border-border",
   pending: "bg-muted text-muted-foreground border-border",
   error: "bg-muted text-muted-foreground",

@@ -396,7 +396,7 @@ export interface BaseClaim {
 }
 
 export interface HallucinationClaim extends BaseClaim {
-  status: "verified" | "unverified" | "uncertain" | "error"
+  status: "verified" | "unverified" | "uncertain" | "error" | "skipped"
   similarity: number
   source_filename?: string
   user_feedback?: "correct" | "incorrect"
@@ -404,7 +404,7 @@ export interface HallucinationClaim extends BaseClaim {
 
 export interface StreamingClaim extends BaseClaim {
   index: number
-  status?: "verified" | "unverified" | "uncertain" | "error" | "pending"
+  status?: "verified" | "unverified" | "uncertain" | "error" | "pending" | "skipped"
   similarity?: number
   source?: string
 }
@@ -422,6 +422,7 @@ export interface HallucinationReport {
     unverified: number
     uncertain: number
     error?: number
+    skipped?: number
   }
   reason?: string
 }

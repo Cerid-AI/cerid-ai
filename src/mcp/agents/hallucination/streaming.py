@@ -29,6 +29,7 @@ from agents.hallucination.persistence import (
     REDIS_HALLUCINATION_TTL,
 )
 from agents.hallucination.verification import (
+    CreditExhaustedError,
     _check_history_consistency,
     _verify_claim_externally,
     verify_claim,
@@ -303,10 +304,13 @@ async def verify_response_streaming(
     verified_count = 0
     unverified_count = 0
     uncertain_count = 0
+    skipped_count = 0
     assessed_confidence = 0.0  # Only accumulate for verified/unverified
     assessed_count = 0
     collected_results: list[dict[str, Any] | None] = [None] * len(claims)
     stream_interrupted = False
+    credit_exhausted = False
+    credit_error_emitted = False
 
     async def _verify_indexed(idx: int, claim_text: str) -> tuple[int, dict[str, Any]]:
         """Verify a single claim with a per-claim timeout and concurrency limit."""
@@ -401,6 +405,11 @@ async def verify_response_streaming(
                 unverified_count += 1
                 assessed_confidence += confidence
                 assessed_count += 1
+            elif status == "skipped":
+                skipped_count += 1
+                # Track credit exhaustion for one-time event emission
+                if result.get("credit_exhausted"):
+                    credit_exhausted = True
             else:
                 # Uncertain/unassessable claims excluded from confidence avg
                 uncertain_count += 1
@@ -425,6 +434,15 @@ async def verify_response_streaming(
                 "verification_answer": result.get("verification_answer", ""),
                 **({"circular_source": True} if result.get("circular_source") else {}),
             }
+
+            # Emit credit_error event once when first 402 is detected
+            if result.get("credit_exhausted") and not credit_error_emitted:
+                credit_error_emitted = True
+                yield {
+                    "type": "credit_error",
+                    "message": "OpenRouter credits exhausted. Add credits at https://openrouter.ai/settings/credits",
+                    "provider": "openrouter",
+                }
     except Exception as loop_exc:
         logger.error(
             "Verification loop interrupted after %d/%d claims: %s",
@@ -463,10 +481,12 @@ async def verify_response_streaming(
         "verified": verified_count,
         "unverified": unverified_count,
         "uncertain": uncertain_count,
+        "skipped": skipped_count,
         "total": len(claims),
         "assessed": assessed_count,
         "extraction_method": method,
         **({"interrupted": True} if stream_interrupted else {}),
+        **({"credit_exhausted": True} if credit_exhausted else {}),
     }
 
     # --- Persist to Redis (same format as batch path) ---
@@ -474,6 +494,7 @@ async def verify_response_streaming(
         "verified": verified_count,
         "unverified": unverified_count,
         "uncertain": uncertain_count,
+        "skipped": skipped_count,
     }
     report = {
         "conversation_id": conversation_id,

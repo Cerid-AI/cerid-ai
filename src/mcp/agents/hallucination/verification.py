@@ -33,7 +33,20 @@ from agents.hallucination.patterns import (
     _is_recency_claim,
     _pick_verification_model,
 )
-from utils.circuit_breaker import CircuitOpenError, get_breaker
+from utils.circuit_breaker import CircuitOpenError, NonTransientError, get_breaker
+
+
+class CreditExhaustedError(NonTransientError):
+    """Raised when the LLM provider returns 402 (payment required / credits exhausted).
+
+    Inherits from NonTransientError so the circuit breaker does NOT count this
+    as a failure -- 402 is permanent until the user adds credits, and opening
+    the circuit would just add a 90s delay on top of an already-broken state.
+    """
+
+    def __init__(self, provider: str = "openrouter"):
+        self.provider = provider
+        super().__init__(f"{provider} credits exhausted (HTTP 402)")
 from utils.claim_cache import cache_verdict, get_cached_verdict
 from utils.llm_parsing import parse_llm_json
 
@@ -672,6 +685,9 @@ async def _llm_call_with_retry(
 
     for attempt in range(max_attempts):
         resp = await client.post(url, **post_kwargs)
+        # 402 = payment required / credits exhausted — not transient, don't retry
+        if resp.status_code == 402:
+            raise CreditExhaustedError("openrouter")
         if resp.status_code != 429:
             resp.raise_for_status()
             return resp
@@ -933,6 +949,9 @@ async def _verify_claim_externally(
                 )
                 return resp.json()
 
+            # CreditExhaustedError (402) inherits NonTransientError, so the
+            # circuit breaker excludes it from failure counting — it propagates
+            # directly to the outer CreditExhaustedError handler below.
             data = await breaker.call(_bifrost_verify)
             raw_message = data["choices"][0]["message"]
             raw_answer = raw_message.get("content", "").strip()
@@ -1019,6 +1038,19 @@ async def _verify_claim_externally(
                 "source_urls": source_urls,
             }
 
+        except CreditExhaustedError as credit_err:
+            logger.warning(
+                "Provider credits exhausted (402) for '%s...': %s",
+                claim[:50], credit_err,
+            )
+            return {
+                "status": "skipped",
+                "confidence": 0,
+                "reason": "Provider credits exhausted",
+                "verification_method": "credit_exhausted",
+                "source_urls": [],
+                "credit_exhausted": True,
+            }
         except CircuitOpenError:
             logger.warning("Bifrost verify circuit open for '%s...'", claim[:50])
             return {
@@ -1181,6 +1213,7 @@ async def verify_claim(
                 "verification_method": ext_result.get("verification_method", "none"),
                 "verification_model": ext_result.get("verification_model"),
                 "source_urls": ext_result.get("source_urls", []),
+                **({"credit_exhausted": True} if ext_result.get("credit_exhausted") else {}),
             })
 
         top_results = all_results[:3]
@@ -1214,6 +1247,7 @@ async def verify_claim(
                 "verification_model": ext_result.get("verification_model"),
                 "source_urls": ext_result.get("source_urls", []),
                 "circular_source": True,
+                **({"credit_exhausted": True} if ext_result.get("credit_exhausted") else {}),
             })
 
         # --- Fallback 2: Very low KB similarity → try external verification ---
@@ -1232,6 +1266,7 @@ async def verify_claim(
                     "verification_method": ext_result.get("verification_method", "none"),
                     "verification_model": ext_result.get("verification_model"),
                     "source_urls": ext_result.get("source_urls", []),
+                    **({"credit_exhausted": True} if ext_result.get("credit_exhausted") else {}),
                 })
 
         # Apply multi-result confidence calibration
@@ -1267,6 +1302,7 @@ async def verify_claim(
                     "verification_method": ext_result.get("verification_method", "none"),
                     "verification_model": ext_result.get("verification_model"),
                     "source_urls": ext_result.get("source_urls", []),
+                    **({"credit_exhausted": True} if ext_result.get("credit_exhausted") else {}),
                 })
             return await _cache_result({
                 "claim": claim,
@@ -1293,6 +1329,7 @@ async def verify_claim(
                     "verification_method": ext_result.get("verification_method", "none"),
                     "verification_model": ext_result.get("verification_model"),
                     "source_urls": ext_result.get("source_urls", []),
+                    **({"credit_exhausted": True} if ext_result.get("credit_exhausted") else {}),
                 })
             # External also uncertain — try web search as final escalation.
             # In streaming mode, skip this second external call to avoid
@@ -1316,6 +1353,7 @@ async def verify_claim(
                         ),
                         "verification_model": web_result.get("verification_model"),
                         "source_urls": web_result.get("source_urls", []),
+                        **({"credit_exhausted": True} if web_result.get("credit_exhausted") else {}),
                     })
             # All methods exhausted — return uncertain with all available context
             return {

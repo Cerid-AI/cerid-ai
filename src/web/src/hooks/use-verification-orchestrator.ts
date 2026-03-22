@@ -266,7 +266,9 @@ export function useVerificationOrchestrator({
         verified: halReport.summary.verified,
         unverified: halReport.summary.unverified,
         uncertain: halReport.summary.uncertain,
+        skipped: halReport.summary.skipped,
         total: halReport.summary.total,
+        creditExhausted: verification.creditError != null,
       }
     }
     return null

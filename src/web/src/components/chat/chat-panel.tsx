@@ -483,6 +483,7 @@ export function ChatPanel() {
           kbContext.setSelectedArtifactId(artifactId)
           setShowKB(true)
         }}
+        creditError={verification.creditError}
       />}
 
       {/* Auto-route notice (advanced only) */}

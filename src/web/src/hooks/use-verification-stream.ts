@@ -11,9 +11,11 @@ interface StreamingSummary {
   verified: number
   unverified: number
   uncertain: number
+  skipped: number
   total: number
   overallConfidence: number
   extractionMethod?: string
+  creditExhausted?: boolean
 }
 
 /**
@@ -49,6 +51,8 @@ interface UseVerificationStreamReturn {
   sessionClaimsChecked: number
   /** Accumulated session-wide estimated verification cost in USD. */
   sessionEstCost: number
+  /** Credit exhaustion error message (set when provider returns 402). */
+  creditError: string | null
 }
 
 /**
@@ -76,6 +80,7 @@ export function useVerificationStream(
   const [phase, setPhase] = useState<VerificationPhase>("idle")
   const [summary, setSummary] = useState<StreamingSummary | null>(null)
   const [extractionMethod, setExtractionMethod] = useState<string | null>(null)
+  const [creditError, setCreditError] = useState<string | null>(null)
   const abortRef = useRef<(() => void) | null>(null)
   const hasReceivedEventsRef = useRef(false)
   const responseTextRef = useRef(responseText)
@@ -108,6 +113,7 @@ export function useVerificationStream(
     setPhase("idle")
     setSummary(null)
     setExtractionMethod(null)
+    setCreditError(null)
   }, [conversationId])
 
   // Clear stale verification state when a new response starts streaming (triggerKey resets to 0)
@@ -118,6 +124,7 @@ export function useVerificationStream(
       setPhase("idle")
       setSummary(null)
       setExtractionMethod(null)
+      setCreditError(null)
     }
     prevTriggerKey.current = triggerKey
   }, [triggerKey])
@@ -157,6 +164,7 @@ export function useVerificationStream(
     setPhase("extracting")
     setSummary(null)
     setExtractionMethod(null)
+    setCreditError(null)
 
     const { response, abort } = streamVerification(text, conversationId, undefined, modelRef.current, query, historyRef.current, expertModeRef.current, sourceArtifactIdsRef.current)
     abortRef.current = abort
@@ -261,15 +269,21 @@ export function useVerificationStream(
                   )
                   break
 
+                case "credit_error":
+                  setCreditError(event.message ?? "LLM provider credits exhausted")
+                  break
+
                 case "summary":
                   receivedSummary = true
                   setSummary({
                     verified: event.verified,
                     unverified: event.unverified,
                     uncertain: event.uncertain,
+                    skipped: event.skipped ?? 0,
                     total: event.total,
                     overallConfidence: event.overall_confidence,
                     extractionMethod: event.extraction_method,
+                    creditExhausted: event.credit_exhausted ?? false,
                   })
                   // Accumulate session-wide metrics
                   sessionRef.current.claimsChecked += event.total ?? 0
@@ -344,7 +358,7 @@ export function useVerificationStream(
           claims: claims.map((c) => ({
             claim: c.claim,
             claim_type: c.claim_type,
-            status: (c.status === "pending" ? "uncertain" : c.status) as "verified" | "unverified" | "uncertain" | "error",
+            status: (c.status === "pending" ? "uncertain" : c.status) as "verified" | "unverified" | "uncertain" | "error" | "skipped",
             similarity: c.similarity ?? 0,
             source_filename: c.source || undefined,
             source_artifact_id: c.source_artifact_id || undefined,
@@ -363,6 +377,7 @@ export function useVerificationStream(
             verified: summary.verified,
             unverified: summary.unverified,
             uncertain: summary.uncertain,
+            skipped: summary.skipped,
           },
         }
       : null
@@ -378,5 +393,6 @@ export function useVerificationStream(
     report,
     sessionClaimsChecked,
     sessionEstCost,
+    creditError,
   }
 }

@@ -291,7 +291,7 @@ function CopyButton({ text }: { text: string }) {
 
 export type MessageVerificationStatus =
   | { state: "loading" }
-  | { state: "done"; verified: number; unverified: number; uncertain: number; total: number }
+  | { state: "done"; verified: number; unverified: number; uncertain: number; skipped?: number; total: number; creditExhausted?: boolean }
   | null
 
 function VerificationBadge({ status, onClick }: { status: MessageVerificationStatus; onClick?: () => void }) {
@@ -306,9 +306,10 @@ function VerificationBadge({ status, onClick }: { status: MessageVerificationSta
     )
   }
 
-  const { verified, total, unverified } = status
+  const { verified, total, unverified, skipped, creditExhausted } = status
   const accuracy = total > 0 ? Math.round((verified / total) * 100) : 0
   const hasIssues = unverified > 0
+  const hasSkipped = (skipped ?? 0) > 0
 
   return (
     <button
@@ -316,18 +317,20 @@ function VerificationBadge({ status, onClick }: { status: MessageVerificationSta
       onClick={onClick}
       className={cn(
         "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium transition-colors",
-        hasIssues
-          ? "bg-red-500/10 text-red-400 hover:bg-red-500/20"
-          : accuracy >= 80
-            ? "bg-green-500/10 text-green-400 hover:bg-green-500/20"
-            : "bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20",
+        creditExhausted
+          ? "bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20"
+          : hasIssues
+            ? "bg-red-500/10 text-red-400 hover:bg-red-500/20"
+            : accuracy >= 80
+              ? "bg-green-500/10 text-green-400 hover:bg-green-500/20"
+              : "bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20",
       )}
     >
       {hasIssues
         ? <ShieldAlert className="h-2.5 w-2.5" />
         : <ShieldCheck className="h-2.5 w-2.5" />
       }
-      {verified}/{total} verified
+      {verified}/{total} verified{hasSkipped ? ` (${skipped} skipped)` : ""}
     </button>
   )
 }

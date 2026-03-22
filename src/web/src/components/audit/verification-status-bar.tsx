@@ -32,6 +32,8 @@ interface VerificationStatusBarProps {
   sessionEstCost?: number
   /** Callback when a KB artifact source is clicked. */
   onArtifactClick?: (artifactId: string) => void
+  /** Credit exhaustion error message from the LLM provider. */
+  creditError?: string | null
 }
 
 /** Status icon for a single claim using display status */
@@ -47,6 +49,8 @@ function ClaimStatusIcon({ displayStatus }: { displayStatus: ClaimDisplayStatus 
       return <Circle className="h-3 w-3 shrink-0 text-purple-400" />
     case "unverified":
       return <AlertTriangle className="h-3 w-3 shrink-0 text-yellow-400" />
+    case "skipped":
+      return <Circle className="h-3 w-3 shrink-0 text-muted-foreground/50" />
     case "pending":
       return <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" />
     case "uncertain":
@@ -63,6 +67,7 @@ function claimStatusColor(displayStatus: ClaimDisplayStatus): string {
     case "evasion": return "text-orange-400"
     case "citation": return "text-purple-400"
     case "unverified": return "text-yellow-400"
+    case "skipped": return "text-muted-foreground/60"
     case "uncertain": return "text-muted-foreground"
     default: return "text-muted-foreground"
   }
@@ -73,7 +78,7 @@ export function VerificationStatusBar({
   streamPhase, verifiedCount = 0, totalClaims = 0,
   extractionMethod, streamingClaims,
   sessionClaimsChecked = 0, sessionEstCost = 0,
-  onArtifactClick,
+  onArtifactClick, creditError,
 }: VerificationStatusBarProps) {
   const [expanded, setExpanded] = useState(false)
 
@@ -238,6 +243,7 @@ export function VerificationStatusBar({
   }
 
   const { verified, unverified, uncertain, total } = report.summary
+  const skippedCount = report.summary.skipped ?? 0
 
   // Split unverified into refuted (cross-model/web-search) and soft unverified (KB only)
   const refutedCount = report.claims.filter(
@@ -262,6 +268,26 @@ export function VerificationStatusBar({
 
   return (
     <div className="border-t bg-muted/30">
+      {/* Credit exhaustion banner */}
+      {creditError && (
+        <div className="flex items-center gap-2 border-b border-yellow-500/20 bg-yellow-500/10 px-4 py-1.5">
+          <AlertTriangle className="h-3 w-3 shrink-0 text-yellow-400" />
+          <span className="flex-1 text-xs text-yellow-300">
+            Verification limited &mdash;{" "}
+            <a
+              href="https://openrouter.ai/settings/credits"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline hover:text-yellow-200"
+            >
+              Add OpenRouter credits
+            </a>
+          </span>
+          {skippedCount > 0 && (
+            <span className="text-[10px] text-yellow-400/70">{skippedCount} claim{skippedCount !== 1 ? "s" : ""} skipped</span>
+          )}
+        </div>
+      )}
       {/* Summary row — clickable to expand claims */}
       <TooltipProvider delayDuration={300}>
       <button
