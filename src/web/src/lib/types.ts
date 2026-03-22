@@ -123,6 +123,24 @@ export interface OpenRouterCredits {
   error?: string
 }
 
+export interface ProviderCredits {
+  configured: boolean
+  provider?: string
+  balance?: number
+  total_credits?: number
+  total_usage?: number
+  usage_daily?: number
+  usage_weekly?: number
+  usage_monthly?: number
+  is_free_tier?: boolean
+  status?: "ok" | "low" | "exhausted" | "error"
+  warning?: string
+  top_up_url?: string
+  account_url?: string
+  signup_url?: string
+  error?: string
+}
+
 export type Theme = "dark" | "light"
 
 export const DOMAINS = ["coding", "finance", "projects", "personal", "general", "conversations"] as const

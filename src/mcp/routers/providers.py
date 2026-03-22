@@ -129,48 +129,66 @@ async def set_internal_provider(body: dict):
     return {"status": "updated", "provider": provider, "model": model}
 
 
-@router.get("/openrouter/credits")
-async def get_openrouter_credits():
-    """Check OpenRouter credit balance and usage."""
+@router.get("/credits")
+async def get_provider_credits():
+    """Get OpenRouter credit balance and usage stats."""
     import httpx
 
     api_key = os.getenv("OPENROUTER_API_KEY", "")
     if not api_key:
-        return {"available": False, "error": "No OpenRouter API key configured"}
+        return {"configured": False, "message": "No OpenRouter API key configured"}
+
+    result: dict = {
+        "configured": True,
+        "provider": "openrouter",
+        "top_up_url": "https://openrouter.ai/settings/credits",
+        "account_url": "https://openrouter.ai/settings",
+        "signup_url": "https://openrouter.ai/auth",
+    }
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(
+            # Get credits balance
+            credits_resp = await client.get(
+                "https://openrouter.ai/api/v1/credits",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            if credits_resp.status_code == 200:
+                credits_data = credits_resp.json().get("data", {})
+                total = credits_data.get("total_credits", 0)
+                used = credits_data.get("total_usage", 0)
+                result["balance"] = round(total - used, 2)
+                result["total_credits"] = total
+                result["total_usage"] = round(used, 2)
+
+            # Get usage stats
+            key_resp = await client.get(
                 "https://openrouter.ai/api/v1/auth/key",
                 headers={"Authorization": f"Bearer {api_key}"},
             )
-            if resp.status_code == 200:
-                data = resp.json()["data"]
-                return {
-                    "available": True,
-                    "credits_remaining": data.get("limit_remaining"),
-                    "credits_used": data.get("usage"),
-                    "rate_limit": data.get("rate_limit"),
-                    "is_free_tier": data.get("is_free_tier", False),
-                    "top_up_url": "https://openrouter.ai/settings/credits",
-                }
-            elif resp.status_code == 402:
-                return {
-                    "available": True,
-                    "credits_remaining": 0,
-                    "credits_used": None,
-                    "is_free_tier": True,
-                    "top_up_url": "https://openrouter.ai/settings/credits",
-                    "warning": "Credits exhausted",
-                }
-            else:
-                return {
-                    "available": False,
-                    "error": f"OpenRouter returned {resp.status_code}",
-                }
+            if key_resp.status_code == 200:
+                key_data = key_resp.json().get("data", {})
+                result["usage_daily"] = round(key_data.get("usage_daily", 0), 4)
+                result["usage_weekly"] = round(key_data.get("usage_weekly", 0), 2)
+                result["usage_monthly"] = round(key_data.get("usage_monthly", 0), 2)
+                result["is_free_tier"] = key_data.get("is_free_tier", False)
+
+                # Warning thresholds
+                balance = result.get("balance", 0)
+                if balance <= 0:
+                    result["status"] = "exhausted"
+                    result["warning"] = "Credits exhausted — add credits to continue using paid models"
+                elif balance < 5:
+                    result["status"] = "low"
+                    result["warning"] = f"Low credits (${balance:.2f} remaining)"
+                else:
+                    result["status"] = "ok"
     except Exception as e:
         logger.warning("OpenRouter credit check failed: %s", e)
-        return {"available": False, "error": str(e)}
+        result["error"] = str(e)
+        result["status"] = "error"
+
+    return result
 
 
 @router.get("/routing")

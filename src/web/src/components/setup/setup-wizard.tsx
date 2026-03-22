@@ -8,7 +8,8 @@ import { Sparkles, Key, CheckCircle2, Activity, ChevronRight, ChevronLeft, Loade
 import { cn } from "@/lib/utils"
 import { ApiKeyInput } from "@/components/setup/api-key-input"
 import { HealthDashboard } from "@/components/setup/health-dashboard"
-import { applySetupConfig } from "@/lib/api"
+import { applySetupConfig, fetchProviderCredits } from "@/lib/api"
+import type { ProviderCredits } from "@/lib/types"
 
 interface SetupWizardProps {
   open: boolean
@@ -34,9 +35,14 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   const [applyError, setApplyError] = useState<string | null>(null)
   const [applied, setApplied] = useState(false)
   const [allHealthy, setAllHealthy] = useState(false)
+  const [credits, setCredits] = useState<ProviderCredits | null>(null)
 
   const handleKeyValidated = useCallback((provider: string) => (key: string, valid: boolean) => {
     setKeys((prev) => ({ ...prev, [provider]: { key, valid } }))
+    // After OpenRouter key is validated, fetch credit balance
+    if (provider === "openrouter" && valid) {
+      fetchProviderCredits().then(setCredits).catch(() => {})
+    }
   }, [])
 
   const canProceedFromKeys = keys.openrouter.valid
@@ -136,6 +142,32 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                   helpUrl="https://openrouter.ai/keys"
                   onKeyValidated={handleKeyValidated("openrouter")}
                 />
+                {!keys.openrouter.valid && (
+                  <div className="rounded-lg border bg-muted/30 px-3 py-2.5">
+                    <p className="mb-1 text-xs font-medium text-muted-foreground">
+                      Don&apos;t have an OpenRouter account?
+                    </p>
+                    <ol className="ml-4 list-decimal space-y-0.5 text-xs text-muted-foreground">
+                      <li>
+                        <a href="https://openrouter.ai/auth" target="_blank" rel="noopener noreferrer" className="text-brand underline hover:text-brand/80">
+                          Create account at openrouter.ai
+                        </a>
+                      </li>
+                      <li>Add credits ($5 minimum recommended)</li>
+                      <li>Copy your API key from the dashboard</li>
+                    </ol>
+                  </div>
+                )}
+                {keys.openrouter.valid && credits?.configured && credits.balance != null && (
+                  <div className="flex items-center justify-between rounded-lg border border-green-500/30 bg-green-500/5 px-3 py-2">
+                    <span className="text-xs text-green-600 dark:text-green-400">
+                      OpenRouter balance
+                    </span>
+                    <span className="text-sm font-semibold tabular-nums text-green-600 dark:text-green-400">
+                      ${credits.balance.toFixed(2)}
+                    </span>
+                  </div>
+                )}
                 <ApiKeyInput
                   provider="openai"
                   label="OpenAI API Key"

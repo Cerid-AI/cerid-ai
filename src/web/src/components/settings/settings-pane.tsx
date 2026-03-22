@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useCallback, useEffect, useState } from "react"
-import { useQueryClient } from "@tanstack/react-query"
-import { fetchSettings, updateSettings, fetchKBStats, adminRebuildIndexes, adminRescore, adminRegenerateSummaries, adminClearDomain } from "@/lib/api"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { fetchSettings, updateSettings, fetchKBStats, adminRebuildIndexes, adminRescore, adminRegenerateSummaries, adminClearDomain, fetchProviderCredits } from "@/lib/api"
 import type { KBStats } from "@/lib/api"
-import type { ServerSettings, SettingsUpdate, RoutingMode } from "@/lib/types"
+import type { ServerSettings, SettingsUpdate, RoutingMode, ProviderCredits } from "@/lib/types"
 import { useSettings } from "@/hooks/use-settings"
 import { cn } from "@/lib/utils"
 import { PRESETS, detectActivePreset } from "@/lib/settings-presets"
@@ -43,6 +43,8 @@ import {
   SearchIcon,
   HardDrive,
   Trash2,
+  CreditCard,
+  ExternalLink,
 } from "lucide-react"
 import { SyncSection } from "./sync-section"
 import { PluginsSection } from "./plugins-section"
@@ -50,7 +52,7 @@ import { PaneErrorBoundary } from "@/components/ui/pane-error-boundary"
 
 type LoadState = "loading" | "error" | "ready"
 
-type SectionKey = "connection" | "knowledge_ingestion" | "features" | "retrieval" | "search" | "taxonomy" | "infra_sync" | "kb_admin"
+type SectionKey = "connection" | "knowledge_ingestion" | "features" | "retrieval" | "search" | "taxonomy" | "infra_sync" | "kb_admin" | "credits"
 
 const SETTINGS_SECTIONS_VERSION = 2 // Bump to force new defaults on existing users
 
@@ -58,7 +60,7 @@ function readSectionState(): Record<SectionKey, boolean> {
   const defaults: Record<SectionKey, boolean> = {
     connection: true, knowledge_ingestion: true, features: true,
     retrieval: true, search: true, taxonomy: true, infra_sync: true,
-    kb_admin: true,
+    kb_admin: true, credits: true,
   }
   try {
     const ver = localStorage.getItem("cerid-settings-sections-v")
@@ -102,6 +104,12 @@ export default function SettingsPane() {
   const [pipelineCustomize, setPipelineCustomize] = useState(false)
   const { routingMode, setRoutingMode } = useSettings()
   const { mode: uiMode, setMode: setUIMode } = useUIMode()
+  const { data: credits } = useQuery<ProviderCredits>({
+    queryKey: ["provider-credits"],
+    queryFn: fetchProviderCredits,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  })
   const [activeTab, setActiveTab] = useState<string>(() => {
     try { return localStorage.getItem("cerid-settings-tab") ?? "essentials" } catch { return "essentials" }
   })
@@ -704,6 +712,64 @@ export default function SettingsPane() {
                       ))}
                     </div>
                   </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* ── Provider Credits ── */}
+            <SectionHeading icon={CreditCard} label="Provider Credits" open={sections.credits} onToggle={() => toggleSection("credits")} />
+            {sections.credits && (
+              <Card className="mb-4">
+                <CardContent className="grid gap-3 pt-4">
+                  {credits?.configured ? (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <LabelWithInfo label="Balance" info="Remaining OpenRouter credits" />
+                        <span className={cn(
+                          "text-sm font-semibold tabular-nums",
+                          credits.status === "ok" && "text-green-600 dark:text-green-400",
+                          credits.status === "low" && "text-yellow-600 dark:text-yellow-400",
+                          credits.status === "exhausted" && "text-red-600 dark:text-red-400",
+                          credits.status === "error" && "text-muted-foreground",
+                        )}>
+                          ${credits.balance?.toFixed(2) ?? "—"}
+                        </span>
+                      </div>
+                      {credits.warning && (
+                        <p className="text-xs text-yellow-600 dark:text-yellow-400">{credits.warning}</p>
+                      )}
+                      <div className="my-1 h-px bg-border" />
+                      <Row label="Today" value={credits.usage_daily != null ? `$${credits.usage_daily.toFixed(4)}` : "—"} info="Spend today" />
+                      <Row label="This Week" value={credits.usage_weekly != null ? `$${credits.usage_weekly.toFixed(2)}` : "—"} info="Spend this week" />
+                      <Row label="This Month" value={credits.usage_monthly != null ? `$${credits.usage_monthly.toFixed(2)}` : "—"} info="Spend this month" />
+                      <Row label="Total Used" value={credits.total_usage != null ? `$${credits.total_usage.toFixed(2)}` : "—"} info="Lifetime credits consumed" />
+                      <div className="my-1 h-px bg-border" />
+                      <div className="flex gap-2">
+                        <a
+                          href={credits.top_up_url ?? "https://openrouter.ai/settings/credits"}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex h-8 items-center gap-1.5 rounded-md bg-brand px-3 text-xs font-medium text-brand-foreground hover:bg-brand/90"
+                        >
+                          Add Credits
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                        <a
+                          href={credits.account_url ?? "https://openrouter.ai/settings"}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs font-medium hover:bg-accent"
+                        >
+                          Manage Account
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      No OpenRouter API key configured. Add one in the setup wizard or environment variables.
+                    </p>
+                  )}
                 </CardContent>
               </Card>
             )}

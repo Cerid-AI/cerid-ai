@@ -1158,6 +1158,14 @@ export async function fetchOpenRouterCredits(): Promise<import("./types").OpenRo
   return res.json()
 }
 
+export async function fetchProviderCredits(): Promise<import("./types").ProviderCredits> {
+  const res = await fetch(`${MCP_BASE}/providers/credits`, {
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) return { configured: false }
+  return res.json()
+}
+
 // ---------------------------------------------------------------------------
 // Automations
 // ---------------------------------------------------------------------------

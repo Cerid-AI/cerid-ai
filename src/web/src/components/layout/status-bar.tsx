@@ -3,7 +3,7 @@
 
 import { useQuery } from "@tanstack/react-query"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { fetchHealth } from "@/lib/api"
+import { fetchHealth, fetchProviderCredits } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 const SERVICE_INFO: Record<string, { purpose: string; tech: string }> = {
@@ -18,6 +18,14 @@ export function StatusBar() {
     queryFn: fetchHealth,
     refetchInterval: 15_000,
     retry: 1,
+  })
+
+  const { data: credits } = useQuery({
+    queryKey: ["provider-credits"],
+    queryFn: fetchProviderCredits,
+    refetchInterval: 60_000,
+    retry: 1,
+    staleTime: 30_000,
   })
 
   const status = isLoading ? "loading" : isError ? "error" : health?.status ?? "unknown"
@@ -88,6 +96,51 @@ export function StatusBar() {
                 </Tooltip>
               )
             })}
+          </div>
+        )}
+
+        {/* Credits indicator — pushed to the right */}
+        {credits?.configured && credits.balance != null && (
+          <div className="ml-auto">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <a
+                  href={credits.top_up_url ?? "https://openrouter.ai/settings/credits"}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={cn(
+                    "cursor-pointer font-medium tabular-nums transition-colors hover:underline",
+                    credits.status === "ok" && "text-green-600 dark:text-green-400",
+                    credits.status === "low" && "text-yellow-600 dark:text-yellow-400",
+                    credits.status === "exhausted" && "text-red-600 dark:text-red-400",
+                    credits.status === "error" && "text-muted-foreground",
+                  )}
+                >
+                  {credits.status === "exhausted" ? (
+                    "Credits exhausted"
+                  ) : (
+                    `$${credits.balance.toFixed(2)}`
+                  )}
+                </a>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="space-y-1">
+                <p className="font-medium">OpenRouter Credits</p>
+                <p className="text-muted-foreground">Balance: ${credits.balance?.toFixed(2)}</p>
+                {credits.usage_daily != null && (
+                  <p className="text-muted-foreground">Today: ${credits.usage_daily.toFixed(4)}</p>
+                )}
+                {credits.usage_weekly != null && (
+                  <p className="text-muted-foreground">This week: ${credits.usage_weekly.toFixed(2)}</p>
+                )}
+                {credits.usage_monthly != null && (
+                  <p className="text-muted-foreground">This month: ${credits.usage_monthly.toFixed(2)}</p>
+                )}
+                {credits.warning && (
+                  <p className="font-medium text-yellow-400">{credits.warning}</p>
+                )}
+                <p className="text-muted-foreground">Click to add credits</p>
+              </TooltipContent>
+            </Tooltip>
           </div>
         )}
       </div>
