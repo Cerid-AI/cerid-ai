@@ -7,8 +7,8 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
-# In Docker, MCP is accessed directly (CORS is open), Bifrost via nginx proxy
-ENV VITE_MCP_URL=http://localhost:8888
+# In Docker, use nginx proxy paths (env-config.js can override at runtime)
+ENV VITE_MCP_URL=/api/mcp
 ENV VITE_BIFROST_URL=/api/bifrost
 ARG VITE_CERID_API_KEY=""
 ENV VITE_CERID_API_KEY=${VITE_CERID_API_KEY}

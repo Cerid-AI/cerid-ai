@@ -4,7 +4,7 @@
 // Runtime config (window.__ENV__ from docker-entrypoint.sh) takes precedence
 // over build-time Vite env vars, enabling config changes without rebuild.
 const _env = (globalThis as Record<string, unknown>).__ENV__ as Record<string, string> | undefined
-const MCP_BASE = _env?.VITE_MCP_URL || import.meta.env.VITE_MCP_URL || "http://localhost:8888"
+const MCP_BASE = _env?.VITE_MCP_URL || import.meta.env.VITE_MCP_URL || "/api/mcp"
 const API_KEY = _env?.VITE_CERID_API_KEY || import.meta.env.VITE_CERID_API_KEY || ""
 
 import { uuid } from "@/lib/utils"
