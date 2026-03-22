@@ -14,19 +14,19 @@ describe("USER_PRESETS", () => {
     expect(new Set(ids).size).toBe(ids.length)
   })
 
-  it("casual preset sets simple mode", () => {
-    const casual = getPresetById("casual")
-    expect(casual.uiMode).toBe("simple")
+  it("quick preset sets simple mode", () => {
+    const quick = getPresetById("quick")
+    expect(quick.uiMode).toBe("simple")
   })
 
-  it("researcher preset sets advanced mode", () => {
-    const researcher = getPresetById("researcher")
-    expect(researcher.uiMode).toBe("advanced")
+  it("balanced preset sets advanced mode", () => {
+    const balanced = getPresetById("balanced")
+    expect(balanced.uiMode).toBe("advanced")
   })
 
-  it("power-user preset sets advanced mode", () => {
-    const powerUser = getPresetById("power-user")
-    expect(powerUser.uiMode).toBe("advanced")
+  it("maximum preset sets advanced mode", () => {
+    const maximum = getPresetById("maximum")
+    expect(maximum.uiMode).toBe("advanced")
   })
 
   it("all presets have settings with enable_auto_inject", () => {
@@ -41,27 +41,29 @@ describe("USER_PRESETS", () => {
     }
   })
 
-  it("power-user enables all pipeline features", () => {
-    const pu = getPresetById("power-user")
-    expect(pu.settings.enable_feedback_loop).toBe(true)
-    expect(pu.settings.enable_hallucination_check).toBe(true)
-    expect(pu.settings.enable_self_rag).toBe(true)
-    expect(pu.settings.enable_semantic_cache).toBe(true)
-    expect(pu.settings.enable_late_interaction).toBe(true)
+  it("maximum enables all pipeline features", () => {
+    const max = getPresetById("maximum")
+    expect(max.settings.enable_feedback_loop).toBe(true)
+    expect(max.settings.enable_hallucination_check).toBe(true)
+    expect(max.settings.enable_self_rag).toBe(true)
+    expect(max.settings.enable_semantic_cache).toBe(true)
+    expect(max.settings.enable_late_interaction).toBe(true)
+    expect(max.settings.enable_memory_consolidation).toBe(true)
+    expect(max.settings.enable_context_compression).toBe(true)
   })
 
-  it("casual disables advanced features", () => {
-    const casual = getPresetById("casual")
-    expect(casual.settings.enable_feedback_loop).toBe(false)
-    expect(casual.settings.enable_hallucination_check).toBe(false)
-    expect(casual.settings.enable_self_rag).toBe(false)
-    expect(casual.settings.enable_semantic_cache).toBe(false)
+  it("quick enables core verification features", () => {
+    const quick = getPresetById("quick")
+    expect(quick.settings.enable_feedback_loop).toBe(false)
+    expect(quick.settings.enable_hallucination_check).toBe(true)
+    expect(quick.settings.enable_self_rag).toBe(true)
+    expect(quick.settings.enable_semantic_cache).toBe(false)
   })
 })
 
 describe("getPresetById", () => {
   it("returns correct preset for each valid ID", () => {
-    const ids: PresetId[] = ["casual", "researcher", "power-user"]
+    const ids: PresetId[] = ["quick", "balanced", "maximum"]
     for (const id of ids) {
       const preset = getPresetById(id)
       expect(preset.id).toBe(id)

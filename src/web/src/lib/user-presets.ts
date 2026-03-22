@@ -3,7 +3,7 @@
 
 import type { SettingsUpdate } from "./types"
 
-export type PresetId = "casual" | "researcher" | "power-user"
+export type PresetId = "quick" | "balanced" | "maximum"
 export type UIMode = "simple" | "advanced"
 
 export interface UserPreset {
@@ -19,19 +19,19 @@ export interface UserPreset {
 
 export const USER_PRESETS: UserPreset[] = [
   {
-    id: "casual",
-    label: "Casual",
-    emoji: "☕",
-    description: "Simple chat with basic knowledge lookups — minimal UI clutter.",
+    id: "quick",
+    label: "Quick",
+    emoji: "⚡",
+    description: "Fast responses with basic verification. Best for quick questions.",
     uiMode: "simple",
     settings: {
       enable_feedback_loop: false,
-      enable_hallucination_check: false,
+      enable_hallucination_check: true,
       enable_memory_extraction: false,
       enable_model_router: false,
       enable_auto_inject: true,
       auto_inject_threshold: 0.85,
-      enable_self_rag: false,
+      enable_self_rag: true,
       enable_contextual_chunks: false,
       enable_adaptive_retrieval: false,
       enable_query_decomposition: false,
@@ -41,7 +41,7 @@ export const USER_PRESETS: UserPreset[] = [
     },
     local: {
       "cerid-feedback-loop": "false",
-      "cerid-hallucination-check": "false",
+      "cerid-hallucination-check": "true",
       "cerid-memory-extraction": "false",
       "cerid-routing-mode": "manual",
       "cerid-auto-inject": "true",
@@ -51,10 +51,10 @@ export const USER_PRESETS: UserPreset[] = [
     },
   },
   {
-    id: "researcher",
-    label: "Researcher",
+    id: "balanced",
+    label: "Balanced",
     emoji: "🔬",
-    description: "Balanced retrieval with verification and memory — recommended for most users.",
+    description: "Thorough retrieval with full verification pipeline.",
     uiMode: "advanced",
     settings: {
       enable_feedback_loop: false,
@@ -70,6 +70,8 @@ export const USER_PRESETS: UserPreset[] = [
       enable_mmr_diversity: true,
       enable_late_interaction: true,
       enable_semantic_cache: true,
+      enable_memory_consolidation: true,
+      enable_context_compression: true,
     },
     local: {
       "cerid-feedback-loop": "false",
@@ -83,10 +85,10 @@ export const USER_PRESETS: UserPreset[] = [
     },
   },
   {
-    id: "power-user",
-    label: "Power User",
+    id: "maximum",
+    label: "Maximum",
     emoji: "🔧",
-    description: "Maximum pipeline features — full feedback loop, auto routing, all analytics.",
+    description: "All features enabled. Maximum quality, higher latency.",
     uiMode: "advanced",
     settings: {
       enable_feedback_loop: true,
@@ -103,6 +105,8 @@ export const USER_PRESETS: UserPreset[] = [
       enable_intelligent_assembly: true,
       enable_late_interaction: true,
       enable_semantic_cache: true,
+      enable_memory_consolidation: true,
+      enable_context_compression: true,
     },
     local: {
       "cerid-feedback-loop": "true",

@@ -589,6 +589,26 @@ export default function SettingsPane() {
                       info="Minimum cosine similarity for a cache hit"
                     />
                   </PipelineToggle>
+
+                  <div className="h-px bg-border" />
+
+                  {/* Memory Consolidation */}
+                  <PipelineToggle
+                    label="Memory Consolidation"
+                    enabled={settings.enable_memory_consolidation ?? true}
+                    onToggle={(v) => patch({ enable_memory_consolidation: v })}
+                    description="Deduplicate and merge similar memories during extraction"
+                  />
+
+                  <div className="h-px bg-border" />
+
+                  {/* Context Compression */}
+                  <PipelineToggle
+                    label="Context Compression"
+                    enabled={settings.enable_context_compression ?? true}
+                    onToggle={(v) => patch({ enable_context_compression: v })}
+                    description="Compress conversation history to fit within model context window"
+                  />
                     </div>
                   )}
                 </CardContent>

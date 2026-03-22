@@ -11,18 +11,21 @@ export interface SettingsPreset {
 
 export const PRESETS: Record<string, SettingsPreset> = {
   essential: {
-    label: "Essential",
-    description: "Core features only — fast, low resource usage",
+    label: "Balanced",
+    description: "Smart defaults — good quality with reasonable speed",
     values: {
       enable_self_rag: true,
-      enable_hallucination_check: false,
+      enable_hallucination_check: true,
       enable_auto_inject: false,
-      enable_adaptive_retrieval: false,
-      enable_query_decomposition: false,
-      enable_mmr_diversity: false,
-      enable_intelligent_assembly: false,
+      enable_adaptive_retrieval: true,
+      enable_query_decomposition: true,
+      enable_mmr_diversity: true,
+      enable_intelligent_assembly: true,
       enable_late_interaction: false,
-      enable_semantic_cache: false,
+      enable_semantic_cache: true,
+      enable_contextual_chunks: false,
+      enable_memory_consolidation: true,
+      enable_context_compression: true,
     },
   },
   recommended: {
@@ -38,9 +41,11 @@ export const PRESETS: Record<string, SettingsPreset> = {
       mmr_lambda: 0.7,
       enable_semantic_cache: true,
       semantic_cache_threshold: 0.92,
-      enable_query_decomposition: false,
-      enable_intelligent_assembly: false,
+      enable_query_decomposition: true,
+      enable_intelligent_assembly: true,
       enable_late_interaction: false,
+      enable_memory_consolidation: true,
+      enable_context_compression: true,
     },
   },
   maximum: {
@@ -62,6 +67,8 @@ export const PRESETS: Record<string, SettingsPreset> = {
       late_interaction_blend_weight: 0.15,
       enable_semantic_cache: true,
       semantic_cache_threshold: 0.92,
+      enable_memory_consolidation: true,
+      enable_context_compression: true,
     },
   },
 }
@@ -77,6 +84,9 @@ const PRESET_TOGGLE_KEYS = [
   "enable_intelligent_assembly",
   "enable_late_interaction",
   "enable_semantic_cache",
+  "enable_contextual_chunks",
+  "enable_memory_consolidation",
+  "enable_context_compression",
 ] as const
 
 /**

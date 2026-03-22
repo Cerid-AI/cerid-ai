@@ -530,6 +530,8 @@ export interface ServerSettings {
   late_interaction_blend_weight?: number
   enable_semantic_cache?: boolean
   semantic_cache_threshold?: number
+  enable_memory_consolidation?: boolean
+  enable_context_compression?: boolean
   // Trading agent integration
   trading_enabled?: boolean
 }
@@ -564,6 +566,8 @@ export interface SettingsUpdate {
   late_interaction_blend_weight?: number
   enable_semantic_cache?: boolean
   semantic_cache_threshold?: number
+  enable_memory_consolidation?: boolean
+  enable_context_compression?: boolean
 }
 
 export interface Memory {

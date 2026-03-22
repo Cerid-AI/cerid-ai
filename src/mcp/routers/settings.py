@@ -116,6 +116,12 @@ class SettingsUpdateRequest(BaseModel):
     semantic_cache_threshold: float | None = Field(
         None, ge=0.5, le=1.0, description="Similarity threshold for cache hits"
     )
+    enable_memory_consolidation: bool | None = Field(
+        None, description="Enable memory dedup/consolidation during extraction"
+    )
+    enable_context_compression: bool | None = Field(
+        None, description="Enable LLM-based conversation context compression"
+    )
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -333,6 +339,14 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
         features_mod.SEMANTIC_CACHE_THRESHOLD = req.semantic_cache_threshold
         config.SEMANTIC_CACHE_THRESHOLD = req.semantic_cache_threshold  # type: ignore[assignment]
         updated["semantic_cache_threshold"] = req.semantic_cache_threshold
+
+    if req.enable_memory_consolidation is not None:
+        set_toggle("enable_memory_consolidation", req.enable_memory_consolidation)
+        updated["enable_memory_consolidation"] = req.enable_memory_consolidation
+
+    if req.enable_context_compression is not None:
+        set_toggle("enable_context_compression", req.enable_context_compression)
+        updated["enable_context_compression"] = req.enable_context_compression
 
     if not updated:
         raise HTTPException(
