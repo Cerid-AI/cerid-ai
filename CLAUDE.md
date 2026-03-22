@@ -1,7 +1,16 @@
 # CLAUDE.md - Cerid AI
 
-> **Extends:** `~/Develop/CLAUDE.md` — all global workflow orchestration, core principles, and task
-> management rules apply here. This file adds only project-specific context.
+> **Extends:** `sunrunnerfire/dotfiles` — all global workflow orchestration, core principles,
+> commit policy, and task management rules apply here. This file adds only project-specific context.
+
+## Session Start (Required)
+
+Before beginning any development work in this repo, if not already done in this session:
+
+1. Read global framework context from the dotfiles repo using the GitHub MCP tool:
+   - `sunrunnerfire/dotfiles` → `CLAUDE.md` (workflow principles, commit policy)
+   - `sunrunnerfire/dotfiles` → `CLAUDE_CODE_SETUP.md` (plugins, MCP servers)
+2. Never add AI attribution to commits — see dotfiles `CLAUDE.md` commit policy.
 
 ---
 
@@ -161,12 +170,12 @@ curl http://localhost:8888/artifacts
 
 ## Claude Code Setup (New Machine)
 
-> **Global setup applies first** — see `~/Develop/CLAUDE_CODE_SETUP.md` for global plugins and MCP servers shared across all projects.
+> **Global setup applies first** — see `sunrunnerfire/dotfiles` → `CLAUDE_CODE_SETUP.md` for global plugins and MCP servers shared across all projects.
 
 ### Project Setup
 
 1. **Verify prerequisites:** Docker running, `.env` decrypted, `age` installed, archive directory exists
-2. **Install global plugins + MCP servers** — follow `~/Develop/CLAUDE_CODE_SETUP.md`
+2. **Install global plugins + MCP servers** — follow `sunrunnerfire/dotfiles` → `CLAUDE_CODE_SETUP.md`
 3. **Run `./scripts/validate-env.sh`** to check all 14 environment validations
 4. **If containers are down:** `./scripts/start-cerid.sh` (or `--build` after a `git pull`)
 
@@ -193,7 +202,7 @@ curl http://localhost:8888/artifacts
 
 ### Global Plugins Required
 
-See `~/Develop/CLAUDE_CODE_SETUP.md` for full list. Key plugins for this project:
+See `sunrunnerfire/dotfiles` → `CLAUDE_CODE_SETUP.md` for full list. Key plugins for this project:
 
 - `superpowers` — plan execution, TDD, code review, debugging workflows
 - `pyright-lsp` — Python type checking
@@ -202,7 +211,7 @@ See `~/Develop/CLAUDE_CODE_SETUP.md` for full list. Key plugins for this project
 
 ### Global MCP Servers Required
 
-See `~/Develop/CLAUDE_CODE_SETUP.md` for install commands:
+See `sunrunnerfire/dotfiles` → `CLAUDE_CODE_SETUP.md` for install commands:
 
 - **context7** — live docs for React, FastAPI, pydantic, ChromaDB, Neo4j
 - **github-mcp** — GitHub issues, PRs, actions
