@@ -374,10 +374,10 @@ class TestExtractionErrorHandling:
 
         from agents.hallucination import _extract_claims_llm
 
-        async def _mock_call_bifrost(*args, **kwargs):
+        async def _mock_call_llm(*args, **kwargs):
             raise httpx.ReadTimeout("Connection timed out")
 
-        with patch("agents.hallucination.extraction.call_bifrost", side_effect=_mock_call_bifrost):
+        with patch("agents.hallucination.extraction.call_llm", side_effect=_mock_call_llm):
             result = await _extract_claims_llm("Some response text for testing.", 10)
 
         assert result == []
@@ -389,10 +389,10 @@ class TestExtractionErrorHandling:
 
         from agents.hallucination import _extract_claims_llm
 
-        async def _mock_call_bifrost(*args, **kwargs):
+        async def _mock_call_llm(*args, **kwargs):
             raise httpx.ConnectError("Connection refused")
 
-        with patch("agents.hallucination.extraction.call_bifrost", side_effect=_mock_call_bifrost):
+        with patch("agents.hallucination.extraction.call_llm", side_effect=_mock_call_llm):
             result = await _extract_claims_llm("Some response text for testing.", 10)
 
         assert result == []
