@@ -65,7 +65,7 @@ export function useVerificationOrchestrator({
   currentModel,
   expertVerification,
 }: UseVerificationOrchestratorOptions): UseVerificationOrchestratorReturn {
-  const { verifiedConversations, markVerified, clearVerified, saveVerification, getVerification, getAllVerificationReports: getAllReports } = useConversationsContext()
+  const { markVerified, clearVerified, saveVerification, getVerification, getAllVerificationReports: getAllReports } = useConversationsContext()
   const [savedReport, setSavedReport] = useState<HallucinationReport | null>(null)
   const [savedReportLoading, setSavedReportLoading] = useState(false)
   const [manualVerifyBump, setManualVerifyBump] = useState(0)
