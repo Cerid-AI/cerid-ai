@@ -62,8 +62,6 @@ class ProviderListResponse(BaseModel):
 @router.get("", response_model=ProviderListResponse)
 async def list_providers():
     """List all supported providers with their connection status."""
-    import os
-
     providers = []
     for name, entry in PROVIDER_REGISTRY.items():
         env_var = entry["env_var"]
@@ -100,8 +98,6 @@ async def list_configured_providers():
 @router.get("/internal")
 async def get_internal_provider():
     """Return the configured internal LLM provider for pipeline operations."""
-    import os
-
     ollama_available = False
     try:
         import httpx
@@ -302,8 +298,6 @@ async def get_provider(name: str):
     if name not in PROVIDER_REGISTRY:
         raise HTTPException(status_code=404, detail=f"Unknown provider: {name}")
 
-    import os
-
     entry = PROVIDER_REGISTRY[name]
     env_var = entry["env_var"]
     api_key = os.getenv(env_var, "") if env_var else ""
@@ -333,7 +327,7 @@ async def validate_key(name: str, req: ValidateKeyRequest):
     """Validate an API key against a provider's test endpoint.
 
     Makes a real HTTP call to the provider to verify the key is valid.
-    Does NOT store the key — that's a future sprint.
+    Key storage is handled separately via PUT /config.
     """
     if name not in PROVIDER_REGISTRY:
         raise HTTPException(status_code=404, detail=f"Unknown provider: {name}")

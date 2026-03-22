@@ -67,7 +67,6 @@ export function useVerificationOrchestrator({
 }: UseVerificationOrchestratorOptions): UseVerificationOrchestratorReturn {
   const { markVerified, clearVerified, saveVerification, getVerification, getAllVerificationReports: getAllReports } = useConversationsContext()
   const [savedReport, setSavedReport] = useState<HallucinationReport | null>(null)
-  const [savedReportLoading, _setSavedReportLoading] = useState(false)
   const [manualVerifyBump, setManualVerifyBump] = useState(0)
   const [verificationRecBanner, setVerificationRecBanner] = useState<{ model: ModelOption; reason: string } | null>(null)
   const [selectedMsgId, setSelectedMsgId] = useState<string | null>(null)
@@ -161,8 +160,7 @@ export function useVerificationOrchestrator({
     if (isStreaming) {
       setSavedReport(null)
       setSelectedMsgId(null)
-      savedForKey.current = ""  // reset save guard for new verification cycle
-      // fetchedForKey ref removed — no longer fetching saved reports from API
+      savedForKey.current = ""
       if (activeId && lastAssistantMsgId) {
         reportCache.delete(cacheKey(activeId, lastAssistantMsgId))
         // Defer context update to avoid re-render during effect
@@ -218,11 +216,7 @@ export function useVerificationOrchestrator({
   // eslint-disable-next-line react-hooks/exhaustive-deps -- context callbacks accessed via refs to prevent re-render loops
   }, [verification.phase, verification.report, activeId, lastAssistantMsgId])
 
-  // Load saved verification report from local caches only (no API fetch).
-  // API fetch was causing infinite re-render loops because saveVerification
-  // updated context → new refs → effect re-triggered → fetch → save → loop.
-  // Reports are cached locally when verification completes (save effect above).
-  // For older conversations without cached reports, the user can click "Re-verify".
+  // Load saved verification report from local caches (module-level + localStorage).
   useEffect(() => {
     if (!activeId || !hallucinationEnabled || !effectiveMsgId) {
       setSavedReport(null)
@@ -275,9 +269,8 @@ export function useVerificationOrchestrator({
     return savedReport
   }, [effectiveMsgId, lastAssistantMsgId, verification.report, savedReport])
 
-  // Only include savedReportLoading when stream is idle — otherwise stream has its own phase
   const halLoading = effectiveMsgId === lastAssistantMsgId
-    ? (verification.loading || (verification.phase === "idle" && savedReportLoading))
+    ? verification.loading
     : false
 
   const verificationStatusForMsg = useMemo((): MessageVerificationStatus => {

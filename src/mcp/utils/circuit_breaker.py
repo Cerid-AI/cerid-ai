@@ -231,6 +231,10 @@ _ollama = AsyncCircuitBreaker("ollama", failure_threshold=3, recovery_timeout=30
 _bifrost_compress = AsyncCircuitBreaker("bifrost-compress", failure_threshold=3, recovery_timeout=60)
 _bifrost_decompose = AsyncCircuitBreaker("bifrost-decompose", failure_threshold=3, recovery_timeout=60)
 _web_search = AsyncCircuitBreaker("web-search", failure_threshold=3, recovery_timeout=30)
+_openrouter = AsyncCircuitBreaker("openrouter", failure_threshold=5, recovery_timeout=60)
+_tavily = AsyncCircuitBreaker("tavily", failure_threshold=3, recovery_timeout=30)
+_searxng = AsyncCircuitBreaker("searxng", failure_threshold=3, recovery_timeout=30)
+_ragas_eval = AsyncCircuitBreaker("ragas_eval", failure_threshold=3, recovery_timeout=60)
 
 
 def get_breaker(name: str) -> AsyncCircuitBreaker:
@@ -244,6 +248,10 @@ def get_breaker(name: str) -> AsyncCircuitBreaker:
         "bifrost-compress": _bifrost_compress,
         "bifrost-decompose": _bifrost_decompose,
         "web-search": _web_search,
+        "openrouter": _openrouter,
+        "tavily": _tavily,
+        "searxng": _searxng,
+        "ragas_eval": _ragas_eval,
         "neo4j": _neo4j,
         "ollama": _ollama,
     }
