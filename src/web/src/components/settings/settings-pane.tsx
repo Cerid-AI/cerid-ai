@@ -46,6 +46,7 @@ import {
 } from "lucide-react"
 import { SyncSection } from "./sync-section"
 import { PluginsSection } from "./plugins-section"
+import { PaneErrorBoundary } from "@/components/ui/pane-error-boundary"
 
 type LoadState = "loading" | "error" | "ready"
 
@@ -272,6 +273,7 @@ export default function SettingsPane() {
 
               {/* ── Essentials Tab ── */}
               <TabsContent value="essentials" className="space-y-1 pt-2">
+              <PaneErrorBoundary label="Essentials">
 
             {/* ── Knowledge & Ingestion ── */}
             <SectionHeading icon={Database} label="Knowledge & Ingestion" open={sections.knowledge_ingestion} onToggle={() => toggleSection("knowledge_ingestion")} />
@@ -421,10 +423,12 @@ export default function SettingsPane() {
               </Card>
             )}
 
+              </PaneErrorBoundary>
               </TabsContent>
 
               {/* ── Pipeline Tab ── */}
               <TabsContent value="pipeline" className="space-y-1 pt-2">
+              <PaneErrorBoundary label="Pipeline">
 
             {/* ── Retrieval Pipeline ── */}
             <SectionHeading icon={Cpu} label="Retrieval Pipeline" open={sections.retrieval} onToggle={() => toggleSection("retrieval")} />
@@ -668,10 +672,12 @@ export default function SettingsPane() {
               </Card>
             )}
 
+              </PaneErrorBoundary>
               </TabsContent>
 
               {/* ── System Tab ── */}
               <TabsContent value="system" className="space-y-1 pt-2">
+              <PaneErrorBoundary label="System">
 
             {/* ── Connection ── */}
             <SectionHeading icon={Server} label="Connection" open={sections.connection} onToggle={() => toggleSection("connection")} />
@@ -872,11 +878,14 @@ export default function SettingsPane() {
               </Card>
             )}
 
+              </PaneErrorBoundary>
               </TabsContent>
 
               {/* ── Plugins Tab ── */}
               <TabsContent value="plugins" className="space-y-1 pt-2">
-                <PluginsSection />
+                <PaneErrorBoundary label="Plugins">
+                  <PluginsSection />
+                </PaneErrorBoundary>
               </TabsContent>
             </Tabs>
           </div>

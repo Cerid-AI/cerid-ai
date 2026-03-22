@@ -92,7 +92,7 @@ export default function WorkflowList({ onEdit, onCreate, onDuplicate }: Workflow
     setError(null)
     try {
       const resp = await fetchWorkflows()
-      setWorkflows(resp.workflows)
+      setWorkflows(Array.isArray(resp.workflows) ? resp.workflows : [])
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load workflows")
     } finally {

@@ -39,6 +39,13 @@ CHAT_FALLBACK_POOL = [
 
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
+# Human-readable error messages for specific upstream status codes
+UPSTREAM_ERROR_MESSAGES: dict[int, str] = {
+    401: "Invalid API key. Check your OpenRouter key in settings.",
+    402: "OpenRouter credits exhausted. Add credits at https://openrouter.ai/settings/credits",
+    403: "Access denied by upstream provider. The selected model may require additional permissions.",
+}
+
 
 def _model_family(model_id: str) -> str:
     """Extract provider family: 'openai/gpt-4o-mini' -> 'openai'."""
@@ -164,9 +171,11 @@ async def _attempt_stream(
 
             # Non-retryable — return a generator that emits the error event
             async def _error_gen() -> AsyncGenerator[bytes, None]:
+                friendly = UPSTREAM_ERROR_MESSAGES.get(status, f"Upstream error ({status})")
                 err = json.dumps({
                     "error": {
-                        "message": f"Upstream error ({status})",
+                        "code": status,
+                        "message": friendly,
                         "type": "upstream_error",
                     }
                 })

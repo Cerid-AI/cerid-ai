@@ -489,7 +489,7 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
         >
           {isUser ? (
             <p className="whitespace-pre-wrap">{message.content}</p>
-          ) : message.content === "" ? (
+          ) : !message.content ? (
             <div className="flex items-center gap-1.5 py-2 px-1">
               <span className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50" style={{ animationDelay: "0ms" }} />
               <span className="h-2 w-2 animate-bounce rounded-full bg-muted-foreground/50" style={{ animationDelay: "150ms" }} />
@@ -518,7 +518,7 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
           />
         )}
 
-        {!isUser && message.content && (
+        {!isUser && !!message.content && (
           <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
             <CopyButton text={message.content} />
             {onCorrect && (
@@ -582,7 +582,7 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
           </div>
         )}
 
-        {!isUser && message.sourcesUsed && message.sourcesUsed.length > 0 && message.content !== "" && (
+        {!isUser && message.sourcesUsed && message.sourcesUsed.length > 0 && !!message.content && (
           <>
             <KBContextIndicator sources={message.sourcesUsed} />
             <SourceAttribution sources={message.sourcesUsed} />

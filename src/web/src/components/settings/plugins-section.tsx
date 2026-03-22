@@ -245,7 +245,8 @@ export function PluginsSection() {
     setScanning(true)
     try {
       const data = await scanPlugins()
-      setPlugins(data.plugins)
+      const scanned = data.plugins
+      setPlugins(Array.isArray(scanned) ? scanned : Object.values(scanned))
     } catch {
       /* ignore */
     } finally {

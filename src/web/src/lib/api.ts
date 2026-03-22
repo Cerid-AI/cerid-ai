@@ -134,7 +134,8 @@ export async function fetchArtifacts(domain?: string, limit = 50): Promise<Artif
   params.set("limit", String(limit))
   const res = await fetch(`${MCP_BASE}/artifacts?${params}`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, `Artifacts fetch failed: ${res.status}`))
-  const artifacts: Artifact[] = await res.json()
+  const raw = await res.json()
+  const artifacts: Artifact[] = Array.isArray(raw) ? raw : []
   return artifacts.map((a) => ({ ...a, tags: parseTags(a.tags) }))
 }
 
@@ -744,7 +745,11 @@ export async function streamChat(
             continue
           }
           if (parsed.error) {
-            throw new Error(parsed.error.message || "Upstream error")
+            const code = parsed.error.code
+            const msg = parsed.error.message || "Upstream error"
+            const err = new Error(msg)
+            ;(err as Error & { code?: number }).code = code
+            throw err
           }
           const content = parsed.choices?.[0]?.delta?.content
           if (content) onChunk(content)
@@ -1160,7 +1165,8 @@ export async function fetchOpenRouterCredits(): Promise<import("./types").OpenRo
 export async function fetchAutomations(): Promise<Automation[]> {
   const res = await fetch(`${MCP_BASE}/automations`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, `Fetch automations failed: ${res.status}`))
-  return res.json()
+  const raw = await res.json()
+  return Array.isArray(raw) ? raw : []
 }
 
 export async function createAutomation(data: AutomationCreate): Promise<Automation> {
@@ -1369,7 +1375,8 @@ export async function runWorkflow(id: string, input?: Record<string, unknown>): 
 export async function fetchWorkflowRuns(id: string, limit = 20): Promise<WorkflowRun[]> {
   const res = await fetch(`${MCP_BASE}/workflows/${id}/runs?limit=${limit}`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, `Fetch workflow runs failed: ${res.status}`))
-  return res.json()
+  const raw = await res.json()
+  return Array.isArray(raw) ? raw : []
 }
 
 export async function fetchWorkflowTemplates(): Promise<WorkflowTemplate[]> {
@@ -1404,6 +1411,7 @@ export async function fetchArtifactsFiltered(params: ArtifactFilterParams): Prom
   qs.set("offset", String(params.offset ?? 0))
   const res = await fetch(`${MCP_BASE}/artifacts?${qs}`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, "Failed to fetch artifacts"))
-  const artifacts: Artifact[] = await res.json()
+  const raw = await res.json()
+  const artifacts: Artifact[] = Array.isArray(raw) ? raw : []
   return artifacts.map((a) => ({ ...a, tags: parseTags(a.tags) }))
 }
