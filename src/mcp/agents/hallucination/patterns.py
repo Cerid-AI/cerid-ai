@@ -94,7 +94,10 @@ NON_FACTUAL_PATTERNS = [
     re.compile(r"^\s*(?:for example|e\.g\.|i\.e\.)\s*$", re.I),   # standalone example markers
     re.compile(r"^\s*\d+\.\s*$"),                                  # bare numbered list markers
     re.compile(r"^\s*(?:import |from \w+ import |def |class |const |let |var |function )", re.I),  # code
-    re.compile(r"^\s*(?:hope this helps|feel free|happy to help|let me know)", re.I),  # pleasantries
+    re.compile(r"^\s*(?:hope this helps|happy to help|let me know)", re.I),  # pleasantries at start
+    re.compile(r"(?:feel free|don'?t hesitate|happy to (?:help|assist)|hope (?:this|that) helps|if you (?:have|need) (?:any|more) (?:questions|help))", re.I),  # pleasantries anywhere
+    re.compile(r"^\s*(?:in (?:summary|conclusion|short)|to (?:summarize|sum up|recap))\s*[,:]?\s*$", re.I),  # standalone summary markers
+    re.compile(r"^\s*(?:overall|essentially|basically)\s*[,:]", re.I),  # filler openers
 ]
 
 # Strong-signal patterns — a single match counts as 2 for scoring purposes
