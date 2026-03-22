@@ -1124,6 +1124,18 @@ export async function fetchSetupHealth(): Promise<SetupHealth> {
 }
 
 // ---------------------------------------------------------------------------
+// OpenRouter Credits
+// ---------------------------------------------------------------------------
+
+export async function fetchOpenRouterCredits(): Promise<import("./types").OpenRouterCredits> {
+  const res = await fetch(`${MCP_BASE}/providers/openrouter/credits`, {
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) return { available: false, error: `HTTP ${res.status}` }
+  return res.json()
+}
+
+// ---------------------------------------------------------------------------
 // Automations
 // ---------------------------------------------------------------------------
 

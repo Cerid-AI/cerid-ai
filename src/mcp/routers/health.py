@@ -43,6 +43,14 @@ def health_check() -> dict:
     except (ValueError, ImportError):
         bifrost_cb_state = "unknown"
 
+    # OpenRouter credit exhaustion flag (set by bifrost.py on 402)
+    credits_exhausted = False
+    try:
+        redis_client = get_redis()
+        credits_exhausted = redis_client.get("cerid:openrouter:credits_exhausted") == "1"
+    except Exception:
+        pass
+
     return {
         "status": "healthy" if all(v == "connected" for v in status.values()) else "degraded",
         "version": "1.0.0",
@@ -50,6 +58,7 @@ def health_check() -> dict:
         "circuit_breakers": {
             "bifrost": bifrost_cb_state,
         },
+        "openrouter_credits_exhausted": credits_exhausted,
     }
 
 

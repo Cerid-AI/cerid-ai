@@ -91,10 +91,42 @@ async def call_bifrost(
             headers=headers,
             timeout=effective_timeout,
         )
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 402:
+                _set_credits_exhausted()
+            raise
+        # On success, clear exhaustion flag if it was previously set
+        _clear_credits_exhausted()
         return resp.json()
 
     return await breaker.call(_call)
+
+
+_CREDITS_KEY = "cerid:openrouter:credits_exhausted"
+
+
+def _set_credits_exhausted() -> None:
+    """Record that OpenRouter returned 402 (credits exhausted)."""
+    try:
+        from deps import get_redis
+
+        get_redis().set(_CREDITS_KEY, "1", ex=300)  # 5-min TTL
+    except Exception:
+        pass
+
+
+def _clear_credits_exhausted() -> None:
+    """Clear the exhaustion flag after a successful Bifrost call."""
+    try:
+        from deps import get_redis
+
+        r = get_redis()
+        if r.exists(_CREDITS_KEY):
+            r.delete(_CREDITS_KEY)
+    except Exception:
+        pass
 
 
 def extract_content(data: dict) -> str:

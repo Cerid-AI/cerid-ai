@@ -110,6 +110,17 @@ export interface HealthResponse {
     redis: "connected" | "error"
     neo4j: "connected" | "error"
   }
+  openrouter_credits_exhausted?: boolean
+}
+
+export interface OpenRouterCredits {
+  available: boolean
+  credits_remaining?: number | null
+  credits_used?: number | null
+  is_free_tier?: boolean
+  top_up_url?: string
+  warning?: string
+  error?: string
 }
 
 export type Theme = "dark" | "light"

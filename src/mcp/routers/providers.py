@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import logging
+import os
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -126,6 +127,50 @@ async def set_internal_provider(body: dict):
         config.INTELLIGENCE_MODEL = intelligence_model
 
     return {"status": "updated", "provider": provider, "model": model}
+
+
+@router.get("/openrouter/credits")
+async def get_openrouter_credits():
+    """Check OpenRouter credit balance and usage."""
+    import httpx
+
+    api_key = os.getenv("OPENROUTER_API_KEY", "")
+    if not api_key:
+        return {"available": False, "error": "No OpenRouter API key configured"}
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                "https://openrouter.ai/api/v1/auth/key",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            if resp.status_code == 200:
+                data = resp.json()["data"]
+                return {
+                    "available": True,
+                    "credits_remaining": data.get("limit_remaining"),
+                    "credits_used": data.get("usage"),
+                    "rate_limit": data.get("rate_limit"),
+                    "is_free_tier": data.get("is_free_tier", False),
+                    "top_up_url": "https://openrouter.ai/settings/credits",
+                }
+            elif resp.status_code == 402:
+                return {
+                    "available": True,
+                    "credits_remaining": 0,
+                    "credits_used": None,
+                    "is_free_tier": True,
+                    "top_up_url": "https://openrouter.ai/settings/credits",
+                    "warning": "Credits exhausted",
+                }
+            else:
+                return {
+                    "available": False,
+                    "error": f"OpenRouter returned {resp.status_code}",
+                }
+    except Exception as e:
+        logger.warning("OpenRouter credit check failed: %s", e)
+        return {"available": False, "error": str(e)}
 
 
 @router.get("/{name}")

@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
 import { Database, Zap, Sparkles, MessageSquarePlus, Clock, ShieldCheck } from "lucide-react"
+import { CreditBanner } from "./credit-banner"
 import { ChatToolbar } from "./chat-toolbar"
 import { ChatMessages } from "./chat-messages"
 import { ChatInput } from "./chat-input"
@@ -329,6 +330,9 @@ export function ChatPanel() {
         onModelChange={handleModelChange}
         onNewChat={() => create(selectedModel)}
       />
+
+      {/* Credit exhaustion banner */}
+      <CreditBanner />
 
       {/* Dashboard metrics bar (advanced only) */}
       {!isSimple && showDashboard && (
