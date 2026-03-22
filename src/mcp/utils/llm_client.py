@@ -165,7 +165,7 @@ async def call_llm(
         _logger.warning("Circuit '%s' open, falling back to Bifrost", breaker_name)
         return await _bifrost_fallback(
             messages,
-            breaker_name=f"bifrost-{breaker_name}",
+            breaker_name=breaker_name,
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -248,7 +248,7 @@ async def call_llm_raw(
         _logger.warning("Circuit '%s' open, falling back to Bifrost", breaker_name)
         return await _bifrost_fallback_raw(
             messages,
-            breaker_name=f"bifrost-{breaker_name}",
+            breaker_name=breaker_name,
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
