@@ -210,10 +210,19 @@ async def multi_domain_query(
     if chroma_client is None:
         chroma_client = get_chroma()
 
+    # Pre-check which collections actually exist to skip missing domains fast
+    try:
+        existing_collections = {c.name for c in chroma_client.list_collections()}
+    except Exception:
+        existing_collections = set()
+
     async def query_domain(domain: str) -> list[dict[str, Any]]:
         """Query a single domain collection (vector + BM25 hybrid)."""
+        col_name = config.collection_name(domain)
+        if existing_collections and col_name not in existing_collections:
+            return []  # Skip missing collections without HTTP round-trip
         try:
-            collection = chroma_client.get_collection(name=config.collection_name(domain))
+            collection = chroma_client.get_collection(name=col_name)
 
             results = collection.query(
                 query_texts=[query],
