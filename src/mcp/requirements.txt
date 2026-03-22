@@ -1,5 +1,6 @@
 # Core framework
 fastapi>=0.100,<0.136
+sentry-sdk[fastapi]>=2.35.0
 uvicorn[standard]>=0.20,<1
 pydantic>=2.0,<3
 
