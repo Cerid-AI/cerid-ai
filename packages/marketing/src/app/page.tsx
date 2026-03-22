@@ -85,7 +85,7 @@ export default function Home() {
 
           <div className="animate-in fade-in slide-in-from-bottom-4 fill-mode-both duration-700 delay-500 mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
             <Link
-              href="https://github.com/sunrunnerfire/cerid-ai"
+              href="https://github.com/Cerid-AI/cerid-ai"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-brand px-6 text-sm font-medium text-brand-foreground shadow transition-colors hover:bg-brand/90"
@@ -201,7 +201,7 @@ export default function Home() {
             setup script, and start building your personal knowledge companion.
           </p>
           <Link
-            href="https://github.com/sunrunnerfire/cerid-ai"
+            href="https://github.com/Cerid-AI/cerid-ai"
             target="_blank"
             rel="noopener noreferrer"
             className="mt-8 inline-flex h-11 items-center justify-center gap-2 rounded-md bg-brand px-6 text-sm font-medium text-brand-foreground shadow transition-colors hover:bg-brand/90"
