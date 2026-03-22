@@ -80,3 +80,6 @@ backups/
 # Electron build output
 packages/desktop/out/
 packages/desktop/release/
+
+# AI assistant artifacts
+.superpowers/
