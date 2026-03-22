@@ -36,14 +36,39 @@ export function useChat({ onMessageStart, onMessageUpdate, onModelResolved, feed
       let aborted = false
       let resolvedModel = model
 
+      // Throttle UI updates during streaming to prevent render depth overflow.
+      // Accumulate chunks and flush to React state at most every 50ms.
+      let lastFlushTime = 0
+      let flushTimer: ReturnType<typeof setTimeout> | null = null
+
+      const flushUpdate = () => {
+        lastFlushTime = Date.now()
+        onMessageUpdate(convoId, accumulated)
+      }
+
       try {
         await streamChat(messages, model, (chunk) => {
           accumulated += chunk
-          onMessageUpdate(convoId, accumulated)
+          const now = Date.now()
+          if (now - lastFlushTime >= 50) {
+            // Enough time passed — flush immediately
+            if (flushTimer) { clearTimeout(flushTimer); flushTimer = null }
+            flushUpdate()
+          } else if (!flushTimer) {
+            // Schedule a flush for the remaining time
+            flushTimer = setTimeout(() => {
+              flushTimer = null
+              flushUpdate()
+            }, 50 - (now - lastFlushTime))
+          }
         }, abortRef.current.signal, (info) => {
           resolvedModel = `openrouter/${info.resolved_model}`
           onModelResolved?.(convoId, resolvedModel)
         })
+        // Flush any remaining throttled content
+        if (flushTimer) { clearTimeout(flushTimer); flushTimer = null }
+        flushUpdate()
+
         if (accumulated.length === 0) {
           accumulated = "\u26A0 No response received. Check your connection or try a different model."
           onMessageUpdate(convoId, accumulated)
