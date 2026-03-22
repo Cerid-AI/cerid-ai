@@ -279,12 +279,22 @@ async def _classify_with_best_available(query: str) -> Complexity:
 # ---------------------------------------------------------------------------
 
 
-async def route(query: str = "", *, task_type: TaskType = TaskType.CHAT) -> RouteDecision:
+async def route(
+    query: str = "",
+    *,
+    task_type: TaskType = TaskType.CHAT,
+    cost_sensitivity: str = "medium",
+) -> RouteDecision:
     """Pick the best model for this query and task type.
+
+    Cost sensitivity (from user settings):
+    - "high": maximize free/cheap models, only use paid for research/expert
+    - "medium": balance quality and cost (default)
+    - "low": prefer capable models, cost is not a concern
 
     Priority:
     1. Task-specific models (verification, expert) -- always used
-    2. Ollama (if available) -- free, instant, local
+    2. Ollama (if available) -- free, instant, for internal ops only
     3. Free OpenRouter models -- for simple/internal tasks
     4. Paid OpenRouter models -- for complex/research tasks
     """
@@ -359,7 +369,21 @@ async def route(query: str = "", *, task_type: TaskType = TaskType.CHAT) -> Rout
     # But Ollama CAN classify the query (free, instant) to pick the best model
     complexity = await _classify_with_best_available(query)
 
+    # Cost sensitivity shifts model selection:
+    # HIGH: use free models more aggressively (even for moderate queries)
+    # LOW: use capable models more aggressively (even for simple queries)
+    cs = cost_sensitivity.lower()
+
     if complexity == Complexity.RESEARCH:
+        # Research always needs web search — no free alternative
+        if cs == "high":
+            # High cost sensitivity: use cheaper Grok Fast instead of Grok 4
+            return RouteDecision(
+                model=RESEARCH_MODELS["grok-online"]["id"],
+                provider="openrouter_paid",
+                reason="research query — using cheaper web model (high cost sensitivity)",
+                estimated_cost_per_1k=0.0002,
+            )
         return RouteDecision(
             model=RESEARCH_MODELS["grok-online"]["id"],
             provider="openrouter_paid",
@@ -368,7 +392,7 @@ async def route(query: str = "", *, task_type: TaskType = TaskType.CHAT) -> Rout
         )
 
     if complexity == Complexity.SIMPLE:
-        # Simple queries use free model — good enough, saves credits
+        # Simple: always free — even low cost sensitivity doesn't waste money here
         return RouteDecision(
             model=FREE_MODELS["llama-3.3"],
             provider="openrouter_free",
@@ -377,6 +401,23 @@ async def route(query: str = "", *, task_type: TaskType = TaskType.CHAT) -> Rout
         )
 
     if complexity == Complexity.COMPLEX:
+        if cs == "high":
+            # High cost sensitivity: use cheap model even for complex (trade quality for savings)
+            return RouteDecision(
+                model=CHEAP_MODELS["gpt-4o-mini"]["id"],
+                provider="openrouter_paid",
+                reason="complex query — downgraded to cheap model (high cost sensitivity)",
+                estimated_cost_per_1k=0.00015,
+            )
+        if cs == "low":
+            # Low cost sensitivity: use best available model
+            return RouteDecision(
+                model=CAPABLE_MODELS["claude-sonnet"]["id"],
+                provider="openrouter_paid",
+                reason="complex query — best model (low cost sensitivity)",
+                estimated_cost_per_1k=0.003,
+            )
+        # Medium: capable model (default)
         return RouteDecision(
             model=CAPABLE_MODELS["claude-sonnet"]["id"],
             provider="openrouter_paid",
@@ -384,7 +425,24 @@ async def route(query: str = "", *, task_type: TaskType = TaskType.CHAT) -> Rout
             estimated_cost_per_1k=0.003,
         )
 
-    # Moderate -- cheap paid model balances quality and cost
+    # Moderate complexity
+    if cs == "high":
+        # High cost sensitivity: use free model for moderate queries too
+        return RouteDecision(
+            model=FREE_MODELS["llama-3.3"],
+            provider="openrouter_free",
+            reason="moderate query — using free model (high cost sensitivity)",
+            estimated_cost_per_1k=0.0,
+        )
+    if cs == "low":
+        # Low cost sensitivity: upgrade moderate to capable model
+        return RouteDecision(
+            model=CHEAP_MODELS["gemini-flash"]["id"],
+            provider="openrouter_paid",
+            reason="moderate query — upgraded model (low cost sensitivity)",
+            estimated_cost_per_1k=0.0003,
+        )
+    # Medium: cheap paid model balances quality and cost
     return RouteDecision(
         model=CHEAP_MODELS["gpt-4o-mini"]["id"],
         provider="openrouter_paid",

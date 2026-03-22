@@ -79,6 +79,7 @@ class ChatRequest(BaseModel):
     top_p: float | None = None
     max_tokens: int | None = None
     stream: bool = True
+    cost_sensitivity: str = "medium"  # "low", "medium", "high"
 
 
 class CompressRequest(BaseModel):
@@ -240,9 +241,16 @@ async def _proxy_stream(req: ChatRequest, request_id: str, api_key: str = "") ->
             from utils.smart_router import TaskType, route
 
             last_content = req.messages[-1].content if req.messages else ""
-            decision = await route(last_content, task_type=TaskType.CHAT)
+            decision = await route(
+                last_content,
+                task_type=TaskType.CHAT,
+                cost_sensitivity=req.cost_sensitivity,
+            )
             req.model = decision.model
-            logger.info("Smart-routed to %s (%s)", decision.model, decision.reason)
+            logger.info(
+                "Smart-routed to %s (%s, cost_sensitivity=%s)",
+                decision.model, decision.reason, req.cost_sensitivity,
+            )
         except Exception as exc:
             logger.warning("Smart routing failed (%s), using fallback", exc)
             req.model = "openai/gpt-4o-mini"
