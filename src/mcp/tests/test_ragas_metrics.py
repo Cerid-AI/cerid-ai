@@ -73,17 +73,17 @@ class TestParseScore:
 
 class TestFaithfulness:
     @pytest.mark.asyncio
-    async def test_calls_bifrost_with_contexts(self):
-        mock_resp = {"choices": [{"message": {"content": json.dumps({"score": 0.9, "reasoning": "Supported"})}}]}
-        with patch("eval.ragas_metrics.call_bifrost", new_callable=AsyncMock, return_value=mock_resp):
+    async def test_calls_llm_with_contexts(self):
+        mock_resp = json.dumps({"score": 0.9, "reasoning": "Supported"})
+        with patch("eval.ragas_metrics.call_llm", new_callable=AsyncMock, return_value=mock_resp):
             result = await faithfulness("Earth orbits the Sun", ["Astronomy textbook content"])
         assert isinstance(result, MetricResult)
         assert result.score == 0.9
 
     @pytest.mark.asyncio
     async def test_handles_empty_contexts(self):
-        mock_resp = {"choices": [{"message": {"content": json.dumps({"score": 0.0, "reasoning": "No context"})}}]}
-        with patch("eval.ragas_metrics.call_bifrost", new_callable=AsyncMock, return_value=mock_resp):
+        mock_resp = json.dumps({"score": 0.0, "reasoning": "No context"})
+        with patch("eval.ragas_metrics.call_llm", new_callable=AsyncMock, return_value=mock_resp):
             result = await faithfulness("Some claim", [])
         assert result.score == 0.0
 
@@ -95,8 +95,8 @@ class TestFaithfulness:
 class TestAnswerRelevancy:
     @pytest.mark.asyncio
     async def test_returns_metric_result(self):
-        mock_resp = {"choices": [{"message": {"content": json.dumps({"score": 0.95, "reasoning": "Relevant"})}}]}
-        with patch("eval.ragas_metrics.call_bifrost", new_callable=AsyncMock, return_value=mock_resp):
+        mock_resp = json.dumps({"score": 0.95, "reasoning": "Relevant"})
+        with patch("eval.ragas_metrics.call_llm", new_callable=AsyncMock, return_value=mock_resp):
             result = await answer_relevancy("What is Python?", "Python is a programming language")
         assert result.score == 0.95
 
@@ -108,8 +108,8 @@ class TestAnswerRelevancy:
 class TestContextPrecision:
     @pytest.mark.asyncio
     async def test_returns_metric_result(self):
-        mock_resp = {"choices": [{"message": {"content": json.dumps({"score": 0.8, "reasoning": "Mostly relevant"})}}]}
-        with patch("eval.ragas_metrics.call_bifrost", new_callable=AsyncMock, return_value=mock_resp):
+        mock_resp = json.dumps({"score": 0.8, "reasoning": "Mostly relevant"})
+        with patch("eval.ragas_metrics.call_llm", new_callable=AsyncMock, return_value=mock_resp):
             result = await context_precision("What is Python?", ["Python docs", "Unrelated content"])
         assert result.score == 0.8
 
@@ -121,8 +121,8 @@ class TestContextPrecision:
 class TestContextRecall:
     @pytest.mark.asyncio
     async def test_returns_metric_result(self):
-        mock_resp = {"choices": [{"message": {"content": json.dumps({"score": 0.7, "reasoning": "Partial coverage"})}}]}
-        with patch("eval.ragas_metrics.call_bifrost", new_callable=AsyncMock, return_value=mock_resp):
+        mock_resp = json.dumps({"score": 0.7, "reasoning": "Partial coverage"})
+        with patch("eval.ragas_metrics.call_llm", new_callable=AsyncMock, return_value=mock_resp):
             result = await context_recall(
                 "What is Python?",
                 "Python is a language created by Guido",
@@ -138,8 +138,8 @@ class TestContextRecall:
 class TestEvaluateAll:
     @pytest.mark.asyncio
     async def test_returns_all_four_metrics(self):
-        mock_resp = {"choices": [{"message": {"content": json.dumps({"score": 0.8, "reasoning": "OK"})}}]}
-        with patch("eval.ragas_metrics.call_bifrost", new_callable=AsyncMock, return_value=mock_resp):
+        mock_resp = json.dumps({"score": 0.8, "reasoning": "OK"})
+        with patch("eval.ragas_metrics.call_llm", new_callable=AsyncMock, return_value=mock_resp):
             results = await evaluate_all(
                 "What is Python?",
                 "Python is a language",

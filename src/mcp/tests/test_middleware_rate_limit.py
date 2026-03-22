@@ -50,7 +50,7 @@ class TestRateLimitHeaders:
         return TestClient(_make_app())
 
     def test_agent_path_has_headers(self, client):
-        resp = client.get("/agent/query")
+        resp = client.post("/agent/query")
         assert "RateLimit-Limit" in resp.headers
         assert "RateLimit-Remaining" in resp.headers
         assert "RateLimit-Reset" in resp.headers
@@ -68,10 +68,10 @@ class TestRateLimitHeaders:
         assert "RateLimit-Limit" not in resp.headers
 
     def test_remaining_decrements(self, client):
-        resp1 = client.get("/agent/query")
+        resp1 = client.post("/agent/query")
         remaining1 = int(resp1.headers["RateLimit-Remaining"])
 
-        resp2 = client.get("/agent/query")
+        resp2 = client.post("/agent/query")
         remaining2 = int(resp2.headers["RateLimit-Remaining"])
 
         assert remaining2 == remaining1 - 1
@@ -117,10 +117,10 @@ class TestRateLimitEnforcement:
     def test_agent_limit_is_20(self):
         client = TestClient(_make_app())
         for i in range(20):
-            resp = client.get("/agent/query")
+            resp = client.post("/agent/query")
             assert resp.status_code == 200, f"Request {i+1} should pass"
 
-        resp = client.get("/agent/query")
+        resp = client.post("/agent/query")
         assert resp.status_code == 429
 
 
@@ -187,7 +187,7 @@ class TestPathIsolation:
         assert resp.status_code == 429
 
         # Agent should still work (different counter)
-        resp = client.get("/agent/query")
+        resp = client.post("/agent/query")
         assert resp.status_code == 200
 
     def test_non_limited_path_unaffected(self):

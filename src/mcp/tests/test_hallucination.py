@@ -1308,7 +1308,7 @@ class TestStalenessEscalation:
             mock_detect.side_effect = [False, True]
 
             result = await _verify_claim_externally(
-                "The CEO of CompanyX recently announced a major acquisition",
+                "The CEO of CompanyX announced a major acquisition last quarter",
                 generating_model="openrouter/anthropic/claude-sonnet-4",
             )
 

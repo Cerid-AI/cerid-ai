@@ -275,15 +275,15 @@ class TestRerankResults:
         assert len(reranked) == 1
         assert reranked[0]["relevance"] == 0.5
 
-    @patch("agents.query_agent.call_bifrost", new_callable=AsyncMock)
+    @patch("agents.query_agent.call_llm", new_callable=AsyncMock)
     @patch("agents.query_agent.config")
-    def test_llm_rerank_fallback_on_error(self, mock_config, mock_call_bifrost):
+    def test_llm_rerank_fallback_on_error(self, mock_config, mock_call_llm):
         """When LLM reranking fails, falls back to embedding sort."""
         mock_config.RERANK_MODE = "llm"
         mock_config.QUERY_RERANK_CANDIDATES = 15
 
-        # Make the Bifrost call raise
-        mock_call_bifrost.side_effect = httpx.HTTPStatusError(
+        # Make the LLM call raise
+        mock_call_llm.side_effect = httpx.HTTPStatusError(
             "Connection refused", request=MagicMock(), response=MagicMock(status_code=502)
         )
 
