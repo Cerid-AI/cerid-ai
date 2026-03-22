@@ -3,6 +3,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useState } from "react"
 import { Loader2 } from "lucide-react"
+import { AppErrorBoundary } from "@/components/layout/app-error-boundary"
 import { AppLayout } from "@/components/layout/app-layout"
 import { ChatPanel } from "@/components/chat/chat-panel"
 import { KBInjectionProvider } from "@/contexts/kb-injection-context"
@@ -80,6 +81,7 @@ export default function App() {
   }
 
   return (
+    <AppErrorBoundary>
     <AuthProvider>
     <ProtectedRoute multiUser={multiUser}>
     <UIModeProvider>
@@ -115,5 +117,6 @@ export default function App() {
     </UIModeProvider>
     </ProtectedRoute>
     </AuthProvider>
+    </AppErrorBoundary>
   )
 }

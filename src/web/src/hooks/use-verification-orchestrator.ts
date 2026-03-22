@@ -234,8 +234,8 @@ export function useVerificationOrchestrator({
       })
       .catch(() => { if (!cancelled) setSavedReportLoading(false) })
     return () => { cancelled = true; setSavedReportLoading(false) }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally exclude verification.phase to avoid re-fetching on phase transitions
-  }, [activeId, effectiveMsgId, lastAssistantMsgId, hallucinationEnabled, getVerification, saveVerification])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally exclude verification.phase, saveVerification, getVerification to avoid infinite re-render loop
+  }, [activeId, effectiveMsgId, lastAssistantMsgId, hallucinationEnabled])
 
   // Proactive web-model switch banner
   useEffect(() => {
