@@ -9,7 +9,7 @@
  * Extracted from ChatPanel to keep verification concerns cohesive.
  */
 
-import { useState, useMemo, useEffect, useCallback } from "react"
+import { useState, useMemo, useEffect, useCallback, useRef } from "react"
 import { useVerificationStream } from "@/hooks/use-verification-stream"
 import { useConversationsContext } from "@/contexts/conversations-context"
 import { useKBInjection } from "@/contexts/kb-injection-context"
@@ -143,6 +143,7 @@ export function useVerificationOrchestrator({
     if (isStreaming) {
       setSavedReport(null)
       setSelectedMsgId(null)
+      savedForKey.current = ""  // reset save guard for new verification cycle
       if (activeId && lastAssistantMsgId) {
         clearVerified(activeId)
         reportCache.delete(cacheKey(activeId, lastAssistantMsgId))
@@ -150,10 +151,18 @@ export function useVerificationOrchestrator({
     }
   }, [isStreaming, activeId, lastAssistantMsgId, clearVerified])
 
+  // Guard: only save once per verification completion (prevents infinite re-render loop)
+  const savedForKey = useRef<string>("")
+
   // Cache completed verification report, mark conversation as completed, and persist to backend + localStorage
   useEffect(() => {
     if (verification.phase === "done" && verification.report && activeId && lastAssistantMsgId) {
-      reportCache.set(cacheKey(activeId, lastAssistantMsgId), verification.report)
+      const key = cacheKey(activeId, lastAssistantMsgId)
+      // Skip if already saved for this exact conversation+message (prevents re-render loop)
+      if (savedForKey.current === key) return
+      savedForKey.current = key
+
+      reportCache.set(key, verification.report)
       markVerified(activeId)
 
       // Persist to localStorage alongside chat history
@@ -166,10 +175,10 @@ export function useVerificationOrchestrator({
           conversation_id: activeId,
           claims: r.claims as unknown as Array<Record<string, unknown>>,
           overall_score: (r.summary as Record<string, unknown>).overall_confidence as number ?? 0,
-          verified: r.summary.verified ?? 0,
-          unverified: r.summary.unverified ?? 0,
-          uncertain: r.summary.uncertain ?? 0,
-          total: r.summary.total ?? 0,
+          verified: r.summary?.verified ?? 0,
+          unverified: r.summary?.unverified ?? 0,
+          uncertain: r.summary?.uncertain ?? 0,
+          total: r.summary?.total ?? 0,
         }).catch(() => {})
       }
     }
