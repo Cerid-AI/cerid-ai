@@ -8,10 +8,10 @@ let checkInterval: ReturnType<typeof setInterval> | null = null
 const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
 
 export function initAutoUpdater(mainWindow: BrowserWindow | null): void {
-  // Configure update feed — GitHub Releases for sunrunnerfire/cerid-ai
+  // Configure update feed — GitHub Releases for Cerid-AI/cerid-ai
   autoUpdater.setFeedURL({
     provider: 'github',
-    owner: 'sunrunnerfire',
+    owner: 'Cerid-AI',
     repo: 'cerid-ai',
   })
 
