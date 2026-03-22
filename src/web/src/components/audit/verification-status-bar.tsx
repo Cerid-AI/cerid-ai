@@ -220,7 +220,7 @@ export function VerificationStatusBar({
   }
 
   // No report yet or skipped
-  if (!report || report.skipped || report.summary.total === 0) {
+  if (!report || report.skipped || !report.summary || report.summary.total === 0) {
     return (
       <div className="border-t bg-muted/30">
         <div className="flex items-center gap-2 px-4 py-1">
@@ -243,7 +243,7 @@ export function VerificationStatusBar({
   }
 
   const { verified, unverified, uncertain, total } = report.summary
-  const skippedCount = report.summary.skipped ?? 0
+  const skippedCount = report.summary?.skipped ?? 0
 
   // Split unverified into refuted (cross-model/web-search) and soft unverified (KB only)
   const refutedCount = report.claims.filter(

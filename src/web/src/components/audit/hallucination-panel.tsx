@@ -430,7 +430,7 @@ export function HallucinationPanel({
   }
 
   // No claims found (clean response)
-  if (!report || report.skipped || report.summary.total === 0) {
+  if (!report || report.skipped || !report.summary || report.summary.total === 0) {
     return (
       <div className="flex h-full flex-col">
         <PanelHeader onClose={onClose} expertVerification={expertVerification} toggleExpertVerification={toggleExpertVerification} inlineMarkups={inlineMarkups} toggleInlineMarkups={toggleInlineMarkups} />

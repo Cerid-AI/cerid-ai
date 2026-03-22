@@ -14,13 +14,16 @@ import type { ChatMessage, HallucinationReport } from "@/lib/types"
 
 /** Build a compact verification badge status from a stored report. */
 function buildStatusFromReport(report: HallucinationReport): MessageVerificationStatus {
-  if (report.skipped || report.summary.total === 0) return null
+  // Guard: summary may be missing on reports from Neo4j persistence or malformed data
+  const summary = report.summary
+  if (!summary) return null
+  if (report.skipped || summary.total === 0) return null
   return {
     state: "done",
-    verified: report.summary.verified,
-    unverified: report.summary.unverified,
-    uncertain: report.summary.uncertain,
-    total: report.summary.total,
+    verified: summary.verified ?? 0,
+    unverified: summary.unverified ?? 0,
+    uncertain: summary.uncertain ?? 0,
+    total: summary.total ?? 0,
   }
 }
 

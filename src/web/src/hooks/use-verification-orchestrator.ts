@@ -260,14 +260,14 @@ export function useVerificationOrchestrator({
   const verificationStatusForMsg = useMemo((): MessageVerificationStatus => {
     if (!hallucinationEnabled || !effectiveMsgId) return null
     if (halLoading) return { state: "loading" }
-    if (halReport && !halReport.skipped && halReport.summary.total > 0) {
+    if (halReport && !halReport.skipped && halReport.summary?.total && halReport.summary.total > 0) {
       return {
         state: "done",
-        verified: halReport.summary.verified,
-        unverified: halReport.summary.unverified,
-        uncertain: halReport.summary.uncertain,
-        skipped: halReport.summary.skipped,
-        total: halReport.summary.total,
+        verified: halReport.summary?.verified,
+        unverified: halReport.summary?.unverified,
+        uncertain: halReport.summary?.uncertain,
+        skipped: halReport.summary?.skipped,
+        total: halReport.summary?.total,
         creditExhausted: verification.creditError != null,
       }
     }
