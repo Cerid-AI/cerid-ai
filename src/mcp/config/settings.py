@@ -359,6 +359,10 @@ RERANK_PREFER_LOCAL = os.getenv("RERANK_PREFER_LOCAL", "true").lower() == "true"
 # Parallel retrieval: max concurrent domain queries
 PARALLEL_RETRIEVAL_MAX = int(os.getenv("PARALLEL_RETRIEVAL_MAX", "4"))
 
+# Smart routing: when enabled, "auto" model selection in chat uses the smart
+# router to pick the best model based on query complexity and availability.
+SMART_ROUTING_ENABLED = os.getenv("SMART_ROUTING_ENABLED", "true").lower() == "true"
+
 # Internal LLM: model to use for pipeline intelligence operations
 # (categorization, decomposition, contextual chunks, claim extraction)
 # Options: "bifrost" (default, uses Bifrost routing), "ollama" (local), or specific model ID

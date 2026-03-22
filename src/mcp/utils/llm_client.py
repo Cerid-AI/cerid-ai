@@ -263,6 +263,84 @@ async def call_llm_raw(
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Smart-routed LLM call (uses smart_router to pick model + provider)
+# ---------------------------------------------------------------------------
+
+
+async def route_and_call(
+    messages: list[dict[str, str]],
+    *,
+    query: str = "",
+    task_type: str = "internal",  # "chat", "internal", "verification", etc.
+    temperature: float = 0.1,
+    max_tokens: int = 500,
+    response_format: dict | None = None,
+) -> tuple[str, "RouteDecision"]:
+    """Smart-route a query to the best LLM, then call it.
+
+    Returns ``(content, route_decision)`` tuple.
+    """
+    from utils.smart_router import RouteDecision, TaskType, route
+
+    task = TaskType(task_type)
+    decision = await route(query, task_type=task)
+
+    if decision.provider == "ollama":
+        # Call Ollama directly
+        content = await _call_ollama_direct(
+            messages,
+            model=decision.model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        return content, decision
+    else:
+        # Call OpenRouter
+        content = await call_llm(
+            messages,
+            model=decision.model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format=response_format,
+        )
+        return content, decision
+
+
+async def _call_ollama_direct(
+    messages: list[dict[str, str]],
+    *,
+    model: str,
+    temperature: float,
+    max_tokens: int,
+) -> str:
+    """Direct Ollama call for smart-routed queries."""
+    import httpx as _httpx
+
+    ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+    try:
+        async with _httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                f"{ollama_url}/api/chat",
+                json={
+                    "model": model,
+                    "messages": messages,
+                    "stream": False,
+                    "options": {"temperature": temperature, "num_predict": max_tokens},
+                },
+            )
+            resp.raise_for_status()
+            return resp.json().get("message", {}).get("content", "")
+    except Exception as e:
+        _logger.warning("Ollama call failed (%s), falling back to OpenRouter", e)
+        return await call_llm(messages, temperature=temperature, max_tokens=max_tokens)
+
+
+# ---------------------------------------------------------------------------
+# Bifrost fallback (when OpenRouter key is absent or circuit is open)
+# ---------------------------------------------------------------------------
+
+
 async def _bifrost_fallback(
     messages: list[dict],
     *,

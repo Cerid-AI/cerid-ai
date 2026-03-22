@@ -173,6 +173,24 @@ async def get_openrouter_credits():
         return {"available": False, "error": str(e)}
 
 
+@router.get("/routing")
+async def get_routing_info():
+    """Return smart routing configuration and current state."""
+    from utils.smart_router import _check_ollama, _ollama_models, get_model_registry
+
+    ollama_available = await _check_ollama()
+
+    return {
+        "ollama_available": ollama_available,
+        "ollama_models": _ollama_models if ollama_available else [],
+        "model_registry": get_model_registry(),
+        "default_internal_model": os.getenv(
+            "INTERNAL_LLM_MODEL", "meta-llama/llama-3.3-70b-instruct"
+        ),
+        "smart_routing_enabled": getattr(config, "SMART_ROUTING_ENABLED", True),
+    }
+
+
 @router.get("/{name}")
 async def get_provider(name: str):
     """Get details for a single provider including available models."""

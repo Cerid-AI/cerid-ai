@@ -19,6 +19,8 @@ from collections.abc import AsyncGenerator
 
 import httpx
 from fastapi import APIRouter, Request
+
+import config
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -230,6 +232,21 @@ async def _attempt_stream(
 
 async def _proxy_stream(req: ChatRequest, request_id: str, api_key: str = "") -> AsyncGenerator[bytes, None]:
     """Stream chat completion from OpenRouter with one fallback retry."""
+    # Smart routing: when model is "auto" or smart routing is enabled with no model
+    if req.model == "auto" or (
+        getattr(config, "SMART_ROUTING_ENABLED", False) and not req.model
+    ):
+        try:
+            from utils.smart_router import TaskType, route
+
+            last_content = req.messages[-1].content if req.messages else ""
+            decision = await route(last_content, task_type=TaskType.CHAT)
+            req.model = decision.model
+            logger.info("Smart-routed to %s (%s)", decision.model, decision.reason)
+        except Exception as exc:
+            logger.warning("Smart routing failed (%s), using fallback", exc)
+            req.model = "openai/gpt-4o-mini"
+
     bare_model = _strip_prefix(req.model)
 
     # Emit metadata event so the frontend knows the resolved model
