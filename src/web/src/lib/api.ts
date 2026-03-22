@@ -438,6 +438,7 @@ export function streamVerification(
   userQuery?: string,
   conversationHistory?: Array<{ role: string; content: string }>,
   expertMode?: boolean,
+  sourceArtifactIds?: string[],
 ): { response: Promise<Response>; abort: () => void } {
   const controller = new AbortController()
   const response = fetch(`${MCP_BASE}/agent/verify-stream`, {
@@ -451,6 +452,7 @@ export function streamVerification(
       ...(userQuery && { user_query: userQuery }),
       ...(conversationHistory?.length && { conversation_history: conversationHistory }),
       ...(expertMode && { expert_mode: true }),
+      ...(sourceArtifactIds?.length && { source_artifact_ids: sourceArtifactIds }),
     }),
     signal: controller.signal,
   })

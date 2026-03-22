@@ -402,6 +402,10 @@ class VerifyStreamRequest(BaseModel):
         None, description="Prior conversation messages for consistency checking"
     )
     expert_mode: bool = Field(False, description="Use expert-tier model (Grok 4) for all verification")
+    source_artifact_ids: list[str] = Field(
+        default_factory=list,
+        description="KB artifact IDs that were injected into the LLM prompt (anti-circularity)",
+    )
 
 
 _STREAM_END = object()  # Sentinel for generator exhaustion
@@ -455,6 +459,7 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
                 user_query=req.user_query,
                 conversation_history=req.conversation_history,
                 expert_mode=req.expert_mode,
+                source_artifact_ids=req.source_artifact_ids,
             )
 
             # Read events with a keepalive timeout — if no event arrives

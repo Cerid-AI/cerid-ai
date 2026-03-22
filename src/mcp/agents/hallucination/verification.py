@@ -1068,6 +1068,7 @@ async def verify_claim(
     model: str | None = None,
     streaming: bool = False,
     expert_mode: bool = False,
+    source_artifact_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Verify a single claim against the knowledge base and user memories.
 
@@ -1147,6 +1148,16 @@ async def verify_claim(
             if r.get("relevance", 0) >= config.VERIFICATION_MIN_RELEVANCE
         ]
 
+        # --- Anti-circularity: penalise KB results that were injected into
+        # the LLM prompt.  These cannot independently verify a claim because
+        # the response was *derived* from them — matching is expected.
+        if source_artifact_ids:
+            _src_set = set(source_artifact_ids)
+            for r in all_results:
+                if r.get("artifact_id") in _src_set:
+                    r["_circular"] = True
+                    r["relevance"] = max(0.0, round(r.get("relevance", 0.0) - 0.3, 4))
+
         # Sort by relevance descending
         all_results.sort(key=lambda x: x.get("relevance", 0.0), reverse=True)
 
@@ -1172,6 +1183,32 @@ async def verify_claim(
         # Use pre-boost relevance for escalation if this is a memory result,
         # so the +0.15 authority boost doesn't mask low KB evidence.
         escalation_similarity = top_result.get("_raw_relevance", raw_similarity)
+
+        # --- Anti-circularity escalation: if ALL top results are circular
+        # (derived from the same KB artifacts injected into the LLM prompt),
+        # the KB cannot independently verify the claim — escalate externally.
+        all_circular = source_artifact_ids and all(
+            r.get("_circular") for r in top_results
+        )
+        if all_circular:
+            logger.info(
+                "All top KB results are circular for claim '%s…' — escalating to external",
+                claim[:50],
+            )
+            ext_result = await _verify_claim_externally(
+                claim, model, streaming=streaming,
+                expert_mode=expert_mode,
+            )
+            return await _cache_result({
+                "claim": claim,
+                "status": ext_result["status"],
+                "similarity": ext_result["confidence"],
+                "reason": ext_result["reason"],
+                "verification_method": ext_result.get("verification_method", "none"),
+                "verification_model": ext_result.get("verification_model"),
+                "source_urls": ext_result.get("source_urls", []),
+                "circular_source": True,
+            })
 
         # --- Fallback 2: Very low KB similarity → try external verification ---
         if escalation_similarity < ext_kb_threshold:
@@ -1207,6 +1244,7 @@ async def verify_claim(
                 "memory_source": bool(top_result.get("memory_source")),
                 "verification_details": details,
                 "verification_method": "kb",
+                **({"circular_source": True} if top_result.get("_circular") else {}),
             })
         elif similarity < unverified_threshold:
             # --- Fallback 3: KB says "unverified" → try external ---

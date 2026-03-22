@@ -183,6 +183,7 @@ async def verify_response_streaming(
     user_query: str | None = None,
     conversation_history: list[dict[str, str]] | None = None,
     expert_mode: bool = False,
+    source_artifact_ids: list[str] | None = None,
 ):
     """Streaming verification generator — yields claim results as they are verified.
 
@@ -191,6 +192,10 @@ async def verify_response_streaming(
 
     When ``expert_mode`` is True, all claims are verified using the expert-tier
     model (Grok 4) instead of the default model pool.
+
+    When ``source_artifact_ids`` is provided, KB results matching those IDs are
+    penalised during confidence scoring to prevent circular self-verification
+    (the KB confirming claims that were originally derived from it).
     """
     if threshold is None:
         threshold = config.HALLUCINATION_THRESHOLD
@@ -314,6 +319,7 @@ async def verify_response_streaming(
                         claim_text, chroma_client, neo4j_driver, redis_client,
                         threshold, model=model, streaming=True,
                         expert_mode=expert_mode,
+                        source_artifact_ids=source_artifact_ids,
                     ),
                     timeout=config.STREAMING_PER_CLAIM_TIMEOUT,
                 )
@@ -417,6 +423,7 @@ async def verify_response_streaming(
                 "verification_model": result.get("verification_model"),
                 "source_urls": result.get("source_urls", []),
                 "verification_answer": result.get("verification_answer", ""),
+                **({"circular_source": True} if result.get("circular_source") else {}),
             }
     except Exception as loop_exc:
         logger.error(

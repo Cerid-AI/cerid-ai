@@ -69,6 +69,8 @@ export function useVerificationStream(
   conversationHistory?: Array<{ role: string; content: string }>,
   /** Use expert-tier model (Grok 4) for all verification. */
   expertMode?: boolean,
+  /** KB artifact IDs injected into the LLM prompt (anti-circularity). */
+  sourceArtifactIds?: string[],
 ): UseVerificationStreamReturn {
   const [claims, setClaims] = useState<StreamingClaim[]>([])
   const [phase, setPhase] = useState<VerificationPhase>("idle")
@@ -86,6 +88,8 @@ export function useVerificationStream(
   useEffect(() => { historyRef.current = conversationHistory }, [conversationHistory])
   const expertModeRef = useRef(expertMode)
   useEffect(() => { expertModeRef.current = expertMode }, [expertMode])
+  const sourceArtifactIdsRef = useRef(sourceArtifactIds)
+  useEffect(() => { sourceArtifactIdsRef.current = sourceArtifactIds }, [sourceArtifactIds])
   // enabled is read via ref so that toggling verification mid-stream does NOT
   // abort the running stream.  Only checked at stream-start time.  This
   // prevents settings hydration (fetchSettings → hydrateHallucination) from
@@ -154,7 +158,7 @@ export function useVerificationStream(
     setSummary(null)
     setExtractionMethod(null)
 
-    const { response, abort } = streamVerification(text, conversationId, undefined, modelRef.current, query, historyRef.current, expertModeRef.current)
+    const { response, abort } = streamVerification(text, conversationId, undefined, modelRef.current, query, historyRef.current, expertModeRef.current, sourceArtifactIdsRef.current)
     abortRef.current = abort
 
     let cancelled = false
@@ -250,6 +254,7 @@ export function useVerificationStream(
                             verification_method: event.verification_method,
                             verification_model: event.verification_model,
                             verification_answer: event.verification_answer || undefined,
+                            circular_source: event.circular_source || undefined,
                           }
                         : c,
                     ),
@@ -351,6 +356,7 @@ export function useVerificationStream(
             verification_model: c.verification_model,
             verification_answer: c.verification_answer,
             consistency_issue: c.consistency_issue,
+            circular_source: c.circular_source,
           })),
           summary: {
             total: summary.total,

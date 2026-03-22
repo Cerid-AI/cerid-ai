@@ -391,6 +391,8 @@ export interface BaseClaim {
   verification_model?: string
   verification_answer?: string
   consistency_issue?: string
+  /** True when the claim was verified against KB artifacts that were injected into the LLM prompt (circular evidence). */
+  circular_source?: boolean
 }
 
 export interface HallucinationClaim extends BaseClaim {

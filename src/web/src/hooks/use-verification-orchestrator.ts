@@ -12,6 +12,7 @@
 import { useState, useMemo, useEffect, useCallback } from "react"
 import { useVerificationStream } from "@/hooks/use-verification-stream"
 import { useConversationsContext } from "@/contexts/conversations-context"
+import { useKBInjection } from "@/contexts/kb-injection-context"
 import { fetchHallucinationReport, saveVerificationReport } from "@/lib/api"
 import { MODELS } from "@/lib/types"
 import type { ChatMessage, HallucinationReport, ModelOption } from "@/lib/types"
@@ -116,6 +117,13 @@ export function useVerificationOrchestrator({
     }))
   }, [activeMessages])
 
+  // Anti-circularity: collect KB artifact IDs that were injected into the LLM prompt
+  const { injectedContext } = useKBInjection()
+  const sourceArtifactIds = useMemo(
+    () => injectedContext.map((r) => r.artifact_id).filter(Boolean),
+    [injectedContext],
+  )
+
   // Streaming verification hook
   const verification = useVerificationStream(
     latestAssistantText,
@@ -126,6 +134,7 @@ export function useVerificationOrchestrator({
     latestUserQuery,
     priorAssistantContext,
     expertVerification,
+    sourceArtifactIds,
   )
 
   // Clear stale saved report, verified mark, AND module-level cache when a new
