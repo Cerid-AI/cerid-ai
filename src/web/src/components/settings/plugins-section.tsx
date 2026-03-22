@@ -229,7 +229,9 @@ export function PluginsSection() {
     setError("")
     try {
       const data = await fetchPlugins()
-      setPlugins(data.plugins)
+      // Backend may return plugins as {} (empty object) or [] (array)
+      const raw = data.plugins
+      setPlugins(Array.isArray(raw) ? raw : Object.values(raw))
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load plugins")
     } finally {
