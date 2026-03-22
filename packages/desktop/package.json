@@ -53,7 +53,7 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "sunrunnerfire",
+      "owner": "Cerid-AI",
       "repo": "cerid-ai"
     }
   },
