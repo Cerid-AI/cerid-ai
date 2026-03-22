@@ -88,12 +88,15 @@ export function useVerificationOrchestrator({
   // Effective selected message ID — falls back to latest assistant message
   const effectiveMsgId = selectedMsgId ?? lastAssistantMsgId
 
+  // Stable trigger key: only changes when assistant message COUNT changes or streaming stops.
+  // Using a count (not array ref) prevents re-triggering when context callbacks update activeMessages identity.
+  const assistantCount = activeMessages?.filter((m) => m.role === "assistant").length ?? 0
   const streamTriggerKey = useMemo(() => {
-    if (!activeMessages || isStreaming) return 0
-    // Only skip if the LATEST message already has a cached report (per-message, not per-conversation)
+    if (isStreaming) return 0
+    // Only skip if the LATEST message already has a cached report
     if (activeId && lastAssistantMsgId && reportCache.has(cacheKey(activeId, lastAssistantMsgId))) return 0
-    return activeMessages.filter((m) => m.role === "assistant").length
-  }, [activeMessages, isStreaming, activeId, lastAssistantMsgId])
+    return assistantCount
+  }, [assistantCount, isStreaming, activeId, lastAssistantMsgId])
 
   const latestUserQuery = useMemo(() => {
     if (!activeMessages) return undefined
