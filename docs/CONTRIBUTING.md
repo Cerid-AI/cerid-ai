@@ -108,8 +108,8 @@ The SDK at `/sdk/v1/` is the stable API consumed by external agents. Changes her
 
 | Consumer | Repo | Rate Limit | Client ID |
 |----------|------|-----------|-----------|
-| cerid-trading-agent | `sunrunnerfire/cerid-trading-agent` | 80 req/min | `trading-agent` |
-| cerid-boardroom | `sunrunnerfire/cerid-boardroom` | 60 req/min | `boardroom-agent` |
+| cerid-trading-agent | `Cerid-AI/cerid-trading-agent` | 80 req/min | `trading-agent` |
+| cerid-boardroom | `Cerid-AI/cerid-boardroom` | 60 req/min | `boardroom-agent` |
 
 ### Stable endpoints
 
