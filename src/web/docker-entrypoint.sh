@@ -6,10 +6,12 @@
 # This allows VITE_MCP_URL and VITE_BIFROST_URL to be overridden at
 # container startup without rebuilding the Docker image.
 
-# Use a timestamped filename to bust browser cache on every restart
 CACHE_BUST=$(date +%s)
+HTML="/usr/share/nginx/html/index.html"
 ENV_JS="/usr/share/nginx/html/env-config.js"
+VERSION_JS="/usr/share/nginx/html/version.json"
 
+# Write env config
 cat > "$ENV_JS" <<EOF
 window.__ENV__ = {
   VITE_MCP_URL: "${VITE_MCP_URL:-/api/mcp}",
@@ -18,10 +20,23 @@ window.__ENV__ = {
 };
 EOF
 
-# Update the script tag in index.html with cache-busting query param
-sed -i "s|env-config\.js[^\"]*|env-config.js?v=$CACHE_BUST|" /usr/share/nginx/html/index.html
+# Write version manifest (used by stale-cache detection)
+cat > "$VERSION_JS" <<EOF
+{"build":"$CACHE_BUST"}
+EOF
 
-echo "[entrypoint] Generated $ENV_JS (v=$CACHE_BUST)"
+# Update env-config script tag with cache-busting query param
+sed -i "s|env-config\.js[^\"]*|env-config.js?v=$CACHE_BUST|" "$HTML"
+
+# Inject a stale-cache detector BEFORE the main bundle.
+# If the browser serves a cached index.html with old JS hashes,
+# this inline script detects the mismatch and forces a reload.
+if ! grep -q "cerid-stale-check" "$HTML"; then
+  DETECTOR="<script id=\"cerid-stale-check\">(function(){var b=\"$CACHE_BUST\";fetch(\"/version.json?_=\"+Date.now(),{cache:\"no-store\"}).then(function(r){return r.json()}).then(function(d){if(d.build!==b){console.warn(\"[cerid] Stale cache detected, reloading...\");location.reload()}}).catch(function(){});})()</script>"
+  sed -i "s|</head>|$DETECTOR</head>|" "$HTML"
+fi
+
+echo "[entrypoint] Generated env-config.js + version.json (v=$CACHE_BUST)"
 
 # Start nginx
 exec nginx -g 'daemon off;'
