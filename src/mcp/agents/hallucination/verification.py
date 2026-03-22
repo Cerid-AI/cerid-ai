@@ -1154,9 +1154,15 @@ async def verify_claim(
         if source_artifact_ids:
             _src_set = set(source_artifact_ids)
             for r in all_results:
-                if r.get("artifact_id") in _src_set:
+                aid = r.get("artifact_id", "")
+                if aid and aid in _src_set:
+                    original_rel = r.get("relevance", 0.0)
                     r["_circular"] = True
-                    r["relevance"] = max(0.0, round(r.get("relevance", 0.0) - 0.3, 4))
+                    r["relevance"] = max(0.0, round(original_rel - 0.3, 4))
+                    logger.info(
+                        "Anti-circular penalty: artifact=%s relevance %.3f → %.3f",
+                        aid[:8], original_rel, r["relevance"],
+                    )
 
         # Sort by relevance descending
         all_results.sort(key=lambda x: x.get("relevance", 0.0), reverse=True)
