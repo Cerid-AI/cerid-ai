@@ -19,6 +19,7 @@ import httpx
 
 import config
 from utils.bifrost import call_bifrost, extract_content
+from utils.internal_llm import call_internal_llm
 from utils.cache import log_event
 from utils.circuit_breaker import CircuitOpenError
 from utils.llm_parsing import parse_llm_json
@@ -59,14 +60,12 @@ async def extract_memories(
     )
 
     try:
-        data = await call_bifrost(
+        content = await call_internal_llm(
             [{"role": "user", "content": prompt}],
-            breaker_name="bifrost-memory",
             temperature=0.1,
             max_tokens=1000,
-            extra_payload={"response_format": {"type": "json_object"}},
+            response_format={"type": "json_object"},
         )
-        content = extract_content(data)
         memories = parse_llm_json(content)
         if not isinstance(memories, list):
             return []
@@ -384,14 +383,12 @@ async def resolve_memory_conflict(
     )
 
     try:
-        data = await call_bifrost(
+        content = await call_internal_llm(
             [{"role": "user", "content": prompt}],
-            breaker_name="bifrost-memory",
             temperature=0.0,
             max_tokens=500,
-            extra_payload={"response_format": {"type": "json_object"}},
+            response_format={"type": "json_object"},
         )
-        content = extract_content(data)
         parsed = parse_llm_json(content)
 
         if not isinstance(parsed, dict):
