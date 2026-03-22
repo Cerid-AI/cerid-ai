@@ -112,7 +112,7 @@ Host Processes (outside Docker):
 ### 1. Clone & Configure
 
 ```bash
-git clone git@github.com:sunrunnerfire/cerid-ai.git
+git clone git@github.com:Cerid-AI/cerid-ai.git
 cd cerid-ai
 
 # Copy and edit environment file
@@ -181,7 +181,7 @@ cd ~/dotfiles && bash install.sh    # installs age key to ~/.config/cerid/age-ke
 brew install age                    # macOS (use apt on Linux)
 
 # 3. Clone the repo
-git clone git@github.com:sunrunnerfire/cerid-ai.git ~/cerid-ai
+git clone git@github.com:Cerid-AI/cerid-ai.git ~/cerid-ai
 cd ~/cerid-ai
 
 # 4. Decrypt secrets
