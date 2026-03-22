@@ -334,16 +334,20 @@ export function HallucinationPanel({
   const [claimUpdates, setClaimUpdates] = useState<Map<number, Partial<HallucinationClaim>>>(new Map())
   const [expertVerifiedClaims, setExpertVerifiedClaims] = useState<Set<number>>(new Set())
 
-  // Reset updates when report changes (new verification run)
-  const reportRef = useRef(report)
+  // Track report identity to detect genuinely new verification runs
+  const reportRef = useRef<string>("")
+  // Reset claim state when report actually changes (new verification run).
+  // Compare by content identity (conversation_id + claim count) instead of
+  // object reference — report gets a new ref on every render from useMemo.
+  const reportIdentity = report ? `${report.conversation_id}:${report.claims?.length ?? 0}` : ""
   useEffect(() => {
-    if (report !== reportRef.current) {
-      reportRef.current = report
+    if (reportIdentity !== reportRef.current) {
+      reportRef.current = reportIdentity
       setClaimUpdates(new Map())
       setRetryingClaims(new Set())
       setExpertVerifiedClaims(new Set())
     }
-  }, [report])
+  }, [reportIdentity])
 
   const handleRetryClaim = useCallback(async (index: number) => {
     const claims = report?.claims
