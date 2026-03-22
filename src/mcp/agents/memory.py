@@ -67,6 +67,9 @@ async def extract_memories(
             response_format={"type": "json_object"},
         )
         memories = parse_llm_json(content)
+        # LLM may return a single object instead of an array — normalize
+        if isinstance(memories, dict):
+            memories = [memories]
         if not isinstance(memories, list):
             return []
 
