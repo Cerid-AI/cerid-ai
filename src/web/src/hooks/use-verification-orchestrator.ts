@@ -88,24 +88,26 @@ export function useVerificationOrchestrator({
   // Effective selected message ID — falls back to latest assistant message
   const effectiveMsgId = selectedMsgId ?? lastAssistantMsgId
 
-  // Stable trigger key: only increments when a genuinely NEW assistant message arrives
-  // (not on context re-renders). Uses a ref to track the last known count and only
-  // updates the trigger when the count actually increases.
+  // Stable trigger key: only increments when a genuinely NEW assistant message
+  // is ADDED (streaming completes), not when switching to an existing conversation.
+  // Initialize lastKnownCount to current count so opening an existing conversation
+  // doesn't trigger verification (count goes 0→1 but that's conversation switch, not new message).
   const assistantCount = activeMessages?.filter((m) => m.role === "assistant").length ?? 0
-  const lastKnownCount = useRef(assistantCount)
+  const lastKnownCount = useRef(-1) // -1 = uninitialized
   const triggerCounter = useRef(0)
 
-  // Only bump trigger when count INCREASES (new message arrived)
-  if (assistantCount > lastKnownCount.current && !isStreaming) {
-    // Check cache before triggering — don't re-verify already-verified messages
+  if (lastKnownCount.current === -1) {
+    // First render: set baseline without triggering
+    lastKnownCount.current = assistantCount
+  } else if (assistantCount > lastKnownCount.current && !isStreaming) {
+    // Count genuinely increased (new message completed streaming)
     const key = activeId && lastAssistantMsgId ? cacheKey(activeId, lastAssistantMsgId) : ""
     if (!key || !reportCache.has(key)) {
       triggerCounter.current += 1
     }
     lastKnownCount.current = assistantCount
-  }
-  // Reset on conversation switch
-  if (assistantCount < lastKnownCount.current) {
+  } else if (assistantCount !== lastKnownCount.current) {
+    // Count changed (conversation switch) — update baseline without triggering
     lastKnownCount.current = assistantCount
   }
 

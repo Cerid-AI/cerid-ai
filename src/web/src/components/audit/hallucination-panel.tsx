@@ -327,6 +327,7 @@ export function HallucinationPanel({
   expertVerification, toggleExpertVerification,
   inlineMarkups, toggleInlineMarkups,
 }: HallucinationPanelProps) {
+  // Panel rendering continues below
   const scrollContentRef = useRef<HTMLDivElement>(null)
 
   // Per-claim expert retry state
