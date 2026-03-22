@@ -162,8 +162,10 @@ export function useVerificationOrchestrator({
       savedForKey.current = ""  // reset save guard for new verification cycle
       fetchedForKey.current = ""  // allow re-fetch after new response
       if (activeId && lastAssistantMsgId) {
-        clearVerified(activeId)
         reportCache.delete(cacheKey(activeId, lastAssistantMsgId))
+        // Defer context update to avoid re-render during effect
+        const aid = activeId
+        setTimeout(() => clearVerified(aid), 0)
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- exclude clearVerified: context callback, triggers state update
@@ -187,23 +189,30 @@ export function useVerificationOrchestrator({
     // Cache in module-level map (instant, no re-render)
     reportCache.set(key, verification.report)
 
-    // Persist via context callbacks using refs (avoids dep array issues)
-    markVerifiedRef.current(activeId)
-    saveVerificationRef.current(activeId, lastAssistantMsgId, verification.report)
+    // Defer context saves to next event loop tick.
+    // This breaks the synchronous render loop: without deferral, calling
+    // markVerified/saveVerification updates conversations state, which
+    // re-renders the entire component tree, which can re-trigger effects.
+    const reportCopy = verification.report
+    const aid = activeId
+    const mid = lastAssistantMsgId
+    setTimeout(() => {
+      markVerifiedRef.current(aid)
+      saveVerificationRef.current(aid, mid, reportCopy)
 
-    // Persist to Neo4j (fire-and-forget, no state update)
-    const r = verification.report
-    if (r.summary && r.claims) {
-      saveVerificationReport({
-        conversation_id: activeId,
-        claims: r.claims as unknown as Array<Record<string, unknown>>,
-        overall_score: (r.summary as Record<string, unknown>).overall_confidence as number ?? 0,
-        verified: r.summary?.verified ?? 0,
-        unverified: r.summary?.unverified ?? 0,
-        uncertain: r.summary?.uncertain ?? 0,
-        total: r.summary?.total ?? 0,
-      }).catch(() => {})
-    }
+      // Persist to Neo4j (fire-and-forget)
+      if (reportCopy.summary && reportCopy.claims) {
+        saveVerificationReport({
+          conversation_id: aid,
+          claims: reportCopy.claims as unknown as Array<Record<string, unknown>>,
+          overall_score: (reportCopy.summary as Record<string, unknown>).overall_confidence as number ?? 0,
+          verified: reportCopy.summary?.verified ?? 0,
+          unverified: reportCopy.summary?.unverified ?? 0,
+          uncertain: reportCopy.summary?.uncertain ?? 0,
+          total: reportCopy.summary?.total ?? 0,
+        }).catch(() => {})
+      }
+    }, 0)
   // eslint-disable-next-line react-hooks/exhaustive-deps -- context callbacks accessed via refs to prevent re-render loops
   }, [verification.phase, verification.report, activeId, lastAssistantMsgId])
 
