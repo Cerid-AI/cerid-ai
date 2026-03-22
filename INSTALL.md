@@ -38,7 +38,7 @@ Open the downloaded `.dmg` file and drag Docker to your Applications folder. Lau
 
 ## Step 2: Download Cerid AI
 
-Download the latest `.dmg` from [GitHub Releases](https://github.com/sunrunnerfire/cerid-ai/releases).
+Download the latest `.dmg` from [GitHub Releases](https://github.com/Cerid-AI/cerid-ai/releases).
 
 ## Step 3: Install
 
@@ -86,7 +86,7 @@ After installation, open Docker Desktop and enable WSL2 integration:
 All remaining commands must be run in a WSL2 terminal (Ubuntu), not PowerShell:
 
 ```bash
-git clone git@github.com:sunrunnerfire/cerid-ai.git ~/cerid-ai
+git clone git@github.com:Cerid-AI/cerid-ai.git ~/cerid-ai
 cd ~/cerid-ai
 bash scripts/setup.sh
 ```
@@ -125,7 +125,7 @@ sudo apt update && sudo apt install docker-compose-plugin
 ### Step 3: Clone and Setup
 
 ```bash
-git clone git@github.com:sunrunnerfire/cerid-ai.git ~/cerid-ai
+git clone git@github.com:Cerid-AI/cerid-ai.git ~/cerid-ai
 cd ~/cerid-ai
 bash scripts/setup.sh
 ```
