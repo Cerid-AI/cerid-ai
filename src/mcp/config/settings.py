@@ -44,6 +44,9 @@ AI_SNIPPET_MAX_CHARS = 1500
 # ---------------------------------------------------------------------------
 # Bifrost / LLM Gateway
 # ---------------------------------------------------------------------------
+# When false (default), all LLM calls go directly to OpenRouter via llm_client.py.
+# When true, Bifrost is used for intent-based auto-routing on user chat.
+USE_BIFROST = os.getenv("CERID_USE_BIFROST", "false").lower() == "true"
 BIFROST_URL = os.getenv("BIFROST_URL", "http://bifrost:8080/v1")
 BIFROST_TIMEOUT = float(os.getenv("BIFROST_TIMEOUT", "20.0"))
 

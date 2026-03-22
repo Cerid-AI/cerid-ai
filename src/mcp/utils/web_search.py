@@ -24,7 +24,7 @@ from typing import Any
 import httpx
 
 import config.settings as config
-from utils.bifrost import call_bifrost, extract_content
+from utils.llm_client import call_llm
 from utils.circuit_breaker import get_breaker
 
 _logger = logging.getLogger("ai-companion.web_search")
@@ -235,7 +235,7 @@ class OpenRouterSearchProvider(WebSearchProvider):
             {"role": "user", "content": query},
         ]
         try:
-            resp = await call_bifrost(
+            content = await call_llm(
                 messages,
                 breaker_name="web_search_openrouter",
                 model=model,
@@ -243,7 +243,6 @@ class OpenRouterSearchProvider(WebSearchProvider):
                 max_tokens=1500,
                 timeout=25.0,
             )
-            content = extract_content(resp)
         except Exception:
             _logger.warning("OpenRouter online search failed", exc_info=True)
             return []

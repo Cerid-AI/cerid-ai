@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Internal LLM call utility — routes to Bifrost or Ollama based on INTERNAL_LLM_PROVIDER.
+"""Internal LLM call utility — routes to direct OpenRouter or Ollama based on INTERNAL_LLM_PROVIDER.
 
 Used by pipeline operations that need lightweight LLM intelligence:
 - Query decomposition
@@ -20,7 +20,6 @@ import logging
 import os
 
 import config
-from utils.bifrost import call_bifrost, extract_content
 from utils.circuit_breaker import CircuitOpenError, get_breaker
 
 logger = logging.getLogger("ai-companion.internal_llm")
@@ -36,7 +35,7 @@ async def call_internal_llm(
     """Route internal LLM call to configured provider.
 
     Returns the assistant message content as a string.
-    Falls back to Bifrost if Ollama is unavailable.
+    Falls back through: Ollama → direct OpenRouter → Bifrost.
     """
     provider = getattr(config, "INTERNAL_LLM_PROVIDER", "bifrost")
 
@@ -45,7 +44,9 @@ async def call_internal_llm(
             messages, temperature=temperature, max_tokens=max_tokens,
         )
     else:
-        return await _call_bifrost(
+        # Default: direct OpenRouter via unified client
+        from utils.llm_client import call_llm
+        return await call_llm(
             messages,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -87,66 +88,8 @@ async def _call_ollama(
     try:
         return await breaker.call(_do_call)
     except (CircuitOpenError, httpx.ConnectError, httpx.TimeoutException) as e:
-        logger.warning("Ollama call failed (%s), falling back to Bifrost", e)
-        return await _call_bifrost(
+        logger.warning("Ollama call failed (%s), falling back to direct OpenRouter", e)
+        from utils.llm_client import call_llm
+        return await call_llm(
             messages, temperature=temperature, max_tokens=max_tokens,
         )
-
-
-async def _call_bifrost(
-    messages: list[dict[str, str]],
-    *,
-    temperature: float,
-    max_tokens: int,
-    response_format: dict | None = None,
-) -> str:
-    """Call OpenRouter directly for internal operations (uses paid credits).
-
-    Falls back to Bifrost gateway only if OpenRouter key is not set.
-    """
-    import httpx
-
-    openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
-    model = getattr(config, "INTERNAL_LLM_MODEL", "") or "meta-llama/llama-3.3-70b-instruct"
-
-    # If OpenRouter key is available, call directly (bypasses Bifrost free-tier limits)
-    if openrouter_key:
-        try:
-            payload: dict = {
-                "model": model,
-                "messages": messages,
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-            }
-            if response_format:
-                payload["response_format"] = response_format
-
-            async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.post(
-                    "https://openrouter.ai/api/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {openrouter_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json=payload,
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                return data.get("choices", [{}])[0].get("message", {}).get("content", "")
-        except Exception as e:
-            logger.warning("Direct OpenRouter call failed (%s), falling back to Bifrost", e)
-
-    # Fallback: route through Bifrost gateway
-    extra: dict = {}
-    if response_format:
-        extra["response_format"] = response_format
-
-    data = await call_bifrost(
-        messages=messages,
-        breaker_name="bifrost-rerank",
-        model=None,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        extra_payload=extra if extra else None,
-    )
-    return extract_content(data)

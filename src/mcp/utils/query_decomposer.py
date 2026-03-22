@@ -115,20 +115,19 @@ async def decompose_query(
     # LLM fallback (optional, rarely needed)
     if use_llm:
         try:
-            from utils.bifrost import call_bifrost, extract_content
+            from utils.llm_client import call_llm
 
             prompt = (
                 "Break this question into 2-4 independent sub-questions that can be answered separately. "
                 "Return ONLY a JSON array of strings. No explanation.\n\n"
                 f"Question: {query}"
             )
-            data = await call_bifrost(
+            content = (await call_llm(
                 [{"role": "user", "content": prompt}],
-                breaker_name="bifrost-decompose",
+                breaker_name="openrouter-decompose",
                 temperature=0.1,
                 max_tokens=200,
-            )
-            content = extract_content(data).strip()
+            )).strip()
             # Parse JSON array
             if content.startswith("["):
                 from utils.llm_parsing import parse_llm_json

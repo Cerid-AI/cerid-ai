@@ -240,17 +240,35 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.debug("Pre-warm ChromaDB failed (lazy init on first use): %s", e)
 
+    # Pre-warm LLM client pool (direct OpenRouter)
     try:
-        from utils.bifrost import get_bifrost_client
-        get_bifrost_client()
-        logger.info("Bifrost HTTP client pool pre-warmed")
+        from utils.llm_client import _get_client
+        _get_client()
+        logger.info("OpenRouter HTTP client pool pre-warmed")
     except Exception as e:
-        logger.debug("Pre-warm Bifrost client failed: %s", e)
+        logger.debug("Pre-warm OpenRouter client failed: %s", e)
+
+    # Bifrost pre-warm only when explicitly enabled
+    import config as _startup_config
+    if getattr(_startup_config, "USE_BIFROST", False):
+        try:
+            from utils.bifrost import get_bifrost_client
+            get_bifrost_client()
+            logger.info("Bifrost HTTP client pool pre-warmed")
+        except Exception as e:
+            logger.debug("Pre-warm Bifrost client failed: %s", e)
+    else:
+        logger.info("Bifrost disabled (CERID_USE_BIFROST=false) — LLM calls route directly to OpenRouter")
 
     yield
 
     # Shutdown: stop scheduler, flush caches, close connections, clear MCP sessions
     stop_scheduler()
+    try:
+        from utils.llm_client import close_client
+        await close_client()
+    except Exception:
+        pass
     try:
         from utils.bifrost import close_bifrost_client
         await close_bifrost_client()

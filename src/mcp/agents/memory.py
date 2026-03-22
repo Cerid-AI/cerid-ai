@@ -18,7 +18,6 @@ from typing import Any
 import httpx
 
 import config
-from utils.bifrost import call_bifrost, extract_content
 from utils.internal_llm import call_internal_llm
 from utils.cache import log_event
 from utils.circuit_breaker import CircuitOpenError

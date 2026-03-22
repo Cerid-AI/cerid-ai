@@ -24,8 +24,8 @@ import httpx
 
 import config
 from db.neo4j.artifacts import list_artifacts, update_artifact_summary
-from utils.bifrost import call_bifrost, extract_content
 from utils.circuit_breaker import CircuitOpenError
+from utils.llm_client import call_llm
 from utils.time import utcnow, utcnow_iso
 
 logger = logging.getLogger("ai-companion.curator")
@@ -245,15 +245,14 @@ async def _generate_synopsis(
 
     for attempt in range(2):
         try:
-            data = await call_bifrost(
+            content = await call_llm(
                 [{"role": "user", "content": prompt}],
-                breaker_name="bifrost-synopsis",
+                breaker_name="openrouter-synopsis",
                 model=model,
                 temperature=0.3,
                 max_tokens=max_tokens,
                 timeout=60.0,
             )
-            content = extract_content(data)
             # Strip markdown code fences if present
             if content.startswith("```"):
                 content = content.split("\n", 1)[-1]
@@ -261,7 +260,7 @@ async def _generate_synopsis(
                 content = content.rsplit("```", 1)[0]
             return content.strip()
         except CircuitOpenError:
-            logger.warning("Bifrost synopsis circuit open, skipping synopsis generation")
+            logger.warning("Synopsis circuit open, skipping synopsis generation")
             return ""
         except httpx.TimeoutException:
             logger.warning("Synopsis generation timed out (attempt %d)", attempt + 1)

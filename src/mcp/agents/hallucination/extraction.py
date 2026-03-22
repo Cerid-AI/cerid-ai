@@ -34,8 +34,8 @@ from agents.hallucination.patterns import (
     STRONG_FACTUAL_PATTERNS,
     _is_ignorance_admission,
 )
-from utils.bifrost import call_bifrost, extract_content
 from utils.circuit_breaker import CircuitOpenError
+from utils.llm_client import call_llm
 from utils.llm_parsing import parse_llm_json
 
 logger = logging.getLogger("ai-companion.hallucination")
@@ -340,15 +340,14 @@ async def _extract_claims_llm(response_text: str, max_claims: int) -> list[str]:
 
     for model in models:
         try:
-            data = await call_bifrost(
+            content = await call_llm(
                 messages,
-                breaker_name="bifrost-claims",
+                breaker_name="openrouter-claims",
                 model=model,
                 temperature=0.1,
                 max_tokens=1200,
-                extra_payload={"response_format": {"type": "json_object"}},
+                response_format={"type": "json_object"},
             )
-            content = extract_content(data)
             raw = parse_llm_json(content)
             if isinstance(raw, list):
                 claims: list[str] = []

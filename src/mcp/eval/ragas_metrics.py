@@ -20,7 +20,7 @@ import json
 import logging
 from dataclasses import dataclass
 
-from utils.bifrost import call_bifrost, extract_content
+from utils.llm_client import call_llm
 
 logger = logging.getLogger("ai-companion")
 
@@ -81,10 +81,10 @@ async def faithfulness(
         },
     ]
 
-    resp = await call_bifrost(
-        messages, breaker_name=_BREAKER, model=model, temperature=0.0, max_tokens=500,
+    content = await call_llm(
+        messages, breaker_name=_BREAKER, model=model or "", temperature=0.0, max_tokens=500,
     )
-    return _parse_score(extract_content(resp))
+    return _parse_score(content)
 
 
 async def answer_relevancy(
@@ -115,10 +115,10 @@ async def answer_relevancy(
         },
     ]
 
-    resp = await call_bifrost(
-        messages, breaker_name=_BREAKER, model=model, temperature=0.0, max_tokens=500,
+    content = await call_llm(
+        messages, breaker_name=_BREAKER, model=model or "", temperature=0.0, max_tokens=500,
     )
-    return _parse_score(extract_content(resp))
+    return _parse_score(content)
 
 
 async def context_precision(
@@ -150,10 +150,10 @@ async def context_precision(
         },
     ]
 
-    resp = await call_bifrost(
-        messages, breaker_name=_BREAKER, model=model, temperature=0.0, max_tokens=500,
+    content = await call_llm(
+        messages, breaker_name=_BREAKER, model=model or "", temperature=0.0, max_tokens=500,
     )
-    return _parse_score(extract_content(resp))
+    return _parse_score(content)
 
 
 async def context_recall(
@@ -191,10 +191,10 @@ async def context_recall(
         },
     ]
 
-    resp = await call_bifrost(
-        messages, breaker_name=_BREAKER, model=model, temperature=0.0, max_tokens=500,
+    content = await call_llm(
+        messages, breaker_name=_BREAKER, model=model or "", temperature=0.0, max_tokens=500,
     )
-    return _parse_score(extract_content(resp))
+    return _parse_score(content)
 
 
 async def evaluate_all(

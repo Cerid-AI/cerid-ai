@@ -918,41 +918,23 @@ async def _verify_claim_externally(
                     f"\"{claim}\"{model_context}\n\n{_json_response_fmt}"
                 )
 
-            url = f"{config.BIFROST_URL}/chat/completions"
-            payload = {
-                "model": verify_model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                "temperature": config.EXTERNAL_VERIFY_TEMPERATURE,
-                "max_tokens": config.EXTERNAL_VERIFY_MAX_TOKENS,
-            }
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
 
             # Increase timeout for web-search calls — they take longer
             timeout = config.BIFROST_TIMEOUT * 2 if is_current_event else config.BIFROST_TIMEOUT
 
-            breaker = get_breaker("bifrost-verify")
-            # In streaming or fast mode, use fewer retries to avoid
-            # compounding delays (each 429 retry holds a semaphore slot
-            # and adds 2-4s sleep + full timeout duration).
-            retry_limit = (
-                config.STREAMING_RETRY_ATTEMPTS if (streaming or fast_mode) else None
+            from utils.llm_client import call_llm_raw
+            data = await call_llm_raw(
+                messages,
+                model=verify_model,
+                temperature=config.EXTERNAL_VERIFY_TEMPERATURE,
+                max_tokens=config.EXTERNAL_VERIFY_MAX_TOKENS,
+                timeout=timeout,
+                breaker_name="openrouter-verify",
             )
-
-            async def _bifrost_verify() -> dict:
-                from utils.bifrost import get_bifrost_client
-                client = get_bifrost_client()
-                resp = await _llm_call_with_retry(
-                    client, url, payload, max_attempts=retry_limit,
-                    timeout=timeout,
-                )
-                return resp.json()
-
-            # CreditExhaustedError (402) inherits NonTransientError, so the
-            # circuit breaker excludes it from failure counting — it propagates
-            # directly to the outer CreditExhaustedError handler below.
-            data = await breaker.call(_bifrost_verify)
             raw_message = data["choices"][0]["message"]
             raw_answer = raw_message.get("content", "").strip()
 
@@ -1428,31 +1410,23 @@ async def _check_history_consistency(
     user_prompt = "\n\n".join(user_prompt_parts)
 
     try:
-        url = f"{config.BIFROST_URL}/chat/completions"
         # Consistency checking requires nuanced cross-text comparison —
         # use the dedicated consistency model (Gemini 2.5 Flash by default)
         # instead of GPT-4o-mini for more reliable contradiction detection.
-        payload = {
-            "model": config.VERIFICATION_CONSISTENCY_MODEL,
-            "messages": [
-                {"role": "system", "content": _SYSTEM_CONSISTENCY_CHECK},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": 0.0,
-            "max_tokens": 400,
-        }
+        messages = [
+            {"role": "system", "content": _SYSTEM_CONSISTENCY_CHECK},
+            {"role": "user", "content": user_prompt},
+        ]
 
-        breaker = get_breaker("bifrost-verify")
-
-        async def _call() -> dict:
-            from utils.bifrost import get_bifrost_client
-            client = get_bifrost_client()
-            resp = await _llm_call_with_retry(
-                client, url, payload, timeout=config.BIFROST_TIMEOUT,
-            )
-            return resp.json()
-
-        data = await breaker.call(_call)
+        from utils.llm_client import call_llm_raw
+        data = await call_llm_raw(
+            messages,
+            model=config.VERIFICATION_CONSISTENCY_MODEL,
+            temperature=0.0,
+            max_tokens=400,
+            timeout=config.BIFROST_TIMEOUT,
+            breaker_name="openrouter-verify",
+        )
         raw_answer = data["choices"][0]["message"].get("content", "").strip()
 
         # Parse JSON array from response

@@ -19,8 +19,8 @@ from typing import Any, Literal
 import httpx
 
 import config
-from utils.bifrost import call_bifrost, extract_content
 from utils.circuit_breaker import CircuitOpenError
+from utils.llm_client import call_llm
 from utils.llm_parsing import parse_llm_json
 from utils.time import utcnow_iso
 
@@ -112,13 +112,12 @@ async def _llm_classify(
     )
 
     try:
-        data = await call_bifrost(
+        content = await call_llm(
             [{"role": "user", "content": prompt}],
-            breaker_name="bifrost-memory",
+            breaker_name="openrouter-memory",
             temperature=0.0,
             max_tokens=200,
         )
-        content = extract_content(data)
         parsed = parse_llm_json(content)
 
         if not isinstance(parsed, dict):

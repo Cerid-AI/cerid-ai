@@ -20,8 +20,8 @@ import os
 
 import httpx
 
-from utils.bifrost import call_bifrost, extract_content
 from utils.circuit_breaker import CircuitOpenError
+from utils.llm_client import call_llm
 
 logger = logging.getLogger("ai-companion.context_compression")
 
@@ -154,13 +154,12 @@ async def _summarize_turns(turns: list[dict]) -> str:
     )
 
     try:
-        data = await call_bifrost(
+        return await call_llm(
             [{"role": "user", "content": prompt}],
-            breaker_name="bifrost-compress",
+            breaker_name="openrouter-compress",
             temperature=0.1,
             max_tokens=500,
         )
-        return extract_content(data)
     except (CircuitOpenError, httpx.HTTPStatusError, KeyError) as e:
         logger.warning("Context compression LLM call failed: %s", e)
         # Fallback: truncate middle turns to their first line

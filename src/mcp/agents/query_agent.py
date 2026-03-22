@@ -17,7 +17,7 @@ import numpy as np
 import config
 from config import DOMAINS
 from deps import get_chroma
-from utils.bifrost import call_bifrost, extract_content
+from utils.llm_client import call_llm
 from utils.cache import log_event
 from utils.circuit_breaker import CircuitOpenError
 from utils.llm_parsing import parse_llm_json
@@ -526,14 +526,12 @@ async def _rerank_llm(
     )
 
     try:
-        data = await call_bifrost(
+        content = await call_llm(
             [{"role": "user", "content": prompt}],
-            breaker_name="bifrost-rerank",
+            breaker_name="openrouter-rerank",
             temperature=0.0,
             max_tokens=200,
         )
-
-        content = extract_content(data)
         ranking = parse_llm_json(content)
 
         if not isinstance(ranking, list):

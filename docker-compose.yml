@@ -104,6 +104,10 @@ services:
 
   # ──────────────────────────────────────────────
   # Layer 2: LLM Gateway
+  # Optional — only needed when CERID_USE_BIFROST=true (for intent-based
+  # auto-routing on user chat).  All internal LLM calls now go directly
+  # to OpenRouter via llm_client.py.  To disable, comment out the bifrost
+  # service and remove the bifrost dependency from mcp-server below.
   # ──────────────────────────────────────────────
 
   bifrost:
@@ -179,6 +183,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      # Bifrost dependency is optional — remove this block if running without Bifrost
+      # (i.e. when CERID_USE_BIFROST is unset or false).
       bifrost:
         condition: service_healthy
     networks:
