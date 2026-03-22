@@ -18,7 +18,7 @@ Before beginning any development work in this repo, if not already done in this 
 
 Cerid AI is a self-hosted, privacy-first Personal AI Knowledge Companion. It unifies multi-domain knowledge bases (code, finance, projects, artifacts) into a context-aware LLM interface with RAG-powered retrieval and intelligent agents. Knowledge base stays local; LLM API calls send query context to the configured provider. Optional cloud sync (Dropbox) for cross-machine settings/conversations, encrypted when CERID_ENCRYPTION_KEY is set.
 
-**Status:** All phases through 50 complete. 1376+ Python tests, 545+ frontend tests. 9 agents, 26 MCP tools (19 core + 5 trading + pkb_web_search + pkb_memory_recall), hybrid BM25s+vector search with semantic chunking, cross-encoder reranking (ONNX, three modes), switchable client-side embeddings (Matryoshka, zero-migration), contextual chunking (LLM-generated situational summaries), advanced RAG pipeline (adaptive retrieval gate, query decomposition with parallel sub-retrieval, MMR diversity reordering, intelligent context assembly with facet coverage, ColBERT-inspired late interaction scoring, semantic query cache with quantized int8 embeddings), circuit breakers on all Bifrost + Neo4j calls, shared Bifrost call utility with singleton httpx connection pool, distributed request tracing, adaptive quality feedback, per-domain tag vocabulary with typeahead UI, improved synopsis generation, streaming verification with 4 claim types (evasion/citation/recency/ignorance) + interactive inline verification (ClaimOverlay popovers, footnote markers, source navigation) + expert verification mode (Grok 4) + per-message verification selection, Self-RAG validation loop, smart routing (direct-to-OpenRouter chat proxy, capability-based model scoring, three-way routing mode, proactive model switch on ignorance detection), context-aware chat (corrections, token-budget KB injection, semantic dedup), advanced response formatting (15 MD component overrides, collapsible code blocks, TOC for long responses), right-click context menus on toolbar icons, drag-drop ingestion on KB pane + chat input + artifact drag-to-chat, infrastructure settings + search tuning sliders, KB admin endpoints (rebuild/rescore/clear/delete/stats) + Settings GUI, incremental knowledge sync with tombstones and conflict resolution, sync GUI with export/import/status dashboard, archive storage mode, mypy type checking in CI, React GUI with iPad/tablet responsive touch UX, LAN access with robust multi-interface IP detection and stale-IP auto-fix, pre-flight validation (port conflicts, env vars, disk space), post-startup reachability checks, guided `setup.sh` installer, configurable port overrides (`CERID_PORT_*`), optional Caddy HTTPS gateway and Cloudflare Tunnel for demos, multi-user auth foundations (opt-in JWT, tenant context, per-user API keys, usage metering), marketing website at cerid.ai (Next.js 16 + Vercel), brand identity (teal accent color system), Simple/Advanced mode (progressive disclosure), settings reorganization (3-tab layout with user experience presets), first-run onboarding dialog, marketing site refreshed (changelog, SEO, animations), MCP server performance optimization (lightweight verification retrieval, connection pooling, parallel graph expansion, deferred cache persistence, startup pre-warming). Infrastructure security hardened (Redis auth, port binding, resource limits, security headers, nginx hardening). CI/CD 7-job pipeline with timeouts. See [`docs/COMPLETED_PHASES.md`](docs/COMPLETED_PHASES.md) for history.
+**Status:** All phases through 50 complete. 1376+ Python tests, 545+ frontend tests. 9 agents, 26 MCP tools (19 core + 5 trading + pkb_web_search + pkb_memory_recall), hybrid BM25s+vector search with semantic chunking, cross-encoder reranking (ONNX, three modes), switchable client-side embeddings (Matryoshka, zero-migration), contextual chunking (LLM-generated situational summaries), advanced RAG pipeline (adaptive retrieval gate, query decomposition with parallel sub-retrieval, MMR diversity reordering, intelligent context assembly with facet coverage, ColBERT-inspired late interaction scoring, semantic query cache with quantized int8 embeddings), circuit breakers on all Bifrost + Neo4j calls, shared Bifrost call utility with singleton httpx connection pool, distributed request tracing, adaptive quality feedback, per-domain tag vocabulary with typeahead UI, improved synopsis generation, streaming verification with 4 claim types (evasion/citation/recency/ignorance) + interactive inline verification (ClaimOverlay popovers, footnote markers, source navigation) + expert verification mode (Grok 4) + per-message verification selection, Self-RAG validation loop, smart routing (direct-to-OpenRouter chat proxy, capability-based model scoring, three-way routing mode, proactive model switch on ignorance detection), context-aware chat (corrections, token-budget KB injection, semantic dedup), advanced response formatting (15 MD component overrides, collapsible code blocks, TOC for long responses), right-click context menus on toolbar icons, drag-drop ingestion on KB pane + chat input + artifact drag-to-chat, infrastructure settings + search tuning sliders, KB admin endpoints (rebuild/rescore/clear/delete/stats) + Settings GUI, incremental knowledge sync with tombstones and conflict resolution, sync GUI with export/import/status dashboard, archive storage mode, mypy type checking in CI, React GUI with iPad/tablet responsive touch UX, LAN access with robust multi-interface IP detection and stale-IP auto-fix, pre-flight validation (port conflicts, env vars, disk space), post-startup reachability checks, guided `setup.sh` installer, configurable port overrides (`CERID_PORT_*`), optional Caddy HTTPS gateway and Cloudflare Tunnel for demos, multi-user auth foundations (opt-in JWT, tenant context, per-user API keys, usage metering), marketing website at cerid.ai (Next.js 16 + Vercel), brand identity (teal accent color system), Simple/Advanced mode (progressive disclosure), settings reorganization (3-tab layout with user experience presets), first-run onboarding dialog, marketing site refreshed (changelog, SEO, animations), MCP server performance optimization (lightweight verification retrieval, connection pooling, parallel graph expansion, deferred cache persistence, startup pre-warming). Infrastructure security hardened (Redis auth, port binding, resource limits, security headers, nginx hardening). CI/CD 9-job pipeline with timeouts. See [`docs/COMPLETED_PHASES.md`](docs/COMPLETED_PHASES.md) for history.
 
 **Next:** See [`tasks/todo.md`](tasks/todo.md).
 
@@ -271,3 +271,38 @@ See [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) for the full developer refere
 - **Version bump** — `pyproject.toml` + git tag
 
 **Version coupling:** Python 3.11 (Dockerfile + CI + pyproject.toml), Node 22 (.nvmrc + Dockerfile), ChromaDB client >=0.5,<0.6 must match server 0.5.23.
+
+## CI Pipeline (9 jobs)
+
+| Job | What |
+|-----|------|
+| lint | `ruff check src/mcp/` |
+| typecheck | `mypy src/mcp/` |
+| test | pytest (70% coverage floor) + Codecov upload + license audit |
+| security | detect-secrets + bandit + pip-audit (CVE-ignores documented inline) + dlint ReDoS |
+| lock-sync | pip-compile lock file freshness check |
+| frontend | tsc + ESLint + Vitest + Vite build + bundle size check (800KB limit) + npm audit + license audit |
+| docker | hadolint (mcp + web Dockerfiles) + `docker build` + Trivy CRITICAL/HIGH scan |
+| frontend-marketing | tsc + ESLint + `next build` (uploads Sentry source maps via `SENTRY_AUTH_TOKEN`) |
+| frontend-desktop | npm ci + `npm run typecheck` |
+
+Docker gates on all 8 prior jobs. Trivy CVE ignore list is in `.github/workflows/ci.yml` with inline rationale for each ignored CVE.
+
+## Sentry
+
+Error monitoring via Sentry org `cerid-ai`. Two projects in this repo:
+
+| Project | SDK | Where initialized |
+|---------|-----|-------------------|
+| `cerid-ai-mcp` | `sentry-sdk[fastapi]` | `src/mcp/main.py` — before `app = FastAPI()` |
+| `cerid-ai-marketing` | `@sentry/nextjs` | `packages/marketing/sentry.server.config.ts`, `sentry.edge.config.ts`, `src/instrumentation.ts`, `src/instrumentation-client.ts`, `src/app/global-error.tsx` |
+
+**GitHub secrets required:**
+
+| Secret | Used by |
+|--------|---------|
+| `SENTRY_AUTH_TOKEN` | Source map uploads during `next build` (CI `frontend-marketing` job) |
+| `SENTRY_DSN_MCP` | Python FastAPI error reporting |
+| `SENTRY_DSN_MARKETING` | Next.js error reporting + Vercel env var `NEXT_PUBLIC_SENTRY_DSN` |
+
+**`withSentryConfig`** wraps `next.config.ts` in `packages/marketing/` with `org: "cerid-ai"`, `project: "cerid-ai-marketing"`, `tunnelRoute: "/monitoring"`, and `widenClientFileUpload: true`. Source maps are uploaded automatically on every `next build` in CI when `SENTRY_AUTH_TOKEN` is present.
