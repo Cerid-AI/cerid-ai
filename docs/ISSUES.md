@@ -1,8 +1,8 @@
 # Cerid AI — Issues & Backlog
 
 > **Created:** 2026-02-25
-> **Last updated:** 2026-03-21
-> **Status:** All phases through 50 complete + Production Readiness Audit. 155+ resolved, 0 open. 1376+ Python tests, 485+ frontend tests.
+> **Last updated:** 2026-03-22
+> **Status:** All phases through 50 complete + Production Readiness Audit + Verification Crash Debugging. 160+ resolved, 0 open. 1376+ Python tests, 485+ frontend tests.
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21 roadmap)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](COMPLETED_PHASES.md)
 > **Purpose:** Track known bugs, feature gaps, structural issues, and architecture evaluations for upcoming phases.
@@ -1105,19 +1105,69 @@ Verification results only appear in the status bar and hallucination panel sideb
 
 ---
 
+## P. Verification Crash Debugging (2026-03-22)
+
+### P1. Docker Build Silent Failure
+
+**Severity:** High
+**Status:** ✅ Resolved (2026-03-22)
+
+**Problem:** `docker compose build --no-cache` can fail with exit code 2 inside the build stage but Docker reuses the cached previous image. TypeScript strict mode in `npm run build` catches errors that `npx tsc --noEmit` misses (unused imports, missing Record keys).
+
+**Fix:** Always verify build output with `docker compose build --progress=plain cerid-web 2>&1 | grep error`. Documented in `tasks/lessons.md`.
+
+### P2. React Verification Panel Crash (Multiple Root Causes)
+
+**Severity:** Critical
+**Status:** ✅ Resolved (2026-03-22)
+
+**Problem:** Verification panel caused infinite render loops and browser crashes. Three root causes: (1) Object reference comparisons in useEffect deps firing every render when `report` comes from useMemo, (2) Context callbacks (useConversationsContext) getting new references on every state update creating cascading re-renders, (3) Deferred state updates needed to break render cycles.
+
+**Fix:** Compare by identity strings (conversation_id + count) instead of object references. Store context callbacks in useRef. Use setTimeout(0) to defer context state updates out of the render cycle.
+
+### P3. Circuit Breaker Name Mismatches
+
+**Severity:** Medium
+**Status:** ✅ Resolved (2026-03-22)
+
+**Problem:** 4 LLM call sites used breaker names not registered in `circuit_breaker.py`. The `f"bifrost-{breaker_name}"` pattern in fallback paths could double-prefix names.
+
+**Fix:** Updated registry with all call site names. Fixed double-prefix pattern.
+
+### P4. Claim Extraction Pleasantry Filtering
+
+**Severity:** Low
+**Status:** ✅ Resolved (2026-03-22)
+
+**Problem:** Pleasantry patterns only matched at sentence start, missing mid-sentence pleasantries. Also, `response_format: {"type": "json_object"}` forced LLMs to return objects not arrays, requiring unwrapping of `{"claims": [...]}` wrappers.
+
+**Fix:** Updated pleasantry regex to match anywhere in sentence. Added JSON wrapper unwrapping in claim extraction.
+
+### P5. LLM JSON Wrapper Unwrapping
+
+**Severity:** Low
+**Status:** ✅ Resolved (2026-03-22)
+
+**Problem:** LLMs sometimes wrap array responses in objects (`{"claims": [...]}`) when `response_format: {"type": "json_object"}` is set. Claim extraction failed silently.
+
+**Fix:** Added unwrapping logic to detect and extract arrays from wrapper objects before processing.
+
+---
+
 ## Priority Order
 
 ### Open Items (0)
 
 No open items. All issues resolved.
 
-### Resolved (155+ items)
+### Resolved (160+ items)
 
 **Phase 40** (6 items): M1 (semantic cache), J1 (verification OOM), K1 (Codecov), K2 (license scanning), K3 (ReDoS audit), K7 (multi-stage Dockerfile)
 **Phase 39** (7 items): L1 (CORS wildcard), L2 (port binding), L3 (email PII), L4 (audit TTL), L5 (sync encryption), L6 (KB injection transparency), L7 (marketing claims)
 **Phase 38D+** (3 items): D4 (temporal claims uncertain), D5 (auto router real-time queries), D6 (Llama fallback retry)
 **Phase 38D** (3 items): D3 (model router auto mode), K5 (digest view), K6 (batch triage UI)
 **Production Readiness Audit** (7 items): O1 (dead code removal, 28K lines), O2 (Docker healthchecks), O3 (trading proxy pooling), O4 (exception handling, 19 instances), O5-O7 (pass 2 cleanup)
+**Verification Crash Debugging** (5 items): P1 (Docker build silent failure), P2 (React verification crash), P3 (circuit breaker mismatches), P4 (pleasantry filtering), P5 (JSON wrapper unwrapping)
 **Phase 41** (6 items resolved): SDK hardening & multi-agent extensibility — typed response models (`models/sdk.py`), consumer domain access control (`CONSUMER_REGISTRY` with `allowed_domains`/`strict_domains`), trading endpoints gated by `CERID_TRADING_ENABLED`, MCP `outputSchema` on all 23 tools, SDK test suite (`test_router_sdk.py`), integration guide (`docs/INTEGRATION_GUIDE.md`)
 **Phase 30** (0 new issues): Codebase audit & cleanup — no new issues filed; structural debt reduced
 **Phase 29** (1 item): V21 (advanced response formatting + inline verification)

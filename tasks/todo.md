@@ -1,7 +1,7 @@
 # Cerid AI — Task Tracker
 
-> **Last updated:** 2026-03-21
-> **Current status:** All phases through 50 complete + Production Readiness Audit. 1376+ Python tests, 485+ frontend tests.
+> **Last updated:** 2026-03-22
+> **Current status:** All phases through 50 complete + Production Readiness Audit + Verification Crash Debugging. 1376+ Python tests, 485+ frontend tests.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md) — 0 open
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE42-50.md](../docs/plans/DEVELOPMENT_PLAN_PHASE42-50.md) (Phases A-D + 42-50)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
@@ -112,6 +112,36 @@ Two-pass audit of the full codebase after completing Phases A-D and 42-50.
 - [x] Stale import references cleaned up
 - [x] Unused feature flag defaults corrected
 - [x] Minor documentation inconsistencies resolved
+
+---
+
+## Verification Crash Debugging & Feature Polish (2026-03-22) ✅
+
+Deep debugging session fixing production crashes and polishing features built in Phases A-50.
+
+### Completed
+- [x] Smart router with direct OpenRouter routing (Bifrost bypass for chat)
+- [x] Provider configuration system (BYOK with failover chain)
+- [x] OpenRouter credit tracking with GUI display
+- [x] LLM prompting optimization (JSON schema, few-shot, creativity controls)
+- [x] RAG features enabled (semantic cache, query decomposition, intelligent assembly)
+- [x] Latency optimizations (graph early-exit, local rerank preference)
+- [x] Internal LLM routing (Bifrost/Ollama with auto-fallback)
+- [x] Folder scanner for autonomous KB building
+- [x] PDF chunked parsing with OOM protection
+- [x] Production readiness audit (verification crash root cause found and fixed)
+- [x] Code cleanup (58 lines dead code removed, 4 latent circuit breaker bugs fixed)
+- [x] Docker build silent failure identified and documented
+- [x] React infinite render loop in verification panel (multiple root causes fixed)
+- [x] Circuit breaker name mismatches across 4 call sites
+- [x] Claim extraction pleasantry filtering and JSON wrapper unwrapping
+
+### Open Areas
+- [ ] Electron desktop app packaging (Phase D — code exists, needs testing/polishing)
+- [ ] Phase C repo architecture separation (deferred — requires dedicated session)
+- [ ] Marketing site updates (cerid.ai — feature content refresh)
+- [ ] Cross-platform testing (Windows, Linux)
+- [ ] Full verification flow testing with sufficient OpenRouter credits
 
 ---
 

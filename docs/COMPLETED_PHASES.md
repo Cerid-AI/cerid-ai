@@ -1,7 +1,7 @@
 # Cerid AI — Completed Phases
 
 > Full history of completed development phases. For current status and next steps, see [CLAUDE.md](../CLAUDE.md).
-> **Last updated:** 2026-03-21
+> **Last updated:** 2026-03-22
 
 ---
 
@@ -156,3 +156,4 @@
 - **Phase D (Complete, 2026-03-21):** Electron Desktop App — main process, Docker lifecycle (dockerode), system tray, auto-updater. CI/CD via `electron-build.yml` for macOS + Windows. Key files: `packages/desktop/`.
 - **Phase 50 (Complete, 2026-03-21):** Visual Workflow Builder — workflow engine with CRUD, Kahn's DAG validation, topological execution, 4 templates. SVG canvas with drag-to-reposition, type-colored nodes, live execution status. Editor with add/delete nodes+edges, config sidebar, template selector, 30+ tests. BSL-1.1 pro-tier plugin wrapper. Key files: `src/mcp/routers/workflows.py`, `src/web/src/components/workflows/`, `plugins/workflow/`.
 - **Production Readiness Audit (Complete, 2026-03-21):** Two-pass audit — Pass 1: 33 issues found and fixed (Sprints A-D), Pass 2: 3 low items fixed. 28,000 lines dead code removed (`app/` + `core/`), 27 new frontend tests (485 total), Docker healthchecks standardized, trading proxy connection pooling, exception handling hardened across 19 instances.
+- **Verification Crash Debugging (Complete, 2026-03-22):** Deep debugging session fixing production crashes in the verification panel. Docker build silent failure identified (exit code 2 reuses cached image). React infinite render loop fixed (3 root causes: object ref comparisons in useEffect, context callback instability, synchronous state updates during render). Circuit breaker name mismatches fixed across 4 call sites. Claim extraction hardened (pleasantry filtering, JSON wrapper unwrapping). 58 lines dead code removed. Smart router, BYOK provider config, OpenRouter credit tracking, RAG features, folder scanner, and PDF chunked parsing all polished. Key files: `tasks/lessons.md` (patterns captured), `src/web/src/hooks/use-verification-orchestrator.ts`, `src/mcp/utils/circuit_breaker.py`, `src/mcp/agents/hallucination/extraction.py`.

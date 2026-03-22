@@ -291,3 +291,30 @@
 - **What:** Added a dedicated `trading` domain to taxonomy with its own sub-categories and tag vocabulary. Moved trading-specific tags from `finance` to `trading`.
 - **Why:** Trading agent queries were matching personal tax documents. Domain segregation ensures trading KB enrichment only searches trading-relevant content.
 - **Reference:** `src/mcp/config/taxonomy.py` — TAXONOMY["trading"], TAG_VOCABULARY["trading"]
+
+---
+
+## Session: Verification Crash Debugging (2026-03-22)
+
+### Docker Build Failures Are Silent
+- `docker compose build --no-cache` can fail with exit code 2 inside the build stage but Docker still uses the cached previous image
+- Always verify `npm run build` succeeds by checking build output for "built"
+- TypeScript strict mode in Docker build (via `npm run build`) catches errors that `npx tsc --noEmit` misses (unused imports, missing Record keys)
+- Fix: always check `docker compose build --progress=plain cerid-web 2>&1 | grep error` after builds
+
+### React Infinite Render Loops
+- Object reference comparisons in useEffect deps cause loops: `if (report !== reportRef.current)` fires every render when `report` comes from useMemo
+- Context callbacks (useConversationsContext) get new references on every state update, creating cascading re-renders
+- Fix: compare by identity strings (conversation_id + count), NOT object references
+- Fix: store context callbacks in useRef and access via .current
+- Fix: use setTimeout(0) to defer context state updates out of the render cycle
+
+### Circuit Breaker Name Mismatches
+- All LLM call sites must use breaker names that exist in circuit_breaker.py registry
+- The registry must be updated whenever new call sites are added
+- `f"bifrost-{breaker_name}"` in fallback paths can double-prefix names
+
+### Claim Extraction Edge Cases
+- `response_format: {"type": "json_object"}` forces LLMs to return objects, not arrays
+- Claims may be wrapped: `{"claims": [...]}` — always unwrap before processing
+- Pleasantry patterns must match ANYWHERE in sentence, not just at start
