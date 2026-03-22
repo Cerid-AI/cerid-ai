@@ -1,4 +1,4 @@
-# Cross-Service Version Coupling
+## Cross-Service Version Coupling
 
 Constraints that span multiple files. When updating one side, check the other.
 
@@ -97,7 +97,7 @@ The pre-commit hook and CI `lock-sync` job enforce that lock files stay in sync.
 
 ## Cross-Project: cerid-trading-agent
 
-The [cerid-trading-agent](https://github.com/sunrunnerfire/cerid-trading-agent) depends on cerid-ai's MCP API for knowledge base enrichment. Changes to cerid-ai must not break this integration.
+The [cerid-trading-agent](https://github.com/Cerid-AI/cerid-trading-agent) depends on cerid-ai's MCP API for knowledge base enrichment. Changes to cerid-ai must not break this integration.
 
 ### Coupled Interfaces
 
@@ -171,6 +171,13 @@ CONSUMER_REGISTRY = {
         "allowed_domains": ["trading", "finance"],     # KB domains this consumer can query
         "strict_domains": True,                        # disables cross-domain affinity bleed
         "description": "Cerid trading agent",
+    },
+    "boardroom-agent": {
+        "rate_limit": 60,                              # req/min
+        "allowed_domains": None,                       # None = all domains
+        "strict_domains": False,
+        "description": "Cerid boardroom agent",
+        "repo": "https://github.com/Cerid-AI/cerid-boardroom",
     },
     "gui": {
         "rate_limit": 20,
