@@ -360,19 +360,24 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
     setProseContainer(node)
   }, [])
 
-  // Claim span matching — runs after DOM render to access rendered text for accurate positions.
-  // Depends on proseContainer (not just proseRef) so it re-runs when the DOM node attaches.
+  // Claim span matching — runs when claims change. Reads DOM text via ref (not state)
+  // to avoid re-trigger loop: DOM mutation effect → textContent changes → this effect → repeat.
   const [claimSpans, setClaimSpans] = useState<ReturnType<typeof matchClaimsToText>>([])
+  const claimsMatchedRef = useRef<string>("")
   useEffect(() => {
-    if (!verificationClaims?.length) { setClaimSpans([]); return }
-    const domText = proseContainer?.textContent ?? undefined
+    if (!verificationClaims?.length) { setClaimSpans([]); claimsMatchedRef.current = ""; return }
+    const domText = proseRef.current?.textContent ?? undefined
     if (!domText) { setClaimSpans([]); return }
+    // Guard: only recalculate if claims actually changed (not on DOM mutations)
+    const claimKey = verificationClaims.map(c => c.claim).join("|")
+    if (claimsMatchedRef.current === claimKey) return
+    claimsMatchedRef.current = claimKey
     const spans = matchClaimsToText(message.content, verificationClaims, domText)
     if (import.meta.env.DEV && verificationClaims.length > 0 && spans.length !== verificationClaims.length) {
       console.warn(`[inline-markup] mismatch: claims=${verificationClaims.length} spans=${spans.length}`)
     }
     setClaimSpans(spans)
-  }, [message.content, verificationClaims, proseContainer])
+  }, [message.content, verificationClaims])
 
   // Inline verification markups via DOM text node highlighting.
   // Process spans in REVERSE order so DOM mutations (mark + footnote insertion)
