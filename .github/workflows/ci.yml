@@ -182,6 +182,7 @@ jobs:
   # Docker
   docker:
     runs-on: ubuntu-latest
+    needs: [lint, typecheck, test, security, lock-sync, frontend, frontend-marketing, frontend-desktop]
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
@@ -277,6 +278,4 @@ jobs:
           cache-dependency-path: packages/desktop/package-lock.json
       - run: npm ci
       - name: TypeScript type check
-        run: npx tsc --noEmit
-      - name: ESLint
-        run: npm run lint
+        run: npm run typecheck
