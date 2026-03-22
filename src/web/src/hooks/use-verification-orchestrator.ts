@@ -149,7 +149,8 @@ export function useVerificationOrchestrator({
         reportCache.delete(cacheKey(activeId, lastAssistantMsgId))
       }
     }
-  }, [isStreaming, activeId, lastAssistantMsgId, clearVerified])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- exclude clearVerified: context callback, triggers state update
+  }, [isStreaming, activeId, lastAssistantMsgId])
 
   // Guard: only save once per verification completion (prevents infinite re-render loop)
   const savedForKey = useRef<string>("")
@@ -182,7 +183,8 @@ export function useVerificationOrchestrator({
         }).catch(() => {})
       }
     }
-  }, [verification.phase, verification.report, activeId, lastAssistantMsgId, markVerified, saveVerification])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- exclude markVerified/saveVerification: they trigger context state updates that cause re-renders. The savedForKey ref guard prevents double execution.
+  }, [verification.phase, verification.report, activeId, lastAssistantMsgId])
 
   // Fetch saved report when switching conversations or selected message changes
   useEffect(() => {
