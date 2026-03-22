@@ -155,7 +155,7 @@ def _extract_claims_heuristic(response_text: str) -> list[str]:
         strong_bonus = sum(1 for p in STRONG_FACTUAL_PATTERNS if p.search(sentence))
         effective_score = factual_score + strong_bonus
 
-        if effective_score >= 2:
+        if effective_score >= 1:
             # Clean up trailing punctuation for consistency
             claim = sentence.rstrip(".,;: ")
             if claim and claim not in claims:
