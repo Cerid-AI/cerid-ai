@@ -202,8 +202,8 @@ EXTERNAL_VERIFY_MAX_CONCURRENT = int(os.getenv("EXTERNAL_VERIFY_MAX_CONCURRENT",
 # Max concurrent claim verifications (KB search + reranking + external LLM).
 # Each verification loads BM25 indices and runs ONNX cross-encoder inference,
 # which is memory-intensive.  With 10+ claims, unbounded parallelism can OOM
-# a 2 GB container.  Default 3 keeps peak memory well under 1 GB.
-VERIFY_CLAIM_MAX_CONCURRENT = int(os.getenv("VERIFY_CLAIM_MAX_CONCURRENT", "3"))
+# a 2 GB container.  Default 5 keeps peak memory manageable on most setups.
+VERIFY_CLAIM_MAX_CONCURRENT = int(os.getenv("VERIFY_CLAIM_MAX_CONCURRENT", "5"))
 # Minimum available container memory (MB) before allowing a new claim verification.
 # Uses cgroup v2 files — no-op when running outside a memory-limited container.
 VERIFY_MEMORY_FLOOR_MB = int(os.getenv("VERIFY_MEMORY_FLOOR_MB", "512"))
@@ -216,9 +216,9 @@ VERIFICATION_MIN_RELEVANCE = float(os.getenv("VERIFICATION_MIN_RELEVANCE", "0.35
 # ---------------------------------------------------------------------------
 # Per-claim timeout: max time for any single claim's full verification
 # (including KB lookup, external calls, and all fallbacks)
-STREAMING_PER_CLAIM_TIMEOUT = float(os.getenv("STREAMING_PER_CLAIM_TIMEOUT", "45"))
+STREAMING_PER_CLAIM_TIMEOUT = float(os.getenv("STREAMING_PER_CLAIM_TIMEOUT", "25"))
 # Total deadline for the entire streaming verification loop (all claims)
-STREAMING_TOTAL_TIMEOUT = float(os.getenv("STREAMING_TOTAL_TIMEOUT", "180"))
+STREAMING_TOTAL_TIMEOUT = float(os.getenv("STREAMING_TOTAL_TIMEOUT", "90"))
 # Fewer LLM retries on 429 during streaming to avoid compounding delays
 STREAMING_RETRY_ATTEMPTS = int(os.getenv("STREAMING_RETRY_ATTEMPTS", "1"))
 

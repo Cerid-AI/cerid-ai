@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from datetime import datetime
 
 import httpx
 
@@ -38,6 +39,49 @@ from utils.circuit_breaker import CircuitOpenError
 from utils.llm_parsing import parse_llm_json
 
 logger = logging.getLogger("ai-companion.hallucination")
+
+CURRENT_YEAR = datetime.now().year
+
+
+def _reclassify_recency(claim_text: str, claim_type: str) -> str:
+    """Reclassify factual claims as recency if they contain temporal references.
+
+    Catches date-based claims about past/future events (e.g. "2024 elections
+    are upcoming") that the stale-knowledge pattern detector would miss because
+    they don't reference training data cutoffs.
+    """
+    if claim_type != "factual":
+        return claim_type  # Don't override non-factual types
+
+    text_lower = claim_text.lower()
+
+    # Check for year references that are stale (before current year)
+    year_pattern = re.findall(r"\b(20[1-9]\d)\b", claim_text)
+    for y in year_pattern:
+        if int(y) < CURRENT_YEAR:
+            # Claim references a past year with present/future tense
+            if any(
+                w in text_lower
+                for w in (
+                    "upcoming", "will ", "going to", "is expected",
+                    "are expected", "plans to", "set to",
+                )
+            ):
+                return "recency"
+
+    # Check for explicit temporal markers that suggest time-sensitive info
+    recency_markers = [
+        r"\b(current|currently|now|today|this year|this month)\b",
+        r"\b(recent|recently|latest|newest|just)\b",
+        r"\b(upcoming|forthcoming|soon|next)\b",
+        r"\b(as of \d{4}|since \d{4})\b",
+    ]
+    for pattern in recency_markers:
+        if re.search(pattern, text_lower):
+            return "recency"
+
+    return claim_type
+
 
 # ---------------------------------------------------------------------------
 # System prompts for LLM-based extraction

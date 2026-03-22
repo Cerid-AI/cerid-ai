@@ -13,11 +13,13 @@ import asyncio
 import json
 import logging
 import re
+from datetime import datetime
 from typing import Any
 
 import httpx
 
 import config
+from agents.hallucination.extraction import _reclassify_recency
 from agents.hallucination.patterns import (
     MEMORY_AUTHORITY_BOOST,
     MEMORY_TYPES,
@@ -74,6 +76,9 @@ _SYSTEM_CURRENT_EVENT_VERIFICATION = (
     "You are verifying a claim made by a different AI model. Your job is to "
     "independently assess accuracy using web sources — do not assume the claim "
     "is correct just because another AI generated it.\n\n"
+    f"The current date is {datetime.now().strftime('%Y-%m-%d')}. Any claim "
+    "referencing events before this date should be evaluated based on whether "
+    "those events have already occurred.\n\n"
     "Search the web for authoritative sources to confirm or refute the claim."
     f"{_EMPIRICAL_SOURCE_GUIDANCE}\n\n"
     "Respond with ONLY a JSON object — no other text:\n"
@@ -147,6 +152,9 @@ _SYSTEM_RECENCY_VERIFICATION = (
     "Your job is to search for the MOST CURRENT data on this topic and "
     "determine whether the model's information is still accurate or has been "
     "superseded by newer data.\n\n"
+    f"The current date is {datetime.now().strftime('%Y-%m-%d')}. Any claim "
+    "referencing events before this date should be evaluated based on whether "
+    "those events have already occurred.\n\n"
     "If the claim contains specific numbers, dates, or facts, search for "
     "the latest available data and compare. Report whether the model's "
     "information is current or outdated, citing the most recent source."
@@ -697,6 +705,7 @@ async def _verify_claim_externally(
     force_web_search: bool = False,
     streaming: bool = False,
     expert_mode: bool = False,
+    fast_mode: bool = False,
 ) -> dict[str, Any]:
     """Direct structured cross-model verification for a single claim.
 
@@ -726,6 +735,11 @@ async def _verify_claim_externally(
     When ``expert_mode`` is True, the expert-tier model (Grok 4) is used
     for all claim types, overriding pool-based selection.  For claims
     requiring web search, the ``:online`` suffix is appended.
+
+    When ``fast_mode`` is True, the function uses the fastest available
+    model (GPT-4o-mini) with 1 retry, skipping the multi-model fallback
+    chain and staleness escalation.  Used for recency claims that don't
+    specifically need current web data.
 
     Pipeline:
     1. Check feature flag (early return if disabled)
@@ -759,8 +773,11 @@ async def _verify_claim_externally(
     # Detect recency/staleness claims (model hedged about its training data)
     # Must check before ignorance — recency claims are also ignorance-adjacent
     # but need different handling (compare data, not just check existence).
+    # Also catch date-based claims via _reclassify_recency (e.g. "2024
+    # elections are upcoming") that the stale-knowledge pattern misses.
     is_recency = (
-        not is_evasion and not is_citation and _is_recency_claim(claim)
+        not is_evasion and not is_citation
+        and (_is_recency_claim(claim) or _reclassify_recency(claim, "factual") == "recency")
     )
 
     # Detect ignorance-admitting claims ("I don't have info about X")
@@ -811,6 +828,12 @@ async def _verify_claim_externally(
         else:
             verify_model = config.VERIFICATION_EXPERT_MODEL
         logger.debug("Expert mode: using %s for claim verification", verify_model)
+
+    # Fast mode: use cheapest/fastest model, 1 retry, skip staleness escalation
+    if fast_mode and not expert_mode:
+        verify_model = config.VERIFICATION_MODEL  # GPT-4o-mini
+        verification_method = "cross_model_fast"
+        logger.debug("Fast mode: using %s for claim verification", verify_model)
 
     sem = _get_ext_verify_semaphore()
 
@@ -894,10 +917,12 @@ async def _verify_claim_externally(
             timeout = config.BIFROST_TIMEOUT * 2 if is_current_event else config.BIFROST_TIMEOUT
 
             breaker = get_breaker("bifrost-verify")
-            # In streaming mode, use fewer retries to avoid compounding
-            # delays (each 429 retry holds a semaphore slot and adds 2-4s
-            # sleep + full timeout duration).
-            retry_limit = config.STREAMING_RETRY_ATTEMPTS if streaming else None
+            # In streaming or fast mode, use fewer retries to avoid
+            # compounding delays (each 429 retry holds a semaphore slot
+            # and adds 2-4s sleep + full timeout duration).
+            retry_limit = (
+                config.STREAMING_RETRY_ATTEMPTS if (streaming or fast_mode) else None
+            )
 
             async def _bifrost_verify() -> dict:
                 from utils.bifrost import get_bifrost_client
@@ -972,6 +997,7 @@ async def _verify_claim_externally(
                 and not is_ignorance
                 and not is_current_event
                 and not streaming
+                and not fast_mode
                 and _is_current_event_claim(claim)  # re-check with broader lens
                 and verdict["status"] in ("verified", "uncertain")
                 and _has_staleness_indicators(raw_answer)

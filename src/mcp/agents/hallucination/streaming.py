@@ -18,10 +18,11 @@ import time
 from typing import Any
 
 import config
-from agents.hallucination.extraction import extract_claims
+from agents.hallucination.extraction import _reclassify_recency, extract_claims
 from agents.hallucination.patterns import (
     _get_claim_verify_semaphore,
     _is_ignorance_admission,
+    _is_recency_claim,
 )
 from agents.hallucination.persistence import (
     REDIS_HALLUCINATION_PREFIX,
@@ -29,6 +30,7 @@ from agents.hallucination.persistence import (
 )
 from agents.hallucination.verification import (
     _check_history_consistency,
+    _verify_claim_externally,
     verify_claim,
 )
 from utils.time import utcnow_iso
@@ -251,7 +253,10 @@ async def verify_response_streaming(
             return "citation"
         if _is_ignorance_admission(claim_text):
             return "ignorance"
-        return "factual"
+        if _is_recency_claim(claim_text):
+            return "recency"
+        # Apply temporal reclassification for date-based claims
+        return _reclassify_recency(claim_text, "factual")
 
     # Notify frontend of extraction method and all extracted claims
     yield {"type": "extraction_complete", "method": method, "count": len(claims)}
@@ -263,6 +268,31 @@ async def verify_response_streaming(
             "index": i,
             "claim_type": _claim_type(claim),
         }
+
+    # --- Pre-fetch KB context for all claims in one batch ---
+    # Reduces per-claim KB query overhead by sharing a single warm retrieval.
+    batch_kb_context: list[dict[str, Any]] = []
+    try:
+        from agents.query_agent import lightweight_kb_query
+        batch_query = " ".join(c for c in claims[:10])
+        batch_kb_context = await lightweight_kb_query(
+            batch_query, chroma_client=chroma_client, top_k=15,
+        )
+    except Exception as kb_exc:
+        logger.debug("Batch KB pre-fetch failed (non-blocking): %s", kb_exc)
+
+    # Build a set of claim indices where KB confidence is very high (>0.85),
+    # allowing us to skip expensive external verification for those claims.
+    high_confidence_kb_claims: set[int] = set()
+    if batch_kb_context:
+        for idx, claim_text in enumerate(claims):
+            claim_lower = claim_text.lower()
+            for kb_result in batch_kb_context:
+                relevance = kb_result.get("relevance", 0.0)
+                content = (kb_result.get("content", "") or "").lower()
+                if relevance > 0.85 and claim_lower[:60] in content:
+                    high_confidence_kb_claims.add(idx)
+                    break
 
     # --- Parallel verification via asyncio.as_completed ---
     verified_count = 0
