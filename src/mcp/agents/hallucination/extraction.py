@@ -350,6 +350,9 @@ async def _extract_claims_llm(response_text: str, max_claims: int) -> list[str]:
                 response_format={"type": "json_object"},
             )
             raw = parse_llm_json(content)
+            # response_format: json_object may wrap array in {"claims": [...]}
+            if isinstance(raw, dict):
+                raw = raw.get("claims", raw.get("results", raw.get("data", [])))
             if isinstance(raw, list):
                 claims: list[str] = []
                 for item in raw[:max_claims]:
@@ -360,7 +363,7 @@ async def _extract_claims_llm(response_text: str, max_claims: int) -> list[str]:
                 if claims:
                     logger.info("LLM claim extraction succeeded with model=%s (%d claims)", model, len(claims))
                     return claims
-            logger.warning("LLM claim extraction returned non-list from %s: %s", model, type(raw).__name__)
+            logger.warning("LLM claim extraction returned unexpected shape from %s: %s", model, type(raw).__name__)
         except CircuitOpenError:
             logger.warning("Bifrost claims circuit open for %s, trying next model", model)
         except (httpx.TimeoutException, httpx.ConnectError) as e:
