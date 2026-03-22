@@ -319,38 +319,59 @@ async def _extract_claims_llm(response_text: str, max_claims: int) -> list[str]:
         "JSON array:"
     )
 
-    try:
-        data = await call_bifrost(
-            [
-                {"role": "system", "content": _SYSTEM_CLAIM_EXTRACTION},
-                {"role": "user", "content": user_prompt},
-            ],
-            breaker_name="bifrost-claims",
-            model=config.VERIFICATION_MODEL,
-            temperature=0.1,
-            max_tokens=1200,
-            extra_payload={"response_format": {"type": "json_object"}},
-        )
-        content = extract_content(data)
-        raw = parse_llm_json(content)
-        if isinstance(raw, list):
-            # Handle both plain strings and structured {"claim": ..., "type": ...}
-            claims: list[str] = []
-            for item in raw[:max_claims]:
-                if isinstance(item, dict):
-                    claims.append(str(item.get("claim", item.get("text", str(item)))))
-                else:
-                    claims.append(str(item))
-            return claims
-        logger.warning("LLM claim extraction returned non-list: %s", type(raw).__name__)
-    except CircuitOpenError:
-        logger.warning("Bifrost claims circuit open, skipping LLM claim extraction")
-    except (httpx.TimeoutException, httpx.ConnectError) as e:
-        logger.warning("Claim extraction timeout/connection error: %s", e)
-    except httpx.HTTPStatusError as e:
-        logger.warning("Claim extraction HTTP error: %s %s", e.response.status_code, e.response.text[:200])
-    except (json.JSONDecodeError, KeyError) as e:
-        logger.warning("Claim extraction failed: %s", e)
+    # Model fallback chain: try free models first, then paid
+    fallback_models = [
+        config.LLM_INTERNAL_MODEL,                            # Free tier (Llama 3.3 70B)
+        config.VERIFICATION_MODEL,                             # Paid (GPT-4o-mini)
+        "openrouter/google/gemini-2.5-flash-preview-05-20",   # Free fallback
+    ]
+    # Deduplicate while preserving order
+    seen_models: set[str] = set()
+    models: list[str] = []
+    for m in fallback_models:
+        if m and m not in seen_models:
+            models.append(m)
+            seen_models.add(m)
+
+    messages = [
+        {"role": "system", "content": _SYSTEM_CLAIM_EXTRACTION},
+        {"role": "user", "content": user_prompt},
+    ]
+
+    for model in models:
+        try:
+            data = await call_bifrost(
+                messages,
+                breaker_name="bifrost-claims",
+                model=model,
+                temperature=0.1,
+                max_tokens=1200,
+                extra_payload={"response_format": {"type": "json_object"}},
+            )
+            content = extract_content(data)
+            raw = parse_llm_json(content)
+            if isinstance(raw, list):
+                claims: list[str] = []
+                for item in raw[:max_claims]:
+                    if isinstance(item, dict):
+                        claims.append(str(item.get("claim", item.get("text", str(item)))))
+                    else:
+                        claims.append(str(item))
+                if claims:
+                    logger.info("LLM claim extraction succeeded with model=%s (%d claims)", model, len(claims))
+                    return claims
+            logger.warning("LLM claim extraction returned non-list from %s: %s", model, type(raw).__name__)
+        except CircuitOpenError:
+            logger.warning("Bifrost claims circuit open for %s, trying next model", model)
+        except (httpx.TimeoutException, httpx.ConnectError) as e:
+            logger.warning("Claim extraction timeout/connection error with %s: %s", model, e)
+        except httpx.HTTPStatusError as e:
+            status = e.response.status_code
+            logger.warning("Claim extraction HTTP %d from %s — trying next model", status, model)
+            if status not in (402, 429, 503):
+                break  # Non-retriable error, stop trying
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.warning("Claim extraction parse error from %s: %s", model, e)
 
     return []
 
