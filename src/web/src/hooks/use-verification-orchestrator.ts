@@ -194,67 +194,38 @@ export function useVerificationOrchestrator({
   // eslint-disable-next-line react-hooks/exhaustive-deps -- context callbacks accessed via refs to prevent re-render loops
   }, [verification.phase, verification.report, activeId, lastAssistantMsgId])
 
-  // Fetch saved report when switching conversations or selected message changes
-  const fetchedForKey = useRef<string>("")
+  // Load saved verification report from local caches only (no API fetch).
+  // API fetch was causing infinite re-render loops because saveVerification
+  // updated context → new refs → effect re-triggered → fetch → save → loop.
+  // Reports are cached locally when verification completes (save effect above).
+  // For older conversations without cached reports, the user can click "Re-verify".
   useEffect(() => {
     if (!activeId || !hallucinationEnabled || !effectiveMsgId) {
       setSavedReport(null)
-      fetchedForKey.current = ""
       return
     }
 
     const key = cacheKey(activeId, effectiveMsgId)
 
-    // Guard: don't re-fetch for the same key (prevents loop from context re-renders)
-    if (fetchedForKey.current === key) return
-
-    // 1. Check module-level cache FIRST
+    // 1. Check module-level cache (fastest, survives tab switches)
     const cached = reportCache.get(key)
     if (cached) {
       setSavedReport(cached)
-      fetchedForKey.current = key
       return
     }
 
-    // 2. Check localStorage
+    // 2. Check localStorage (persisted across page reloads)
     const localReport = getVerification(activeId, effectiveMsgId)
     if (localReport) {
       reportCache.set(key, localReport)
       setSavedReport(localReport)
-      fetchedForKey.current = key
       return
     }
 
-    // For non-latest messages, skip API fetch
-    if (effectiveMsgId !== lastAssistantMsgId) {
-      setSavedReport(null)
-      return
-    }
-
-    // Only fetch from API when stream is idle and no claims have been streamed yet
-    if (verification.phase !== "idle") return
-    if (verification.claims && verification.claims.length > 0) return
-
-    // 3. Fetch from API (Redis → Neo4j fallback) — only once per key
-    fetchedForKey.current = key
-    let cancelled = false
-    setSavedReportLoading(true)
-    fetchHallucinationReport(activeId)
-      .then((r) => {
-        if (!cancelled) {
-          setSavedReport(r)
-          setSavedReportLoading(false)
-          if (r && lastAssistantMsgId) {
-            reportCache.set(cacheKey(activeId, lastAssistantMsgId), r)
-            // Use ref to avoid triggering context re-render from this effect
-            saveVerificationRef.current(activeId, lastAssistantMsgId, r)
-          }
-        }
-      })
-      .catch(() => { if (!cancelled) setSavedReportLoading(false) })
-    return () => { cancelled = true; setSavedReportLoading(false) }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- exclude context callbacks + verification.phase to prevent re-render loops
-  }, [activeId, effectiveMsgId, lastAssistantMsgId, hallucinationEnabled])
+    // No cached report — user can re-verify via button
+    setSavedReport(null)
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- exclude getVerification (context callback, causes re-render loops)
+  }, [activeId, effectiveMsgId, hallucinationEnabled])
 
   // Proactive web-model switch banner
   useEffect(() => {
