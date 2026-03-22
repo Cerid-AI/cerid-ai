@@ -29,7 +29,7 @@ export function Footer() {
             <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
               <li>
                 <Link
-                  href="https://github.com/sunrunnerfire/cerid-ai"
+                  href="https://github.com/Cerid-AI/cerid-ai"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="hover:text-foreground"
@@ -39,7 +39,7 @@ export function Footer() {
               </li>
               <li>
                 <Link
-                  href="https://github.com/sunrunnerfire/cerid-ai/blob/main/docs/API_REFERENCE.md"
+                  href="https://github.com/Cerid-AI/cerid-ai/blob/main/docs/API_REFERENCE.md"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="hover:text-foreground"
