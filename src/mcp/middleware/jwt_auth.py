@@ -36,7 +36,10 @@ EXEMPT_PREFIXES = (
 
 
 def create_access_token(payload: dict, secret: str = CERID_JWT_SECRET) -> str:
-    """Create a JWT access token."""
+    """Create a JWT access token. Injects ``exp`` if not already present (24h default)."""
+    from datetime import datetime, timedelta, timezone
+
+    payload.setdefault("exp", datetime.now(timezone.utc) + timedelta(hours=24))
     return jwt.encode(payload, secret, algorithm="HS256")
 
 

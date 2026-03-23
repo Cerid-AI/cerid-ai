@@ -29,6 +29,28 @@ logger = logging.getLogger("ai-companion.chat")
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
+# ---------------------------------------------------------------------------
+# Shared connection pool — avoids per-request TCP/TLS handshake overhead
+# ---------------------------------------------------------------------------
+_chat_client: httpx.AsyncClient | None = None
+
+
+def _get_chat_client() -> httpx.AsyncClient:
+    global _chat_client
+    if _chat_client is None or _chat_client.is_closed:
+        _chat_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(120.0, connect=10.0),
+            limits=httpx.Limits(max_connections=30, max_keepalive_connections=15),
+        )
+    return _chat_client
+
+
+async def close_chat_client() -> None:
+    global _chat_client
+    if _chat_client and not _chat_client.is_closed:
+        await _chat_client.aclose()
+        _chat_client = None
+
 router = APIRouter(tags=["chat"])
 
 # Models to try when the primary model fails with a retryable error.
@@ -147,10 +169,8 @@ async def _attempt_stream(
     if request_id:
         headers["X-Request-ID"] = request_id
 
-    timeout = httpx.Timeout(120.0, connect=10.0)
-
     try:
-        client = httpx.AsyncClient(timeout=timeout)
+        client = _get_chat_client()
         req_obj = client.build_request(
             "POST",
             f"{OPENROUTER_BASE}/chat/completions",
@@ -167,7 +187,6 @@ async def _attempt_stream(
                 status, bare_model, error_body,
             )
             await response.aclose()
-            await client.aclose()
 
             if status in RETRYABLE_STATUS_CODES:
                 return status
@@ -222,7 +241,6 @@ async def _attempt_stream(
                 yield f"data: {err}\n\ndata: [DONE]\n\n".encode()
             finally:
                 await response.aclose()
-                await client.aclose()
 
         return _success_gen()
 

@@ -87,7 +87,12 @@ async def mcp_sse_endpoint(request: Request):
     # Evict oldest session if at capacity
     if len(_sessions) >= _MAX_SESSIONS:
         oldest_key = next(iter(_sessions))
-        _sessions.pop(oldest_key, None)
+        evicted_queue = _sessions.pop(oldest_key, None)
+        if evicted_queue is not None:
+            try:
+                evicted_queue.put_nowait(None)  # Sentinel signals event_stream to stop
+            except asyncio.QueueFull:
+                pass
         logger.warning(f"[MCP] Evicted oldest session {oldest_key} (cap={_MAX_SESSIONS})")
     _sessions[session_id] = queue
     logger.info(f"[MCP] SSE opened: {session_id}")
@@ -113,6 +118,9 @@ async def mcp_sse_endpoint(request: Request):
                     logger.debug(f"[MCP] Sent keep-alive ping: {session_id}")
                 try:
                     msg = await asyncio.wait_for(queue.get(), timeout=8.0)
+                    if msg is None:
+                        logger.info(f"[MCP] Session evicted, closing SSE: {session_id}")
+                        break
                     data = json.dumps(msg)
                     yield f"event: message\ndata: {data}\n\n"
                     logger.info(f"[MCP] Sent via SSE: {msg.get('id', 'notification')}")

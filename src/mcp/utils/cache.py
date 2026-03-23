@@ -53,9 +53,11 @@ def log_event(
         entry["conversation_id"] = conversation_id
     payload = json.dumps(entry)
     try:
-        redis_client.lpush(config.REDIS_INGEST_LOG, payload)
-        redis_client.ltrim(config.REDIS_INGEST_LOG, 0, config.REDIS_LOG_MAX - 1)
-        redis_client.expire(config.REDIS_INGEST_LOG, 86400 * 30)  # 30-day TTL
+        pipe = redis_client.pipeline()
+        pipe.lpush(config.REDIS_INGEST_LOG, payload)
+        pipe.ltrim(config.REDIS_INGEST_LOG, 0, config.REDIS_LOG_MAX - 1)
+        pipe.expire(config.REDIS_INGEST_LOG, 86400 * 30)  # 30-day TTL
+        pipe.execute()
     except Exception as e:
         logger.error(f"Failed to log event to Redis: {e}")
 

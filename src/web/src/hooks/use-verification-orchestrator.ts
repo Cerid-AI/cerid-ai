@@ -109,25 +109,32 @@ export function useVerificationOrchestrator({
   const assistantCount = activeMessages?.filter((m) => m.role === "assistant").length ?? 0
   const lastKnownCount = useRef(-1) // -1 = uninitialized
   const triggerCounter = useRef(0)
+  const [triggerBump, setTriggerBump] = useState(0)
 
-  if (lastKnownCount.current === -1) {
-    // First render: set baseline without triggering
-    lastKnownCount.current = assistantCount
-  } else if (assistantCount > lastKnownCount.current && !isStreaming) {
-    // Count genuinely increased (new message completed streaming)
-    const key = activeId && lastAssistantMsgId ? cacheKey(activeId, lastAssistantMsgId) : ""
-    if (!key || !reportCache.has(key)) {
-      triggerCounter.current += 1
+  // Minimum response length (chars) to trigger verification — skip trivial replies
+  const MIN_VERIFIABLE_LENGTH = 200
+
+  // Move trigger logic into useEffect to avoid render-body ref mutations
+  // (unsafe in React 18 Concurrent Mode / StrictMode)
+  useEffect(() => {
+    if (lastKnownCount.current === -1) {
+      lastKnownCount.current = assistantCount
+      return
     }
-    lastKnownCount.current = assistantCount
-  } else if (assistantCount !== lastKnownCount.current && !isStreaming) {
-    // Count changed while not streaming (conversation switch) — update baseline
-    // without triggering. IMPORTANT: do NOT update baseline while streaming,
-    // otherwise the post-stream render sees count==baseline and never triggers.
-    lastKnownCount.current = assistantCount
-  }
+    if (assistantCount > lastKnownCount.current && !isStreaming) {
+      const key = activeId && lastAssistantMsgId ? cacheKey(activeId, lastAssistantMsgId) : ""
+      const textLen = latestAssistantText?.length ?? 0
+      if (textLen >= MIN_VERIFIABLE_LENGTH && (!key || !reportCache.has(key))) {
+        triggerCounter.current += 1
+        setTriggerBump((prev) => prev + 1)
+      }
+      lastKnownCount.current = assistantCount
+    } else if (assistantCount !== lastKnownCount.current && !isStreaming) {
+      lastKnownCount.current = assistantCount
+    }
+  }, [assistantCount, isStreaming, activeId, lastAssistantMsgId, latestAssistantText])
 
-  const streamTriggerKey = isStreaming ? 0 : triggerCounter.current
+  const streamTriggerKey = isStreaming ? 0 : triggerCounter.current + triggerBump * 0
 
   const latestUserQuery = useMemo(() => {
     if (!activeMessages) return undefined

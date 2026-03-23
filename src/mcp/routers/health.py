@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from fastapi import APIRouter
 
@@ -12,6 +13,11 @@ from deps import get_chroma, get_neo4j, get_redis
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion")
+
+# In-memory health cache — avoids blocking I/O on every poll
+_health_cache: dict = {}
+_health_cache_ts: float = 0.0
+_HEALTH_CACHE_TTL = 10.0  # seconds
 
 
 def health_check() -> dict:
@@ -95,7 +101,14 @@ def list_collections() -> dict:
 
 @router.get("/health")
 def health_check_endpoint():
-    return health_check()
+    global _health_cache, _health_cache_ts
+    now = time.monotonic()
+    if _health_cache and (now - _health_cache_ts) < _HEALTH_CACHE_TTL:
+        return _health_cache
+    result = health_check()
+    _health_cache = result
+    _health_cache_ts = now
+    return result
 
 
 @router.get("/collections")

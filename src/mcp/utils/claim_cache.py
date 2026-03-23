@@ -10,6 +10,7 @@ stored in Redis with a 30-day TTL by default.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -17,6 +18,9 @@ import re
 from typing import Any
 
 logger = logging.getLogger("ai-companion.claim_cache")
+
+# Prefixes that indicate non-standard claims — skip caching for these
+_SPECIAL_PREFIXES = ("[EVASION]", "[CITATION]", "[IGNORANCE]")
 
 
 def normalize_claim(claim: str) -> str:
@@ -40,9 +44,11 @@ def claim_hash(claim: str) -> str:
 
 async def get_cached_verdict(redis_client, claim_text: str) -> dict[str, Any] | None:
     """Check if a claim has been verified before. Returns cached verdict or *None*."""
+    if any(claim_text.strip().startswith(p) for p in _SPECIAL_PREFIXES):
+        return None
     key = f"verf:claim:{claim_hash(claim_text)}"
     try:
-        data = await redis_client.get(key)
+        data = await asyncio.to_thread(redis_client.get, key)
         if data:
             verdict = json.loads(data)
             logger.debug("Claim cache hit: %s -> %s", key, verdict.get("status"))
@@ -66,6 +72,8 @@ async def cache_verdict(
     Tower") — enabling downstream consumers to interpret the cached claim
     correctly even when the bare claim text is ambiguous.
     """
+    if any(claim_text.strip().startswith(p) for p in _SPECIAL_PREFIXES):
+        return
     key = f"verf:claim:{claim_hash(claim_text)}"
     try:
         cache_entry: dict[str, Any] = {
@@ -79,7 +87,7 @@ async def cache_verdict(
         }
         if response_context:
             cache_entry["response_context"] = response_context[:200]
-        await redis_client.set(key, json.dumps(cache_entry), ex=ttl)
+        await asyncio.to_thread(redis_client.set, key, json.dumps(cache_entry), ttl)
         logger.debug("Claim cached: %s (status=%s)", key, cache_entry["status"])
     except Exception as e:
         logger.debug("Failed to cache claim %s: %s", key, e)

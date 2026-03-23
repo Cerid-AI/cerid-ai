@@ -336,10 +336,8 @@ export function useVerificationStream(
 
     return () => {
       clearTimeout(timeoutId)
-      if (!hasReceivedEventsRef.current) {
-        cancelled = true
-        abort()
-      }
+      cancelled = true
+      abort()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- responseText/userQuery/enabled read via refs to prevent mid-stream restarts
   }, [conversationId, triggerKey])

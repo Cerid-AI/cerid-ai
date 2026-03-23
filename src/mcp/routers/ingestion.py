@@ -74,8 +74,8 @@ async def ingest_endpoint(req: IngestRequest, request: Request):
     async with _ingest_semaphore:
         result = await asyncio.to_thread(ingest_content, req.content, req.domain, metadata)
     try:
-        from utils.query_cache import invalidate_all
-        invalidate_all()
+        from utils.query_cache import invalidate_cache_non_blocking
+        asyncio.get_running_loop().create_task(invalidate_cache_non_blocking())
     except Exception as e:
         logger.debug(f"Cache invalidation failed (non-blocking): {e}")
     return result

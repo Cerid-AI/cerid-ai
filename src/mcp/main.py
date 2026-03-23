@@ -287,6 +287,11 @@ async def lifespan(app: FastAPI):
         await close_bifrost_client()
     except Exception:
         pass
+    try:
+        from routers.chat import close_chat_client
+        await close_chat_client()
+    except Exception:
+        pass
     # Close trading proxy connection pool
     if CERID_TRADING_ENABLED:
         try:

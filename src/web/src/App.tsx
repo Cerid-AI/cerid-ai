@@ -4,6 +4,7 @@
 import { lazy, Suspense, useCallback, useEffect, useState } from "react"
 import { Loader2 } from "lucide-react"
 import { AppErrorBoundary } from "@/components/layout/app-error-boundary"
+import { PaneErrorBoundary } from "@/components/ui/pane-error-boundary"
 import { AppLayout } from "@/components/layout/app-layout"
 import { ChatPanel } from "@/components/chat/chat-panel"
 import { KBInjectionProvider } from "@/contexts/kb-injection-context"
@@ -92,7 +93,11 @@ export default function App() {
       {(activePane) => {
         switch (activePane) {
           case "chat":
-            return <ChatPanel />
+            return (
+              <PaneErrorBoundary label="Chat">
+                <ChatPanel />
+              </PaneErrorBoundary>
+            )
           case "knowledge":
           case "monitoring":
           case "audit":
