@@ -353,6 +353,9 @@ export function HallucinationPanel({
   // Per-claim retry loading state (transient, stays local)
   const [retryingClaims, setRetryingClaims] = useState<Set<number>>(new Set())
 
+  // Filter state — track which categories are hidden (must be at top level, not conditional)
+  const [hiddenCategories, setHiddenCategories] = useState<Set<string>>(new Set())
+
   // Reset retry state when report changes
   const reportRef = useRef<string>("")
   const reportIdentity = report ? `${report.conversation_id}:${report.claims?.length ?? 0}` : ""
@@ -474,8 +477,6 @@ export function HallucinationPanel({
   const evasionCount = report.claims.filter((c) => c.claim_type === "evasion").length
   const softUnverifiedCount = unverified - refutedCount - evasionCount
 
-  // Filter state — track which categories are hidden
-  const [hiddenCategories, setHiddenCategories] = useState<Set<string>>(new Set())
   const toggleCategory = (cat: string) => {
     setHiddenCategories((prev) => {
       const next = new Set(prev)
