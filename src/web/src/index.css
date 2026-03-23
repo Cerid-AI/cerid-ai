@@ -182,6 +182,11 @@
 .dark .border-brand {
   border-color: oklch(0.55 0.12 255);
 }
+/* Selected verification message glow in dark mode */
+.dark .ring-brand\/40 {
+  --tw-ring-color: oklch(0.55 0.12 255 / 40%);
+  box-shadow: 0 0 20px oklch(0.45 0.10 255 / 18%), var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000);
+}
 /* Scrollbar cobalt tint */
 .dark ::-webkit-scrollbar-thumb {
   background: oklch(0.35 0.05 255 / 50%);

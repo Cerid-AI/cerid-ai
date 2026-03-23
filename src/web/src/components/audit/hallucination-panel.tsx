@@ -81,7 +81,7 @@ function ClaimBadge({
     <div
       data-claim-index={index}
       className={cn(
-        "flex gap-2 rounded-lg border px-3 py-2.5 transition-all cursor-pointer",
+        "rounded-lg border px-3 py-2.5 transition-all cursor-pointer",
         focused && "ring-2 ring-brand bg-brand/5",
       )}
       onClick={() => {
@@ -89,17 +89,14 @@ function ClaimBadge({
         onFocus?.(focused ? null : index)
       }}
     >
-      {/* Left column: index + status badge stacked */}
-      <div className="shrink-0 flex flex-col items-center gap-1 pt-0.5">
-        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
+      {/* Badge row: number + status + sub-type, left-aligned */}
+      <div className="flex items-center gap-1.5 mb-1.5">
+        <span className="shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
           {index + 1}
         </span>
         {expertVerified ? (
-          <Badge variant="outline" className="border-purple-500/40 bg-purple-500/10 text-purple-400 text-[10px] px-1.5 py-0.5 leading-tight text-center">
-            <span className="flex flex-col items-center gap-0">
-              <span className="flex items-center gap-0.5"><Sparkles className="h-2.5 w-2.5" />expert</span>
-              <span>{displayStatus}</span>
-            </span>
+          <Badge variant="outline" className="border-purple-500/40 bg-purple-500/10 text-purple-400 text-[10px] px-1.5 py-0.5">
+            <span className="flex items-center gap-0.5"><Sparkles className="h-2.5 w-2.5" />expert · {displayStatus}</span>
           </Badge>
         ) : (
           <Badge
@@ -110,13 +107,13 @@ function ClaimBadge({
           </Badge>
         )}
         {refutedSubType && REFUTED_SUB_LABELS[refutedSubType] && (
-          <Badge variant="outline" className={`text-[9px] px-1 py-0 whitespace-nowrap ${REFUTED_SUB_LABELS[refutedSubType].color}`}>
+          <Badge variant="outline" className={`text-[9px] px-1 py-0 ${REFUTED_SUB_LABELS[refutedSubType].color}`}>
             {REFUTED_SUB_LABELS[refutedSubType].label}
           </Badge>
         )}
       </div>
-      {/* Right column: claim content fills remaining width */}
-      <div className="min-w-0 flex-1">
+      {/* Full-width content below badges */}
+      <div className="min-w-0 w-full">
         {/* Re-verifying banner */}
         {retrying && (
           <div className="mb-2 flex items-center gap-2 rounded-md border border-purple-500/30 bg-purple-500/5 px-2.5 py-2 text-xs text-purple-400">

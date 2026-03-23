@@ -8,6 +8,7 @@
 
 import { useRef, useEffect } from "react"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { cn } from "@/lib/utils"
 import { MessageBubble, type MessageVerificationStatus } from "./message-bubble"
 import { ModelSwitchDivider } from "./model-switch-divider"
 import type { ChatMessage, HallucinationReport } from "@/lib/types"
@@ -41,7 +42,7 @@ interface ChatMessagesProps {
   onToggleMarkup?: () => void
   onClaimFocus?: (index: number) => void
   onArtifactClick: (artifactId: string) => void
-  onSelectVerificationMsg?: (msgId: string) => void
+  onSelectVerificationMsg?: (msgId: string | null) => void
 }
 
 export function ChatMessages({
@@ -105,8 +106,22 @@ export function ChatMessages({
           const msgClaims = isSelected && halReport?.claims ? halReport.claims : undefined
           const msgInlineMarkups = isSelected ? inlineMarkups : undefined
 
+          // Click handler: any assistant message with a report can be selected
+          const canSelectForVerification = msg.role === "assistant" && storedReport
+          const handleBubbleClick = canSelectForVerification
+            ? () => onSelectVerificationMsg?.(isSelected ? null : msg.id)  // Toggle: click again to deselect
+            : undefined
+
           return (
-            <div key={msg.id}>
+            <div
+              key={msg.id}
+              className={cn(
+                "transition-all duration-300",
+                isSelected && "rounded-xl ring-2 ring-brand/40 bg-brand/3 shadow-[0_0_16px_oklch(0.55_0.12_185/15%)]",
+                canSelectForVerification && !isSelected && "cursor-pointer hover:bg-muted/20 rounded-xl",
+              )}
+              onClick={!isSelected ? handleBubbleClick : undefined}
+            >
               {divider}
               <MessageBubble
                 message={msg}
@@ -116,8 +131,8 @@ export function ChatMessages({
                 onCorrect={msg.role === "assistant" && !isStreaming ? onCorrect : undefined}
                 onToggleMarkup={isSelected ? onToggleMarkup : undefined}
                 onSelectForVerification={
-                  msg.role === "assistant" && storedReport && !isSelected
-                    ? () => onSelectVerificationMsg?.(msg.id)
+                  canSelectForVerification
+                    ? () => onSelectVerificationMsg?.(isSelected ? null : msg.id)
                     : undefined
                 }
                 onClaimFocus={isSelected ? onClaimFocus : undefined}

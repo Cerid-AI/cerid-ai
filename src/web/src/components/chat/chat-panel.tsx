@@ -436,7 +436,7 @@ export function ChatPanel() {
           setShowKB(true)
         }}
         onSelectVerificationMsg={(msgId) => {
-          setSelectedVerificationMsgId(msgId)
+          setSelectedVerificationMsgId(msgId ?? null)
           setFocusedClaimIndex(null)
         }}
       />
