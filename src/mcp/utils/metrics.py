@@ -48,13 +48,28 @@ _MODEL_PRICING: dict[str, tuple[float, float]] = {
     "meta-llama/llama-3.3-70b-instruct": (0.10, 0.32),
 }
 
+# Ollama models — explicitly free (local inference, zero cloud cost).
+# Listed separately so estimate_cost() returns 0.0 intentionally,
+# distinguishable from "unknown model" which also returns 0.0.
+_OLLAMA_MODEL_PREFIXES = ("qwen", "phi", "llama", "gemma", "mistral", "codellama")
+
+
+def is_ollama_model(model_id: str) -> bool:
+    """Check if a model ID is a local Ollama model (free inference)."""
+    clean = model_id.lower().split(":")[0]
+    return any(clean.startswith(p) for p in _OLLAMA_MODEL_PREFIXES)
+
 
 def estimate_cost(model_id: str, input_tokens: int, output_tokens: int) -> float:
     """Estimate LLM cost in USD based on model and token counts.
 
     Strips common prefixes (``openrouter/``) before looking up pricing.
-    Returns 0.0 for unknown models.
+    Returns 0.0 for Ollama models (explicitly free) and unknown models.
     """
+    # Ollama models are always free
+    if is_ollama_model(model_id):
+        return 0.0
+
     # Normalize model ID
     clean_id = model_id
     for prefix in ("openrouter/",):

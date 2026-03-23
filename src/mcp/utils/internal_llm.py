@@ -87,9 +87,16 @@ async def _call_ollama(
 
     try:
         return await breaker.call(_do_call)
-    except (CircuitOpenError, httpx.ConnectError, httpx.TimeoutException) as e:
-        logger.warning("Ollama call failed (%s), falling back to direct OpenRouter", e)
-        from utils.llm_client import call_llm
-        return await call_llm(
-            messages, temperature=temperature, max_tokens=max_tokens,
-        )
+    except CircuitOpenError:
+        logger.warning("Ollama circuit breaker open — falling back to OpenRouter")
+    except httpx.ConnectError:
+        logger.warning("Ollama unreachable at %s (is 'ollama serve' running?) — falling back to OpenRouter", ollama_url)
+    except httpx.TimeoutException:
+        logger.warning("Ollama request timed out (model may be loading or server overloaded) — falling back to OpenRouter")
+    except httpx.HTTPStatusError as e:
+        logger.warning("Ollama HTTP %d — falling back to OpenRouter", e.response.status_code)
+
+    from utils.llm_client import call_llm
+    return await call_llm(
+        messages, temperature=temperature, max_tokens=max_tokens,
+    )

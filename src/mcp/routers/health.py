@@ -36,12 +36,18 @@ def health_check() -> dict:
         status["neo4j"] = "connected"
     except Exception as exc:
         status["neo4j"] = f"error: {exc}"
-    # Bifrost circuit breaker state
+    # Circuit breaker states
     try:
         from utils.circuit_breaker import get_breaker
         bifrost_cb_state = get_breaker("bifrost-rerank").state.value
     except (ValueError, ImportError):
         bifrost_cb_state = "unknown"
+
+    try:
+        from utils.circuit_breaker import get_breaker as _gb
+        ollama_cb_state = _gb("ollama").state.value
+    except (ValueError, ImportError):
+        ollama_cb_state = "unknown"
 
     # OpenRouter credit exhaustion flag (set by bifrost.py on 402)
     credits_exhausted = False
@@ -51,15 +57,33 @@ def health_check() -> dict:
     except Exception:
         pass
 
-    return {
+    # Ollama status (when enabled)
+    import os
+    ollama_enabled = os.getenv("OLLAMA_ENABLED", "false").lower() in ("true", "1")
+    ollama_status: dict | None = None
+    if ollama_enabled:
+        ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+        try:
+            import httpx
+            resp = httpx.get(f"{ollama_url}/api/tags", timeout=3)
+            models = [m.get("name", "") for m in resp.json().get("models", [])] if resp.status_code == 200 else []
+            ollama_status = {"reachable": True, "models": len(models), "url": ollama_url}
+        except Exception:
+            ollama_status = {"reachable": False, "url": ollama_url}
+
+    result: dict = {
         "status": "healthy" if all(v == "connected" for v in status.values()) else "degraded",
         "version": "1.0.0",
         "services": status,
         "circuit_breakers": {
             "bifrost": bifrost_cb_state,
+            "ollama": ollama_cb_state,
         },
         "openrouter_credits_exhausted": credits_exhausted,
     }
+    if ollama_status is not None:
+        result["ollama"] = ollama_status
+    return result
 
 
 def list_collections() -> dict:

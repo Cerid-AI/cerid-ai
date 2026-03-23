@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 
 from fastapi import APIRouter, HTTPException
@@ -191,6 +192,11 @@ async def get_settings_endpoint():
         "semantic_cache_threshold": features_mod.SEMANTIC_CACHE_THRESHOLD,
         # Trading agent integration
         "trading_enabled": config.CERID_TRADING_ENABLED,
+        # Ollama add-on
+        "ollama_enabled": os.getenv("OLLAMA_ENABLED", "false").lower() in ("true", "1"),
+        "ollama_url": os.getenv("OLLAMA_URL", "http://localhost:11434"),
+        "internal_llm_provider": config.INTERNAL_LLM_PROVIDER,
+        "internal_llm_model": config.INTERNAL_LLM_MODEL or config.OLLAMA_DEFAULT_MODEL,
     }
 
 

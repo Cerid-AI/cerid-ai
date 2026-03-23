@@ -252,12 +252,17 @@ async def list_available_models():
     seen: set[str] = set()
 
     for name, entry in PROVIDER_REGISTRY.items():
-        env_var = entry.get("env_var", "")
-        api_key = os.getenv(env_var, "") if env_var else ""
-        key_set = bool(api_key) or not entry.get("requires_api_key", True)
-
-        if not key_set:
-            continue
+        # Ollama: include when enabled (no API key needed)
+        if name == "ollama":
+            ollama_on = os.getenv("OLLAMA_ENABLED", "false").lower() in ("true", "1")
+            if not ollama_on:
+                continue
+        else:
+            env_var = entry.get("env_var", "")
+            api_key = os.getenv(env_var, "") if env_var else ""
+            key_set = bool(api_key) or not entry.get("requires_api_key", True)
+            if not key_set:
+                continue
 
         for model_id in entry.get("models", []):
             if model_id in seen:
