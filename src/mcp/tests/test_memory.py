@@ -38,18 +38,10 @@ class TestExtractMemories:
         assert result == []
 
     @pytest.mark.asyncio
-    @patch("utils.bifrost.get_bifrost_client")
-    async def test_successful_extraction(self, mock_get_client):
+    @patch("agents.memory.call_internal_llm", new_callable=AsyncMock)
+    async def test_successful_extraction(self, mock_llm):
         """Valid LLM response should parse into memory list."""
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
-            "choices": [{"message": {"content": '[{"content":"Python uses GIL","memory_type":"fact","summary":"Python GIL"}]'}}]
-        }
-
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_get_client.return_value = mock_client
+        mock_llm.return_value = '[{"content":"Python uses GIL","memory_type":"fact","summary":"Python GIL"}]'
 
         result = await extract_memories("x" * 200, "conv-123")
         assert len(result) == 1
@@ -57,18 +49,10 @@ class TestExtractMemories:
         assert "GIL" in result[0]["content"]
 
     @pytest.mark.asyncio
-    @patch("utils.bifrost.get_bifrost_client")
-    async def test_invalid_memory_type_defaults_to_fact(self, mock_get_client):
+    @patch("agents.memory.call_internal_llm", new_callable=AsyncMock)
+    async def test_invalid_memory_type_defaults_to_fact(self, mock_llm):
         """Unknown memory_type should default to 'fact'."""
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
-            "choices": [{"message": {"content": '[{"content":"test","memory_type":"invalid_type","summary":"test"}]'}}]
-        }
-
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_get_client.return_value = mock_client
+        mock_llm.return_value = '[{"content":"test","memory_type":"invalid_type","summary":"test"}]'
 
         result = await extract_memories("x" * 200, "conv-123")
         assert result[0]["memory_type"] == "fact"
