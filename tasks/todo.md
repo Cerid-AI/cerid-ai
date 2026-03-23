@@ -1,7 +1,7 @@
 # Cerid AI — Task Tracker
 
-> **Last updated:** 2026-03-22
-> **Current status:** All phases through 50 complete + Production Readiness Audit + Verification Crash Debugging. 1376+ Python tests, 485+ frontend tests.
+> **Last updated:** 2026-03-23
+> **Current status:** All phases through 50 complete + Sentry + Verification Fixes + Ollama Add-On. 1376+ Python tests, 485+ frontend tests.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md) — 0 open
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE42-50.md](../docs/plans/DEVELOPMENT_PLAN_PHASE42-50.md) (Phases A-D + 42-50)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
@@ -141,7 +141,45 @@ Deep debugging session fixing production crashes and polishing features built in
 - [ ] Phase C repo architecture separation (deferred — requires dedicated session)
 - [ ] Marketing site updates (cerid.ai — feature content refresh)
 - [ ] Cross-platform testing (Windows, Linux)
-- [ ] Full verification flow testing with sufficient OpenRouter credits
+- [x] Full verification flow testing with sufficient OpenRouter credits ✅ 2026-03-22
+
+---
+
+## Sentry Wiring + Verification Fixes + Ollama Add-On (2026-03-22) ✅
+
+Infrastructure, verification pipeline, and local LLM integration session.
+
+### Sentry Integration
+- [x] Wire Sentry DSN end-to-end (MCP container → .env → docker-compose mapping)
+- [x] Add sentry-sdk to requirements.lock (was missing, caused ModuleNotFoundError)
+- [x] Upgrade @sentry/nextjs 8.55 → 10.45 (v8 didn't support Next.js 16)
+- [x] Fix Turbopack + Sentry webpack conflict (turbopack: {} in next.config)
+- [x] Add .env.local patterns to .gitignore
+
+### Verification Pipeline Fixes
+- [x] Fix verification trigger bug (baseline counter updated during streaming, trigger never fired)
+- [x] Add topic context to claim verification (LLM-powered + heuristic fallback)
+- [x] Fix previous message verification badges (merge reportCache into allVerificationReports)
+- [x] Lift expert re-verify state to orchestrator (badge updates after re-verification)
+- [x] Store response_context in claim cache for future lookups
+
+### Ollama Add-On (Local LLM)
+- [x] Hardware detection script (scripts/detect-gpu.sh — NVIDIA/AMD/Metal/CPU)
+- [x] Docker Compose profile for Ollama (--profile ollama, GPU passthrough ready)
+- [x] First-run user prompt in start-cerid.sh (hardware info, model size, auto-pull)
+- [x] Default model: qwen2.5:1.5b (1.5B params, ~1GB)
+- [x] Route 5 Tier 1 pipeline tasks to internal LLM (Ollama-first with OpenRouter fallback)
+- [x] Health endpoint: Ollama circuit breaker + reachability status
+- [x] Settings API: expose Ollama config (enabled, url, provider, model)
+- [x] Provider endpoints: /providers/ollama/status, /enable, /disable
+- [x] Model availability: include Ollama models when enabled
+- [x] Cost tracking: is_ollama_model() distinguishes local (free) from unknown
+- [x] Error handling: specific messages for circuit breaker, connection refused, timeout
+- [x] SDK health: internal_llm block (provider, model, ollama_enabled)
+- [x] Frontend: OllamaSection in Settings > System (status, toggle, model, limitations)
+- [x] API documentation: comprehensive Ollama section in API_REFERENCE.md
+- [x] CLAUDE.md: Ollama conventions documentation
+- [x] pyproject.toml: E402 per-file-ignores for main.py (Sentry init before imports)
 
 ---
 
