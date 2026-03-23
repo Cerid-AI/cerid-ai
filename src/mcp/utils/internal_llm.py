@@ -42,6 +42,7 @@ async def call_internal_llm(
     if provider == "ollama":
         return await _call_ollama(
             messages, temperature=temperature, max_tokens=max_tokens,
+            json_mode=response_format is not None and response_format.get("type") == "json_object",
         )
     else:
         # Default: direct OpenRouter via unified client
@@ -59,6 +60,7 @@ async def _call_ollama(
     *,
     temperature: float,
     max_tokens: int,
+    json_mode: bool = False,
 ) -> str:
     """Call local Ollama instance for internal operations."""
     import httpx
@@ -68,18 +70,23 @@ async def _call_ollama(
     breaker = get_breaker("ollama")
 
     async def _do_call() -> str:
+        payload: dict = {
+            "model": model,
+            "messages": messages,
+            "stream": False,
+            "options": {
+                "temperature": temperature,
+                "num_predict": max_tokens,
+            },
+        }
+        # Ollama supports format: "json" to enforce JSON output
+        if json_mode:
+            payload["format"] = "json"
+
         async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.post(
                 f"{ollama_url}/api/chat",
-                json={
-                    "model": model,
-                    "messages": messages,
-                    "stream": False,
-                    "options": {
-                        "temperature": temperature,
-                        "num_predict": max_tokens,
-                    },
-                },
+                json=payload,
             )
             resp.raise_for_status()
             data = resp.json()

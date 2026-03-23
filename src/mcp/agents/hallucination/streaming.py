@@ -37,6 +37,7 @@ from utils.time import utcnow_iso
 logger = logging.getLogger("ai-companion.hallucination")
 
 _CGROUP_MEMORY_MAX = pathlib.Path("/sys/fs/cgroup/memory.max")
+_CGROUP_MEMORY_CURRENT = pathlib.Path("/sys/fs/cgroup/memory.current")
 
 
 def _heuristic_response_context(response_text: str, user_query: str | None) -> str | None:
@@ -102,7 +103,6 @@ async def _extract_response_context(response_text: str, user_query: str | None) 
         logger.debug("LLM topic extraction failed (%s), using heuristic", exc)
 
     return heuristic
-_CGROUP_MEMORY_CURRENT = pathlib.Path("/sys/fs/cgroup/memory.current")
 
 
 def _container_memory_available_mb() -> float | None:

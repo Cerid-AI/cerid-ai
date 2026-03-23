@@ -65,7 +65,7 @@ def health_check() -> dict:
         ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
         try:
             import httpx
-            resp = httpx.get(f"{ollama_url}/api/tags", timeout=3)
+            resp = httpx.get(f"{ollama_url}/api/tags", timeout=1)
             models = [m.get("name", "") for m in resp.json().get("models", [])] if resp.status_code == 200 else []
             ollama_status = {"reachable": True, "models": len(models), "url": ollama_url}
         except Exception:
