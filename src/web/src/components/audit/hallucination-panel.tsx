@@ -27,6 +27,12 @@ function claimHostname(url: string): string {
   try { return new URL(url).hostname.replace(/^www\./, "") } catch { return url }
 }
 
+const REFUTED_SUB_LABELS: Record<string, { label: string; color: string }> = {
+  factual: { label: "factual error", color: "text-red-400 border-red-500/30" },
+  outdated: { label: "outdated data", color: "text-amber-400 border-amber-500/30" },
+  numeric: { label: "numeric mismatch", color: "text-rose-400 border-rose-500/30" },
+}
+
 function ClaimBadge({
   claim,
   index,
@@ -36,6 +42,7 @@ function ClaimBadge({
   onRetry,
   retrying,
   expertVerified,
+  refutedSubType,
 }: {
   claim: HallucinationClaim
   index: number
@@ -45,6 +52,7 @@ function ClaimBadge({
   onRetry?: () => void
   retrying?: boolean
   expertVerified?: boolean
+  refutedSubType?: string | null
 }) {
   const [feedback, setFeedback] = useState<"correct" | "incorrect" | null>(
     claim.user_feedback ?? null,
@@ -97,6 +105,11 @@ function ClaimBadge({
           className={`shrink-0 ${DISPLAY_STATUS_COLORS[displayStatus] ?? DISPLAY_STATUS_COLORS.error}`}
         >
           {displayStatus}
+        </Badge>
+      )}
+      {refutedSubType && REFUTED_SUB_LABELS[refutedSubType] && (
+        <Badge variant="outline" className={`shrink-0 text-[9px] px-1 py-0 ${REFUTED_SUB_LABELS[refutedSubType].color}`}>
+          {REFUTED_SUB_LABELS[refutedSubType].label}
         </Badge>
       )}
       <div className="min-w-0 flex-1">
@@ -461,31 +474,118 @@ export function HallucinationPanel({
   const evasionCount = report.claims.filter((c) => c.claim_type === "evasion").length
   const softUnverifiedCount = unverified - refutedCount - evasionCount
 
+  // Filter state — track which categories are hidden
+  const [hiddenCategories, setHiddenCategories] = useState<Set<string>>(new Set())
+  const toggleCategory = (cat: string) => {
+    setHiddenCategories((prev) => {
+      const next = new Set(prev)
+      if (next.has(cat)) next.delete(cat)
+      else next.add(cat)
+      return next
+    })
+  }
+
+  // Classify each claim's filter category for filtering
+  const getFilterCategory = (claim: HallucinationClaim): string => {
+    const ds = getClaimDisplayStatus(claim.status, claim.verification_method, claim.claim_type)
+    if (ds === "refuted") return "refuted"
+    if (ds === "evasion") return "evasion"
+    if (ds === "verified") return "verified"
+    if (ds === "unverified") return "unverified"
+    return "other"
+  }
+
+  // Refuted sub-categorization based on reason text
+  const getRefutedSubType = (claim: HallucinationClaim): string | null => {
+    const ds = getClaimDisplayStatus(claim.status, claim.verification_method, claim.claim_type)
+    if (ds !== "refuted") return null
+    const reason = (claim.reason ?? "").toLowerCase()
+    if (reason.includes("outdated") || reason.includes("superseded") || reason.includes("current") || reason.includes("newer")) return "outdated"
+    if (reason.includes("number") || reason.includes("figure") || reason.includes("statistic") || reason.includes("approximately") || reason.includes("not precise")) return "numeric"
+    return "factual"
+  }
+
+  // Filter claims
+  const visibleClaims = report.claims.map((claim, i) => {
+    const merged = claimUpdates.has(i) ? { ...claim, ...claimUpdates.get(i)! } : claim
+    return { claim: merged, originalIndex: i }
+  }).filter(({ claim }) => !hiddenCategories.has(getFilterCategory(claim)))
+
   return (
     <div className="flex h-full flex-col">
       <PanelHeader onClose={onClose} expertVerification={expertVerification} toggleExpertVerification={toggleExpertVerification} inlineMarkups={inlineMarkups} toggleInlineMarkups={toggleInlineMarkups} />
-      <div className="flex gap-3 px-4 py-2 text-xs">
+      {/* Filter buttons — click to toggle category visibility */}
+      <div className="flex flex-wrap gap-1.5 px-4 py-2">
         {verified > 0 && (
-          <span className="text-green-400">{verified} verified</span>
+          <button
+            onClick={() => toggleCategory("verified")}
+            className={cn(
+              "rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors border",
+              hiddenCategories.has("verified")
+                ? "bg-muted/30 text-muted-foreground/50 border-border/50 line-through"
+                : "bg-green-500/10 text-green-400 border-green-500/30",
+            )}
+          >
+            {verified} verified
+          </button>
         )}
         {refutedCount > 0 && (
-          <span className="text-red-400">{refutedCount} refuted</span>
+          <button
+            onClick={() => toggleCategory("refuted")}
+            className={cn(
+              "rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors border",
+              hiddenCategories.has("refuted")
+                ? "bg-muted/30 text-muted-foreground/50 border-border/50 line-through"
+                : "bg-red-500/10 text-red-400 border-red-500/30",
+            )}
+          >
+            {refutedCount} refuted
+          </button>
         )}
         {evasionCount > 0 && (
-          <span className="text-orange-400">{evasionCount} evaded</span>
+          <button
+            onClick={() => toggleCategory("evasion")}
+            className={cn(
+              "rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors border",
+              hiddenCategories.has("evasion")
+                ? "bg-muted/30 text-muted-foreground/50 border-border/50 line-through"
+                : "bg-orange-500/10 text-orange-400 border-orange-500/30",
+            )}
+          >
+            {evasionCount} evaded
+          </button>
         )}
         {softUnverifiedCount > 0 && (
-          <span className="text-yellow-400">{softUnverifiedCount} unverified</span>
+          <button
+            onClick={() => toggleCategory("unverified")}
+            className={cn(
+              "rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors border",
+              hiddenCategories.has("unverified")
+                ? "bg-muted/30 text-muted-foreground/50 border-border/50 line-through"
+                : "bg-yellow-500/10 text-yellow-400 border-yellow-500/30",
+            )}
+          >
+            {softUnverifiedCount} unverified
+          </button>
         )}
         {uncertain > 0 && (
-          <span className="text-muted-foreground">{uncertain} uncertain</span>
+          <button
+            onClick={() => toggleCategory("other")}
+            className={cn(
+              "rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors border",
+              hiddenCategories.has("other")
+                ? "bg-muted/30 text-muted-foreground/50 border-border/50 line-through"
+                : "bg-muted/50 text-muted-foreground border-border",
+            )}
+          >
+            {uncertain} uncertain
+          </button>
         )}
       </div>
       <ScrollArea className="min-h-0 flex-1 px-4 pb-3">
         <div className="space-y-2" ref={scrollContentRef}>
-          {report.claims.map((claim, i) => {
-            // Merge per-claim expert retry results
-            const mergedClaim = claimUpdates.has(i) ? { ...claim, ...claimUpdates.get(i)! } : claim
+          {visibleClaims.map(({ claim: mergedClaim, originalIndex: i }) => {
+            const refutedSub = getRefutedSubType(mergedClaim)
             return (
               <ClaimBadge
                 key={i}
@@ -497,6 +597,7 @@ export function HallucinationPanel({
                 onRetry={() => handleRetryClaim(i)}
                 retrying={retryingClaims.has(i)}
                 expertVerified={expertVerifiedClaims.has(i)}
+                refutedSubType={refutedSub}
               />
             )
           })}

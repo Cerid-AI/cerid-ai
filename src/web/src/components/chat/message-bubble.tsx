@@ -23,16 +23,19 @@ import { SourceAttribution } from "./source-attribution"
 import { KBContextIndicator } from "./kb-context-indicator"
 import { ClaimOverlay } from "./claim-overlay"
 
-/** Inline styles for <mark> elements — avoids prose class specificity overriding Tailwind utilities. */
+/** Inline styles for <mark> elements — avoids prose class specificity overriding Tailwind utilities.
+ *  Verified claims use a subtle underline instead of a background highlight
+ *  to keep the reading flow clean. Non-verified claims use background colors
+ *  to draw attention to potential issues. */
 const MARKUP_STYLES: Record<ClaimDisplayStatus, React.CSSProperties> = {
-  verified: { backgroundColor: "rgba(34,197,94,0.2)" },
-  refuted: { backgroundColor: "rgba(239,68,68,0.2)" },
-  unverified: { backgroundColor: "rgba(234,179,8,0.2)" },
-  evasion: { backgroundColor: "rgba(249,115,22,0.2)" },
-  citation: { backgroundColor: "rgba(168,85,247,0.2)" },
-  uncertain: { backgroundColor: "rgba(107,114,128,0.2)" },
-  pending: { backgroundColor: "rgba(107,114,128,0.1)" },
-  skipped: { backgroundColor: "rgba(156,163,175,0.15)" },
+  verified: { backgroundColor: "transparent", borderBottom: "2px solid rgba(34,197,94,0.4)", textDecoration: "none" },
+  refuted: { backgroundColor: "rgba(239,68,68,0.15)", borderBottom: "2px solid rgba(239,68,68,0.5)" },
+  unverified: { backgroundColor: "rgba(234,179,8,0.12)", borderBottom: "2px solid rgba(234,179,8,0.4)" },
+  evasion: { backgroundColor: "rgba(249,115,22,0.12)", borderBottom: "2px solid rgba(249,115,22,0.4)" },
+  citation: { backgroundColor: "rgba(168,85,247,0.12)", borderBottom: "2px solid rgba(168,85,247,0.4)" },
+  uncertain: { backgroundColor: "rgba(107,114,128,0.1)" },
+  pending: { backgroundColor: "rgba(107,114,128,0.08)" },
+  skipped: { backgroundColor: "rgba(156,163,175,0.08)" },
 }
 
 /** Code block fallback while SyntaxHighlighter loads */
