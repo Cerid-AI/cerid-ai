@@ -8,13 +8,19 @@ from unittest.mock import MagicMock
 
 
 def test_log_event_sets_ttl():
-    """log_event should set a TTL on the ingest log key."""
+    """log_event should set a TTL on the ingest log key via pipeline."""
     from utils.cache import log_event
 
+    mock_pipe = MagicMock()
     mock_redis = MagicMock()
+    mock_redis.pipeline.return_value = mock_pipe
     log_event(mock_redis, "ingest", artifact_id="a1", domain="code", filename="test.py")
-    # Verify expire was called on the log key
-    mock_redis.expire.assert_called_once()
-    # TTL should be 30 days (2592000 seconds)
-    args = mock_redis.expire.call_args
+    # Verify pipeline was used
+    mock_redis.pipeline.assert_called_once()
+    mock_pipe.lpush.assert_called_once()
+    mock_pipe.ltrim.assert_called_once()
+    # Verify expire was called with 30-day TTL
+    mock_pipe.expire.assert_called_once()
+    args = mock_pipe.expire.call_args
     assert args[0][1] == 86400 * 30
+    mock_pipe.execute.assert_called_once()

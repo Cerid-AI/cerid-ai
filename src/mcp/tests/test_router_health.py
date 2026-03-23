@@ -20,6 +20,12 @@ def _make_app():
 
 
 class TestHealthEndpoint:
+    def setup_method(self):
+        """Reset the health cache between tests."""
+        import routers.health as h
+        h._health_cache = {}
+        h._health_cache_ts = 0.0
+
     @patch("routers.health.get_redis")
     @patch("routers.health.get_chroma")
     @patch("routers.health.get_neo4j")

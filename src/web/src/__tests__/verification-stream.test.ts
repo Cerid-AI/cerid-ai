@@ -306,7 +306,7 @@ describe("useVerificationStream", () => {
 
   // --- Cancellation resilience ---
 
-  it("does NOT abort stream when verification is in progress (verifying phase)", async () => {
+  it("aborts stream on unmount even when verification is in progress (prevents memory leak)", async () => {
     let resolveStream: () => void
     const streamComplete = new Promise<void>((resolve) => { resolveStream = resolve })
     const abortFn = vi.fn()
@@ -346,7 +346,7 @@ describe("useVerificationStream", () => {
     })
 
     unmount()
-    expect(abortFn).not.toHaveBeenCalled()
+    expect(abortFn).toHaveBeenCalled()
 
     resolveStream!()
   })

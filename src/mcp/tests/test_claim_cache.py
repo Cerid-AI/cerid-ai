@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -80,14 +80,14 @@ class TestClaimHash:
 
 
 # ---------------------------------------------------------------------------
-# get_cached_verdict
+# get_cached_verdict (uses asyncio.to_thread with sync Redis client)
 # ---------------------------------------------------------------------------
 
 class TestGetCachedVerdict:
     @pytest.mark.asyncio
     async def test_cache_hit(self):
         verdict = {"status": "verified", "similarity": 0.95}
-        redis = AsyncMock()
+        redis = MagicMock()
         redis.get.return_value = json.dumps(verdict)
 
         result = await get_cached_verdict(redis, "The sky is blue")
@@ -96,7 +96,7 @@ class TestGetCachedVerdict:
 
     @pytest.mark.asyncio
     async def test_cache_miss(self):
-        redis = AsyncMock()
+        redis = MagicMock()
         redis.get.return_value = None
 
         result = await get_cached_verdict(redis, "unknown claim")
@@ -104,11 +104,20 @@ class TestGetCachedVerdict:
 
     @pytest.mark.asyncio
     async def test_redis_error_returns_none(self):
-        redis = AsyncMock()
+        redis = MagicMock()
         redis.get.side_effect = ConnectionError("connection refused")
 
         result = await get_cached_verdict(redis, "some claim")
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_special_prefix_skips_cache(self):
+        """Claims with [EVASION]/[CITATION]/[IGNORANCE] prefixes skip cache."""
+        redis = MagicMock()
+        for prefix in ("[EVASION]", "[CITATION]", "[IGNORANCE]"):
+            result = await get_cached_verdict(redis, f"{prefix} some claim text")
+            assert result is None
+        redis.get.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +127,7 @@ class TestGetCachedVerdict:
 class TestCacheVerdict:
     @pytest.mark.asyncio
     async def test_stores_correctly(self):
-        redis = AsyncMock()
+        redis = MagicMock()
         verdict = {
             "status": "verified",
             "similarity": 0.92,
@@ -142,27 +151,28 @@ class TestCacheVerdict:
 
     @pytest.mark.asyncio
     async def test_respects_ttl(self):
-        redis = AsyncMock()
+        redis = MagicMock()
         verdict = {"status": "verified"}
 
         await cache_verdict(redis, "test", verdict, ttl=3600)
 
-        call_kwargs = redis.set.call_args[1]
-        assert call_kwargs["ex"] == 3600
+        # asyncio.to_thread passes ttl as positional arg
+        call_args = redis.set.call_args[0]
+        assert call_args[2] == 3600
 
     @pytest.mark.asyncio
     async def test_default_ttl_30_days(self):
-        redis = AsyncMock()
+        redis = MagicMock()
         verdict = {"status": "unverified"}
 
         await cache_verdict(redis, "test", verdict)
 
-        call_kwargs = redis.set.call_args[1]
-        assert call_kwargs["ex"] == 2_592_000
+        call_args = redis.set.call_args[0]
+        assert call_args[2] == 2_592_000
 
     @pytest.mark.asyncio
     async def test_truncates_long_reason(self):
-        redis = AsyncMock()
+        redis = MagicMock()
         verdict = {"status": "verified", "reason": "x" * 500}
 
         await cache_verdict(redis, "test", verdict)
@@ -172,11 +182,19 @@ class TestCacheVerdict:
 
     @pytest.mark.asyncio
     async def test_redis_error_swallowed(self):
-        redis = AsyncMock()
+        redis = MagicMock()
         redis.set.side_effect = ConnectionError("connection refused")
 
         # Should not raise
         await cache_verdict(redis, "test", {"status": "verified"})
+
+    @pytest.mark.asyncio
+    async def test_special_prefix_skips_cache(self):
+        """Claims with special prefixes are not cached."""
+        redis = MagicMock()
+        for prefix in ("[EVASION]", "[CITATION]", "[IGNORANCE]"):
+            await cache_verdict(redis, f"{prefix} some text", {"status": "verified"})
+        redis.set.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -189,13 +207,13 @@ class TestRoundTrip:
         """Cached verdict is retrievable via get_cached_verdict."""
         store: dict[str, str] = {}
 
-        async def mock_set(key, value, ex=None):
+        def mock_set(key, value, ttl=None):
             store[key] = value
 
-        async def mock_get(key):
+        def mock_get(key):
             return store.get(key)
 
-        redis = AsyncMock()
+        redis = MagicMock()
         redis.set = mock_set
         redis.get = mock_get
 
@@ -220,13 +238,13 @@ class TestRoundTrip:
         """Semantically equivalent claims (different word order) hit the same cache entry."""
         store: dict[str, str] = {}
 
-        async def mock_set(key, value, ex=None):
+        def mock_set(key, value, ttl=None):
             store[key] = value
 
-        async def mock_get(key):
+        def mock_get(key):
             return store.get(key)
 
-        redis = AsyncMock()
+        redis = MagicMock()
         redis.set = mock_set
         redis.get = mock_get
 
