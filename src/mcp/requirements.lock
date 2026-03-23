@@ -436,9 +436,9 @@ et-xmlfile==2.0.0 \
     --hash=sha256:7a91720bc756843502c3b7504c77b8fe44217c85c537d85037f0f536151b2caa \
     --hash=sha256:dab3f4764309081ce75662649be815c4c9081e88f0837825f90fd28317d4da54
     # via openpyxl
-fastapi==0.135.1 \
-    --hash=sha256:46e2fc5745924b7c840f71ddd277382af29ce1cdb7d5eab5bf697e3fb9999c9e \
-    --hash=sha256:d04115b508d936d254cea545b7312ecaa58a7b3a0f84952535b4c9afae7668cd
+fastapi==0.135.2 \
+    --hash=sha256:0af0447d541867e8db2a6a25c23a8c4bd80e2394ac5529bd87501bbb9e240ca5 \
+    --hash=sha256:88a832095359755527b7f63bb4c6bc9edb8329a026189eed83d6c1afcf419d56
     # via
     #   -r requirements.txt
     #   chromadb
@@ -648,9 +648,9 @@ kubernetes==35.0.0 \
     --hash=sha256:39e2b33b46e5834ef6c3985ebfe2047ab39135d41de51ce7641a7ca5b372a13d \
     --hash=sha256:3d00d344944239821458b9efd484d6df9f011da367ecb155dadf9513f05f09ee
     # via chromadb
-langchain-core==1.2.20 \
-    --hash=sha256:b65ff678f3c3dc1f1b4d03a3af5ee3b8d51f9be5181d74eb53c6c11cd9dd5e68 \
-    --hash=sha256:c7ac8b976039b5832abb989fef058b88c270594ba331efc79e835df046e7dc44
+langchain-core==1.2.21 \
+    --hash=sha256:1a121d13976dc0908d5a8222262810ea483a4cf2b05006bdba75df5b11b554b3 \
+    --hash=sha256:486cb405e2ecb0c407cb5fb5379ed0f919eb4b8a868b60cc8c3c15a3dfb560a7
     # via
     #   langgraph
     #   langgraph-checkpoint
