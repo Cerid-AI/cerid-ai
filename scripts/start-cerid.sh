@@ -144,6 +144,51 @@ else
     echo "[preflight] Skipped (--force)"
 fi
 
+# --- Ollama Add-On Prompt ---
+OLLAMA_PROFILE=""
+OLLAMA_DEFAULT_MODEL="qwen2.5:1.5b"
+
+# Source GPU detection
+source "$CERID_ROOT/scripts/detect-gpu.sh" 2>/dev/null || true
+
+# Check if Ollama is already configured
+OLLAMA_CONFIGURED=$(grep -s '^OLLAMA_ENABLED=' "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- || echo "")
+
+if [ -z "$OLLAMA_CONFIGURED" ]; then
+    # First run — prompt the user
+    echo ""
+    echo "[ollama] Local LLM Add-On Available"
+    echo "  Model:    $OLLAMA_DEFAULT_MODEL (1.5B params, ~1GB download)"
+    echo "  Purpose:  Local AI for verification context, smart routing, and extraction"
+    echo "  Benefit:  Zero cloud cost for internal pipeline operations"
+    echo "  Hardware: ${CERID_GPU_LABEL:-Unknown}"
+    if [ "${CERID_OLLAMA_IMAGE:-}" = "native" ]; then
+        echo "  Note:     macOS Metal detected — Ollama runs natively (not in Docker)"
+        echo "            Install via: brew install ollama && ollama serve"
+    fi
+    echo ""
+    read -r -p "  Install Ollama add-on? [y/N]: " OLLAMA_ANSWER </dev/tty 2>/dev/null || OLLAMA_ANSWER="n"
+
+    if [[ "$OLLAMA_ANSWER" =~ ^[Yy]$ ]]; then
+        echo "OLLAMA_ENABLED=true" >> "$ENV_FILE"
+        echo "INTERNAL_LLM_PROVIDER=ollama" >> "$ENV_FILE"
+        echo "INTERNAL_LLM_MODEL=$OLLAMA_DEFAULT_MODEL" >> "$ENV_FILE"
+        if [ "${CERID_OLLAMA_IMAGE:-}" != "native" ]; then
+            echo "OLLAMA_URL=http://cerid-ollama:11434" >> "$ENV_FILE"
+        fi
+        OLLAMA_CONFIGURED="true"
+        echo "  [ollama] Enabled — will start with stack"
+    else
+        echo "OLLAMA_ENABLED=false" >> "$ENV_FILE"
+        OLLAMA_CONFIGURED="false"
+        echo "  [ollama] Skipped — enable later in Settings or re-run with OLLAMA_ENABLED=true"
+    fi
+fi
+
+if [ "$OLLAMA_CONFIGURED" = "true" ] && [ "${CERID_OLLAMA_IMAGE:-}" != "native" ]; then
+    OLLAMA_PROFILE="--profile ollama"
+fi
+
 # Ensure archive directory exists (MCP mounts it read-only)
 ARCHIVE_DIR="${HOME}/cerid-archive"
 if [ ! -d "$ARCHIVE_DIR" ] && [ ! -L "$ARCHIVE_DIR" ]; then
@@ -228,7 +273,7 @@ if [ -z "$LEGACY_FLAG" ] && [ -f "$UNIFIED_COMPOSE" ]; then
     echo "[unified] Starting all services via root docker-compose.yml..."
     echo "  Startup order: Neo4j, ChromaDB, Redis → Bifrost → MCP → Web"
     echo "  (depends_on healthchecks enforce correct ordering)"
-    docker compose -f "$UNIFIED_COMPOSE" --env-file "$ENV_FILE" up -d $BUILD_FLAG $WEB_RECREATE
+    docker compose -f "$UNIFIED_COMPOSE" --env-file "$ENV_FILE" $OLLAMA_PROFILE up -d $BUILD_FLAG $WEB_RECREATE
 else
     # --- Legacy 4-step startup (preserved for backward compatibility) ---
     echo "[legacy] Starting services in 4-step order..."
@@ -287,6 +332,33 @@ echo -n "  MCP..."
 wait_for_service "MCP" "http://localhost:${CERID_PORT_MCP}/health" 90 && echo " ready" || { echo " timeout"; CRITICAL_FAIL=1; }
 echo -n "  React GUI..."
 wait_for_service "React GUI" "http://localhost:${CERID_PORT_GUI}" 60 && echo " ready" || { echo " timeout"; CRITICAL_FAIL=1; }
+
+# Ollama: wait for service + pull default model
+if [ -n "$OLLAMA_PROFILE" ]; then
+    echo -n "  Ollama..."
+    if wait_for_service "Ollama" "http://127.0.0.1:11434/api/tags" 60; then
+        echo " ready"
+        # Pull default model if not already present
+        local_models=$(curl -sf http://127.0.0.1:11434/api/tags 2>/dev/null | grep -c "$OLLAMA_DEFAULT_MODEL" || echo "0")
+        if [ "$local_models" = "0" ]; then
+            echo "  [ollama] Pulling $OLLAMA_DEFAULT_MODEL (~1GB)..."
+            docker exec cerid-ollama ollama pull "$OLLAMA_DEFAULT_MODEL" 2>&1 | tail -1
+        else
+            echo "  [ollama] Model $OLLAMA_DEFAULT_MODEL already available"
+        fi
+    else
+        echo " timeout (Ollama will be available later)"
+    fi
+elif [ "$OLLAMA_CONFIGURED" = "true" ] && [ "${CERID_OLLAMA_IMAGE:-}" = "native" ]; then
+    # macOS native Ollama — check if it's running
+    echo -n "  Ollama (native)..."
+    OLLAMA_NATIVE_URL=$(grep -s '^OLLAMA_URL=' "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- || echo "http://localhost:11434")
+    if wait_for_service "Ollama" "${OLLAMA_NATIVE_URL}/api/tags" 5 1; then
+        echo " ready"
+    else
+        echo " not running (start with: ollama serve)"
+    fi
+fi
 
 # Validate LAN reachability (the bug that prompted Phase 27)
 if [ "$CERID_HOST" != "localhost" ]; then

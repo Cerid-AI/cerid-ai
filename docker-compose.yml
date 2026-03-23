@@ -178,6 +178,10 @@ services:
       - SEMANTIC_CACHE_DIM=768
       - SENTRY_DSN=${SENTRY_DSN_MCP}
       - SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-development}
+      - OLLAMA_ENABLED=${OLLAMA_ENABLED:-false}
+      - OLLAMA_URL=${OLLAMA_URL:-http://cerid-ollama:11434}
+      - INTERNAL_LLM_PROVIDER=${INTERNAL_LLM_PROVIDER:-bifrost}
+      - INTERNAL_LLM_MODEL=${INTERNAL_LLM_MODEL:-qwen2.5:1.5b}
     depends_on:
       neo4j:
         condition: service_healthy
@@ -235,6 +239,41 @@ services:
       retries: 3
       start_period: 15s
 
+  # ──────────────────────────────────────────────
+  # Optional: Local LLM (Ollama Add-On)
+  # ──────────────────────────────────────────────
+  # Activated via: OLLAMA_ENABLED=true in .env (set by start-cerid.sh prompt)
+  # Start with: docker compose --profile ollama up -d
+  # macOS Apple Silicon: runs natively (not in Docker) for Metal acceleration
+
+  ollama:
+    container_name: cerid-ollama
+    image: ${CERID_OLLAMA_IMAGE:-ollama/ollama:latest}
+    profiles: ["ollama"]
+    ports:
+      - "${CERID_BIND_ADDR:-127.0.0.1}:11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    networks:
+      - llm-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 4G
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
 networks:
   llm-network:
     driver: bridge
+
+volumes:
+  ollama-data:

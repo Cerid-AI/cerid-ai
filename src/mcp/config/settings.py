@@ -369,6 +369,9 @@ SMART_ROUTING_ENABLED = os.getenv("SMART_ROUTING_ENABLED", "true").lower() == "t
 INTERNAL_LLM_PROVIDER = os.getenv("INTERNAL_LLM_PROVIDER", "bifrost")
 INTERNAL_LLM_MODEL = os.getenv("INTERNAL_LLM_MODEL", "")  # empty = provider default
 
+# Default Ollama model for pipeline tasks — lightweight, runs on CPU or GPU
+OLLAMA_DEFAULT_MODEL = os.getenv("OLLAMA_DEFAULT_MODEL", "qwen2.5:1.5b")
+
 # User-configurable default model for high-value intelligence tasks
 # (verification, expert analysis, complex reasoning)
 INTELLIGENCE_MODEL = os.getenv("INTELLIGENCE_MODEL", "")  # empty = auto-select

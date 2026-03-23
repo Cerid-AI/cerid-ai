@@ -170,6 +170,26 @@ else
     fi
 fi
 
+# ── Optional: Ollama check ─────────────────────────────────────────────────
+OLLAMA_ENABLED_VAL=$(grep -s '^OLLAMA_ENABLED=true' "$ENV_FILE" 2>/dev/null || echo "")
+if [ -n "$OLLAMA_ENABLED_VAL" ]; then
+    ollama_container_status="$(docker inspect --format '{{.State.Status}}' cerid-ollama 2>/dev/null || echo "missing")"
+    ollama_health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' cerid-ollama 2>/dev/null || echo "missing")"
+    if [ "$ollama_container_status" = "running" ] && { [ "$ollama_health" = "healthy" ] || [ "$ollama_health" = "none" ]; }; then
+        pass "Container cerid-ollama is running and healthy"
+    elif [ "$ollama_container_status" = "missing" ]; then
+        # Check for native Ollama (macOS)
+        OLLAMA_URL_VAL=$(grep -s '^OLLAMA_URL=' "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- || echo "http://localhost:11434")
+        if curl -sf "$OLLAMA_URL_VAL/api/tags" >/dev/null 2>&1; then
+            pass "Ollama (native) is reachable at $OLLAMA_URL_VAL"
+        else
+            warn "Ollama enabled but not running — start with: ollama serve (native) or docker compose --profile ollama up -d"
+        fi
+    else
+        warn "Container cerid-ollama is $ollama_container_status (health: $ollama_health)"
+    fi
+fi
+
 if [ "$QUICK" = false ]; then
 
     # ── Check 7: Data directories ─────────────────────────────────────────────

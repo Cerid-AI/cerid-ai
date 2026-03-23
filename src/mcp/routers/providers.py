@@ -132,6 +132,84 @@ async def set_internal_provider(body: dict):
     return {"status": "updated", "provider": provider, "model": model}
 
 
+@router.get("/ollama/status")
+async def get_ollama_status():
+    """Check Ollama availability, installed models, and hardware info."""
+    import httpx
+
+    ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+    enabled = os.getenv("OLLAMA_ENABLED", "false").lower() in ("true", "1")
+    result: dict = {
+        "enabled": enabled,
+        "url": ollama_url,
+        "reachable": False,
+        "models": [],
+        "default_model": config.OLLAMA_DEFAULT_MODEL,
+        "default_model_installed": False,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(f"{ollama_url}/api/tags")
+            if resp.status_code == 200:
+                result["reachable"] = True
+                models_data = resp.json().get("models", [])
+                result["models"] = [m.get("name", "") for m in models_data]
+                result["default_model_installed"] = any(
+                    config.OLLAMA_DEFAULT_MODEL in m.get("name", "")
+                    for m in models_data
+                )
+    except Exception:
+        pass
+
+    return result
+
+
+@router.post("/ollama/enable")
+async def enable_ollama():
+    """Enable Ollama as the internal LLM provider.
+
+    Checks connectivity, updates runtime config to route pipeline
+    intelligence calls to Ollama. Does NOT persist to .env (that's done
+    by start-cerid.sh or manually by the user).
+    """
+    import httpx
+
+    ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+
+    # Verify Ollama is reachable
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(f"{ollama_url}/api/tags")
+            if resp.status_code != 200:
+                raise HTTPException(status_code=503, detail="Ollama is not responding")
+    except httpx.ConnectError:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Cannot connect to Ollama at {ollama_url}. "
+                   "Start with: ollama serve (macOS) or docker compose --profile ollama up -d",
+        )
+
+    # Update runtime config
+    config.INTERNAL_LLM_PROVIDER = "ollama"
+    if not config.INTERNAL_LLM_MODEL:
+        config.INTERNAL_LLM_MODEL = config.OLLAMA_DEFAULT_MODEL
+
+    return {
+        "status": "enabled",
+        "provider": "ollama",
+        "model": config.INTERNAL_LLM_MODEL,
+        "url": ollama_url,
+    }
+
+
+@router.post("/ollama/disable")
+async def disable_ollama():
+    """Disable Ollama — fall back to Bifrost/OpenRouter for pipeline tasks."""
+    config.INTERNAL_LLM_PROVIDER = "bifrost"
+    return {"status": "disabled", "provider": "bifrost"}
+
+
 @router.get("/credits")
 async def get_provider_credits():
     """Get OpenRouter credit balance and usage stats."""

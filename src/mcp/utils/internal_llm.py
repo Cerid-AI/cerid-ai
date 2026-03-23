@@ -64,7 +64,7 @@ async def _call_ollama(
     import httpx
 
     ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
-    model = getattr(config, "INTERNAL_LLM_MODEL", "") or "phi3:mini"
+    model = getattr(config, "INTERNAL_LLM_MODEL", "") or config.OLLAMA_DEFAULT_MODEL
     breaker = get_breaker("ollama")
 
     async def _do_call() -> str:
