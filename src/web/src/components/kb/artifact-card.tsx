@@ -118,7 +118,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
       }}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect() } }}
     >
-      <CardContent className="min-w-0 overflow-hidden p-3">
+      <CardContent className="min-w-0 overflow-hidden px-3 py-2">
         {/* Header row */}
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">

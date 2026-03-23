@@ -117,7 +117,7 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts }: Taxonom
   const hasFilter = filter.domain !== null
 
   return (
-    <div className="space-y-1">
+    <div className="w-full space-y-1 rounded-lg border bg-card/50 p-2">
       <div className="flex items-center justify-between px-2">
         <span className="text-xs font-medium text-muted-foreground">Taxonomy</span>
         <div className="flex gap-0.5">
@@ -170,8 +170,8 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts }: Taxonom
         </div>
       )}
 
-      <ScrollArea className="max-h-[280px]">
-        <div className="space-y-0.5 px-1">
+      <ScrollArea className="max-h-[280px] w-full">
+        <div className="space-y-0.5 px-1 w-full">
           {Object.entries(taxonomy.domains).map(([domain, info]) => {
             const isExpanded = expanded.has(domain)
             const isActive = filter.domain === domain

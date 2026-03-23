@@ -160,7 +160,37 @@
   background: linear-gradient(135deg, oklch(0.52 0.06 185 / 8%) 0%, oklch(0.52 0.04 200 / 4%) 100%);
 }
 .dark .bg-brand-gradient {
-  background: linear-gradient(135deg, oklch(0.72 0.06 185 / 8%) 0%, oklch(0.50 0.04 255 / 6%) 100%);
+  background: linear-gradient(135deg, oklch(0.72 0.06 185 / 8%) 0%, oklch(0.50 0.06 255 / 10%) 100%);
+}
+
+/* --- Dark mode cobalt highlights --- */
+.dark .border-border {
+  border-color: oklch(0.35 0.05 255 / 45%);
+}
+/* Focused/active elements get a cobalt glow */
+.dark *:focus-visible {
+  outline-color: oklch(0.55 0.12 255 / 60%);
+  box-shadow: 0 0 0 3px oklch(0.45 0.10 255 / 20%);
+}
+/* Cards get a subtle cobalt edge glow on hover */
+.dark [data-slot="card"]:hover,
+.dark .group:hover > [data-slot="card"] {
+  border-color: oklch(0.45 0.06 255 / 50%);
+  box-shadow: 0 0 12px oklch(0.40 0.08 255 / 12%);
+}
+/* Active sidebar items get cobalt accent */
+.dark .border-brand {
+  border-color: oklch(0.55 0.12 255);
+}
+/* Scrollbar cobalt tint */
+.dark ::-webkit-scrollbar-thumb {
+  background: oklch(0.35 0.05 255 / 50%);
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.45 0.07 255 / 60%);
+}
+.dark ::-webkit-scrollbar-track {
+  background: oklch(0.17 0.02 255 / 30%);
 }
 
 /* KB artifact card action buttons — always show pointer cursor */

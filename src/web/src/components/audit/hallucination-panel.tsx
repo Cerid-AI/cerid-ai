@@ -81,7 +81,7 @@ function ClaimBadge({
     <div
       data-claim-index={index}
       className={cn(
-        "flex items-start gap-2 rounded-lg border px-3 py-3 transition-all cursor-pointer",
+        "flex gap-2 rounded-lg border px-3 py-2.5 transition-all cursor-pointer",
         focused && "ring-2 ring-brand bg-brand/5",
       )}
       onClick={() => {
@@ -89,29 +89,33 @@ function ClaimBadge({
         onFocus?.(focused ? null : index)
       }}
     >
-      <span className="shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
-        {index + 1}
-      </span>
-      {expertVerified ? (
-        <Badge variant="outline" className="shrink-0 border-purple-500/40 bg-purple-500/10 text-purple-400 text-[10px] px-1.5 py-0.5 leading-tight text-center">
-          <span className="flex flex-col items-center gap-0">
-            <span className="flex items-center gap-0.5"><Sparkles className="h-2.5 w-2.5" />expert</span>
-            <span>{displayStatus}</span>
-          </span>
-        </Badge>
-      ) : (
-        <Badge
-          variant="outline"
-          className={`shrink-0 ${DISPLAY_STATUS_COLORS[displayStatus] ?? DISPLAY_STATUS_COLORS.error}`}
-        >
-          {displayStatus}
-        </Badge>
-      )}
-      {refutedSubType && REFUTED_SUB_LABELS[refutedSubType] && (
-        <Badge variant="outline" className={`shrink-0 text-[9px] px-1 py-0 ${REFUTED_SUB_LABELS[refutedSubType].color}`}>
-          {REFUTED_SUB_LABELS[refutedSubType].label}
-        </Badge>
-      )}
+      {/* Left column: index + status badge stacked */}
+      <div className="shrink-0 flex flex-col items-center gap-1 pt-0.5">
+        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
+          {index + 1}
+        </span>
+        {expertVerified ? (
+          <Badge variant="outline" className="border-purple-500/40 bg-purple-500/10 text-purple-400 text-[10px] px-1.5 py-0.5 leading-tight text-center">
+            <span className="flex flex-col items-center gap-0">
+              <span className="flex items-center gap-0.5"><Sparkles className="h-2.5 w-2.5" />expert</span>
+              <span>{displayStatus}</span>
+            </span>
+          </Badge>
+        ) : (
+          <Badge
+            variant="outline"
+            className={`text-[10px] ${DISPLAY_STATUS_COLORS[displayStatus] ?? DISPLAY_STATUS_COLORS.error}`}
+          >
+            {displayStatus}
+          </Badge>
+        )}
+        {refutedSubType && REFUTED_SUB_LABELS[refutedSubType] && (
+          <Badge variant="outline" className={`text-[9px] px-1 py-0 whitespace-nowrap ${REFUTED_SUB_LABELS[refutedSubType].color}`}>
+            {REFUTED_SUB_LABELS[refutedSubType].label}
+          </Badge>
+        )}
+      </div>
+      {/* Right column: claim content fills remaining width */}
       <div className="min-w-0 flex-1">
         {/* Re-verifying banner */}
         {retrying && (
