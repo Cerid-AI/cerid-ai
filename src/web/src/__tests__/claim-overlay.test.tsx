@@ -56,7 +56,7 @@ describe("ClaimOverlay", () => {
     })
   })
 
-  it("renders popover on claim mark click", () => {
+  it("renders popover on footnote click", () => {
     const container = createContainerWithMark()
     const claim = makeClaim()
     const span = makeSpan()
@@ -69,9 +69,9 @@ describe("ClaimOverlay", () => {
       />,
     )
 
-    // Click the mark
-    const mark = container.querySelector("[data-cerid-claim]") as HTMLElement
-    fireEvent.click(mark)
+    // Click the footnote superscript (marks are not clickable)
+    const footnote = container.querySelector("[data-cerid-footnote]") as HTMLElement
+    fireEvent.click(footnote)
 
     // Popover should show the claim text (also in mark element, so use getAllByText)
     const matches = screen.getAllByText(/The capital of France is Paris/)
@@ -95,7 +95,7 @@ describe("ClaimOverlay", () => {
       />,
     )
 
-    fireEvent.click(container.querySelector("[data-cerid-claim]")!)
+    fireEvent.click(container.querySelector("[data-cerid-footnote]")!)
     expect(screen.getByText("refuted")).toBeInTheDocument()
 
     document.body.removeChild(container)
@@ -116,7 +116,7 @@ describe("ClaimOverlay", () => {
       />,
     )
 
-    fireEvent.click(container.querySelector("[data-cerid-claim]")!)
+    fireEvent.click(container.querySelector("[data-cerid-footnote]")!)
     // Expand details to see source info
     fireEvent.click(screen.getByText("More"))
     const sourceButton = screen.getByText("notes.pdf")
@@ -152,7 +152,7 @@ describe("ClaimOverlay", () => {
     )
 
     // Open popover
-    fireEvent.click(container.querySelector("[data-cerid-claim]")!)
+    fireEvent.click(container.querySelector("[data-cerid-footnote]")!)
     expect(screen.getByText("verified")).toBeInTheDocument()
 
     // Press Escape
@@ -175,7 +175,7 @@ describe("ClaimOverlay", () => {
       />,
     )
 
-    fireEvent.click(container.querySelector("[data-cerid-claim]")!)
+    fireEvent.click(container.querySelector("[data-cerid-footnote]")!)
     expect(screen.getByText("cross-model")).toBeInTheDocument()
 
     document.body.removeChild(container)
@@ -194,7 +194,7 @@ describe("ClaimOverlay", () => {
       />,
     )
 
-    fireEvent.click(container.querySelector("[data-cerid-claim]")!)
+    fireEvent.click(container.querySelector("[data-cerid-footnote]")!)
     // Expand details to see source snippet
     fireEvent.click(screen.getByText("More"))
     expect(screen.getByText(/Paris is the capital city/)).toBeInTheDocument()
@@ -215,7 +215,7 @@ describe("ClaimOverlay", () => {
       />,
     )
 
-    fireEvent.click(container.querySelector("[data-cerid-claim]")!)
+    fireEvent.click(container.querySelector("[data-cerid-footnote]")!)
     // Expand details to see similarity
     fireEvent.click(screen.getByText("More"))
     expect(screen.getByText("87% match")).toBeInTheDocument()

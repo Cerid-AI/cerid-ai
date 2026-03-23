@@ -73,23 +73,32 @@ export function ClaimOverlay({ container, claims, claimSpans, onClaimFocus, onAr
     setHovered(null)
   }, [])
 
-  // Attach listeners to marks and footnotes.
-  // claimSpans in the dep array ensures re-attachment after DOM mutation injects marks.
+  // Attach listeners: click only on footnotes [N], hover tooltip on both marks and footnotes.
+  // Marks (highlighted text) should not be clickable — only the superscript reference is.
   useEffect(() => {
     if (!container) return
     const marks = container.querySelectorAll<HTMLElement>("[data-cerid-claim]")
     const footnotes = container.querySelectorAll<HTMLElement>("[data-cerid-footnote]")
-    const all = [...marks, ...footnotes]
 
-    for (const el of all) {
+    // Footnotes: click + hover
+    for (const el of footnotes) {
       el.addEventListener("click", handleMarkClick)
+      el.addEventListener("mouseenter", handleMouseEnter)
+      el.addEventListener("mouseleave", handleMouseLeave)
+    }
+    // Marks: hover tooltip only (no click — text should not be interactive)
+    for (const el of marks) {
       el.addEventListener("mouseenter", handleMouseEnter)
       el.addEventListener("mouseleave", handleMouseLeave)
     }
 
     return () => {
-      for (const el of all) {
+      for (const el of footnotes) {
         el.removeEventListener("click", handleMarkClick)
+        el.removeEventListener("mouseenter", handleMouseEnter)
+        el.removeEventListener("mouseleave", handleMouseLeave)
+      }
+      for (const el of marks) {
         el.removeEventListener("mouseenter", handleMouseEnter)
         el.removeEventListener("mouseleave", handleMouseLeave)
       }

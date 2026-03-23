@@ -430,10 +430,11 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
           range.setEnd(tn.node, localEnd)
 
           const mark = document.createElement("mark")
-          // Use inline styles to bypass prose mark specificity
+          // Use inline styles to bypass prose mark specificity.
+          // Text keeps default cursor — only the footnote [N] is clickable.
           const styleObj = MARKUP_STYLES[span.displayStatus] ?? MARKUP_STYLES.uncertain
           Object.assign(mark.style, styleObj, {
-            cursor: "pointer",
+            cursor: "default",
             borderRadius: "2px",
             paddingInline: "2px",
           })
