@@ -20,7 +20,7 @@ import httpx
 
 import config
 from utils.circuit_breaker import CircuitOpenError
-from utils.llm_client import call_llm
+from utils.internal_llm import call_internal_llm
 from utils.llm_parsing import parse_llm_json
 from utils.time import utcnow_iso
 
@@ -112,9 +112,8 @@ async def _llm_classify(
     )
 
     try:
-        content = await call_llm(
+        content = await call_internal_llm(
             [{"role": "user", "content": prompt}],
-            breaker_name="bifrost-memory",
             temperature=0.0,
             max_tokens=200,
         )

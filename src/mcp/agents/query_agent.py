@@ -19,7 +19,6 @@ from config import DOMAINS
 from deps import get_chroma
 from utils.cache import log_event
 from utils.circuit_breaker import CircuitOpenError
-from utils.llm_client import call_llm
 from utils.llm_parsing import parse_llm_json
 from utils.text import STOPWORDS as _STOPWORDS
 from utils.text import WORD_RE as _WORD_RE
@@ -526,9 +525,9 @@ async def _rerank_llm(
     )
 
     try:
-        content = await call_llm(
+        from utils.internal_llm import call_internal_llm
+        content = await call_internal_llm(
             [{"role": "user", "content": prompt}],
-            breaker_name="bifrost-rerank",
             temperature=0.0,
             max_tokens=200,
         )

@@ -35,6 +35,7 @@ from agents.hallucination.patterns import (
     _is_ignorance_admission,
 )
 from utils.circuit_breaker import CircuitOpenError
+from utils.internal_llm import call_internal_llm
 from utils.llm_client import call_llm
 from utils.llm_parsing import parse_llm_json
 
@@ -338,6 +339,28 @@ async def _extract_claims_llm(response_text: str, max_claims: int) -> list[str]:
         {"role": "system", "content": _SYSTEM_CLAIM_EXTRACTION},
         {"role": "user", "content": user_prompt},
     ]
+
+    # Try internal LLM first (Ollama if available, else routes to OpenRouter)
+    try:
+        content = await call_internal_llm(
+            messages, temperature=0.1, max_tokens=1200,
+            response_format={"type": "json_object"},
+        )
+        raw = parse_llm_json(content)
+        if isinstance(raw, dict):
+            raw = raw.get("claims", raw.get("results", raw.get("data", [])))
+        if isinstance(raw, list):
+            claims_internal: list[str] = []
+            for item in raw[:max_claims]:
+                if isinstance(item, dict):
+                    claims_internal.append(str(item.get("claim", item.get("text", str(item)))))
+                else:
+                    claims_internal.append(str(item))
+            if claims_internal:
+                logger.info("Internal LLM claim extraction succeeded (%d claims)", len(claims_internal))
+                return claims_internal
+    except Exception as e:
+        logger.debug("Internal LLM claim extraction failed (%s), trying external models", e)
 
     for model in models:
         try:

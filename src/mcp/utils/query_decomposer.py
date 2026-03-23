@@ -115,16 +115,15 @@ async def decompose_query(
     # LLM fallback (optional, rarely needed)
     if use_llm:
         try:
-            from utils.llm_client import call_llm
+            from utils.internal_llm import call_internal_llm
 
             prompt = (
                 "Break this question into 2-4 independent sub-questions that can be answered separately. "
                 "Return ONLY a JSON array of strings. No explanation.\n\n"
                 f"Question: {query}"
             )
-            content = (await call_llm(
+            content = (await call_internal_llm(
                 [{"role": "user", "content": prompt}],
-                breaker_name="bifrost-decompose",
                 temperature=0.1,
                 max_tokens=200,
             )).strip()
