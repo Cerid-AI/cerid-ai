@@ -318,6 +318,12 @@ interface HallucinationPanelProps {
   /** Inline markup toggle. */
   inlineMarkups?: boolean
   toggleInlineMarkups?: () => void
+  /** Per-claim expert re-verification updates (from orchestrator). */
+  claimUpdates?: Map<number, Partial<HallucinationClaim>>
+  /** Set of claim indices that have been expert-re-verified (from orchestrator). */
+  expertVerifiedClaims?: Set<number>
+  /** Callback to record an expert re-verification result (lifted to orchestrator). */
+  onClaimUpdate?: (index: number, result: Partial<HallucinationClaim>) => void
 }
 
 export function HallucinationPanel({
@@ -326,27 +332,21 @@ export function HallucinationPanel({
   focusedClaimIndex, onClaimFocus, onClose,
   expertVerification, toggleExpertVerification,
   inlineMarkups, toggleInlineMarkups,
+  claimUpdates = new Map(), expertVerifiedClaims = new Set(), onClaimUpdate,
 }: HallucinationPanelProps) {
   // Panel rendering continues below
   const scrollContentRef = useRef<HTMLDivElement>(null)
 
-  // Per-claim expert retry state
+  // Per-claim retry loading state (transient, stays local)
   const [retryingClaims, setRetryingClaims] = useState<Set<number>>(new Set())
-  const [claimUpdates, setClaimUpdates] = useState<Map<number, Partial<HallucinationClaim>>>(new Map())
-  const [expertVerifiedClaims, setExpertVerifiedClaims] = useState<Set<number>>(new Set())
 
-  // Track report identity to detect genuinely new verification runs
+  // Reset retry state when report changes
   const reportRef = useRef<string>("")
-  // Reset claim state when report actually changes (new verification run).
-  // Compare by content identity (conversation_id + claim count) instead of
-  // object reference — report gets a new ref on every render from useMemo.
   const reportIdentity = report ? `${report.conversation_id}:${report.claims?.length ?? 0}` : ""
   useEffect(() => {
     if (reportIdentity !== reportRef.current) {
       reportRef.current = reportIdentity
-      setClaimUpdates(new Map())
       setRetryingClaims(new Set())
-      setExpertVerifiedClaims(new Set())
     }
   }, [reportIdentity])
 
@@ -358,12 +358,11 @@ export function HallucinationPanel({
     try {
       const result = await verifySingleClaim(claims[index].claim, conversationId)
       if (result) {
-        setClaimUpdates((prev) => new Map(prev).set(index, result))
-        setExpertVerifiedClaims((prev) => new Set(prev).add(index))
+        onClaimUpdate?.(index, result)
       }
     } catch { /* ignore */ }
     setRetryingClaims((prev) => { const next = new Set(prev); next.delete(index); return next })
-  }, [report?.claims, conversationId])
+  }, [report?.claims, conversationId, onClaimUpdate])
 
   // Auto-scroll focused claim into view
   useEffect(() => {

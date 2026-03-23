@@ -15,7 +15,7 @@ import { useConversationsContext } from "@/contexts/conversations-context"
 import { useKBInjection } from "@/contexts/kb-injection-context"
 import { saveVerificationReport } from "@/lib/api"
 import { MODELS } from "@/lib/types"
-import type { ChatMessage, HallucinationReport, ModelOption } from "@/lib/types"
+import type { ChatMessage, HallucinationClaim, HallucinationReport, ModelOption } from "@/lib/types"
 import type { MessageVerificationStatus } from "@/components/chat/message-bubble"
 
 /** Module-level report cache — survives hook unmount/remount across pane switches.
@@ -55,6 +55,12 @@ export interface UseVerificationOrchestratorReturn {
   setSelectedVerificationMsgId: (id: string | null) => void
   /** All verification reports for the active conversation (keyed by message ID). */
   allVerificationReports: Record<string, HallucinationReport>
+  /** Per-claim expert re-verification updates (index → partial claim). */
+  claimUpdates: Map<number, Partial<HallucinationClaim>>
+  /** Set of claim indices that have been expert-re-verified. */
+  expertVerifiedClaims: Set<number>
+  /** Callback to record an expert re-verification result for a claim. */
+  handleClaimUpdate: (index: number, result: Partial<HallucinationClaim>) => void
 }
 
 export function useVerificationOrchestrator({
@@ -70,6 +76,15 @@ export function useVerificationOrchestrator({
   const [manualVerifyBump, setManualVerifyBump] = useState(0)
   const [verificationRecBanner, setVerificationRecBanner] = useState<{ model: ModelOption; reason: string } | null>(null)
   const [selectedMsgId, setSelectedMsgId] = useState<string | null>(null)
+
+  // Per-claim expert re-verification state (lifted from HallucinationPanel)
+  const [claimUpdates, setClaimUpdates] = useState<Map<number, Partial<HallucinationClaim>>>(new Map())
+  const [expertVerifiedClaims, setExpertVerifiedClaims] = useState<Set<number>>(new Set())
+
+  const handleClaimUpdate = useCallback((index: number, result: Partial<HallucinationClaim>) => {
+    setClaimUpdates((prev) => new Map(prev).set(index, result))
+    setExpertVerifiedClaims((prev) => new Set(prev).add(index))
+  }, [])
 
   // Derived values from messages
   const latestAssistantText = useMemo(() => {
@@ -105,8 +120,10 @@ export function useVerificationOrchestrator({
       triggerCounter.current += 1
     }
     lastKnownCount.current = assistantCount
-  } else if (assistantCount !== lastKnownCount.current) {
-    // Count changed (conversation switch) — update baseline without triggering
+  } else if (assistantCount !== lastKnownCount.current && !isStreaming) {
+    // Count changed while not streaming (conversation switch) — update baseline
+    // without triggering. IMPORTANT: do NOT update baseline while streaming,
+    // otherwise the post-stream render sees count==baseline and never triggers.
     lastKnownCount.current = assistantCount
   }
 
@@ -160,6 +177,8 @@ export function useVerificationOrchestrator({
     if (isStreaming) {
       setSavedReport(null)
       setSelectedMsgId(null)
+      setClaimUpdates(new Map())
+      setExpertVerifiedClaims(new Set())
       savedForKey.current = ""
       if (activeId && lastAssistantMsgId) {
         reportCache.delete(cacheKey(activeId, lastAssistantMsgId))
@@ -277,6 +296,26 @@ export function useVerificationOrchestrator({
     if (!hallucinationEnabled || !effectiveMsgId) return null
     if (halLoading) return { state: "loading" }
     if (halReport && !halReport.skipped && halReport.summary?.total && halReport.summary.total > 0) {
+      // Merge original claims with expert re-verification updates
+      if (claimUpdates.size > 0 && halReport.claims) {
+        const merged = halReport.claims.map((c, i) =>
+          claimUpdates.has(i) ? { ...c, ...claimUpdates.get(i) } : c,
+        )
+        const verified = merged.filter((c) => c.status === "verified").length
+        const unverified = merged.filter((c) => c.status === "unverified").length
+        const uncertain = merged.filter((c) => c.status === "uncertain").length
+        const skipped = merged.filter((c) => c.status === "skipped").length
+        return {
+          state: "done",
+          verified,
+          unverified,
+          uncertain,
+          skipped,
+          total: merged.length,
+          creditExhausted: verification.creditError != null,
+          hasExpertClaims: expertVerifiedClaims.size > 0,
+        }
+      }
       return {
         state: "done",
         verified: halReport.summary?.verified,
@@ -285,10 +324,11 @@ export function useVerificationOrchestrator({
         skipped: halReport.summary?.skipped,
         total: halReport.summary?.total,
         creditExhausted: verification.creditError != null,
+        hasExpertClaims: expertVerifiedClaims.size > 0,
       }
     }
     return null
-  }, [hallucinationEnabled, effectiveMsgId, halLoading, halReport])
+  }, [hallucinationEnabled, effectiveMsgId, halLoading, halReport, claimUpdates, expertVerifiedClaims])
 
   const handleVerifyMessage = useCallback(() => {
     // Clear completed mark + module cache so re-verification can proceed
@@ -323,5 +363,8 @@ export function useVerificationOrchestrator({
     selectedVerificationMsgId: effectiveMsgId,
     setSelectedVerificationMsgId: setSelectedMsgId,
     allVerificationReports,
+    claimUpdates,
+    expertVerifiedClaims,
+    handleClaimUpdate,
   }
 }

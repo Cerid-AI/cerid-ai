@@ -4,7 +4,7 @@
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { lazy, Suspense, useState, useCallback, useMemo, useRef, useEffect, isValidElement, type ReactNode } from "react"
-import { Copy, Check, User, Bot, ShieldCheck, ShieldAlert, Loader2, Pencil, Shield, ExternalLink } from "lucide-react"
+import { Copy, Check, User, Bot, ShieldCheck, ShieldAlert, Loader2, Pencil, Shield, ExternalLink, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn, formatCost } from "@/lib/utils"
@@ -292,7 +292,7 @@ function CopyButton({ text }: { text: string }) {
 
 export type MessageVerificationStatus =
   | { state: "loading" }
-  | { state: "done"; verified: number; unverified: number; uncertain: number; skipped?: number; total: number; creditExhausted?: boolean }
+  | { state: "done"; verified: number; unverified: number; uncertain: number; skipped?: number; total: number; creditExhausted?: boolean; hasExpertClaims?: boolean }
   | null
 
 function VerificationBadge({ status, onClick }: { status: MessageVerificationStatus; onClick?: () => void }) {
@@ -307,7 +307,7 @@ function VerificationBadge({ status, onClick }: { status: MessageVerificationSta
     )
   }
 
-  const { verified, total, unverified, skipped, creditExhausted } = status
+  const { verified, total, unverified, skipped, creditExhausted, hasExpertClaims } = status
   const accuracy = total > 0 ? Math.round((verified / total) * 100) : 0
   const hasIssues = unverified > 0
   const hasSkipped = (skipped ?? 0) > 0
@@ -318,18 +318,22 @@ function VerificationBadge({ status, onClick }: { status: MessageVerificationSta
       onClick={onClick}
       className={cn(
         "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium transition-colors",
-        creditExhausted
-          ? "bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20"
-          : hasIssues
-            ? "bg-red-500/10 text-red-400 hover:bg-red-500/20"
-            : accuracy >= 80
-              ? "bg-green-500/10 text-green-400 hover:bg-green-500/20"
-              : "bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20",
+        hasExpertClaims
+          ? "bg-purple-500/10 text-purple-400 hover:bg-purple-500/20"
+          : creditExhausted
+            ? "bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20"
+            : hasIssues
+              ? "bg-red-500/10 text-red-400 hover:bg-red-500/20"
+              : accuracy >= 80
+                ? "bg-green-500/10 text-green-400 hover:bg-green-500/20"
+                : "bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20",
       )}
     >
-      {hasIssues
-        ? <ShieldAlert className="h-2.5 w-2.5" />
-        : <ShieldCheck className="h-2.5 w-2.5" />
+      {hasExpertClaims
+        ? <Sparkles className="h-2.5 w-2.5" />
+        : hasIssues
+          ? <ShieldAlert className="h-2.5 w-2.5" />
+          : <ShieldCheck className="h-2.5 w-2.5" />
       }
       {verified}/{total} verified{hasSkipped ? ` (${skipped} skipped)` : ""}
     </button>

@@ -97,6 +97,9 @@ export function ChatPanel() {
     selectedVerificationMsgId,
     setSelectedVerificationMsgId,
     allVerificationReports,
+    claimUpdates,
+    expertVerifiedClaims,
+    handleClaimUpdate,
   } = useVerificationOrchestrator({
     activeMessages: active?.messages,
     activeId: activeId ?? null,
@@ -553,6 +556,9 @@ export function ChatPanel() {
           toggleExpertVerification={toggleExpertVerification}
           inlineMarkups={inlineMarkups}
           toggleInlineMarkups={toggleInlineMarkups}
+          claimUpdates={claimUpdates}
+          expertVerifiedClaims={expertVerifiedClaims}
+          onClaimUpdate={handleClaimUpdate}
         />
       </Panel>
       <PanelSeparator className="h-1 bg-border transition-colors hover:bg-primary/20 active:bg-primary/30" />
