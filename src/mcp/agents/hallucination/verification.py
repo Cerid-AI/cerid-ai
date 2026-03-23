@@ -1142,7 +1142,7 @@ async def verify_claim(
     async def _cache_result(result: dict[str, Any]) -> dict[str, Any]:
         """Cache the verdict (fire-and-forget) and return the result unchanged."""
         if result.get("status") in ("verified", "unverified"):
-            await cache_verdict(redis_client, claim, result)
+            await cache_verdict(redis_client, claim, result, response_context=response_context)
         return result
 
     try:

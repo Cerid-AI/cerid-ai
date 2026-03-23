@@ -39,27 +39,69 @@ logger = logging.getLogger("ai-companion.hallucination")
 _CGROUP_MEMORY_MAX = pathlib.Path("/sys/fs/cgroup/memory.max")
 
 
-def _extract_response_context(response_text: str, user_query: str | None) -> str | None:
-    """Build a brief topic summary for claim verification context.
-
-    Uses the user query (most reliable) or the first heading/sentence of the
-    response to give the verification model enough context to resolve ambiguous
-    claims like "It is 330 meters tall".
-    """
+def _heuristic_response_context(response_text: str, user_query: str | None) -> str | None:
+    """Heuristic fallback: build topic context from user query + first heading."""
     import re
 
     parts: list[str] = []
     if user_query:
         parts.append(user_query.strip()[:200])
 
-    # Extract first markdown heading if present
     heading_match = re.search(r"^#{1,3}\s+(.+)", response_text, re.MULTILINE)
     if heading_match:
         heading = heading_match.group(1).strip()
         if heading and heading not in (user_query or ""):
             parts.append(heading[:100])
 
+    if not parts:
+        # Last resort: first non-empty line (likely the topic)
+        for line in response_text.split("\n"):
+            stripped = line.strip().lstrip("#").strip()
+            if len(stripped) > 10:
+                parts.append(stripped[:120])
+                break
+
     return "; ".join(parts) if parts else None
+
+
+async def _extract_response_context(response_text: str, user_query: str | None) -> str | None:
+    """Build a brief topic summary for claim verification context.
+
+    Attempts LLM-based extraction via the internal LLM (Ollama if available,
+    else lightweight OpenRouter model) for a precise one-line topic summary.
+    Falls back to heuristic extraction (user query + heading) on failure.
+    """
+    # Fast heuristic first — always available as fallback
+    heuristic = _heuristic_response_context(response_text, user_query)
+
+    # Try LLM-based extraction for higher quality context
+    try:
+        from utils.internal_llm import call_internal_llm
+
+        snippet = response_text[:800]
+        query_hint = f'\nUser asked: "{user_query}"' if user_query else ""
+        prompt = (
+            f"What is the main topic of this response? "
+            f"Reply with ONLY a brief noun phrase (e.g. 'the Eiffel Tower', "
+            f"'Python async programming', '2023 US tax filing'). "
+            f"No explanation.\n\n{snippet}{query_hint}"
+        )
+        result = await asyncio.wait_for(
+            call_internal_llm(
+                [{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_tokens=40,
+            ),
+            timeout=5.0,
+        )
+        topic = result.strip().strip('"').strip("'").strip(".")
+        if topic and 3 < len(topic) < 150:
+            logger.debug("LLM topic extraction: '%s'", topic)
+            return topic
+    except Exception as exc:
+        logger.debug("LLM topic extraction failed (%s), using heuristic", exc)
+
+    return heuristic
 _CGROUP_MEMORY_CURRENT = pathlib.Path("/sys/fs/cgroup/memory.current")
 
 
@@ -273,7 +315,7 @@ async def verify_response_streaming(
         return
 
     # Build topic context for claim verification (prevents ambiguous claims)
-    response_context = _extract_response_context(response_text, user_query)
+    response_context = await _extract_response_context(response_text, user_query)
 
     # Classify each claim's type for frontend display
     def _claim_type(claim_text: str) -> str:

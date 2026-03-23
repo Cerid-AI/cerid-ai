@@ -57,11 +57,18 @@ async def cache_verdict(
     claim_text: str,
     verdict: dict[str, Any],
     ttl: int = 2_592_000,
+    response_context: str | None = None,
 ) -> None:
-    """Cache a verified claim verdict. Default TTL: 30 days."""
+    """Cache a verified claim verdict. Default TTL: 30 days.
+
+    When ``response_context`` is provided it is stored alongside the verdict
+    so that future cache hits can include the topic context (e.g. "the Eiffel
+    Tower") — enabling downstream consumers to interpret the cached claim
+    correctly even when the bare claim text is ambiguous.
+    """
     key = f"verf:claim:{claim_hash(claim_text)}"
     try:
-        cache_entry = {
+        cache_entry: dict[str, Any] = {
             "status": verdict.get("status", "unknown"),
             "similarity": verdict.get("similarity", 0),
             "verification_method": verdict.get("verification_method", ""),
@@ -70,6 +77,8 @@ async def cache_verdict(
             "source_domain": verdict.get("source_domain", ""),
             "cached": True,
         }
+        if response_context:
+            cache_entry["response_context"] = response_context[:200]
         await redis_client.set(key, json.dumps(cache_entry), ex=ttl)
         logger.debug("Claim cached: %s (status=%s)", key, cache_entry["status"])
     except Exception as e:
