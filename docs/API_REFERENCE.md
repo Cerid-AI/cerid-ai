@@ -484,10 +484,34 @@ make deps-check
 - `POST /workflows/{id}/run` — Execute workflow
 - `GET /workflows/templates` — Predefined templates
 
-### Ollama (Local LLM)
-- `GET /ollama/models` — List installed models
-- `POST /ollama/chat` — Chat with local model
-- `POST /ollama/pull` — Pull/download model
+### Ollama (Local LLM Add-On)
+
+**Proxy endpoints** (require `OLLAMA_ENABLED=true`):
+- `GET /ollama/models` — List installed Ollama models
+- `POST /ollama/chat` — Chat with local model (streaming + non-streaming)
+- `POST /ollama/pull` — Pull/download a model (streaming progress)
+
+**Configuration & management:**
+- `GET /providers/ollama/status` — Ollama status: `{ enabled, url, reachable, models[], default_model, default_model_installed }`
+- `POST /providers/ollama/enable` — Enable Ollama as internal LLM provider (checks connectivity, updates runtime config)
+- `POST /providers/ollama/disable` — Disable Ollama, fall back to OpenRouter
+- `GET /providers/internal` — Current internal LLM provider: `{ provider, model, intelligence_model, ollama_available }`
+- `PUT /providers/internal` — Update internal LLM provider at runtime (not persisted to .env)
+
+**Default model:** `qwen2.5:1.5b` (1.5B params, ~1GB, runs on CPU or GPU)
+
+**Pipeline tasks routed to internal LLM:**
+- Claim extraction (verification)
+- Query decomposition (multi-part queries)
+- Memory conflict resolution (ADD/UPDATE/NOOP classification)
+- Response topic extraction (disambiguation context)
+- LLM reranking (fallback to ONNX cross-encoder)
+
+**Limitations:** The local model handles classification, extraction, and routing. It does NOT handle: user-facing chat, verification fact-checking, synopsis generation, or web search — those always use OpenRouter.
+
+**Hardware detection:** `scripts/detect-gpu.sh` auto-detects NVIDIA GPU, AMD ROCm, macOS Metal, or CPU fallback. Docker Compose profile `ollama` starts the container with GPU passthrough when available. macOS Apple Silicon: Ollama runs natively for Metal acceleration.
+
+**Cost:** $0 for all internal LLM calls when using Ollama. Falls back to OpenRouter (paid) when Ollama is unavailable.
 
 ### Web Search
 - Tool: `pkb_web_search` — Search web with verification

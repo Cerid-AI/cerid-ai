@@ -61,6 +61,14 @@ function mockMultiFetch(settingsData: unknown, kbStatsData: unknown) {
         text: () => Promise.resolve(JSON.stringify(kbStatsData)),
       })
     }
+    if (url.includes("/providers/ollama/status")) {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ enabled: false, url: "http://localhost:11434", reachable: false, models: [], default_model: "qwen2.5:1.5b", default_model_installed: false }),
+        text: () => Promise.resolve("{}"),
+      })
+    }
     return Promise.resolve({
       ok: true,
       status: 200,

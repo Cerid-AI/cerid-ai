@@ -3,9 +3,9 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { fetchSettings, updateSettings, fetchKBStats, adminRebuildIndexes, adminRescore, adminRegenerateSummaries, adminClearDomain, fetchProviderCredits } from "@/lib/api"
+import { fetchSettings, updateSettings, fetchKBStats, adminRebuildIndexes, adminRescore, adminRegenerateSummaries, adminClearDomain, fetchProviderCredits, fetchOllamaStatus, enableOllama, disableOllama } from "@/lib/api"
 import type { KBStats } from "@/lib/api"
-import type { ServerSettings, SettingsUpdate, RoutingMode, ProviderCredits } from "@/lib/types"
+import type { ServerSettings, SettingsUpdate, RoutingMode, ProviderCredits, OllamaStatus } from "@/lib/types"
 import { useSettings } from "@/hooks/use-settings"
 import { cn } from "@/lib/utils"
 import { PRESETS, detectActivePreset } from "@/lib/settings-presets"
@@ -52,7 +52,7 @@ import { PaneErrorBoundary } from "@/components/ui/pane-error-boundary"
 
 type LoadState = "loading" | "error" | "ready"
 
-type SectionKey = "connection" | "knowledge_ingestion" | "features" | "retrieval" | "search" | "taxonomy" | "infra_sync" | "kb_admin" | "credits"
+type SectionKey = "connection" | "knowledge_ingestion" | "features" | "retrieval" | "search" | "taxonomy" | "infra_sync" | "ollama" | "kb_admin" | "credits"
 
 const SETTINGS_SECTIONS_VERSION = 2 // Bump to force new defaults on existing users
 
@@ -60,7 +60,7 @@ function readSectionState(): Record<SectionKey, boolean> {
   const defaults: Record<SectionKey, boolean> = {
     connection: true, knowledge_ingestion: true, features: true,
     retrieval: true, search: true, taxonomy: true, infra_sync: true,
-    kb_admin: true, credits: true,
+    ollama: true, kb_admin: true, credits: true,
   }
   try {
     const ver = localStorage.getItem("cerid-settings-sections-v")
@@ -828,6 +828,10 @@ export default function SettingsPane() {
               </>
             )}
 
+            {/* ── Local LLM (Ollama) ── */}
+            <SectionHeading icon={Cpu} label="Local LLM (Ollama)" open={sections.ollama} onToggle={() => toggleSection("ollama")} />
+            {sections.ollama && <OllamaSection settings={settings} onRefresh={load} />}
+
             {/* ── KB Management ── */}
             <SectionHeading icon={HardDrive} label="KB Management" open={sections.kb_admin} onToggle={() => toggleSection("kb_admin")} />
             {sections.kb_admin && (
@@ -972,6 +976,99 @@ function Header() {
       </div>
       <p className="text-xs text-muted-foreground">Server configuration, features, and retrieval pipeline</p>
     </div>
+  )
+}
+
+function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRefresh: () => void }) {
+  const { data: ollamaStatus, refetch: refetchOllama, isLoading } = useQuery<OllamaStatus>({
+    queryKey: ["ollama-status"],
+    queryFn: fetchOllamaStatus,
+    staleTime: 30_000,
+  })
+  const [toggling, setToggling] = useState(false)
+
+  const handleToggle = useCallback(async () => {
+    if (!ollamaStatus) return
+    setToggling(true)
+    try {
+      if (settings.internal_llm_provider === "ollama") {
+        await disableOllama()
+      } else {
+        await enableOllama()
+      }
+      await refetchOllama()
+      onRefresh()
+    } catch (e) {
+      console.warn("Ollama toggle failed:", e)
+    }
+    setToggling(false)
+  }, [ollamaStatus, settings.internal_llm_provider, refetchOllama, onRefresh])
+
+  const isActive = settings.internal_llm_provider === "ollama"
+  const hwLabel = settings.ollama_url?.includes("cerid-ollama") ? "Docker container" : settings.ollama_url ?? "—"
+
+  return (
+    <Card className="mb-2">
+      <CardHeader className="pb-2 pt-4 px-4">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <Cpu className="h-4 w-4 text-muted-foreground" />
+          Ollama — Local LLM Add-On
+        </CardTitle>
+        <CardDescription className="text-xs">
+          Free local inference for pipeline tasks (verification context, query decomposition, memory resolution, claim extraction).
+          Uses qwen2.5:1.5b (~1GB) by default. Falls back to OpenRouter when unavailable.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-3 pt-0">
+        {/* Status */}
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground">Status</span>
+          {isLoading ? (
+            <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+          ) : ollamaStatus?.reachable ? (
+            <Badge variant="default" className="text-[10px] bg-green-500/20 text-green-400 border-green-500/30">
+              Connected ({ollamaStatus.models.length} model{ollamaStatus.models.length !== 1 ? "s" : ""})
+            </Badge>
+          ) : ollamaStatus?.enabled ? (
+            <Badge variant="outline" className="text-[10px] text-yellow-400 border-yellow-500/30">
+              Enabled but unreachable
+            </Badge>
+          ) : (
+            <Badge variant="secondary" className="text-[10px]">Not installed</Badge>
+          )}
+        </div>
+        {/* Active toggle */}
+        <div className="flex items-center justify-between">
+          <LabelWithInfo label="Route pipeline tasks to Ollama" info="When on, claim extraction, query decomposition, memory resolution, and topic extraction use the local model. When off, uses OpenRouter." />
+          <Switch
+            checked={isActive}
+            onCheckedChange={handleToggle}
+            disabled={toggling || (!ollamaStatus?.reachable && !isActive)}
+          />
+        </div>
+        {/* Model */}
+        <Row label="Model" value={settings.internal_llm_model ?? "qwen2.5:1.5b"} mono info="Lightweight model for pipeline intelligence tasks" />
+        {/* Default model installed? */}
+        {ollamaStatus?.reachable && (
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">Default model installed</span>
+            <Badge variant={ollamaStatus.default_model_installed ? "default" : "secondary"} className="text-[10px]">
+              {ollamaStatus.default_model_installed ? "Yes" : "No — run: ollama pull " + ollamaStatus.default_model}
+            </Badge>
+          </div>
+        )}
+        {/* Connection */}
+        <Row label="Endpoint" value={hwLabel} mono info="Ollama server URL (Docker container or native)" />
+        {/* Provider */}
+        <Row label="Active provider" value={isActive ? "Ollama (local, $0)" : "OpenRouter (cloud)"} info="Which LLM handles internal pipeline operations" />
+        {/* Limitations */}
+        <div className="rounded border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground leading-relaxed">
+          <span className="font-medium">Limitations:</span> The local model (1.5B params) handles classification, extraction, and routing well.
+          It does not handle: user-facing chat, verification fact-checking, synopsis generation, or web search.
+          Those tasks always use capable cloud models via OpenRouter.
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 

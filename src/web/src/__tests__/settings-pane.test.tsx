@@ -43,6 +43,10 @@ const mockSettings = {
   sync_backend: "local",
   machine_id: "test-machine",
   version: "0.8.0",
+  ollama_enabled: false,
+  ollama_url: "http://localhost:11434",
+  internal_llm_provider: "bifrost",
+  internal_llm_model: "qwen2.5:1.5b",
 }
 
 function mockFetch(data: unknown, status = 200) {
@@ -53,6 +57,15 @@ function mockFetch(data: unknown, status = 200) {
         ok: true,
         status: 200,
         json: () => Promise.resolve({ total_artifacts: 0, total_chunks: 0, domains: {} }),
+        text: () => Promise.resolve("{}"),
+      })
+    }
+    // Ollama status endpoint
+    if (typeof url === "string" && url.includes("/providers/ollama/status")) {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ enabled: false, url: "http://localhost:11434", reachable: false, models: [], default_model: "qwen2.5:1.5b", default_model_installed: false }),
         text: () => Promise.resolve("{}"),
       })
     }

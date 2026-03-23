@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
+import config
 from config.settings import CERID_BOARDROOM_ENABLED, CERID_TRADING_ENABLED
 from models.sdk import (
     SDKCascadeConfirmResponse,
@@ -114,6 +115,13 @@ def sdk_health():
             "enable_self_rag",
             "enable_memory_extraction",
         )
+    }
+    # Expose internal LLM provider info for SDK consumers
+    import os
+    base["internal_llm"] = {
+        "provider": config.INTERNAL_LLM_PROVIDER,
+        "model": config.INTERNAL_LLM_MODEL or config.OLLAMA_DEFAULT_MODEL,
+        "ollama_enabled": os.getenv("OLLAMA_ENABLED", "false").lower() in ("true", "1"),
     }
     return base
 

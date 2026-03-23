@@ -1141,6 +1141,33 @@ export async function fetchProviderCredits(): Promise<import("./types").Provider
 }
 
 // ---------------------------------------------------------------------------
+// Ollama / Internal LLM
+
+export async function fetchOllamaStatus(): Promise<import("./types").OllamaStatus> {
+  const res = await fetch(`${MCP_BASE}/providers/ollama/status`, { headers: mcpHeaders() })
+  if (!res.ok) return { enabled: false, url: "", reachable: false, models: [], default_model: "", default_model_installed: false }
+  return res.json()
+}
+
+export async function enableOllama(): Promise<{ status: string; provider: string; model: string; url: string }> {
+  const res = await fetch(`${MCP_BASE}/providers/ollama/enable`, { method: "POST", headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Enable Ollama failed: ${res.status}`))
+  return res.json()
+}
+
+export async function disableOllama(): Promise<{ status: string; provider: string }> {
+  const res = await fetch(`${MCP_BASE}/providers/ollama/disable`, { method: "POST", headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Disable Ollama failed: ${res.status}`))
+  return res.json()
+}
+
+export async function fetchInternalProvider(): Promise<{ provider: string; model: string; intelligence_model: string; ollama_available: boolean }> {
+  const res = await fetch(`${MCP_BASE}/providers/internal`, { headers: mcpHeaders() })
+  if (!res.ok) return { provider: "bifrost", model: "", intelligence_model: "", ollama_available: false }
+  return res.json()
+}
+
+// ---------------------------------------------------------------------------
 // Automations
 // ---------------------------------------------------------------------------
 

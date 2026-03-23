@@ -553,6 +553,21 @@ export interface ServerSettings {
   enable_context_compression?: boolean
   // Trading agent integration
   trading_enabled?: boolean
+  // Ollama add-on (local LLM for pipeline tasks)
+  ollama_enabled?: boolean
+  ollama_url?: string
+  internal_llm_provider?: string
+  internal_llm_model?: string
+}
+
+/** Ollama add-on status from GET /providers/ollama/status */
+export interface OllamaStatus {
+  enabled: boolean
+  url: string
+  reachable: boolean
+  models: string[]
+  default_model: string
+  default_model_installed: boolean
 }
 
 export interface SettingsUpdate {
@@ -587,6 +602,9 @@ export interface SettingsUpdate {
   semantic_cache_threshold?: number
   enable_memory_consolidation?: boolean
   enable_context_compression?: boolean
+  // Ollama add-on
+  internal_llm_provider?: string
+  internal_llm_model?: string
 }
 
 export interface Memory {
