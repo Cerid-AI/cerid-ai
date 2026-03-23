@@ -340,15 +340,29 @@ export function useVerificationOrchestrator({
     setManualVerifyBump((prev) => prev + 1)
   }, [activeId, lastAssistantMsgId, clearVerified])
 
-  // All verification reports for badges on all messages
+  // All verification reports for badges on all messages.
+  // Merges three sources: localStorage (persisted), module-level cache
+  // (survives pane switches), and the live streaming report.
   const allVerificationReports = useMemo(() => {
     if (!activeId) return {}
     const stored = getAllReports(activeId)
-    // Also include any live/cached reports not yet persisted
-    if (lastAssistantMsgId && verification.report) {
-      return { ...stored, [lastAssistantMsgId]: verification.report }
+
+    // Include module-level cache entries for this conversation
+    const prefix = `${activeId}:`
+    const cached: Record<string, HallucinationReport> = {}
+    for (const [key, report] of reportCache.entries()) {
+      if (key.startsWith(prefix)) {
+        const msgId = key.slice(prefix.length)
+        cached[msgId] = report
+      }
     }
-    return stored
+
+    // Merge: cached fills gaps, stored overrides cached, live overrides all
+    const merged = { ...cached, ...stored }
+    if (lastAssistantMsgId && verification.report) {
+      merged[lastAssistantMsgId] = verification.report
+    }
+    return merged
   }, [activeId, getAllReports, lastAssistantMsgId, verification.report])
 
   return {

@@ -722,6 +722,7 @@ async def _verify_claim_externally(
     streaming: bool = False,
     expert_mode: bool = False,
     fast_mode: bool = False,
+    response_context: str | None = None,
 ) -> dict[str, Any]:
     """Direct structured cross-model verification for a single claim.
 
@@ -868,6 +869,13 @@ async def _verify_claim_externally(
                 "\"confidence\": 0.0-1.0, \"reasoning\": \"...\"}"
             )
 
+            # Prepend topic context when available so ambiguous claims
+            # like "It is 330 meters tall" can be resolved.
+            context_line = (
+                f"\n\nContext: this claim is from a response about: {response_context}"
+                if response_context else ""
+            )
+
             if is_evasion:
                 # Extract the user's original question from the evasion claim
                 q_match = re.search(r'The user asked: "(.+?)"', claim)
@@ -900,7 +908,7 @@ async def _verify_claim_externally(
                     f"superseded by newer data. If the claim contains specific "
                     f"numbers, dates, or facts, find the latest available data "
                     f"and compare."
-                    f"{model_context}\n\n{_json_response_fmt}"
+                    f"{context_line}{model_context}\n\n{_json_response_fmt}"
                 )
             elif is_ignorance:
                 # Reframed prompt: check underlying facts, not the model's honesty
@@ -910,12 +918,12 @@ async def _verify_claim_externally(
                     f"Do NOT evaluate whether the model is honest about its "
                     f"limitations. Instead, search for and verify whether the "
                     f"underlying facts, events, or information actually exist."
-                    f"{model_context}\n\n{_json_response_fmt}"
+                    f"{context_line}{model_context}\n\n{_json_response_fmt}"
                 )
             else:
                 user_prompt = (
                     f"Assess this claim for factual accuracy:\n\n"
-                    f"\"{claim}\"{model_context}\n\n{_json_response_fmt}"
+                    f"\"{claim}\"{context_line}{model_context}\n\n{_json_response_fmt}"
                 )
 
             messages = [
@@ -1009,7 +1017,8 @@ async def _verify_claim_externally(
                     claim[:50],
                 )
                 return await _verify_claim_externally(
-                    claim, generating_model, force_web_search=True
+                    claim, generating_model, force_web_search=True,
+                    response_context=response_context,
                 )
 
             return {
@@ -1083,8 +1092,15 @@ async def verify_claim(
     streaming: bool = False,
     expert_mode: bool = False,
     source_artifact_ids: list[str] | None = None,
+    response_context: str | None = None,
 ) -> dict[str, Any]:
     """Verify a single claim against the knowledge base and user memories.
+
+    When ``response_context`` is provided, it is prepended to external
+    verification prompts so the verifier knows the topic being discussed
+    (e.g. "The response is about the Eiffel Tower").  This prevents
+    ambiguous claims like "It is 330 meters tall" from returning
+    uncertain due to missing subject context.
 
     Uses multi-result triangulation, numeric contradiction detection,
     and memory authority to produce calibrated confidence scores.
@@ -1185,7 +1201,7 @@ async def verify_claim(
         if not all_results:
             ext_result = await _verify_claim_externally(
                 claim, model, force_web_search=True, streaming=streaming,
-                expert_mode=expert_mode,
+                expert_mode=expert_mode, response_context=response_context,
             )
             return await _cache_result({
                 "claim": claim,
@@ -1218,7 +1234,7 @@ async def verify_claim(
             )
             ext_result = await _verify_claim_externally(
                 claim, model, streaming=streaming,
-                expert_mode=expert_mode,
+                expert_mode=expert_mode, response_context=response_context,
             )
             return await _cache_result({
                 "claim": claim,
@@ -1236,7 +1252,7 @@ async def verify_claim(
         if escalation_similarity < ext_kb_threshold:
             ext_result = await _verify_claim_externally(
                 claim, model, streaming=streaming,
-                expert_mode=expert_mode,
+                expert_mode=expert_mode, response_context=response_context,
             )
             # Use external result if it provides a stronger signal than KB
             if ext_result["confidence"] > raw_similarity:
@@ -1273,7 +1289,7 @@ async def verify_claim(
             # --- Fallback 3: KB says "unverified" → try external ---
             ext_result = await _verify_claim_externally(
                 claim, model, streaming=streaming,
-                expert_mode=expert_mode,
+                expert_mode=expert_mode, response_context=response_context,
             )
             if ext_result.get("status") in ("verified", "unverified"):
                 return await _cache_result({
@@ -1300,7 +1316,7 @@ async def verify_claim(
             # definitive answer before falling back to KB-only uncertain ---
             ext_result = await _verify_claim_externally(
                 claim, model, streaming=streaming,
-                expert_mode=expert_mode,
+                expert_mode=expert_mode, response_context=response_context,
             )
             if ext_result.get("status") in ("verified", "unverified"):
                 return await _cache_result({
@@ -1322,7 +1338,7 @@ async def verify_claim(
             ):
                 web_result = await _verify_claim_externally(
                     claim, model, force_web_search=True,
-                    expert_mode=expert_mode,
+                    expert_mode=expert_mode, response_context=response_context,
                 )
                 if web_result.get("status") in ("verified", "unverified"):
                     return await _cache_result({
