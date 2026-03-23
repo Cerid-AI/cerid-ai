@@ -110,6 +110,7 @@ certifi==2026.2.25 \
     #   httpx
     #   kubernetes
     #   requests
+    #   sentry-sdk
 cffi==2.0.0 \
     --hash=sha256:00bdf7acc5f795150faa6957054fbbca2439db2f775ce831222b66f192f03beb \
     --hash=sha256:07b271772c100085dd28b74fa0cd81c8fb1a3ba18b21e03d7c27f3436a10606b \
@@ -441,6 +442,7 @@ fastapi==0.135.1 \
     # via
     #   -r requirements.txt
     #   chromadb
+    #   sentry-sdk
 filelock==3.25.2 \
     --hash=sha256:b64ece2b38f4ca29dd3e810287aa8c48182bbecd1ae6e9ae126c9b35f1382694 \
     --hash=sha256:ca8afb0da15f229774c9ad1b455ed96e85a81373065fb10446672f64444ddf70
@@ -2029,6 +2031,10 @@ rich==14.3.3 \
     # via
     #   chromadb
     #   typer
+sentry-sdk[fastapi]==2.55.0 \
+    --hash=sha256:3774c4d8820720ca4101548131b9c162f4c9426eb7f4d24aca453012a7470f69 \
+    --hash=sha256:97026981cb15699394474a196b88503a393cbc58d182ece0d3abe12b9bd978d4
+    # via -r requirements.txt
 shellingham==1.5.4 \
     --hash=sha256:7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686 \
     --hash=sha256:8dbca0739d487e5bd35ab3ca4b36e11c4078f3a234bfce294b0a0291363404de
@@ -2277,6 +2283,7 @@ urllib3==2.6.3 \
     # via
     #   kubernetes
     #   requests
+    #   sentry-sdk
 uuid-utils==0.14.1 \
     --hash=sha256:043fb58fde6cf1620a6c066382f04f87a8e74feb0f95a585e4ed46f5d44af57b \
     --hash=sha256:0972488e3f9b449e83f006ead5a0e0a33ad4a13e4462e865b7c286ab7d7566a3 \

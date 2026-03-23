@@ -1,5 +1,7 @@
 # Secrets & keys
 .env
+.env.local
+.env*.local
 !.env.age
 !.env.example
 *.key

@@ -176,6 +176,8 @@ services:
       - RERANK_ONNX_FILENAME=onnx/model_quint8_avx2.onnx
       - EMBEDDING_MODEL=Snowflake/snowflake-arctic-embed-m-v1.5
       - SEMANTIC_CACHE_DIM=768
+      - SENTRY_DSN=${SENTRY_DSN_MCP}
+      - SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-development}
     depends_on:
       neo4j:
         condition: service_healthy
