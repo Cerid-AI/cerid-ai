@@ -33,11 +33,11 @@ class TestNormalizeClaim:
         result = normalize_claim("France's capital")
         assert "france's" in result
 
-    def test_order_independence(self):
-        """Words are sorted, so reordered claims map to the same key."""
+    def test_order_preserved(self):
+        """Word order is preserved (no sorting) to avoid false cache hits."""
         a = normalize_claim("capital of France")
         b = normalize_claim("France capital of")
-        assert a == b
+        assert a != b  # different order = different key (intentional)
 
     def test_case_insensitive(self):
         assert normalize_claim("PARIS") == normalize_claim("paris")
@@ -72,10 +72,10 @@ class TestClaimHash:
         h2 = claim_hash("Water boils at 100 degrees")
         assert h1 != h2
 
-    def test_normalized_equivalence(self):
-        """Equivalent claims produce the same hash."""
+    def test_case_equivalence(self):
+        """Same words, same order, different case produce the same hash."""
         h1 = claim_hash("Capital of France")
-        h2 = claim_hash("france capital of")
+        h2 = claim_hash("capital of france")
         assert h1 == h2
 
 
@@ -234,8 +234,8 @@ class TestRoundTrip:
         assert result["cached"] is True
 
     @pytest.mark.asyncio
-    async def test_equivalent_claims_share_cache(self):
-        """Semantically equivalent claims (different word order) hit the same cache entry."""
+    async def test_case_insensitive_cache_hit(self):
+        """Same claim with different case hits the same cache entry."""
         store: dict[str, str] = {}
 
         def mock_set(key, value, ttl=None):
@@ -248,8 +248,8 @@ class TestRoundTrip:
         redis.set = mock_set
         redis.get = mock_get
 
-        await cache_verdict(redis, "capital of France is Paris", {"status": "verified"})
-        result = await get_cached_verdict(redis, "Paris is capital of France")
+        await cache_verdict(redis, "Paris is the capital of France", {"status": "verified"})
+        result = await get_cached_verdict(redis, "paris is the capital of france")
 
         assert result is not None
         assert result["status"] == "verified"

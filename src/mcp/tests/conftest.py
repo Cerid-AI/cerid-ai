@@ -125,14 +125,18 @@ def _reset_bifrost_client():
 
     Without this, get_bifrost_client() / _get_client() cache a client from the
     first test, preventing subsequent tests' patches from taking effect.
+    Also clears the claim_cache L1 in-memory cache to prevent cross-test leakage.
     """
     import utils.bifrost as _bifrost_mod
     import utils.llm_client as _llm_mod
+    from utils.claim_cache import clear_l1_cache
     _bifrost_mod._client = None
     _llm_mod._client = None
+    clear_l1_cache()
     yield
     _bifrost_mod._client = None
     _llm_mod._client = None
+    clear_l1_cache()
 
 
 @pytest.fixture

@@ -51,6 +51,11 @@ def _l1_set(key: str, verdict: dict[str, Any]) -> None:
         _l1_cache.popitem(last=False)
 
 
+def clear_l1_cache() -> None:
+    """Clear the in-memory L1 cache. Used in tests to prevent cross-test leakage."""
+    _l1_cache.clear()
+
+
 def normalize_claim(claim: str) -> str:
     """Normalize a claim for deduplication.
 
