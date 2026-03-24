@@ -1166,7 +1166,7 @@ async def verify_claims_batch_external(
                     seen_urls.add(url_str)
 
         # Parse the JSON array response
-        from utils.llm_client import parse_llm_json
+        from utils.llm_parsing import parse_llm_json
         parsed = parse_llm_json(raw_answer)
         if isinstance(parsed, dict):
             parsed = parsed.get("results", parsed.get("claims", []))
