@@ -10,10 +10,14 @@ const ConversationsContext = createContext<ConversationsContextValue | null>(nul
 
 export function ConversationsProvider({ children }: { children: ReactNode }) {
   const value = useConversations()
-  // Memoize context value to avoid re-rendering all consumers on every render.
-  // useConversations returns stable function references (useCallback) but the
-  // object wrapper is new each render — useMemo prevents that.
-  const memoized = useMemo(() => value, Object.values(value))
+  // Memoize context value to stabilize the object reference.
+  // Functions from useConversations are already stable (useCallback).
+  // Only re-create when data values change, not on every render.
+  const memoized = useMemo(
+    () => value,
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- stable callbacks omitted intentionally
+    [value.conversations, value.active, value.activeId, value.verifiedConversations],
+  )
   return (
     <ConversationsContext value={memoized}>
       {children}
