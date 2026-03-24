@@ -29,14 +29,14 @@ import { ClaimOverlay } from "./claim-overlay"
  *  to keep the reading flow clean. Non-verified claims use background colors
  *  to draw attention to potential issues. */
 const MARKUP_STYLES: Record<ClaimDisplayStatus, React.CSSProperties> = {
-  verified: { backgroundColor: "transparent", borderBottom: "2px solid rgba(34,197,94,0.4)", textDecoration: "none", color: "inherit" },
-  refuted: { backgroundColor: "rgba(239,68,68,0.15)", borderBottom: "2px solid rgba(239,68,68,0.5)", color: "inherit" },
-  unverified: { backgroundColor: "rgba(234,179,8,0.12)", borderBottom: "2px solid rgba(234,179,8,0.4)", color: "inherit" },
-  evasion: { backgroundColor: "rgba(249,115,22,0.12)", borderBottom: "2px solid rgba(249,115,22,0.4)", color: "inherit" },
-  citation: { backgroundColor: "rgba(168,85,247,0.12)", borderBottom: "2px solid rgba(168,85,247,0.4)", color: "inherit" },
-  uncertain: { backgroundColor: "rgba(107,114,128,0.1)", color: "inherit" },
-  pending: { backgroundColor: "rgba(107,114,128,0.08)", color: "inherit" },
-  skipped: { backgroundColor: "rgba(156,163,175,0.08)", color: "inherit" },
+  verified: { backgroundColor: "transparent", borderBottom: "2px solid var(--claim-verified-border, rgba(22,163,74,0.6))", textDecoration: "none", color: "inherit" },
+  refuted: { backgroundColor: "var(--claim-refuted-bg, rgba(220,38,38,0.12))", borderBottom: "2px solid var(--claim-refuted-border, rgba(220,38,38,0.6))", color: "inherit" },
+  unverified: { backgroundColor: "var(--claim-unverified-bg, rgba(202,138,4,0.10))", borderBottom: "2px solid var(--claim-unverified-border, rgba(202,138,4,0.5))", color: "inherit" },
+  evasion: { backgroundColor: "var(--claim-evasion-bg, rgba(234,88,12,0.10))", borderBottom: "2px solid rgba(234,88,12,0.5)", color: "inherit" },
+  citation: { backgroundColor: "var(--claim-citation-bg, rgba(147,51,234,0.10))", borderBottom: "2px solid rgba(147,51,234,0.5)", color: "inherit" },
+  uncertain: { backgroundColor: "rgba(107,114,128,0.10)", color: "inherit" },
+  pending: { backgroundColor: "rgba(107,114,128,0.06)", color: "inherit" },
+  skipped: { backgroundColor: "rgba(156,163,175,0.06)", color: "inherit" },
 }
 
 /** Code block fallback while SyntaxHighlighter loads */
