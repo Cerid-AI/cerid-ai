@@ -209,6 +209,7 @@ async def _attempt_stream(
         async def _success_gen() -> AsyncGenerator[bytes, None]:
             try:
                 actual_model_emitted = False
+                usage_data: dict | None = None
                 async for chunk in response.aiter_bytes():
                     if not actual_model_emitted:
                         try:
@@ -227,6 +228,17 @@ async def _attempt_stream(
                                     break
                         except (json.JSONDecodeError, UnicodeDecodeError):
                             pass
+                    # Capture usage from the final SSE chunk (before [DONE])
+                    try:
+                        text_chunk = chunk.decode(errors="replace")
+                        for line in text_chunk.split("\n"):
+                            stripped = line.strip()
+                            if stripped.startswith("data: ") and stripped != "data: [DONE]":
+                                parsed_chunk = json.loads(stripped[6:])
+                                if "usage" in parsed_chunk:
+                                    usage_data = parsed_chunk["usage"]
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        pass
                     yield chunk
             except (httpx.ReadError, httpx.RemoteProtocolError, httpx.ReadTimeout, httpx.StreamClosed) as exc:
                 logger.warning(
@@ -241,6 +253,21 @@ async def _attempt_stream(
                 yield f"data: {err}\n\ndata: [DONE]\n\n".encode()
             finally:
                 await response.aclose()
+                # Record LLM cost from OpenRouter usage data (fire-and-forget)
+                if usage_data:
+                    try:
+                        from utils.metrics import MetricsCollector, estimate_cost
+                        prompt_tokens = usage_data.get("prompt_tokens", 0)
+                        completion_tokens = usage_data.get("completion_tokens", 0)
+                        if prompt_tokens or completion_tokens:
+                            cost = estimate_cost(bare_model, prompt_tokens, completion_tokens)
+                            MetricsCollector.record_metric("llm_cost_usd", cost)
+                            logger.debug(
+                                "Chat cost: model=%s prompt=%d completion=%d cost=$%.6f",
+                                bare_model, prompt_tokens, completion_tokens, cost,
+                            )
+                    except Exception:
+                        pass
 
         return _success_gen()
 
@@ -259,10 +286,17 @@ async def _proxy_stream(req: ChatRequest, request_id: str, api_key: str = "") ->
             from utils.smart_router import TaskType, route
 
             last_content = req.messages[-1].content if req.messages else ""
+            total_chars = sum(len(m.content) for m in req.messages)
+            kb_count = sum(
+                1 for m in req.messages
+                if m.role == "system" and "<document" in m.content
+            )
             decision = await route(
                 last_content,
                 task_type=TaskType.CHAT,
                 cost_sensitivity=req.cost_sensitivity,
+                total_chars=total_chars,
+                kb_injection_count=kb_count,
             )
             req.model = decision.model
             logger.info(

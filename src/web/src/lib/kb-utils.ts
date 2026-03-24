@@ -44,12 +44,21 @@ export function deduplicateChunks(
 }
 
 /**
- * Format a KB chunk with a domain/filename header prefix for LLM context.
+ * Format a KB chunk with XML document tags for clear LLM boundary detection.
+ *
+ * XML tags provide:
+ * - Clear document boundary delimiters (no ambiguity between chunks)
+ * - Structured metadata attributes for source attribution
+ * - Compatibility with smart routing's `<document` detection for injection counting
  */
 export function formatChunkWithHeader(source: KBQueryResult): string {
-  const parts: string[] = []
-  if (source.domain) parts.push(source.domain)
-  if (source.sub_category) parts.push(source.sub_category)
-  const domainPath = parts.length > 0 ? parts.join(" > ") + " | " : ""
-  return `--- ${domainPath}${source.filename} ---\n${source.content}`
+  const attrs: string[] = []
+  if (source.artifact_id) attrs.push(`id="${source.artifact_id}"`)
+  if (source.domain) attrs.push(`domain="${source.domain}"`)
+  if (source.sub_category) attrs.push(`category="${source.sub_category}"`)
+  if (source.filename) attrs.push(`source="${source.filename}"`)
+  if (source.chunk_index != null) attrs.push(`chunk="${source.chunk_index}"`)
+  if (source.relevance != null) attrs.push(`relevance="${source.relevance.toFixed(2)}"`)
+  const attrStr = attrs.length > 0 ? " " + attrs.join(" ") : ""
+  return `<document${attrStr}>\n${source.content}\n</document>`
 }

@@ -283,6 +283,8 @@ async def route(
     *,
     task_type: TaskType = TaskType.CHAT,
     cost_sensitivity: str = "medium",
+    total_chars: int = 0,
+    kb_injection_count: int = 0,
 ) -> RouteDecision:
     """Pick the best model for this query and task type.
 
@@ -367,6 +369,18 @@ async def route(
     # Ollama is never used for chat answers (quality too low for user-facing)
     # But Ollama CAN classify the query (free, instant) to pick the best model
     complexity = await _classify_with_best_available(query)
+
+    # Context-aware escalation: KB injections and large conversations
+    # require models with sufficient context windows and reasoning ability
+    if kb_injection_count >= 3 and complexity == Complexity.SIMPLE:
+        complexity = Complexity.MODERATE
+        logger.info("Escalated SIMPLE→MODERATE: %d KB injections", kb_injection_count)
+    if total_chars > 40_000:
+        complexity = Complexity.COMPLEX
+        logger.info("Escalated to COMPLEX: %d total chars (large context)", total_chars)
+    elif total_chars > 12_000 and complexity == Complexity.SIMPLE:
+        complexity = Complexity.MODERATE
+        logger.info("Escalated SIMPLE→MODERATE: %d total chars", total_chars)
 
     # Cost sensitivity shifts model selection:
     # HIGH: use free models more aggressively (even for moderate queries)

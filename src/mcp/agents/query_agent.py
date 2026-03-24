@@ -843,6 +843,7 @@ async def agent_query(
     debug_timing: bool = False,
     allowed_domains: list[str] | None = None,
     strict_domains: bool = False,
+    model: str | None = None,
 ) -> dict[str, Any]:
     """Execute multi-domain query with reranking, graph expansion, and context assembly."""
     timer = StepTimer(enabled=debug_timing)
@@ -1064,18 +1065,20 @@ async def agent_query(
 
     # Step 6: Assemble context
     with timer.step("context_assembly"):
+        # Model-aware context budget — large-context models get more KB context
+        ctx_budget = config.get_context_budget_for_model(model)
         if ENABLE_INTELLIGENT_ASSEMBLY and results:
             try:
                 from utils.context_assembler import intelligent_assemble
                 context, sources, coverage_meta = intelligent_assemble(
-                    results=results, query=query, max_chars=config.QUERY_CONTEXT_MAX_CHARS,
+                    results=results, query=query, max_chars=ctx_budget,
                 )
                 char_count = len(context)
             except Exception as e:
                 logger.warning("Intelligent assembly failed, falling back: %s", e)
-                context, sources, char_count = assemble_context(results, max_chars=config.QUERY_CONTEXT_MAX_CHARS)
+                context, sources, char_count = assemble_context(results, max_chars=ctx_budget)
         else:
-            context, sources, char_count = assemble_context(results, max_chars=config.QUERY_CONTEXT_MAX_CHARS)
+            context, sources, char_count = assemble_context(results, max_chars=ctx_budget)
 
     # Step 7: Calculate confidence (average relevance of included sources)
     confidence = 0.0

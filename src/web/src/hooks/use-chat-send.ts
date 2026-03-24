@@ -165,7 +165,7 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
         const contextParts = dedupedSources.map(formatChunkWithHeader)
         allMessages.push({
           role: "system",
-          content: `The user's knowledge base contains the following relevant context. Use it to inform your response:\n\n${contextParts.join("\n\n")}`,
+          content: `Reference the following knowledge base documents when answering. Each <document> is an independent source.\n\n${contextParts.join("\n\n")}`,
         })
         options.clearInjected()
       }

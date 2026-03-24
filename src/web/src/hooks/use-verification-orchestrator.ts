@@ -158,12 +158,20 @@ export function useVerificationOrchestrator({
     }))
   }, [activeMessages])
 
-  // Anti-circularity: collect KB artifact IDs that were injected into the LLM prompt
+  // Anti-circularity: collect KB artifact IDs that were injected into the LLM prompt.
+  // Use a ref to persist IDs across the clearInjected() call that happens at send time.
+  // Without this, injectedContext is empty by the time verification reads it.
+  const lastInjectedIdsRef = useRef<string[]>([])
   const { injectedContext } = useKBInjection()
-  const sourceArtifactIds = useMemo(
-    () => injectedContext.map((r) => r.artifact_id).filter(Boolean),
-    [injectedContext],
-  )
+  const sourceArtifactIds = useMemo(() => {
+    // Prefer live context; fall back to persisted ref (post-clear)
+    const liveIds = injectedContext.map((r) => r.artifact_id).filter(Boolean)
+    if (liveIds.length > 0) {
+      lastInjectedIdsRef.current = liveIds
+      return liveIds
+    }
+    return lastInjectedIdsRef.current
+  }, [injectedContext])
 
   // Streaming verification hook
   const verification = useVerificationStream(

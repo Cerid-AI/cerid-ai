@@ -88,7 +88,33 @@ TEMPORAL_RECENCY_WEIGHT = 0.1        # max boost from recency (added to relevanc
 HYBRID_VECTOR_WEIGHT = float(os.getenv("HYBRID_VECTOR_WEIGHT", "0.6"))
 HYBRID_KEYWORD_WEIGHT = float(os.getenv("HYBRID_KEYWORD_WEIGHT", "0.4"))
 BM25_DATA_DIR = os.path.join(os.getenv("DATA_DIR", "data"), "bm25")
-QUERY_CONTEXT_MAX_CHARS = 14_000    # max chars assembled for LLM context
+QUERY_CONTEXT_MAX_CHARS = 14_000    # default max chars assembled for LLM context
+
+# Model-aware context char budgets — use larger budgets for large-context models.
+# Keys are model family prefixes (matched via startswith on the model ID).
+MODEL_CONTEXT_CHAR_BUDGETS: dict[str, int] = {
+    "claude": 40_000,       # Claude: 200K context
+    "gemini": 40_000,       # Gemini: 1M context
+    "gpt-4o": 20_000,       # GPT-4o: 128K context
+    "gpt-4o-mini": 14_000,  # GPT-4o-mini: 128K but cheaper, stay conservative
+    "llama": 10_000,        # Llama: 32K–128K context
+    "qwen": 10_000,         # Qwen: 32K–128K context
+}
+
+
+def get_context_budget_for_model(model: str | None) -> int:
+    """Return the context char budget for a given model ID.
+
+    Matches model family by prefix against MODEL_CONTEXT_CHAR_BUDGETS.
+    Returns QUERY_CONTEXT_MAX_CHARS as default for unknown models.
+    """
+    if not model:
+        return QUERY_CONTEXT_MAX_CHARS
+    model_lower = model.lower().split("/")[-1]  # strip provider prefix
+    for prefix, budget in MODEL_CONTEXT_CHAR_BUDGETS.items():
+        if model_lower.startswith(prefix):
+            return budget
+    return QUERY_CONTEXT_MAX_CHARS
 QUERY_RERANK_CANDIDATES = 15        # max candidates sent to reranker
 QUERY_CONTEXT_MESSAGES = 5          # max conversation messages used for query enrichment
 
