@@ -219,9 +219,12 @@ VERIFICATION_MIN_RELEVANCE = float(os.getenv("VERIFICATION_MIN_RELEVANCE", "0.35
 # ---------------------------------------------------------------------------
 # Per-claim timeout: max time for any single claim's full verification
 # (including KB lookup, external calls, and all fallbacks)
-STREAMING_PER_CLAIM_TIMEOUT = float(os.getenv("STREAMING_PER_CLAIM_TIMEOUT", "25"))
+STREAMING_PER_CLAIM_TIMEOUT = float(os.getenv("STREAMING_PER_CLAIM_TIMEOUT", "30"))
+# Extended timeout for expert-tier models (Grok 4 with :online web search)
+# and current-event claims that require web search + reasoning
+STREAMING_EXPERT_CLAIM_TIMEOUT = float(os.getenv("STREAMING_EXPERT_CLAIM_TIMEOUT", "60"))
 # Total deadline for the entire streaming verification loop (all claims)
-STREAMING_TOTAL_TIMEOUT = float(os.getenv("STREAMING_TOTAL_TIMEOUT", "90"))
+STREAMING_TOTAL_TIMEOUT = float(os.getenv("STREAMING_TOTAL_TIMEOUT", "120"))
 # Fewer LLM retries on 429 during streaming to avoid compounding delays
 STREAMING_RETRY_ATTEMPTS = int(os.getenv("STREAMING_RETRY_ATTEMPTS", "1"))
 

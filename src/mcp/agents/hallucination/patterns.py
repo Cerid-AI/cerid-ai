@@ -121,6 +121,10 @@ CURRENT_EVENT_PATTERNS = [
     re.compile(r"\b(?:trending|breaking|emerging|ongoing)\b", re.I),
     re.compile(r"\b(?:CEO|president|prime minister|acquired|merger|IPO|bankruptcy|election)\b", re.I),
     re.compile(r"\b(?:version|v)\s*\d+\.\d+.*\b(?:released|launched|available|shipped)\b", re.I),
+    # Prices, costs, fees — inherently time-sensitive and change frequently
+    re.compile(r"(?:€|\$|£|¥|₹)\s*\d+[\d.,]*\b", re.I),       # currency symbols + amounts
+    re.compile(r"\b(?:costs?|prices?|fees?|fares?|rates?|charges?|subscription|salary|salaries|wages?)\b.*\b(?:\d+[\d.,]*)\b", re.I),
+    re.compile(r"\b(?:ticket|admission|entry|membership)\b.*\b(?:€|\$|£|¥|₹|\d+[\d.,]*)\b", re.I),
 ]
 
 # Patterns that indicate a verification model's response admits stale knowledge.

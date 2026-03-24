@@ -382,6 +382,13 @@ async def verify_response_streaming(
         """Verify a single claim with a per-claim timeout and concurrency limit."""
         await _wait_for_memory(config.VERIFY_MEMORY_FLOOR_MB, f"claim-{idx}")
         sem = _get_claim_verify_semaphore()
+        # Use extended timeout for expert mode (Grok 4 + :online web search)
+        # and current-event claims that require web search + reasoning
+        claim_timeout = (
+            config.STREAMING_EXPERT_CLAIM_TIMEOUT
+            if expert_mode or _claim_type(claim_text) == "recency"
+            else config.STREAMING_PER_CLAIM_TIMEOUT
+        )
         try:
             async with sem:
                 result = await asyncio.wait_for(
@@ -392,18 +399,18 @@ async def verify_response_streaming(
                         source_artifact_ids=source_artifact_ids,
                         response_context=response_context,
                     ),
-                    timeout=config.STREAMING_PER_CLAIM_TIMEOUT,
+                    timeout=claim_timeout,
                 )
         except TimeoutError:
             logger.warning(
                 "Claim %d verification timed out after %ds: '%s...'",
-                idx, config.STREAMING_PER_CLAIM_TIMEOUT, claim_text[:50],
+                idx, claim_timeout, claim_text[:50],
             )
             result = {
                 "claim": claim_text,
                 "status": "uncertain",
                 "similarity": 0.0,
-                "reason": f"Verification timed out ({int(config.STREAMING_PER_CLAIM_TIMEOUT)}s)",
+                "reason": f"Verification timed out ({int(claim_timeout)}s)",
                 "verification_method": "timeout",
             }
         return idx, result
