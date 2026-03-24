@@ -1079,6 +1079,142 @@ def _kb_source_fields(top_result: dict[str, Any] | None) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Batch external verification (same-model claim grouping)
+# ---------------------------------------------------------------------------
+
+_SYSTEM_BATCH_VERIFICATION = (
+    "You are a fact-checking engine. You receive multiple claims to verify. "
+    "For EACH claim, determine if it is factually accurate. "
+    "Respond with a JSON array of objects, one per claim, in the same order. "
+    "Each object must have: "
+    '{"claim_index": <0-based>, "verdict": "verified"|"refuted"|"uncertain", '
+    '"confidence": <0.0-1.0>, "reason": "<brief explanation>"}'
+)
+
+_BATCH_JSON_FMT = (
+    "\n\nRespond with ONLY a JSON array. Example:\n"
+    '[{"claim_index": 0, "verdict": "verified", "confidence": 0.95, "reason": "Confirmed by official data"}, '
+    '{"claim_index": 1, "verdict": "refuted", "confidence": 0.8, "reason": "Current price is different"}]'
+)
+
+
+async def verify_claims_batch_external(
+    claims: list[tuple[int, str]],
+    model: str,
+    response_context: str | None = None,
+    timeout: float | None = None,
+) -> dict[int, dict[str, Any]]:
+    """Verify multiple claims in a single LLM call to the same model.
+
+    Args:
+        claims: List of (original_index, claim_text) tuples.
+        model: The model to use for all claims in this batch.
+        response_context: Topic context for ambiguous claims.
+        timeout: Per-batch timeout (default: BIFROST_TIMEOUT * 3).
+
+    Returns:
+        Dict mapping original_index → verdict dict with keys:
+        status, similarity, reason, verification_method, verification_model.
+    """
+    if not claims:
+        return {}
+
+    if timeout is None:
+        timeout = config.BIFROST_TIMEOUT * 3
+
+    context_line = (
+        f"\nContext: these claims are from a response about: {response_context}\n"
+        if response_context else ""
+    )
+
+    claims_block = "\n".join(
+        f"  [{i}] \"{text}\"" for i, (_, text) in enumerate(claims)
+    )
+    user_prompt = (
+        f"Verify each of the following {len(claims)} claims for factual accuracy:"
+        f"{context_line}\n\n{claims_block}{_BATCH_JSON_FMT}"
+    )
+
+    messages = [
+        {"role": "system", "content": _SYSTEM_BATCH_VERIFICATION},
+        {"role": "user", "content": user_prompt},
+    ]
+
+    results: dict[int, dict[str, Any]] = {}
+
+    try:
+        from utils.llm_client import call_llm_raw
+        data = await call_llm_raw(
+            messages,
+            model=model,
+            temperature=0.1,
+            max_tokens=200 * len(claims),  # ~200 tokens per claim verdict
+            timeout=timeout,
+            breaker_name="bifrost-verify",
+        )
+        raw_answer = data["choices"][0]["message"].get("content", "").strip()
+
+        # Extract source URLs from annotations (web search models)
+        annotations = data["choices"][0]["message"].get("annotations", [])
+        source_urls: list[str] = []
+        seen_urls: set = set()
+        for a in annotations:
+            if a.get("type") == "url_citation":
+                url_str = a.get("url_citation", {}).get("url", "")
+                if url_str and url_str not in seen_urls:
+                    source_urls.append(url_str)
+                    seen_urls.add(url_str)
+
+        # Parse the JSON array response
+        from utils.llm_client import parse_llm_json
+        parsed = parse_llm_json(raw_answer)
+        if isinstance(parsed, dict):
+            parsed = parsed.get("results", parsed.get("claims", []))
+        if not isinstance(parsed, list):
+            logger.warning("Batch verification returned non-array: %s", type(parsed).__name__)
+            return results
+
+        for item in parsed:
+            if not isinstance(item, dict):
+                continue
+            batch_idx = item.get("claim_index", -1)
+            if not isinstance(batch_idx, int) or batch_idx < 0 or batch_idx >= len(claims):
+                continue
+            original_idx = claims[batch_idx][0]
+            verdict_str = str(item.get("verdict", "uncertain")).lower()
+
+            # Map verdict string to status
+            if verdict_str in ("verified", "true", "correct", "accurate"):
+                status = "verified"
+            elif verdict_str in ("refuted", "false", "incorrect", "inaccurate"):
+                status = "unverified"
+            else:
+                status = "uncertain"
+
+            confidence = float(item.get("confidence", 0.5))
+            reason = str(item.get("reason", ""))[:200]
+
+            results[original_idx] = {
+                "claim": claims[batch_idx][1],
+                "status": status,
+                "similarity": confidence,
+                "reason": reason,
+                "verification_method": "web_search" if ":online" in model else "cross_model",
+                "verification_model": model,
+                "source_urls": source_urls[:3] if source_urls else [],
+            }
+
+        logger.info(
+            "Batch verification: %d/%d claims resolved via %s",
+            len(results), len(claims), model,
+        )
+    except Exception as exc:
+        logger.warning("Batch verification failed (%s), claims will fall back to individual", exc)
+
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Main claim verification
 # ---------------------------------------------------------------------------
 

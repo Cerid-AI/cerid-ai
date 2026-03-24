@@ -366,6 +366,51 @@ async def verify_response_streaming(
                     high_confidence_kb_claims.add(idx)
                     break
 
+    # --- Batch pre-verification for current-event claims ---
+    # Group time-sensitive claims (prices, recency) going to the same web-search
+    # model and verify them in a single LLM call instead of N individual calls.
+    # This reduces API round-trips, avoids rate limits, and prevents timeouts.
+    from agents.hallucination.patterns import _is_current_event_claim
+    from agents.hallucination.verification import verify_claims_batch_external
+
+    batch_results: dict[int, dict[str, Any]] = {}
+    current_event_claims: list[tuple[int, str]] = []
+    for idx, claim_text in enumerate(claims):
+        ct = _claim_type(claim_text)
+        if ct in ("recency",) or _is_current_event_claim(claim_text):
+            # Check cache first — don't re-batch already-cached claims
+            from utils.claim_cache import get_cached_verdict
+            cached = await get_cached_verdict(redis_client, claim_text)
+            if cached and cached.get("status") in ("verified", "unverified"):
+                batch_results[idx] = cached
+            else:
+                current_event_claims.append((idx, claim_text))
+
+    if current_event_claims and len(current_event_claims) >= 2:
+        # Batch verify — use current-event model with :online suffix
+        batch_model = config.VERIFICATION_CURRENT_EVENT_MODEL
+        if expert_mode:
+            batch_model = config.VERIFICATION_EXPERT_MODEL + ":online"
+        try:
+            batch_timeout = config.STREAMING_EXPERT_CLAIM_TIMEOUT
+            batch_verdicts = await asyncio.wait_for(
+                verify_claims_batch_external(
+                    current_event_claims,
+                    model=batch_model,
+                    response_context=response_context,
+                    timeout=batch_timeout,
+                ),
+                timeout=batch_timeout + 5,
+            )
+            batch_results.update(batch_verdicts)
+            logger.info(
+                "Batch verified %d/%d current-event claims via %s",
+                len(batch_verdicts), len(current_event_claims), batch_model,
+            )
+        except (TimeoutError, Exception) as exc:
+            logger.warning("Batch verification failed (%s), falling back to individual", exc)
+            # Claims not in batch_results will be verified individually below
+
     # --- Parallel verification via asyncio.as_completed ---
     verified_count = 0
     unverified_count = 0
@@ -378,8 +423,16 @@ async def verify_response_streaming(
     credit_exhausted = False
     credit_error_emitted = False
 
+    # Pre-fill collected_results with batch results
+    for idx, result in batch_results.items():
+        collected_results[idx] = result
+
     async def _verify_indexed(idx: int, claim_text: str) -> tuple[int, dict[str, Any]]:
         """Verify a single claim with a per-claim timeout and concurrency limit."""
+        # Skip if already resolved by batch verification
+        if collected_results[idx] is not None:
+            return idx, collected_results[idx]  # type: ignore[return-value]
+
         await _wait_for_memory(config.VERIFY_MEMORY_FLOOR_MB, f"claim-{idx}")
         sem = _get_claim_verify_semaphore()
         # Use extended timeout for expert mode (Grok 4 + :online web search)
