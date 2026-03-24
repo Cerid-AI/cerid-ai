@@ -242,24 +242,25 @@ def discover_relationships(
         refs = _extract_references(content, filename)
         if refs:
             with driver.session() as session:
-                for ref_name in refs:
-                    result = session.run(
-                        "MATCH (a:Artifact) "
-                        "WHERE a.id <> $artifact_id AND a.filename ENDS WITH $ref_name "
-                        "RETURN a.id AS id, a.filename AS filename "
-                        "LIMIT 3",
-                        artifact_id=artifact_id,
-                        ref_name=ref_name,
-                    )
-                    for record in result:
-                        if create_relationship(
-                            driver,
-                            artifact_id,
-                            record["id"],
-                            "REFERENCES",
-                            {"reason": f"references {record['filename']}"},
-                        ):
-                            created += 1
+                # Batch all ref lookups in a single UNWIND query
+                result = session.run(
+                    "UNWIND $ref_names AS ref_name "
+                    "MATCH (a:Artifact) "
+                    "WHERE a.id <> $artifact_id AND a.filename ENDS WITH ref_name "
+                    "RETURN a.id AS id, a.filename AS filename, ref_name "
+                    "LIMIT 30",
+                    artifact_id=artifact_id,
+                    ref_names=list(refs),
+                )
+                for record in result:
+                    if create_relationship(
+                        driver,
+                        artifact_id,
+                        record["id"],
+                        "REFERENCES",
+                        {"reason": f"references {record['filename']}"},
+                    ):
+                        created += 1
 
     if created > 0:
         logger.info(

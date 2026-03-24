@@ -19,10 +19,32 @@ from __future__ import annotations
 import logging
 import os
 
+import httpx
+
 import config
 from utils.circuit_breaker import CircuitOpenError, get_breaker
 
 logger = logging.getLogger("ai-companion.internal_llm")
+
+# Shared connection pool for Ollama calls (avoids per-request TCP handshake)
+_ollama_client: httpx.AsyncClient | None = None
+
+
+def _get_ollama_client() -> httpx.AsyncClient:
+    global _ollama_client
+    if _ollama_client is None or _ollama_client.is_closed:
+        _ollama_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(60.0, connect=5.0),
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+        )
+    return _ollama_client
+
+
+async def close_ollama_client() -> None:
+    global _ollama_client
+    if _ollama_client and not _ollama_client.is_closed:
+        await _ollama_client.aclose()
+        _ollama_client = None
 
 
 async def call_internal_llm(
@@ -83,14 +105,14 @@ async def _call_ollama(
         if json_mode:
             payload["format"] = "json"
 
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                f"{ollama_url}/api/chat",
-                json=payload,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            return data.get("message", {}).get("content", "")
+        client = _get_ollama_client()
+        resp = await client.post(
+            f"{ollama_url}/api/chat",
+            json=payload,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("message", {}).get("content", "")
 
     try:
         return await breaker.call(_do_call)

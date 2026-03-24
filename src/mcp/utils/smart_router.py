@@ -108,17 +108,16 @@ async def _check_ollama() -> bool:
         return False
 
     try:
-        import httpx
-
         ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
-        async with httpx.AsyncClient(timeout=3) as client:
-            resp = await client.get(f"{ollama_url}/api/tags")
-            if resp.status_code == 200:
-                data = resp.json()
-                _ollama_models = [m.get("name", "") for m in data.get("models", [])]
-                _ollama_available = len(_ollama_models) > 0
-            else:
-                _ollama_available = False
+        from utils.internal_llm import _get_ollama_client
+        client = _get_ollama_client()
+        resp = await client.get(f"{ollama_url}/api/tags")
+        if resp.status_code == 200:
+            data = resp.json()
+            _ollama_models = [m.get("name", "") for m in data.get("models", [])]
+            _ollama_available = len(_ollama_models) > 0
+        else:
+            _ollama_available = False
     except Exception:
         _ollama_available = False
 
@@ -223,7 +222,6 @@ async def _classify_with_best_available(query: str) -> Complexity:
         return heuristic_result
 
     try:
-        import httpx
 
         ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
         # Pick smallest available model for classification (fastest)
@@ -246,27 +244,28 @@ async def _classify_with_best_available(query: str) -> Complexity:
             f"Query: {query[:500]}"
         )
 
-        async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.post(
-                f"{ollama_url}/api/chat",
-                json={
-                    "model": classifier_model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "stream": False,
-                    "options": {"temperature": 0.0, "num_predict": 10},
-                },
-            )
-            resp.raise_for_status()
-            content = resp.json().get("message", {}).get("content", "").strip().lower()
+        from utils.internal_llm import _get_ollama_client
+        client = _get_ollama_client()
+        resp = await client.post(
+            f"{ollama_url}/api/chat",
+            json={
+                "model": classifier_model,
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": False,
+                "options": {"temperature": 0.0, "num_predict": 10},
+            },
+        )
+        resp.raise_for_status()
+        content = resp.json().get("message", {}).get("content", "").strip().lower()
 
-            # Parse LLM response
-            for level in Complexity:
-                if level.value in content:
-                    logger.debug(
-                        "Ollama classified '%s...' as %s (heuristic was %s)",
-                        query[:40], level.value, heuristic_result.value,
-                    )
-                    return level
+        # Parse LLM response
+        for level in Complexity:
+            if level.value in content:
+                logger.debug(
+                    "Ollama classified '%s...' as %s (heuristic was %s)",
+                    query[:40], level.value, heuristic_result.value,
+                )
+                return level
 
     except Exception as e:
         logger.debug("Ollama classification failed (%s), using heuristic", e)

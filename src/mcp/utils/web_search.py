@@ -29,6 +29,19 @@ from utils.llm_client import call_llm
 
 _logger = logging.getLogger("ai-companion.web_search")
 
+# Shared connection pool for external search API calls
+_search_client: httpx.AsyncClient | None = None
+
+
+def _get_search_client() -> httpx.AsyncClient:
+    global _search_client
+    if _search_client is None or _search_client.is_closed:
+        _search_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(15.0, connect=5.0),
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+        )
+    return _search_client
+
 # ---------------------------------------------------------------------------
 # Configuration (read from env, no settings.py modifications needed)
 # ---------------------------------------------------------------------------
@@ -118,19 +131,19 @@ class TavilyProvider(WebSearchProvider):
         breaker = get_breaker("tavily")
 
         async def _call() -> list[WebSearchResult]:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.post(
-                    "https://api.tavily.com/search",
-                    json={
-                        "api_key": self._api_key,
-                        "query": query,
-                        "max_results": min(max_results, 10),
-                        "search_depth": "advanced",
-                        "include_answer": False,
-                    },
-                )
-                resp.raise_for_status()
-                data = resp.json()
+            client = _get_search_client()
+            resp = await client.post(
+                "https://api.tavily.com/search",
+                json={
+                    "api_key": self._api_key,
+                    "query": query,
+                    "max_results": min(max_results, 10),
+                    "search_depth": "advanced",
+                    "include_answer": False,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
 
             results: list[WebSearchResult] = []
             for item in data.get("results", []):
@@ -173,17 +186,17 @@ class SearxngProvider(WebSearchProvider):
         breaker = get_breaker("searxng")
 
         async def _call() -> list[WebSearchResult]:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.get(
-                    f"{self._base_url}/search",
-                    params={
-                        "q": query,
-                        "format": "json",
-                        "pageno": 1,
-                    },
-                )
-                resp.raise_for_status()
-                data = resp.json()
+            client = _get_search_client()
+            resp = await client.get(
+                f"{self._base_url}/search",
+                params={
+                    "q": query,
+                    "format": "json",
+                    "pageno": 1,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
 
             results: list[WebSearchResult] = []
             for i, item in enumerate(data.get("results", [])[:max_results]):

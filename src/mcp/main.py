@@ -292,6 +292,11 @@ async def lifespan(app: FastAPI):
         await close_chat_client()
     except Exception:
         pass
+    try:
+        from utils.internal_llm import close_ollama_client
+        await close_ollama_client()
+    except Exception:
+        pass
     # Close trading proxy connection pool
     if CERID_TRADING_ENABLED:
         try:

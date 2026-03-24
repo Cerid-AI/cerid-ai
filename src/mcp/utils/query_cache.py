@@ -23,14 +23,14 @@ CACHE_PREFIX = "qcache:"
 DEFAULT_TTL = 300  # 5 minutes
 
 
-def _cache_key(query: str, domain: str, top_k: int) -> str:
-    raw = f"{query}|{domain}|{top_k}"
+def _cache_key(query: str, domain: str, top_k: int, context_hint: str = "") -> str:
+    raw = f"{query}|{domain}|{top_k}|{context_hint}"
     return CACHE_PREFIX + hashlib.sha256(raw.encode()).hexdigest()[:32]
 
 
-def get_cached(query: str, domain: str, top_k: int) -> dict[str, Any] | None:
+def get_cached(query: str, domain: str, top_k: int, context_hint: str = "") -> dict[str, Any] | None:
     try:
-        key = _cache_key(query, domain, top_k)
+        key = _cache_key(query, domain, top_k, context_hint)
         raw = get_redis().get(key)
         if raw:
             logger.debug(f"Cache hit: {key[:20]}")
@@ -41,10 +41,11 @@ def get_cached(query: str, domain: str, top_k: int) -> dict[str, Any] | None:
 
 
 def set_cached(
-    query: str, domain: str, top_k: int, result: dict[str, Any], ttl: int = DEFAULT_TTL
+    query: str, domain: str, top_k: int, result: dict[str, Any], ttl: int = DEFAULT_TTL,
+    context_hint: str = "",
 ) -> None:
     try:
-        key = _cache_key(query, domain, top_k)
+        key = _cache_key(query, domain, top_k, context_hint)
         get_redis().setex(key, ttl, json.dumps(result, default=str))
     except Exception as e:
         logger.warning(f"Cache write failed: {e}")

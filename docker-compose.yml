@@ -112,6 +112,7 @@ services:
 
   bifrost:
     container_name: bifrost
+    profiles: ["bifrost"]
     image: maximhq/bifrost:latest@sha256:0fa2596eb2d05cf2f58b6d7b31076b0cc153f2c60972e83eb1f634bccd0372df
     depends_on:
       neo4j:
@@ -189,10 +190,9 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      # Bifrost dependency is optional — remove this block if running without Bifrost
-      # (i.e. when CERID_USE_BIFROST is unset or false).
-      bifrost:
-        condition: service_healthy
+      # Bifrost is optional — start with: docker compose --profile bifrost up
+      # When the bifrost profile is active, mcp-server will wait for it via
+      # the CERID_USE_BIFROST env var check in main.py, not via depends_on.
     networks:
       - llm-network
     restart: unless-stopped
