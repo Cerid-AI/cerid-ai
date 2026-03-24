@@ -428,6 +428,10 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
         const localStart = Math.max(0, span.start - tn.start)
         const localEnd = Math.min(tn.node.textContent?.length ?? 0, span.end - tn.start)
 
+        // Skip empty or whitespace-only text nodes
+        const sliceText = tn.node.textContent?.slice(localStart, localEnd) ?? ""
+        if (!sliceText.trim()) continue
+
         try {
           const range = document.createRange()
           range.setStart(tn.node, localStart)
