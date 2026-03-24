@@ -159,8 +159,8 @@
 /* --- Claim highlight variables (light mode: strong & visible, dark mode: softer) --- */
 :root {
   --claim-verified-border: rgba(22, 163, 74, 0.65);
-  --claim-refuted-bg: rgba(220, 38, 38, 0.18);
-  --claim-refuted-border: rgba(185, 28, 28, 0.75);
+  --claim-refuted-bg: rgba(220, 38, 38, 0.25);
+  --claim-refuted-border: rgba(185, 28, 28, 0.85);
   --claim-unverified-bg: rgba(161, 98, 7, 0.12);
   --claim-unverified-border: rgba(161, 98, 7, 0.6);
   --claim-evasion-bg: rgba(194, 65, 12, 0.12);

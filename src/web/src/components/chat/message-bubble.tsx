@@ -418,7 +418,10 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
         offset += len
       }
 
-      // Find the text node containing this span
+      // Mark ALL text nodes that overlap with this span (handles cross-node ranges
+      // e.g., when bold/parenthetical elements split the text across nodes)
+      const styleObj = MARKUP_STYLES[span.displayStatus] ?? MARKUP_STYLES.uncertain
+      let lastMark: HTMLElement | null = null
       for (const tn of textNodes) {
         if (tn.end <= span.start || tn.start >= span.end) continue
 
@@ -431,9 +434,6 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
           range.setEnd(tn.node, localEnd)
 
           const mark = document.createElement("mark")
-          // Use inline styles to bypass prose mark specificity.
-          // Text keeps default cursor — only the footnote [N] is clickable.
-          const styleObj = MARKUP_STYLES[span.displayStatus] ?? MARKUP_STYLES.uncertain
           Object.assign(mark.style, styleObj, {
             cursor: "default",
             borderRadius: "2px",
@@ -443,18 +443,19 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
           mark.dataset.claimIndex = String(i)
           range.surroundContents(mark)
           createdEls.push(mark)
-
-          // Add footnote superscript after mark
-          const sup = document.createElement("sup")
-          sup.className = "ml-0.5 cursor-pointer text-[10px] font-semibold text-brand hover:text-brand/80"
-          sup.textContent = `[${i + 1}]`
-          sup.dataset.ceridFootnote = String(i)
-          mark.parentNode?.insertBefore(sup, mark.nextSibling)
-          createdEls.push(sup)
+          lastMark = mark
         } catch {
           // surroundContents can fail if range crosses element boundaries
         }
-        break // Only mark in the first matching text node per span
+      }
+      // Add footnote superscript after the LAST marked segment
+      if (lastMark) {
+        const sup = document.createElement("sup")
+        sup.className = "ml-0.5 cursor-pointer text-[10px] font-semibold text-brand hover:text-brand/80"
+        sup.textContent = `[${i + 1}]`
+        sup.dataset.ceridFootnote = String(i)
+        lastMark.parentNode?.insertBefore(sup, lastMark.nextSibling)
+        createdEls.push(sup)
       }
     }
 
