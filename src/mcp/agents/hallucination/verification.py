@@ -863,11 +863,9 @@ async def _verify_claim_externally(
                 if generating_model else ""
             )
 
-            _json_response_fmt = (
-                "Respond with ONLY a JSON object: "
-                "{\"verdict\": \"supported\"|\"refuted\"|\"insufficient_info\", "
-                "\"confidence\": 0.0-1.0, \"reasoning\": \"...\"}"
-            )
+            # JSON format is already specified in the system prompt —
+            # appending it again to user prompts wastes ~30 tokens per call.
+            _json_response_fmt = ""
 
             # Prepend topic context when available so ambiguous claims
             # like "It is 330 meters tall" can be resolved.
@@ -1083,19 +1081,13 @@ def _kb_source_fields(top_result: dict[str, Any] | None) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 _SYSTEM_BATCH_VERIFICATION = (
-    "You are a fact-checking engine. You receive multiple claims to verify. "
-    "For EACH claim, determine if it is factually accurate. "
-    "Respond with a JSON array of objects, one per claim, in the same order. "
-    "Each object must have: "
-    '{"claim_index": <0-based>, "verdict": "verified"|"refuted"|"uncertain", '
-    '"confidence": <0.0-1.0>, "reason": "<brief explanation>"}'
+    "You are a fact-checking engine. Verify each claim for factual accuracy. "
+    "Respond with ONLY a JSON array, one object per claim in order. "
+    "Each: {\"claim_index\": N, \"verdict\": \"supported\"|\"refuted\"|\"insufficient_info\", "
+    "\"confidence\": 0.0-1.0, \"reasoning\": \"brief explanation\"}"
 )
 
-_BATCH_JSON_FMT = (
-    "\n\nRespond with ONLY a JSON array. Example:\n"
-    '[{"claim_index": 0, "verdict": "verified", "confidence": 0.95, "reason": "Confirmed by official data"}, '
-    '{"claim_index": 1, "verdict": "refuted", "confidence": 0.8, "reason": "Current price is different"}]'
-)
+_BATCH_JSON_FMT = ""  # Schema is in the system prompt — no need to repeat
 
 
 async def verify_claims_batch_external(
@@ -1148,7 +1140,7 @@ async def verify_claims_batch_external(
             messages,
             model=model,
             temperature=0.1,
-            max_tokens=200 * len(claims),  # ~200 tokens per claim verdict
+            max_tokens=min(100 * len(claims), 800),  # ~100 tokens per verdict
             timeout=timeout,
             breaker_name="bifrost-verify",
         )
@@ -1181,18 +1173,13 @@ async def verify_claims_batch_external(
             if not isinstance(batch_idx, int) or batch_idx < 0 or batch_idx >= len(claims):
                 continue
             original_idx = claims[batch_idx][0]
-            verdict_str = str(item.get("verdict", "uncertain")).lower()
-
-            # Map verdict string to status
-            if verdict_str in ("verified", "true", "correct", "accurate"):
-                status = "verified"
-            elif verdict_str in ("refuted", "false", "incorrect", "inaccurate"):
-                status = "unverified"
-            else:
-                status = "uncertain"
-
-            confidence = float(item.get("confidence", 0.5))
-            reason = str(item.get("reason", ""))[:200]
+            # Reuse the same parsing logic as single-claim verification
+            verdict_obj = _parse_verification_verdict(
+                json.dumps(item) if isinstance(item, dict) else str(item)
+            )
+            status = verdict_obj.get("status", "uncertain")
+            confidence = verdict_obj.get("similarity", 0.5)
+            reason = verdict_obj.get("reason", "")[:200]
 
             results[original_idx] = {
                 "claim": claims[batch_idx][1],

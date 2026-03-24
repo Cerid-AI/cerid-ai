@@ -89,27 +89,15 @@ def _reclassify_recency(claim_text: str, claim_type: str) -> str:
 # ---------------------------------------------------------------------------
 
 _SYSTEM_CLAIM_EXTRACTION = (
-    "You are a factual claim extraction engine for a verification system. "
-    "Your job is to identify every verifiable factual statement in the text. "
-    "A verifiable claim is any statement that could be checked against "
-    "external sources — including dates, numbers, statistics, named entities, "
-    "causal relationships, comparisons, attributions, and technical specifications. "
-    "CRITICAL: Resolve ALL pronouns and anaphora in each extracted claim. "
-    "Replace 'it', 'they', 'this', 'that', 'the building', etc. with the "
-    "specific entity from context. Example: if the text is about the Eiffel "
-    "Tower and says 'It is 330 meters tall', extract 'The Eiffel Tower is "
-    "330 meters tall', NOT 'It is 330 meters tall'. Each claim must be "
-    "independently verifiable WITHOUT needing surrounding context. "
-    "Do NOT extract opinions, greetings, questions, code examples, or conversational pleasantries "
-    "(e.g., 'feel free to ask', 'hope this helps', 'let me know if you need more', 'happy to assist'). "
-    "DO extract statements about knowledge cutoffs, data availability, and "
-    "admissions of lacking information — these are verifiable claims about "
-    "the model's capabilities and the existence of underlying data. "
-    "Return ONLY a JSON array of objects, each with:\n"
-    '  {"claim": "<the factual statement>", "type": "<category>"}\n'
-    "Valid types: date, statistic, attribution, comparison, technical, "
-    "definition, causal, general.\n"
-    "If the text contains no verifiable claims, return []."
+    "You are a factual claim extraction engine. Extract verifiable statements "
+    "(dates, numbers, statistics, names, attributions, comparisons, specs). "
+    "CRITICAL: Resolve ALL pronouns — replace 'it'/'they'/'this' with the "
+    "specific entity. Each claim must be self-contained and independently verifiable. "
+    "Exclude opinions, greetings, questions, and code. "
+    "Include knowledge-cutoff admissions and data-availability claims. "
+    'Return ONLY JSON: [{"claim": "...", "type": "..."}]. '
+    "Types: date, statistic, attribution, comparison, technical, general. "
+    "Empty text → []."
 )
 
 
@@ -379,27 +367,13 @@ async def _extract_claims_llm(
     )
     user_prompt = (
         f"Extract up to {max_claims} verifiable factual claims from the text below.\n"
-        "Include: dates, statistics, comparisons (X is faster/better than Y), "
-        "causal statements (because, due to, leads to), attributions "
-        "(according to, created by), technical specs, and definitions.\n"
-        "Exclude: opinions, greetings, questions, and code blocks.\n"
-        "Include knowledge-cutoff admissions and data-availability claims "
-        "(e.g., 'As of my last update...', 'I don't have access to...').\n"
-        "For list items that contain facts, extract the factual part as a standalone claim.\n"
-        "IMPORTANT: Replace ALL pronouns (it, they, this, that, these, the X) "
-        "with the specific entity they refer to. Each claim must be self-contained.\n"
-        f"{query_context}\n"
-        "Examples:\n"
-        'Context: user asked "Tell me about the Eiffel Tower"\n'
-        'Input: "It was completed in 1889. It is 330 meters tall."\n'
+        f"{query_context}"
+        "Example (pronoun resolution):\n"
+        'User asked: "Tell me about the Eiffel Tower"\n'
+        'Text: "It was completed in 1889. It is 330 meters tall."\n'
         'Output: [{"claim": "The Eiffel Tower was completed in 1889", "type": "general"}, '
         '{"claim": "The Eiffel Tower is 330 meters tall", "type": "statistic"}]\n\n'
-        'Input: "Paris is the capital of France. I hope this helps!"\n'
-        'Output: [{"claim": "Paris is the capital of France", "type": "general"}]\n\n'
-        'Input: "I don\'t have access to that information, but generally speaking, '
-        'water boils at 100\u00b0C at sea level."\n'
-        'Output: [{"claim": "Water boils at 100\u00b0C at sea level", "type": "technical"}]\n\n'
-        f"Text:\n{response_text[:5000]}\n\n"
+        f"Text:\n{response_text[:3000]}\n\n"
         "JSON array:"
     )
 
@@ -425,7 +399,7 @@ async def _extract_claims_llm(
     # Try internal LLM first (Ollama if available, else routes to OpenRouter)
     try:
         content = await call_internal_llm(
-            messages, temperature=0.1, max_tokens=1200,
+            messages, temperature=0.1, max_tokens=800,
             response_format={"type": "json_object"},
         )
         raw = parse_llm_json(content)
@@ -451,7 +425,7 @@ async def _extract_claims_llm(
                 breaker_name="bifrost-claims",
                 model=model,
                 temperature=0.1,
-                max_tokens=1200,
+                max_tokens=800,
                 response_format={"type": "json_object"},
             )
             raw = parse_llm_json(content)

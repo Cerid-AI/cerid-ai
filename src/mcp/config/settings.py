@@ -201,12 +201,12 @@ EXTERNAL_VERIFY_MODEL = os.getenv("EXTERNAL_VERIFY_MODEL", "openrouter/openai/gp
 EXTERNAL_VERIFY_KB_THRESHOLD = float(os.getenv("EXTERNAL_VERIFY_KB_THRESHOLD", "0.5"))
 EXTERNAL_VERIFY_MAX_TOKENS = 250
 EXTERNAL_VERIFY_TEMPERATURE = 0.0
-EXTERNAL_VERIFY_MAX_CONCURRENT = int(os.getenv("EXTERNAL_VERIFY_MAX_CONCURRENT", "5"))
+EXTERNAL_VERIFY_MAX_CONCURRENT = int(os.getenv("EXTERNAL_VERIFY_MAX_CONCURRENT", "8"))
 # Max concurrent claim verifications (KB search + reranking + external LLM).
 # Each verification loads BM25 indices and runs ONNX cross-encoder inference,
 # which is memory-intensive.  With 10+ claims, unbounded parallelism can OOM
 # a 2 GB container.  Default 5 keeps peak memory manageable on most setups.
-VERIFY_CLAIM_MAX_CONCURRENT = int(os.getenv("VERIFY_CLAIM_MAX_CONCURRENT", "5"))
+VERIFY_CLAIM_MAX_CONCURRENT = int(os.getenv("VERIFY_CLAIM_MAX_CONCURRENT", "8"))
 # Minimum available container memory (MB) before allowing a new claim verification.
 # Uses cgroup v2 files — no-op when running outside a memory-limited container.
 VERIFY_MEMORY_FLOOR_MB = int(os.getenv("VERIFY_MEMORY_FLOOR_MB", "512"))

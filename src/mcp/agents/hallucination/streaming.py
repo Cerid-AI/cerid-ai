@@ -314,8 +314,13 @@ async def verify_response_streaming(
         }
         return
 
-    # Build topic context for claim verification (prevents ambiguous claims)
-    response_context = await _extract_response_context(response_text, user_query)
+    # Build topic context for claim verification (prevents ambiguous claims).
+    # When user_query is provided, the heuristic is fast and sufficient —
+    # skip the LLM call to save 500ms–2s off the critical path.
+    if user_query:
+        response_context = _heuristic_response_context(response_text, user_query)
+    else:
+        response_context = await _extract_response_context(response_text, user_query)
 
     # Classify each claim's type for frontend display
     def _claim_type(claim_text: str) -> str:
@@ -386,30 +391,41 @@ async def verify_response_streaming(
             else:
                 current_event_claims.append((idx, claim_text))
 
+    # Track which indices are batch candidates — they'll be resolved by
+    # the batch task running concurrently with individual verification.
+    batch_candidate_indices: set[int] = {idx for idx, _ in current_event_claims}
+    batch_task: asyncio.Task | None = None
+
     if current_event_claims and len(current_event_claims) >= 2:
-        # Batch verify — use current-event model with :online suffix
         batch_model = config.VERIFICATION_CURRENT_EVENT_MODEL
         if expert_mode:
             batch_model = config.VERIFICATION_EXPERT_MODEL + ":online"
-        try:
-            batch_timeout = config.STREAMING_EXPERT_CLAIM_TIMEOUT
-            batch_verdicts = await asyncio.wait_for(
-                verify_claims_batch_external(
-                    current_event_claims,
-                    model=batch_model,
-                    response_context=response_context,
-                    timeout=batch_timeout,
-                ),
-                timeout=batch_timeout + 5,
-            )
-            batch_results.update(batch_verdicts)
-            logger.info(
-                "Batch verified %d/%d current-event claims via %s",
-                len(batch_verdicts), len(current_event_claims), batch_model,
-            )
-        except (TimeoutError, Exception) as exc:
-            logger.warning("Batch verification failed (%s), falling back to individual", exc)
-            # Claims not in batch_results will be verified individually below
+
+        async def _run_batch() -> None:
+            """Run batch verification concurrently with individual claims."""
+            try:
+                batch_timeout = config.STREAMING_EXPERT_CLAIM_TIMEOUT
+                batch_verdicts = await asyncio.wait_for(
+                    verify_claims_batch_external(
+                        current_event_claims,
+                        model=batch_model,
+                        response_context=response_context,
+                        timeout=batch_timeout,
+                    ),
+                    timeout=batch_timeout + 5,
+                )
+                batch_results.update(batch_verdicts)
+                # Pre-fill collected_results so individual tasks can skip
+                for bidx, bresult in batch_verdicts.items():
+                    collected_results[bidx] = bresult
+                logger.info(
+                    "Batch verified %d/%d current-event claims via %s",
+                    len(batch_verdicts), len(current_event_claims), batch_model,
+                )
+            except (TimeoutError, Exception) as exc:
+                logger.warning("Batch verification failed (%s), falling back to individual", exc)
+
+        batch_task = asyncio.create_task(_run_batch())
 
     # --- Parallel verification via asyncio.as_completed ---
     verified_count = 0
@@ -418,18 +434,25 @@ async def verify_response_streaming(
     skipped_count = 0
     assessed_confidence = 0.0  # Only accumulate for verified/unverified
     assessed_count = 0
+    # NOTE: collected_results is shared with the concurrent batch_task
     collected_results: list[dict[str, Any] | None] = [None] * len(claims)
     stream_interrupted = False
     credit_exhausted = False
     credit_error_emitted = False
 
-    # Pre-fill collected_results with batch results
+    # Pre-fill collected_results with cached batch results (non-async, immediate)
     for idx, result in batch_results.items():
         collected_results[idx] = result
 
     async def _verify_indexed(idx: int, claim_text: str) -> tuple[int, dict[str, Any]]:
         """Verify a single claim with a per-claim timeout and concurrency limit."""
-        # Skip if already resolved by batch verification
+        # For batch candidates, wait briefly for the concurrent batch task
+        if idx in batch_candidate_indices and batch_task is not None:
+            try:
+                await asyncio.wait_for(asyncio.shield(batch_task), timeout=3.0)
+            except (TimeoutError, Exception):
+                pass  # batch not done yet or failed — proceed individually
+        # Skip if already resolved by batch verification or cache
         if collected_results[idx] is not None:
             return idx, collected_results[idx]  # type: ignore[return-value]
 
