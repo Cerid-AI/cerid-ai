@@ -98,9 +98,9 @@ bm25s==0.3.2.post1 \
     --hash=sha256:66470f49fb9e8208e3d01d400d237ed09ecad9a03d7721f82cf520e3b2e29aee \
     --hash=sha256:ccb4d0a85168c2b1bdc86e513ea10a7ff14b638d33a173fe5c8ba14dd5d0fb78
     # via -r requirements.txt
-build==1.4.0 \
-    --hash=sha256:6a07c1b8eb6f2b311b96fcbdbce5dab5fe637ffda0fd83c9cac622e927501596 \
-    --hash=sha256:f1b91b925aa322be454f8330c6fb48b465da993d1e7e7e6fa35027ec49f3c936
+build==1.4.1 \
+    --hash=sha256:21c81f7a0fa423f0da229335c5c2a605967fbfc9af3c4b6ecd368265ed59c6bc \
+    --hash=sha256:30adeb28821e573a49b556030d8c84186d112f6a38b12fa5476092c4544ae55a
     # via chromadb
 certifi==2026.2.25 \
     --hash=sha256:027692e4402ad994f1c42e52a4997a9763c646b73e4096e4d5d6db8af1d6f0fa \
