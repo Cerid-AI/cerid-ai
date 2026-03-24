@@ -275,7 +275,7 @@ export function KBContextPanel({
             </Tooltip>
           </TooltipProvider>
           <div className="flex flex-col items-end gap-0.5">
-            <span className="flex items-center gap-1 text-[11px] text-muted-foreground/60">
+            <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
               <Upload className="h-3 w-3" />
               Drop files to ingest
             </span>

@@ -218,7 +218,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
             {result.summary}
           </p>
         ) : isBrowseMode ? (
-          <p className="mt-2 text-xs italic text-muted-foreground/60">
+          <p className="mt-2 text-xs italic text-muted-foreground">
             No summary available
           </p>
         ) : null}

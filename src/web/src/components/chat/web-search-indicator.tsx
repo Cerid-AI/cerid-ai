@@ -52,7 +52,7 @@ export function WebSearchIndicator({ active, query, sourceUrls }: WebSearchIndic
           {active ? "Searching the web\u2026" : "Web search complete"}
         </span>
         {query && (
-          <span className="ml-1 truncate text-[11px] text-muted-foreground/60 italic max-w-[200px]">
+          <span className="ml-1 truncate text-[11px] text-muted-foreground italic max-w-[200px]">
             {query}
           </span>
         )}

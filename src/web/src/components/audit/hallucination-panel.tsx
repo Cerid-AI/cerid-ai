@@ -81,7 +81,7 @@ function ClaimBadge({
     <div
       data-claim-index={index}
       className={cn(
-        "rounded-lg border px-3 py-2.5 transition-all cursor-pointer",
+        "rounded-lg border bg-card px-3 py-2.5 transition-all cursor-pointer shadow-sm",
         focused && "ring-2 ring-brand bg-brand/5",
       )}
       onClick={() => {
@@ -116,7 +116,7 @@ function ClaimBadge({
       <div className="min-w-0 w-full">
         {/* Re-verifying banner */}
         {retrying && (
-          <div className="mb-2 flex items-center gap-2 rounded-md border border-purple-500/30 bg-purple-500/5 px-2.5 py-2 text-xs text-purple-400">
+          <div className="mb-2 flex items-center gap-2 rounded-md border border-purple-200 bg-purple-50 px-2.5 py-2 text-xs text-purple-700 dark:border-purple-500/30 dark:bg-purple-500/5 dark:text-purple-400">
             <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
             <span>Re-verifying with expert analysis (Grok 4)...</span>
           </div>
@@ -524,8 +524,8 @@ export function HallucinationPanel({
             className={cn(
               "rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors border",
               hiddenCategories.has("verified")
-                ? "bg-muted/30 text-muted-foreground/50 border-border/50 line-through"
-                : "bg-green-500/10 text-green-400 border-green-500/30",
+                ? "bg-muted/30 text-muted-foreground border-border/50 line-through"
+                : "bg-green-50 text-green-700 border-green-200 dark:bg-green-500/10 dark:text-green-400 dark:border-green-500/30",
             )}
           >
             {verified} verified
@@ -537,8 +537,8 @@ export function HallucinationPanel({
             className={cn(
               "rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors border",
               hiddenCategories.has("refuted")
-                ? "bg-muted/30 text-muted-foreground/50 border-border/50 line-through"
-                : "bg-red-500/10 text-red-400 border-red-500/30",
+                ? "bg-muted/30 text-muted-foreground border-border/50 line-through"
+                : "bg-red-50 text-red-700 border-red-200 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/30",
             )}
           >
             {refutedCount} refuted
@@ -550,8 +550,8 @@ export function HallucinationPanel({
             className={cn(
               "rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors border",
               hiddenCategories.has("evasion")
-                ? "bg-muted/30 text-muted-foreground/50 border-border/50 line-through"
-                : "bg-orange-500/10 text-orange-400 border-orange-500/30",
+                ? "bg-muted/30 text-muted-foreground border-border/50 line-through"
+                : "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-500/10 dark:text-orange-400 dark:border-orange-500/30",
             )}
           >
             {evasionCount} evaded
@@ -563,8 +563,8 @@ export function HallucinationPanel({
             className={cn(
               "rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors border",
               hiddenCategories.has("unverified")
-                ? "bg-muted/30 text-muted-foreground/50 border-border/50 line-through"
-                : "bg-yellow-500/10 text-yellow-400 border-yellow-500/30",
+                ? "bg-muted/30 text-muted-foreground border-border/50 line-through"
+                : "bg-amber-50 text-amber-700 border-amber-200 dark:bg-yellow-500/10 dark:text-yellow-400 dark:border-yellow-500/30",
             )}
           >
             {softUnverifiedCount} unverified
@@ -576,7 +576,7 @@ export function HallucinationPanel({
             className={cn(
               "rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors border",
               hiddenCategories.has("other")
-                ? "bg-muted/30 text-muted-foreground/50 border-border/50 line-through"
+                ? "bg-muted/30 text-muted-foreground border-border/50 line-through"
                 : "bg-muted/50 text-muted-foreground border-border",
             )}
           >

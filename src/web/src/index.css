@@ -56,24 +56,24 @@
     --radius: 0.625rem;
     --brand: oklch(0.52 0.14 185);
     --brand-foreground: oklch(0.985 0 0);
-    /* Warm parchment palette — visible contrast between surface layers */
+    /* Warm parchment palette — WCAG AA compliant contrast ratios */
     --background: oklch(0.935 0.012 75);
     --foreground: oklch(0.18 0.01 60);
-    --card: oklch(0.955 0.008 75);
+    --card: oklch(0.96 0.006 75);
     --card-foreground: oklch(0.18 0.01 60);
-    --popover: oklch(0.96 0.006 75);
+    --popover: oklch(0.965 0.005 75);
     --popover-foreground: oklch(0.18 0.01 60);
     --primary: oklch(0.25 0.015 60);
     --primary-foreground: oklch(0.96 0.006 75);
-    /* Warm sand secondary/muted tones — more separation */
+    /* Warm sand secondary/muted — darkened muted-fg for contrast */
     --secondary: oklch(0.90 0.015 75);
     --secondary-foreground: oklch(0.25 0.015 60);
     --muted: oklch(0.895 0.015 75);
-    --muted-foreground: oklch(0.45 0.012 60);
+    --muted-foreground: oklch(0.38 0.012 60);
     --accent: oklch(0.90 0.022 185);
     --accent-foreground: oklch(0.22 0.015 60);
-    --destructive: oklch(0.577 0.245 27.325);
-    /* Warm borders — more visible */
+    --destructive: oklch(0.50 0.22 27);
+    /* Warm borders — visible */
     --border: oklch(0.82 0.016 75);
     --input: oklch(0.84 0.014 75);
     --ring: oklch(0.52 0.10 185);

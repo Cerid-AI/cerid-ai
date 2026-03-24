@@ -12,7 +12,7 @@ export function KBContextIndicator({ sources }: { sources?: SourceRef[] }) {
     <TooltipProvider delayDuration={300}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground/60 select-none cursor-default">
+          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground select-none cursor-default">
             <Shield className="h-3 w-3" />
             <span>KB context sent to LLM &middot; {sources.length} {sources.length === 1 ? "source" : "sources"}</span>
           </span>

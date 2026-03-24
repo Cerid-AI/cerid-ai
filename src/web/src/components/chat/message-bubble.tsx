@@ -446,7 +446,7 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
 
           // Add footnote superscript after mark
           const sup = document.createElement("sup")
-          sup.className = "ml-0.5 cursor-pointer text-[10px] font-medium text-primary/60 hover:text-primary"
+          sup.className = "ml-0.5 cursor-pointer text-[10px] font-semibold text-brand hover:text-brand/80"
           sup.textContent = `[${i + 1}]`
           sup.dataset.ceridFootnote = String(i)
           mark.parentNode?.insertBefore(sup, mark.nextSibling)

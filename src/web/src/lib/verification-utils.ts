@@ -195,14 +195,18 @@ export function getClaimDisplayStatus(
   return "uncertain"
 }
 
-/** Shared display-status → color classes map used across claim UI components. */
+/** Shared display-status → color classes map used across claim UI components.
+ * Uses light/dark-adaptive Tailwind colors for WCAG AA compliance:
+ * - Light mode: -700 text on -50 bg (contrast ratio ~7:1)
+ * - Dark mode: -400 text on -500/20 bg (contrast ratio ~5:1)
+ */
 export const DISPLAY_STATUS_COLORS: Record<ClaimDisplayStatus | "error", string> = {
-  verified: "bg-green-500/20 text-green-400 border-green-500/30",
-  refuted: "bg-red-500/20 text-red-400 border-red-500/30",
-  unverified: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
-  evasion: "bg-orange-500/20 text-orange-400 border-orange-500/30",
-  citation: "bg-purple-500/20 text-purple-400 border-purple-500/30",
-  skipped: "bg-muted/50 text-muted-foreground/60 border-border/50",
+  verified: "bg-green-50 text-green-700 border-green-200 dark:bg-green-500/20 dark:text-green-400 dark:border-green-500/30",
+  refuted: "bg-red-50 text-red-700 border-red-200 dark:bg-red-500/20 dark:text-red-400 dark:border-red-500/30",
+  unverified: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-yellow-500/20 dark:text-yellow-400 dark:border-yellow-500/30",
+  evasion: "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-500/20 dark:text-orange-400 dark:border-orange-500/30",
+  citation: "bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-500/20 dark:text-purple-400 dark:border-purple-500/30",
+  skipped: "bg-muted/50 text-muted-foreground border-border/50",
   uncertain: "bg-muted/50 text-muted-foreground border-border",
   pending: "bg-muted text-muted-foreground border-border",
   error: "bg-muted text-muted-foreground",
@@ -219,11 +223,11 @@ export function verificationMethodLabel(method?: string): string | null {
   return method
 }
 
-/** Verification method → badge color classes. */
+/** Verification method → badge color classes (light/dark adaptive). */
 export function verificationMethodColor(method?: string): string {
-  if (method === "cross_model") return "bg-purple-500/15 text-purple-400 border-purple-500/30"
-  if (method === "web_search") return "bg-blue-500/15 text-blue-400 border-blue-500/30"
-  if (method === "kb") return "bg-cyan-500/15 text-cyan-400 border-cyan-500/30"
+  if (method === "cross_model") return "bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-500/15 dark:text-purple-400 dark:border-purple-500/30"
+  if (method === "web_search") return "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-500/15 dark:text-blue-400 dark:border-blue-500/30"
+  if (method === "kb") return "bg-cyan-50 text-cyan-700 border-cyan-200 dark:bg-cyan-500/15 dark:text-cyan-400 dark:border-cyan-500/30"
   return "bg-muted text-muted-foreground border-border"
 }
 

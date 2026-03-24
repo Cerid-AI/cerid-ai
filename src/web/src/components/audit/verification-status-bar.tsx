@@ -67,7 +67,7 @@ function claimStatusColor(displayStatus: ClaimDisplayStatus): string {
     case "evasion": return "text-orange-400"
     case "citation": return "text-purple-400"
     case "unverified": return "text-yellow-400"
-    case "skipped": return "text-muted-foreground/60"
+    case "skipped": return "text-muted-foreground"
     case "uncertain": return "text-muted-foreground"
     default: return "text-muted-foreground"
   }
@@ -108,7 +108,7 @@ export function VerificationStatusBar({
           <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" />
           <span className="flex-1 text-xs text-muted-foreground">
             Verifying {verifiedCount}/{totalClaims} claims
-            {extractionMethod && <span className="ml-1 text-muted-foreground/60">({extractionMethod})</span>}
+            {extractionMethod && <span className="ml-1 text-muted-foreground">({extractionMethod})</span>}
           </span>
           <span className="flex items-center gap-1 text-yellow-400 transition-colors">
             <span className="text-[11px] font-medium">{expanded ? "Less" : "More"}</span>
@@ -197,7 +197,7 @@ export function VerificationStatusBar({
           {sessionClaimsChecked > 0 && (
             <>
               <div className="h-3 w-px shrink-0 bg-border" />
-              <span className="text-xs text-muted-foreground/60">
+              <span className="text-xs text-muted-foreground">
                 Session: {sessionClaimsChecked} facts
               </span>
             </>
@@ -232,7 +232,7 @@ export function VerificationStatusBar({
           {sessionClaimsChecked > 0 && (
             <>
               <div className="h-3 w-px shrink-0 bg-border" />
-              <span className="text-xs text-muted-foreground/60">
+              <span className="text-xs text-muted-foreground">
                 Session: {sessionClaimsChecked} facts &bull; ~${sessionEstCost.toFixed(4)}
               </span>
             </>
@@ -326,7 +326,7 @@ export function VerificationStatusBar({
         )}
         {uncertain > 0 && (
           <Tooltip><TooltipTrigger asChild>
-            <span className="text-muted-foreground/60">{uncertain} uncertain</span>
+            <span className="text-muted-foreground">{uncertain} uncertain</span>
           </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Checked but inconclusive — insufficient evidence to confirm or deny</p></TooltipContent></Tooltip>
         )}
 
@@ -362,7 +362,7 @@ export function VerificationStatusBar({
         {report.extraction_method && (
           <>
             <div className="h-3 w-px shrink-0 bg-border" />
-            <span className="text-muted-foreground/60">via {report.extraction_method}</span>
+            <span className="text-muted-foreground">via {report.extraction_method}</span>
           </>
         )}
 
@@ -371,7 +371,7 @@ export function VerificationStatusBar({
           <>
             <div className="h-3 w-px shrink-0 bg-border" />
             <Tooltip><TooltipTrigger asChild>
-            <span className="text-muted-foreground/60">
+            <span className="text-muted-foreground">
               Session: {sessionClaimsChecked} facts &bull; ~${sessionEstCost.toFixed(4)}
             </span>
             </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Total claims checked this session and estimated LLM verification cost</p></TooltipContent></Tooltip>
@@ -439,16 +439,16 @@ export function VerificationStatusBar({
                         {c.source_filename}
                       </button>
                     ) : c.source_filename ? (
-                      <span className="shrink-0 text-muted-foreground/60">{c.source_filename}</span>
+                      <span className="shrink-0 text-muted-foreground">{c.source_filename}</span>
                     ) : null}
                     {c.similarity > 0 && (
-                      <span className="shrink-0 tabular-nums text-muted-foreground/60">
+                      <span className="shrink-0 tabular-nums text-muted-foreground">
                         {Math.round(c.similarity * 100)}%
                       </span>
                     )}
                   </div>
                   {c.source_snippet && (
-                    <p className="ml-[18px] line-clamp-2 leading-tight text-muted-foreground/60 italic">
+                    <p className="ml-[18px] line-clamp-2 leading-tight text-muted-foreground italic">
                       &ldquo;{c.source_snippet.slice(0, 150)}&rdquo;
                     </p>
                   )}

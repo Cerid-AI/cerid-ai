@@ -649,7 +649,7 @@ export function KnowledgePane() {
                   <AlertCircle className="h-2.5 w-2.5 shrink-0 text-destructive" />
                 )}
                 <span className="min-w-0 truncate text-muted-foreground">{entry.name}</span>
-                <span className="ml-auto shrink-0 text-muted-foreground/60">
+                <span className="ml-auto shrink-0 text-muted-foreground">
                   {new Date(entry.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                 </span>
               </div>

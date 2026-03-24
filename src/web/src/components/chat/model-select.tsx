@@ -42,7 +42,7 @@ export function ModelSelect({ value, onChange }: ModelSelectProps) {
                   {top}
                 </span>
               )}
-              <span className="ml-1.5 shrink-0 text-[10px] text-muted-foreground/60">
+              <span className="ml-1.5 shrink-0 text-[10px] text-muted-foreground">
                 ~{formatCost(cost)}
               </span>
             </SelectItem>

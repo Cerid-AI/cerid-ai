@@ -258,7 +258,7 @@ export function ClaimOverlay({ container, claims, claimSpans, onClaimFocus, onAr
             <>
               <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
                 {displayModelName(claim.verification_model) && (
-                  <span className="text-muted-foreground/60">{displayModelName(claim.verification_model)}</span>
+                  <span className="text-muted-foreground">{displayModelName(claim.verification_model)}</span>
                 )}
                 {claim.similarity > 0 && (
                   <span className="tabular-nums">{Math.round(claim.similarity * 100)}% confidence</span>
