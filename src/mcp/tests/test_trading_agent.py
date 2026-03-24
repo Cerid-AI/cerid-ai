@@ -86,3 +86,50 @@ class TestLongshotSurfaceQuery:
         result = await longshot_surface_query(asset="ETH", date_range="7d", neo4j=mock_neo4j)
         assert "calibration_points" in result
         assert isinstance(result["calibration_points"], list)
+
+    @pytest.mark.asyncio
+    async def test_wildcard_asset_omits_filter(self) -> None:
+        """asset='*' must query all CalibrationPoints, not match the literal string '*'."""
+        from agents.trading_agent import longshot_surface_query
+
+        call_args: list[tuple] = []
+
+        def fake_query(driver: object, cypher: str, **params: object) -> list[dict]:
+            call_args.append((cypher, params))
+            return [{"market_id": "m1", "implied_prob": 0.10, "actual_outcome": 0.12, "timestamp": None}]
+
+        import agents.trading_agent as _ta
+        original = _ta._neo4j_query
+        _ta._neo4j_query = fake_query  # type: ignore[assignment]
+        try:
+            result = await longshot_surface_query(asset="*", date_range="30d", neo4j=object())
+        finally:
+            _ta._neo4j_query = original
+
+        assert result["count"] == 1
+        # The Cypher must NOT contain the asset equality filter
+        cypher_used = call_args[0][0]
+        assert "{asset: $asset}" not in cypher_used
+        assert "asset" not in call_args[0][1]  # no $asset param passed
+
+    @pytest.mark.asyncio
+    async def test_all_alias_also_omits_filter(self) -> None:
+        """asset='all' is an alias for wildcard and should behave identically to '*'."""
+        from agents.trading_agent import longshot_surface_query
+
+        call_args: list[tuple] = []
+
+        def fake_query(driver: object, cypher: str, **params: object) -> list[dict]:
+            call_args.append((cypher, params))
+            return []
+
+        import agents.trading_agent as _ta
+        original = _ta._neo4j_query
+        _ta._neo4j_query = fake_query  # type: ignore[assignment]
+        try:
+            await longshot_surface_query(asset="all", date_range="30d", neo4j=object())
+        finally:
+            _ta._neo4j_query = original
+
+        cypher_used = call_args[0][0]
+        assert "{asset: $asset}" not in cypher_used

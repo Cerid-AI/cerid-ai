@@ -211,23 +211,39 @@ async def cascade_confirm(
 async def longshot_surface_query(
     asset: str, date_range: str, neo4j: Any,
 ) -> dict[str, Any]:
-    """Query stored calibration surface from Neo4j."""
+    """Query stored calibration surface from Neo4j.
+
+    Pass asset="*" or asset="all" to return calibration points for all assets.
+    """
     duration_map = {
         "7d": "P7D", "14d": "P14D", "30d": "P30D", "90d": "P90D",
     }
     duration = duration_map.get(date_range, "P30D")
     try:
-        records = _neo4j_query(
-            neo4j,
-            "MATCH (c:CalibrationPoint {asset: $asset}) "
-            "WHERE c.timestamp > datetime() - duration($duration) "
-            "RETURN c.market_id AS market_id, "
-            "c.implied_prob AS implied_prob, "
-            "c.actual_outcome AS actual_outcome, "
-            "c.timestamp AS timestamp "
-            "ORDER BY c.timestamp DESC LIMIT 500",
-            asset=asset, duration=duration,
-        )
+        if asset in ("*", "all"):
+            records = _neo4j_query(
+                neo4j,
+                "MATCH (c:CalibrationPoint) "
+                "WHERE c.timestamp > datetime() - duration($duration) "
+                "RETURN c.market_id AS market_id, "
+                "c.implied_prob AS implied_prob, "
+                "c.actual_outcome AS actual_outcome, "
+                "c.timestamp AS timestamp "
+                "ORDER BY c.timestamp DESC LIMIT 500",
+                duration=duration,
+            )
+        else:
+            records = _neo4j_query(
+                neo4j,
+                "MATCH (c:CalibrationPoint {asset: $asset}) "
+                "WHERE c.timestamp > datetime() - duration($duration) "
+                "RETURN c.market_id AS market_id, "
+                "c.implied_prob AS implied_prob, "
+                "c.actual_outcome AS actual_outcome, "
+                "c.timestamp AS timestamp "
+                "ORDER BY c.timestamp DESC LIMIT 500",
+                asset=asset, duration=duration,
+            )
         return {
             "calibration_points": records,
             "count": len(records),
