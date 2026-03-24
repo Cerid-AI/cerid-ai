@@ -48,49 +48,49 @@
 }
 
 /* ================================================================
-   Light Mode — Cool Slate palette
+   Light Mode — Cool Slate palette (high contrast)
    Background: cool gray-blue undertones (hue 240 = slate)
    Accents: teal brand (hue 185) — distinct from Claude/Anthropic warm beige
-   Card/surface hierarchy uses 4%+ lightness steps for clear separation
+   Surface hierarchy: bg 91% → card 97% → popover 98% (6%+ gap)
    ================================================================ */
 :root {
     --radius: 0.625rem;
-    --brand: oklch(0.52 0.14 185);
+    --brand: oklch(0.46 0.14 185);
     --brand-foreground: oklch(0.985 0 0);
-    /* Cool slate palette — WCAG AA compliant contrast ratios */
-    --background: oklch(0.955 0.005 240);
-    --foreground: oklch(0.16 0.015 240);
-    --card: oklch(0.99 0.002 240);
-    --card-foreground: oklch(0.16 0.015 240);
-    --popover: oklch(0.99 0.002 240);
-    --popover-foreground: oklch(0.16 0.015 240);
-    --primary: oklch(0.22 0.02 240);
-    --primary-foreground: oklch(0.97 0.003 240);
-    /* Cool slate secondary/muted — high-contrast muted-fg */
-    --secondary: oklch(0.92 0.006 240);
-    --secondary-foreground: oklch(0.22 0.02 240);
-    --muted: oklch(0.915 0.006 240);
-    --muted-foreground: oklch(0.36 0.015 240);
-    --accent: oklch(0.92 0.025 185);
-    --accent-foreground: oklch(0.18 0.02 240);
-    --destructive: oklch(0.50 0.22 27);
-    /* Cool borders — clearly visible against slate bg */
-    --border: oklch(0.85 0.008 240);
-    --input: oklch(0.87 0.006 240);
-    --ring: oklch(0.52 0.10 185);
+    /* Cool slate palette — WCAG AAA-targeted contrast */
+    --background: oklch(0.91 0.008 240);
+    --foreground: oklch(0.13 0.02 240);
+    --card: oklch(0.97 0.004 240);
+    --card-foreground: oklch(0.13 0.02 240);
+    --popover: oklch(0.98 0.003 240);
+    --popover-foreground: oklch(0.13 0.02 240);
+    --primary: oklch(0.20 0.025 240);
+    --primary-foreground: oklch(0.97 0.004 240);
+    /* Cool slate secondary/muted — darkened muted-fg for dashboard readability */
+    --secondary: oklch(0.87 0.008 240);
+    --secondary-foreground: oklch(0.20 0.025 240);
+    --muted: oklch(0.86 0.008 240);
+    --muted-foreground: oklch(0.30 0.02 240);
+    --accent: oklch(0.88 0.03 185);
+    --accent-foreground: oklch(0.15 0.025 240);
+    --destructive: oklch(0.45 0.24 27);
+    /* Strong cool borders — clearly visible */
+    --border: oklch(0.78 0.012 240);
+    --input: oklch(0.80 0.010 240);
+    --ring: oklch(0.46 0.12 185);
     --chart-1: oklch(0.646 0.222 41.116);
     --chart-2: oklch(0.6 0.118 184.704);
     --chart-3: oklch(0.398 0.07 227.392);
     --chart-4: oklch(0.828 0.189 84.429);
     --chart-5: oklch(0.769 0.188 70.08);
-    /* Sidebar with cool teal wash — clearly separated from main bg */
-    --sidebar: oklch(0.94 0.015 200);
-    --sidebar-foreground: oklch(0.16 0.015 240);
-    --sidebar-primary: oklch(0.22 0.02 240);
-    --sidebar-primary-foreground: oklch(0.97 0.003 240);
-    --sidebar-accent: oklch(0.90 0.025 185);
-    --sidebar-accent-foreground: oklch(0.18 0.02 240);
-    --sidebar-border: oklch(0.85 0.010 210);
+    /* Sidebar — darker slate with teal tint for clear separation */
+    --sidebar: oklch(0.89 0.018 200);
+    --sidebar-foreground: oklch(0.13 0.02 240);
+    --sidebar-primary: oklch(0.20 0.025 240);
+    --sidebar-primary-foreground: oklch(0.97 0.004 240);
+    --sidebar-accent: oklch(0.85 0.03 185);
+    --sidebar-accent-foreground: oklch(0.15 0.025 240);
+    --sidebar-border: oklch(0.78 0.015 210);
     --sidebar-ring: oklch(0.708 0 0);
 }
 
