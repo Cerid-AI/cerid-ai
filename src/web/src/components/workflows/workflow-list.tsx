@@ -53,7 +53,7 @@ function RunStatusBadge({ status }: { status: string }) {
     },
     failed: {
       label: "Failed",
-      className: "bg-red-500/15 text-red-400 border-red-500/30",
+      className: "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30",
       icon: <XCircle className="h-3 w-3" />,
     },
     running: {
@@ -147,8 +147,8 @@ export default function WorkflowList({ onEdit, onCreate, onDuplicate }: Workflow
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center h-48 gap-3">
-        <AlertCircle className="h-6 w-6 text-red-400" />
-        <p className="text-sm text-red-400">{error}</p>
+        <AlertCircle className="h-6 w-6 text-red-700 dark:text-red-400" />
+        <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
         <Button variant="outline" size="sm" onClick={load}>
           <RefreshCw className="h-3.5 w-3.5 mr-1" /> Retry
         </Button>
@@ -229,7 +229,7 @@ export default function WorkflowList({ onEdit, onCreate, onDuplicate }: Workflow
                         {deleting === wf.id ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-400" />
                         ) : (
-                          <Trash2 className="h-3.5 w-3.5 text-zinc-400 hover:text-red-400" />
+                          <Trash2 className="h-3.5 w-3.5 text-zinc-400 hover:text-red-700 dark:text-red-400" />
                         )}
                       </Button>
                     </div>

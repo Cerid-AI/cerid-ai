@@ -348,7 +348,7 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
 
       {/* Error banner */}
       {error && (
-        <div className="px-3 py-2 bg-red-500/10 border-b border-red-500/30 text-red-400 text-sm">
+        <div className="px-3 py-2 bg-red-500/10 border-b border-red-500/30 text-red-700 dark:text-red-400 text-sm">
           {error}
           <button className="ml-2 underline text-xs" onClick={() => setError(null)}>dismiss</button>
         </div>
@@ -391,7 +391,7 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
               <Badge variant={runResult.status === "completed" ? "default" : "destructive"} className="text-[10px]">
                 {runResult.status}
               </Badge>
-              {runResult.error && <span className="text-red-400 ml-2">{runResult.error}</span>}
+              {runResult.error && <span className="text-red-700 dark:text-red-400 ml-2">{runResult.error}</span>}
             </div>
           )}
         </div>
@@ -456,7 +456,7 @@ export default function WorkflowEditor({ workflow, onSave, onBack }: WorkflowEdi
                       </span>
                       <button
                         aria-label="Remove connection"
-                        className="text-red-500/60 hover:text-red-400"
+                        className="text-red-500/60 hover:text-red-700 dark:text-red-400"
                         onClick={() =>
                           setEdges((prev) =>
                             prev.filter((edge) => !(edge.source_id === e.source_id && edge.target_id === e.target_id)),

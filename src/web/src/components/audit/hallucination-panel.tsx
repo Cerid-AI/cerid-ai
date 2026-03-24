@@ -28,7 +28,7 @@ function claimHostname(url: string): string {
 }
 
 const REFUTED_SUB_LABELS: Record<string, { label: string; color: string }> = {
-  factual: { label: "factual error", color: "text-red-400 border-red-500/30" },
+  factual: { label: "factual error", color: "text-red-700 dark:text-red-400 border-red-500/30" },
   outdated: { label: "outdated data", color: "text-amber-400 border-amber-500/30" },
   numeric: { label: "numeric mismatch", color: "text-rose-400 border-rose-500/30" },
 }
@@ -95,7 +95,7 @@ function ClaimBadge({
           {index + 1}
         </span>
         {expertVerified ? (
-          <Badge variant="outline" className="border-purple-500/40 bg-purple-500/10 text-purple-400 text-[10px] px-1.5 py-0.5">
+          <Badge variant="outline" className="border-purple-500/40 bg-purple-500/10 text-purple-600 dark:text-purple-400 text-[10px] px-1.5 py-0.5">
             <span className="flex items-center gap-0.5"><Sparkles className="h-2.5 w-2.5" />expert · {displayStatus}</span>
           </Badge>
         ) : (
@@ -169,7 +169,7 @@ function ClaimBadge({
                       href={url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-[11px] text-blue-500 hover:text-blue-400 truncate"
+                      className="inline-flex items-center gap-1 text-[11px] text-blue-500 hover:text-blue-700 dark:text-blue-400 truncate"
                     >
                       <ExternalLink className="h-2.5 w-2.5 shrink-0" />
                       {claimHostname(url)}
@@ -181,7 +181,7 @@ function ClaimBadge({
                   href={`https://www.google.com/search?q=${encodeURIComponent(claim.claim)}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-[11px] text-blue-500 hover:text-blue-400"
+                  className="inline-flex items-center gap-1 text-[11px] text-blue-500 hover:text-blue-700 dark:text-blue-400"
                 >
                   <Search className="h-2.5 w-2.5" />
                   Search for references
@@ -196,7 +196,7 @@ function ClaimBadge({
             <Button
               variant="ghost"
               size="sm"
-              className="h-6 px-2 text-[11px] text-muted-foreground hover:text-purple-400 hover:bg-purple-500/10 gap-1"
+              className="h-6 px-2 text-[11px] text-muted-foreground hover:text-purple-600 dark:text-purple-400 hover:bg-purple-500/10 gap-1"
               onClick={(e) => { e.stopPropagation(); onRetry() }}
               aria-label="Re-verify this claim with expert analysis"
               title="Re-verify with Grok 4 expert mode"
@@ -282,7 +282,7 @@ function StreamingClaimBadge({ claim }: { claim: StreamingClaim }) {
               href={claim.source_urls![0]}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-blue-400 hover:text-blue-300"
+              className="text-blue-700 dark:text-blue-400 hover:text-blue-300"
               title="View source"
             >
               <ExternalLink className="h-3 w-3" />

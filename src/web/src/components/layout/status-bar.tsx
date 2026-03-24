@@ -88,7 +88,7 @@ export function StatusBar() {
                   <TooltipContent side="top" className="space-y-1">
                     <p className="font-medium">{info?.tech ?? name}</p>
                     {info && <p className="text-muted-foreground">{info.purpose}</p>}
-                    <p className={cn(connected ? "text-green-400" : "text-red-400")}>
+                    <p className={cn(connected ? "text-green-700 dark:text-green-400" : "text-red-700 dark:text-red-400")}>
                       Status: {connected ? "Connected \u2713" : "Disconnected \u2717"}
                     </p>
                     <p className="text-muted-foreground">Last checked: {lastChecked}</p>

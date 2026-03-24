@@ -83,12 +83,12 @@ export function AccuracyDashboard({ verification }: AccuracyDashboardProps) {
                   </div>
                   <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground">
                     <span>{stats.checks} checks</span>
-                    <span className="text-green-400">{stats.verified} verified</span>
+                    <span className="text-green-700 dark:text-green-400">{stats.verified} verified</span>
                     {stats.uncertain > 0 && (
                       <span className="text-amber-600 dark:text-yellow-400">{stats.uncertain} uncertain</span>
                     )}
                     {stats.unverified > 0 && (
-                      <span className="text-red-400">{stats.unverified} unverified</span>
+                      <span className="text-red-700 dark:text-red-400">{stats.unverified} unverified</span>
                     )}
                   </div>
                 </div>

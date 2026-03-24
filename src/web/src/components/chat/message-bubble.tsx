@@ -323,13 +323,13 @@ function VerificationBadge({ status, onClick }: { status: MessageVerificationSta
       className={cn(
         "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium transition-colors",
         hasExpertClaims
-          ? "bg-purple-500/10 text-purple-400 hover:bg-purple-500/20"
+          ? "bg-purple-500/10 text-purple-600 dark:text-purple-400 hover:bg-purple-500/20"
           : creditExhausted
             ? "bg-yellow-500/10 text-amber-600 dark:text-yellow-400 hover:bg-yellow-500/20"
             : hasIssues
-              ? "bg-red-500/10 text-red-400 hover:bg-red-500/20"
+              ? "bg-red-500/10 text-red-700 dark:text-red-400 hover:bg-red-500/20"
               : accuracy >= 80
-                ? "bg-green-500/10 text-green-400 hover:bg-green-500/20"
+                ? "bg-green-500/10 text-green-700 dark:text-green-400 hover:bg-green-500/20"
                 : "bg-yellow-500/10 text-amber-600 dark:text-yellow-400 hover:bg-yellow-500/20",
       )}
     >

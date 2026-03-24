@@ -22,7 +22,7 @@ export const SessionDetail: FC<SessionDetailProps> = ({
       }`}>{status}</span>
     </div>
     <div className="grid grid-cols-3 gap-2 text-sm">
-      <div><span className="text-zinc-400">PnL:</span> <span className={pnl >= 0 ? 'text-green-400' : 'text-red-400'}>${pnl.toFixed(2)}</span></div>
+      <div><span className="text-zinc-400">PnL:</span> <span className={pnl >= 0 ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}>${pnl.toFixed(2)}</span></div>
       <div><span className="text-zinc-400">Positions:</span> {positions}</div>
       <div><span className="text-zinc-400">Signals:</span> {signals}</div>
     </div>

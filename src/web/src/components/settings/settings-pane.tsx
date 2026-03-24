@@ -1026,7 +1026,7 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
           {isLoading ? (
             <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
           ) : ollamaStatus?.reachable ? (
-            <Badge variant="default" className="text-[10px] bg-green-500/20 text-green-400 border-green-500/30">
+            <Badge variant="default" className="text-[10px] bg-green-500/20 text-green-700 dark:text-green-400 border-green-500/30">
               Connected ({ollamaStatus.models.length} model{ollamaStatus.models.length !== 1 ? "s" : ""})
             </Badge>
           ) : ollamaStatus?.enabled ? (

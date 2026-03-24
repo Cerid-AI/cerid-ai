@@ -131,23 +131,23 @@ export function VerificationStatusBar({
                         <span className="shrink-0 rounded bg-orange-500/15 px-1 text-[10px] text-orange-600 dark:text-orange-400">evasion</span>
                       )}
                       {c.claim_type === "citation" && (
-                        <span className="shrink-0 rounded bg-purple-500/15 px-1 text-[10px] text-purple-400">citation</span>
+                        <span className="shrink-0 rounded bg-purple-500/15 px-1 text-[10px] text-purple-600 dark:text-purple-400">citation</span>
                       )}
                       {c.verification_method === "cross_model" && (
-                        <span className="shrink-0 rounded bg-purple-500/15 px-1 text-[10px] text-purple-400">cross-model</span>
+                        <span className="shrink-0 rounded bg-purple-500/15 px-1 text-[10px] text-purple-600 dark:text-purple-400">cross-model</span>
                       )}
                       {c.verification_method === "web_search" && (
-                        <span className="shrink-0 rounded bg-blue-500/15 px-1 text-[10px] text-blue-400">web search</span>
+                        <span className="shrink-0 rounded bg-blue-500/15 px-1 text-[10px] text-blue-700 dark:text-blue-400">web search</span>
                       )}
                       {c.verification_method === "kb" && (
-                        <span className="shrink-0 rounded bg-cyan-500/15 px-1 text-[10px] text-cyan-400">kb</span>
+                        <span className="shrink-0 rounded bg-cyan-500/15 px-1 text-[10px] text-cyan-700 dark:text-cyan-400">kb</span>
                       )}
                       {(c.source_urls?.length ?? 0) > 0 && (
                         <a
                           href={c.source_urls![0]}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="shrink-0 text-blue-400 hover:text-blue-300"
+                          className="shrink-0 text-blue-700 dark:text-blue-400 hover:text-blue-300"
                           title={c.source_urls![0]}
                         >
                           <ExternalLink className="h-3 w-3" />
@@ -403,13 +403,13 @@ export function VerificationStatusBar({
                       {stripMarkdown(c.claim)}
                     </span>
                     {c.verification_method === "cross_model" && (
-                      <span className="shrink-0 rounded bg-purple-500/15 px-1 text-[10px] text-purple-400">cross-model</span>
+                      <span className="shrink-0 rounded bg-purple-500/15 px-1 text-[10px] text-purple-600 dark:text-purple-400">cross-model</span>
                     )}
                     {c.verification_method === "web_search" && (
-                      <span className="shrink-0 rounded bg-blue-500/15 px-1 text-[10px] text-blue-400">web search</span>
+                      <span className="shrink-0 rounded bg-blue-500/15 px-1 text-[10px] text-blue-700 dark:text-blue-400">web search</span>
                     )}
                     {c.verification_method === "kb" && (
-                      <span className="shrink-0 rounded bg-cyan-500/15 px-1 text-[10px] text-cyan-400">kb</span>
+                      <span className="shrink-0 rounded bg-cyan-500/15 px-1 text-[10px] text-cyan-700 dark:text-cyan-400">kb</span>
                     )}
                     {(c.source_urls?.length ?? 0) > 0 && c.source_urls!.slice(0, 2).map((url, ui) => {
                       let domain: string
@@ -420,7 +420,7 @@ export function VerificationStatusBar({
                           href={url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-flex shrink-0 items-center gap-0.5 rounded bg-blue-500/15 px-1 text-[10px] text-blue-400 hover:text-blue-300"
+                          className="inline-flex shrink-0 items-center gap-0.5 rounded bg-blue-500/15 px-1 text-[10px] text-blue-700 dark:text-blue-400 hover:text-blue-300"
                           title={url}
                         >
                           <ExternalLink className="h-2.5 w-2.5" />

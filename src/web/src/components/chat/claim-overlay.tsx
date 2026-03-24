@@ -275,7 +275,7 @@ export function ClaimOverlay({ container, claims, claimSpans, onClaimFocus, onAr
           {/* Ignorance claim: show found answer */}
           {claim.claim_type === "ignorance" && claim.status === "unverified" && claim.verification_answer && (
             <div className="mt-2 rounded bg-green-500/10 px-2 py-1.5">
-              <span className="text-[10px] font-medium text-green-400">Found answer: </span>
+              <span className="text-[10px] font-medium text-green-700 dark:text-green-400">Found answer: </span>
               <span className="text-[11px] leading-tight text-green-300/80">
                 {claim.verification_answer.slice(0, 300)}
               </span>
@@ -293,7 +293,7 @@ export function ClaimOverlay({ container, claims, claimSpans, onClaimFocus, onAr
                     href={url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-[11px] text-blue-500 hover:text-blue-400 truncate"
+                    className="inline-flex items-center gap-1 text-[11px] text-blue-500 hover:text-blue-700 dark:text-blue-400 truncate"
                   >
                     <ExternalLink className="h-2.5 w-2.5 shrink-0" />
                     {hostname(url)}
@@ -305,7 +305,7 @@ export function ClaimOverlay({ container, claims, claimSpans, onClaimFocus, onAr
                 href={`https://www.google.com/search?q=${encodeURIComponent(claim.claim)}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-[11px] text-blue-500 hover:text-blue-400"
+                className="inline-flex items-center gap-1 text-[11px] text-blue-500 hover:text-blue-700 dark:text-blue-400"
               >
                 <Search className="h-2.5 w-2.5" />
                 Search for references
