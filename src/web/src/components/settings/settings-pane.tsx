@@ -1030,7 +1030,7 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
               Connected ({ollamaStatus.models.length} model{ollamaStatus.models.length !== 1 ? "s" : ""})
             </Badge>
           ) : ollamaStatus?.enabled ? (
-            <Badge variant="outline" className="text-[10px] text-yellow-400 border-yellow-500/30">
+            <Badge variant="outline" className="text-[10px] text-amber-600 dark:text-yellow-400 border-yellow-500/30">
               Enabled but unreachable
             </Badge>
           ) : (

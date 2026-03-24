@@ -40,15 +40,15 @@ interface VerificationStatusBarProps {
 function ClaimStatusIcon({ displayStatus }: { displayStatus: ClaimDisplayStatus }) {
   switch (displayStatus) {
     case "verified":
-      return <CheckCircle2 className="h-3 w-3 shrink-0 text-green-400" />
+      return <CheckCircle2 className="h-3 w-3 shrink-0 text-green-700 dark:text-green-400" />
     case "refuted":
-      return <XOctagon className="h-3 w-3 shrink-0 text-red-400" />
+      return <XOctagon className="h-3 w-3 shrink-0 text-red-700 dark:text-red-400" />
     case "evasion":
-      return <AlertTriangle className="h-3 w-3 shrink-0 text-orange-400" />
+      return <AlertTriangle className="h-3 w-3 shrink-0 text-orange-600 dark:text-orange-400" />
     case "citation":
-      return <Circle className="h-3 w-3 shrink-0 text-purple-400" />
+      return <Circle className="h-3 w-3 shrink-0 text-purple-600 dark:text-purple-400" />
     case "unverified":
-      return <AlertTriangle className="h-3 w-3 shrink-0 text-yellow-400" />
+      return <AlertTriangle className="h-3 w-3 shrink-0 text-amber-600 dark:text-yellow-400" />
     case "skipped":
       return <Circle className="h-3 w-3 shrink-0 text-muted-foreground/50" />
     case "pending":
@@ -62,11 +62,11 @@ function ClaimStatusIcon({ displayStatus }: { displayStatus: ClaimDisplayStatus 
 /** Color class for a claim display status */
 function claimStatusColor(displayStatus: ClaimDisplayStatus): string {
   switch (displayStatus) {
-    case "verified": return "text-green-400"
-    case "refuted": return "text-red-400"
-    case "evasion": return "text-orange-400"
-    case "citation": return "text-purple-400"
-    case "unverified": return "text-yellow-400"
+    case "verified": return "text-green-700 dark:text-green-400"
+    case "refuted": return "text-red-700 dark:text-red-400"
+    case "evasion": return "text-orange-600 dark:text-orange-400"
+    case "citation": return "text-purple-600 dark:text-purple-400"
+    case "unverified": return "text-amber-600 dark:text-yellow-400"
     case "skipped": return "text-muted-foreground"
     case "uncertain": return "text-muted-foreground"
     default: return "text-muted-foreground"
@@ -110,7 +110,7 @@ export function VerificationStatusBar({
             Verifying {verifiedCount}/{totalClaims} claims
             {extractionMethod && <span className="ml-1 text-muted-foreground">({extractionMethod})</span>}
           </span>
-          <span className="flex items-center gap-1 text-yellow-400 transition-colors">
+          <span className="flex items-center gap-1 text-amber-600 dark:text-yellow-400 transition-colors">
             <span className="text-[11px] font-medium">{expanded ? "Less" : "More"}</span>
             {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
           </span>
@@ -128,7 +128,7 @@ export function VerificationStatusBar({
                         {stripMarkdown(c.claim)}
                       </span>
                       {c.claim_type === "evasion" && (
-                        <span className="shrink-0 rounded bg-orange-500/15 px-1 text-[10px] text-orange-400">evasion</span>
+                        <span className="shrink-0 rounded bg-orange-500/15 px-1 text-[10px] text-orange-600 dark:text-orange-400">evasion</span>
                       )}
                       {c.claim_type === "citation" && (
                         <span className="shrink-0 rounded bg-purple-500/15 px-1 text-[10px] text-purple-400">citation</span>
@@ -159,7 +159,7 @@ export function VerificationStatusBar({
                     </div>
                     {c.claim_type === "ignorance" && c.status === "unverified" && c.verification_answer && (
                       <div className="ml-[18px] rounded bg-green-500/10 px-2 py-1">
-                        <span className="text-[10px] font-medium text-green-400">Found answer: </span>
+                        <span className="text-[10px] font-medium text-green-700 dark:text-green-400">Found answer: </span>
                         <span className="text-[10px] leading-tight text-green-300/80">{stripMarkdown(c.verification_answer.slice(0, 300))}</span>
                       </div>
                     )}
@@ -262,7 +262,7 @@ export function VerificationStatusBar({
 
   // Shield color — refuted claims trigger the warning
   const hasRefuted = refutedCount > 0
-  const shieldColor = hasRefuted ? "text-red-400" : "text-green-400"
+  const shieldColor = hasRefuted ? "text-red-700 dark:text-red-400" : "text-green-700 dark:text-green-400"
   const ShieldIcon = hasRefuted ? ShieldAlert : ShieldCheck
   const hasClaims = report.claims && report.claims.length > 0
 
@@ -271,8 +271,8 @@ export function VerificationStatusBar({
       {/* Credit exhaustion banner */}
       {creditError && (
         <div className="flex items-center gap-2 border-b border-yellow-500/20 bg-yellow-500/10 px-4 py-1.5">
-          <AlertTriangle className="h-3 w-3 shrink-0 text-yellow-400" />
-          <span className="flex-1 text-xs text-yellow-300">
+          <AlertTriangle className="h-3 w-3 shrink-0 text-amber-600 dark:text-yellow-400" />
+          <span className="flex-1 text-xs text-amber-700 dark:text-yellow-300">
             Verification limited &mdash;{" "}
             <a
               href="https://openrouter.ai/settings/credits"
@@ -284,7 +284,7 @@ export function VerificationStatusBar({
             </a>
           </span>
           {skippedCount > 0 && (
-            <span className="text-[10px] text-yellow-400/70">{skippedCount} claim{skippedCount !== 1 ? "s" : ""} skipped</span>
+            <span className="text-[10px] text-amber-600/70 dark:text-yellow-400/70">{skippedCount} claim{skippedCount !== 1 ? "s" : ""} skipped</span>
           )}
         </div>
       )}
@@ -306,22 +306,22 @@ export function VerificationStatusBar({
 
         {verified > 0 && (
           <Tooltip><TooltipTrigger asChild>
-            <span className="text-green-400">{verified} verified</span>
+            <span className="text-green-700 dark:text-green-400">{verified} verified</span>
           </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Claims confirmed by cross-model check or KB evidence</p></TooltipContent></Tooltip>
         )}
         {refutedCount > 0 && (
           <Tooltip><TooltipTrigger asChild>
-            <span className="text-red-400">{refutedCount} refuted</span>
+            <span className="text-red-700 dark:text-red-400">{refutedCount} refuted</span>
           </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Claims actively contradicted by another model or web search</p></TooltipContent></Tooltip>
         )}
         {evasionCount > 0 && (
           <Tooltip><TooltipTrigger asChild>
-            <span className="text-orange-400">{evasionCount} evaded</span>
+            <span className="text-orange-600 dark:text-orange-400">{evasionCount} evaded</span>
           </TooltipTrigger><TooltipContent side="top"><p className="text-xs">Model deflected or avoided answering directly</p></TooltipContent></Tooltip>
         )}
         {softUnverifiedCount > 0 && (
           <Tooltip><TooltipTrigger asChild>
-            <span className="text-yellow-400">{softUnverifiedCount} unverified</span>
+            <span className="text-amber-600 dark:text-yellow-400">{softUnverifiedCount} unverified</span>
           </TooltipTrigger><TooltipContent side="top"><p className="text-xs">No matching evidence found in KB (not necessarily wrong)</p></TooltipContent></Tooltip>
         )}
         {uncertain > 0 && (
@@ -381,7 +381,7 @@ export function VerificationStatusBar({
         {/* Expand toggle */}
         <div className="flex-1" />
         {hasClaims && (
-          <span className="flex items-center gap-1 text-yellow-400 transition-colors">
+          <span className="flex items-center gap-1 text-amber-600 dark:text-yellow-400 transition-colors">
             <span className="text-[11px] font-medium">{expanded ? "Less" : "More"}</span>
             {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
           </span>
@@ -454,7 +454,7 @@ export function VerificationStatusBar({
                   )}
                   {c.claim_type === "ignorance" && c.status === "unverified" && c.verification_answer && (
                     <div className="ml-[18px] mt-0.5 rounded bg-green-500/10 px-2 py-1">
-                      <span className="text-[10px] font-medium text-green-400">Found answer: </span>
+                      <span className="text-[10px] font-medium text-green-700 dark:text-green-400">Found answer: </span>
                       <span className="text-[10px] leading-tight text-green-300/80">{stripMarkdown(c.verification_answer.slice(0, 300))}</span>
                     </div>
                   )}

@@ -136,7 +136,7 @@ export function StatusBar() {
                   <p className="text-muted-foreground">This month: ${credits.usage_monthly.toFixed(2)}</p>
                 )}
                 {credits.warning && (
-                  <p className="font-medium text-yellow-400">{credits.warning}</p>
+                  <p className="font-medium text-amber-600 dark:text-yellow-400">{credits.warning}</p>
                 )}
                 <p className="text-muted-foreground">Click to add credits</p>
               </TooltipContent>

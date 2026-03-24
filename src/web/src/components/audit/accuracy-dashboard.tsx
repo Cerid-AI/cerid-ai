@@ -85,7 +85,7 @@ export function AccuracyDashboard({ verification }: AccuracyDashboardProps) {
                     <span>{stats.checks} checks</span>
                     <span className="text-green-400">{stats.verified} verified</span>
                     {stats.uncertain > 0 && (
-                      <span className="text-yellow-400">{stats.uncertain} uncertain</span>
+                      <span className="text-amber-600 dark:text-yellow-400">{stats.uncertain} uncertain</span>
                     )}
                     {stats.unverified > 0 && (
                       <span className="text-red-400">{stats.unverified} unverified</span>

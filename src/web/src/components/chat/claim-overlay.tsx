@@ -214,7 +214,7 @@ export function ClaimOverlay({ container, claims, claimSpans, onClaimFocus, onAr
 
       {/* Expand/collapse toggle */}
       <button
-        className="mt-1.5 inline-flex items-center gap-0.5 text-[11px] text-yellow-400 hover:text-yellow-300"
+        className="mt-1.5 inline-flex items-center gap-0.5 text-[11px] text-amber-600 dark:text-yellow-400 hover:text-yellow-300"
         onClick={() => setExpanded((prev) => !prev)}
       >
         {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}

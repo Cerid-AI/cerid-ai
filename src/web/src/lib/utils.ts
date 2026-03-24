@@ -73,7 +73,7 @@ export function getAccuracyTier(accuracy: number): {
   barColor: string
 } {
   if (accuracy >= 0.8) return { label: "High", textColor: "text-green-400", barColor: "bg-green-500" }
-  if (accuracy >= 0.5) return { label: "Medium", textColor: "text-yellow-400", barColor: "bg-yellow-500" }
+  if (accuracy >= 0.5) return { label: "Medium", textColor: "text-amber-600 dark:text-yellow-400", barColor: "bg-yellow-500" }
   return { label: "Low", textColor: "text-red-400", barColor: "bg-red-500" }
 }
 

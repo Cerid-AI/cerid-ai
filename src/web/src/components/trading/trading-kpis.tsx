@@ -18,7 +18,7 @@ export const TradingKPIs: FC<TradingKPIsProps> = ({
     {[
       { label: 'Total PnL', value: `$${totalPnl.toFixed(2)}`, color: totalPnl >= 0 ? 'text-green-400' : 'text-red-400' },
       { label: 'Daily PnL', value: `$${dailyPnl.toFixed(2)}`, color: dailyPnl >= 0 ? 'text-green-400' : 'text-red-400' },
-      { label: 'Sharpe (7d)', value: sharpe.toFixed(2), color: sharpe >= 1.5 ? 'text-green-400' : 'text-yellow-400' },
+      { label: 'Sharpe (7d)', value: sharpe.toFixed(2), color: sharpe >= 1.5 ? 'text-green-400' : 'text-amber-600 dark:text-yellow-400' },
       { label: 'Max Drawdown', value: `${maxDrawdown.toFixed(1)}%`, color: maxDrawdown < 5 ? 'text-green-400' : 'text-red-400' },
       { label: 'Active Sessions', value: String(activeSessions), color: 'text-blue-400' },
     ].map(kpi => (

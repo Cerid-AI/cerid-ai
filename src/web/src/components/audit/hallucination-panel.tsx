@@ -126,7 +126,7 @@ function ClaimBadge({
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
           <VerificationMethodBadge method={claim.verification_method} model={claim.verification_model} />
           {claim.similarity > 0 && <span>({Math.round(claim.similarity * 100)}% match)</span>}
-          <span className="inline-flex items-center gap-0.5 text-yellow-400">
+          <span className="inline-flex items-center gap-0.5 text-amber-600 dark:text-yellow-400">
             {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
             {expanded ? "Hide details" : "Show details"}
           </span>
