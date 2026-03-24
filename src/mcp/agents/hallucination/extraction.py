@@ -94,6 +94,12 @@ _SYSTEM_CLAIM_EXTRACTION = (
     "A verifiable claim is any statement that could be checked against "
     "external sources — including dates, numbers, statistics, named entities, "
     "causal relationships, comparisons, attributions, and technical specifications. "
+    "CRITICAL: Resolve ALL pronouns and anaphora in each extracted claim. "
+    "Replace 'it', 'they', 'this', 'that', 'the building', etc. with the "
+    "specific entity from context. Example: if the text is about the Eiffel "
+    "Tower and says 'It is 330 meters tall', extract 'The Eiffel Tower is "
+    "330 meters tall', NOT 'It is 330 meters tall'. Each claim must be "
+    "independently verifiable WITHOUT needing surrounding context. "
     "Do NOT extract opinions, greetings, questions, code examples, or conversational pleasantries "
     "(e.g., 'feel free to ask', 'hope this helps', 'let me know if you need more', 'happy to assist'). "
     "DO extract statements about knowledge cutoffs, data availability, and "
@@ -105,6 +111,70 @@ _SYSTEM_CLAIM_EXTRACTION = (
     "definition, causal, general.\n"
     "If the text contains no verifiable claims, return []."
 )
+
+
+# ---------------------------------------------------------------------------
+# Pronoun resolution for heuristic claims (non-LLM fallback)
+# ---------------------------------------------------------------------------
+
+# Pronouns that commonly refer to the main subject of a response
+_SUBJECT_PRONOUNS = re.compile(
+    r"^(It|They|This|That|These|Those|The (?:building|tower|city|country|"
+    r"company|system|language|framework|tool|project|model|algorithm|"
+    r"protocol|device|product|service|platform|library|database))\b",
+    re.IGNORECASE,
+)
+
+
+def _extract_topic_from_heading(response_text: str, user_query: str | None) -> str | None:
+    """Extract the main topic entity from user query or first heading."""
+    if user_query:
+        # Try to extract the topic noun phrase from the query
+        # "Tell me about the Eiffel Tower" → "the Eiffel Tower"
+        # "What is Python?" → "Python"
+        q = user_query.strip().rstrip("?!.")
+        for prefix in ("tell me about ", "what is ", "what are ", "describe ",
+                        "explain ", "how does ", "who is ", "who was ",
+                        "what was ", "what were "):
+            if q.lower().startswith(prefix):
+                return q[len(prefix):].strip()
+        # Fallback: use the full query as topic hint
+        return q[:80]
+
+    # No user query — try first heading
+    heading_match = re.search(r"^#{1,3}\s+(.+)", response_text, re.MULTILINE)
+    if heading_match:
+        return heading_match.group(1).strip()[:80]
+
+    # Last resort: first significant line
+    for line in response_text.split("\n"):
+        stripped = line.strip().lstrip("#").strip()
+        if len(stripped) > 15 and not stripped.startswith("```"):
+            return stripped[:80]
+    return None
+
+
+def _resolve_pronouns_heuristic(
+    claims: list[str], response_text: str, user_query: str | None,
+) -> list[str]:
+    """Replace leading pronouns in heuristic-extracted claims with the topic entity.
+
+    This is a lightweight non-LLM approach: extract the main topic from the
+    user query or first heading, then substitute pronouns that start a claim.
+    """
+    topic = _extract_topic_from_heading(response_text, user_query)
+    if not topic:
+        return claims
+
+    resolved: list[str] = []
+    for claim in claims:
+        match = _SUBJECT_PRONOUNS.match(claim)
+        if match:
+            pronoun = match.group(1)
+            resolved.append(topic + claim[len(pronoun):])
+        else:
+            resolved.append(claim)
+    return resolved
 
 
 # ---------------------------------------------------------------------------
@@ -298,8 +368,15 @@ def _extract_citation_claims(response_text: str) -> list[str]:
 # LLM-based claim extraction
 # ---------------------------------------------------------------------------
 
-async def _extract_claims_llm(response_text: str, max_claims: int) -> list[str]:
+async def _extract_claims_llm(
+    response_text: str, max_claims: int, user_query: str | None = None,
+) -> list[str]:
     """Extract factual claims using the verification LLM model."""
+    query_context = (
+        f'\nThe user originally asked: "{user_query}"\n'
+        "Use this to resolve pronouns and references in the response.\n"
+        if user_query else ""
+    )
     user_prompt = (
         f"Extract up to {max_claims} verifiable factual claims from the text below.\n"
         "Include: dates, statistics, comparisons (X is faster/better than Y), "
@@ -308,12 +385,17 @@ async def _extract_claims_llm(response_text: str, max_claims: int) -> list[str]:
         "Exclude: opinions, greetings, questions, and code blocks.\n"
         "Include knowledge-cutoff admissions and data-availability claims "
         "(e.g., 'As of my last update...', 'I don't have access to...').\n"
-        "For list items that contain facts, extract the factual part as a standalone claim.\n\n"
+        "For list items that contain facts, extract the factual part as a standalone claim.\n"
+        "IMPORTANT: Replace ALL pronouns (it, they, this, that, these, the X) "
+        "with the specific entity they refer to. Each claim must be self-contained.\n"
+        f"{query_context}\n"
         "Examples:\n"
+        'Context: user asked "Tell me about the Eiffel Tower"\n'
+        'Input: "It was completed in 1889. It is 330 meters tall."\n'
+        'Output: [{"claim": "The Eiffel Tower was completed in 1889", "type": "general"}, '
+        '{"claim": "The Eiffel Tower is 330 meters tall", "type": "statistic"}]\n\n'
         'Input: "Paris is the capital of France. I hope this helps!"\n'
         'Output: [{"claim": "Paris is the capital of France", "type": "general"}]\n\n'
-        'Input: "The temperature is 72\u00b0F. However, I should note that weather data changes frequently."\n'
-        'Output: [{"claim": "The temperature is 72\u00b0F", "type": "statistic"}]\n\n'
         'Input: "I don\'t have access to that information, but generally speaking, '
         'water boils at 100\u00b0C at sea level."\n'
         'Output: [{"claim": "Water boils at 100\u00b0C at sea level", "type": "technical"}]\n\n'
@@ -448,7 +530,7 @@ async def extract_claims(
         return merged[:max_claims]
 
     # Try LLM extraction first
-    llm_claims = await _extract_claims_llm(response_text, max_claims)
+    llm_claims = await _extract_claims_llm(response_text, max_claims, user_query=user_query)
     if llm_claims:
         return _merge_special(llm_claims), "llm"
 
@@ -456,6 +538,10 @@ async def extract_claims(
     logger.info("LLM claim extraction returned empty — falling back to heuristic")
     heuristic_claims = _extract_claims_heuristic(response_text)
     if heuristic_claims:
+        # Heuristic claims may contain unresolved pronouns — resolve them
+        heuristic_claims = _resolve_pronouns_heuristic(
+            heuristic_claims, response_text, user_query,
+        )
         return _merge_special(heuristic_claims), "heuristic"
 
     # Evasion claims alone are high priority — model refused to answer
