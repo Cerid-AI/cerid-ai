@@ -9,6 +9,8 @@
 
 As of Phase A, a single root `docker-compose.yml` replaces the previous 4-step startup sequence. All services (Infrastructure, Bifrost, MCP, React GUI) are defined in one file with `depends_on` healthchecks ensuring correct startup order.
 
+> **Note:** Bifrost is now optional. Use `--profile bifrost` to enable it, controlled by the `CERID_USE_BIFROST` env var. When disabled, chat routes directly to OpenRouter.
+
 ```bash
 # Start everything (preferred)
 docker compose up -d
@@ -49,7 +51,11 @@ OLLAMA_URL=http://localhost:11434
 | `/ollama/models` | GET | List available local models |
 | `/ollama/pull` | POST | Pull a new model from Ollama registry |
 
-Ollama proxy includes a circuit breaker (5 failures → 60s open). When `OLLAMA_ENABLED=false` (default), all endpoints return 404.
+Ollama proxy includes a circuit breaker (5 failures → 60s open). When `OLLAMA_ENABLED=false` (default), all endpoints return 503.
+
+**Internal LLM configuration:**
+- `INTERNAL_LLM_PROVIDER` — `ollama` or `openrouter` (default: `openrouter`)
+- `INTERNAL_LLM_MODEL` — Model ID for pipeline tasks (default: `qwen2.5:1.5b` for Ollama)
 
 ---
 
@@ -62,7 +68,7 @@ maxmemory 1gb
 maxmemory-policy allkeys-lru
 ```
 
-Container memory limit: 4GB (raised from 512MB in Phase 38). Socket timeout: 10s. Authentication via `REDIS_PASSWORD` env var.
+Container memory limit: 2GB (raised from 512MB in Phase 38). Socket timeout: 10s. Authentication via `REDIS_PASSWORD` env var.
 
 ---
 
@@ -281,7 +287,7 @@ Branch protection is configured via **GitHub UI** (not checked into the reposito
 | Job | What It Checks |
 |-----|----------------|
 | `lint` | Ruff Python linting |
-| `test` | 564 pytest tests, 55% coverage minimum |
+| `test` | 1376+ pytest tests, 70% coverage minimum |
 | `security` | Bandit SAST + pip-audit dependency scan |
 | `lock-sync` | Lock file freshness (pip-compile) |
 | `frontend` | TypeScript types + ESLint + vitest + build + bundle size (<800KB) + npm audit |
@@ -424,9 +430,9 @@ All features below are present in the codebase. Some require environment variabl
 | Feature | Env Var | Default | Description |
 |---------|---------|---------|-------------|
 | Self-RAG validation | `ENABLE_SELF_RAG` | `true` | Iterative retrieval refinement for weak claims |
-| Hallucination check | `ENABLE_HALLUCINATION_CHECK` | `false` | Post-response fact verification against KB |
+| Hallucination check | `ENABLE_HALLUCINATION_CHECK` | `true` | Post-response fact verification against KB |
 | Feedback loop | `ENABLE_FEEDBACK_LOOP` | `false` | Save AI responses back to KB |
-| Memory extraction | `ENABLE_MEMORY_EXTRACTION` | `false` | Extract facts/preferences from conversations |
+| Memory extraction | `ENABLE_MEMORY_EXTRACTION` | `true` | Extract facts/preferences from conversations |
 | Contextual chunking | `ENABLE_CONTEXTUAL_CHUNKS` | `false` | LLM-generated situational summaries on chunks |
 | Auto KB inject | `ENABLE_AUTO_INJECT` | `false` | Auto-inject relevant KB context into queries |
 | Model router | `ENABLE_MODEL_ROUTER` | `false` | Smart model selection (recommend/auto modes) |

@@ -19,7 +19,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 - **Multi-Provider LLM Access** via Bifrost gateway (Claude, GPT, Grok, Gemini, DeepSeek, Llama)
 - **9 Intelligent Agents** — Query (LLM reranking), Triage (LangGraph), Rectification, Audit, Maintenance, Hallucination Detection, Memory Extraction, Curation, Self-RAG
 - **Trading Agent Integration** — 5 MCP tools + SDK endpoints for signal enrichment, herd detection, Kelly sizing, cascade confirmation, and longshot calibration (opt-in via `CERID_TRADING_ENABLED`)
-- **26 MCP Tools** for knowledge base, trading, web search, and memory operations via MCP protocol
+- **27 MCP Tools** for knowledge base, trading, web search, memory, and multi-modal operations via MCP protocol
 - **A2A Protocol** — Agent-to-Agent communication for remote agent discovery and task invocation
 - **Plugin System** — Extensible via manifest-based plugins (multi-modal KB, visual workflow builder)
 - **Observability Dashboard** — 8 Redis time-series metrics, health score grading, SVG sparklines
@@ -40,7 +40,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 - **Multi-Machine Sync** via Dropbox — JSONL export/import with auto-import on startup
 - **Source Attribution** — collapsible source references with relevance scores on chat responses
 - **Model Context Breaks** — provider-colored model badges, switch dividers between model changes
-- **GitHub Actions CI/CD** with 1,308 tests (961 pytest + 347 vitest)
+- **GitHub Actions CI/CD** with 1,921+ tests (1376+ pytest + 545+ frontend)
 - **Three-Tier AI Categorization** (manual, smart, pro) via Bifrost
 - **Obsidian Vault Integration** — auto-sync vault notes into knowledge base
 - **Reproducible Builds** — pip-compile lock files with hashes, pinned Docker images, Dependabot
@@ -78,7 +78,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 │          /agent/audit           │    │   Grok, DeepSeek, etc.)  │
 │          /agent/maintain        │    └──────────────────────────┘
 │  SSE:   /mcp/sse /mcp/messages  │
-│  Tools: 18 MCP tools (pkb_*)   │
+│  Tools: 27 MCP tools (pkb_*)   │
 │  Search: Hybrid BM25 + vector   │
 │  Middleware: auth, rate-limit    │
 │  Scheduler: APScheduler         │
@@ -342,7 +342,7 @@ cerid-ai/
 ├── data -> src/mcp/data
 │
 ├── .github/
-│   ├── workflows/ci.yml              # 7-job CI (lint, test, security, lock-sync, frontend, docker, codeql)
+│   ├── workflows/ci.yml              # 9-job CI (lint, typecheck, test, security, lock-sync, frontend, docker, frontend-marketing, frontend-desktop)
 │   └── dependabot.yml                # Weekly grouped PRs (pip, npm, actions, docker)
 │
 ├── docs/
@@ -445,7 +445,7 @@ cerid-ai/
 │   │   ├── rate_limit.py              # Sliding window rate limiter + headers
 │   │   └── request_id.py             # X-Request-ID middleware
 │   │
-│   └── tests/                         # 950 pytest tests (27 test files)
+│   └── tests/                         # 1376+ pytest tests (27+ test files)
 │
 ├── src/web/                           # React GUI (Phase 6+)
 │   ├── .nvmrc                         # Node version source of truth (22)
@@ -461,7 +461,7 @@ cerid-ai/
 │       │                              # use-model-router, use-model-switch,
 │       │                              # use-smart-suggestions, use-live-metrics
 │       ├── contexts/                  # KB injection context provider
-│       ├── __tests__/                 # 347 vitest tests (25 test files)
+│       ├── __tests__/                 # 545+ vitest tests (25+ test files)
 │       └── components/
 │           ├── layout/                # Sidebar, status bar, split-pane
 │           ├── chat/                  # Chat panel, input, bubbles, dashboard,

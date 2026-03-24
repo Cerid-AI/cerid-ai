@@ -17,7 +17,7 @@ Cerid AI is a self-hosted personal AI knowledge companion that exposes a stable 
 - **SDK API:** Stable `/sdk/v1/` endpoints for external consumers with per-client rate limiting, domain access control, and typed Pydantic response models.
 - **A2A Protocol:** Agent-to-Agent communication via `/.well-known/agent.json` agent cards. Task lifecycle (create/status/cancel) with Redis-backed storage. Remote agent discovery and invocation via A2A client.
 - **Plugin System:** Extend functionality via manifest-based plugins (`plugins/` directory). Plugin management API (7 endpoints), tier gating (community/pro), BSL-1.1 licensing.
-- **26 MCP Tools:** 19 core KB tools + 5 trading tools + `pkb_web_search` + `pkb_memory_recall`.
+- **27 MCP Tools:** 19 core + 5 trading + `pkb_web_search` + `pkb_memory_recall` + `pkb_ingest_multimodal`.
 
 New cerid-series agents (e.g., trading, compliance, research) integrate by registering as consumers, defining their KB domain, and calling SDK endpoints. Alternatively, agents can discover and invoke cerid-ai via the A2A protocol.
 
@@ -68,7 +68,7 @@ Add an entry to `CONSUMER_REGISTRY` in `config/settings.py`:
 ```python
 CONSUMER_REGISTRY = {
     "agent-name": {
-        "rate_limit": 80,           # req/min
+        "rate_limits": {"/agent/": (80, 60), "/sdk/": (80, 60)},  # (max_requests, window_seconds)
         "allowed_domains": ["agent_domain", "related_domain"],
         "strict_domains": True,     # disables cross-domain affinity bleed
         "description": "Brief description of the agent",
@@ -77,7 +77,7 @@ CONSUMER_REGISTRY = {
 }
 ```
 
-Also add the client to `CLIENT_RATE_LIMITS` for backward compatibility with per-client rate limiting.
+Rate limits are auto-derived from `CONSUMER_REGISTRY` — no need to separately update `CLIENT_RATE_LIMITS`.
 
 ### Step 4: Agent Module
 
@@ -188,6 +188,8 @@ Update the following files:
 - `CLAUDE.md` — Update tool count, agent count, and add a conventions bullet for the new agent.
 - `docs/DEPENDENCY_COUPLING.md` — Add coupled interfaces table, safe-to-change list, and breaking changes.
 - `docs/ISSUES.md` — Add a phase section documenting what was resolved.
+
+**Second reference implementation:** The cerid-boardroom agent (`Cerid-AI/cerid-boardroom`) follows the same integration pattern with boardroom-specific SDK endpoints under `/sdk/v1/ops/`. See `docs/DEPENDENCY_COUPLING.md` for its coupled interfaces.
 
 ---
 

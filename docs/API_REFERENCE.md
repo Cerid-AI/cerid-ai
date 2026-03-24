@@ -68,8 +68,9 @@
 - `GET /mcp/sse` — SSE stream (MCP protocol, JSON-RPC 2.0)
 - `POST /mcp/messages?sessionId=X` — JSON-RPC handler
 
-### MCP Tools (18 total)
+### MCP Tools (27 total)
 
+**Core tools (19):**
 - `pkb_query` — Single-domain query
 - `pkb_ingest` — Ingest raw text
 - `pkb_ingest_file` — Ingest a file with parsing and metadata
@@ -88,6 +89,18 @@
 - `pkb_check_hallucinations` — Verify LLM claims against KB (Phase 7A)
 - `pkb_memory_extract` — Extract memories from conversations (Phase 7C)
 - `pkb_memory_archive` — Archive old conversation memories (Phase 7C)
+- `pkb_ingest_multimodal` — Multi-modal ingestion (OCR, audio, vision) (Phase 46)
+
+**Trading tools (5, gated by `CERID_TRADING_ENABLED`):**
+- `pkb_trading_signal` — Trading signal enrichment via KB
+- `pkb_herd_detect` — Herd behavior detection
+- `pkb_kelly_size` — Kelly criterion position sizing
+- `pkb_cascade_confirm` — Cascade liquidation confirmation
+- `pkb_longshot_surface` — Longshot opportunity surfacing
+
+**Additional tools:**
+- `pkb_web_search` — Agentic web search with verification (Phase 42)
+- `pkb_memory_recall` — Context-aware memory retrieval with decay scoring (Phase 44)
 
 ### SDK Router (`/sdk/v1/`) — Stable External API
 
@@ -96,17 +109,17 @@ Versioned facade for cerid-series consumers (trading-agent, future projects). De
 - `POST /sdk/v1/query` — KB query with reranking (delegates to `/agent/query`)
 - `POST /sdk/v1/hallucination` — Hallucination detection (delegates to `/agent/hallucination`)
 - `POST /sdk/v1/memory/extract` — Memory extraction (delegates to `/agent/memory/extract`)
-- `GET /sdk/v1/health` — Health check with `version`, `services`, and `features` (subset of feature toggles relevant to consumers)
+- `GET /sdk/v1/health` — Health check with `version`, `services`, `features` (subset of feature toggles relevant to consumers), and `internal_llm` (current internal LLM provider and model)
 
 **Client identification:** Send `X-Client-ID` header to get per-client rate limiting. Each client ID gets an independent rate budget:
 
 | Client ID | `/agent/` & `/sdk/` | `/ingest` | `/recategorize` |
 |-----------|---------------------|-----------|-----------------|
 | `gui` (default) | 20 req/min | 10 req/min | 10 req/min |
-| `trading-agent` | 30 req/min | — | — |
+| `trading-agent` | 80 req/min | — | — |
 | `_default` (unknown) | 10 req/min | 5 req/min | 5 req/min |
 
-Configured in `config/settings.py:CLIENT_RATE_LIMITS`. Add new consumers by extending this dict.
+Configured in `CONSUMER_REGISTRY` in `config/settings.py`. Rate limits are auto-derived from the registry.
 
 ---
 
@@ -117,7 +130,7 @@ Configured in `config/settings.py:CLIENT_RATE_LIMITS`. Add new consumers by exte
 ### Categorization Tiers
 
 - `manual` — Domain from folder name only, no AI
-- `smart` — Free model (Llama 3.1 via Bifrost) for classification
+- `smart` — Free model (Llama 3.3 70B Instruct via OpenRouter) for classification
 - `pro` — Premium model (Claude Sonnet via Bifrost)
 
 AI calls are token-efficient: only first ~1500 chars sent for classification. Response format enforced as JSON.
@@ -168,9 +181,9 @@ Monitors `.md` files only. Uses `/ingest` (text endpoint) since the vault isn't 
 Multi-domain search with LLM-powered reranking and intelligent context assembly.
 
 **Features:**
-- Parallel retrieval across all 5 ChromaDB collections
+- Parallel retrieval across all configured ChromaDB collections
 - Deduplication by (artifact_id + chunk_index), keeping highest relevance
-- LLM reranking via Bifrost (Llama 3.1 free tier) — blends 60% LLM rank + 40% embedding score
+- Cross-encoder reranking (ONNX) — blends 60% reranker score + 40% embedding score
 - Token budget enforcement (14k character limit)
 - Source attribution with confidence scoring
 
@@ -194,7 +207,7 @@ curl -X POST http://localhost:8888/agent/query \
 **Key Functions:**
 - `multi_domain_query()` — Parallel ChromaDB queries across domains
 - `deduplicate_results()` — Remove duplicate chunks
-- `rerank_results()` — LLM-based relevance reranking via Bifrost (falls back to embedding sort)
+- `rerank_results()` — Cross-encoder (ONNX) relevance reranking (falls back to embedding sort)
 - `assemble_context()` — Build context within token budget
 - `agent_query()` — Main orchestration function
 - `self_rag_enhance()` — Iterative claim verification and targeted retrieval refinement (in `agents/self_rag.py`)
@@ -329,6 +342,8 @@ curl -X POST http://localhost:8888/recategorize \
 - `CATEGORIZE_MODE=smart` — Default tier (manual/smart/pro)
 - `BIFROST_URL=http://bifrost:8080/v1`
 - `ARCHIVE_PATH=/archive` — Container-side mount point
+- `INTERNAL_LLM_PROVIDER` — Internal LLM provider for pipeline tasks (`ollama` or `openrouter`, default: `openrouter`)
+- `INTERNAL_LLM_MODEL` — Internal LLM model ID (default: `qwen2.5:1.5b` for Ollama, auto-selected for OpenRouter)
 
 ---
 
@@ -505,13 +520,21 @@ make deps-check
 - Query decomposition (multi-part queries)
 - Memory conflict resolution (ADD/UPDATE/NOOP classification)
 - Response topic extraction (disambiguation context)
-- LLM reranking (fallback to ONNX cross-encoder)
+- Reranking (cross-encoder ONNX default, LLM reranking fallback)
 
 **Limitations:** The local model handles classification, extraction, and routing. It does NOT handle: user-facing chat, verification fact-checking, synopsis generation, or web search — those always use OpenRouter.
 
 **Hardware detection:** `scripts/detect-gpu.sh` auto-detects NVIDIA GPU, AMD ROCm, macOS Metal, or CPU fallback. Docker Compose profile `ollama` starts the container with GPU passthrough when available. macOS Apple Silicon: Ollama runs natively for Metal acceleration.
 
 **Cost:** $0 for all internal LLM calls when using Ollama. Falls back to OpenRouter (paid) when Ollama is unavailable.
+
+#### Boardroom Endpoints
+
+Stable endpoints for the cerid-boardroom agent (`X-Client-ID: boardroom-agent`):
+
+- `GET /sdk/v1/ops/health` — Boardroom-specific health check
+- `POST /sdk/v1/ops/competitive-scan` — Competitive landscape analysis against KB
+- `POST /sdk/v1/ops/strategy-brief` — Strategy brief generation from KB context
 
 ### Web Search
 - Tool: `pkb_web_search` — Search web with verification

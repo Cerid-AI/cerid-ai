@@ -68,7 +68,7 @@ at https://neo4j.com/labs/apoc/current/.
 | Proxy router | `src/mcp/routers/ollama_proxy.py` | `/ollama/chat`, `/ollama/models`, `/ollama/pull` |
 | Default URL | `.env` / `config/settings.py` | `OLLAMA_URL=http://localhost:11434` |
 
-**Rule:** Ollama is entirely optional. When `OLLAMA_ENABLED=false` (default), all `/ollama/*` endpoints return 404. No Ollama dependency is required in the Docker image or Python requirements. The proxy uses httpx with circuit breaker to communicate with a separately-installed Ollama server.
+**Rule:** Ollama is entirely optional. When `OLLAMA_ENABLED=false` (default), all `/ollama/*` endpoints return 503. No Ollama dependency is required in the Docker image or Python requirements. The proxy uses httpx with circuit breaker to communicate with a separately-installed Ollama server.
 
 ## Bifrost LLM Gateway
 
@@ -156,6 +156,22 @@ The trading agent handles cerid-ai unavailability via `AsyncCircuitBreaker` (5 f
 
 ---
 
+## Cross-Project: cerid-boardroom
+
+The [cerid-boardroom](https://github.com/Cerid-AI/cerid-boardroom) agent depends on cerid-ai's SDK API for competitive intelligence and strategy brief generation.
+
+### Coupled Interfaces
+
+| Interface | cerid-ai Side | cerid-boardroom Side | Notes |
+|-----------|---------------|----------------------|-------|
+| KB query | `POST /sdk/v1/query` | `CeridClient.query()` | Shared with trading agent |
+| Health check | `GET /sdk/v1/ops/health` | `CeridClient.health_check()` | Boardroom-specific health |
+| Competitive scan | `POST /sdk/v1/ops/competitive-scan` | `CeridClient.competitive_scan()` | Body: `{"query": "...", "domains": [...]}` |
+| Strategy brief | `POST /sdk/v1/ops/strategy-brief` | `CeridClient.strategy_brief()` | Body: `{"topic": "...", "context": {...}}` |
+| Client ID | `X-Client-ID` header | `X-Client-ID: boardroom-agent` | 60 req/min budget |
+
+---
+
 ## New Consumer Integration
 
 For a complete 13-step checklist on adding a new cerid-series agent integration (feature flag, domain, consumer registration, endpoints, MCP tools, tests, and documentation), see [`docs/INTEGRATION_GUIDE.md`](INTEGRATION_GUIDE.md).
@@ -167,20 +183,38 @@ For a complete 13-step checklist on adding a new cerid-series agent integration 
 ```python
 CONSUMER_REGISTRY = {
     "trading-agent": {
-        "rate_limit": 80,                              # req/min
+        "rate_limits": {"/agent/": (80, 60), "/sdk/": (80, 60)},  # (max_requests, window_seconds)
         "allowed_domains": ["trading", "finance"],     # KB domains this consumer can query
         "strict_domains": True,                        # disables cross-domain affinity bleed
         "description": "Cerid trading agent",
     },
     "boardroom-agent": {
-        "rate_limit": 60,                              # req/min
+        "rate_limits": {"/agent/": (60, 60), "/sdk/": (60, 60)},
         "allowed_domains": None,                       # None = all domains
         "strict_domains": False,
         "description": "Cerid boardroom agent",
         "repo": "https://github.com/Cerid-AI/cerid-boardroom",
     },
+    "cli-ingest": {
+        "rate_limits": {"/ingest": (30, 60)},
+        "allowed_domains": None,
+        "strict_domains": False,
+        "description": "CLI batch ingestion tool",
+    },
+    "a2a-agent": {
+        "rate_limits": {"/agent/": (20, 60), "/sdk/": (20, 60)},
+        "allowed_domains": None,
+        "strict_domains": False,
+        "description": "A2A protocol remote agents",
+    },
+    "folder_scanner": {
+        "rate_limits": {"/ingest": (20, 60)},
+        "allowed_domains": None,
+        "strict_domains": False,
+        "description": "Folder watcher auto-ingestion",
+    },
     "gui": {
-        "rate_limit": 20,
+        "rate_limits": {"/agent/": (20, 60), "/sdk/": (20, 60), "/ingest": (10, 60)},
         "allowed_domains": None,                       # None = all domains (GUI has full access)
         "strict_domains": False,
         "description": "React GUI",

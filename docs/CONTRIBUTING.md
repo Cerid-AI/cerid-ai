@@ -66,7 +66,7 @@ Plugins in `plugins/` are scanned at startup. Each has a `manifest.json` with na
 
 ## 3. CI Pipeline
 
-The CI runs 7 jobs on every PR. All must pass to merge.
+The CI runs 9 jobs on every PR. All must pass to merge.
 
 | Job | Tool | What Breaks It |
 |-----|------|----------------|
@@ -77,6 +77,8 @@ The CI runs 7 jobs on every PR. All must pass to merge.
 | **lock-sync** | pip-compile (in Docker) | `requirements.lock` out of sync with `requirements.txt` |
 | **frontend** | tsc, eslint, vitest, npm audit | Type errors, lint violations, test failures, vulnerable deps |
 | **docker** | hadolint, trivy, build test | Dockerfile lint issues, image CVEs, build failures |
+| **frontend-marketing** | tsc, eslint, next build | Type errors, lint violations, build failures (Sentry source maps) |
+| **frontend-desktop** | npm ci, typecheck | Type errors, missing dependencies |
 
 **Common fix:** If `lock-sync` fails after editing `requirements.txt`, run `make lock-python` locally and commit the updated `.lock` file.
 
@@ -115,7 +117,7 @@ The SDK at `/sdk/v1/` is the stable API consumed by external agents. Changes her
 
 - `GET /sdk/v1/health` — Health check
 - `POST /sdk/v1/query` — Knowledge base query
-- `POST /sdk/v1/hallucination/check` — Hallucination detection
+- `POST /sdk/v1/hallucination` — Hallucination detection
 - `POST /sdk/v1/memory/extract` — Memory extraction
 - `POST /sdk/v1/trading/signal` — Trading signal analysis (gated)
 - `POST /sdk/v1/trading/herd-detect` — Herd behavior detection (gated)
