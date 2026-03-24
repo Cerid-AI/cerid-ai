@@ -156,20 +156,20 @@
   }
 }
 
-/* --- Claim highlight variables (light mode: stronger, dark mode: softer) --- */
+/* --- Claim highlight variables (light mode: strong & visible, dark mode: softer) --- */
 :root {
   --claim-verified-border: rgba(22, 163, 74, 0.65);
-  --claim-refuted-bg: rgba(220, 38, 38, 0.12);
-  --claim-refuted-border: rgba(220, 38, 38, 0.6);
-  --claim-unverified-bg: rgba(161, 98, 7, 0.10);
-  --claim-unverified-border: rgba(161, 98, 7, 0.55);
-  --claim-evasion-bg: rgba(194, 65, 12, 0.10);
-  --claim-citation-bg: rgba(126, 34, 206, 0.10);
+  --claim-refuted-bg: rgba(220, 38, 38, 0.18);
+  --claim-refuted-border: rgba(185, 28, 28, 0.75);
+  --claim-unverified-bg: rgba(161, 98, 7, 0.12);
+  --claim-unverified-border: rgba(161, 98, 7, 0.6);
+  --claim-evasion-bg: rgba(194, 65, 12, 0.12);
+  --claim-citation-bg: rgba(126, 34, 206, 0.12);
 }
 .dark {
   --claim-verified-border: rgba(34, 197, 94, 0.4);
-  --claim-refuted-bg: rgba(239, 68, 68, 0.15);
-  --claim-refuted-border: rgba(239, 68, 68, 0.5);
+  --claim-refuted-bg: rgba(239, 68, 68, 0.18);
+  --claim-refuted-border: rgba(239, 68, 68, 0.6);
   --claim-unverified-bg: rgba(234, 179, 8, 0.12);
   --claim-unverified-border: rgba(234, 179, 8, 0.4);
   --claim-evasion-bg: rgba(249, 115, 22, 0.12);

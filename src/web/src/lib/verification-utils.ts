@@ -106,14 +106,26 @@ export function matchClaimsToText(text: string, claims: ClaimLike[], domTextCont
       } catch { /* invalid regex, skip */ }
     }
 
-    // Tier 4: first 5 significant words (>2 chars) with flexible whitespace
+    // Tier 4: first 5 significant words (>2 chars) with flexible gaps
+    // Allows parentheticals and short interjections between words (up to 60 chars)
     const sigWords = words.filter((w) => w.length > 2).slice(0, 5)
     if (sigWords.length >= 3) {
-      const prefixPattern = sigWords.map(escapeRegex).join("\\s+")
+      // First try strict whitespace
+      const strictPattern = sigWords.map(escapeRegex).join("\\s+")
       try {
-        const re = new RegExp(prefixPattern, "i")
+        const re = new RegExp(strictPattern, "i")
         const match = re.exec(searchText)
         if (match) {
+          rawSpans.push({ start: match.index, end: match.index + match[0].length, claim: c.claim, displayStatus })
+          continue
+        }
+      } catch { /* skip */ }
+      // Then try with flexible gaps (handles parentheticals like "(Exposition Universelle)")
+      const flexGapPattern = sigWords.map(escapeRegex).join("[\\s\\S]{0,60}?")
+      try {
+        const re = new RegExp(flexGapPattern, "i")
+        const match = re.exec(searchText)
+        if (match && match[0].length < 300) {
           rawSpans.push({ start: match.index, end: match.index + match[0].length, claim: c.claim, displayStatus })
           continue
         }
@@ -121,22 +133,28 @@ export function matchClaimsToText(text: string, claims: ClaimLike[], domTextCont
     }
 
     // Tier 5: longest contiguous word sequence (≥4 words) — handles LLM
-    // paraphrasing by finding the longest verbatim subsequence
+    // paraphrasing by finding the longest verbatim subsequence.
+    // Uses flexible gaps to handle inline parentheticals.
     if (words.length >= 4) {
       let bestMatch: { start: number; end: number } | null = null
       let bestLen = 0
       for (let wStart = 0; wStart <= words.length - 4; wStart++) {
         for (let wEnd = words.length; wEnd >= wStart + 4; wEnd--) {
-          const subPattern = words.slice(wStart, wEnd).map(escapeRegex).join("\\s+")
-          try {
-            const re = new RegExp(subPattern, "i")
-            const match = re.exec(searchText)
-            if (match && match[0].length > bestLen) {
-              bestMatch = { start: match.index, end: match.index + match[0].length }
-              bestLen = match[0].length
-              break // Found longest from this wStart
-            }
-          } catch { /* skip */ }
+          const subWords = words.slice(wStart, wEnd).map(escapeRegex)
+          // Try strict whitespace first, then flexible gaps
+          for (const sep of ["\\s+", "[\\s\\S]{0,60}?"]) {
+            const subPattern = subWords.join(sep)
+            try {
+              const re = new RegExp(subPattern, "i")
+              const match = re.exec(searchText)
+              if (match && match[0].length > bestLen && match[0].length < 400) {
+                bestMatch = { start: match.index, end: match.index + match[0].length }
+                bestLen = match[0].length
+                break // Found with this separator
+              }
+            } catch { /* skip */ }
+          }
+          if (bestMatch && bestLen > 0) break
         }
         if (bestMatch) break // Use first (leftmost) best match
       }
