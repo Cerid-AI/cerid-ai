@@ -4,8 +4,7 @@
 import remarkGfm from "remark-gfm"
 import { lazy, Suspense, useState, useCallback, useMemo, useRef, useEffect, isValidElement, type ReactNode } from "react"
 
-/** Lazy-load react-markdown (~40KB) — only loaded when first message renders */
-const ReactMarkdown = lazy(() => import("react-markdown"))
+import ReactMarkdown from "react-markdown"
 import { Copy, Check, User, Bot, ShieldCheck, ShieldAlert, Loader2, Pencil, Shield, ExternalLink, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
