@@ -18,7 +18,7 @@ def test_user():
     uid = uuid.uuid4().hex[:8]
     return {
         "email": f"beta-test-{uid}@cerid-test.local",
-        "password": "BetaTest2026!Secure",
+        "password": "BetaTest2026!Secure",  # pragma: allowlist secret
         "display_name": f"Beta Tester {uid}",
     }
 
