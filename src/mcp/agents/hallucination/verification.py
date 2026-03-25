@@ -89,7 +89,7 @@ _SYSTEM_CURRENT_EVENT_VERIFICATION = (
     "You are verifying a claim made by a different AI model. Your job is to "
     "independently assess accuracy using web sources — do not assume the claim "
     "is correct just because another AI generated it.\n\n"
-    f"The current date is {datetime.now().strftime('%Y-%m-%d')}. Any claim "
+    "The current date is {current_date}. Any claim "
     "referencing events before this date should be evaluated based on whether "
     "those events have already occurred.\n\n"
     "Search the web for authoritative sources to confirm or refute the claim."
@@ -165,7 +165,7 @@ _SYSTEM_RECENCY_VERIFICATION = (
     "Your job is to search for the MOST CURRENT data on this topic and "
     "determine whether the model's information is still accurate or has been "
     "superseded by newer data.\n\n"
-    f"The current date is {datetime.now().strftime('%Y-%m-%d')}. Any claim "
+    "The current date is {current_date}. Any claim "
     "referencing events before this date should be evaluated based on whether "
     "those events have already occurred.\n\n"
     "If the claim contains specific numbers, dates, or facts, search for "
@@ -825,6 +825,8 @@ async def _verify_claim_externally(
         else:
             system_prompt = _SYSTEM_CURRENT_EVENT_VERIFICATION
         verification_method = "web_search"
+        # Inject current date into system prompt (was baked in at import time — stale after midnight)
+        system_prompt = system_prompt.replace("{current_date}", datetime.now().strftime("%Y-%m-%d"))
     else:
         # Complex claims (causal, comparative, multi-hop) use a stronger
         # model for more reliable verdicts.  Simple factual claims use the

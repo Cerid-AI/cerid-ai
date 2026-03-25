@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import pathlib
+import re
 import time
 from typing import Any
 
@@ -42,8 +43,6 @@ _CGROUP_MEMORY_CURRENT = pathlib.Path("/sys/fs/cgroup/memory.current")
 
 def _heuristic_response_context(response_text: str, user_query: str | None) -> str | None:
     """Heuristic fallback: build topic context from user query + first heading."""
-    import re
-
     parts: list[str] = []
     if user_query:
         parts.append(user_query.strip()[:200])

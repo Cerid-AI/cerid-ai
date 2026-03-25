@@ -58,7 +58,7 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
 
         # Check header
         provided = request.headers.get("X-API-Key", "")
-        if not hmac.compare_digest(provided, self.api_key):
+        if not provided or not hmac.compare_digest(provided, self.api_key):
             client = request.client.host if request.client else "unknown"
             logger.warning(f"Unauthorized request to {path} from {_redact_ip(client)}")
             return JSONResponse(

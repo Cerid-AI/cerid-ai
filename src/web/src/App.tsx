@@ -63,7 +63,7 @@ export default function App() {
         setMultiUser(!!s.multi_user)
         setTradingEnabled(!!s.trading_enabled)
       })
-      .catch(() => {})
+      .catch((err) => { if (import.meta.env.DEV) console.warn("Settings fetch failed:", err) })
   }, [])
 
   // Show nothing while checking setup status

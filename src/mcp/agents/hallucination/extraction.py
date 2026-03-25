@@ -41,7 +41,9 @@ from utils.llm_parsing import parse_llm_json
 
 logger = logging.getLogger("ai-companion.hallucination")
 
-CURRENT_YEAR = datetime.now().year
+def _current_year() -> int:
+    """Return the current year (not baked in at import time)."""
+    return datetime.now().year
 
 
 def _reclassify_recency(claim_text: str, claim_type: str) -> str:
@@ -59,7 +61,7 @@ def _reclassify_recency(claim_text: str, claim_type: str) -> str:
     # Check for year references that are stale (before current year)
     year_pattern = re.findall(r"\b(20[1-9]\d)\b", claim_text)
     for y in year_pattern:
-        if int(y) < CURRENT_YEAR:
+        if int(y) < _current_year():
             # Claim references a past year with present/future tense
             if any(
                 w in text_lower

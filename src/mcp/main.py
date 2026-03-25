@@ -18,7 +18,7 @@ sentry_sdk.init(
     dsn=os.environ.get("SENTRY_DSN"),
     environment=os.environ.get("SENTRY_ENVIRONMENT", "development"),
     release=os.environ.get("SENTRY_RELEASE"),
-    send_default_pii=True,
+    send_default_pii=False,  # Privacy-first: don't send API keys, IPs, or request bodies
     traces_sample_rate=0.1,
     profile_session_sample_rate=1.0,
     profile_lifecycle="trace",
@@ -280,30 +280,30 @@ async def lifespan(app: FastAPI):
     try:
         from utils.llm_client import close_client
         await close_client()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("LLM client shutdown failed: %s", exc)
     try:
         from utils.bifrost import close_bifrost_client
         await close_bifrost_client()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Bifrost client shutdown failed: %s", exc)
     try:
         from routers.chat import close_chat_client
         await close_chat_client()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Chat client shutdown failed: %s", exc)
     try:
         from utils.internal_llm import close_ollama_client
         await close_ollama_client()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Ollama client shutdown failed: %s", exc)
     # Close trading proxy connection pool
     if CERID_TRADING_ENABLED:
         try:
             from routers.trading_proxy import close_trading_proxy_client
             await close_trading_proxy_client()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Trading proxy shutdown failed: %s", exc)
     # Flush semantic cache HNSW index to Redis before closing Redis
     try:
         from deps import get_redis
