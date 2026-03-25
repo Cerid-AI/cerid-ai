@@ -1066,8 +1066,12 @@ async def agent_query(
     # Step 6: Assemble context
     with timer.step("context_assembly"):
         # Model-aware context budget — large-context models get more KB context
-        ctx_budget_fn = getattr(config, "get_context_budget_for_model", None)
-        ctx_budget = ctx_budget_fn(model) if callable(ctx_budget_fn) else config.QUERY_CONTEXT_MAX_CHARS
+        try:
+            ctx_budget = config.get_context_budget_for_model(model)
+        except (AttributeError, TypeError):
+            ctx_budget = getattr(config, "QUERY_CONTEXT_MAX_CHARS", 14_000)
+        if not isinstance(ctx_budget, (int, float)):
+            ctx_budget = 14_000
         if ENABLE_INTELLIGENT_ASSEMBLY and results:
             try:
                 from utils.context_assembler import intelligent_assemble
