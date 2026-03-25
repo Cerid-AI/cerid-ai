@@ -256,12 +256,13 @@ async def _attempt_stream(
                 # Record LLM cost from OpenRouter usage data (fire-and-forget)
                 if usage_data:
                     try:
-                        from utils.metrics import MetricsCollector, estimate_cost
+                        from utils.metrics import estimate_cost, get_metrics_collector
                         prompt_tokens = usage_data.get("prompt_tokens", 0)
                         completion_tokens = usage_data.get("completion_tokens", 0)
                         if prompt_tokens or completion_tokens:
                             cost = estimate_cost(bare_model, prompt_tokens, completion_tokens)
-                            MetricsCollector.record_metric("llm_cost_usd", cost)
+                            collector = get_metrics_collector()
+                            collector.record_metric("llm_cost_usd", cost)
                             logger.debug(
                                 "Chat cost: model=%s prompt=%d completion=%d cost=$%.6f",
                                 bare_model, prompt_tokens, completion_tokens, cost,

@@ -98,14 +98,17 @@ describe("deduplicateChunks", () => {
 // ---------------------------------------------------------------------------
 
 describe("formatChunkWithHeader", () => {
-  it("includes domain and sub_category in header", () => {
+  it("wraps content in XML document tags with attributes", () => {
     const source = makeKBResult("some content")
     source.domain = "code"
     source.sub_category = "python"
     const result = formatChunkWithHeader(source)
-    expect(result).toContain("code > python")
-    expect(result).toContain("test.txt")
+    expect(result).toContain("<document")
+    expect(result).toContain('domain="code"')
+    expect(result).toContain('category="python"')
+    expect(result).toContain('source="test.txt"')
     expect(result).toContain("some content")
+    expect(result).toContain("</document>")
   })
 
   it("handles missing domain gracefully", () => {
@@ -113,7 +116,8 @@ describe("formatChunkWithHeader", () => {
     source.domain = ""
     source.sub_category = ""
     const result = formatChunkWithHeader(source)
-    expect(result).toContain("test.txt")
+    expect(result).toContain("<document")
+    expect(result).toContain('source="test.txt"')
     expect(result).toContain("content here")
   })
 
@@ -122,6 +126,7 @@ describe("formatChunkWithHeader", () => {
     source.domain = "finance"
     source.sub_category = ""
     const result = formatChunkWithHeader(source)
-    expect(result).toContain("finance | test.txt")
+    expect(result).toContain('domain="finance"')
+    expect(result).not.toContain('category=')
   })
 })
