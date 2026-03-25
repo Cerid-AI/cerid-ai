@@ -99,6 +99,7 @@ MODEL_CONTEXT_CHAR_BUDGETS: dict[str, int] = {
     "gpt-4o-mini": 14_000,  # GPT-4o-mini: 128K but cheaper, stay conservative
     "llama": 10_000,        # Llama: 32K–128K context
     "qwen": 10_000,         # Qwen: 32K–128K context
+    "grok": 32_000,         # Grok: 131K context
 }
 
 

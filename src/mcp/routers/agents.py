@@ -182,6 +182,7 @@ async def agent_query_endpoint(req: AgentQueryRequest, request: Request):
             debug_timing=debug_timing,
             allowed_domains=allowed_domains,
             strict_domains=strict_domains,
+            model=req.model,
         )
 
         # Self-RAG: validate claims and refine retrieval if enabled
