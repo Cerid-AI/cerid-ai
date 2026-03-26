@@ -174,7 +174,7 @@ def _classify_complexity(query: str) -> Complexity:
     ):
         return Complexity.SIMPLE
 
-    # Complex indicators -- multi-step, code, analysis
+    # Complex indicators -- multi-step, code, analysis, reasoning
     complex_keywords = [
         "implement",
         "build",
@@ -191,6 +191,20 @@ def _classify_complexity(query: str) -> Complexity:
         "code",
         "function",
         "class",
+        # Analytical reasoning signals
+        "analyze",
+        "analyse",
+        "evaluate",
+        "assess",
+        "review",
+        "critique",
+        "trade-off",
+        "tradeoff",
+        "implications",
+        "scalability",
+        "thread-safe",
+        "race condition",
+        "considering",
     ]
     if any(kw in query_lower for kw in complex_keywords) or word_count > 100:
         return Complexity.COMPLEX
@@ -415,12 +429,15 @@ async def route(
 
     if complexity == Complexity.COMPLEX:
         if cs == "high":
-            # High cost sensitivity: use cheap model even for complex (trade quality for savings)
+            # High cost sensitivity: use cheapest *capable* model, not a mini model.
+            # Complex queries need reasoning quality — gpt-4o-mini can't handle
+            # architecture analysis, code review, or multi-step reasoning well.
+            # Gemini Flash is 2x the cost of mini but dramatically better at reasoning.
             return RouteDecision(
-                model=str(CHEAP_MODELS["gpt-4o-mini"]["id"]),
+                model=str(CHEAP_MODELS["gemini-flash"]["id"]),
                 provider="openrouter_paid",
-                reason="complex query — downgraded to cheap model (high cost sensitivity)",
-                estimated_cost_per_1k=0.00015,
+                reason="complex query — cheapest capable model (high cost sensitivity)",
+                estimated_cost_per_1k=0.0003,
             )
         if cs == "low":
             # Low cost sensitivity: use best available model

@@ -1,0 +1,3 @@
+# Test reports are generated per-run, not committed
+*
+!.gitignore
