@@ -8,6 +8,9 @@
 #   ./tests/beta/run.sh --skip-browser     # Skip Playwright E2E
 #   ./tests/beta/run.sh --auth             # Include multi-user auth tests
 #   ./tests/beta/run.sh --skip-performance # Skip performance benchmarks
+#   ./tests/beta/run.sh --eval             # Evaluation & efficacy suite only
+#   ./tests/beta/run.sh --full             # All tiers + evaluation suite
+#   ./tests/beta/run.sh --eval --browser   # Eval + browser E2E
 #
 # Exit codes: 0 = all P0 pass, 1 = P0 failure, 2 = run error
 
@@ -25,6 +28,7 @@ RUN_PERFORMANCE=true
 RUN_SECURITY=true
 RUN_BROWSER=true
 RUN_AUTH=false
+RUN_EVAL=false
 STOP_AFTER=""
 
 for arg in "$@"; do
@@ -34,8 +38,11 @@ for arg in "$@"; do
     --skip-browser) RUN_BROWSER=false ;;
     --skip-performance) RUN_PERFORMANCE=false ;;
     --auth) RUN_AUTH=true ;;
+    --eval) RUN_EVAL=true; RUN_SMOKE=false; RUN_FUNCTIONAL=false; RUN_INTEGRATION=false; RUN_PERFORMANCE=false; RUN_SECURITY=false; RUN_BROWSER=false ;;
+    --full) RUN_EVAL=true ;;
+    --browser) RUN_BROWSER=true ;;
     --help|-h)
-      echo "Usage: $0 [--smoke|--functional|--skip-browser|--skip-performance|--auth]"
+      echo "Usage: $0 [--smoke|--functional|--skip-browser|--skip-performance|--auth|--eval|--full|--browser]"
       exit 0
       ;;
   esac
@@ -283,6 +290,116 @@ fi
 if $RUN_BROWSER; then
   report_section "Browser E2E Tests"
   report_text "\n> Browser E2E tests are run interactively via Playwright MCP tools.\n> See the test plan for E-01 through E-10 test cases.\n"
+fi
+
+# ─────────────────────────────────────────────────
+# TIER 7: EVALUATION & EFFICACY SUITE
+# ─────────────────────────────────────────────────
+if ${RUN_EVAL:-false}; then
+  echo ""
+  echo "╔══════════════════════════════════════╗"
+  echo "║   EVALUATION & EFFICACY SUITE        ║"
+  echo "╚══════════════════════════════════════╝"
+  echo ""
+
+  DOCKER_NETWORK=$(docker network ls --format '{{.Name}}' | grep 'llm-network' | head -1)
+  [[ -z "$DOCKER_NETWORK" ]] && DOCKER_NETWORK="cerid-ai_llm-network"
+
+  mkdir -p "${SCRIPT_DIR}/eval/reports"
+
+  docker run --rm --network "$DOCKER_NETWORK" \
+    -v "${SCRIPT_DIR}:/tests" -w /tests \
+    python:3.11-slim bash -c "
+      pip install -q httpx pytest 'pytest-asyncio>=0.23' 2>/dev/null
+      cd eval && python -m pytest . -v --tb=short \
+        --junitxml=reports/eval.xml 2>&1
+    "
+  EVAL_EXIT=$?
+
+  report_section "Evaluation & Efficacy Suite"
+  if [[ -f "${SCRIPT_DIR}/eval/reports/eval.xml" ]]; then
+    python3 -c "
+import xml.etree.ElementTree as ET
+tree = ET.parse('${SCRIPT_DIR}/eval/reports/eval.xml')
+root = tree.getroot()
+for tc in root.iter('testcase'):
+    name = tc.get('name', 'unknown')
+    time_val = tc.get('time', '0')
+    failure = tc.find('failure')
+    skip = tc.find('skipped')
+    if failure is not None:
+        msg = (failure.get('message', '') or '')[:80]
+        print(f'FAIL|EVAL|{name}|{time_val}s|{msg}')
+    elif skip is not None:
+        print(f'SKIP|EVAL|{name}|{time_val}s|skipped')
+    else:
+        print(f'PASS|EVAL|{name}|{time_val}s|')
+" > "${SCRIPT_DIR}/eval/reports/eval.results" 2>/dev/null || true
+    report_append_results "${SCRIPT_DIR}/eval/reports/eval.results"
+  fi
+
+  # Generate structured markdown report
+  EVAL_REPORT="${SCRIPT_DIR}/eval/reports/eval-report-$(date +%Y%m%d-%H%M%S).md"
+  python3 -c "
+import xml.etree.ElementTree as ET, sys, os
+from datetime import datetime
+
+xml_path = '${SCRIPT_DIR}/eval/reports/eval.xml'
+if not os.path.exists(xml_path):
+    sys.exit(0)
+tree = ET.parse(xml_path)
+root = tree.getroot()
+
+ts = root.get('timestamp', datetime.now().isoformat())
+total = int(root.get('tests', 0))
+failures = int(root.get('failures', 0))
+errors = int(root.get('errors', 0))
+skipped = int(root.get('skips', root.get('skip', '0')))
+passed = total - failures - errors - skipped
+
+tiers = {'verification_efficacy': [], 'rag_benchmark': [], 'routing_validation': []}
+for tc in root.iter('testcase'):
+    name = tc.get('name', '')
+    classname = tc.get('classname', '')
+    time_val = tc.get('time', '0')
+    fail = tc.find('failure')
+    skip = tc.find('skipped')
+    status = 'FAIL' if fail is not None else ('SKIP' if skip is not None else 'PASS')
+    detail = (fail.get('message','') if fail is not None else '')[:120]
+    matched = False
+    for tier_key in tiers:
+        if tier_key in classname:
+            tiers[tier_key].append((name, status, time_val, detail))
+            matched = True
+            break
+    if not matched:
+        tiers.setdefault('other', []).append((name, status, time_val, detail))
+
+verdict = 'GO' if failures == 0 and errors == 0 else ('GO WITH CAVEATS' if failures <= 3 else 'NO-GO')
+lines = ['# Evaluation & Efficacy Report', '', '**Date:** ' + ts, '**Verdict:** ' + verdict, '',
+         '## Summary', '', '| Metric | Value |', '|--------|-------|',
+         '| Total | ' + str(total) + ' |', '| Passed | ' + str(passed) + ' |',
+         '| Failed | ' + str(failures) + ' |', '| Errors | ' + str(errors) + ' |',
+         '| Skipped | ' + str(skipped) + ' |', '']
+for tier_name, results in tiers.items():
+    if not results:
+        continue
+    lines.append('## ' + tier_name.replace('_', ' ').title())
+    lines.append('')
+    lines.append('| Test | Status | Duration | Notes |')
+    lines.append('|------|--------|----------|-------|')
+    for n, s, t, d in results:
+        emoji = 'PASS' if s == 'PASS' else ('SKIP' if s == 'SKIP' else 'FAIL')
+        lines.append('| ' + n + ' | ' + emoji + ' | ' + t + 's | ' + d + ' |')
+    lines.append('')
+with open('${SCRIPT_DIR}/eval/reports/eval-report-latest.md', 'w') as f:
+    f.write('\n'.join(lines))
+print('Report: eval/reports/eval-report-latest.md')
+" 2>/dev/null || true
+  [[ -f "${SCRIPT_DIR}/eval/reports/eval-report-latest.md" ]] && \
+    cp "${SCRIPT_DIR}/eval/reports/eval-report-latest.md" "$EVAL_REPORT"
+
+  [[ $EVAL_EXIT -ne 0 ]] && OVERALL_EXIT=1
 fi
 
 # ─────────────────────────────────────────────────
