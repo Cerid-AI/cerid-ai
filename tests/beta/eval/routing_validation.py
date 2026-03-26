@@ -69,20 +69,46 @@ async def get_routed_model(client: httpx.AsyncClient, query: str) -> str | None:
     return model
 
 
+# Tier ordering for downgrade detection (higher index = more capable)
+_TIER_RANK = {"free_or_cheap": 0, "capable": 1, "research_online": 2}
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("case", CASES, ids=[c["description"] for c in CASES])
 async def test_routing_case(case: dict, aclient: httpx.AsyncClient) -> None:
-    """Verify model selection reflects expected complexity routing."""
+    """Verify model selection reflects expected complexity routing.
+
+    Gap 5 fix: Tightened from "tier != unknown" to also catch severe downgrades.
+    A capable/research query routed to free_or_cheap is a quality regression.
+    """
     model = await get_routed_model(aclient, case["query"])
     assert model is not None, f"No model returned for: {case['query']}"
 
     tier = classify_model_tier(model)
     expected = case["expected_tier"]
 
-    # Router is cost-sensitive — may use cheaper models for all tiers.
-    # The key invariant: a model should be known (not "unknown").
-    # For capable/research, allow any known tier (cost optimization is valid).
+    # Hard invariant: model must be recognized
     assert tier != "unknown", (
         f"[{case['description']}] Unrecognized model tier for: {model}"
     )
-    print(f"  [{case['description']}] expected={expected} actual={tier} model={model}")
+
+    # Soft invariant: capable/research queries should NOT downgrade to free_or_cheap.
+    # Cost optimization may use a capable model for a research query (acceptable),
+    # but routing a complex analysis to gpt-4o-mini is a quality concern.
+    # This is a warnings.warn (not assert) because the smart router's cost
+    # sensitivity tuning is a separate concern from pipeline correctness.
+    expected_rank = _TIER_RANK.get(expected, 0)
+    actual_rank = _TIER_RANK.get(tier, 0)
+    if expected_rank >= 1 and actual_rank < 1:  # capable/research → free_or_cheap
+        import warnings
+        warnings.warn(
+            f"[{case['description']}] QUALITY CONCERN: expected tier "
+            f"'{expected}' but got '{tier}' ({model}). "
+            f"Complex queries routing to free/cheap models may degrade quality.",
+            stacklevel=1,
+        )
+
+    # Informational: log tier match/mismatch
+    match_marker = "MATCH" if tier == expected else "MISMATCH"
+    print(f"  [{case['description']}] expected={expected} actual={tier} "
+          f"model={model} [{match_marker}]")

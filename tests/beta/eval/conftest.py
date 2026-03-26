@@ -76,10 +76,17 @@ async def stream_verify(
     user_query: str,
     expert_mode: bool = False,
     source_artifact_ids: list[str] | None = None,
+    generating_model: str | None = None,
+    conversation_history: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Call POST /agent/verify-stream and parse SSE events into structured result.
 
     Returns dict with keys: claims (list), summary (dict), errors (list).
+
+    Args:
+        generating_model: Model that produced response_text. Enables cross-model
+            diversity selection — the verifier picks a different model family.
+        conversation_history: Prior conversation turns for consistency checking.
     """
     body: dict[str, Any] = {
         "response_text": response_text,
@@ -90,50 +97,73 @@ async def stream_verify(
         body["expert_mode"] = True
     if source_artifact_ids:
         body["source_artifact_ids"] = source_artifact_ids
+    if generating_model:
+        body["model"] = generating_model
+    if conversation_history:
+        body["conversation_history"] = conversation_history
 
     claims: list[dict] = []
     summary: dict = {}
     errors: list[str] = []
 
-    async with client.stream("POST", "/agent/verify-stream", json=body, timeout=180.0) as resp:
-        resp.raise_for_status()
-        buffer = ""
-        async for chunk in resp.aiter_text():
-            buffer += chunk
-            while "\n" in buffer:
-                line, buffer = buffer.split("\n", 1)
-                line = line.strip()
-                if not line or line.startswith(":"):
-                    continue
-                if line.startswith("data: "):
-                    data_str = line[6:]
-                    try:
-                        event = json.loads(data_str)
-                    except json.JSONDecodeError:
-                        continue
-                    etype = event.get("event", event.get("type", ""))
-                    if etype == "claim_extracted":
-                        claims.append({
-                            "index": event.get("index"),
-                            "claim": event.get("claim", ""),
-                            "claim_type": event.get("claim_type", ""),
-                            "status": "pending",
-                        })
-                    elif etype == "claim_verified":
-                        idx = event.get("index")
-                        for c in claims:
-                            if c["index"] == idx:
-                                c["status"] = event.get("status", "")
-                                c["confidence"] = event.get("confidence", 0)
-                                c["source"] = event.get("source", "")
-                                c["verification_method"] = event.get("verification_method", "")
-                                c["reason"] = event.get("reason", "")
-                                break
-                    elif etype == "summary":
-                        summary = event
-                    elif etype == "error":
-                        errors.append(event.get("detail", str(event)))
+    return await _stream_verify_with_retry(client, body, claims, summary, errors)
 
+
+async def _stream_verify_with_retry(
+    client: httpx.AsyncClient,
+    body: dict[str, Any],
+    claims: list[dict],
+    summary: dict,
+    errors: list[str],
+    max_retries: int = 5,
+) -> dict[str, Any]:
+    """Execute verify-stream with retry on 429 rate limit."""
+    for attempt in range(max_retries):
+        async with client.stream("POST", "/agent/verify-stream", json=body, timeout=180.0) as resp:
+            if resp.status_code == 429 and attempt < max_retries - 1:
+                await asyncio.sleep(5 * (attempt + 1))
+                continue
+            resp.raise_for_status()
+            buffer = ""
+            async for chunk in resp.aiter_text():
+                buffer += chunk
+                while "\n" in buffer:
+                    line, buffer = buffer.split("\n", 1)
+                    line = line.strip()
+                    if not line or line.startswith(":"):
+                        continue
+                    if line.startswith("data: "):
+                        data_str = line[6:]
+                        try:
+                            event = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            continue
+                        etype = event.get("event", event.get("type", ""))
+                        if etype == "claim_extracted":
+                            claims.append({
+                                "index": event.get("index"),
+                                "claim": event.get("claim", ""),
+                                "claim_type": event.get("claim_type", ""),
+                                "status": "pending",
+                            })
+                        elif etype == "claim_verified":
+                            idx = event.get("index")
+                            for c in claims:
+                                if c["index"] == idx:
+                                    c["status"] = event.get("status", "")
+                                    c["confidence"] = event.get("confidence", 0)
+                                    c["source"] = event.get("source", "")
+                                    c["verification_method"] = event.get("verification_method", "")
+                                    c["reason"] = event.get("reason", "")
+                                    break
+                        elif etype == "summary":
+                            summary.update(event)
+                        elif etype == "error":
+                            errors.append(event.get("detail", str(event)))
+            # Success — don't retry
+            return {"claims": claims, "summary": summary, "errors": errors}
+
+    # Should not reach here, but just in case
     return {"claims": claims, "summary": summary, "errors": errors}
 
 
