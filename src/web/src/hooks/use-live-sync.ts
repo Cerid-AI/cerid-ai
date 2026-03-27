@@ -21,7 +21,7 @@ export function useLiveSync({ url, token, enabled = true, onDelta, onPresence }:
   // Store callbacks in refs to avoid stale closures on reconnect
   const onDeltaRef = useRef(onDelta);
   const onPresenceRef = useRef(onPresence);
-  const connectRef = useRef<() => void>();
+  const connectRef = useRef<() => void>(undefined);
   onDeltaRef.current = onDelta;
   onPresenceRef.current = onPresence;
 

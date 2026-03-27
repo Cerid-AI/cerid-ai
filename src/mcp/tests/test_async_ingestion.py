@@ -23,11 +23,11 @@ def _ensure_real_router():
     test_memory.py may inject a stub into sys.modules that lacks the batch
     endpoint. This helper detects the stub and force-loads the real module.
     """
-    ri = sys.modules.get("routers.ingestion")
+    ri = sys.modules.get("app.routers.ingestion")
     if ri is not None and not hasattr(ri, "ingest_batch_endpoint"):
-        del sys.modules["routers.ingestion"]
-        importlib.import_module("routers.ingestion")
-    return importlib.import_module("routers.ingestion")
+        del sys.modules["app.routers.ingestion"]
+        importlib.import_module("app.routers.ingestion")
+    return importlib.import_module("app.routers.ingestion")
 
 # ---------------------------------------------------------------------------
 # 4A: Async file parsing — asyncio.to_thread() wrapping

@@ -579,8 +579,6 @@ class TestCurate:
     @staticmethod
     def _make_graph_store(artifacts_by_domain=None):
         """Create a mock GraphStore with list_artifacts and update_artifact."""
-        from dataclasses import dataclass
-
         from core.contracts.stores import ArtifactNode
 
         gs = MagicMock()

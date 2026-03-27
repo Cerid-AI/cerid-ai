@@ -236,7 +236,7 @@ class TestExecuteToolAgents:
         mock_chroma.return_value = MagicMock()
         mock_redis.return_value = MagicMock()
 
-        with patch("core.agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
+        with patch("agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
             mock_aq.return_value = {"context": "result", "sources": []}
             result = asyncio.get_event_loop().run_until_complete(
                 execute_tool("pkb_agent_query", {"query": "test"})
@@ -247,7 +247,7 @@ class TestExecuteToolAgents:
     def test_pkb_audit(self, mock_redis):
         mock_redis.return_value = MagicMock()
 
-        with patch("core.agents.audit.audit", new_callable=AsyncMock) as mock_audit:
+        with patch("agents.audit.audit", new_callable=AsyncMock) as mock_audit:
             mock_audit.return_value = {"timestamp": "2026-01-01"}
             result = asyncio.get_event_loop().run_until_complete(
                 execute_tool("pkb_audit", {"reports": ["activity"], "hours": 12})
@@ -263,7 +263,7 @@ class TestExecuteToolAgents:
         mock_chroma.return_value = MagicMock()
         mock_redis.return_value = MagicMock()
 
-        with patch("core.agents.rectify.rectify", new_callable=AsyncMock) as mock_rect:
+        with patch("agents.rectify.rectify", new_callable=AsyncMock) as mock_rect:
             mock_rect.return_value = {"findings": {}}
             asyncio.get_event_loop().run_until_complete(
                 execute_tool("pkb_rectify", {"auto_fix": True, "stale_days": 30})
@@ -280,7 +280,7 @@ class TestExecuteToolAgents:
         mock_chroma.return_value = MagicMock()
         mock_redis.return_value = MagicMock()
 
-        with patch("core.agents.maintenance.maintain", new_callable=AsyncMock) as mock_maint:
+        with patch("agents.maintenance.maintain", new_callable=AsyncMock) as mock_maint:
             mock_maint.return_value = {"actions_run": ["health"]}
             asyncio.get_event_loop().run_until_complete(
                 execute_tool("pkb_maintain", {"actions": ["health"]})

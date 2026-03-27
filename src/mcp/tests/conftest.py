@@ -138,7 +138,7 @@ def _reset_bifrost_client():
 
     # Ensure LLM calls use the direct OpenRouter path (mockable via httpx.AsyncClient)
     old_key = os.environ.get("OPENROUTER_API_KEY")
-    os.environ["OPENROUTER_API_KEY"] = "test-dummy-key"
+    os.environ["OPENROUTER_API_KEY"] = "test-dummy-key"  # pragma: allowlist secret
 
     # Also reset internal_llm client
     try:
