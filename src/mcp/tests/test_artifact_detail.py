@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 def _make_app():
     """Create minimal FastAPI app with just the artifacts router."""
-    from routers.artifacts import router
+    from app.routers.artifacts import router
 
     app = FastAPI()
     app.include_router(router)

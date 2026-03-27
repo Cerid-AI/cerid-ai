@@ -12,7 +12,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from middleware.rate_limit import RateLimitMiddleware, get_client_ip
+from app.middleware.rate_limit import RateLimitMiddleware, get_client_ip
 
 # ---------------------------------------------------------------------------
 # Helper: minimal ASGI app with rate limiter

@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from eval.ragas_metrics import (
+from app.eval.ragas_metrics import (
     MetricResult,
     _parse_score,
     answer_relevancy,

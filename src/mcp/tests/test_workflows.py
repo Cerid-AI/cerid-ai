@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from routers.workflows import (
+from app.routers.workflows import (
     AVAILABLE_AGENTS,
     WORKFLOW_TEMPLATES,
     NodeType,

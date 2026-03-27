@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from db.neo4j.artifacts import get_verification_report, save_verification_report
+from app.db.neo4j.artifacts import get_verification_report, save_verification_report
 
 # ---------------------------------------------------------------------------
 # Fixtures

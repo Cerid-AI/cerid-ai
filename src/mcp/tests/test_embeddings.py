@@ -132,7 +132,7 @@ class TestGetEmbeddingFunction:
 class TestEmbeddingAwareClient:
     def test_injects_embedding_function(self):
         """Wrapper injects ef when model differs from server default."""
-        from deps import _EmbeddingAwareClient
+        from app.deps import _EmbeddingAwareClient
 
         mock_client = MagicMock()
         mock_collection = MagicMock()
@@ -149,7 +149,7 @@ class TestEmbeddingAwareClient:
 
     def test_no_injection_when_server_default(self):
         """Wrapper passes through without ef when using server default model."""
-        from deps import _EmbeddingAwareClient
+        from app.deps import _EmbeddingAwareClient
 
         mock_client = MagicMock()
         wrapper = _EmbeddingAwareClient(mock_client)
@@ -162,7 +162,7 @@ class TestEmbeddingAwareClient:
 
     def test_passthrough_other_methods(self):
         """Other methods (heartbeat, list_collections, etc.) pass through."""
-        from deps import _EmbeddingAwareClient
+        from app.deps import _EmbeddingAwareClient
 
         mock_client = MagicMock()
         mock_client.heartbeat.return_value = 12345
@@ -173,7 +173,7 @@ class TestEmbeddingAwareClient:
 
     def test_get_collection_also_injects(self):
         """get_collection (read path) also gets the embedding function."""
-        from deps import _EmbeddingAwareClient
+        from app.deps import _EmbeddingAwareClient
 
         mock_client = MagicMock()
         wrapper = _EmbeddingAwareClient(mock_client)

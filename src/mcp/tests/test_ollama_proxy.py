@@ -45,7 +45,7 @@ class TestOllamaDisabled:
     async def test_models_disabled(self):
         from fastapi import HTTPException
 
-        from routers.ollama_proxy import list_ollama_models
+        from app.routers.ollama_proxy import list_ollama_models
 
         with _disable_ollama():
             with pytest.raises(HTTPException) as exc_info:
@@ -57,7 +57,7 @@ class TestOllamaDisabled:
     async def test_chat_disabled(self):
         from fastapi import HTTPException
 
-        from routers.ollama_proxy import ChatMessage, ChatRequest, chat_completion
+        from app.routers.ollama_proxy import ChatMessage, ChatRequest, chat_completion
 
         req = ChatRequest(
             model="llama3.2",
@@ -72,7 +72,7 @@ class TestOllamaDisabled:
     async def test_pull_disabled(self):
         from fastapi import HTTPException
 
-        from routers.ollama_proxy import PullRequest, pull_model
+        from app.routers.ollama_proxy import PullRequest, pull_model
 
         with _disable_ollama():
             with pytest.raises(HTTPException) as exc_info:
@@ -87,7 +87,7 @@ class TestOllamaDisabled:
 class TestListModels:
     @pytest.mark.asyncio
     async def test_list_models_success(self):
-        from routers.ollama_proxy import list_ollama_models
+        from app.routers.ollama_proxy import list_ollama_models
 
         mock_resp = MagicMock()
         mock_resp.json.return_value = {
@@ -114,7 +114,7 @@ class TestListModels:
     async def test_list_models_connection_error(self):
         from fastapi import HTTPException
 
-        from routers.ollama_proxy import list_ollama_models
+        from app.routers.ollama_proxy import list_ollama_models
 
         mock_client = AsyncMock()
         mock_client.get.side_effect = httpx.ConnectError("Connection refused")
@@ -131,7 +131,7 @@ class TestListModels:
     async def test_list_models_timeout(self):
         from fastapi import HTTPException
 
-        from routers.ollama_proxy import list_ollama_models
+        from app.routers.ollama_proxy import list_ollama_models
 
         mock_client = AsyncMock()
         mock_client.get.side_effect = httpx.TimeoutException("timed out")
@@ -151,7 +151,7 @@ class TestListModels:
 class TestChatSync:
     @pytest.mark.asyncio
     async def test_chat_success(self):
-        from routers.ollama_proxy import ChatMessage, ChatRequest, chat_completion
+        from app.routers.ollama_proxy import ChatMessage, ChatRequest, chat_completion
 
         ollama_response = {
             "model": "llama3.2",
@@ -195,7 +195,7 @@ class TestChatSync:
     async def test_chat_connection_error(self):
         from fastapi import HTTPException
 
-        from routers.ollama_proxy import ChatMessage, ChatRequest, chat_completion
+        from app.routers.ollama_proxy import ChatMessage, ChatRequest, chat_completion
 
         mock_client = AsyncMock()
         mock_client.post.side_effect = httpx.ConnectError("Connection refused")
@@ -216,7 +216,7 @@ class TestChatSync:
     async def test_chat_circuit_breaker_open(self):
         from fastapi import HTTPException
 
-        from routers.ollama_proxy import ChatMessage, ChatRequest, chat_completion
+        from app.routers.ollama_proxy import ChatMessage, ChatRequest, chat_completion
         from utils.circuit_breaker import CircuitState, get_breaker
 
         # Force circuit breaker open
@@ -245,7 +245,7 @@ class TestChatStream:
     async def test_stream_circuit_breaker_open(self):
         from fastapi import HTTPException
 
-        from routers.ollama_proxy import ChatMessage, ChatRequest, chat_completion
+        from app.routers.ollama_proxy import ChatMessage, ChatRequest, chat_completion
         from utils.circuit_breaker import CircuitState, get_breaker
 
         breaker = get_breaker("ollama")

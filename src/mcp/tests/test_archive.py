@@ -7,7 +7,7 @@ import asyncio
 import os
 from unittest.mock import patch
 
-from routers.upload import _archive_file, list_archive_files
+from app.routers.upload import _archive_file, list_archive_files
 
 # ---------------------------------------------------------------------------
 # Tests: _archive_file helper

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from db.neo4j.artifacts import (
+from app.db.neo4j.artifacts import (
     create_artifact,
     find_artifact_by_filename,
     get_artifact,
@@ -15,13 +15,13 @@ from db.neo4j.artifacts import (
     recategorize_artifact,
     update_artifact,
 )
-from db.neo4j.relationships import (
+from app.db.neo4j.relationships import (
     create_relationship,
     discover_relationships,
     find_related_artifacts,
 )
-from db.neo4j.schema import init_schema
-from db.neo4j.taxonomy import (
+from app.db.neo4j.schema import init_schema
+from app.db.neo4j.taxonomy import (
     create_domain,
     create_sub_category,
     get_taxonomy,

@@ -307,7 +307,7 @@ class TestEstimateCost:
 
 class TestHealthScore:
     def test_perfect_metrics(self):
-        from routers.observability import _compute_health_score
+        from app.routers.observability import _compute_health_score
 
         metrics = {
             "query_latency_ms": {"p95": 200.0},
@@ -325,7 +325,7 @@ class TestHealthScore:
         assert "throughput" in factors
 
     def test_no_data(self):
-        from routers.observability import _compute_health_score
+        from app.routers.observability import _compute_health_score
 
         metrics = {}
         score, grade, factors = _compute_health_score(metrics)
@@ -335,7 +335,7 @@ class TestHealthScore:
         assert grade in ("C", "D")
 
     def test_high_latency_penalized(self):
-        from routers.observability import _compute_health_score
+        from app.routers.observability import _compute_health_score
 
         fast = {"query_latency_ms": {"p95": 100.0}}
         slow = {"query_latency_ms": {"p95": 8000.0}}
@@ -346,7 +346,7 @@ class TestHealthScore:
         assert fast_score > slow_score
 
     def test_grades(self):
-        from routers.observability import _compute_health_score
+        from app.routers.observability import _compute_health_score
 
         # Excellent metrics
         excellent = {
@@ -359,7 +359,7 @@ class TestHealthScore:
         assert grade == "A"
 
     def test_grade_boundaries(self):
-        from routers.observability import _compute_health_score
+        from app.routers.observability import _compute_health_score
 
         # Very poor metrics
         poor = {

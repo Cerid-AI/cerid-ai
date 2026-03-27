@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 
 def _make_app():
-    from routers.chat import router
+    from app.routers.chat import router
 
     app = FastAPI()
     app.include_router(router)
@@ -163,17 +163,17 @@ class TestStripPrefix:
     """Unit tests for _strip_prefix helper."""
 
     def test_strips_openrouter_prefix(self):
-        from routers.chat import _strip_prefix
+        from app.routers.chat import _strip_prefix
 
         assert _strip_prefix("openrouter/anthropic/claude-sonnet-4.6") == "anthropic/claude-sonnet-4.6"
 
     def test_no_prefix_passthrough(self):
-        from routers.chat import _strip_prefix
+        from app.routers.chat import _strip_prefix
 
         assert _strip_prefix("anthropic/claude-sonnet-4.6") == "anthropic/claude-sonnet-4.6"
 
     def test_empty_string(self):
-        from routers.chat import _strip_prefix
+        from app.routers.chat import _strip_prefix
 
         assert _strip_prefix("") == ""
 

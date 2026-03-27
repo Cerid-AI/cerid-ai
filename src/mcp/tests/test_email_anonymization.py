@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 def test_anonymize_strips_email_addresses():
     """When ANONYMIZE_EMAIL_HEADERS is true, From/To/Cc should be redacted."""
-    from parsers.email import _anonymize_header
+    from app.parsers.email import _anonymize_header
 
     with patch("parsers.email._config.ANONYMIZE_EMAIL_HEADERS", True):
         result = _anonymize_header("John Doe <john.doe@example.com>")
@@ -21,7 +21,7 @@ def test_anonymize_strips_email_addresses():
 
 def test_anonymize_handles_multiple_addresses():
     """Multiple recipients should all be anonymized."""
-    from parsers.email import _anonymize_header
+    from app.parsers.email import _anonymize_header
 
     with patch("parsers.email._config.ANONYMIZE_EMAIL_HEADERS", True):
         result = _anonymize_header("alice@foo.com, Bob <bob@bar.org>")
@@ -33,7 +33,7 @@ def test_anonymize_handles_multiple_addresses():
 
 def test_anonymize_preserves_non_email_text():
     """Subject lines and dates should pass through unchanged."""
-    from parsers.email import _anonymize_header
+    from app.parsers.email import _anonymize_header
 
     with patch("parsers.email._config.ANONYMIZE_EMAIL_HEADERS", True):
         result = _anonymize_header("Weekly team standup notes")
@@ -42,7 +42,7 @@ def test_anonymize_preserves_non_email_text():
 
 def test_anonymize_disabled_preserves_original():
     """When ANONYMIZE_EMAIL_HEADERS is false, original headers are kept."""
-    from parsers.email import _anonymize_header
+    from app.parsers.email import _anonymize_header
 
     with patch("parsers.email._config.ANONYMIZE_EMAIL_HEADERS", False):
         result = _anonymize_header("John Doe <john.doe@example.com>")

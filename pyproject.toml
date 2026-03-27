@@ -16,6 +16,7 @@ ignore = ["E501"]  # line length handled by formatter
 
 [tool.ruff.lint.per-file-ignores]
 "main.py" = ["E402"]  # sentry_sdk.init() must run before all other imports
+"app/main.py" = ["E402"]  # sentry_sdk.init() must run before all other imports
 
 [tool.mypy]
 python_version = "3.11"
@@ -35,7 +36,7 @@ testpaths = ["src/mcp/tests"]
 asyncio_mode = "auto"
 
 [tool.importlinter]
-root_packages = ["core", "config"]
+root_packages = ["core", "app", "config"]
 include_external_packages = true
 
 [[tool.importlinter.contracts]]

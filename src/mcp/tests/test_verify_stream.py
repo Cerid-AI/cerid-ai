@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 import pytest
 
-from routers.agents import _STREAM_END, _safe_anext
+from app.routers.agents import _STREAM_END, _safe_anext
 
 # ---------------------------------------------------------------------------
 # Helpers — synthetic async generators for testing

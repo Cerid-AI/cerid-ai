@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from sync._helpers import (
+from app.sync._helpers import (
     ARTIFACTS_JSONL,
     CHROMA_BATCH_SIZE,
     DOMAINS_JSONL,
@@ -29,7 +29,7 @@ from sync._helpers import (
     _sha256_file,
     _write_jsonl,
 )
-from sync.manifest import read_manifest, write_manifest
+from app.sync.manifest import read_manifest, write_manifest
 
 # ---------------------------------------------------------------------------
 # Tests: Constants
@@ -330,7 +330,7 @@ class TestWriteManifest:
 
 class TestExportNeo4j:
     def test_exports_artifacts(self, mock_neo4j, tmp_path):
-        from sync.export import export_neo4j
+        from app.sync.export import export_neo4j
 
         driver, session = mock_neo4j
 
@@ -361,7 +361,7 @@ class TestExportNeo4j:
         assert artifacts_file.exists()
 
     def test_handles_neo4j_error(self, mock_neo4j, tmp_path):
-        from sync.export import export_neo4j
+        from app.sync.export import export_neo4j
 
         driver, session = mock_neo4j
         session.run.side_effect = Exception("Neo4j down")
@@ -377,7 +377,7 @@ class TestExportNeo4j:
 class TestExportRedis:
     @patch("sync.export.config")
     def test_exports_audit_log(self, mock_config, tmp_path):
-        from sync.export import export_redis
+        from app.sync.export import export_redis
 
         mock_config.REDIS_INGEST_LOG = "ingest:log"
         redis = MagicMock()
@@ -393,7 +393,7 @@ class TestExportRedis:
 
     @patch("sync.export.config")
     def test_handles_redis_error(self, mock_config, tmp_path):
-        from sync.export import export_redis
+        from app.sync.export import export_redis
 
         mock_config.REDIS_INGEST_LOG = "ingest:log"
         redis = MagicMock()
@@ -410,7 +410,7 @@ class TestExportRedis:
 class TestImportRedis:
     @patch("sync.import_.config")
     def test_imports_new_entries(self, mock_config, tmp_path):
-        from sync.import_ import import_redis
+        from app.sync.import_ import import_redis
 
         mock_config.REDIS_INGEST_LOG = "ingest:log"
         mock_config.REDIS_LOG_MAX = 10000
@@ -432,7 +432,7 @@ class TestImportRedis:
 
     @patch("sync.import_.config")
     def test_deduplicates_existing(self, mock_config, tmp_path):
-        from sync.import_ import import_redis
+        from app.sync.import_ import import_redis
 
         mock_config.REDIS_INGEST_LOG = "ingest:log"
         mock_config.REDIS_LOG_MAX = 10000
@@ -453,7 +453,7 @@ class TestImportRedis:
 
     @patch("sync.import_.config")
     def test_missing_export_file(self, mock_config, tmp_path):
-        from sync.import_ import import_redis
+        from app.sync.import_ import import_redis
 
         mock_config.REDIS_INGEST_LOG = "ingest:log"
         mock_config.REDIS_LOG_MAX = 10000

@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from services.ingestion import (
+from app.services.ingestion import (
     _content_hash,
     _rollback_chromadb,
     ingest_content,

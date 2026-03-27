@@ -12,8 +12,8 @@ from unittest import mock
 _config_stub = type("config", (), {"MACHINE_ID": "test-machine", "ENCRYPT_SYNC": True})()
 
 with mock.patch.dict("sys.modules", {"config": _config_stub}):
-    import sync.user_state as _user_state_mod
-    from sync.user_state import (
+    import app.sync.user_state as _user_state_mod
+    from app.sync.user_state import (
         read_conversation,
         read_conversations,
         read_preferences,

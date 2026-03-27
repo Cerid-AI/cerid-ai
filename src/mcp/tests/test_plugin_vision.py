@@ -185,7 +185,7 @@ class TestDetectPlugin:
 
     def test_detect_audio(self):
         """Audio extensions route to audio plugin."""
-        from services.multimodal import _detect_plugin
+        from app.services.multimodal import _detect_plugin
 
         assert _detect_plugin("/path/to/file.mp3", "") == "audio"
         assert _detect_plugin("/path/to/file.wav", "") == "audio"
@@ -193,7 +193,7 @@ class TestDetectPlugin:
 
     def test_detect_ocr(self):
         """Image extensions route to OCR plugin by default."""
-        from services.multimodal import _detect_plugin
+        from app.services.multimodal import _detect_plugin
 
         assert _detect_plugin("/path/to/file.png", "") == "ocr"
         assert _detect_plugin("/path/to/file.jpg", "") == "ocr"
@@ -201,21 +201,21 @@ class TestDetectPlugin:
 
     def test_detect_override(self):
         """Plugin override forces specific plugin."""
-        from services.multimodal import _detect_plugin
+        from app.services.multimodal import _detect_plugin
 
         assert _detect_plugin("/path/to/file.png", "vision") == "vision"
         assert _detect_plugin("/path/to/file.png", "ocr") == "ocr"
 
     def test_detect_unknown_extension(self):
         """Unknown extensions raise ValueError."""
-        from services.multimodal import _detect_plugin
+        from app.services.multimodal import _detect_plugin
 
         with pytest.raises(ValueError, match="No multi-modal plugin"):
             _detect_plugin("/path/to/file.xyz", "")
 
     def test_detect_unknown_override(self):
         """Unknown plugin override raises ValueError."""
-        from services.multimodal import _detect_plugin
+        from app.services.multimodal import _detect_plugin
 
         with pytest.raises(ValueError, match="Unknown plugin"):
             _detect_plugin("/path/to/file.png", "nonexistent")
@@ -227,7 +227,7 @@ class TestIngestMultimodal:
     @pytest.mark.asyncio
     async def test_ingest_blocked_in_community(self):
         """ingest_multimodal returns error in community tier."""
-        from services.multimodal import ingest_multimodal
+        from app.services.multimodal import ingest_multimodal
 
         with patch("services.multimodal.config") as mock_config:
             mock_config.FEATURE_TIER = "community"
@@ -239,7 +239,7 @@ class TestIngestMultimodal:
     @pytest.mark.asyncio
     async def test_ingest_file_not_found(self):
         """ingest_multimodal returns error for missing files."""
-        from services.multimodal import ingest_multimodal
+        from app.services.multimodal import ingest_multimodal
 
         with patch("services.multimodal.config") as mock_config:
             mock_config.FEATURE_TIER = "pro"

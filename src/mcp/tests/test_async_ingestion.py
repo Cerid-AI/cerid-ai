@@ -26,7 +26,7 @@ def _ensure_real_router():
     ri = sys.modules.get("routers.ingestion")
     if ri is not None and not hasattr(ri, "ingest_batch_endpoint"):
         del sys.modules["routers.ingestion"]
-        import routers.ingestion  # noqa: F811
+        import app.routers.ingestion  # noqa: F811
         importlib.reload(routers.ingestion)
     return importlib.import_module("routers.ingestion")
 
@@ -56,7 +56,7 @@ class TestAsyncFileParsing:
             {"status": "success", "domain": "coding", "chunks": 1},  # ingest_content
         ])
 
-        from services.ingestion import ingest_file
+        from app.services.ingestion import ingest_file
 
         asyncio.get_event_loop().run_until_complete(
             ingest_file("/archive/test.txt", domain="coding")
@@ -67,7 +67,7 @@ class TestAsyncFileParsing:
 
         # First call should be parse_file
         first_call = mock_asyncio.to_thread.call_args_list[0]
-        from parsers import parse_file
+        from app.parsers import parse_file
         assert first_call.args[0] is parse_file
 
     @patch("services.ingestion.asyncio")
@@ -87,7 +87,7 @@ class TestAsyncFileParsing:
             {"status": "success", "domain": "coding", "chunks": 2},
         ])
 
-        from services.ingestion import ingest_file
+        from app.services.ingestion import ingest_file
 
         asyncio.get_event_loop().run_until_complete(
             ingest_file("/archive/test.txt", domain="coding")
@@ -95,7 +95,7 @@ class TestAsyncFileParsing:
 
         # Second to_thread call should be ingest_content
         second_call = mock_asyncio.to_thread.call_args_list[1]
-        from services.ingestion import ingest_content
+        from app.services.ingestion import ingest_content
         assert second_call.args[0] is ingest_content
 
     @patch("services.ingestion.asyncio")
@@ -116,7 +116,7 @@ class TestAsyncFileParsing:
             {"status": "success", "domain": "general", "chunks": 3},
         ])
 
-        from services.ingestion import ingest_file
+        from app.services.ingestion import ingest_file
 
         result = asyncio.get_event_loop().run_until_complete(
             ingest_file("/archive/doc.pdf", domain="general")
@@ -135,7 +135,7 @@ class TestIngestBatch:
     @pytest.mark.asyncio
     async def test_batch_validates_max_items(self):
         """Batch size exceeding BATCH_MAX_ITEMS should raise ValueError."""
-        from services.ingestion import ingest_batch
+        from app.services.ingestion import ingest_batch
 
         items = [{"content": f"item {i}"} for i in range(21)]
         with pytest.raises(ValueError, match="exceeds maximum"):
@@ -147,7 +147,7 @@ class TestIngestBatch:
         """Batch should handle content-based items."""
         mock_ingest.return_value = {"status": "success", "chunks": 1}
 
-        from services.ingestion import ingest_batch
+        from app.services.ingestion import ingest_batch
 
         items = [
             {"content": "first item", "domain": "coding"},
@@ -162,7 +162,7 @@ class TestIngestBatch:
     @pytest.mark.asyncio
     async def test_batch_empty_item_returns_error(self):
         """Items without content or file_path should return an error result."""
-        from services.ingestion import ingest_batch
+        from app.services.ingestion import ingest_batch
 
         items = [{"domain": "coding"}]  # No content or file_path
         result = await ingest_batch(items)
@@ -180,7 +180,7 @@ class TestIngestBatch:
             {"status": "success", "chunks": 2},
         ]
 
-        from services.ingestion import ingest_batch
+        from app.services.ingestion import ingest_batch
 
         items = [
             {"content": "good 1", "domain": "coding"},
@@ -199,7 +199,7 @@ class TestIngestBatch:
         """Duplicate results should count as 'succeeded'."""
         mock_ingest.return_value = {"status": "duplicate", "duplicate_of": "existing.txt"}
 
-        from services.ingestion import ingest_batch
+        from app.services.ingestion import ingest_batch
 
         items = [{"content": "duplicate content"}]
         result = await ingest_batch(items)
@@ -213,7 +213,7 @@ class TestIngestBatch:
         """Batch should handle file_path-based items."""
         mock_ingest_file.return_value = {"status": "success", "chunks": 3}
 
-        from services.ingestion import ingest_batch
+        from app.services.ingestion import ingest_batch
 
         items = [
             {"file_path": "/archive/test.pdf", "domain": "coding"},

@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from eval.ablation import (
+from app.eval.ablation import (
     _RAG_TOGGLES,
     PRESET_CONFIGS,
     AblationConfig,

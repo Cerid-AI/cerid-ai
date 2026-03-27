@@ -7,7 +7,7 @@ import math
 
 import pytest
 
-from eval.metrics import (
+from app.eval.metrics import (
     average_precision,
     mrr,
     ndcg_at_k,

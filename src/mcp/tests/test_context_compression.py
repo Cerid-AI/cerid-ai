@@ -204,7 +204,7 @@ class TestCompressEndpoint:
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
 
-        from routers.agents import router
+        from app.routers.agents import router
 
         app = FastAPI()
         app.include_router(router)

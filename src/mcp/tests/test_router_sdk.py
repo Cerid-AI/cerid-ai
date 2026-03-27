@@ -14,7 +14,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from routers.sdk import router as sdk_router
+from app.routers.sdk import router as sdk_router
 
 
 def _make_app(trading_enabled: bool = False) -> FastAPI:

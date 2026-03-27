@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 @pytest.fixture()
 def client():
     """Create a test client with mocked dependencies."""
-    from main import app  # noqa: E402 — triggers router imports
+    from app.main import app  # noqa: E402 — triggers router imports
 
     with (
         patch("routers.kb_admin.get_neo4j", return_value=MagicMock()),

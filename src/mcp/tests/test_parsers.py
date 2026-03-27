@@ -12,8 +12,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from parsers._utils import _strip_html_tags, _strip_rtf
-from parsers.registry import _MAX_TEXT_CHARS, PARSER_REGISTRY, parse_file, register_parser
+from app.parsers._utils import _strip_html_tags, _strip_rtf
+from app.parsers.registry import _MAX_TEXT_CHARS, PARSER_REGISTRY, parse_file, register_parser
 
 # ---------------------------------------------------------------------------
 # Tests: _strip_html_tags (pure function)

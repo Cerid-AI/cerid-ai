@@ -16,27 +16,27 @@ from core.contracts.llm import LLMClient, LLMResponse
 # --- Compliance tests: verify each store implements its contract ---
 
 def test_chroma_store_implements_vector_store():
-    from stores.chroma_store import ChromaVectorStore
+    from app.stores.chroma_store import ChromaVectorStore
     assert issubclass(ChromaVectorStore, VectorStore)
 
 
 def test_neo4j_store_implements_graph_store():
-    from stores.neo4j_store import Neo4jGraphStore
+    from app.stores.neo4j_store import Neo4jGraphStore
     assert issubclass(Neo4jGraphStore, GraphStore)
 
 
 def test_redis_cache_implements_cache_store():
-    from stores.redis_cache import RedisCacheStore
+    from app.stores.redis_cache import RedisCacheStore
     assert issubclass(RedisCacheStore, CacheStore)
 
 
 def test_redis_audit_implements_audit_log():
-    from stores.redis_audit import RedisAuditLog
+    from app.stores.redis_audit import RedisAuditLog
     assert issubclass(RedisAuditLog, AuditLog)
 
 
 def test_llm_client_implements_contract():
-    from stores.llm_clients import OpenRouterLLMClient
+    from app.stores.llm_clients import OpenRouterLLMClient
     assert issubclass(OpenRouterLLMClient, LLMClient)
 
 
@@ -44,7 +44,7 @@ def test_llm_client_implements_contract():
 
 @pytest.mark.asyncio
 async def test_chroma_store_search_returns_search_results():
-    from stores.chroma_store import ChromaVectorStore
+    from app.stores.chroma_store import ChromaVectorStore
 
     mock_collection = MagicMock()
     mock_collection.query.return_value = {
@@ -63,7 +63,7 @@ async def test_chroma_store_search_returns_search_results():
 
 @pytest.mark.asyncio
 async def test_chroma_store_count():
-    from stores.chroma_store import ChromaVectorStore
+    from app.stores.chroma_store import ChromaVectorStore
 
     mock_collection = MagicMock()
     mock_collection.count.return_value = 42
@@ -73,7 +73,7 @@ async def test_chroma_store_count():
 
 @pytest.mark.asyncio
 async def test_redis_cache_get_set_delete():
-    from stores.redis_cache import RedisCacheStore
+    from app.stores.redis_cache import RedisCacheStore
 
     mock_redis = MagicMock()
     mock_redis.get.return_value = b"cached-value"
@@ -92,7 +92,7 @@ async def test_redis_cache_get_set_delete():
 
 @pytest.mark.asyncio
 async def test_redis_audit_record_and_query():
-    from stores.redis_audit import RedisAuditLog
+    from app.stores.redis_audit import RedisAuditLog
 
     mock_redis = MagicMock()
     store = RedisAuditLog(mock_redis)
@@ -109,7 +109,7 @@ async def test_redis_audit_record_and_query():
 
 @pytest.mark.asyncio
 async def test_openrouter_llm_client_delegates():
-    from stores.llm_clients import OpenRouterLLMClient
+    from app.stores.llm_clients import OpenRouterLLMClient
 
     with patch("core.utils.llm_client.call_llm") as mock_call:
         mock_call.return_value = {"content": "hello", "model": "test", "usage": {"tokens": 10}}
