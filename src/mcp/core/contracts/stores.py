@@ -85,3 +85,61 @@ class GraphStore(ABC):
 
     @abstractmethod
     async def list_domains(self) -> list[str]: ...
+
+    # -- Batch helpers used by the query agent pipeline --
+
+    async def get_artifacts_batch(
+        self, artifact_ids: list[str]
+    ) -> dict[str, ArtifactNode]:
+        """Batch-fetch multiple artifacts by ID.
+
+        Returns ``{artifact_id: ArtifactNode}`` for all IDs that exist.
+        Default implementation calls :meth:`get_artifact` in parallel;
+        concrete stores should override with a single round-trip query.
+        """
+        import asyncio
+
+        results: dict[str, ArtifactNode] = {}
+        nodes = await asyncio.gather(
+            *(self.get_artifact(aid) for aid in artifact_ids)
+        )
+        for node in nodes:
+            if node is not None:
+                results[node.id] = node
+        return results
+
+    async def find_related_with_metadata(
+        self,
+        artifact_ids: list[str],
+        *,
+        depth: int = 1,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Find related artifacts with full relationship metadata.
+
+        Returns a list of dicts with keys: ``id``, ``filename``, ``domain``,
+        ``summary``, ``keywords``, ``chunk_ids``, ``chunk_count``,
+        ``relationship_type``, ``relationship_depth``, ``relationship_reason``.
+
+        Default implementation delegates to :meth:`get_related` and wraps
+        the :class:`ArtifactNode` results (without relationship metadata).
+        Concrete stores should override to include relationship details.
+        """
+        nodes = await self.get_related(
+            artifact_ids, depth=depth, limit=limit,
+        )
+        return [
+            {
+                "id": n.id,
+                "filename": n.filename,
+                "domain": n.domain,
+                "summary": n.summary,
+                "keywords": "[]",
+                "chunk_ids": "[]",
+                "chunk_count": 0,
+                "relationship_type": "",
+                "relationship_depth": 1,
+                "relationship_reason": "",
+            }
+            for n in nodes
+        ]
