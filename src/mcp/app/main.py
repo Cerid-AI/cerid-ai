@@ -47,6 +47,7 @@ from app.routers import (
     kb_admin,
     mcp_sse,
     memories,
+    migration,
     models,
     observability,
     ollama_proxy,
@@ -62,6 +63,7 @@ from app.routers import (
     upload,
     user_state,
     workflows,
+    ws_sync,
 )
 from app.scheduler import start_scheduler, stop_scheduler
 from config.features import CERID_MULTI_USER
@@ -393,6 +395,13 @@ app.include_router(observability.router, prefix="/api/v1")
 # Alerting API (threshold-based metric alerts with webhook notifications)
 app.include_router(alerts.router)
 app.include_router(alerts.router, prefix="/api/v1")
+
+# Migration API (Notion/Obsidian importers)
+app.include_router(migration.router)
+app.include_router(migration.router, prefix="/api/v1")
+
+# WebSocket sync (real-time collaborative memory; gated on WS_SYNC_ENABLED)
+app.include_router(ws_sync.router)
 
 # Ollama local LLM proxy (always registered; endpoints gate on OLLAMA_ENABLED)
 app.include_router(ollama_proxy.router)
