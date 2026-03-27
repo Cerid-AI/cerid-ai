@@ -10,11 +10,10 @@ Events: ingestion.complete, health.warning, digest.ready, rectify.findings
 
 from __future__ import annotations
 
-import logging
-from typing import Any
-
 import ipaddress
+import logging
 import socket
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
