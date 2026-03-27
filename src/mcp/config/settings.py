@@ -586,6 +586,17 @@ EVAL_RAGAS_MODEL: str = os.getenv("CERID_EVAL_RAGAS_MODEL", "")
 EVAL_LEADERBOARD_MAX: int = 50
 EVAL_DEFAULT_BENCHMARK: str = "beir_subset.jsonl"
 
+# ---------------------------------------------------------------------------
+# Enterprise Features
+# ---------------------------------------------------------------------------
+CERID_ENTERPRISE = os.getenv("CERID_ENTERPRISE", "false").lower() in ("1", "true")
+ABAC_POLICY_KEY = "cerid:enterprise:abac_policy"
+SSO_PROVIDER = os.getenv("CERID_SSO_PROVIDER", "")  # saml | oidc
+SSO_METADATA_URL = os.getenv("CERID_SSO_METADATA_URL", "")
+CLASSIFICATION_ENABLED = os.getenv("CERID_CLASSIFICATION", "false").lower() in ("1", "true")
+AUDIT_STREAM_KEY = "cerid:audit:stream"
+AUDIT_RETENTION_DAYS = int(os.getenv("CERID_AUDIT_RETENTION_DAYS", "365"))
+
 if not NEO4J_PASSWORD:
     _config_logger.warning(
         "NEO4J_PASSWORD is empty — Neo4j queries will fail with auth errors. "
