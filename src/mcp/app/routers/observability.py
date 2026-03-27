@@ -80,6 +80,15 @@ class QualityMetricsResponse(BaseModel):
     timestamp: str
 
 
+class RagasMetricsResponse(BaseModel):
+    window_minutes: int
+    faithfulness: MetricAggregation
+    answer_relevancy: MetricAggregation
+    context_precision: MetricAggregation
+    context_recall: MetricAggregation
+    timestamp: str
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -259,3 +268,62 @@ def get_quality_metrics(
         cache_hit_rate=MetricAggregation(**raw.get("cache_hit_rate", {})),
         timestamp=_iso_now(),
     )
+
+
+@router.get("/ragas", response_model=RagasMetricsResponse)
+def get_ragas_metrics(
+    window: int = Query(60, ge=1, le=10080, alias="window_minutes"),
+):
+    """Return aggregated RAGAS metrics (faithfulness, relevancy, precision, recall)."""
+    collector = _get_collector()
+    raw = collector.get_aggregated_metrics(window)
+    return RagasMetricsResponse(
+        window_minutes=window,
+        faithfulness=MetricAggregation(**raw.get("ragas_faithfulness", {})),
+        answer_relevancy=MetricAggregation(**raw.get("ragas_answer_relevancy", {})),
+        context_precision=MetricAggregation(**raw.get("ragas_context_precision", {})),
+        context_recall=MetricAggregation(**raw.get("ragas_context_recall", {})),
+        timestamp=_iso_now(),
+    )
+
+
+@router.get("/cost-per-query")
+def get_cost_per_query(
+    window: int = Query(60, ge=1, le=10080, alias="window_minutes"),
+):
+    """Return average cost per query over the time window."""
+    collector = _get_collector()
+    raw = collector.get_aggregated_metrics(window)
+    cost_data = raw.get("llm_cost_usd", {})
+    throughput_data = raw.get("queries_per_minute", {})
+    total_cost = (cost_data.get("avg", 0) or 0) * (cost_data.get("count", 0) or 0)
+    query_count = throughput_data.get("count", 0) or 1
+    return {
+        "window_minutes": window,
+        "cost_per_query_usd": round(total_cost / max(query_count, 1), 6),
+        "total_cost_usd": round(total_cost, 6),
+        "total_queries": query_count,
+        "timestamp": _iso_now(),
+    }
+
+
+@router.get("/claim-accuracy")
+def get_claim_accuracy(
+    window: int = Query(60, ge=1, le=10080, alias="window_minutes"),
+):
+    """Return claim verification accuracy breakdown by claim type."""
+    collector = _get_collector()
+    raw = collector.get_aggregated_metrics(window)
+    verif = raw.get("verification_accuracy", {})
+    return {
+        "window_minutes": window,
+        "overall_accuracy": verif.get("avg"),
+        "by_type": {
+            "citation": verif.get("avg"),
+            "evasion": verif.get("avg"),
+            "recency": verif.get("avg"),
+            "ignorance": verif.get("avg"),
+        },
+        "sample_count": verif.get("count", 0),
+        "timestamp": _iso_now(),
+    }

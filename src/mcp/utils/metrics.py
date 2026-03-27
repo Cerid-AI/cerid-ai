@@ -33,6 +33,10 @@ METRIC_NAMES = frozenset({
     "cache_hit_rate",
     "verification_accuracy",
     "queries_per_minute",
+    "ragas_faithfulness",
+    "ragas_answer_relevancy",
+    "ragas_context_precision",
+    "ragas_context_recall",
 })
 
 # Model pricing table (USD per 1M tokens) --input/output

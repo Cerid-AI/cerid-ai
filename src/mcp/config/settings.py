@@ -572,6 +572,14 @@ CLIENT_RATE_LIMITS: dict[str, dict[str, tuple[int, int]]] = {
 }
 
 # ---------------------------------------------------------------------------
+# Alerting
+# ---------------------------------------------------------------------------
+ALERT_CHECK_INTERVAL_S: int = 60
+ALERT_MAX_PER_METRIC: int = 5
+ALERT_WEBHOOK_TIMEOUT_S: int = 10
+ALERT_EVENTS_MAX: int = 1000  # Max stored alert events
+
+# ---------------------------------------------------------------------------
 # Eval Harness
 # ---------------------------------------------------------------------------
 EVAL_RAGAS_MODEL: str = os.getenv("CERID_EVAL_RAGAS_MODEL", "")

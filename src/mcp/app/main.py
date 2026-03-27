@@ -28,8 +28,6 @@ sentry_sdk.init(
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from config.features import CERID_MULTI_USER
-from config.settings import CERID_TRADING_ENABLED
 from app.db import neo4j as graph
 from app.deps import close_chroma, close_neo4j, close_redis, get_neo4j
 from app.middleware.auth import APIKeyMiddleware
@@ -39,6 +37,7 @@ from app.middleware.tenant_context import TenantContextMiddleware
 from app.routers import (
     a2a,
     agents,
+    alerts,
     artifacts,
     automations,
     chat,
@@ -65,6 +64,8 @@ from app.routers import (
     workflows,
 )
 from app.scheduler import start_scheduler, stop_scheduler
+from config.features import CERID_MULTI_USER
+from config.settings import CERID_TRADING_ENABLED
 
 logging.basicConfig(
     level=logging.INFO,
@@ -243,8 +244,8 @@ async def lifespan(app: FastAPI):
 
     # Pre-warm connections and models for faster first request
     try:
-        from config.taxonomy import DOMAINS, collection_name
         from app.deps import get_chroma
+        from config.taxonomy import DOMAINS, collection_name
         chroma = get_chroma()
         _first_domain = DOMAINS[0] if DOMAINS else None
         if _first_domain:
@@ -388,6 +389,10 @@ app.include_router(models.router, prefix="/api/v1")
 # Observability dashboard API (real-time metrics, health score, cost, quality)
 app.include_router(observability.router)
 app.include_router(observability.router, prefix="/api/v1")
+
+# Alerting API (threshold-based metric alerts with webhook notifications)
+app.include_router(alerts.router)
+app.include_router(alerts.router, prefix="/api/v1")
 
 # Ollama local LLM proxy (always registered; endpoints gate on OLLAMA_ENABLED)
 app.include_router(ollama_proxy.router)
