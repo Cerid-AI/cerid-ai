@@ -20,7 +20,7 @@ jobs:
       - run: ruff check src/mcp/
       - run: pip install import-linter
       - name: Import boundary check
-        run: cd src/mcp && python -m importlinter
+        run: cd src/mcp && lint-imports
 
   typecheck:
     runs-on: ubuntu-latest

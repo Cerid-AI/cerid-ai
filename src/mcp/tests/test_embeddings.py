@@ -141,7 +141,7 @@ class TestEmbeddingAwareClient:
         wrapper = _EmbeddingAwareClient(mock_client)
 
         fake_ef = MagicMock()
-        with patch("core.utils.embeddings.get_embedding_function", return_value=fake_ef):
+        with patch("utils.embeddings.get_embedding_function", return_value=fake_ef):
             wrapper.get_or_create_collection(name="test_coll")
 
         call_kwargs = mock_client.get_or_create_collection.call_args[1]
@@ -154,7 +154,7 @@ class TestEmbeddingAwareClient:
         mock_client = MagicMock()
         wrapper = _EmbeddingAwareClient(mock_client)
 
-        with patch("core.utils.embeddings.get_embedding_function", return_value=None):
+        with patch("utils.embeddings.get_embedding_function", return_value=None):
             wrapper.get_or_create_collection(name="test_coll")
 
         call_kwargs = mock_client.get_or_create_collection.call_args[1]
@@ -179,7 +179,7 @@ class TestEmbeddingAwareClient:
         wrapper = _EmbeddingAwareClient(mock_client)
 
         fake_ef = MagicMock()
-        with patch("core.utils.embeddings.get_embedding_function", return_value=fake_ef):
+        with patch("utils.embeddings.get_embedding_function", return_value=fake_ef):
             wrapper.get_collection(name="test_coll")
 
         call_kwargs = mock_client.get_collection.call_args[1]

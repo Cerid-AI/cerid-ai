@@ -101,7 +101,7 @@ class TestValidateNode:
 # ---------------------------------------------------------------------------
 
 class TestParseNode:
-    @patch("core.agents.triage.parse_file")
+    @patch("app.agents.triage.parse_file")
     def test_successful_parse(self, mock_parse):
         mock_parse.return_value = {
             "text": "parsed content here",
@@ -112,7 +112,7 @@ class TestParseNode:
         assert result["status"] == "parsed"
         assert result["parsed_text"] == "parsed content here"
 
-    @patch("core.agents.triage.parse_file")
+    @patch("app.agents.triage.parse_file")
     def test_parse_error(self, mock_parse):
         mock_parse.side_effect = ValueError("Bad file format")
         state = _base_state(file_path=os.path.join(tempfile.gettempdir(), "test.txt"))
@@ -120,7 +120,7 @@ class TestParseNode:
         assert result["status"] == "error"
         assert "Bad file format" in result["error"]
 
-    @patch("core.agents.triage.parse_file")
+    @patch("app.agents.triage.parse_file")
     def test_structured_data_detected(self, mock_parse):
         mock_parse.return_value = {
             "text": "table data",
@@ -131,7 +131,7 @@ class TestParseNode:
         result = parse_node(state)
         assert result["is_structured"] is True
 
-    @patch("core.agents.triage.parse_file")
+    @patch("app.agents.triage.parse_file")
     def test_xlsx_is_structured(self, mock_parse):
         mock_parse.return_value = {
             "text": "spreadsheet data",
@@ -141,7 +141,7 @@ class TestParseNode:
         result = parse_node(state)
         assert result["is_structured"] is True
 
-    @patch("core.agents.triage.parse_file")
+    @patch("app.agents.triage.parse_file")
     def test_unexpected_error_caught(self, mock_parse):
         mock_parse.side_effect = RuntimeError("unexpected")
         state = _base_state(file_path=os.path.join(tempfile.gettempdir(), "test.txt"))
@@ -186,7 +186,7 @@ class TestRouteCategorization:
 # ---------------------------------------------------------------------------
 
 class TestExtractMetadataNode:
-    @patch("core.agents.triage.extract_metadata")
+    @patch("app.agents.triage.extract_metadata")
     def test_merges_metadata(self, mock_extract):
         mock_extract.return_value = {"word_count": 100, "summary": "local summary"}
         state = _base_state(
@@ -200,7 +200,7 @@ class TestExtractMetadataNode:
         assert result["metadata"]["summary"] == "AI summary"
         assert result["metadata"]["file_type"] == ""
 
-    @patch("core.agents.triage.extract_metadata")
+    @patch("app.agents.triage.extract_metadata")
     def test_adds_file_type(self, mock_extract):
         mock_extract.return_value = {}
         state = _base_state(file_type="pdf", page_count=5)
@@ -208,14 +208,14 @@ class TestExtractMetadataNode:
         assert result["metadata"]["file_type"] == "pdf"
         assert result["metadata"]["page_count"] == 5
 
-    @patch("core.agents.triage.extract_metadata")
+    @patch("app.agents.triage.extract_metadata")
     def test_ai_categorized_flag(self, mock_extract):
         mock_extract.return_value = {}
         state = _base_state(needs_ai_categorization=True)
         result = extract_metadata_node(state)
         assert result["metadata"]["ai_categorized"] == "true"
 
-    @patch("core.agents.triage.extract_metadata")
+    @patch("app.agents.triage.extract_metadata")
     def test_tags_preserved(self, mock_extract):
         mock_extract.return_value = {}
         state = _base_state(tags="important,review")
@@ -228,7 +228,7 @@ class TestExtractMetadataNode:
 # ---------------------------------------------------------------------------
 
 class TestChunkNode:
-    @patch("core.agents.triage.chunk_text")
+    @patch("app.agents.triage.chunk_text")
     def test_produces_chunks(self, mock_chunk):
         mock_chunk.return_value = ["chunk 1", "chunk 2"]
         state = _base_state(parsed_text="some text to chunk")
@@ -236,7 +236,7 @@ class TestChunkNode:
         assert result["chunks"] == ["chunk 1", "chunk 2"]
         mock_chunk.assert_called_once()
 
-    @patch("core.agents.triage.chunk_text")
+    @patch("app.agents.triage.chunk_text")
     def test_empty_text(self, mock_chunk):
         mock_chunk.return_value = []
         state = _base_state(parsed_text="")

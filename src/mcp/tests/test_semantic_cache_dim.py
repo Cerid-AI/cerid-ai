@@ -10,7 +10,7 @@ def test_semantic_cache_dim_default_is_768():
         # Re-import to pick up the default
         import importlib
 
-        import utils.semantic_cache as sc_mod
+        import core.retrieval.semantic_cache as sc_mod
         importlib.reload(sc_mod)
         assert sc_mod._HNSW_DIM == 768, f"Expected 768, got {sc_mod._HNSW_DIM}"
     finally:
@@ -23,7 +23,7 @@ def test_semantic_cache_dim_overridable_via_env(monkeypatch):
     monkeypatch.setenv("SEMANTIC_CACHE_DIM", "256")
     import importlib
 
-    import utils.semantic_cache as sc_mod
+    import core.retrieval.semantic_cache as sc_mod
     importlib.reload(sc_mod)
     assert sc_mod._HNSW_DIM == 256
 

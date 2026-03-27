@@ -111,7 +111,7 @@ async def test_openrouter_llm_client_delegates():
     from app.stores.llm_clients import OpenRouterLLMClient
 
     with patch("core.utils.llm_client.call_llm") as mock_call:
-        mock_call.return_value = {"content": "hello", "model": "test", "usage": {"tokens": 10}}
+        mock_call.return_value = "hello"
         client = OpenRouterLLMClient()
         resp = await client.call([{"role": "user", "content": "hi"}])
         assert isinstance(resp, LLMResponse)

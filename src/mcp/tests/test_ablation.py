@@ -143,7 +143,7 @@ class TestRunAblation:
     async def test_handles_query_failure_gracefully(self):
         with (
             patch("utils.features.set_toggle"),
-            patch("core.agents.query_agent.agent_query", new_callable=AsyncMock, side_effect=RuntimeError("boom")),
+            patch("agents.query_agent.agent_query", new_callable=AsyncMock, side_effect=RuntimeError("boom")),
         ):
             configs = [AblationConfig(name="test")]
             results = await run_ablation(

@@ -211,12 +211,12 @@ class TestEnsureDir:
 # ---------------------------------------------------------------------------
 
 class TestDefaultSyncDir:
-    @patch("sync._helpers.config")
+    @patch("app.sync._helpers.config")
     def test_uses_config_value(self, mock_config):
         mock_config.SYNC_DIR = "/custom/sync"
         assert _default_sync_dir() == "/custom/sync"
 
-    @patch("sync._helpers.config")
+    @patch("app.sync._helpers.config")
     def test_fallback_when_no_config(self, mock_config):
         # Remove SYNC_DIR attribute
         del mock_config.SYNC_DIR
@@ -244,7 +244,7 @@ class TestReadManifest:
         mf = tmp_path / "manifest.json"
         mf.write_text(json.dumps(manifest))
 
-        with patch("sync.manifest._default_sync_dir", return_value=str(tmp_path)):
+        with patch("app.sync.manifest._default_sync_dir", return_value=str(tmp_path)):
             result = read_manifest(str(tmp_path))
 
         assert result["machine_id"] == "test-host"

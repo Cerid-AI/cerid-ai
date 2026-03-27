@@ -392,7 +392,7 @@ class TestRerankerModule:
     def test_sigmoid_clipping(self):
         import numpy as np
 
-        from utils.reranker import _sigmoid
+        from core.retrieval.reranker import _sigmoid
         # Extreme values should not overflow
         assert _sigmoid(np.array([100.0]))[0] == pytest.approx(1.0, abs=1e-6)
         assert _sigmoid(np.array([-100.0]))[0] == pytest.approx(0.0, abs=1e-6)
@@ -835,69 +835,82 @@ class TestApplyMetadataBoost:
 # ---------------------------------------------------------------------------
 
 class TestApplyQualityBoost:
-    def test_no_driver(self):
-        """Returns results unchanged when neo4j_driver is None."""
+    @staticmethod
+    def _mock_graph_store(scores_map=None, raise_exc=None):
+        """Create a mock GraphStore with get_artifacts_batch returning ArtifactNodes."""
+        gs = MagicMock()
+        if raise_exc:
+            gs.get_artifacts_batch = AsyncMock(side_effect=raise_exc)
+        else:
+            scores_map = scores_map or {}
+            nodes = {}
+            for aid, score in scores_map.items():
+                node = MagicMock()
+                node.quality_score = score
+                nodes[aid] = node
+            gs.get_artifacts_batch = AsyncMock(return_value=nodes)
+        return gs
+
+    @pytest.mark.asyncio
+    async def test_no_driver(self):
+        """Returns results unchanged when neither driver nor graph_store is provided."""
         results = [_make_result(relevance=0.8)]
-        boosted = apply_quality_boost(results, neo4j_driver=None)
+        boosted = await apply_quality_boost(results, neo4j_driver=None)
         assert boosted[0]["relevance"] == 0.8
         assert "quality_score" not in boosted[0]
 
-    def test_empty_results(self):
+    @pytest.mark.asyncio
+    async def test_empty_results(self):
         """Returns empty list for empty input."""
-        driver = MagicMock()
-        assert apply_quality_boost([], neo4j_driver=driver) == []
+        gs = self._mock_graph_store()
+        assert await apply_quality_boost([], graph_store=gs) == []
 
-    @patch("db.neo4j.artifacts.get_quality_scores")
-    def test_basic_multiplier_quality_1(self, mock_scores):
+    @pytest.mark.asyncio
+    async def test_basic_multiplier_quality_1(self):
         """quality=1.0 → multiplier = 0.8 + 0.4*1.0 = 1.2 (20% boost)."""
-        mock_scores.return_value = {"art-1": 1.0}
+        gs = self._mock_graph_store({"art-1": 1.0})
         results = [_make_result(relevance=0.8, artifact_id="art-1")]
-        boosted = apply_quality_boost(results, neo4j_driver=MagicMock())
-        # 0.8 * (0.8 + 0.4 * 1.0) = 0.8 * 1.2 = 0.96
+        boosted = await apply_quality_boost(results, graph_store=gs)
         assert boosted[0]["relevance"] == round(0.8 * 1.2, 4)
 
-    @patch("db.neo4j.artifacts.get_quality_scores")
-    def test_basic_multiplier_quality_0(self, mock_scores):
+    @pytest.mark.asyncio
+    async def test_basic_multiplier_quality_0(self):
         """quality=0.0 → multiplier = 0.8 + 0.4*0.0 = 0.8 (20% penalty)."""
-        mock_scores.return_value = {"art-1": 0.0}
+        gs = self._mock_graph_store({"art-1": 0.0})
         results = [_make_result(relevance=0.8, artifact_id="art-1")]
-        boosted = apply_quality_boost(results, neo4j_driver=MagicMock())
-        # 0.8 * (0.8 + 0.4 * 0.0) = 0.8 * 0.8 = 0.64
+        boosted = await apply_quality_boost(results, graph_store=gs)
         assert boosted[0]["relevance"] == round(0.8 * 0.8, 4)
 
-    @patch("db.neo4j.artifacts.get_quality_scores")
-    def test_basic_multiplier_quality_half(self, mock_scores):
+    @pytest.mark.asyncio
+    async def test_basic_multiplier_quality_half(self):
         """quality=0.5 → multiplier = 0.8 + 0.4*0.5 = 1.0 (neutral)."""
-        mock_scores.return_value = {"art-1": 0.5}
+        gs = self._mock_graph_store({"art-1": 0.5})
         results = [_make_result(relevance=0.8, artifact_id="art-1")]
-        boosted = apply_quality_boost(results, neo4j_driver=MagicMock())
-        # 0.8 * (0.8 + 0.4 * 0.5) = 0.8 * 1.0 = 0.8
+        boosted = await apply_quality_boost(results, graph_store=gs)
         assert boosted[0]["relevance"] == round(0.8 * 1.0, 4)
 
-    @patch("db.neo4j.artifacts.get_quality_scores")
-    def test_unscored_default(self, mock_scores):
+    @pytest.mark.asyncio
+    async def test_unscored_default(self):
         """Artifacts not in scores dict get 0.5 default."""
-        mock_scores.return_value = {}  # No scores returned
+        gs = self._mock_graph_store({})  # No scores returned
         results = [_make_result(relevance=0.8, artifact_id="art-1")]
-        boosted = apply_quality_boost(results, neo4j_driver=MagicMock())
-        # Default quality = 0.5 → multiplier = 0.8 + 0.4 * 0.5 = 1.0
-        # 0.8 * 1.0 = 0.8
+        boosted = await apply_quality_boost(results, graph_store=gs)
         assert boosted[0]["relevance"] == round(0.8 * 1.0, 4)
         assert boosted[0]["quality_score"] == 0.5
 
-    @patch("db.neo4j.artifacts.get_quality_scores")
-    def test_quality_score_attached(self, mock_scores):
+    @pytest.mark.asyncio
+    async def test_quality_score_attached(self):
         """quality_score field is added to result dict."""
-        mock_scores.return_value = {"art-1": 0.75}
+        gs = self._mock_graph_store({"art-1": 0.75})
         results = [_make_result(relevance=0.8, artifact_id="art-1")]
-        boosted = apply_quality_boost(results, neo4j_driver=MagicMock())
+        boosted = await apply_quality_boost(results, graph_store=gs)
         assert boosted[0]["quality_score"] == 0.75
 
-    @patch("db.neo4j.artifacts.get_quality_scores")
-    def test_lookup_failure(self, mock_scores):
-        """If get_quality_scores raises, returns results unchanged."""
-        mock_scores.side_effect = Exception("Neo4j connection failed")
+    @pytest.mark.asyncio
+    async def test_lookup_failure(self):
+        """If get_artifacts_batch raises, returns results unchanged."""
+        gs = self._mock_graph_store(raise_exc=Exception("Neo4j connection failed"))
         results = [_make_result(relevance=0.8, artifact_id="art-1")]
-        boosted = apply_quality_boost(results, neo4j_driver=MagicMock())
+        boosted = await apply_quality_boost(results, graph_store=gs)
         assert boosted[0]["relevance"] == 0.8
         assert "quality_score" not in boosted[0]

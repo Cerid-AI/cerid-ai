@@ -80,7 +80,7 @@ class TestExecuteToolUnknown:
 # ---------------------------------------------------------------------------
 
 class TestExecuteToolSync:
-    @patch("tools.query_knowledge")
+    @patch("app.tools.query_knowledge")
     def test_pkb_query(self, mock_qk):
         mock_qk.return_value = {"results": []}
         asyncio.get_event_loop().run_until_complete(
@@ -88,7 +88,7 @@ class TestExecuteToolSync:
         )
         mock_qk.assert_called_once_with(query="test")
 
-    @patch("tools.ingest_content")
+    @patch("app.tools.ingest_content")
     def test_pkb_ingest(self, mock_ic):
         mock_ic.return_value = {"status": "success"}
         asyncio.get_event_loop().run_until_complete(
@@ -96,7 +96,7 @@ class TestExecuteToolSync:
         )
         mock_ic.assert_called_once_with("hello", "coding")
 
-    @patch("tools.ingest_content")
+    @patch("app.tools.ingest_content")
     def test_pkb_ingest_defaults(self, mock_ic):
         mock_ic.return_value = {"status": "success"}
         asyncio.get_event_loop().run_until_complete(
@@ -104,7 +104,7 @@ class TestExecuteToolSync:
         )
         mock_ic.assert_called_once_with("", "general")
 
-    @patch("tools.health_check")
+    @patch("app.tools.health_check")
     def test_pkb_health(self, mock_hc):
         mock_hc.return_value = {"status": "healthy"}
         result = asyncio.get_event_loop().run_until_complete(
@@ -112,7 +112,7 @@ class TestExecuteToolSync:
         )
         assert result["status"] == "healthy"
 
-    @patch("tools.list_collections")
+    @patch("app.tools.list_collections")
     def test_pkb_collections(self, mock_lc):
         mock_lc.return_value = {"collections": []}
         asyncio.get_event_loop().run_until_complete(
@@ -126,8 +126,8 @@ class TestExecuteToolSync:
 # ---------------------------------------------------------------------------
 
 class TestExecuteToolArtifacts:
-    @patch("tools.get_neo4j")
-    @patch("tools.graph")
+    @patch("app.tools.get_neo4j")
+    @patch("app.tools.graph")
     def test_pkb_artifacts_with_domain(self, mock_graph, mock_get_neo4j):
         mock_driver = MagicMock()
         mock_get_neo4j.return_value = mock_driver
@@ -140,8 +140,8 @@ class TestExecuteToolArtifacts:
             mock_driver, domain="coding", limit=10
         )
 
-    @patch("tools.get_neo4j")
-    @patch("tools.graph")
+    @patch("app.tools.get_neo4j")
+    @patch("app.tools.graph")
     def test_pkb_artifacts_empty_domain_becomes_none(self, mock_graph, mock_get_neo4j):
         mock_get_neo4j.return_value = MagicMock()
         mock_graph.list_artifacts.return_value = []
@@ -159,7 +159,7 @@ class TestExecuteToolArtifacts:
 # ---------------------------------------------------------------------------
 
 class TestExecuteToolRecategorize:
-    @patch("tools.recategorize")
+    @patch("app.tools.recategorize")
     def test_pkb_recategorize(self, mock_recat):
         mock_recat.return_value = {"status": "success"}
         asyncio.get_event_loop().run_until_complete(
@@ -173,7 +173,7 @@ class TestExecuteToolRecategorize:
             artifact_id="a1", new_domain="finance", tags="important"
         )
 
-    @patch("tools.recategorize")
+    @patch("app.tools.recategorize")
     def test_pkb_recategorize_missing_required_raises(self, mock_recat):
         with pytest.raises(KeyError):
             asyncio.get_event_loop().run_until_complete(
@@ -186,11 +186,11 @@ class TestExecuteToolRecategorize:
 # ---------------------------------------------------------------------------
 
 class TestExecuteToolTriage:
-    @patch("tools.ingest_content")
+    @patch("app.tools.ingest_content")
     def test_triage_error_returns_early(self, mock_ic):
         triage_result = {"status": "error", "error": "File not found"}
 
-        with patch("core.agents.triage.triage_file", new_callable=AsyncMock) as mock_tf:
+        with patch("agents.triage.triage_file", new_callable=AsyncMock) as mock_tf:
             mock_tf.return_value = triage_result
             result = asyncio.get_event_loop().run_until_complete(
                 execute_tool("pkb_triage", {"file_path": os.path.join(tempfile.gettempdir(), "nope.txt")})
@@ -200,7 +200,7 @@ class TestExecuteToolTriage:
         assert result["error"] == "File not found"
         mock_ic.assert_not_called()  # Should NOT proceed to ingest
 
-    @patch("tools.ingest_content")
+    @patch("app.tools.ingest_content")
     def test_triage_success_ingests(self, mock_ic):
         triage_result = {
             "status": "parsed",
@@ -212,7 +212,7 @@ class TestExecuteToolTriage:
         }
         mock_ic.return_value = {"status": "success", "artifact_id": "a1"}
 
-        with patch("core.agents.triage.triage_file", new_callable=AsyncMock) as mock_tf:
+        with patch("agents.triage.triage_file", new_callable=AsyncMock) as mock_tf:
             mock_tf.return_value = triage_result
             result = asyncio.get_event_loop().run_until_complete(
                 execute_tool("pkb_triage", {"file_path": os.path.join(tempfile.gettempdir(), "test.py")})
@@ -228,9 +228,9 @@ class TestExecuteToolTriage:
 # ---------------------------------------------------------------------------
 
 class TestExecuteToolAgents:
-    @patch("tools.get_redis")
-    @patch("tools.get_chroma")
-    @patch("tools.get_neo4j")
+    @patch("app.tools.get_redis")
+    @patch("app.tools.get_chroma")
+    @patch("app.tools.get_neo4j")
     def test_pkb_agent_query(self, mock_neo4j, mock_chroma, mock_redis):
         mock_neo4j.return_value = MagicMock()
         mock_chroma.return_value = MagicMock()
@@ -243,7 +243,7 @@ class TestExecuteToolAgents:
             )
         assert result["context"] == "result"
 
-    @patch("tools.get_redis")
+    @patch("app.tools.get_redis")
     def test_pkb_audit(self, mock_redis):
         mock_redis.return_value = MagicMock()
 
@@ -255,9 +255,9 @@ class TestExecuteToolAgents:
         mock_audit.assert_called_once()
         assert result["timestamp"] == "2026-01-01"
 
-    @patch("tools.get_redis")
-    @patch("tools.get_chroma")
-    @patch("tools.get_neo4j")
+    @patch("app.tools.get_redis")
+    @patch("app.tools.get_chroma")
+    @patch("app.tools.get_neo4j")
     def test_pkb_rectify(self, mock_neo4j, mock_chroma, mock_redis):
         mock_neo4j.return_value = MagicMock()
         mock_chroma.return_value = MagicMock()
@@ -272,9 +272,9 @@ class TestExecuteToolAgents:
         assert call_kwargs["auto_fix"] is True
         assert call_kwargs["stale_days"] == 30
 
-    @patch("tools.get_redis")
-    @patch("tools.get_chroma")
-    @patch("tools.get_neo4j")
+    @patch("app.tools.get_redis")
+    @patch("app.tools.get_chroma")
+    @patch("app.tools.get_neo4j")
     def test_pkb_maintain(self, mock_neo4j, mock_chroma, mock_redis):
         mock_neo4j.return_value = MagicMock()
         mock_chroma.return_value = MagicMock()

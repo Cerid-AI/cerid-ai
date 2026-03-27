@@ -241,7 +241,7 @@ class TestGenerateContexts:
         }
         mock_post.return_value = resp
 
-        from utils.contextual import _generate_contexts
+        from core.utils.contextual import _generate_contexts
 
         result = _generate_contexts(["chunk"], "doc preview", "file.txt", "")
         assert result == [""]
@@ -255,7 +255,7 @@ class TestGenerateContexts:
 
         mock_post.return_value = _mock_response(["ctx"])
 
-        from utils.contextual import _generate_contexts
+        from core.utils.contextual import _generate_contexts
 
         # Use a character that won't appear in the prompt boilerplate
         long_chunk = "\u00e9" * 500

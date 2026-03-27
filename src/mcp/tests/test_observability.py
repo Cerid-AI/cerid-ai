@@ -403,6 +403,10 @@ class TestMetricNames:
             "cache_hit_rate",
             "verification_accuracy",
             "queries_per_minute",
+            "ragas_faithfulness",
+            "ragas_answer_relevancy",
+            "ragas_context_precision",
+            "ragas_context_recall",
         }
         assert METRIC_NAMES == expected
 

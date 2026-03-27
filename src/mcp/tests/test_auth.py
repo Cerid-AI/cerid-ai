@@ -380,7 +380,7 @@ class TestAuthHelpers:
         # Patch create_access_token where _build_access_token references it
         # (routers.auth imports it at the top, so patch that reference)
         with patch(
-            "routers.auth.create_access_token",
+            "app.routers.auth.create_access_token",
             side_effect=lambda payload, secret="test-key": pyjwt.encode(
                 payload, "test-key", algorithm="HS256"
             ),
@@ -401,7 +401,7 @@ class TestAuthHelpers:
         import jwt as pyjwt
 
         with patch(
-            "routers.auth.create_access_token",
+            "app.routers.auth.create_access_token",
             side_effect=lambda payload, secret="test-key": pyjwt.encode(
                 payload, "test-key", algorithm="HS256"
             ),

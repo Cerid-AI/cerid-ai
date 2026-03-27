@@ -218,7 +218,7 @@ class TestStreamingTimeouts:
         with (
             patch("core.agents.hallucination.streaming.verify_claim", side_effect=_mock_verify_claim),
             patch(
-                "agents.hallucination.streaming.extract_claims",
+                "core.agents.hallucination.streaming.extract_claims",
                 return_value=(["Paris is the capital of France."], "heuristic"),
             ),
             patch("config.STREAMING_PER_CLAIM_TIMEOUT", 0.1),
@@ -263,7 +263,7 @@ class TestStreamingTimeouts:
         with (
             patch("core.agents.hallucination.streaming.verify_claim", side_effect=_mock_verify_claim),
             patch(
-                "agents.hallucination.streaming.extract_claims",
+                "core.agents.hallucination.streaming.extract_claims",
                 return_value=(
                     ["Claim 1.", "Claim 2.", "Claim 3."],
                     "heuristic",
@@ -290,7 +290,7 @@ class TestStreamingTimeouts:
     @pytest.mark.asyncio
     async def test_streaming_flag_limits_retries(self):
         """In streaming mode, _llm_call_with_retry should use fewer attempts."""
-        from agents.hallucination import _llm_call_with_retry
+        from core.agents.hallucination.verification import _llm_call_with_retry
 
         call_count = 0
 
@@ -372,7 +372,7 @@ class TestExtractionErrorHandling:
         """httpx.TimeoutException in LLM extraction should return empty list."""
         import httpx
 
-        from agents.hallucination import _extract_claims_llm
+        from core.agents.hallucination.extraction import _extract_claims_llm
 
         async def _mock_call_llm(*args, **kwargs):
             raise httpx.ReadTimeout("Connection timed out")
@@ -387,7 +387,7 @@ class TestExtractionErrorHandling:
         """httpx.ConnectError in LLM extraction should return empty list."""
         import httpx
 
-        from agents.hallucination import _extract_claims_llm
+        from core.agents.hallucination.extraction import _extract_claims_llm
 
         async def _mock_call_llm(*args, **kwargs):
             raise httpx.ConnectError("Connection refused")

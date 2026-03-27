@@ -111,7 +111,7 @@ def test_parse_obsidian_folder_to_domain():
     assert by_title["budgets"]["metadata"]["domain"] == "Finance"
 
     # root_note.md -> domain "root"
-    assert by_title["Root Note"]["metadata"]["domain"] == "root"
+    assert by_title["root_note"]["metadata"]["domain"] == "root"
 
 
 def test_parse_obsidian_skips_hidden():
