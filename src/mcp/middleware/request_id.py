@@ -6,44 +6,25 @@
 The request ID is stored in a ``contextvars.ContextVar`` so that any async
 code executing within the request lifecycle can access it via
 ``get_request_id()`` without explicit parameter passing.
+
+ContextVar declarations and accessor functions live in ``core.utils.tracing``
+so they can be imported by core agents and utilities without pulling in
+Starlette/FastAPI dependencies.
 """
 from __future__ import annotations
 
-import contextvars
 import uuid
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
-# ContextVars available to all async code within a request
-request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "request_id", default=""
+from core.utils.tracing import (  # noqa: F401
+    client_id_var,
+    get_client_id,
+    get_request_id,
+    request_id_var,
+    tracing_headers,
 )
-client_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "client_id", default="gui"
-)
-
-
-def get_request_id() -> str:
-    """Return the current request ID (empty string outside a request context)."""
-    return request_id_var.get()
-
-
-def get_client_id() -> str:
-    """Return the current client ID (``'gui'`` outside a request context)."""
-    return client_id_var.get()
-
-
-def tracing_headers() -> dict[str, str]:
-    """Return headers dict with tracing IDs for outbound httpx calls."""
-    headers: dict[str, str] = {}
-    rid = request_id_var.get()
-    if rid:
-        headers["X-Request-ID"] = rid
-    cid = client_id_var.get()
-    if cid:
-        headers["X-Client-ID"] = cid
-    return headers
 
 
 class RequestIDMiddleware(BaseHTTPMiddleware):
