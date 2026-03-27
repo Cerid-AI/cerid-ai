@@ -571,6 +571,13 @@ CLIENT_RATE_LIMITS: dict[str, dict[str, tuple[int, int]]] = {
     k: v["rate_limits"] for k, v in CONSUMER_REGISTRY.items()
 }
 
+# ---------------------------------------------------------------------------
+# Eval Harness
+# ---------------------------------------------------------------------------
+EVAL_RAGAS_MODEL: str = os.getenv("CERID_EVAL_RAGAS_MODEL", "")
+EVAL_LEADERBOARD_MAX: int = 50
+EVAL_DEFAULT_BENCHMARK: str = "beir_subset.jsonl"
+
 if not NEO4J_PASSWORD:
     _config_logger.warning(
         "NEO4J_PASSWORD is empty — Neo4j queries will fail with auth errors. "
