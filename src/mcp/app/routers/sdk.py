@@ -17,7 +17,6 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 
 import config
-from config.settings import CERID_BOARDROOM_ENABLED, CERID_TRADING_ENABLED
 from app.models.sdk import (
     SDKCascadeConfirmResponse,
     SDKHallucinationResponse,
@@ -45,6 +44,7 @@ from app.routers.agents import (
     memory_extract_endpoint,
 )
 from app.routers.health import health_check
+from config.settings import CERID_BOARDROOM_ENABLED, CERID_TRADING_ENABLED
 
 router = APIRouter(prefix="/sdk/v1", tags=["SDK"])
 

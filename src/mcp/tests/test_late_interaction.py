@@ -6,10 +6,12 @@
 import numpy as np
 
 from utils.late_interaction import (
-    _cosine_similarity,
-    _sliding_windows,
     compute_maxsim,
     late_interaction_rerank,
+)
+from core.retrieval.late_interaction import (
+    _cosine_similarity,
+    _sliding_windows,
 )
 
 

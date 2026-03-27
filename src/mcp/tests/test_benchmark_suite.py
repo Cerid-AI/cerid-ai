@@ -6,10 +6,10 @@
 from __future__ import annotations
 
 from app.eval.benchmark_suite import (
+    DEFAULT_CATEGORIES,
     BenchmarkCategory,
     BenchmarkReport,
     BenchmarkResult,
-    DEFAULT_CATEGORIES,
     compare_reports,
     format_report,
 )

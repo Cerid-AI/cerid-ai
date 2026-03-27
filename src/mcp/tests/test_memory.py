@@ -18,8 +18,10 @@ if "routers.ingestion" not in sys.modules:
     _stub.router = MagicMock()  # type: ignore[attr-defined]
     sys.modules["routers.ingestion"] = _stub
     # Also register as attribute on the parent package so _dot_lookup works.
-    import app.routers
-    routers.ingestion = _stub  # type: ignore[attr-defined]
+    if "routers" not in sys.modules:
+        sys.modules["routers"] = ModuleType("routers")
+    _routers_pkg = sys.modules["routers"]
+    _routers_pkg.ingestion = _stub  # type: ignore[attr-defined]
 
 from agents.memory import (
     archive_old_memories,

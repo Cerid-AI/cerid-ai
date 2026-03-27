@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """Verify all contract ABCs are importable and abstract."""
-import pytest
 from abc import ABC
+
+import pytest
 
 
 def test_vector_store_is_abstract():
@@ -49,9 +50,9 @@ def test_audit_log_is_abstract():
 
 
 def test_dataclasses_importable():
-    from core.contracts.stores import SearchResult, ArtifactNode
-    from core.contracts.llm import LLMResponse
     from core.contracts.audit import AuditEvent
+    from core.contracts.llm import LLMResponse
+    from core.contracts.stores import ArtifactNode, SearchResult
 
     # Verify they're constructable
     sr = SearchResult(artifact_id="a1", chunk_id="c1", content="text", metadata={}, distance=0.5)

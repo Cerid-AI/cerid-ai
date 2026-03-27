@@ -887,8 +887,8 @@ async def agent_query(
     with timer.step("semantic_cache_lookup"):
         if ENABLE_SEMANTIC_CACHE and redis_client:
             try:
-                from core.utils.embeddings import get_embedding_function
                 from core.retrieval.semantic_cache import cache_lookup
+                from core.utils.embeddings import get_embedding_function
                 _ef = get_embedding_function()
                 if _ef is not None:
                     _query_embedding = np.asarray(_ef([query])[0])
@@ -1063,8 +1063,8 @@ async def agent_query(
     with timer.step("late_interaction"):
         if ENABLE_LATE_INTERACTION and results:
             try:
-                from core.utils.embeddings import get_embedding_function
                 from core.retrieval.late_interaction import late_interaction_rerank
+                from core.utils.embeddings import get_embedding_function
                 _ef = get_embedding_function()
                 if _ef is not None:
                     results = late_interaction_rerank(

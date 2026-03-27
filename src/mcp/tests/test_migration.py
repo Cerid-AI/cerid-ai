@@ -12,14 +12,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.parsers.notion import parse_notion_export
 from app.parsers.obsidian import (
     _extract_wiki_links,
     _parse_yaml_frontmatter,
     _split_frontmatter,
     parse_obsidian_vault,
 )
-from app.parsers.notion import parse_notion_export
-
 
 # ---------------------------------------------------------------------------
 # Obsidian parser tests

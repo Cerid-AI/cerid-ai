@@ -16,11 +16,6 @@ import bcrypt
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from config.features import (
-    CERID_JWT_ACCESS_TTL,
-    CERID_JWT_REFRESH_TTL,
-    DEFAULT_TENANT_ID,
-)
 from app.db.neo4j.users import (
     create_tenant,
     create_user,
@@ -32,6 +27,11 @@ from app.db.neo4j.users import (
 from app.deps import get_neo4j, get_redis
 from app.middleware.jwt_auth import create_access_token, decode_access_token
 from app.models.user import UserPublic
+from config.features import (
+    CERID_JWT_ACCESS_TTL,
+    CERID_JWT_REFRESH_TTL,
+    DEFAULT_TENANT_ID,
+)
 from utils.encryption import encrypt_field
 
 logger = logging.getLogger("ai-companion.auth")

@@ -7,11 +7,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.contracts.stores import VectorStore, GraphStore, SearchResult
+from core.contracts.audit import AuditEvent, AuditLog
 from core.contracts.cache import CacheStore
-from core.contracts.audit import AuditLog, AuditEvent
 from core.contracts.llm import LLMClient, LLMResponse
-
+from core.contracts.stores import GraphStore, SearchResult, VectorStore
 
 # --- Compliance tests: verify each store implements its contract ---
 

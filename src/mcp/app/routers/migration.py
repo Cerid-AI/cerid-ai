@@ -17,7 +17,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, File
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/migrate", tags=["migration"])
@@ -90,12 +90,13 @@ def _process_notion_pages(job_id: str, pages: list[dict[str, Any]]) -> None:
     for page in pages:
         try:
             from app.services.ingestion import ingest_content
+            meta = page.get("metadata", {})
+            meta["filename"] = page["title"]
+            meta["source"] = "notion"
             ingest_content(
                 content=page["content"],
-                title=page["title"],
                 domain="domain_projects",
-                source="notion",
-                metadata=page.get("metadata", {}),
+                metadata=meta,
             )
             processed += 1
         except Exception as exc:
@@ -126,11 +127,11 @@ def _process_obsidian_notes(job_id: str, notes: list[dict[str, Any]]) -> None:
                 import json
                 metadata["wiki_links_json"] = json.dumps(links)
 
+            metadata["filename"] = note["title"]
+            metadata["source"] = "obsidian"
             ingest_content(
                 content=note["content"],
-                title=note["title"],
                 domain=metadata.get("domain", "domain_projects"),
-                source="obsidian",
                 metadata=metadata,
             )
             processed += 1

@@ -17,7 +17,7 @@ export function useLiveSync({ url, token, enabled = true, onDelta, onPresence }:
   const wsRef = useRef<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // Store callbacks in refs to avoid stale closures on reconnect
   const onDeltaRef = useRef(onDelta);
   const onPresenceRef = useRef(onPresence);

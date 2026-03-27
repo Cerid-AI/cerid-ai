@@ -4,7 +4,13 @@
 """Re-export bridge — implementation lives in core.utils.bifrost."""
 
 from core.utils.bifrost import *  # noqa: F401,F403
-from core.utils.bifrost import call_bifrost, close_bifrost_client, extract_content, get_bifrost_client, set_redis_getter  # noqa: F401
+from core.utils.bifrost import (  # noqa: F401
+    call_bifrost,
+    close_bifrost_client,
+    extract_content,
+    get_bifrost_client,
+    set_redis_getter,
+)
 
 # Wire Redis getter so core/utils/bifrost.py can cache credit-exhaustion state
 try:

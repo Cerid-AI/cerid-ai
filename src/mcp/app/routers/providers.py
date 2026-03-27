@@ -275,7 +275,7 @@ async def get_provider_credits():
 @router.get("/routing")
 async def get_routing_info():
     """Return smart routing configuration and current state."""
-    from utils.smart_router import _check_ollama, _ollama_models, get_model_registry
+    from core.routing.smart_router import _check_ollama, _ollama_models, get_model_registry
 
     ollama_available = await _check_ollama()
 

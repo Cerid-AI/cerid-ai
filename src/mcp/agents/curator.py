@@ -28,7 +28,6 @@ from core.agents.curator import curate as _core_curate
 from core.agents.curator import estimate_synopsis_run as _core_estimate
 from core.contracts.stores import ArtifactNode, GraphStore
 
-
 # ---------------------------------------------------------------------------
 # Minimal Neo4j driver → GraphStore adapter (bridge-only, for legacy callers)
 # ---------------------------------------------------------------------------

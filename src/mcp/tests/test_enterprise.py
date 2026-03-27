@@ -18,7 +18,6 @@ from enterprise.classification import (
 )
 from enterprise.sso import SSOConfig, get_oidc_discovery
 
-
 # =========================================================================
 # ABAC
 # =========================================================================
@@ -272,7 +271,7 @@ class TestSSO:
             provider="oidc",
             metadata_url="https://idp.example.com/.well-known/openid-configuration",
             client_id="my-client",
-            client_secret="s3cret",
+            client_secret="s3cret",  # pragma: allowlist secret
             attribute_mapping={"email": "preferred_username"},
         )
         assert config.provider == "oidc"

@@ -17,8 +17,6 @@ if _existing is not None and not hasattr(_existing, "_get_adjacent_domains"):
     del sys.modules["agents.query_agent"]
 
 from agents.query_agent import (  # noqa: E402
-    _enrich_query,
-    _get_adjacent_domains,
     agent_query,
     apply_metadata_boost,
     apply_quality_boost,
@@ -26,6 +24,10 @@ from agents.query_agent import (  # noqa: E402
     deduplicate_results,
     multi_domain_query,
     rerank_results,
+)
+from core.agents.query_agent import (  # noqa: E402
+    _enrich_query,
+    _get_adjacent_domains,
 )
 
 # ---------------------------------------------------------------------------

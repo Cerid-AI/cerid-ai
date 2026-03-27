@@ -94,9 +94,9 @@ bcrypt==5.0.0 \
     # via
     #   -r requirements.txt
     #   chromadb
-bm25s==0.3.2.post1 \
-    --hash=sha256:66470f49fb9e8208e3d01d400d237ed09ecad9a03d7721f82cf520e3b2e29aee \
-    --hash=sha256:ccb4d0a85168c2b1bdc86e513ea10a7ff14b638d33a173fe5c8ba14dd5d0fb78
+bm25s==0.3.3 \
+    --hash=sha256:03941f4e2a3610cbbaefa614c22d0e164a53c1e3201a4330cba45081260fd934 \
+    --hash=sha256:c2567435da193ea8bf8801c471ae972cfc8f4415002f2e024f4c55d0fbc0f12f
     # via -r requirements.txt
 build==1.4.2 \
     --hash=sha256:35b14e1ee329c186d3f08466003521ed7685ec15ecffc07e68d706090bf161d1 \
@@ -450,13 +450,13 @@ filelock==3.25.2 \
 flatbuffers==25.12.19 \
     --hash=sha256:7634f50c427838bb021c2d66a3d1168e9d199b0607e6329399f04846d42e20b4
     # via onnxruntime
-fsspec==2026.2.0 \
-    --hash=sha256:6544e34b16869f5aacd5b90bdf1a71acb37792ea3ddf6125ee69a22a53fb8bff \
-    --hash=sha256:98de475b5cb3bd66bedd5c4679e87b4fdfe1a3bf4d707b151b3c07e58c9a2437
+fsspec==2026.3.0 \
+    --hash=sha256:1ee6a0e28677557f8c2f994e3eea77db6392b4de9cd1f5d7a9e87a0ae9d01b41 \
+    --hash=sha256:d2ceafaad1b3457968ed14efa28798162f1638dbb5d2a6868a2db002a5ee39a4
     # via huggingface-hub
-googleapis-common-protos==1.73.0 \
-    --hash=sha256:778d07cd4fbeff84c6f7c72102f0daf98fa2bfd3fa8bea426edc545588da0b5a \
-    --hash=sha256:dfdaaa2e860f242046be561e6d6cb5c5f1541ae02cfbcb034371aadb2942b4e8
+googleapis-common-protos==1.73.1 \
+    --hash=sha256:13114f0e9d2391756a0194c3a8131974ed7bffb06086569ba193364af59163b6 \
+    --hash=sha256:e51f09eb0a43a8602f5a915870972e6b4a394088415c79d79605a46d8e826ee8
     # via opentelemetry-exporter-otlp-proto-grpc
 grpcio==1.78.0 \
     --hash=sha256:082653eecbdf290e6e3e2c276ab2c54b9e7c299e07f4221872380312d8cf395e \

@@ -189,7 +189,7 @@ def format_report(report: BenchmarkReport) -> str:
 def compare_reports(a: BenchmarkReport, b: BenchmarkReport) -> str:
     """Return a Markdown table showing metric deltas between two reports."""
     lines = [
-        f"## Benchmark Comparison",
+        "## Benchmark Comparison",
         f"**A:** `{a.pipeline}` ({a.timestamp})  ",
         f"**B:** `{b.pipeline}` ({b.timestamp})  ",
         f"**Overall:** {a.overall_score:.4f} → {b.overall_score:.4f} "

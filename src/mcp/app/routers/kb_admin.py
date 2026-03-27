@@ -13,9 +13,9 @@ from pydantic import BaseModel, Field
 
 import config
 from agents.curator import _is_truncated_summary, curate
-from config.features import CERID_MULTI_USER
 from app.db.neo4j.artifacts import delete_artifact, list_artifacts
 from app.deps import get_chroma, get_neo4j
+from config.features import CERID_MULTI_USER
 from utils.bm25 import rebuild_all as rebuild_bm25_all
 from utils.query_cache import invalidate_cache_non_blocking
 

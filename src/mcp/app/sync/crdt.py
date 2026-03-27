@@ -9,7 +9,6 @@ for conflict-free replicated data types used in multi-client sync.
 
 from __future__ import annotations
 
-import json
 import uuid
 from dataclasses import dataclass, field
 from typing import Any

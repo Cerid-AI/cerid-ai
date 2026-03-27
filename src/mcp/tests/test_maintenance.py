@@ -6,11 +6,11 @@
 from unittest.mock import MagicMock, patch
 
 from agents.maintenance import (
-    _check_bifrost_sync,
     analyze_collections,
     check_system_health,
     purge_artifacts,
 )
+from core.agents.maintenance import _check_bifrost_sync
 
 # ---------------------------------------------------------------------------
 # Tests: check_system_health

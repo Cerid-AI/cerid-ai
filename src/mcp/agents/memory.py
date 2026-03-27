@@ -12,15 +12,17 @@ from __future__ import annotations
 from typing import Any
 
 from core.agents.memory import (  # noqa: F401
-    MIN_RESPONSE_LENGTH,
     MEMORY_TYPES,
+    MIN_RESPONSE_LENGTH,
     archive_old_memories,
     calculate_memory_score,
     detect_memory_conflict,
-    extract_and_store_memories as _core_extract_and_store_memories,
     extract_memories,
     recall_memories,
     resolve_memory_conflict,
+)
+from core.agents.memory import (
+    extract_and_store_memories as _core_extract_and_store_memories,
 )
 
 

@@ -346,7 +346,7 @@ async def configure(req: ConfigureRequest) -> ConfigureResponse:
             updates["XAI_API_KEY"] = req.xai_api_key
 
         if req.neo4j_password:
-            if req.neo4j_password == "auto":
+            if req.neo4j_password == "auto":  # pragma: allowlist secret
                 updates["NEO4J_PASSWORD"] = secrets.token_hex(16)  # pragma: allowlist secret
             else:
                 updates["NEO4J_PASSWORD"] = req.neo4j_password

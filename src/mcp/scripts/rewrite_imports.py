@@ -7,11 +7,9 @@ Usage: cd src/mcp && python3 scripts/rewrite_imports.py [--dry-run]
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 import libcst as cst
-import libcst.matchers as m
 
 # Modules that moved under app/
 MOVED_MODULES = {

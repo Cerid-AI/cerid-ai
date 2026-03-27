@@ -153,8 +153,8 @@ async def start_scan(req: ScanRequest) -> dict:
 
     from pathlib import Path
 
-    from config.taxonomy import SUPPORTED_EXTENSIONS
     from app.services.folder_scanner import DEFAULT_EXCLUDE_DIRS, _estimate_file_count
+    from config.taxonomy import SUPPORTED_EXTENSIONS
 
     exclude = DEFAULT_EXCLUDE_DIRS | set(req.exclude_patterns or [])
     estimate = _estimate_file_count(Path(req.path), SUPPORTED_EXTENSIONS, exclude)

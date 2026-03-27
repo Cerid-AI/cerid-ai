@@ -22,12 +22,12 @@ class OpenRouterLLMClient(LLMClient):
     ) -> LLMResponse:
         from core.utils.llm_client import call_llm
         result = await call_llm(
-            messages=messages, model=model,
+            messages=messages, model=model or "",
             temperature=temperature, max_tokens=max_tokens,
             breaker_name=breaker_name,
         )
         return LLMResponse(
-            content=result.get("content", ""),
-            model=result.get("model", model or "unknown"),
-            usage=result.get("usage"),
+            content=result,
+            model=model or "unknown",
+            usage=None,
         )

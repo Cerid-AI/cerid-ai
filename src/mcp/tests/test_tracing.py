@@ -1,5 +1,5 @@
 """Verify tracing contextvars accessors work from core."""
-from core.utils.tracing import get_request_id, get_client_id, tracing_headers, request_id_var, client_id_var
+from core.utils.tracing import get_client_id, get_request_id, request_id_var, tracing_headers
 
 
 def test_get_request_id_returns_default():

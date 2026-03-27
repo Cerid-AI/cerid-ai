@@ -21,10 +21,10 @@ from pathlib import Path
 from typing import Any, AsyncIterator
 
 import config
-from config.taxonomy import SUPPORTED_EXTENSIONS
 from app.deps import get_redis
 from app.parsers import parse_file as _parse_file
 from app.services.ingestion import ingest_content, ingest_file
+from config.taxonomy import SUPPORTED_EXTENSIONS
 from utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.scanner")

@@ -258,7 +258,7 @@ async def lifespan(app: FastAPI):
 
     # Pre-warm LLM client pool (direct OpenRouter)
     try:
-        from utils.llm_client import _get_client
+        from core.utils.llm_client import _get_client
         _get_client()
         logger.info("OpenRouter HTTP client pool pre-warmed")
     except Exception as e:

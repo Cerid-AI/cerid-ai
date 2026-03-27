@@ -16,12 +16,11 @@ Provides CRUD for alert rules and event history:
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
-import uuid
-
-import ipaddress
 import socket
+import uuid
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel

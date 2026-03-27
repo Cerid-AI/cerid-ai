@@ -42,7 +42,7 @@ async function getQueue(): Promise<QueuedRequest[]> {
   });
 }
 
-async function clearQueue(): Promise<void> {
+async function _clearQueue(): Promise<void> {
   const db = await openDB();
   const tx = db.transaction(STORE_NAME, 'readwrite');
   tx.objectStore(STORE_NAME).clear();

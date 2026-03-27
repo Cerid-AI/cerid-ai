@@ -26,8 +26,7 @@ def _ensure_real_router():
     ri = sys.modules.get("routers.ingestion")
     if ri is not None and not hasattr(ri, "ingest_batch_endpoint"):
         del sys.modules["routers.ingestion"]
-        import app.routers.ingestion  # noqa: F811
-        importlib.reload(routers.ingestion)
+        importlib.import_module("routers.ingestion")
     return importlib.import_module("routers.ingestion")
 
 # ---------------------------------------------------------------------------

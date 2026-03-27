@@ -18,7 +18,7 @@ class Neo4jGraphStore(GraphStore):
 
     async def get_artifact(self, artifact_id: str) -> ArtifactNode | None:
         from app.db.neo4j.artifacts import get_artifact
-        raw = await get_artifact(self._driver, artifact_id)
+        raw = get_artifact(self._driver, artifact_id)
         if not raw:
             return None
         return ArtifactNode(
@@ -32,7 +32,7 @@ class Neo4jGraphStore(GraphStore):
         self, artifact_ids: list[str], *, depth: int = 1, limit: int = 20,
     ) -> list[ArtifactNode]:
         from app.db.neo4j import find_related_artifacts
-        raw_list = await find_related_artifacts(self._driver, artifact_ids, depth=depth, limit=limit)
+        raw_list = find_related_artifacts(self._driver, artifact_ids, depth=depth, max_results=limit)
         return [
             ArtifactNode(
                 id=r["artifact_id"], filename=r.get("filename", ""),
@@ -47,7 +47,7 @@ class Neo4jGraphStore(GraphStore):
         self, *, domain: str | None = None, offset: int = 0, limit: int = 100,
     ) -> list[ArtifactNode]:
         from app.db.neo4j.artifacts import list_artifacts
-        raw_list = await list_artifacts(self._driver, domain=domain, offset=offset, limit=limit)
+        raw_list = list_artifacts(self._driver, domain=domain, offset=offset, limit=limit)
         return [
             ArtifactNode(
                 id=r["artifact_id"], filename=r.get("filename", ""),
@@ -60,8 +60,9 @@ class Neo4jGraphStore(GraphStore):
 
     async def update_artifact(self, artifact_id: str, updates: dict[str, Any]) -> None:
         from app.db.neo4j.artifacts import update_artifact_summary
-        await update_artifact_summary(self._driver, artifact_id, updates)
+        summary = updates.get("summary", "")
+        update_artifact_summary(self._driver, artifact_id, summary)
 
     async def list_domains(self) -> list[str]:
         from app.db.neo4j.artifacts import list_domains
-        return await list_domains(self._driver)
+        return list_domains(self._driver)

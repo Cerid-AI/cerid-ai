@@ -8,9 +8,6 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
-
-
 # ---------------------------------------------------------------------------
 # LWWRegister
 # ---------------------------------------------------------------------------
@@ -149,8 +146,7 @@ class TestCRDTState:
     """CRDTState serialization tests."""
 
     def test_crdt_state_encode_decode(self):
-        from app.sync.crdt import CRDTState, LWWElementDict, LWWRegister, ORSet
-        from app.sync.crdt import decode_delta, encode_delta
+        from app.sync.crdt import CRDTState, LWWRegister, decode_delta, encode_delta
 
         state = CRDTState()
         state.metadata.set("title", "Test Artifact", 1.0)

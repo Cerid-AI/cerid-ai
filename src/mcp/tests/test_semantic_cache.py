@@ -13,12 +13,14 @@ import pytest
 
 import utils.semantic_cache as sc
 from utils.semantic_cache import (
-    _dequantize_int8,
-    _HNSWIndex,
-    _quantize_int8,
     cache_lookup,
     cache_store,
     invalidate_cache,
+)
+from core.retrieval.semantic_cache import (
+    _dequantize_int8,
+    _HNSWIndex,
+    _quantize_int8,
 )
 
 # ---------------------------------------------------------------------------

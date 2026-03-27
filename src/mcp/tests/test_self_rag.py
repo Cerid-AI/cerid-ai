@@ -28,12 +28,12 @@ if "agents.hallucination" not in sys.modules:
     _agents_pkg.hallucination = _hall_stub  # type: ignore[attr-defined]
 
 import config
-from agents.self_rag import (
+from agents.self_rag import self_rag_enhance  # noqa: E402
+from core.agents.self_rag import (  # noqa: E402
     _assess_claims,
     _merge_results,
     _retrieve_for_claims,
     _with_metadata,
-    self_rag_enhance,
 )
 
 # ---------------------------------------------------------------------------
@@ -254,7 +254,7 @@ class TestSelfRagEnhance:
 
     @pytest.mark.asyncio
     @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
-    @patch("agents.self_rag._assess_claims", new_callable=AsyncMock)
+    @patch("core.agents.self_rag._assess_claims", new_callable=AsyncMock)
     async def test_all_claims_supported(self, mock_assess, mock_extract):
         mock_extract.return_value = (["Python uses GIL", "FastAPI is async"], "llm")
         mock_assess.return_value = [
@@ -271,8 +271,8 @@ class TestSelfRagEnhance:
 
     @pytest.mark.asyncio
     @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
-    @patch("agents.self_rag._assess_claims", new_callable=AsyncMock)
-    @patch("agents.self_rag._retrieve_for_claims", new_callable=AsyncMock)
+    @patch("core.agents.self_rag._assess_claims", new_callable=AsyncMock)
+    @patch("core.agents.self_rag._retrieve_for_claims", new_callable=AsyncMock)
     @patch("agents.query_agent.assemble_context")
     async def test_weak_claims_trigger_refinement(self, mock_assemble, mock_retrieve, mock_assess, mock_extract):
         mock_extract.return_value = (["strong claim", "weak claim"], "llm")
@@ -304,8 +304,8 @@ class TestSelfRagEnhance:
 
     @pytest.mark.asyncio
     @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
-    @patch("agents.self_rag._assess_claims", new_callable=AsyncMock)
-    @patch("agents.self_rag._retrieve_for_claims", new_callable=AsyncMock)
+    @patch("core.agents.self_rag._assess_claims", new_callable=AsyncMock)
+    @patch("core.agents.self_rag._retrieve_for_claims", new_callable=AsyncMock)
     async def test_no_additional_results_found(self, mock_retrieve, mock_assess, mock_extract):
         mock_extract.return_value = (["weak claim"], "heuristic")
         mock_assess.return_value = [
@@ -322,8 +322,8 @@ class TestSelfRagEnhance:
 
     @pytest.mark.asyncio
     @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
-    @patch("agents.self_rag._assess_claims", new_callable=AsyncMock)
-    @patch("agents.self_rag._retrieve_for_claims", new_callable=AsyncMock)
+    @patch("core.agents.self_rag._assess_claims", new_callable=AsyncMock)
+    @patch("core.agents.self_rag._retrieve_for_claims", new_callable=AsyncMock)
     @patch("agents.query_agent.assemble_context")
     async def test_respects_max_iterations(self, mock_assemble, mock_retrieve, mock_assess, mock_extract):
         """Self-RAG should stop after max_iterations even if claims remain weak."""
@@ -347,8 +347,8 @@ class TestSelfRagEnhance:
 
     @pytest.mark.asyncio
     @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
-    @patch("agents.self_rag._assess_claims", new_callable=AsyncMock)
-    @patch("agents.self_rag._retrieve_for_claims", new_callable=AsyncMock)
+    @patch("core.agents.self_rag._assess_claims", new_callable=AsyncMock)
+    @patch("core.agents.self_rag._retrieve_for_claims", new_callable=AsyncMock)
     async def test_respects_max_refined_queries(self, mock_retrieve, mock_assess, mock_extract):
         """Only up to SELF_RAG_MAX_REFINED_QUERIES weak claims should be used."""
         mock_extract.return_value = (["w1", "w2", "w3", "w4", "w5"], "llm")
@@ -376,8 +376,8 @@ class TestSelfRagEnhance:
 
     @pytest.mark.asyncio
     @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
-    @patch("agents.self_rag._assess_claims", new_callable=AsyncMock)
-    @patch("agents.self_rag._retrieve_for_claims", new_callable=AsyncMock)
+    @patch("core.agents.self_rag._assess_claims", new_callable=AsyncMock)
+    @patch("core.agents.self_rag._retrieve_for_claims", new_callable=AsyncMock)
     @patch("agents.query_agent.assemble_context")
     async def test_model_metadata_passed_through(self, mock_assemble, mock_retrieve, mock_assess, mock_extract):
         mock_extract.return_value = (["claim"], "llm")
@@ -399,8 +399,8 @@ class TestSelfRagEnhance:
 
     @pytest.mark.asyncio
     @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
-    @patch("agents.self_rag._assess_claims", new_callable=AsyncMock)
-    @patch("agents.self_rag._retrieve_for_claims", new_callable=AsyncMock)
+    @patch("core.agents.self_rag._assess_claims", new_callable=AsyncMock)
+    @patch("core.agents.self_rag._retrieve_for_claims", new_callable=AsyncMock)
     @patch("agents.query_agent.assemble_context")
     async def test_context_reassembled_after_refinement(self, mock_assemble, mock_retrieve, mock_assess, mock_extract):
         """When additional results are found, context should be reassembled."""
