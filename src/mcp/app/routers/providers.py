@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 import config
-from config.model_providers import (
+from core.routing.model_providers import (
     PROVIDER_CONFIGS,
     ProviderState,
     get_degraded_status,
