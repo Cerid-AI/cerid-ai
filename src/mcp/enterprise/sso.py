@@ -66,6 +66,27 @@ async def get_oidc_discovery(metadata_url: str) -> dict:
         return resp.json()
 
 
+def _validate_token_endpoint(url: str) -> None:
+    """Reject token endpoints targeting internal/private networks (SSRF prevention)."""
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        raise ValueError(f"Token endpoint must use HTTPS: {url}")
+    hostname = parsed.hostname or ""
+    if not hostname:
+        raise ValueError(f"Token endpoint has no hostname: {url}")
+    try:
+        for info in socket.getaddrinfo(hostname, None):
+            addr = ipaddress.ip_address(info[4][0])
+            if addr.is_private or addr.is_loopback or addr.is_link_local:
+                raise ValueError(f"Token endpoint resolves to private/internal IP: {hostname}")
+    except socket.gaierror:
+        pass  # DNS resolution failure handled at POST time
+
+
 async def exchange_oidc_code(code: str, config: SSOConfig) -> dict:
     """Exchange an OIDC authorization code for tokens.
 
@@ -78,6 +99,9 @@ async def exchange_oidc_code(code: str, config: SSOConfig) -> dict:
     token_endpoint = discovery.get("token_endpoint", "")
     if not token_endpoint:
         raise ValueError("No token_endpoint found in OIDC discovery document")
+
+    # Validate token_endpoint: must be HTTPS and not resolve to private IPs
+    _validate_token_endpoint(token_endpoint)
 
     payload = {
         "grant_type": "authorization_code",

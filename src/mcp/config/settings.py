@@ -151,6 +151,11 @@ GRAPH_RELATIONSHIP_TYPES = [
     "REFERENCES",       # explicit filename mention in content
 ]
 
+# Validate relationship type names are safe for Cypher injection
+import re as _re
+for _rt in GRAPH_RELATIONSHIP_TYPES:
+    assert _re.fullmatch(r"[A-Z_]+", _rt), f"Invalid GRAPH_RELATIONSHIP_TYPE: {_rt!r} — must match ^[A-Z_]+$"
+
 # ---------------------------------------------------------------------------
 # Embedding Model
 # ---------------------------------------------------------------------------

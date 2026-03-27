@@ -49,7 +49,7 @@ async def _send_loop(ws: WebSocket, queue: asyncio.Queue) -> None:
 
 async def _broadcast(msg: dict, *, exclude: WebSocket | None = None) -> None:
     """Enqueue *msg* to all connected clients except *exclude*."""
-    for ws, info in _connections.items():
+    for ws, info in list(_connections.items()):
         if ws is exclude:
             continue
         try:

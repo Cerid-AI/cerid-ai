@@ -18,6 +18,7 @@ export function useLiveSync({ url, token, enabled = true, onDelta, onPresence }:
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const mountedRef = useRef(true);
   // Store callbacks in refs to avoid stale closures on reconnect
   const onDeltaRef = useRef(onDelta);
   const onPresenceRef = useRef(onPresence);
@@ -30,12 +31,14 @@ export function useLiveSync({ url, token, enabled = true, onDelta, onPresence }:
     try {
       const ws = new WebSocket(`${url}?token=${encodeURIComponent(token)}`);
       wsRef.current = ws;
-      ws.onopen = () => { setConnected(true); setError(null); };
+      ws.onopen = () => { if (mountedRef.current) { setConnected(true); setError(null); } };
       ws.onclose = () => {
-        setConnected(false);
-        reconnectTimer.current = setTimeout(() => connectRef.current?.(), 3000);
+        if (mountedRef.current) {
+          setConnected(false);
+          reconnectTimer.current = setTimeout(() => connectRef.current?.(), 3000);
+        }
       };
-      ws.onerror = () => setError('WebSocket connection failed');
+      ws.onerror = () => { if (mountedRef.current) setError('WebSocket connection failed'); };
       ws.onmessage = (event) => {
         try {
           const msg: SyncMessage = JSON.parse(event.data);
@@ -48,8 +51,10 @@ export function useLiveSync({ url, token, enabled = true, onDelta, onPresence }:
   useEffect(() => { connectRef.current = connect; }, [connect]);
 
   useEffect(() => {
+    mountedRef.current = true;
     connect();
     return () => {
+      mountedRef.current = false;
       clearTimeout(reconnectTimer.current);
       wsRef.current?.close();
     };

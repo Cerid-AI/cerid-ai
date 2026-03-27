@@ -138,7 +138,9 @@ async def run_eval(body: EvalRunRequest) -> EvalRunResponse:
     """Run the evaluation harness against a benchmark file and return metrics."""
     _check_enabled()
 
-    benchmark_path = _EVAL_DIR / body.benchmark
+    benchmark_path = (_EVAL_DIR / body.benchmark).resolve()
+    if not benchmark_path.is_relative_to(_EVAL_DIR.resolve()):
+        raise HTTPException(status_code=400, detail="Invalid benchmark path")
     if not benchmark_path.exists():
         raise HTTPException(status_code=404, detail=f"Benchmark file not found: {body.benchmark}")
     if not benchmark_path.suffix == ".jsonl":
@@ -189,7 +191,7 @@ async def list_benchmarks() -> list[BenchmarkFile]:
         if not search_dir.exists():
             continue
         for p in sorted(search_dir.glob("*.jsonl")):
-            files.append(BenchmarkFile(name=p.name, path=str(p), size_bytes=p.stat().st_size))
+            files.append(BenchmarkFile(name=p.name, path=str(p.relative_to(_EVAL_DIR.resolve())), size_bytes=p.stat().st_size))
     return files
 
 
@@ -293,9 +295,13 @@ async def compare_pipelines_endpoint(
     from app.eval.harness import compare_pipelines, evaluate, load_benchmark
 
     # Try datasets/ subdirectory first, then eval/ root
-    benchmark_path = _DATASETS_DIR / benchmark
+    benchmark_path = (_DATASETS_DIR / benchmark).resolve()
+    if not benchmark_path.is_relative_to(_EVAL_DIR.resolve()):
+        raise HTTPException(status_code=400, detail="Invalid benchmark path")
     if not benchmark_path.exists():
-        benchmark_path = _EVAL_DIR / benchmark
+        benchmark_path = (_EVAL_DIR / benchmark).resolve()
+        if not benchmark_path.is_relative_to(_EVAL_DIR.resolve()):
+            raise HTTPException(status_code=400, detail="Invalid benchmark path")
     if not benchmark_path.exists():
         raise HTTPException(status_code=404, detail=f"Benchmark file not found: {benchmark}")
 
