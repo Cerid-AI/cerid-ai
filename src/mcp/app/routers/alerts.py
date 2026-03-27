@@ -20,6 +20,9 @@ import json
 import logging
 import uuid
 
+import ipaddress
+import socket
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -93,13 +96,36 @@ def _compare(value: float, operator: str, threshold: float) -> bool:
     return False
 
 
+def _validate_webhook_url(url: str) -> None:
+    """Reject webhook URLs targeting internal/private networks (SSRF prevention)."""
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("https", "http"):
+        raise ValueError(f"Webhook URL must use http(s): {url}")
+    hostname = parsed.hostname or ""
+    if not hostname:
+        raise ValueError(f"Webhook URL has no hostname: {url}")
+    # Resolve and check for private/loopback/link-local IPs
+    try:
+        for info in socket.getaddrinfo(hostname, None):
+            addr = ipaddress.ip_address(info[4][0])
+            if addr.is_private or addr.is_loopback or addr.is_link_local:
+                raise ValueError(f"Webhook URL resolves to private/internal IP: {hostname}")
+    except socket.gaierror:
+        pass  # DNS resolution failure handled at POST time
+
+
 async def _notify_webhook(url: str, event: AlertEvent) -> None:
     """POST alert event to webhook URL with 10s timeout."""
     import httpx
 
     try:
+        _validate_webhook_url(url)
         async with httpx.AsyncClient(timeout=10.0) as client:
             await client.post(url, json=event.model_dump())
+    except ValueError as exc:
+        logger.warning("Webhook URL validation failed: %s", exc)
     except Exception as exc:
         logger.warning("Webhook notification failed for %s: %s", url, exc)
 

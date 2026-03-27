@@ -315,15 +315,19 @@ def get_claim_accuracy(
     collector = _get_collector()
     raw = collector.get_aggregated_metrics(window)
     verif = raw.get("verification_accuracy", {})
+    # Per-type breakdown not yet available from MetricsCollector;
+    # overall avg used as placeholder until per-claim-type metrics are recorded.
+    avg = verif.get("avg")
     return {
         "window_minutes": window,
-        "overall_accuracy": verif.get("avg"),
+        "overall_accuracy": avg,
         "by_type": {
-            "citation": verif.get("avg"),
-            "evasion": verif.get("avg"),
-            "recency": verif.get("avg"),
-            "ignorance": verif.get("avg"),
+            "citation": avg,
+            "evasion": avg,
+            "recency": avg,
+            "ignorance": avg,
         },
+        "note": "Per-type breakdown pending — currently shows overall average for each type",
         "sample_count": verif.get("count", 0),
         "timestamp": _iso_now(),
     }

@@ -18,6 +18,11 @@ export function useLiveSync({ url, token, enabled = true, onDelta, onPresence }:
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
+  // Store callbacks in refs to avoid stale closures on reconnect
+  const onDeltaRef = useRef(onDelta);
+  const onPresenceRef = useRef(onPresence);
+  onDeltaRef.current = onDelta;
+  onPresenceRef.current = onPresence;
 
   const connect = useCallback(() => {
     if (!enabled) return;
@@ -33,12 +38,12 @@ export function useLiveSync({ url, token, enabled = true, onDelta, onPresence }:
       ws.onmessage = (event) => {
         try {
           const msg: SyncMessage = JSON.parse(event.data);
-          if (msg.type === 'delta' && onDelta) onDelta(msg.payload);
-          if (msg.type === 'presence' && onPresence) onPresence(msg.payload);
+          if (msg.type === 'delta' && onDeltaRef.current) onDeltaRef.current(msg.payload);
+          if (msg.type === 'presence' && onPresenceRef.current) onPresenceRef.current(msg.payload);
         } catch { /* ignore malformed messages */ }
       };
     } catch { setError('Failed to create WebSocket'); }
-  }, [url, token, enabled, onDelta, onPresence]);
+  }, [url, token, enabled]);
 
   useEffect(() => {
     connect();

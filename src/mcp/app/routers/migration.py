@@ -53,8 +53,8 @@ class MigrationStatusResponse(BaseModel):
 
 def _get_redis() -> Any:
     """Deferred import of Redis client."""
-    from deps import get_redis_sync
-    return get_redis_sync()
+    from app.deps import get_redis
+    return get_redis()
 
 
 def _set_migration_status(
@@ -89,7 +89,7 @@ def _process_notion_pages(job_id: str, pages: list[dict[str, Any]]) -> None:
 
     for page in pages:
         try:
-            from services.ingestion import ingest_content
+            from app.services.ingestion import ingest_content
             ingest_content(
                 content=page["content"],
                 title=page["title"],
@@ -118,7 +118,7 @@ def _process_obsidian_notes(job_id: str, notes: list[dict[str, Any]]) -> None:
 
     for note in notes:
         try:
-            from services.ingestion import ingest_content
+            from app.services.ingestion import ingest_content
             metadata = note.get("metadata", {})
             # Store wiki-links as metadata for relationship building
             links = note.get("links", [])
@@ -209,6 +209,16 @@ async def migrate_obsidian(
             raise HTTPException(status_code=400, detail="Uploaded file is not a valid ZIP archive")
 
         with zipfile.ZipFile(zip_path, "r") as zf:
+            # Guard against Zip Slip (path traversal)
+            resolved_extract = extract_dir.resolve()
+            for member in zf.infolist():
+                target = (extract_dir / member.filename).resolve()
+                if not target.is_relative_to(resolved_extract):
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+                    raise HTTPException(
+                        status_code=400,
+                        detail="ZIP contains path traversal entries",
+                    )
             zf.extractall(extract_dir)
 
         from app.parsers.obsidian import parse_obsidian_vault

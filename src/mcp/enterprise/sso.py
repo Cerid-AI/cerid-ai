@@ -49,8 +49,15 @@ def validate_saml_assertion(xml: str) -> dict:
 async def get_oidc_discovery(metadata_url: str) -> dict:
     """Fetch the OpenID Connect discovery document from *metadata_url*.
 
-    Returns the parsed JSON as a dict.
+    Returns the parsed JSON as a dict.  Only HTTPS URLs are accepted
+    to prevent SSRF against internal services.
     """
+    from urllib.parse import urlparse
+
+    parsed = urlparse(metadata_url)
+    if parsed.scheme != "https":
+        raise ValueError("OIDC metadata URL must use HTTPS")
+
     import httpx  # deferred import
 
     async with httpx.AsyncClient(timeout=10.0) as client:
