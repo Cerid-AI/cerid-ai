@@ -11,6 +11,7 @@ reuse TCP connections instead of opening a new one per call.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import httpx
 
@@ -107,12 +108,21 @@ async def call_bifrost(
 _CREDITS_KEY = "cerid:openrouter:credits_exhausted"
 
 
+_redis_getter: Any = None
+
+
+def set_redis_getter(fn: Any) -> None:
+    """Register a callable that returns a Redis client (called from app layer)."""
+    global _redis_getter  # noqa: PLW0603
+    _redis_getter = fn
+
+
 def _set_credits_exhausted() -> None:
     """Record that OpenRouter returned 402 (credits exhausted)."""
     try:
-        from deps import get_redis
-
-        get_redis().set(_CREDITS_KEY, "1", ex=300)  # 5-min TTL
+        if _redis_getter is None:
+            return
+        _redis_getter().set(_CREDITS_KEY, "1", ex=300)  # 5-min TTL
     except Exception:
         pass
 
@@ -120,9 +130,9 @@ def _set_credits_exhausted() -> None:
 def _clear_credits_exhausted() -> None:
     """Clear the exhaustion flag after a successful Bifrost call."""
     try:
-        from deps import get_redis
-
-        r = get_redis()
+        if _redis_getter is None:
+            return
+        r = _redis_getter()
         if r.exists(_CREDITS_KEY):
             r.delete(_CREDITS_KEY)
     except Exception:
