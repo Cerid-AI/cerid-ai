@@ -597,6 +597,15 @@ CLASSIFICATION_ENABLED = os.getenv("CERID_CLASSIFICATION", "false").lower() in (
 AUDIT_STREAM_KEY = "cerid:audit:stream"
 AUDIT_RETENTION_DAYS = int(os.getenv("CERID_AUDIT_RETENTION_DAYS", "365"))
 
+# ---------------------------------------------------------------------------
+# WebSocket Sync
+# ---------------------------------------------------------------------------
+WS_SYNC_ENABLED = os.getenv("CERID_WS_SYNC", "false").lower() in ("1", "true")
+WS_HEARTBEAT_INTERVAL_S = 30
+WS_PRESENCE_TIMEOUT_S = 90
+WS_MAX_CONNECTIONS = 50
+SYNC_CRDT_ENABLED = True
+
 if not NEO4J_PASSWORD:
     _config_logger.warning(
         "NEO4J_PASSWORD is empty — Neo4j queries will fail with auth errors. "
