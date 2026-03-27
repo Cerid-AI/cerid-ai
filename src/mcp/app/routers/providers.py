@@ -11,17 +11,17 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 import config
+from config.providers import (
+    PROVIDER_REGISTRY,
+    get_configured_providers,
+    validate_provider_key,
+)
 from core.routing.model_providers import (
     PROVIDER_CONFIGS,
     ProviderState,
     get_degraded_status,
     load_config,
     save_config,
-)
-from config.providers import (
-    PROVIDER_REGISTRY,
-    get_configured_providers,
-    validate_provider_key,
 )
 
 router = APIRouter(prefix="/providers", tags=["providers"])
