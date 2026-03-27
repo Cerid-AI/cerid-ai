@@ -1,10 +1,29 @@
 # Cerid AI — Task Tracker
 
-> **Last updated:** 2026-03-23
-> **Current status:** All phases through 50 complete + Sentry + Verification Fixes + Ollama Add-On. 1376+ Python tests, 545+ frontend tests.
+> **Last updated:** 2026-03-27
+> **Current status:** All phases through 50 complete + Phase C core extraction + Leapfrog Roadmap (6 features) + Security Audit. 1660+ Python tests, 545+ frontend tests.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md) — 0 open
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE42-50.md](../docs/plans/DEVELOPMENT_PLAN_PHASE42-50.md) (Phases A-D + 42-50)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
+
+## Session 2026-03-27: Phase C + Leapfrog + Audit
+
+### Completed
+- [x] Phase C core extraction (14 commits on feature/phase-c-core-extraction)
+- [x] Leapfrog Roadmap — 6 features: eval harness, enterprise ABAC/SSO, CRDT memory, WebSocket sync, PWA offline, benchmark suite
+- [x] Comprehensive security audit — 7 critical/high findings fixed
+- [x] CI fully green — all 9 jobs passing (1660 tests)
+- [x] PR #25 created and CI-verified
+
+### Audit Findings (Remaining — Beta Cycle)
+- [ ] Pin sentry-sdk<3 in requirements.txt
+- [ ] Add CSP header to nginx.conf
+- [ ] Neo4j N+1 batch query optimization
+- [ ] IDB connection leak in use-offline-queue.ts
+- [ ] LWW Register commutativity tiebreaker
+- [ ] Wire enterprise overlay into main.py (Phase C+1)
+
+---
 
 ## Development Roadmap: Phases A-D + 42-50
 

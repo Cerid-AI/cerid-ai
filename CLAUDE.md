@@ -18,7 +18,7 @@ Before beginning any development work in this repo, if not already done in this 
 
 Cerid AI is a self-hosted, privacy-first Personal AI Knowledge Companion. It unifies multi-domain knowledge bases (code, finance, projects, artifacts) into a context-aware LLM interface with RAG-powered retrieval and intelligent agents. Knowledge base stays local; LLM API calls send query context to the configured provider. Optional cloud sync (Dropbox) for cross-machine settings/conversations, encrypted when CERID_ENCRYPTION_KEY is set.
 
-**Status:** All phases through 50 complete. 1376+ Python tests, 545+ frontend tests. 9 agents, 27 MCP tools (19 core + 5 trading + pkb_web_search + pkb_memory_recall + pkb_ingest_multimodal), hybrid BM25s+vector search with semantic chunking, cross-encoder reranking (ONNX, three modes), switchable client-side embeddings (Matryoshka, zero-migration), contextual chunking (LLM-generated situational summaries), advanced RAG pipeline (adaptive retrieval gate, query decomposition with parallel sub-retrieval, MMR diversity reordering, intelligent context assembly with facet coverage, ColBERT-inspired late interaction scoring, semantic query cache with quantized int8 embeddings), circuit breakers on all Bifrost + Neo4j calls, shared Bifrost call utility with singleton httpx connection pool, distributed request tracing, adaptive quality feedback, per-domain tag vocabulary with typeahead UI, improved synopsis generation, streaming verification with 4 claim types (evasion/citation/recency/ignorance) + interactive inline verification (ClaimOverlay popovers, footnote markers, source navigation) + expert verification mode (Grok 4) + per-message verification selection, Self-RAG validation loop, smart routing (direct-to-OpenRouter chat proxy, capability-based model scoring, three-way routing mode, proactive model switch on ignorance detection), context-aware chat (corrections, token-budget KB injection, semantic dedup), advanced response formatting (15 MD component overrides, collapsible code blocks, TOC for long responses), right-click context menus on toolbar icons, drag-drop ingestion on KB pane + chat input + artifact drag-to-chat, infrastructure settings + search tuning sliders, KB admin endpoints (rebuild/rescore/clear/delete/stats) + Settings GUI, incremental knowledge sync with tombstones and conflict resolution, sync GUI with export/import/status dashboard, archive storage mode, mypy type checking in CI, React GUI with iPad/tablet responsive touch UX, LAN access with robust multi-interface IP detection and stale-IP auto-fix, pre-flight validation (port conflicts, env vars, disk space), post-startup reachability checks, guided `setup.sh` installer, configurable port overrides (`CERID_PORT_*`), optional Caddy HTTPS gateway and Cloudflare Tunnel for demos, multi-user auth foundations (opt-in JWT, tenant context, per-user API keys, usage metering), marketing website at cerid.ai (Next.js 16 + Vercel), brand identity (teal accent color system), Simple/Advanced mode (progressive disclosure), settings reorganization (3-tab layout with user experience presets), first-run onboarding dialog, marketing site refreshed (changelog, SEO, animations), MCP server performance optimization (lightweight verification retrieval, connection pooling, parallel graph expansion, deferred cache persistence, startup pre-warming). Infrastructure security hardened (Redis auth, port binding, resource limits, security headers, nginx hardening). CI/CD 9-job pipeline with timeouts. See [`docs/COMPLETED_PHASES.md`](docs/COMPLETED_PHASES.md) for history.
+**Status:** All phases through 50 complete + Phase C core extraction + Leapfrog Roadmap (6 features). 1660+ Python tests, 545+ frontend tests. 9 agents, 27 MCP tools (19 core + 5 trading + pkb_web_search + pkb_memory_recall + pkb_ingest_multimodal), hybrid BM25s+vector search with semantic chunking, cross-encoder reranking (ONNX, three modes), switchable client-side embeddings (Matryoshka, zero-migration), contextual chunking (LLM-generated situational summaries), advanced RAG pipeline (adaptive retrieval gate, query decomposition with parallel sub-retrieval, MMR diversity reordering, intelligent context assembly with facet coverage, ColBERT-inspired late interaction scoring, semantic query cache with quantized int8 embeddings), circuit breakers on all Bifrost + Neo4j calls, shared Bifrost call utility with singleton httpx connection pool, distributed request tracing, adaptive quality feedback, per-domain tag vocabulary with typeahead UI, improved synopsis generation, streaming verification with 4 claim types (evasion/citation/recency/ignorance) + interactive inline verification (ClaimOverlay popovers, footnote markers, source navigation) + expert verification mode (Grok 4) + per-message verification selection, Self-RAG validation loop, smart routing (direct-to-OpenRouter chat proxy, capability-based model scoring, three-way routing mode, proactive model switch on ignorance detection), context-aware chat (corrections, token-budget KB injection, semantic dedup), advanced response formatting (15 MD component overrides, collapsible code blocks, TOC for long responses), right-click context menus on toolbar icons, drag-drop ingestion on KB pane + chat input + artifact drag-to-chat, infrastructure settings + search tuning sliders, KB admin endpoints (rebuild/rescore/clear/delete/stats) + Settings GUI, incremental knowledge sync with tombstones and conflict resolution, sync GUI with export/import/status dashboard, archive storage mode, mypy type checking in CI, React GUI with iPad/tablet responsive touch UX, LAN access with robust multi-interface IP detection and stale-IP auto-fix, pre-flight validation (port conflicts, env vars, disk space), post-startup reachability checks, guided `setup.sh` installer, configurable port overrides (`CERID_PORT_*`), optional Caddy HTTPS gateway and Cloudflare Tunnel for demos, multi-user auth foundations (opt-in JWT, tenant context, per-user API keys, usage metering), marketing website at cerid.ai (Next.js 16 + Vercel), brand identity (teal accent color system), Simple/Advanced mode (progressive disclosure), settings reorganization (3-tab layout with user experience presets), first-run onboarding dialog, marketing site refreshed (changelog, SEO, animations), MCP server performance optimization (lightweight verification retrieval, connection pooling, parallel graph expansion, deferred cache persistence, startup pre-warming). Infrastructure security hardened (Redis auth, port binding, resource limits, security headers, nginx hardening). CI/CD 9-job pipeline with timeouts. See [`docs/COMPLETED_PHASES.md`](docs/COMPLETED_PHASES.md) for history.
 
 **Next:** See [`tasks/todo.md`](tasks/todo.md).
 
@@ -64,21 +64,29 @@ React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly
 ├── docs/                        # API_REFERENCE.md, ISSUES.md, OPERATIONS.md, plans/
 ├── plugins/                     # BSL-1.1 pro-tier plugins (multimodal/, workflow/)
 ├── src/mcp/                     # FastAPI MCP server (Python 3.11)
-│   ├── main.py                  # Entry point
+│   ├── core/                    # Portable orchestrator core (Apache-2.0)
+│   │   ├── agents/              # Query, memory, hallucination, curator, self_rag
+│   │   ├── contracts/           # ABCs: VectorStore, GraphStore, CacheStore, LLMClient
+│   │   ├── retrieval/           # BM25, reranker, semantic cache, query decomposition
+│   │   ├── routing/             # Smart router, model providers
+│   │   └── utils/               # Embeddings, circuit breaker, LLM client
+│   ├── app/                     # Application layer (concrete implementations)
+│   │   ├── routers/             # FastAPI routers (27+ endpoints)
+│   │   ├── stores/              # ChromaVectorStore, Neo4jGraphStore, RedisCacheStore
+│   │   ├── db/neo4j/            # Cypher queries, schema, artifacts
+│   │   ├── services/            # ingestion.py (ingest_content, ingest_file, dedup)
+│   │   ├── middleware/          # auth, rate_limit, request_id, jwt, tenant_context
+│   │   ├── parsers/             # PDF, office, structured, email, ebook
+│   │   ├── eval/                # Retrieval evaluation harness + benchmark suite
+│   │   ├── sync/                # CRDT, export, import, manifest, status
+│   │   ├── models/              # Pydantic schemas
+│   │   ├── main.py              # Entry point
+│   │   └── tools.py             # MCP tool registry + dispatcher (27 tools)
+│   ├── enterprise/              # Enterprise overlay (ABAC, SSO, classification, immutable audit)
 │   ├── config/                  # settings.py, taxonomy.py, features.py, providers.py
-│   ├── db/neo4j/                # schema, artifacts, relationships, taxonomy, memory
-│   ├── sync/                    # export, import_, manifest, status
-│   ├── parsers/                 # registry, pdf, office, structured, email, ebook
-│   ├── services/                # ingestion.py (ingest_content, ingest_file, dedup)
-│   ├── eval/                    # Retrieval evaluation harness (NDCG, MRR, P@K, R@K)
-│   ├── agents/                  # query, curator, triage, rectify, audit, maintenance, hallucination/, memory, self_rag
-│   ├── routers/                 # FastAPI routers (health, query, ingestion, agents, taxonomy, setup, providers, models, automations, a2a, observability, plugins, workflows, ollama_proxy, eval, etc.)
-│   ├── models/                  # user.py, sdk.py, trading.py (Pydantic schemas)
-│   ├── middleware/              # auth.py, rate_limit.py, request_id.py, jwt_auth.py, tenant_context.py
-│   ├── tools.py                 # MCP tool registry + dispatcher (27 tools)
-│   ├── plugins/                 # Plugin loader + built-in plugin scaffold
-│   ├── utils/                   # bm25, cache, query_cache, embeddings, chunker, dedup, encryption, web_search, a2a_client, etc.
-│   ├── scripts/                 # watch_ingest.py, watch_obsidian.py, ingest_cli.py
+│   ├── agents/                  # Bridge modules (re-export from core.agents)
+│   ├── utils/                   # Bridge modules (re-export from core.utils)
+│   ├── services/                # Bridge modules (re-export from app.services)
 │   └── requirements.txt/.lock   # Python deps (ranges / pinned with hashes)
 ├── src/web/                     # React GUI (React 19, Vite 7, Tailwind v4, shadcn/ui)
 │   ├── docker-compose.yml       # cerid-web service (separate from MCP)
@@ -95,6 +103,16 @@ React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly
 ```
 
 > For API endpoints, agent details, ingestion pipeline, and sync commands, see [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md).
+
+## Phase C Architecture
+
+The `src/mcp/` codebase is split into three layers:
+
+- **`core/`** contains portable orchestration logic: agents, retrieval algorithms (BM25, reranker, semantic cache, query decomposition), routing (smart router, model providers), and contracts (ABCs for `VectorStore`, `GraphStore`, `CacheStore`, `LLMClient`). This layer has zero FastAPI or infrastructure dependencies and is licensed Apache-2.0 for standalone reuse.
+- **`app/`** contains concrete implementations: FastAPI routers, store adapters (`ChromaVectorStore`, `Neo4jGraphStore`, `RedisCacheStore`), parsers, middleware, sync, eval, and the application entry point.
+- **Bridge modules** (`agents/`, `utils/`, `services/` at the `src/mcp/` root) re-export from `core` and `app` to provide backward-compatible import paths. Existing code that imports `from agents.query_agent import ...` continues to work unchanged.
+- **import-linter** enforces layer boundaries: `core/` must not import `app/`, `config/` must not import `core/`. Violations fail CI.
+- **`enterprise/`** is a standalone overlay (ABAC, SSO, classification, immutable audit) — scaffolded but not wired for beta.
 
 ## Development
 
@@ -280,7 +298,7 @@ See [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) for the full developer refere
 |-----|------|
 | lint | `ruff check src/mcp/` |
 | typecheck | `mypy src/mcp/` |
-| test | pytest (70% coverage floor) + Codecov upload + license audit |
+| test | pytest 1660+ tests (70% coverage floor) + Codecov upload + license audit |
 | security | detect-secrets + bandit + pip-audit (CVE-ignores documented inline) + dlint ReDoS |
 | lock-sync | pip-compile lock file freshness check |
 | frontend | tsc + ESLint + Vitest + Vite build + bundle size check (800KB limit) + npm audit + license audit |

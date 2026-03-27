@@ -318,3 +318,28 @@
 - `response_format: {"type": "json_object"}` forces LLMs to return objects, not arrays
 - Claims may be wrapped: `{"claims": [...]}` — always unwrap before processing
 - Pleasantry patterns must match ANYWHERE in sentence, not just at start
+
+---
+
+## Session 2026-03-27 — Phase C + Leapfrog + CI Fixes
+
+### Bridge Module Patch Targets
+- When Phase C moved code into `core/` with bridge modules, `import *` skips `_`-prefixed names
+- `@patch` must target the module where the name is looked up at runtime, NOT the source module
+- If `tools.py` does `from agents.foo import bar`, patch `agents.foo.bar` (bridge), not `core.agents.foo.bar` (source)
+- 547 patch targets had to be updated across 34 test files
+
+### import-linter
+- `lint-imports` reads config from CWD — if CI runs `cd src/mcp && lint-imports`, config must be in `src/mcp/.importlinter` (not root pyproject.toml)
+- Contract violations are real bugs: `config.model_providers` importing from `core.routing` violated the "config must not import core" rule
+
+### React 19 ESLint
+- `react-hooks/refs` rule forbids writing `ref.current = value` during render
+- Must wrap in `useEffect(() => { ref.current = value }, [value])`
+- `useRef<T>()` without initial value now requires explicit `undefined`: `useRef<T>(undefined)`
+
+### Security Audit Patterns
+- Path traversal: always `resolve()` + `is_relative_to()` on user-supplied paths
+- SSRF: validate token endpoints from OIDC discovery docs (attacker controls the discovery JSON)
+- XSS in entrypoints: JSON-encode env vars before writing to JS files
+- Dict iteration: `list(dict.items())` to snapshot before async iteration
