@@ -87,9 +87,9 @@ class TestValidateFilePath:
 class TestIngestContentDuplicate:
     """Test that duplicate content is detected and reported."""
 
-    @patch("services.ingestion.get_redis", return_value=MagicMock())
-    @patch("services.ingestion.get_neo4j")
-    @patch("services.ingestion.get_chroma")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
     def test_exact_duplicate_returns_duplicate_status(self, mock_chroma, mock_neo4j, mock_redis):
         # Set up ChromaDB mock
         collection = MagicMock()
@@ -110,9 +110,9 @@ class TestIngestContentDuplicate:
         assert result["artifact_id"] == "existing-id"
         assert result["duplicate_of"] == "existing.txt"
 
-    @patch("services.ingestion.get_redis", return_value=MagicMock())
-    @patch("services.ingestion.get_neo4j")
-    @patch("services.ingestion.get_chroma")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
     def test_new_content_returns_success(self, mock_chroma, mock_neo4j, mock_redis):
         # Set up ChromaDB mock
         collection = MagicMock()
@@ -127,7 +127,7 @@ class TestIngestContentDuplicate:
         session.run.return_value.single.return_value = None  # No match
 
         # Patch graph functions to avoid actual DB calls
-        with patch("services.ingestion.graph") as mock_graph:
+        with patch("app.services.ingestion.graph") as mock_graph:
             mock_graph.find_artifact_by_filename.return_value = None
             mock_graph.create_artifact.return_value = None
             mock_graph.discover_relationships.return_value = 0
@@ -152,9 +152,9 @@ class TestIngestContentDuplicate:
 class TestIngestContentResponse:
     """Test the structure of ingest_content return values."""
 
-    @patch("services.ingestion.get_redis", return_value=MagicMock())
-    @patch("services.ingestion.get_neo4j")
-    @patch("services.ingestion.get_chroma")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
     def test_success_response_has_required_fields(self, mock_chroma, mock_neo4j, mock_redis):
         collection = MagicMock()
         mock_chroma.return_value.get_or_create_collection.return_value = collection
@@ -166,7 +166,7 @@ class TestIngestContentResponse:
         driver.session.return_value.__exit__ = MagicMock(return_value=False)
         session.run.return_value.single.return_value = None
 
-        with patch("services.ingestion.graph") as mock_graph:
+        with patch("app.services.ingestion.graph") as mock_graph:
             mock_graph.find_artifact_by_filename.return_value = None
             mock_graph.create_artifact.return_value = None
             mock_graph.discover_relationships.return_value = 0
@@ -178,9 +178,9 @@ class TestIngestContentResponse:
         assert isinstance(result["related"], list)
         assert isinstance(result["chunks"], int)
 
-    @patch("services.ingestion.get_redis", return_value=MagicMock())
-    @patch("services.ingestion.get_neo4j")
-    @patch("services.ingestion.get_chroma")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
     def test_default_domain_is_general(self, mock_chroma, mock_neo4j, mock_redis):
         collection = MagicMock()
         mock_chroma.return_value.get_or_create_collection.return_value = collection
@@ -192,7 +192,7 @@ class TestIngestContentResponse:
         driver.session.return_value.__exit__ = MagicMock(return_value=False)
         session.run.return_value.single.return_value = None
 
-        with patch("services.ingestion.graph") as mock_graph:
+        with patch("app.services.ingestion.graph") as mock_graph:
             mock_graph.find_artifact_by_filename.return_value = None
             mock_graph.create_artifact.return_value = None
             mock_graph.discover_relationships.return_value = 0
@@ -209,9 +209,9 @@ class TestIngestContentResponse:
 class TestConcurrentDuplicate:
     """Test that constraint violations (concurrent inserts) are handled."""
 
-    @patch("services.ingestion.get_redis", return_value=MagicMock())
-    @patch("services.ingestion.get_neo4j")
-    @patch("services.ingestion.get_chroma")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
     def test_constraint_error_returns_duplicate(self, mock_chroma, mock_neo4j, mock_redis):
         collection = MagicMock()
         mock_chroma.return_value.get_or_create_collection.return_value = collection
@@ -223,7 +223,7 @@ class TestConcurrentDuplicate:
         driver.session.return_value.__exit__ = MagicMock(return_value=False)
         session.run.return_value.single.return_value = None  # First check passes
 
-        with patch("services.ingestion.graph") as mock_graph:
+        with patch("app.services.ingestion.graph") as mock_graph:
             mock_graph.find_artifact_by_filename.return_value = None
             # Simulate a constraint violation on create
             mock_graph.create_artifact.side_effect = Exception(
@@ -246,9 +246,9 @@ class TestConcurrentDuplicate:
 class TestIngestChromaDB:
     """Test ChromaDB interaction during ingestion."""
 
-    @patch("services.ingestion.get_redis", return_value=MagicMock())
-    @patch("services.ingestion.get_neo4j")
-    @patch("services.ingestion.get_chroma")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
     def test_chunks_added_to_collection(self, mock_chroma, mock_neo4j, mock_redis):
         collection = MagicMock()
         mock_chroma.return_value.get_or_create_collection.return_value = collection
@@ -260,7 +260,7 @@ class TestIngestChromaDB:
         driver.session.return_value.__exit__ = MagicMock(return_value=False)
         session.run.return_value.single.return_value = None
 
-        with patch("services.ingestion.graph") as mock_graph:
+        with patch("app.services.ingestion.graph") as mock_graph:
             mock_graph.find_artifact_by_filename.return_value = None
             mock_graph.create_artifact.return_value = None
             mock_graph.discover_relationships.return_value = 0
@@ -272,9 +272,9 @@ class TestIngestChromaDB:
         call_kwargs = collection.add.call_args
         assert "ids" in call_kwargs.kwargs or len(call_kwargs.args) > 0
 
-    @patch("services.ingestion.get_redis", return_value=MagicMock())
-    @patch("services.ingestion.get_neo4j")
-    @patch("services.ingestion.get_chroma")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
     def test_correct_collection_name(self, mock_chroma, mock_neo4j, mock_redis):
         collection = MagicMock()
         chroma_client = MagicMock()
@@ -288,7 +288,7 @@ class TestIngestChromaDB:
         driver.session.return_value.__exit__ = MagicMock(return_value=False)
         session.run.return_value.single.return_value = None
 
-        with patch("services.ingestion.graph") as mock_graph:
+        with patch("app.services.ingestion.graph") as mock_graph:
             mock_graph.find_artifact_by_filename.return_value = None
             mock_graph.create_artifact.return_value = None
             mock_graph.discover_relationships.return_value = 0
@@ -309,10 +309,10 @@ class TestIngestChromaDB:
 class TestIngestRedisLogging:
     """Test that successful ingestion logs to Redis."""
 
-    @patch("services.ingestion.cache")
-    @patch("services.ingestion.get_redis")
-    @patch("services.ingestion.get_neo4j")
-    @patch("services.ingestion.get_chroma")
+    @patch("app.services.ingestion.cache")
+    @patch("app.services.ingestion.get_redis")
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
     def test_log_event_called_on_success(self, mock_chroma, mock_neo4j, mock_redis, mock_cache):
         collection = MagicMock()
         mock_chroma.return_value.get_or_create_collection.return_value = collection
@@ -324,7 +324,7 @@ class TestIngestRedisLogging:
         driver.session.return_value.__exit__ = MagicMock(return_value=False)
         session.run.return_value.single.return_value = None
 
-        with patch("services.ingestion.graph") as mock_graph:
+        with patch("app.services.ingestion.graph") as mock_graph:
             mock_graph.find_artifact_by_filename.return_value = None
             mock_graph.create_artifact.return_value = None
             mock_graph.discover_relationships.return_value = 0
@@ -367,9 +367,9 @@ class TestRollbackChromaDB:
 class TestCompensatingTransaction:
     """Test that ChromaDB chunks are rolled back when Neo4j fails."""
 
-    @patch("services.ingestion.get_redis", return_value=MagicMock())
-    @patch("services.ingestion.get_neo4j")
-    @patch("services.ingestion.get_chroma")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
     def test_neo4j_failure_rolls_back_chromadb(self, mock_chroma, mock_neo4j, mock_redis):
         collection = MagicMock()
         mock_chroma.return_value.get_or_create_collection.return_value = collection
@@ -381,7 +381,7 @@ class TestCompensatingTransaction:
         driver.session.return_value.__exit__ = MagicMock(return_value=False)
         session.run.return_value.single.return_value = None
 
-        with patch("services.ingestion.graph") as mock_graph:
+        with patch("app.services.ingestion.graph") as mock_graph:
             mock_graph.find_artifact_by_filename.return_value = None
             mock_graph.create_artifact.side_effect = Exception("Neo4j connection lost")
             mock_graph.discover_relationships.return_value = 0
@@ -393,9 +393,9 @@ class TestCompensatingTransaction:
         # ChromaDB chunks should have been rolled back
         collection.delete.assert_called_once()
 
-    @patch("services.ingestion.get_redis", return_value=MagicMock())
-    @patch("services.ingestion.get_neo4j")
-    @patch("services.ingestion.get_chroma")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
     def test_neo4j_failure_returns_zero_chunks(self, mock_chroma, mock_neo4j, mock_redis):
         collection = MagicMock()
         mock_chroma.return_value.get_or_create_collection.return_value = collection
@@ -407,7 +407,7 @@ class TestCompensatingTransaction:
         driver.session.return_value.__exit__ = MagicMock(return_value=False)
         session.run.return_value.single.return_value = None
 
-        with patch("services.ingestion.graph") as mock_graph:
+        with patch("app.services.ingestion.graph") as mock_graph:
             mock_graph.find_artifact_by_filename.return_value = None
             mock_graph.create_artifact.side_effect = Exception("Neo4j timeout")
 
@@ -415,9 +415,9 @@ class TestCompensatingTransaction:
 
         assert result["chunks"] == 0
 
-    @patch("services.ingestion.get_redis", return_value=MagicMock())
-    @patch("services.ingestion.get_neo4j")
-    @patch("services.ingestion.get_chroma")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
     def test_constraint_violation_still_returns_duplicate(self, mock_chroma, mock_neo4j, mock_redis):
         """Constraint violations should still return duplicate, not error."""
         collection = MagicMock()
@@ -430,7 +430,7 @@ class TestCompensatingTransaction:
         driver.session.return_value.__exit__ = MagicMock(return_value=False)
         session.run.return_value.single.return_value = None
 
-        with patch("services.ingestion.graph") as mock_graph:
+        with patch("app.services.ingestion.graph") as mock_graph:
             mock_graph.find_artifact_by_filename.return_value = None
             mock_graph.create_artifact.side_effect = Exception(
                 "ConstraintValidationFailed content_hash uniqueness"
@@ -441,9 +441,9 @@ class TestCompensatingTransaction:
         assert result["status"] == "duplicate"
         collection.delete.assert_called_once()
 
-    @patch("services.ingestion.get_redis", return_value=MagicMock())
-    @patch("services.ingestion.get_neo4j")
-    @patch("services.ingestion.get_chroma")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
     def test_neo4j_failure_does_not_log_to_redis(self, mock_chroma, mock_neo4j, mock_redis):
         """Failed ingestion should not log an event to Redis."""
         collection = MagicMock()
@@ -456,8 +456,8 @@ class TestCompensatingTransaction:
         driver.session.return_value.__exit__ = MagicMock(return_value=False)
         session.run.return_value.single.return_value = None
 
-        with patch("services.ingestion.graph") as mock_graph, \
-             patch("services.ingestion.cache") as mock_cache:
+        with patch("app.services.ingestion.graph") as mock_graph, \
+             patch("app.services.ingestion.cache") as mock_cache:
             mock_graph.find_artifact_by_filename.return_value = None
             mock_graph.create_artifact.side_effect = Exception("Neo4j down")
 

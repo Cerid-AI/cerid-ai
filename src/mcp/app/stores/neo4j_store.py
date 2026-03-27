@@ -64,5 +64,7 @@ class Neo4jGraphStore(GraphStore):
         update_artifact_summary(self._driver, artifact_id, summary)
 
     async def list_domains(self) -> list[str]:
-        from app.db.neo4j.artifacts import list_domains
-        return list_domains(self._driver)
+        records, _, _ = self._driver.execute_query(
+            "MATCH (a:Artifact) RETURN DISTINCT a.domain AS domain ORDER BY domain"
+        )
+        return [r["domain"] for r in records if r["domain"]]

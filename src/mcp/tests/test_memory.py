@@ -40,7 +40,7 @@ class TestExtractMemories:
         assert result == []
 
     @pytest.mark.asyncio
-    @patch("agents.memory.call_internal_llm", new_callable=AsyncMock)
+    @patch("core.agents.memory.call_internal_llm", new_callable=AsyncMock)
     async def test_successful_extraction(self, mock_llm):
         """Valid LLM response should parse into memory list."""
         mock_llm.return_value = '[{"content":"Python uses GIL","memory_type":"fact","summary":"Python GIL"}]'
@@ -51,7 +51,7 @@ class TestExtractMemories:
         assert "GIL" in result[0]["content"]
 
     @pytest.mark.asyncio
-    @patch("agents.memory.call_internal_llm", new_callable=AsyncMock)
+    @patch("core.agents.memory.call_internal_llm", new_callable=AsyncMock)
     async def test_invalid_memory_type_defaults_to_fact(self, mock_llm):
         """Unknown memory_type should default to 'fact'."""
         mock_llm.return_value = '[{"content":"test","memory_type":"invalid_type","summary":"test"}]'
@@ -64,7 +64,7 @@ class TestExtractAndStoreMemories:
     """Test full extraction + storage pipeline."""
 
     @pytest.mark.asyncio
-    @patch("agents.memory.config")
+    @patch("core.agents.memory.config")
     async def test_disabled_returns_skipped(self, mock_config):
         """Should skip when ENABLE_MEMORY_EXTRACTION is False."""
         mock_config.ENABLE_MEMORY_EXTRACTION = False
@@ -72,9 +72,9 @@ class TestExtractAndStoreMemories:
         assert result["status"] == "skipped"
 
     @pytest.mark.asyncio
-    @patch("agents.memory.config")
-    @patch("agents.memory.extract_memories", new_callable=AsyncMock)
-    @patch("services.ingestion.ingest_content")
+    @patch("core.agents.memory.config")
+    @patch("core.agents.memory.extract_memories", new_callable=AsyncMock)
+    @patch("app.services.ingestion.ingest_content")
     async def test_successful_storage(self, mock_ingest, mock_extract, mock_config, mock_redis, mock_neo4j):
         """Extracted memories should be ingested into conversations domain."""
         mock_config.ENABLE_MEMORY_EXTRACTION = True

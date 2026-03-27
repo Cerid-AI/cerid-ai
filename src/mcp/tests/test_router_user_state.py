@@ -24,13 +24,13 @@ def sync_dir(tmp_path: Path) -> Path:
 def app(sync_dir: Path) -> FastAPI:
     _app = FastAPI()
     _app.include_router(router)
-    with patch("routers.user_state._sync_dir", return_value=str(sync_dir)):
+    with patch("app.routers.user_state._sync_dir", return_value=str(sync_dir)):
         yield _app
 
 
 @pytest.fixture()
 def client(app: FastAPI, sync_dir: Path) -> TestClient:
-    with patch("routers.user_state._sync_dir", return_value=str(sync_dir)):
+    with patch("app.routers.user_state._sync_dir", return_value=str(sync_dir)):
         yield TestClient(app)
 
 
@@ -156,7 +156,7 @@ def test_summary_includes_conversation_ids(client: TestClient):
 def test_write_503_when_no_sync_dir():
     _app = FastAPI()
     _app.include_router(router)
-    with patch("routers.user_state._sync_dir", return_value=""):
+    with patch("app.routers.user_state._sync_dir", return_value=""):
         c = TestClient(_app)
         resp = c.post("/user-state/conversations", json={"id": "x", "title": "y"})
         assert resp.status_code == 503

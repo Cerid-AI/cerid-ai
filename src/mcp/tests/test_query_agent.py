@@ -201,7 +201,7 @@ class TestMultiDomainQuery:
                 multi_domain_query("test", domains=["nonexistent_domain_xyz"])
             )
 
-    @patch("agents.query_agent.config")
+    @patch("core.agents.query_agent.config")
     def test_query_single_domain(self, mock_config):
         mock_config.DOMAINS = ["coding", "general"]
         mock_config.collection_name = lambda d: f"domain_{d}"
@@ -220,7 +220,7 @@ class TestMultiDomainQuery:
         chroma_client.get_collection.return_value = collection
 
         # Mock BM25 as unavailable
-        with patch("utils.bm25.is_available", return_value=False):
+        with patch("core.retrieval.bm25.is_available", return_value=False):
             results = asyncio.get_event_loop().run_until_complete(
                 multi_domain_query("test query", domains=["coding"], chroma_client=chroma_client)
             )
@@ -230,7 +230,7 @@ class TestMultiDomainQuery:
         assert results[0]["content"] == "test content"
         assert results[0]["relevance"] == 0.8  # 1.0 - 0.2
 
-    @patch("agents.query_agent.config")
+    @patch("core.agents.query_agent.config")
     def test_domain_error_returns_empty(self, mock_config):
         mock_config.DOMAINS = ["coding", "general"]
         mock_config.collection_name = lambda d: f"domain_{d}"
@@ -238,7 +238,7 @@ class TestMultiDomainQuery:
         chroma_client = MagicMock()
         chroma_client.get_collection.side_effect = Exception("Collection not found")
 
-        with patch("utils.bm25.is_available", return_value=False):
+        with patch("core.retrieval.bm25.is_available", return_value=False):
             results = asyncio.get_event_loop().run_until_complete(
                 multi_domain_query("test", domains=["coding"], chroma_client=chroma_client)
             )
@@ -277,8 +277,8 @@ class TestRerankResults:
         assert len(reranked) == 1
         assert reranked[0]["relevance"] == 0.5
 
-    @patch("utils.internal_llm.call_internal_llm", new_callable=AsyncMock)
-    @patch("agents.query_agent.config")
+    @patch("core.utils.internal_llm.call_internal_llm", new_callable=AsyncMock)
+    @patch("core.agents.query_agent.config")
     def test_llm_rerank_fallback_on_error(self, mock_config, mock_call_llm):
         """When LLM reranking fails, falls back to embedding sort."""
         mock_config.RERANK_MODE = "llm"
@@ -299,7 +299,7 @@ class TestRerankResults:
         # Fallback: sorted by relevance descending
         assert reranked[0]["relevance"] >= reranked[1]["relevance"]
 
-    @patch("agents.query_agent.config")
+    @patch("core.agents.query_agent.config")
     def test_cross_encoder_rerank(self, mock_config):
         """Cross-encoder mode dispatches to utils.reranker and blends scores."""
         mock_config.RERANK_MODE = "cross_encoder"
@@ -326,7 +326,7 @@ class TestRerankResults:
             results_arg.sort(key=lambda x: x["relevance"], reverse=True)
             return results_arg
 
-        with patch("utils.reranker.rerank", side_effect=fake_rerank):
+        with patch("core.retrieval.reranker.rerank", side_effect=fake_rerank):
             reranked = asyncio.get_event_loop().run_until_complete(
                 rerank_results(results, "Python programming", use_reranking=True)
             )
@@ -334,7 +334,7 @@ class TestRerankResults:
         # Python content should rank higher despite lower original score
         assert reranked[0]["artifact_id"] in ("a1", "a3")
 
-    @patch("agents.query_agent.config")
+    @patch("core.agents.query_agent.config")
     def test_cross_encoder_fallback_to_llm(self, mock_config):
         """When cross-encoder fails, falls back to LLM reranking."""
         mock_config.RERANK_MODE = "cross_encoder"
@@ -345,8 +345,8 @@ class TestRerankResults:
             _make_result(relevance=0.9, artifact_id="a2"),
         ]
 
-        with patch("utils.reranker.rerank", side_effect=RuntimeError("model not found")):
-            with patch("agents.query_agent._rerank_llm", new_callable=AsyncMock) as mock_llm:
+        with patch("core.retrieval.reranker.rerank", side_effect=RuntimeError("model not found")):
+            with patch("core.agents.query_agent._rerank_llm", new_callable=AsyncMock) as mock_llm:
                 mock_llm.return_value = sorted(
                     results, key=lambda x: x["relevance"], reverse=True,
                 )
@@ -363,7 +363,7 @@ class TestRerankResults:
             _make_result(relevance=0.9, artifact_id="a2"),
         ]
 
-        with patch("agents.query_agent.config") as mock_config:
+        with patch("core.agents.query_agent.config") as mock_config:
             mock_config.RERANK_MODE = "none"
             reranked = asyncio.get_event_loop().run_until_complete(
                 rerank_results(results, "test", use_reranking=True)
@@ -398,7 +398,7 @@ class TestRerankerModule:
         assert _sigmoid(np.array([-100.0]))[0] == pytest.approx(0.0, abs=1e-6)
         assert _sigmoid(np.array([0.0]))[0] == pytest.approx(0.5, abs=1e-6)
 
-    @patch("utils.reranker._load_model")
+    @patch("core.retrieval.reranker._load_model")
     def test_rerank_blends_scores(self, mock_load):
         """Verify score blending formula: CE_WEIGHT * ce + ORIGINAL_WEIGHT * original."""
         import numpy as np
@@ -445,11 +445,11 @@ class TestRerankerModule:
 # ---------------------------------------------------------------------------
 
 class TestAgentQuery:
-    @patch("agents.query_agent.log_event")
-    @patch("agents.query_agent.rerank_results")
-    @patch("agents.query_agent.graph_expand_results")
-    @patch("agents.query_agent.multi_domain_query")
-    @patch("agents.query_agent.config")
+    @patch("core.agents.query_agent.log_event")
+    @patch("core.agents.query_agent.rerank_results")
+    @patch("core.agents.query_agent.graph_expand_results")
+    @patch("core.agents.query_agent.multi_domain_query")
+    @patch("core.agents.query_agent.config")
     @patch("config.features.ENABLE_ADAPTIVE_RETRIEVAL", False)
     def test_basic_query_response_shape(
         self, mock_config, mock_mdq, mock_graph, mock_rerank, mock_log
@@ -491,11 +491,11 @@ class TestAgentQuery:
         assert response["total_results"] == 1
         assert isinstance(response["confidence"], float)
 
-    @patch("agents.query_agent.log_event")
-    @patch("agents.query_agent.rerank_results")
-    @patch("agents.query_agent.graph_expand_results")
-    @patch("agents.query_agent.multi_domain_query")
-    @patch("agents.query_agent.config")
+    @patch("core.agents.query_agent.log_event")
+    @patch("core.agents.query_agent.rerank_results")
+    @patch("core.agents.query_agent.graph_expand_results")
+    @patch("core.agents.query_agent.multi_domain_query")
+    @patch("core.agents.query_agent.config")
     @patch("config.features.ENABLE_ADAPTIVE_RETRIEVAL", False)
     def test_logs_to_redis_when_client_provided(
         self, mock_config, mock_mdq, mock_graph, mock_rerank, mock_log
@@ -528,11 +528,11 @@ class TestAgentQuery:
 
         mock_log.assert_called_once()
 
-    @patch("agents.query_agent.log_event")
-    @patch("agents.query_agent.rerank_results")
-    @patch("agents.query_agent.graph_expand_results")
-    @patch("agents.query_agent.multi_domain_query")
-    @patch("agents.query_agent.config")
+    @patch("core.agents.query_agent.log_event")
+    @patch("core.agents.query_agent.rerank_results")
+    @patch("core.agents.query_agent.graph_expand_results")
+    @patch("core.agents.query_agent.multi_domain_query")
+    @patch("core.agents.query_agent.config")
     def test_no_results_returns_zero_confidence(
         self, mock_config, mock_mdq, mock_graph, mock_rerank, mock_log
     ):

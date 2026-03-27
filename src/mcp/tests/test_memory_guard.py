@@ -24,8 +24,8 @@ def test_container_memory_available_parses_cgroup_files(tmp_path):
     max_file.write_text("4294967296\n")  # 4 * 1024^3
     current_file.write_text("2684354560\n")  # 2.5 * 1024^3
 
-    with patch("agents.hallucination.streaming._CGROUP_MEMORY_MAX", max_file), \
-         patch("agents.hallucination.streaming._CGROUP_MEMORY_CURRENT", current_file):
+    with patch("core.agents.hallucination.streaming._CGROUP_MEMORY_MAX", max_file), \
+         patch("core.agents.hallucination.streaming._CGROUP_MEMORY_CURRENT", current_file):
         result = _container_memory_available_mb()
 
     assert result is not None
@@ -41,8 +41,8 @@ def test_container_memory_available_returns_none_for_unlimited(tmp_path):
     max_file.write_text("max\n")
     current_file.write_text("1073741824\n")
 
-    with patch("agents.hallucination.streaming._CGROUP_MEMORY_MAX", max_file), \
-         patch("agents.hallucination.streaming._CGROUP_MEMORY_CURRENT", current_file):
+    with patch("core.agents.hallucination.streaming._CGROUP_MEMORY_MAX", max_file), \
+         patch("core.agents.hallucination.streaming._CGROUP_MEMORY_CURRENT", current_file):
         result = _container_memory_available_mb()
 
     assert result is None
@@ -52,7 +52,7 @@ def test_container_memory_available_returns_none_for_unlimited(tmp_path):
 async def test_wait_for_memory_noop_outside_container():
     """_wait_for_memory should return immediately when not in a container."""
     from agents.hallucination.streaming import _wait_for_memory
-    with patch("agents.hallucination.streaming._container_memory_available_mb", return_value=None):
+    with patch("core.agents.hallucination.streaming._container_memory_available_mb", return_value=None):
         # Should not block
         await asyncio.wait_for(_wait_for_memory(512, "test"), timeout=1.0)
 
@@ -73,7 +73,7 @@ async def test_wait_for_memory_blocks_when_low():
     async def fast_sleep(duration):
         pass  # Skip actual sleep in tests
 
-    with patch("agents.hallucination.streaming._container_memory_available_mb", side_effect=mock_available), \
+    with patch("core.agents.hallucination.streaming._container_memory_available_mb", side_effect=mock_available), \
          patch.object(streaming_mod.asyncio, "sleep", fast_sleep):
         await asyncio.wait_for(_wait_for_memory(512, "test"), timeout=5.0)
 

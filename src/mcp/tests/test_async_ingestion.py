@@ -36,10 +36,10 @@ def _ensure_real_router():
 class TestAsyncFileParsing:
     """Verify that ingest_file() uses asyncio.to_thread() for blocking calls."""
 
-    @patch("services.ingestion.asyncio")
-    @patch("services.ingestion.ai_categorize", new_callable=AsyncMock)
-    @patch("services.ingestion.extract_metadata")
-    @patch("services.ingestion.validate_file_path")
+    @patch("app.services.ingestion.asyncio")
+    @patch("app.services.ingestion.ai_categorize", new_callable=AsyncMock)
+    @patch("app.services.ingestion.extract_metadata")
+    @patch("app.services.ingestion.validate_file_path")
     def test_parse_file_runs_in_thread(
         self, mock_validate, mock_meta, mock_ai_cat, mock_asyncio
     ):
@@ -69,10 +69,10 @@ class TestAsyncFileParsing:
         from app.parsers import parse_file
         assert first_call.args[0] is parse_file
 
-    @patch("services.ingestion.asyncio")
-    @patch("services.ingestion.ai_categorize", new_callable=AsyncMock)
-    @patch("services.ingestion.extract_metadata")
-    @patch("services.ingestion.validate_file_path")
+    @patch("app.services.ingestion.asyncio")
+    @patch("app.services.ingestion.ai_categorize", new_callable=AsyncMock)
+    @patch("app.services.ingestion.extract_metadata")
+    @patch("app.services.ingestion.validate_file_path")
     def test_ingest_content_runs_in_thread(
         self, mock_validate, mock_meta, mock_ai_cat, mock_asyncio
     ):
@@ -97,10 +97,10 @@ class TestAsyncFileParsing:
         from app.services.ingestion import ingest_content
         assert second_call.args[0] is ingest_content
 
-    @patch("services.ingestion.asyncio")
-    @patch("services.ingestion.ai_categorize", new_callable=AsyncMock)
-    @patch("services.ingestion.extract_metadata")
-    @patch("services.ingestion.validate_file_path")
+    @patch("app.services.ingestion.asyncio")
+    @patch("app.services.ingestion.ai_categorize", new_callable=AsyncMock)
+    @patch("app.services.ingestion.extract_metadata")
+    @patch("app.services.ingestion.validate_file_path")
     def test_parse_output_preserved(
         self, mock_validate, mock_meta, mock_ai_cat, mock_asyncio
     ):
@@ -141,7 +141,7 @@ class TestIngestBatch:
             await ingest_batch(items)
 
     @pytest.mark.asyncio
-    @patch("services.ingestion.ingest_content")
+    @patch("app.services.ingestion.ingest_content")
     async def test_batch_content_items(self, mock_ingest):
         """Batch should handle content-based items."""
         mock_ingest.return_value = {"status": "success", "chunks": 1}
@@ -170,7 +170,7 @@ class TestIngestBatch:
         assert result["results"][0]["status"] == "error"
 
     @pytest.mark.asyncio
-    @patch("services.ingestion.ingest_content")
+    @patch("app.services.ingestion.ingest_content")
     async def test_batch_individual_failures_dont_block(self, mock_ingest):
         """Individual item failures should not prevent other items from succeeding."""
         mock_ingest.side_effect = [
@@ -193,7 +193,7 @@ class TestIngestBatch:
         assert result["results"][1]["status"] == "error"
 
     @pytest.mark.asyncio
-    @patch("services.ingestion.ingest_content")
+    @patch("app.services.ingestion.ingest_content")
     async def test_batch_duplicate_counted_as_success(self, mock_ingest):
         """Duplicate results should count as 'succeeded'."""
         mock_ingest.return_value = {"status": "duplicate", "duplicate_of": "existing.txt"}
@@ -207,7 +207,7 @@ class TestIngestBatch:
         assert result["failed"] == 0
 
     @pytest.mark.asyncio
-    @patch("services.ingestion.ingest_file", new_callable=AsyncMock)
+    @patch("app.services.ingestion.ingest_file", new_callable=AsyncMock)
     async def test_batch_file_items(self, mock_ingest_file):
         """Batch should handle file_path-based items."""
         mock_ingest_file.return_value = {"status": "success", "chunks": 3}

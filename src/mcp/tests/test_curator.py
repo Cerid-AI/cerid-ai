@@ -144,7 +144,7 @@ class TestScoreKeywords:
 # ---------------------------------------------------------------------------
 
 class TestScoreFreshness:
-    @patch("agents.curator.utcnow")
+    @patch("core.agents.curator.utcnow")
     def test_recent_today(self, mock_utcnow):
         """Document from today -> age ~0 days -> score close to 1.0."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
@@ -153,7 +153,7 @@ class TestScoreFreshness:
         result = score_freshness(ts)
         assert result == pytest.approx(1.0, abs=0.01)
 
-    @patch("agents.curator.utcnow")
+    @patch("core.agents.curator.utcnow")
     def test_thirty_days_old(self, mock_utcnow):
         """30 days old -> half-life of 30 -> score = 0.5."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
@@ -162,7 +162,7 @@ class TestScoreFreshness:
         result = score_freshness(ts)
         assert result == pytest.approx(0.5, abs=0.01)
 
-    @patch("agents.curator.utcnow")
+    @patch("core.agents.curator.utcnow")
     def test_sixty_days_old(self, mock_utcnow):
         """60 days old -> 2 half-lives -> score = 0.25."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
@@ -183,7 +183,7 @@ class TestScoreFreshness:
         """None ingested_at, no modified_at -> fallback 0.5."""
         assert score_freshness(None) == 0.5
 
-    @patch("agents.curator.utcnow")
+    @patch("core.agents.curator.utcnow")
     def test_future_date_clamped(self, mock_utcnow):
         """Future date -> age clamped to 0 -> score = 1.0."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
@@ -192,7 +192,7 @@ class TestScoreFreshness:
         result = score_freshness(future)
         assert result == pytest.approx(1.0, abs=0.001)
 
-    @patch("agents.curator.utcnow")
+    @patch("core.agents.curator.utcnow")
     def test_modified_at_preferred(self, mock_utcnow):
         """modified_at should be used over ingested_at when present."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
@@ -205,7 +205,7 @@ class TestScoreFreshness:
         expected = math.pow(2, -1 / 30)
         assert result == pytest.approx(expected, abs=0.01)
 
-    @patch("agents.curator.utcnow")
+    @patch("core.agents.curator.utcnow")
     def test_modified_at_none_falls_back(self, mock_utcnow):
         """modified_at=None -> falls back to ingested_at."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
@@ -215,7 +215,7 @@ class TestScoreFreshness:
         result = score_freshness(ts, modified_at=None)
         assert result == pytest.approx(0.5, abs=0.01)
 
-    @patch("agents.curator.utcnow")
+    @patch("core.agents.curator.utcnow")
     def test_naive_timestamp_comparison(self, mock_utcnow):
         """Naive (no timezone) timestamp should still work."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
@@ -342,7 +342,7 @@ class TestScoreCompleteness:
 
 class TestComputeQualityScore:
     @patch("utils.quality._utcnow")
-    @patch("agents.curator.utcnow")
+    @patch("core.agents.curator.utcnow")
     def test_weighted_sum_matches_manual(self, mock_utcnow, mock_quality_utcnow):
         """Verify weighted sum calculation with known inputs."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
@@ -368,7 +368,7 @@ class TestComputeQualityScore:
         assert result["breakdown"]["completeness"] == pytest.approx(1.0)
         assert result["issues"] == []
 
-    @patch("agents.curator.utcnow")
+    @patch("core.agents.curator.utcnow")
     def test_issues_include_summary_missing(self, mock_utcnow):
         """Missing summary -> summary_missing in issues."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
@@ -385,7 +385,7 @@ class TestComputeQualityScore:
         result = compute_quality_score(artifact)
         assert "summary_missing" in result["issues"]
 
-    @patch("agents.curator.utcnow")
+    @patch("core.agents.curator.utcnow")
     def test_issues_include_summary_weak(self, mock_utcnow):
         """Short but non-empty summary (< 0.5 score) -> summary_weak."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
@@ -403,7 +403,7 @@ class TestComputeQualityScore:
         result = compute_quality_score(artifact)
         assert "summary_weak" in result["issues"]
 
-    @patch("agents.curator.utcnow")
+    @patch("core.agents.curator.utcnow")
     def test_issues_include_keywords_missing(self, mock_utcnow):
         """No keywords -> keywords_missing."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
@@ -420,7 +420,7 @@ class TestComputeQualityScore:
         result = compute_quality_score(artifact)
         assert "keywords_missing" in result["issues"]
 
-    @patch("agents.curator.utcnow")
+    @patch("core.agents.curator.utcnow")
     def test_issues_include_keywords_sparse(self, mock_utcnow):
         """1 keyword (score = 0.2 < 0.5) -> keywords_sparse."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
@@ -437,7 +437,7 @@ class TestComputeQualityScore:
         result = compute_quality_score(artifact)
         assert "keywords_sparse" in result["issues"]
 
-    @patch("agents.curator.utcnow")
+    @patch("core.agents.curator.utcnow")
     def test_issues_include_metadata_incomplete(self, mock_utcnow):
         """Completeness < 0.5 -> metadata_incomplete."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
@@ -454,7 +454,7 @@ class TestComputeQualityScore:
         result = compute_quality_score(artifact)
         assert "metadata_incomplete" in result["issues"]
 
-    @patch("agents.curator.utcnow")
+    @patch("core.agents.curator.utcnow")
     def test_issues_include_stale(self, mock_utcnow):
         """Very old artifact -> freshness < 0.3 -> stale."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
@@ -473,7 +473,7 @@ class TestComputeQualityScore:
         assert "stale" in result["issues"]
 
     @patch("utils.quality._utcnow")
-    @patch("agents.curator.utcnow")
+    @patch("core.agents.curator.utcnow")
     def test_all_dimensions_contribute(self, mock_utcnow, mock_quality_utcnow):
         """Verify each dimension contributes proportionally to weighted total."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
@@ -582,10 +582,10 @@ class TestStoreQualityScores:
 
 class TestCurate:
     @pytest.mark.asyncio
-    @patch("agents.curator.utcnow")
-    @patch("agents.curator._store_quality_scores")
-    @patch("agents.curator.list_artifacts")
-    @patch("agents.curator.config")
+    @patch("core.agents.curator.utcnow")
+    @patch("core.agents.curator._store_quality_scores")
+    @patch("core.agents.curator.list_artifacts")
+    @patch("core.agents.curator.config")
     async def test_correct_response_shape(
         self, mock_config, mock_list, mock_store, mock_utcnow
     ):
@@ -629,10 +629,10 @@ class TestCurate:
         assert "low_quality_artifacts" in result
 
     @pytest.mark.asyncio
-    @patch("agents.curator.utcnow")
-    @patch("agents.curator._store_quality_scores")
-    @patch("agents.curator.list_artifacts")
-    @patch("agents.curator.config")
+    @patch("core.agents.curator.utcnow")
+    @patch("core.agents.curator._store_quality_scores")
+    @patch("core.agents.curator.list_artifacts")
+    @patch("core.agents.curator.config")
     async def test_domain_filtering(
         self, mock_config, mock_list, mock_store, mock_utcnow
     ):
@@ -661,10 +661,10 @@ class TestCurate:
         mock_list.assert_called_once_with(driver, domain="finance", limit=200)
 
     @pytest.mark.asyncio
-    @patch("agents.curator.utcnow")
-    @patch("agents.curator._store_quality_scores")
-    @patch("agents.curator.list_artifacts")
-    @patch("agents.curator.config")
+    @patch("core.agents.curator.utcnow")
+    @patch("core.agents.curator._store_quality_scores")
+    @patch("core.agents.curator.list_artifacts")
+    @patch("core.agents.curator.config")
     async def test_handles_neo4j_list_failure(
         self, mock_config, mock_list, mock_store, mock_utcnow
     ):
@@ -707,10 +707,10 @@ class TestCurate:
         assert result["artifacts_stored"] == 1
 
     @pytest.mark.asyncio
-    @patch("agents.curator.utcnow")
-    @patch("agents.curator._store_quality_scores")
-    @patch("agents.curator.list_artifacts")
-    @patch("agents.curator.config")
+    @patch("core.agents.curator.utcnow")
+    @patch("core.agents.curator._store_quality_scores")
+    @patch("core.agents.curator.list_artifacts")
+    @patch("core.agents.curator.config")
     async def test_handles_store_failure(
         self, mock_config, mock_list, mock_store, mock_utcnow
     ):
@@ -749,10 +749,10 @@ class TestCurate:
         assert result["artifacts_stored"] == 0
 
     @pytest.mark.asyncio
-    @patch("agents.curator.utcnow")
-    @patch("agents.curator._store_quality_scores")
-    @patch("agents.curator.list_artifacts")
-    @patch("agents.curator.config")
+    @patch("core.agents.curator.utcnow")
+    @patch("core.agents.curator._store_quality_scores")
+    @patch("core.agents.curator.list_artifacts")
+    @patch("core.agents.curator.config")
     async def test_low_quality_artifacts_sorted(
         self, mock_config, mock_list, mock_store, mock_utcnow
     ):
@@ -803,10 +803,10 @@ class TestCurate:
             assert lq[0]["quality_score"] <= lq[1]["quality_score"]
 
     @pytest.mark.asyncio
-    @patch("agents.curator.utcnow")
-    @patch("agents.curator._store_quality_scores")
-    @patch("agents.curator.list_artifacts")
-    @patch("agents.curator.config")
+    @patch("core.agents.curator.utcnow")
+    @patch("core.agents.curator._store_quality_scores")
+    @patch("core.agents.curator.list_artifacts")
+    @patch("core.agents.curator.config")
     async def test_no_artifacts(
         self, mock_config, mock_list, mock_store, mock_utcnow
     ):
@@ -837,10 +837,10 @@ class TestCurate:
         mock_store.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch("agents.curator.utcnow")
-    @patch("agents.curator._store_quality_scores")
-    @patch("agents.curator.list_artifacts")
-    @patch("agents.curator.config")
+    @patch("core.agents.curator.utcnow")
+    @patch("core.agents.curator._store_quality_scores")
+    @patch("core.agents.curator.list_artifacts")
+    @patch("core.agents.curator.config")
     async def test_max_artifacts_passed(
         self, mock_config, mock_list, mock_store, mock_utcnow
     ):

@@ -229,7 +229,7 @@ class TestIngestMultimodal:
         """ingest_multimodal returns error in community tier."""
         from app.services.multimodal import ingest_multimodal
 
-        with patch("services.multimodal.config") as mock_config:
+        with patch("app.services.multimodal.config") as mock_config:
             mock_config.FEATURE_TIER = "community"
             result = await ingest_multimodal("/some/file.mp3")
 
@@ -241,7 +241,7 @@ class TestIngestMultimodal:
         """ingest_multimodal returns error for missing files."""
         from app.services.multimodal import ingest_multimodal
 
-        with patch("services.multimodal.config") as mock_config:
+        with patch("app.services.multimodal.config") as mock_config:
             mock_config.FEATURE_TIER = "pro"
             result = await ingest_multimodal("/nonexistent/file.mp3")
 

@@ -302,8 +302,8 @@ class TestWorkflowCRUD:
 
 
 class TestWorkflowExecution:
-    @patch("routers.workflows.get_redis")
-    @patch("routers.workflows._execute_agent_node")
+    @patch("app.routers.workflows.get_redis")
+    @patch("app.routers.workflows._execute_agent_node")
     def test_simple_chain_execution(self, mock_agent, mock_redis_fn):
         mock_redis_fn.return_value = _mock_redis()
         mock_agent.return_value = {"results": [{"text": "found"}]}
@@ -322,8 +322,8 @@ class TestWorkflowExecution:
         assert "q" in run.results
         assert "sr" in run.results
 
-    @patch("routers.workflows.get_redis")
-    @patch("routers.workflows._execute_agent_node")
+    @patch("app.routers.workflows.get_redis")
+    @patch("app.routers.workflows._execute_agent_node")
     def test_execution_failure_captured(self, mock_agent, mock_redis_fn):
         mock_redis_fn.return_value = _mock_redis()
         mock_agent.side_effect = RuntimeError("Agent crashed")
@@ -337,8 +337,8 @@ class TestWorkflowExecution:
         assert run.status == RunStatus.FAILED
         assert "Agent crashed" in run.error
 
-    @patch("routers.workflows.get_redis")
-    @patch("routers.workflows._execute_agent_node")
+    @patch("app.routers.workflows.get_redis")
+    @patch("app.routers.workflows._execute_agent_node")
     def test_condition_node_evaluation(self, mock_agent, mock_redis_fn):
         mock_redis_fn.return_value = _mock_redis()
         mock_agent.return_value = {"confidence": 0.9}
@@ -358,8 +358,8 @@ class TestWorkflowExecution:
         assert run.status == RunStatus.COMPLETED
         assert run.results["c"]["passed"] is True
 
-    @patch("routers.workflows.get_redis")
-    @patch("routers.workflows._execute_agent_node")
+    @patch("app.routers.workflows.get_redis")
+    @patch("app.routers.workflows._execute_agent_node")
     def test_empty_workflow_runs(self, mock_agent, mock_redis_fn):
         """A workflow with nodes but no edges runs all nodes independently."""
         mock_redis_fn.return_value = _mock_redis()

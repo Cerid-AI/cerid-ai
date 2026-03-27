@@ -35,7 +35,7 @@ class TestChatStreamEndpoint:
     """POST /chat/stream"""
 
     def test_returns_503_when_no_api_key(self):
-        with patch("routers.chat.OPENROUTER_API_KEY", ""):
+        with patch("app.routers.chat.OPENROUTER_API_KEY", ""):
             app = _make_app()
             client = TestClient(app)
             resp = client.post("/chat/stream", json={
@@ -58,11 +58,11 @@ class TestChatStreamEndpoint:
 
         mock_response.aiter_bytes = fake_aiter
 
-        with patch("routers.chat.OPENROUTER_API_KEY", "sk-test"):
+        with patch("app.routers.chat.OPENROUTER_API_KEY", "sk-test"):
             app = _make_app()
             client = TestClient(app)
 
-            with patch("routers.chat.httpx.AsyncClient") as mock_client_cls:
+            with patch("app.routers.chat.httpx.AsyncClient") as mock_client_cls:
                 _setup_mock_client(mock_client_cls, mock_response)
 
                 resp = client.post("/chat/stream", json={
@@ -103,11 +103,11 @@ class TestChatStreamEndpoint:
 
         mock_response.aiter_bytes = fake_aiter
 
-        with patch("routers.chat.OPENROUTER_API_KEY", "sk-test"):
+        with patch("app.routers.chat.OPENROUTER_API_KEY", "sk-test"):
             app = _make_app()
             client = TestClient(app)
 
-            with patch("routers.chat.httpx.AsyncClient") as mock_client_cls:
+            with patch("app.routers.chat.httpx.AsyncClient") as mock_client_cls:
                 _setup_mock_client(mock_client_cls, mock_response)
 
                 resp = client.post("/chat/stream", json={
@@ -143,11 +143,11 @@ class TestChatStreamEndpoint:
 
         mock_response.aiter_bytes = fake_aiter
 
-        with patch("routers.chat.OPENROUTER_API_KEY", "sk-test"):
+        with patch("app.routers.chat.OPENROUTER_API_KEY", "sk-test"):
             app = _make_app()
             client = TestClient(app)
 
-            with patch("routers.chat.httpx.AsyncClient") as mock_client_cls:
+            with patch("app.routers.chat.httpx.AsyncClient") as mock_client_cls:
                 _setup_mock_client(mock_client_cls, mock_response)
 
                 resp = client.post("/chat/stream", json={
@@ -182,7 +182,7 @@ class TestChatRequestValidation:
     """Request body validation."""
 
     def test_rejects_missing_model(self):
-        with patch("routers.chat.OPENROUTER_API_KEY", "sk-test"):
+        with patch("app.routers.chat.OPENROUTER_API_KEY", "sk-test"):
             app = _make_app()
             client = TestClient(app)
             resp = client.post("/chat/stream", json={
@@ -191,11 +191,11 @@ class TestChatRequestValidation:
             assert resp.status_code == 422  # Pydantic validation error
 
     def test_rejects_empty_messages(self):
-        with patch("routers.chat.OPENROUTER_API_KEY", "sk-test"):
+        with patch("app.routers.chat.OPENROUTER_API_KEY", "sk-test"):
             app = _make_app()
             client = TestClient(app)
 
-            with patch("routers.chat.httpx.AsyncClient") as mock_client_cls:
+            with patch("app.routers.chat.httpx.AsyncClient") as mock_client_cls:
                 mock_resp = AsyncMock()
                 mock_resp.status_code = 200
                 mock_resp.aclose = AsyncMock()
@@ -218,11 +218,11 @@ class TestChatRequestValidation:
 
     def test_accepts_optional_max_tokens(self):
         """max_tokens is optional and should be forwarded when present."""
-        with patch("routers.chat.OPENROUTER_API_KEY", "sk-test"):
+        with patch("app.routers.chat.OPENROUTER_API_KEY", "sk-test"):
             app = _make_app()
             client = TestClient(app)
 
-            with patch("routers.chat.httpx.AsyncClient") as mock_client_cls:
+            with patch("app.routers.chat.httpx.AsyncClient") as mock_client_cls:
                 mock_resp = AsyncMock()
                 mock_resp.status_code = 200
                 mock_resp.aclose = AsyncMock()

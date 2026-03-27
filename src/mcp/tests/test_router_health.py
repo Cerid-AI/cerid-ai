@@ -26,9 +26,9 @@ class TestHealthEndpoint:
         h._health_cache = {}
         h._health_cache_ts = 0.0
 
-    @patch("routers.health.get_redis")
-    @patch("routers.health.get_chroma")
-    @patch("routers.health.get_neo4j")
+    @patch("app.routers.health.get_redis")
+    @patch("app.routers.health.get_chroma")
+    @patch("app.routers.health.get_neo4j")
     def test_healthy_when_all_connected(self, mock_neo4j, mock_chroma, mock_redis):
         driver = MagicMock()
         session = MagicMock()
@@ -46,9 +46,9 @@ class TestHealthEndpoint:
         assert data["services"]["redis"] == "connected"
         assert data["services"]["neo4j"] == "connected"
 
-    @patch("routers.health.get_redis")
-    @patch("routers.health.get_chroma")
-    @patch("routers.health.get_neo4j")
+    @patch("app.routers.health.get_redis")
+    @patch("app.routers.health.get_chroma")
+    @patch("app.routers.health.get_neo4j")
     def test_degraded_when_service_down(self, mock_neo4j, mock_chroma, mock_redis):
         mock_neo4j.side_effect = ConnectionError("Neo4j unreachable")
 
@@ -60,9 +60,9 @@ class TestHealthEndpoint:
         assert data["status"] == "degraded"
         assert "error" in data["services"]["neo4j"]
 
-    @patch("routers.health.get_redis", side_effect=Exception("Redis down"))
-    @patch("routers.health.get_chroma", side_effect=Exception("Chroma down"))
-    @patch("routers.health.get_neo4j", side_effect=Exception("Neo4j down"))
+    @patch("app.routers.health.get_redis", side_effect=Exception("Redis down"))
+    @patch("app.routers.health.get_chroma", side_effect=Exception("Chroma down"))
+    @patch("app.routers.health.get_neo4j", side_effect=Exception("Neo4j down"))
     def test_degraded_when_all_services_down(self, mock_neo4j, mock_chroma, mock_redis):
         client = TestClient(_make_app())
         response = client.get("/health")
@@ -75,7 +75,7 @@ class TestHealthEndpoint:
 
 
 class TestCollectionsEndpoint:
-    @patch("routers.health.get_chroma")
+    @patch("app.routers.health.get_chroma")
     def test_returns_collection_list(self, mock_chroma):
         coll1, coll2 = MagicMock(), MagicMock()
         coll1.name = "kb_coding"
@@ -91,7 +91,7 @@ class TestCollectionsEndpoint:
         assert "kb_coding" in data["collections"]
         assert "kb_finance" in data["collections"]
 
-    @patch("routers.health.get_chroma")
+    @patch("app.routers.health.get_chroma")
     def test_returns_empty_when_no_collections(self, mock_chroma):
         mock_chroma.return_value.list_collections.return_value = []
 

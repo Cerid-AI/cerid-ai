@@ -71,7 +71,7 @@ def parse_notion_export(zip_path: str | Path) -> list[dict[str, Any]]:
 
             # Register this page's folder for child lookups
             page_folder = str(pure.with_suffix(""))
-            page_id = _notion_id_from_name(pure.stem)
+            page_id = _notion_id_from_name(pure.stem) or ""
             folder_ids[page_folder] = page_id
 
             # Map Notion database properties to cerid metadata

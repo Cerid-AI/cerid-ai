@@ -58,7 +58,7 @@ def _make_app(plugin_dir: str, tier: str = "community") -> FastAPI:
 
     with patch("config.PLUGIN_DIR", plugin_dir), \
          patch("config.FEATURE_TIER", tier), \
-         patch("routers.plugins.get_redis", return_value=mock_redis):
+         patch("app.routers.plugins.get_redis", return_value=mock_redis):
         from app.routers.plugins import router
 
         app = FastAPI()
@@ -75,7 +75,7 @@ class TestListPlugins:
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
              patch("config.FEATURE_TIER", "community"), \
-             patch("routers.plugins.get_redis", return_value=mock_redis):
+             patch("app.routers.plugins.get_redis", return_value=mock_redis):
             from app.routers.plugins import router
 
             app = FastAPI()
@@ -97,7 +97,7 @@ class TestListPlugins:
 
         with patch("config.PLUGIN_DIR", str(empty_dir)), \
              patch("config.FEATURE_TIER", "community"), \
-             patch("routers.plugins.get_redis", return_value=mock_redis):
+             patch("app.routers.plugins.get_redis", return_value=mock_redis):
             from app.routers.plugins import router
 
             app = FastAPI()
@@ -113,7 +113,7 @@ class TestListPlugins:
 
         with patch("config.PLUGIN_DIR", "/nonexistent/path"), \
              patch("config.FEATURE_TIER", "community"), \
-             patch("routers.plugins.get_redis", return_value=mock_redis):
+             patch("app.routers.plugins.get_redis", return_value=mock_redis):
             from app.routers.plugins import router
 
             app = FastAPI()
@@ -132,7 +132,7 @@ class TestGetPlugin:
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
              patch("config.FEATURE_TIER", "community"), \
-             patch("routers.plugins.get_redis", return_value=mock_redis):
+             patch("app.routers.plugins.get_redis", return_value=mock_redis):
             from app.routers.plugins import router
 
             app = FastAPI()
@@ -152,7 +152,7 @@ class TestGetPlugin:
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
              patch("config.FEATURE_TIER", "community"), \
-             patch("routers.plugins.get_redis", return_value=mock_redis):
+             patch("app.routers.plugins.get_redis", return_value=mock_redis):
             from app.routers.plugins import router
 
             app = FastAPI()
@@ -170,7 +170,7 @@ class TestEnableDisable:
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
              patch("config.FEATURE_TIER", "community"), \
-             patch("routers.plugins.get_redis", return_value=mock_redis), \
+             patch("app.routers.plugins.get_redis", return_value=mock_redis), \
              patch("plugins.get_loaded_plugins", return_value={}):
             from app.routers.plugins import router
 
@@ -189,7 +189,7 @@ class TestEnableDisable:
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
              patch("config.FEATURE_TIER", "community"), \
-             patch("routers.plugins.get_redis", return_value=mock_redis):
+             patch("app.routers.plugins.get_redis", return_value=mock_redis):
             from app.routers.plugins import router
 
             app = FastAPI()
@@ -206,7 +206,7 @@ class TestEnableDisable:
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
              patch("config.FEATURE_TIER", "pro"), \
-             patch("routers.plugins.get_redis", return_value=mock_redis), \
+             patch("app.routers.plugins.get_redis", return_value=mock_redis), \
              patch("plugins.get_loaded_plugins", return_value={}):
             from app.routers.plugins import router
 
@@ -225,7 +225,7 @@ class TestEnableDisable:
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
              patch("config.FEATURE_TIER", "community"), \
-             patch("routers.plugins.get_redis", return_value=mock_redis), \
+             patch("app.routers.plugins.get_redis", return_value=mock_redis), \
              patch("plugins.get_loaded_plugins", return_value={}):
             from app.routers.plugins import router
 
@@ -245,7 +245,7 @@ class TestEnableDisable:
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
              patch("config.FEATURE_TIER", "community"), \
-             patch("routers.plugins.get_redis", return_value=mock_redis):
+             patch("app.routers.plugins.get_redis", return_value=mock_redis):
             from app.routers.plugins import router
 
             app = FastAPI()
@@ -263,7 +263,7 @@ class TestPluginConfig:
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
              patch("config.FEATURE_TIER", "community"), \
-             patch("routers.plugins.get_redis", return_value=mock_redis):
+             patch("app.routers.plugins.get_redis", return_value=mock_redis):
             from app.routers.plugins import router
 
             app = FastAPI()
@@ -280,7 +280,7 @@ class TestPluginConfig:
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
              patch("config.FEATURE_TIER", "community"), \
-             patch("routers.plugins.get_redis", return_value=mock_redis):
+             patch("app.routers.plugins.get_redis", return_value=mock_redis):
             from app.routers.plugins import router
 
             app = FastAPI()
@@ -307,7 +307,7 @@ class TestPluginConfig:
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
              patch("config.FEATURE_TIER", "community"), \
-             patch("routers.plugins.get_redis", return_value=mock_redis):
+             patch("app.routers.plugins.get_redis", return_value=mock_redis):
             from app.routers.plugins import router
 
             app = FastAPI()
@@ -325,7 +325,7 @@ class TestScanPlugins:
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
              patch("config.FEATURE_TIER", "community"), \
-             patch("routers.plugins.get_redis", return_value=mock_redis):
+             patch("app.routers.plugins.get_redis", return_value=mock_redis):
             from app.routers.plugins import router
 
             app = FastAPI()
@@ -343,7 +343,7 @@ class TestScanPlugins:
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
              patch("config.FEATURE_TIER", "community"), \
-             patch("routers.plugins.get_redis", return_value=mock_redis):
+             patch("app.routers.plugins.get_redis", return_value=mock_redis):
             from app.routers.plugins import router
 
             app = FastAPI()
@@ -377,7 +377,7 @@ class TestPluginStatus:
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
              patch("config.FEATURE_TIER", "community"), \
-             patch("routers.plugins.get_redis", return_value=mock_redis):
+             patch("app.routers.plugins.get_redis", return_value=mock_redis):
             from app.routers.plugins import router
 
             app = FastAPI()
@@ -394,7 +394,7 @@ class TestPluginStatus:
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
              patch("config.FEATURE_TIER", "community"), \
-             patch("routers.plugins.get_redis", return_value=mock_redis):
+             patch("app.routers.plugins.get_redis", return_value=mock_redis):
             from app.routers.plugins import router
 
             app = FastAPI()
@@ -411,7 +411,7 @@ class TestPluginStatus:
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
              patch("config.FEATURE_TIER", "community"), \
-             patch("routers.plugins.get_redis", return_value=mock_redis), \
+             patch("app.routers.plugins.get_redis", return_value=mock_redis), \
              patch("plugins.get_loaded_plugins", return_value={}):
             from app.routers.plugins import router
 
@@ -430,7 +430,7 @@ class TestPluginStatus:
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
              patch("config.FEATURE_TIER", "community"), \
-             patch("routers.plugins.get_redis", return_value=mock_redis), \
+             patch("app.routers.plugins.get_redis", return_value=mock_redis), \
              patch("plugins.get_loaded_plugins", return_value={"cerid-plugin-analytics": {}}):
             from app.routers.plugins import router
 

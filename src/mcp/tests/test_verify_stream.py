@@ -216,7 +216,7 @@ class TestStreamingTimeouts:
         # Patch verify_claim and extract_claims with fast fakes, and set
         # very short per-claim timeout (0.1s) so the test doesn't wait long.
         with (
-            patch("agents.hallucination.streaming.verify_claim", side_effect=_mock_verify_claim),
+            patch("core.agents.hallucination.streaming.verify_claim", side_effect=_mock_verify_claim),
             patch(
                 "agents.hallucination.streaming.extract_claims",
                 return_value=(["Paris is the capital of France."], "heuristic"),
@@ -261,7 +261,7 @@ class TestStreamingTimeouts:
             return {"status": "verified", "similarity": 0.9}
 
         with (
-            patch("agents.hallucination.streaming.verify_claim", side_effect=_mock_verify_claim),
+            patch("core.agents.hallucination.streaming.verify_claim", side_effect=_mock_verify_claim),
             patch(
                 "agents.hallucination.streaming.extract_claims",
                 return_value=(
@@ -344,9 +344,9 @@ class TestStreamingTimeouts:
             return []
 
         with (
-            patch("agents.query_agent.lightweight_kb_query", side_effect=_mock_lightweight_kb_query),
-            patch("agents.hallucination.verification._verify_claim_externally", side_effect=_mock_external),
-            patch("agents.hallucination.verification._query_memories", side_effect=_mock_memories),
+            patch("core.agents.query_agent.lightweight_kb_query", side_effect=_mock_lightweight_kb_query),
+            patch("core.agents.hallucination.verification._verify_claim_externally", side_effect=_mock_external),
+            patch("core.agents.hallucination.verification._query_memories", side_effect=_mock_memories),
         ):
             # Non-streaming: should make 2 external calls (cross-model + web escalation)
             external_calls.clear()
@@ -377,7 +377,7 @@ class TestExtractionErrorHandling:
         async def _mock_call_llm(*args, **kwargs):
             raise httpx.ReadTimeout("Connection timed out")
 
-        with patch("agents.hallucination.extraction.call_llm", side_effect=_mock_call_llm):
+        with patch("core.agents.hallucination.extraction.call_llm", side_effect=_mock_call_llm):
             result = await _extract_claims_llm("Some response text for testing.", 10)
 
         assert result == []
@@ -392,7 +392,7 @@ class TestExtractionErrorHandling:
         async def _mock_call_llm(*args, **kwargs):
             raise httpx.ConnectError("Connection refused")
 
-        with patch("agents.hallucination.extraction.call_llm", side_effect=_mock_call_llm):
+        with patch("core.agents.hallucination.extraction.call_llm", side_effect=_mock_call_llm):
             result = await _extract_claims_llm("Some response text for testing.", 10)
 
         assert result == []
@@ -406,7 +406,7 @@ class TestExtractionErrorHandling:
             raise RuntimeError("Bifrost is down")
 
         with (
-            patch("agents.hallucination.streaming.extract_claims", side_effect=_crash_extract),
+            patch("core.agents.hallucination.streaming.extract_claims", side_effect=_crash_extract),
             patch("config.HALLUCINATION_MIN_RESPONSE_LENGTH", 10),
         ):
             events = []
@@ -436,7 +436,7 @@ class TestExtractionErrorHandling:
             raise TimeoutError("simulated extraction timeout")
 
         with (
-            patch("agents.hallucination.streaming.extract_claims", side_effect=_timeout_extract),
+            patch("core.agents.hallucination.streaming.extract_claims", side_effect=_timeout_extract),
             patch("config.HALLUCINATION_MIN_RESPONSE_LENGTH", 10),
         ):
             events = []

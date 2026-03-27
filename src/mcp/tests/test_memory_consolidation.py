@@ -313,9 +313,9 @@ class TestMemoryConsolidationIntegration:
     """Test consolidation integration in extract_and_store_memories."""
 
     @pytest.mark.asyncio
-    @patch("agents.memory.config")
-    @patch("agents.memory.extract_memories", new_callable=AsyncMock)
-    @patch("services.ingestion.ingest_content")
+    @patch("core.agents.memory.config")
+    @patch("core.agents.memory.extract_memories", new_callable=AsyncMock)
+    @patch("app.services.ingestion.ingest_content")
     @patch("config.features.FEATURE_TOGGLES", {
         "enable_memory_consolidation": True,
     })
@@ -343,9 +343,9 @@ class TestMemoryConsolidationIntegration:
         mock_ingest.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch("agents.memory.config")
-    @patch("agents.memory.extract_memories", new_callable=AsyncMock)
-    @patch("services.ingestion.ingest_content")
+    @patch("core.agents.memory.config")
+    @patch("core.agents.memory.extract_memories", new_callable=AsyncMock)
+    @patch("app.services.ingestion.ingest_content")
     @patch("config.features.FEATURE_TOGGLES", {
         "enable_memory_consolidation": True,
     })
@@ -376,9 +376,9 @@ class TestMemoryConsolidationIntegration:
         mock_mark.assert_called_once_with(mock_neo4j[0], "art-old", "art-new")
 
     @pytest.mark.asyncio
-    @patch("agents.memory.config")
-    @patch("agents.memory.extract_memories", new_callable=AsyncMock)
-    @patch("services.ingestion.ingest_content")
+    @patch("core.agents.memory.config")
+    @patch("core.agents.memory.extract_memories", new_callable=AsyncMock)
+    @patch("app.services.ingestion.ingest_content")
     @patch("config.features.FEATURE_TOGGLES", {
         "enable_memory_consolidation": False,
     })

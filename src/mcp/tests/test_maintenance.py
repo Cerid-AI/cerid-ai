@@ -17,7 +17,7 @@ from core.agents.maintenance import _check_bifrost_sync
 # ---------------------------------------------------------------------------
 
 class TestCheckSystemHealth:
-    @patch("agents.maintenance.config")
+    @patch("core.agents.maintenance.config")
     def test_all_services_healthy(self, mock_config, mock_neo4j, mock_chroma, mock_redis):
         mock_config.REDIS_INGEST_LOG = "ingest:log"
         driver, session = mock_neo4j
@@ -47,7 +47,7 @@ class TestCheckSystemHealth:
         assert health["data"]["total_chunks"] == 50
         assert health["data"]["artifacts"] == 10
 
-    @patch("agents.maintenance.config")
+    @patch("core.agents.maintenance.config")
     def test_chromadb_error(self, mock_config, mock_neo4j, mock_redis):
         driver, session = mock_neo4j
         redis = mock_redis
@@ -64,7 +64,7 @@ class TestCheckSystemHealth:
         assert "error" in health["services"]["chromadb"]
         assert health["overall"] == "degraded"
 
-    @patch("agents.maintenance.config")
+    @patch("core.agents.maintenance.config")
     def test_neo4j_error(self, mock_config, mock_chroma, mock_redis):
         mock_config.REDIS_INGEST_LOG = "ingest:log"
         client, collection = mock_chroma
@@ -81,7 +81,7 @@ class TestCheckSystemHealth:
         assert "error" in health["services"]["neo4j"]
         assert health["overall"] == "degraded"
 
-    @patch("agents.maintenance.config")
+    @patch("core.agents.maintenance.config")
     def test_redis_error(self, mock_config, mock_neo4j, mock_chroma):
         mock_config.REDIS_INGEST_LOG = "ingest:log"
         driver, session = mock_neo4j
@@ -97,7 +97,7 @@ class TestCheckSystemHealth:
         assert "error" in health["services"]["redis"]
         assert health["overall"] == "degraded"
 
-    @patch("agents.maintenance.config")
+    @patch("core.agents.maintenance.config")
     def test_has_timestamp(self, mock_config, mock_neo4j, mock_chroma, mock_redis):
         mock_config.REDIS_INGEST_LOG = "ingest:log"
         driver, session = mock_neo4j
@@ -112,7 +112,7 @@ class TestCheckSystemHealth:
         health = check_system_health(driver, client, redis)
         assert "timestamp" in health
 
-    @patch("agents.maintenance.config")
+    @patch("core.agents.maintenance.config")
     def test_collection_sizes_tracked(self, mock_config, mock_neo4j, mock_chroma, mock_redis):
         mock_config.REDIS_INGEST_LOG = "ingest:log"
         driver, session = mock_neo4j
@@ -142,7 +142,7 @@ class TestCheckSystemHealth:
 # ---------------------------------------------------------------------------
 
 class TestCheckBifrostSync:
-    @patch("agents.maintenance.config")
+    @patch("core.agents.maintenance.config")
     @patch("urllib.request.urlopen")
     def test_healthy_bifrost(self, mock_urlopen, mock_config):
         mock_config.BIFROST_URL = "http://bifrost:8080/v1"
@@ -154,7 +154,7 @@ class TestCheckBifrostSync:
 
         assert _check_bifrost_sync() == "connected"
 
-    @patch("agents.maintenance.config")
+    @patch("core.agents.maintenance.config")
     @patch("urllib.request.urlopen")
     def test_bifrost_non_200(self, mock_urlopen, mock_config):
         mock_config.BIFROST_URL = "http://bifrost:8080/v1"
@@ -167,7 +167,7 @@ class TestCheckBifrostSync:
         result = _check_bifrost_sync()
         assert "503" in result
 
-    @patch("agents.maintenance.config")
+    @patch("core.agents.maintenance.config")
     @patch("urllib.request.urlopen")
     def test_bifrost_unreachable(self, mock_urlopen, mock_config):
         mock_config.BIFROST_URL = "http://bifrost:8080/v1"
@@ -182,7 +182,7 @@ class TestCheckBifrostSync:
 # ---------------------------------------------------------------------------
 
 class TestPurgeArtifacts:
-    @patch("agents.maintenance.config")
+    @patch("core.agents.maintenance.config")
     def test_purge_single_artifact(self, mock_config, mock_neo4j, mock_chroma):
         mock_config.collection_name = lambda d: f"domain_{d}"
         driver, session = mock_neo4j
@@ -205,7 +205,7 @@ class TestPurgeArtifacts:
         assert result["purged"][0]["id"] == "art-1"
         assert result["purged"][0]["chunks_removed"] == 2
 
-    @patch("agents.maintenance.config")
+    @patch("core.agents.maintenance.config")
     def test_artifact_not_found(self, mock_config, mock_neo4j, mock_chroma):
         driver, session = mock_neo4j
         client, collection = mock_chroma
@@ -216,7 +216,7 @@ class TestPurgeArtifacts:
         assert result["error_count"] == 1
         assert result["errors"][0]["error"] == "not found"
 
-    @patch("agents.maintenance.config")
+    @patch("core.agents.maintenance.config")
     def test_partial_error(self, mock_config, mock_neo4j, mock_chroma):
         mock_config.collection_name = lambda d: f"domain_{d}"
         driver, session = mock_neo4j
@@ -238,8 +238,8 @@ class TestPurgeArtifacts:
         assert result["purged_count"] == 1
         assert result["error_count"] == 1
 
-    @patch("agents.maintenance.log_event")
-    @patch("agents.maintenance.config")
+    @patch("core.agents.maintenance.log_event")
+    @patch("core.agents.maintenance.config")
     def test_logs_purge_to_redis(self, mock_config, mock_log, mock_neo4j, mock_chroma):
         mock_config.collection_name = lambda d: f"domain_{d}"
         driver, session = mock_neo4j
@@ -264,7 +264,7 @@ class TestPurgeArtifacts:
 # ---------------------------------------------------------------------------
 
 class TestAnalyzeCollections:
-    @patch("agents.maintenance.config")
+    @patch("core.agents.maintenance.config")
     def test_basic_analysis(self, mock_config):
         mock_config.DOMAINS = ["coding", "general"]
         mock_config.collection_name = lambda d: f"domain_{d}"
@@ -285,7 +285,7 @@ class TestAnalyzeCollections:
         assert result["empty_collections"] == []
         assert result["missing_collections"] == []
 
-    @patch("agents.maintenance.config")
+    @patch("core.agents.maintenance.config")
     def test_detects_empty_collections(self, mock_config):
         mock_config.DOMAINS = ["coding"]
         mock_config.collection_name = lambda d: f"domain_{d}"
@@ -301,7 +301,7 @@ class TestAnalyzeCollections:
         assert "domain_coding" in result["empty_collections"]
         assert len(result["recommendations"]) > 0
 
-    @patch("agents.maintenance.config")
+    @patch("core.agents.maintenance.config")
     def test_detects_missing_collections(self, mock_config):
         mock_config.DOMAINS = ["coding", "finance"]
         mock_config.collection_name = lambda d: f"domain_{d}"
@@ -316,7 +316,7 @@ class TestAnalyzeCollections:
         result = analyze_collections(client)
         assert "domain_finance" in result["missing_collections"]
 
-    @patch("agents.maintenance.config")
+    @patch("core.agents.maintenance.config")
     def test_detects_extra_collections(self, mock_config):
         mock_config.DOMAINS = ["coding"]
         mock_config.collection_name = lambda d: f"domain_{d}"
@@ -334,7 +334,7 @@ class TestAnalyzeCollections:
         result = analyze_collections(client)
         assert "domain_legacy" in result["extra_collections"]
 
-    @patch("agents.maintenance.config")
+    @patch("core.agents.maintenance.config")
     def test_no_collections(self, mock_config):
         mock_config.DOMAINS = ["coding"]
         mock_config.collection_name = lambda d: f"domain_{d}"

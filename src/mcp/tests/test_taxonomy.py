@@ -464,7 +464,7 @@ class TestSuggestTagsEndpoint:
     @pytest.mark.asyncio
     async def test_suggest_tags_with_domain(self):
         """Suggest tags returns vocabulary tags for a specific domain."""
-        with patch("routers.taxonomy.get_neo4j") as mock_neo4j:
+        with patch("app.routers.taxonomy.get_neo4j") as mock_neo4j:
             mock_driver = MagicMock()
             mock_session = MagicMock()
             mock_result = MagicMock()
@@ -485,7 +485,7 @@ class TestSuggestTagsEndpoint:
     @pytest.mark.asyncio
     async def test_suggest_tags_with_prefix(self):
         """Suggest tags filters by prefix."""
-        with patch("routers.taxonomy.get_neo4j") as mock_neo4j:
+        with patch("app.routers.taxonomy.get_neo4j") as mock_neo4j:
             mock_driver = MagicMock()
             mock_session = MagicMock()
             mock_result = MagicMock()

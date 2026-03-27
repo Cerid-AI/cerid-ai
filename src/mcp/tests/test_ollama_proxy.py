@@ -103,7 +103,7 @@ class TestListModels:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with _enable_ollama(), patch("routers.ollama_proxy.httpx.AsyncClient", return_value=mock_client):
+        with _enable_ollama(), patch("app.routers.ollama_proxy.httpx.AsyncClient", return_value=mock_client):
             result = await list_ollama_models()
 
         assert len(result.models) == 2
@@ -121,7 +121,7 @@ class TestListModels:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with _enable_ollama(), patch("routers.ollama_proxy.httpx.AsyncClient", return_value=mock_client):
+        with _enable_ollama(), patch("app.routers.ollama_proxy.httpx.AsyncClient", return_value=mock_client):
             with pytest.raises(HTTPException) as exc_info:
                 await list_ollama_models()
             assert exc_info.value.status_code == 503
@@ -138,7 +138,7 @@ class TestListModels:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with _enable_ollama(), patch("routers.ollama_proxy.httpx.AsyncClient", return_value=mock_client):
+        with _enable_ollama(), patch("app.routers.ollama_proxy.httpx.AsyncClient", return_value=mock_client):
             with pytest.raises(HTTPException) as exc_info:
                 await list_ollama_models()
             assert exc_info.value.status_code == 504
@@ -178,7 +178,7 @@ class TestChatSync:
             max_tokens=100,
         )
 
-        with _enable_ollama(), patch("routers.ollama_proxy.httpx.AsyncClient", return_value=mock_client):
+        with _enable_ollama(), patch("app.routers.ollama_proxy.httpx.AsyncClient", return_value=mock_client):
             result = await chat_completion(req)
 
         assert result["model"] == "llama3.2"
@@ -207,7 +207,7 @@ class TestChatSync:
             messages=[ChatMessage(role="user", content="Hello")],
         )
 
-        with _enable_ollama(), patch("routers.ollama_proxy.httpx.AsyncClient", return_value=mock_client):
+        with _enable_ollama(), patch("app.routers.ollama_proxy.httpx.AsyncClient", return_value=mock_client):
             with pytest.raises(HTTPException) as exc_info:
                 await chat_completion(req)
             assert exc_info.value.status_code == 503

@@ -147,7 +147,7 @@ class TestWithMetadata:
 
 class TestAssessClaims:
     @pytest.mark.asyncio
-    @patch("agents.query_agent.multi_domain_query", new_callable=AsyncMock)
+    @patch("core.agents.query_agent.multi_domain_query", new_callable=AsyncMock)
     async def test_covered_claim(self, mock_mdq):
         mock_mdq.return_value = _make_multi_domain_result(relevance=0.8)
         assessments = await _assess_claims(["Python uses GIL"], MagicMock(), threshold=0.5)
@@ -156,7 +156,7 @@ class TestAssessClaims:
         assert assessments[0]["max_similarity"] == 0.8
 
     @pytest.mark.asyncio
-    @patch("agents.query_agent.multi_domain_query", new_callable=AsyncMock)
+    @patch("core.agents.query_agent.multi_domain_query", new_callable=AsyncMock)
     async def test_weak_claim(self, mock_mdq):
         mock_mdq.return_value = _make_multi_domain_result(relevance=0.3)
         assessments = await _assess_claims(["obscure fact"], MagicMock(), threshold=0.5)
@@ -164,7 +164,7 @@ class TestAssessClaims:
         assert assessments[0]["max_similarity"] == 0.3
 
     @pytest.mark.asyncio
-    @patch("agents.query_agent.multi_domain_query", new_callable=AsyncMock)
+    @patch("core.agents.query_agent.multi_domain_query", new_callable=AsyncMock)
     async def test_no_results(self, mock_mdq):
         mock_mdq.return_value = []
         assessments = await _assess_claims(["unknown claim"], MagicMock(), threshold=0.5)
@@ -172,7 +172,7 @@ class TestAssessClaims:
         assert assessments[0]["max_similarity"] == 0.0
 
     @pytest.mark.asyncio
-    @patch("agents.query_agent.multi_domain_query", new_callable=AsyncMock)
+    @patch("core.agents.query_agent.multi_domain_query", new_callable=AsyncMock)
     async def test_multiple_claims(self, mock_mdq):
         mock_mdq.side_effect = [
             _make_multi_domain_result(relevance=0.9),
@@ -183,7 +183,7 @@ class TestAssessClaims:
         assert assessments[1]["covered"] is False
 
     @pytest.mark.asyncio
-    @patch("agents.query_agent.multi_domain_query", new_callable=AsyncMock)
+    @patch("core.agents.query_agent.multi_domain_query", new_callable=AsyncMock)
     async def test_assessment_error_handled(self, mock_mdq):
         mock_mdq.side_effect = Exception("connection failed")
         assessments = await _assess_claims(["test claim"], MagicMock(), threshold=0.5)
@@ -197,7 +197,7 @@ class TestAssessClaims:
 
 class TestRetrieveForClaims:
     @pytest.mark.asyncio
-    @patch("agents.query_agent.agent_query", new_callable=AsyncMock)
+    @patch("core.agents.query_agent.agent_query", new_callable=AsyncMock)
     async def test_returns_combined_results(self, mock_aq):
         mock_aq.return_value = {
             "results": [
@@ -211,7 +211,7 @@ class TestRetrieveForClaims:
         assert mock_aq.call_count == 2
 
     @pytest.mark.asyncio
-    @patch("agents.query_agent.agent_query", new_callable=AsyncMock)
+    @patch("core.agents.query_agent.agent_query", new_callable=AsyncMock)
     async def test_uses_no_reranking(self, mock_aq):
         mock_aq.return_value = {"results": []}
         await _retrieve_for_claims(["query"], MagicMock(), MagicMock(), MagicMock())
@@ -219,14 +219,14 @@ class TestRetrieveForClaims:
         assert call_kwargs["use_reranking"] is False
 
     @pytest.mark.asyncio
-    @patch("agents.query_agent.agent_query", new_callable=AsyncMock)
+    @patch("core.agents.query_agent.agent_query", new_callable=AsyncMock)
     async def test_handles_query_failure(self, mock_aq):
         mock_aq.side_effect = Exception("timeout")
         results = await _retrieve_for_claims(["query"], MagicMock(), MagicMock(), MagicMock())
         assert results == []
 
     @pytest.mark.asyncio
-    @patch("agents.query_agent.agent_query", new_callable=AsyncMock)
+    @patch("core.agents.query_agent.agent_query", new_callable=AsyncMock)
     async def test_empty_queries(self, mock_aq):
         results = await _retrieve_for_claims([], MagicMock(), MagicMock(), MagicMock())
         assert results == []
@@ -241,7 +241,7 @@ class TestRetrieveForClaims:
 
 class TestSelfRagEnhance:
     @pytest.mark.asyncio
-    @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
+    @patch("core.agents.hallucination.extract_claims", new_callable=AsyncMock)
     async def test_no_claims_returns_early(self, mock_extract):
         mock_extract.return_value = ([], "none")
         qr = _make_query_result()
@@ -253,7 +253,7 @@ class TestSelfRagEnhance:
         assert result["context"] == qr["context"]  # unchanged
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
+    @patch("core.agents.hallucination.extract_claims", new_callable=AsyncMock)
     @patch("core.agents.self_rag._assess_claims", new_callable=AsyncMock)
     async def test_all_claims_supported(self, mock_assess, mock_extract):
         mock_extract.return_value = (["Python uses GIL", "FastAPI is async"], "llm")
@@ -270,10 +270,10 @@ class TestSelfRagEnhance:
         assert result["self_rag"]["claims_weak"] == 0
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
+    @patch("core.agents.hallucination.extract_claims", new_callable=AsyncMock)
     @patch("core.agents.self_rag._assess_claims", new_callable=AsyncMock)
     @patch("core.agents.self_rag._retrieve_for_claims", new_callable=AsyncMock)
-    @patch("agents.query_agent.assemble_context")
+    @patch("core.agents.query_agent.assemble_context")
     async def test_weak_claims_trigger_refinement(self, mock_assemble, mock_retrieve, mock_assess, mock_extract):
         mock_extract.return_value = (["strong claim", "weak claim"], "llm")
         # First assess: one weak
@@ -303,7 +303,7 @@ class TestSelfRagEnhance:
         assert "weak claim" in result["self_rag"]["refined_queries"]
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
+    @patch("core.agents.hallucination.extract_claims", new_callable=AsyncMock)
     @patch("core.agents.self_rag._assess_claims", new_callable=AsyncMock)
     @patch("core.agents.self_rag._retrieve_for_claims", new_callable=AsyncMock)
     async def test_no_additional_results_found(self, mock_retrieve, mock_assess, mock_extract):
@@ -321,10 +321,10 @@ class TestSelfRagEnhance:
         assert result["self_rag"]["claims_weak"] == 1
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
+    @patch("core.agents.hallucination.extract_claims", new_callable=AsyncMock)
     @patch("core.agents.self_rag._assess_claims", new_callable=AsyncMock)
     @patch("core.agents.self_rag._retrieve_for_claims", new_callable=AsyncMock)
-    @patch("agents.query_agent.assemble_context")
+    @patch("core.agents.query_agent.assemble_context")
     async def test_respects_max_iterations(self, mock_assemble, mock_retrieve, mock_assess, mock_extract):
         """Self-RAG should stop after max_iterations even if claims remain weak."""
         mock_extract.return_value = (["persistent weak claim"], "llm")
@@ -346,7 +346,7 @@ class TestSelfRagEnhance:
         assert mock_retrieve.call_count <= 2
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
+    @patch("core.agents.hallucination.extract_claims", new_callable=AsyncMock)
     @patch("core.agents.self_rag._assess_claims", new_callable=AsyncMock)
     @patch("core.agents.self_rag._retrieve_for_claims", new_callable=AsyncMock)
     async def test_respects_max_refined_queries(self, mock_retrieve, mock_assess, mock_extract):
@@ -375,10 +375,10 @@ class TestSelfRagEnhance:
             assert len(queries_arg) <= 3
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
+    @patch("core.agents.hallucination.extract_claims", new_callable=AsyncMock)
     @patch("core.agents.self_rag._assess_claims", new_callable=AsyncMock)
     @patch("core.agents.self_rag._retrieve_for_claims", new_callable=AsyncMock)
-    @patch("agents.query_agent.assemble_context")
+    @patch("core.agents.query_agent.assemble_context")
     async def test_model_metadata_passed_through(self, mock_assemble, mock_retrieve, mock_assess, mock_extract):
         mock_extract.return_value = (["claim"], "llm")
         mock_assess.side_effect = [
@@ -398,10 +398,10 @@ class TestSelfRagEnhance:
         assert result["self_rag"]["extraction_method"] == "llm"
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.extract_claims", new_callable=AsyncMock)
+    @patch("core.agents.hallucination.extract_claims", new_callable=AsyncMock)
     @patch("core.agents.self_rag._assess_claims", new_callable=AsyncMock)
     @patch("core.agents.self_rag._retrieve_for_claims", new_callable=AsyncMock)
-    @patch("agents.query_agent.assemble_context")
+    @patch("core.agents.query_agent.assemble_context")
     async def test_context_reassembled_after_refinement(self, mock_assemble, mock_retrieve, mock_assess, mock_extract):
         """When additional results are found, context should be reassembled."""
         mock_extract.return_value = (["weak claim"], "llm")
