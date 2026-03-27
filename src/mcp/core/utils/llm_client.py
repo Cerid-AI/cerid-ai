@@ -241,7 +241,7 @@ async def call_llm_raw(
         resp = await client.post("/chat/completions", **post_kwargs)
         # 402 = credits exhausted — propagate as-is
         if resp.status_code == 402:
-            from agents.hallucination.verification import CreditExhaustedError
+            from core.agents.hallucination.verification import CreditExhaustedError
             raise CreditExhaustedError("openrouter")
         resp.raise_for_status()
         return resp.json()
