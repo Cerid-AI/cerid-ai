@@ -679,7 +679,7 @@ async def curate_endpoint(req: CurateRequest):
 async def curate_estimate_endpoint(req: CurateEstimateRequest):
     try:
         from agents.curator import estimate_synopsis_run
-        return estimate_synopsis_run(
+        return await estimate_synopsis_run(
             neo4j_driver=get_neo4j(),
             chroma_client=get_chroma(),
             model=req.synopsis_model,
