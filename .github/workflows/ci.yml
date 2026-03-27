@@ -18,6 +18,9 @@ jobs:
           python-version: "3.11"
       - run: pip install ruff==0.15.4
       - run: ruff check src/mcp/
+      - run: pip install import-linter
+      - name: Import boundary check
+        run: cd src/mcp && python -m importlinter
 
   typecheck:
     runs-on: ubuntu-latest

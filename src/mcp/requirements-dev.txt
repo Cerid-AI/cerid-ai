@@ -5,3 +5,4 @@ pytest-cov
 respx
 mypy>=1.10
 types-redis
+import-linter
