@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """Trading-specific agent functions for cerid-ai.
 
 These functions provide KB enrichment for the cerid-trading-agent.
