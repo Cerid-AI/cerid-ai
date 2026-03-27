@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging as _logging
 import os
+import re as _re
 
 # ---------------------------------------------------------------------------
 # PDF Parsing (memory-safe chunked extraction)
@@ -152,7 +153,6 @@ GRAPH_RELATIONSHIP_TYPES = [
 ]
 
 # Validate relationship type names are safe for Cypher injection
-import re as _re
 for _rt in GRAPH_RELATIONSHIP_TYPES:
     assert _re.fullmatch(r"[A-Z_]+", _rt), f"Invalid GRAPH_RELATIONSHIP_TYPE: {_rt!r} — must match ^[A-Z_]+$"
 
