@@ -53,7 +53,7 @@ interface SystemSectionProps {
 }
 
 export function SystemSection({
-  settings, sections, toggleSection, patch,
+  settings, sections, toggleSection, patch: _patch,
   credits, kbStats, kbLoading, kbAction, kbResult,
   loadKBStats, runKBAction, clearConfirmDomain, setClearConfirmDomain, onRefresh,
 }: SystemSectionProps) {

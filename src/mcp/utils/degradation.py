@@ -58,8 +58,8 @@ def _any_open(names: tuple[str, ...]) -> bool:
 def _redis_down() -> bool:
     """Best-effort Redis reachability check via deps."""
     try:
-        from deps import get_redis_sync
-        get_redis_sync().ping()
+        from deps import get_redis
+        get_redis().ping()
         return False
     except Exception:  # noqa: BLE001
         return True

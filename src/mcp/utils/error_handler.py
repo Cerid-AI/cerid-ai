@@ -47,9 +47,9 @@ def handle_errors(
             )
             if breaker_name:
                 try:
-                    from utils.circuit_breaker import circuit_breaker
+                    from utils.circuit_breaker import get_breaker
 
-                    circuit_breaker(breaker_name).record_failure()
+                    get_breaker(breaker_name).record_failure()
                 except Exception:
                     pass
             if fallback is not None:
