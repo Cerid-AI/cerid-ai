@@ -50,6 +50,7 @@ from agents.hallucination import (
     verify_claim,
     verify_response_streaming,
 )
+from agents.hallucination.extraction import _reclassify_recency
 
 
 class TestExtractClaims:
@@ -933,6 +934,22 @@ class TestCurrentEventDetection:
     def test_as_of_recent_date(self):
         """'As of 2025' is a temporal marker."""
         assert _is_current_event_claim("As of 2025, the API supports web search") is True
+
+    def test_year_before_verb_bidirectional(self):
+        """Year-before-verb order should match (bidirectional pattern)."""
+        assert _is_current_event_claim("In 2024, OpenAI released GPT-4o") is True
+
+    def test_year_after_verb_bidirectional(self):
+        """Verb-before-year order should also match."""
+        assert _is_current_event_claim("GPT-4o was released in 2024") is True
+
+    def test_2024_is_strong_temporal(self):
+        """Year 2024 should be a strong temporal signal (not require 2 weak matches)."""
+        assert _is_current_event_claim("The Model X costs $35,000 as of 2024") is True
+
+    def test_year_2024_alone_is_current_event(self):
+        """A claim mentioning only 2024 should qualify as current event."""
+        assert _is_current_event_claim("Python 3.13 was released in 2024") is True
 
 
 class TestCurrentEventRouting:
@@ -1976,6 +1993,39 @@ class TestRecencyClaimDetection:
     def test_ignorance_claim_not_detected(self):
         # Ignorance claims should NOT match recency patterns
         assert not _is_recency_claim("I don't have specific information about that")
+
+
+class TestReclassifyRecency:
+    """Test _reclassify_recency() reclassification of factual → recency claims."""
+
+    def test_past_year_with_future_tense(self):
+        """Past year + future tense → recency."""
+        assert _reclassify_recency("The 2024 elections are upcoming in November", "factual") == "recency"
+
+    def test_current_temporal_marker(self):
+        """Explicit temporal markers like 'currently' → recency."""
+        assert _reclassify_recency("Python 3.13 is currently the latest version", "factual") == "recency"
+
+    def test_recently_marker(self):
+        """'recently' → recency."""
+        assert _reclassify_recency("Tesla recently updated its Autopilot software", "factual") == "recency"
+
+    def test_as_of_year(self):
+        """'as of YYYY' → recency."""
+        assert _reclassify_recency("As of 2024, the API supports web search", "factual") == "recency"
+
+    def test_static_factual_stays_factual(self):
+        """Claims without temporal markers stay factual."""
+        assert _reclassify_recency("Python was created by Guido van Rossum", "factual") == "factual"
+
+    def test_non_factual_not_overridden(self):
+        """Non-factual types should not be reclassified."""
+        assert _reclassify_recency("I don't know the answer", "ignorance") == "ignorance"
+        assert _reclassify_recency("Based on the cited paper", "citation") == "citation"
+
+    def test_upcoming_with_past_year(self):
+        """'upcoming' with a past year → recency (stale claim)."""
+        assert _reclassify_recency("The 2023 conference is upcoming", "factual") == "recency"
 
 
 class TestRecencyVerdictInterpretation:

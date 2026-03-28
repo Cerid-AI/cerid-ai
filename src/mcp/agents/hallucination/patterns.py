@@ -115,7 +115,7 @@ STRONG_FACTUAL_PATTERNS = [
 CURRENT_EVENT_PATTERNS = [
     re.compile(r"\b(?:202[4-9]|203\d)\b"),                      # recent/future years
     re.compile(r"\b(?:recently|just|newly|latest|current|now)\b", re.I),
-    re.compile(r"\b(?:announced|launched|released|unveiled|introduced|updated)\b.*\b(?:202[4-9]|this year|last (?:month|week|year))\b", re.I),
+    re.compile(r"(?:\b(?:announced|launched|released|unveiled|introduced|updated)\b.*\b(?:202[4-9]|this year|last (?:month|week|year))\b|\b(?:202[4-9]|this year|last (?:month|week|year))\b.*\b(?:announced|launched|released|unveiled|introduced|updated)\b)", re.I),
     re.compile(r"\b(?:this year|last year|this month|last month|this week|last week)\b", re.I),
     re.compile(r"\b(?:as of|since|starting|beginning|effective)\s+(?:202[4-9]|January|February|March|April|May|June|July|August|September|October|November|December)\b", re.I),
     re.compile(r"\b(?:trending|breaking|emerging|ongoing)\b", re.I),
@@ -372,7 +372,7 @@ def _is_current_event_claim(claim: str) -> bool:
     if matches >= 1:
         # Check for strong temporal signals that alone warrant web search
         strong_temporal = [
-            re.compile(r"\b(?:202[5-9]|203\d)\b"),              # year 2025+
+            re.compile(r"\b(?:202[4-9]|203\d)\b"),              # year 2024+
             re.compile(r"\b(?:this year|last month|this month|last week|this week)\b", re.I),
             re.compile(r"\b(?:recently|just|newly)\b.*\b(?:announced|launched|released)\b", re.I),
         ]

@@ -243,68 +243,117 @@ function ClaimBadge({
   )
 }
 
-function StreamingClaimBadge({ claim }: { claim: StreamingClaim }) {
+export function StreamingClaimBadge({ claim }: { claim: StreamingClaim }) {
+  const [expanded, setExpanded] = useState(false)
   const rawStatus = claim.status ?? "pending"
-  const displayStatus = rawStatus === "pending"
+  const isPending = rawStatus === "pending"
+  const displayStatus = isPending
     ? (claim.claim_type === "evasion" ? "evasion" as const : "pending" as const)
     : getClaimDisplayStatus(rawStatus, claim.verification_method, claim.claim_type)
+  const hasDetails = !isPending && (claim.reason || claim.source_snippet || (claim.source_urls?.length ?? 0) > 0 || claim.source)
 
   return (
-    <div className="flex items-start gap-2 rounded-lg border px-3 py-3">
-      <span className="shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
-        {claim.index + 1}
-      </span>
-      <Badge
-        variant="outline"
-        className={`shrink-0 ${DISPLAY_STATUS_COLORS[displayStatus] ?? DISPLAY_STATUS_COLORS.uncertain}`}
-      >
-        {displayStatus === "pending" ? (
-          <span className="flex items-center gap-1">
-            <Loader2 className="h-2.5 w-2.5 animate-spin" />
-            verifying
-          </span>
-        ) : (
-          displayStatus
-        )}
-      </Badge>
-      <div className="min-w-0 flex-1">
-        <p className="text-sm leading-relaxed line-clamp-2">{stripMarkdown(claim.claim)}</p>
-        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-          {claim.source && (
-            <span>Source: {claim.source}</span>
+    <div
+      className={cn(
+        "rounded-lg border px-3 py-3 transition-all",
+        hasDetails && "cursor-pointer hover:bg-muted/30",
+      )}
+      onClick={() => hasDetails && setExpanded((prev) => !prev)}
+    >
+      <div className="flex items-start gap-2">
+        <span className="shrink-0 flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[10px] font-medium text-muted-foreground">
+          {claim.index + 1}
+        </span>
+        <Badge
+          variant="outline"
+          className={`shrink-0 ${DISPLAY_STATUS_COLORS[displayStatus] ?? DISPLAY_STATUS_COLORS.uncertain}`}
+        >
+          {isPending ? (
+            <span className="flex items-center gap-1">
+              <Loader2 className="h-2.5 w-2.5 animate-spin" />
+              verifying
+            </span>
+          ) : (
+            displayStatus
           )}
-          {claim.source_domain && (
-            <Badge variant="outline" className="text-[10px] px-1 py-0">{claim.source_domain}</Badge>
-          )}
-          <VerificationMethodBadge method={claim.verification_method} model={claim.verification_model} />
-          {(claim.source_urls?.length ?? 0) > 0 && (
-            <a
-              href={claim.source_urls![0]}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-700 dark:text-blue-400 hover:text-blue-300"
-              title="View source"
-            >
-              <ExternalLink className="h-3 w-3" />
-            </a>
-          )}
-          {claim.similarity != null && claim.similarity > 0 && <span>({Math.round(claim.similarity * 100)}% match)</span>}
-        </div>
-        {claim.source_snippet && (
-          <p className="mt-1 line-clamp-2 text-xs text-muted-foreground/70 italic leading-relaxed">
-            &ldquo;{claim.source_snippet.slice(0, 150)}&rdquo;
-          </p>
+        </Badge>
+        {claim.claim_type && claim.claim_type !== "factual" && (
+          <Badge variant="outline" className="text-[10px] px-1 py-0">
+            {claim.claim_type}
+          </Badge>
         )}
-        {claim.reason && !claim.source && (
-          <p className="mt-1 text-xs text-muted-foreground">{stripMarkdown(claim.reason)}</p>
-        )}
-        {claim.consistency_issue && (
-          <div className="mt-1 flex items-start gap-1 text-xs text-amber-400">
-            <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
-            <span>{stripMarkdown(claim.consistency_issue)}</span>
+        <div className="min-w-0 flex-1">
+          <p className={cn("text-sm leading-relaxed", !expanded && "line-clamp-2")}>{stripMarkdown(claim.claim)}</p>
+          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+            {claim.source && (
+              <span>Source: {claim.source}</span>
+            )}
+            {claim.source_domain && (
+              <Badge variant="outline" className="text-[10px] px-1 py-0">{claim.source_domain}</Badge>
+            )}
+            <VerificationMethodBadge method={claim.verification_method} model={claim.verification_model} />
+            {claim.similarity != null && claim.similarity > 0 && <span>({Math.round(claim.similarity * 100)}% match)</span>}
+            {hasDetails && (
+              <span className="inline-flex items-center gap-0.5 text-amber-600 dark:text-yellow-400">
+                {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                {expanded ? "Less" : "More"}
+              </span>
+            )}
           </div>
-        )}
+        </div>
       </div>
+
+      {/* Expanded details — shown after verification completes */}
+      {expanded && (
+        <div className="mt-2 ml-7 space-y-1.5">
+          {claim.source_snippet && (
+            <p className="line-clamp-3 text-xs text-muted-foreground/70 italic leading-relaxed">
+              &ldquo;{claim.source_snippet.slice(0, 150)}&rdquo;
+            </p>
+          )}
+          {claim.reason && !claim.source && (
+            <p className="text-xs text-muted-foreground">{stripMarkdown(claim.reason)}</p>
+          )}
+          {claim.consistency_issue && (
+            <div className="flex items-start gap-1 text-xs text-amber-400">
+              <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+              <span>{stripMarkdown(claim.consistency_issue)}</span>
+            </div>
+          )}
+          {/* References */}
+          <div className="border-t border-border/50 pt-1.5">
+            <p className="text-[10px] font-medium text-muted-foreground mb-1">References</p>
+            {(claim.source_urls?.length ?? 0) > 0 ? (
+              <div className="flex flex-col gap-0.5">
+                {claim.source_urls!.slice(0, 5).map((url, i) => (
+                  <a
+                    key={i}
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-[11px] text-blue-500 hover:text-blue-700 dark:text-blue-400 truncate"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <ExternalLink className="h-2.5 w-2.5 shrink-0" />
+                    {claimHostname(url)}
+                  </a>
+                ))}
+              </div>
+            ) : (
+              <a
+                href={`https://www.google.com/search?q=${encodeURIComponent(claim.claim)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-[11px] text-blue-500 hover:text-blue-700 dark:text-blue-400"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Search className="h-2.5 w-2.5" />
+                Search for references
+              </a>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
