@@ -546,6 +546,15 @@ CONSUMER_REGISTRY: dict[str, dict] = {
         "allowed_domains": None,     # A2A peers get full domain access
         "strict_domains": False,
     },
+    "cerid-finance": {
+        "description": "Cerid Finance personal finance dashboard",
+        "rate_limits": {
+            "/agent/": (40, 60),     # 40 req/min — dashboard + AI chat
+            "/sdk/": (40, 60),
+        },
+        "allowed_domains": ["finance", "strategy", "general"],
+        "strict_domains": True,      # No bleed into personal/trading/coding data
+    },
     "folder_scanner": {
         "rate_limits": {
             "/ingest": (60, 60),     # 60 req/min — bulk ingestion
