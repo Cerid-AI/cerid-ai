@@ -3,59 +3,27 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { fetchSettings, updateSettings, fetchKBStats, adminRebuildIndexes, adminRescore, adminRegenerateSummaries, adminClearDomain, fetchProviderCredits, fetchOllamaStatus, enableOllama, disableOllama, fetchHealthStatus } from "@/lib/api"
+import { fetchSettings, updateSettings, fetchKBStats, fetchProviderCredits } from "@/lib/api"
 import type { KBStats } from "@/lib/api"
-import type { ServerSettings, SettingsUpdate, RoutingMode, ProviderCredits, OllamaStatus, HealthStatusResponse } from "@/lib/types"
-import { useSettings } from "@/hooks/use-settings"
-import { cn } from "@/lib/utils"
-import { PRESETS, detectActivePreset } from "@/lib/settings-presets"
-import { USER_PRESETS } from "@/lib/user-presets"
+import type { ServerSettings, SettingsUpdate, ProviderCredits } from "@/lib/types"
 import { useUIMode } from "@/contexts/ui-mode-context"
+import { cn } from "@/lib/utils"
+import { USER_PRESETS } from "@/lib/user-presets"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
-import { Switch } from "@/components/ui/switch"
-import { Slider } from "@/components/ui/slider"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import {
-  Settings,
-  Server,
-  Database,
-  Tag,
-  ToggleLeft,
-  Cpu,
-  Loader2,
-  AlertCircle,
-  RefreshCw,
-  Info,
-  ChevronDown,
-  ChevronRight,
-  Wrench,
-  SearchIcon,
-  HardDrive,
-  Trash2,
-  CreditCard,
-  ExternalLink,
-  Lock,
-} from "lucide-react"
-import { SyncSection } from "./sync-section"
+import { Settings, Loader2, AlertCircle, RefreshCw } from "lucide-react"
 import { PluginsSection } from "./plugins-section"
 import { PaneErrorBoundary } from "@/components/ui/pane-error-boundary"
+import { EssentialsSection } from "./essentials-section"
+import { PipelineSection } from "./pipeline-section"
+import { SystemSection } from "./system-section"
+import type { SectionKey } from "./settings-primitives"
 
 type LoadState = "loading" | "error" | "ready"
 
-type SectionKey = "connection" | "knowledge_ingestion" | "features" | "retrieval" | "search" | "taxonomy" | "infra_sync" | "ollama" | "kb_admin" | "credits"
-
-const SETTINGS_SECTIONS_VERSION = 2 // Bump to force new defaults on existing users
+const SETTINGS_SECTIONS_VERSION = 2
 
 function readSectionState(): Record<SectionKey, boolean> {
   const defaults: Record<SectionKey, boolean> = {
@@ -69,7 +37,6 @@ function readSectionState(): Record<SectionKey, boolean> {
       const raw = localStorage.getItem("cerid-settings-sections")
       if (raw) {
         const parsed = JSON.parse(raw) as Record<string, boolean>
-        // Migrate: drop legacy keys, merge with new defaults
         return { ...defaults, ...Object.fromEntries(
           Object.entries(parsed).filter(([k]) => k in defaults)
         ) }
@@ -86,10 +53,6 @@ function persistSectionState(state: Record<SectionKey, boolean>) {
   } catch { /* noop */ }
 }
 
-function formatFlagName(flag: string): string {
-  return flag.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
-}
-
 export default function SettingsPane() {
   const queryClient = useQueryClient()
   const [settings, setSettings] = useState<ServerSettings | null>(null)
@@ -102,8 +65,6 @@ export default function SettingsPane() {
   const [kbAction, setKBAction] = useState<string | null>(null)
   const [kbResult, setKBResult] = useState("")
   const [clearConfirmDomain, setClearConfirmDomain] = useState<string | null>(null)
-  const [pipelineCustomize, setPipelineCustomize] = useState(false)
-  const { routingMode, setRoutingMode } = useSettings()
   const { mode: uiMode, setMode: setUIMode } = useUIMode()
   const { data: credits } = useQuery<ProviderCredits>({
     queryKey: ["provider-credits"],
@@ -122,11 +83,9 @@ export default function SettingsPane() {
 
   const applyUserPreset = async (preset: typeof USER_PRESETS[number]) => {
     setUIMode(preset.uiMode)
-    // Apply localStorage overrides
     for (const [key, value] of Object.entries(preset.local)) {
       try { localStorage.setItem(key, value) } catch { /* noop */ }
     }
-    // Apply server settings
     await patch(preset.settings)
   }
 
@@ -136,15 +95,13 @@ export default function SettingsPane() {
       const stats = await fetchKBStats()
       setKBStats(stats)
     } catch {
-      /* ignore — section just stays empty */
+      /* ignore */
     } finally {
       setKBLoading(false)
     }
   }, [])
 
-  useEffect(() => {
-    loadKBStats()
-  }, [loadKBStats])
+  useEffect(() => { loadKBStats() }, [loadKBStats])
 
   const runKBAction = useCallback(async (action: string, fn: () => Promise<{ message: string }>) => {
     setKBAction(action)
@@ -239,10 +196,9 @@ export default function SettingsPane() {
       <ScrollArea className="min-h-0 flex-1">
         <TooltipProvider delayDuration={300}>
           <div className="space-y-4 p-4">
-            {/* ── User Experience Presets ── */}
+            {/* -- User Experience Presets -- */}
             <div className="grid grid-cols-3 gap-2">
               {USER_PRESETS.map((preset) => {
-                // Detect active preset by comparing UI mode + key settings
                 const isActive = uiMode === preset.uiMode &&
                   settings.enable_hallucination_check === (preset.settings.enable_hallucination_check ?? false) &&
                   settings.enable_feedback_loop === (preset.settings.enable_feedback_loop ?? false) &&
@@ -271,7 +227,7 @@ export default function SettingsPane() {
               })}
             </div>
 
-            {/* ── Tabbed Settings ── */}
+            {/* -- Tabbed Settings -- */}
             <Tabs value={activeTab} onValueChange={handleTabChange}>
               <TabsList className="w-full">
                 <TabsTrigger value="essentials" className="flex-1">Essentials</TabsTrigger>
@@ -280,679 +236,39 @@ export default function SettingsPane() {
                 <TabsTrigger value="plugins" className="flex-1">Plugins</TabsTrigger>
               </TabsList>
 
-              {/* ── Essentials Tab ── */}
               <TabsContent value="essentials" className="space-y-1 pt-2">
-              <PaneErrorBoundary label="Essentials">
-
-            {/* ── Knowledge & Ingestion ── */}
-            <SectionHeading icon={Database} label="Knowledge & Ingestion" open={sections.knowledge_ingestion} onToggle={() => toggleSection("knowledge_ingestion")} />
-            {sections.knowledge_ingestion && (
-              <Card className="mb-4">
-                <CardContent className="grid gap-4 pt-4">
-                  <ToggleRow
-                    label="Auto-inject KB Context"
-                    enabled={settings.enable_auto_inject}
-                    onToggle={(v) => patch({ enable_auto_inject: v })}
-                    info="Automatically includes relevant KB context when relevance exceeds threshold"
-                  />
-                  {settings.enable_auto_inject && (
-                    <SliderRow
-                      label="Injection Threshold"
-                      value={settings.auto_inject_threshold}
-                      onChange={(v) => patch({ auto_inject_threshold: v })}
-                      min={0.5} max={1} step={0.05}
-                      info="Minimum relevance score to auto-inject (higher = more selective)"
-                    />
-                  )}
-
-                  <div className="my-1 h-px bg-border" />
-
-                  <div className="flex items-center justify-between">
-                    <LabelWithInfo label="Categorization Mode" info="How uploaded documents are categorized into KB domains" />
-                    <Select
-                      value={settings.categorize_mode}
-                      onValueChange={(v) => patch({ categorize_mode: v })}
-                    >
-                      <SelectTrigger size="sm" className="w-28">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="manual">Manual</SelectItem>
-                        <SelectItem value="smart">Smart</SelectItem>
-                        <SelectItem value="pro">Pro</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <Row
-                    label="Chunk Size"
-                    value={`${settings.chunk_max_tokens} tokens / ${settings.chunk_overlap} overlap`}
-                    info="Max tokens per chunk and overlap between chunks for embedding"
-                  />
-                  <div className="flex items-center justify-between">
-                    <LabelWithInfo label="Storage Mode" info="Extract-only parses text and discards the file. Archive keeps a copy in the sync directory." />
-                    <Select
-                      value={settings.storage_mode}
-                      onValueChange={(v) => patch({ storage_mode: v })}
-                    >
-                      <SelectTrigger size="sm" className="w-32">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="extract_only">Extract Only</SelectItem>
-                        <SelectItem value="archive">Archive</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <ToggleRow
-                    label="Contextual Chunking"
-                    enabled={settings.enable_contextual_chunks ?? false}
-                    onToggle={(v) => patch({ enable_contextual_chunks: v })}
-                    info="Adds LLM-generated situational summaries to each chunk for richer retrieval context"
-                  />
-                </CardContent>
-              </Card>
-            )}
-
-            {/* ── AI Features ── */}
-            <SectionHeading icon={ToggleLeft} label="AI Features" open={sections.features} onToggle={() => toggleSection("features")} />
-            {sections.features && (
-              <Card className="mb-4">
-                <CardContent className="grid gap-3 pt-4">
-                  <ToggleRow
-                    label="Self-RAG Validation"
-                    enabled={settings.enable_self_rag ?? true}
-                    onToggle={(v) => patch({ enable_self_rag: v })}
-                    info="Validates retrieval quality and retries with refined queries if results are insufficient"
-                  />
-                  <ToggleRow
-                    label="Feedback Loop"
-                    enabled={settings.enable_feedback_loop}
-                    onToggle={(v) => patch({ enable_feedback_loop: v })}
-                    info="Saves AI responses back to your knowledge base for continuous improvement"
-                  />
-                  <ToggleRow
-                    label="Hallucination Check"
-                    enabled={settings.enable_hallucination_check}
-                    onToggle={(v) => patch({ enable_hallucination_check: v })}
-                    info="Verifies factual claims in AI responses against your knowledge base"
-                  />
-                  <ToggleRow
-                    label="Memory Extraction"
-                    enabled={settings.enable_memory_extraction}
-                    onToggle={(v) => patch({ enable_memory_extraction: v })}
-                    info="Extracts key facts and preferences from conversations into long-term memory"
-                  />
-
-                  <div className="my-1 h-px bg-border" />
-
-                  <SliderRow
-                    label="Hallucination Threshold"
-                    value={settings.hallucination_threshold}
-                    onChange={(v) => patch({ hallucination_threshold: v })}
-                    min={0} max={1} step={0.05}
-                    info="Confidence threshold for flagging claims (lower = more sensitive)"
-                  />
-
-                  <div className="my-1 h-px bg-border" />
-
-                  <div className="flex items-center justify-between">
-                    <LabelWithInfo label="Model Router" info="Manual: no suggestions. Recommend: shows switch banner. Auto: silently picks the best model." />
-                    <Select
-                      value={routingMode}
-                      onValueChange={(v) => setRoutingMode(v as RoutingMode)}
-                    >
-                      <SelectTrigger size="sm" className="w-32">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="manual">Manual</SelectItem>
-                        <SelectItem value="recommend">Recommend</SelectItem>
-                        <SelectItem value="auto">Auto</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <LabelWithInfo label="Cost Sensitivity" info="How aggressively the model router optimizes for cost vs quality" />
-                    <Select
-                      value={settings.cost_sensitivity ?? "medium"}
-                      onValueChange={(v) => patch({ cost_sensitivity: v })}
-                    >
-                      <SelectTrigger size="sm" className="w-28">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="low">Low</SelectItem>
-                        <SelectItem value="medium">Medium</SelectItem>
-                        <SelectItem value="high">High</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-              </PaneErrorBoundary>
+                <PaneErrorBoundary label="Essentials">
+                  <EssentialsSection settings={settings} sections={sections} toggleSection={toggleSection} patch={patch} />
+                </PaneErrorBoundary>
               </TabsContent>
 
-              {/* ── Pipeline Tab ── */}
               <TabsContent value="pipeline" className="space-y-1 pt-2">
-              <PaneErrorBoundary label="Pipeline">
-
-            {/* ── Retrieval Pipeline ── */}
-            <SectionHeading icon={Cpu} label="Retrieval Pipeline" open={sections.retrieval} onToggle={() => toggleSection("retrieval")} />
-            {sections.retrieval && (
-              <Card className="mb-4">
-                <CardHeader className="px-4 pb-2 pt-4">
-                  <CardDescription className="text-xs">
-                    Choose a preset or customize individual pipeline stages.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="grid gap-4 px-4 pb-4">
-                  {/* ── Preset cards ── */}
-                  {(() => {
-                    const activePreset = detectActivePreset(settings as unknown as Record<string, unknown>)
-                    return (
-                      <div className="grid grid-cols-3 gap-2">
-                        {Object.entries(PRESETS).map(([key, preset]) => (
-                          <button
-                            key={key}
-                            type="button"
-                            onClick={() => patch(preset.values)}
-                            className={cn(
-                              "rounded-lg border p-2.5 text-left transition-colors",
-                              activePreset === key
-                                ? "border-primary bg-primary/5"
-                                : "border-muted hover:border-muted-foreground/30",
-                            )}
-                          >
-                            <span className="text-sm font-medium">{preset.label}</span>
-                            <p className="mt-0.5 text-[11px] leading-tight text-muted-foreground">
-                              {preset.description}
-                            </p>
-                          </button>
-                        ))}
-                      </div>
-                    )
-                  })()}
-
-                  {!detectActivePreset(settings as unknown as Record<string, unknown>) && (
-                    <p className="text-[11px] text-muted-foreground">
-                      Custom configuration — doesn&apos;t match any preset
-                    </p>
-                  )}
-
-                  {/* ── Customize disclosure ── */}
-                  <button
-                    type="button"
-                    className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
-                    onClick={() => setPipelineCustomize(!pipelineCustomize)}
-                  >
-                    {pipelineCustomize ? (
-                      <ChevronDown className="h-3 w-3" />
-                    ) : (
-                      <ChevronRight className="h-3 w-3" />
-                    )}
-                    Customize
-                  </button>
-
-                  {pipelineCustomize && (
-                    <div className="space-y-4 border-t pt-4">
-                  {/* Adaptive Retrieval */}
-                  <PipelineToggle
-                    label="Adaptive Retrieval"
-                    enabled={settings.enable_adaptive_retrieval ?? false}
-                    onToggle={(v) => patch({ enable_adaptive_retrieval: v })}
-                    description="Classifies query complexity to skip or reduce retrieval for simple queries"
-                  >
-                    <SliderRow
-                      label="Light Top-K"
-                      value={settings.adaptive_retrieval_light_top_k ?? 3}
-                      onChange={(v) => patch({ adaptive_retrieval_light_top_k: Math.round(v) })}
-                      min={1} max={10} step={1}
-                      info="Number of results for light retrieval mode"
-                    />
-                  </PipelineToggle>
-
-                  <div className="h-px bg-border" />
-
-                  {/* Query Decomposition */}
-                  <PipelineToggle
-                    label="Query Decomposition"
-                    enabled={settings.enable_query_decomposition ?? false}
-                    onToggle={(v) => patch({ enable_query_decomposition: v })}
-                    description="Breaks complex multi-part questions into parallel sub-queries for broader coverage"
-                  >
-                    <SliderRow
-                      label="Max Sub-queries"
-                      value={settings.query_decomposition_max_subqueries ?? 4}
-                      onChange={(v) => patch({ query_decomposition_max_subqueries: Math.round(v) })}
-                      min={2} max={6} step={1}
-                      info="Maximum number of sub-queries per decomposition"
-                    />
-                  </PipelineToggle>
-
-                  <div className="h-px bg-border" />
-
-                  {/* MMR Diversity */}
-                  <PipelineToggle
-                    label="MMR Diversity"
-                    enabled={settings.enable_mmr_diversity ?? false}
-                    onToggle={(v) => patch({ enable_mmr_diversity: v })}
-                    description="Reorders results using Maximal Marginal Relevance for diverse, non-redundant context"
-                  >
-                    <SliderRow
-                      label="Lambda"
-                      value={settings.mmr_lambda ?? 0.7}
-                      onChange={(v) => patch({ mmr_lambda: v })}
-                      min={0} max={1} step={0.05}
-                      info="Balance between relevance (1.0) and diversity (0.0)"
-                    />
-                  </PipelineToggle>
-
-                  <div className="h-px bg-border" />
-
-                  {/* Intelligent Assembly */}
-                  <PipelineToggle
-                    label="Intelligent Assembly"
-                    enabled={settings.enable_intelligent_assembly ?? false}
-                    onToggle={(v) => patch({ enable_intelligent_assembly: v })}
-                    description="Three-pass context assembly maximizing query facet coverage"
-                  />
-
-                  <div className="h-px bg-border" />
-
-                  {/* Late Interaction */}
-                  <PipelineToggle
-                    label="Late Interaction"
-                    enabled={settings.enable_late_interaction ?? false}
-                    onToggle={(v) => patch({ enable_late_interaction: v })}
-                    description="ColBERT-inspired MaxSim scoring for fine-grained token-level relevance"
-                  >
-                    <SliderRow
-                      label="Top-N Candidates"
-                      value={settings.late_interaction_top_n ?? 8}
-                      onChange={(v) => patch({ late_interaction_top_n: Math.round(v) })}
-                      min={4} max={16} step={1}
-                      info="Number of candidates for late interaction scoring"
-                    />
-                    <SliderRow
-                      label="Blend Weight"
-                      value={settings.late_interaction_blend_weight ?? 0.15}
-                      onChange={(v) => patch({ late_interaction_blend_weight: v })}
-                      min={0} max={0.5} step={0.05}
-                      info="Weight of late interaction score blended into final ranking"
-                    />
-                  </PipelineToggle>
-
-                  <div className="h-px bg-border" />
-
-                  {/* Semantic Cache */}
-                  <PipelineToggle
-                    label="Semantic Cache"
-                    enabled={settings.enable_semantic_cache ?? false}
-                    onToggle={(v) => patch({ enable_semantic_cache: v })}
-                    description="Caches retrieval results keyed by semantic query similarity"
-                  >
-                    <SliderRow
-                      label="Similarity Threshold"
-                      value={settings.semantic_cache_threshold ?? 0.92}
-                      onChange={(v) => patch({ semantic_cache_threshold: v })}
-                      min={0.8} max={1} step={0.01}
-                      info="Minimum cosine similarity for a cache hit"
-                    />
-                  </PipelineToggle>
-
-                  <div className="h-px bg-border" />
-
-                  {/* Memory Consolidation */}
-                  <PipelineToggle
-                    label="Memory Consolidation"
-                    enabled={settings.enable_memory_consolidation ?? true}
-                    onToggle={(v) => patch({ enable_memory_consolidation: v })}
-                    description="Deduplicate and merge similar memories during extraction"
-                  />
-
-                  <div className="h-px bg-border" />
-
-                  {/* Context Compression */}
-                  <PipelineToggle
-                    label="Context Compression"
-                    enabled={settings.enable_context_compression ?? true}
-                    onToggle={(v) => patch({ enable_context_compression: v })}
-                    description="Compress conversation history to fit within model context window"
-                  />
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
-
-            {/* ── Search Tuning ── */}
-            <SectionHeading icon={SearchIcon} label="Search Tuning" open={sections.search} onToggle={() => toggleSection("search")} />
-            {sections.search && (
-              <Card className="mb-4">
-                <CardContent className="grid gap-4 pt-4">
-                  <SliderRow
-                    label="Vector Weight"
-                    value={settings.hybrid_vector_weight ?? 0.6}
-                    onChange={(v) => patch({ hybrid_vector_weight: v })}
-                    min={0} max={1} step={0.05}
-                    info="Weight for vector similarity in hybrid search (0-1)"
-                  />
-                  <SliderRow
-                    label="Keyword Weight"
-                    value={settings.hybrid_keyword_weight ?? 0.4}
-                    onChange={(v) => patch({ hybrid_keyword_weight: v })}
-                    min={0} max={1} step={0.05}
-                    info="Weight for BM25 keyword matching in hybrid search (0-1)"
-                  />
-
-                  <div className="my-1 h-px bg-border" />
-
-                  <SliderRow
-                    label="Rerank LLM Weight"
-                    value={settings.rerank_llm_weight ?? 0.6}
-                    onChange={(v) => patch({ rerank_llm_weight: v })}
-                    min={0} max={1} step={0.05}
-                    info="Weight for LLM-based reranking score (0-1)"
-                  />
-                  <SliderRow
-                    label="Rerank Original Weight"
-                    value={settings.rerank_original_weight ?? 0.4}
-                    onChange={(v) => patch({ rerank_original_weight: v })}
-                    min={0} max={1} step={0.05}
-                    info="Weight for original relevance score in reranking (0-1)"
-                  />
-
-                  <div className="my-1 h-px bg-border" />
-
-                  <Row
-                    label="Temporal Half-life"
-                    value={settings.temporal_half_life_days ? `${settings.temporal_half_life_days} days` : "—"}
-                    info="Days until temporal recency boost decays by half"
-                  />
-                  <Row
-                    label="Recency Weight"
-                    value={(settings.temporal_recency_weight ?? 0.1).toFixed(2)}
-                    info="Maximum boost from document recency"
-                  />
-                </CardContent>
-              </Card>
-            )}
-
-              </PaneErrorBoundary>
+                <PaneErrorBoundary label="Pipeline">
+                  <PipelineSection settings={settings} sections={sections} toggleSection={toggleSection} patch={patch} />
+                </PaneErrorBoundary>
               </TabsContent>
 
-              {/* ── System Tab ── */}
               <TabsContent value="system" className="space-y-1 pt-2">
-              <PaneErrorBoundary label="System">
-
-            {/* ── Connection ── */}
-            <SectionHeading icon={Server} label="Connection" open={sections.connection} onToggle={() => toggleSection("connection")} />
-            {sections.connection && (
-              <Card className="mb-4">
-                <CardContent className="grid gap-3 pt-4">
-                  <Row label="Server Version" value={settings.version} info="Current MCP server version" />
-                  <Row label="Machine ID" value={settings.machine_id} mono info="Unique identifier for this server instance" />
-                  <div className="flex items-center justify-between">
-                    <LabelWithInfo label="Feature Tier" info="Controls which platform capabilities are available. Set via CERID_TIER env var." />
-                    <Badge variant={settings.feature_tier === "pro" ? "default" : "secondary"}>
-                      {settings.feature_tier}
-                    </Badge>
-                  </div>
-                  {/* Tier-gated capabilities grid */}
-                  <div className="mt-1 rounded border bg-muted/30 p-3">
-                    <p className="mb-2 text-[11px] font-medium text-muted-foreground">Platform Capabilities</p>
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-                      {Object.entries(settings.feature_flags).map(([flag, enabled]) => (
-                        <div key={flag} className="flex items-center gap-1.5">
-                          <div className={cn("h-1.5 w-1.5 rounded-full", enabled ? "bg-green-500" : "bg-muted-foreground/30")} />
-                          <span className="text-[11px] text-muted-foreground">{formatFlagName(flag)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* ── Provider Credits ── */}
-            <SectionHeading icon={CreditCard} label="Provider Credits" open={sections.credits} onToggle={() => toggleSection("credits")} />
-            {sections.credits && (
-              <Card className="mb-4">
-                <CardContent className="grid gap-3 pt-4">
-                  {credits?.configured ? (
-                    <>
-                      <div className="flex items-center justify-between">
-                        <LabelWithInfo label="Balance" info="Remaining OpenRouter credits" />
-                        <span className={cn(
-                          "text-sm font-semibold tabular-nums",
-                          credits.status === "ok" && "text-green-600 dark:text-green-400",
-                          credits.status === "low" && "text-yellow-600 dark:text-yellow-400",
-                          credits.status === "exhausted" && "text-red-600 dark:text-red-400",
-                          credits.status === "error" && "text-muted-foreground",
-                        )}>
-                          ${credits.balance?.toFixed(2) ?? "—"}
-                        </span>
-                      </div>
-                      {credits.warning && (
-                        <p className="text-xs text-yellow-600 dark:text-yellow-400">{credits.warning}</p>
-                      )}
-                      <div className="my-1 h-px bg-border" />
-                      <Row label="Today" value={credits.usage_daily != null ? `$${credits.usage_daily.toFixed(4)}` : "—"} info="Spend today" />
-                      <Row label="This Week" value={credits.usage_weekly != null ? `$${credits.usage_weekly.toFixed(2)}` : "—"} info="Spend this week" />
-                      <Row label="This Month" value={credits.usage_monthly != null ? `$${credits.usage_monthly.toFixed(2)}` : "—"} info="Spend this month" />
-                      <Row label="Total Used" value={credits.total_usage != null ? `$${credits.total_usage.toFixed(2)}` : "—"} info="Lifetime credits consumed" />
-                      <div className="my-1 h-px bg-border" />
-                      <div className="flex gap-2">
-                        <a
-                          href={credits.top_up_url ?? "https://openrouter.ai/settings/credits"}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex h-8 items-center gap-1.5 rounded-md bg-brand px-3 text-xs font-medium text-brand-foreground hover:bg-brand/90"
-                        >
-                          Add Credits
-                          <ExternalLink className="h-3 w-3" />
-                        </a>
-                        <a
-                          href={credits.account_url ?? "https://openrouter.ai/settings"}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs font-medium hover:bg-accent"
-                        >
-                          Manage Account
-                          <ExternalLink className="h-3 w-3" />
-                        </a>
-                      </div>
-                    </>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">
-                      No OpenRouter API key configured. Add one in the setup wizard or environment variables.
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-            )}
-
-            {/* ── Taxonomy ── */}
-            <SectionHeading icon={Tag} label="Taxonomy" open={sections.taxonomy} onToggle={() => toggleSection("taxonomy")} />
-            {sections.taxonomy && (
-              <div className="mb-4 grid gap-3">
-                {Object.entries(settings.taxonomy).map(([domain, info]) => (
-                  <Card key={domain}>
-                    <CardHeader className="p-4 pb-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-base">{info.icon}</span>
-                        <CardTitle className="text-sm capitalize">{domain}</CardTitle>
-                      </div>
-                      <CardDescription className="text-xs">{info.description}</CardDescription>
-                    </CardHeader>
-                    {info.sub_categories.length > 0 && (
-                      <CardContent className="flex flex-wrap gap-1.5 px-4 pb-3 pt-0">
-                        {info.sub_categories.map((sub) => (
-                          <Badge key={sub} variant="outline" className="text-[10px]">
-                            {sub}
-                          </Badge>
-                        ))}
-                      </CardContent>
-                    )}
-                  </Card>
-                ))}
-              </div>
-            )}
-
-            {/* ── Infrastructure & Sync ── */}
-            <SectionHeading icon={Wrench} label="Infrastructure & Sync" open={sections.infra_sync} onToggle={() => toggleSection("infra_sync")} />
-            {sections.infra_sync && (
-              <>
-                <Card className="mb-2">
-                  <CardContent className="grid gap-3 pt-4">
-                    <Row label="Bifrost URL" value={settings.bifrost_url ?? "—"} mono info="LLM gateway endpoint" />
-                    <Row label="Bifrost Timeout" value={settings.bifrost_timeout ? `${settings.bifrost_timeout}s` : "—"} info="Request timeout for LLM calls" />
-                    <Row label="ChromaDB" value={settings.chroma_url ?? "—"} mono info="Vector database endpoint" />
-                    <Row label="Neo4j" value={settings.neo4j_uri ?? "—"} mono info="Graph database endpoint" />
-                    <Row label="Redis" value={settings.redis_url ?? "—"} mono info="Cache and BM25 index (password redacted)" />
-                    <Row label="Archive Path" value={settings.archive_path ?? "—"} mono info="File archive mount path" />
-                    <Row label="Chunking Mode" value={settings.chunking_mode ?? "—"} info="Token-based or semantic chunking" />
-                    <div className="my-1 h-px bg-border" />
-                    <div className="flex items-center justify-between">
-                      <LabelWithInfo label="Encryption" info="Whether data at rest is encrypted" />
-                      <Badge variant={settings.enable_encryption ? "default" : "secondary"}>
-                        {settings.enable_encryption ? "Enabled" : "Disabled"}
-                      </Badge>
-                    </div>
-                    <Row label="Sync Backend" value={settings.sync_backend} info="Storage backend for cross-device sync" />
-                  </CardContent>
-                </Card>
-                <SyncSection />
-              </>
-            )}
-
-            {/* ── Local LLM (Ollama) ── */}
-            <SectionHeading icon={Cpu} label="Local LLM (Ollama)" open={sections.ollama} onToggle={() => toggleSection("ollama")} />
-            {sections.ollama && <OllamaSection settings={settings} onRefresh={load} />}
-
-            {/* ── KB Management ── */}
-            <SectionHeading icon={HardDrive} label="KB Management" open={sections.kb_admin} onToggle={() => toggleSection("kb_admin")} />
-            {sections.kb_admin && (
-              <Card className="mb-4">
-                <CardContent className="grid gap-3 pt-4">
-                  {kbStats && (
-                    <div className="rounded border bg-muted/30 p-2 text-xs">
-                      <div className="flex items-center justify-between">
-                        <span className="text-muted-foreground">Total artifacts</span>
-                        <span className="font-mono">{kbStats.total_artifacts}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-muted-foreground">Total chunks</span>
-                        <span className="font-mono">{kbStats.total_chunks}</span>
-                      </div>
-                      {Object.entries(kbStats.domains).map(([domain, info]) => (
-                        <div key={domain} className="mt-1 flex items-center justify-between gap-2 border-t pt-1">
-                          <span className="truncate text-muted-foreground">{domain}</span>
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono">{info.artifacts} / {info.chunks}</span>
-                            {info.artifacts > 0 && clearConfirmDomain !== domain && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-5 w-5 p-0 text-destructive/60 hover:text-destructive"
-                                onClick={() => setClearConfirmDomain(domain)}
-                                title={`Clear ${domain}`}
-                              >
-                                <Trash2 className="h-3 w-3" />
-                              </Button>
-                            )}
-                            {clearConfirmDomain === domain && (
-                              <div className="flex items-center gap-1">
-                                <Button
-                                  variant="destructive"
-                                  size="sm"
-                                  className="h-5 px-1 text-[10px]"
-                                  disabled={kbAction !== null}
-                                  onClick={() => {
-                                    setClearConfirmDomain(null)
-                                    runKBAction("clear", () => adminClearDomain(domain))
-                                  }}
-                                >
-                                  Clear
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-5 px-1 text-[10px]"
-                                  onClick={() => setClearConfirmDomain(null)}
-                                >
-                                  Cancel
-                                </Button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {kbLoading && !kbStats && (
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Loader2 className="h-3 w-3 animate-spin" /> Loading KB stats...
-                    </div>
-                  )}
-
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="text-xs"
-                      disabled={kbAction !== null}
-                      onClick={() => runKBAction("rebuild", adminRebuildIndexes)}
-                    >
-                      {kbAction === "rebuild" && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
-                      Rebuild Indexes
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="text-xs"
-                      disabled={kbAction !== null}
-                      onClick={() => runKBAction("rescore", adminRescore)}
-                    >
-                      {kbAction === "rescore" && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
-                      Rescore All
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="text-xs"
-                      disabled={kbAction !== null}
-                      onClick={() => runKBAction("summaries", adminRegenerateSummaries)}
-                    >
-                      {kbAction === "summaries" && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
-                      Regenerate Summaries
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="text-xs"
-                      disabled={kbLoading}
-                      onClick={loadKBStats}
-                    >
-                      {kbLoading && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
-                      Refresh Stats
-                    </Button>
-                  </div>
-
-                  {kbResult && (
-                    <p className="rounded bg-muted/50 px-2 py-1 text-xs text-muted-foreground">{kbResult}</p>
-                  )}
-                </CardContent>
-              </Card>
-            )}
-
-              </PaneErrorBoundary>
+                <PaneErrorBoundary label="System">
+                  <SystemSection
+                    settings={settings}
+                    sections={sections}
+                    toggleSection={toggleSection}
+                    patch={patch}
+                    credits={credits}
+                    kbStats={kbStats}
+                    kbLoading={kbLoading}
+                    kbAction={kbAction}
+                    kbResult={kbResult}
+                    loadKBStats={loadKBStats}
+                    runKBAction={runKBAction}
+                    clearConfirmDomain={clearConfirmDomain}
+                    setClearConfirmDomain={setClearConfirmDomain}
+                    onRefresh={load}
+                  />
+                </PaneErrorBoundary>
               </TabsContent>
 
-              {/* ── Plugins Tab ── */}
               <TabsContent value="plugins" className="space-y-1 pt-2">
                 <PaneErrorBoundary label="Plugins">
                   <PluginsSection />
@@ -966,8 +282,6 @@ export default function SettingsPane() {
   )
 }
 
-/* ── Helper Components ── */
-
 function Header() {
   return (
     <div className="border-b px-4 py-3">
@@ -976,336 +290,6 @@ function Header() {
         <h2 className="text-lg font-semibold">Settings</h2>
       </div>
       <p className="text-xs text-muted-foreground">Server configuration, features, and retrieval pipeline</p>
-    </div>
-  )
-}
-
-const STAGE_LABELS: Record<string, string> = {
-  claim_extraction: "Claim Extraction",
-  query_decomposition: "Query Decomposition",
-  topic_extraction: "Topic Extraction",
-  memory_resolution: "Memory Resolution",
-  verification_simple: "Simple Verification",
-  verification_complex: "Complex Verification",
-  reranking: "Reranking",
-  chat_generation: "Chat Generation",
-}
-
-const LOCKED_STAGES = new Set(["verification_complex", "chat_generation"])
-
-function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRefresh: () => void }) {
-  const { data: ollamaStatus, refetch: refetchOllama, isLoading } = useQuery<OllamaStatus>({
-    queryKey: ["ollama-status"],
-    queryFn: fetchOllamaStatus,
-    staleTime: 30_000,
-  })
-  const { data: healthStatus } = useQuery<HealthStatusResponse>({
-    queryKey: ["health-status"],
-    queryFn: fetchHealthStatus,
-    refetchInterval: 30_000,
-    retry: 1,
-  })
-  const { mode: uiMode } = useUIMode()
-  const [toggling, setToggling] = useState(false)
-  const [pipelineOpen, setPipelineOpen] = useState(false)
-
-  const handleToggle = useCallback(async () => {
-    if (!ollamaStatus) return
-    setToggling(true)
-    try {
-      if (settings.internal_llm_provider === "ollama") {
-        await disableOllama()
-      } else {
-        await enableOllama()
-      }
-      await refetchOllama()
-      onRefresh()
-    } catch (e) {
-      console.warn("Ollama toggle failed:", e)
-    }
-    setToggling(false)
-  }, [ollamaStatus, settings.internal_llm_provider, refetchOllama, onRefresh])
-
-  const isActive = settings.internal_llm_provider === "ollama"
-  const hwLabel = settings.ollama_url?.includes("cerid-ollama") ? "Docker container" : settings.ollama_url ?? "—"
-  const showPipelineRouting = uiMode === "advanced" && ollamaStatus?.reachable
-  const pipelineProviders = healthStatus?.pipeline_providers ?? settings.pipeline_providers
-
-  return (
-    <Card className="mb-2">
-      <CardHeader className="pb-2 pt-4 px-4">
-        <CardTitle className="text-sm flex items-center gap-2">
-          <Cpu className="h-4 w-4 text-muted-foreground" />
-          Ollama — Local LLM Add-On
-        </CardTitle>
-        <CardDescription className="text-xs">
-          Free local inference for pipeline tasks (verification context, query decomposition, memory resolution, claim extraction).
-          Uses qwen2.5:1.5b (~1GB) by default. Falls back to OpenRouter when unavailable.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-3 pt-0">
-        {/* Status */}
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-muted-foreground">Status</span>
-          {isLoading ? (
-            <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
-          ) : ollamaStatus?.reachable ? (
-            <Badge variant="default" className="text-[10px] bg-green-500/20 text-green-700 dark:text-green-400 border-green-500/30">
-              Connected ({ollamaStatus.models.length} model{ollamaStatus.models.length !== 1 ? "s" : ""})
-            </Badge>
-          ) : ollamaStatus?.enabled ? (
-            <Badge variant="outline" className="text-[10px] text-amber-600 dark:text-yellow-400 border-yellow-500/30">
-              Enabled but unreachable
-            </Badge>
-          ) : (
-            <Badge variant="secondary" className="text-[10px]">Not installed</Badge>
-          )}
-        </div>
-        {/* Active toggle */}
-        <div className="flex items-center justify-between">
-          <LabelWithInfo label="Route pipeline tasks to Ollama" info="When on, claim extraction, query decomposition, memory resolution, and topic extraction use the local model. When off, uses OpenRouter." />
-          <Switch
-            checked={isActive}
-            onCheckedChange={handleToggle}
-            disabled={toggling || (!ollamaStatus?.reachable && !isActive)}
-          />
-        </div>
-        {/* Model */}
-        <Row label="Model" value={settings.internal_llm_model ?? "qwen2.5:1.5b"} mono info="Lightweight model for pipeline intelligence tasks" />
-        {/* Default model installed? */}
-        {ollamaStatus?.reachable && (
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-muted-foreground">Default model installed</span>
-            <Badge variant={ollamaStatus.default_model_installed ? "default" : "secondary"} className="text-[10px]">
-              {ollamaStatus.default_model_installed ? "Yes" : "No — run: ollama pull " + ollamaStatus.default_model}
-            </Badge>
-          </div>
-        )}
-        {/* Connection */}
-        <Row label="Endpoint" value={hwLabel} mono info="Ollama server URL (Docker container or native)" />
-        {/* Provider */}
-        <Row label="Active provider" value={isActive ? "Ollama (local, $0)" : "OpenRouter (cloud)"} info="Which LLM handles internal pipeline operations" />
-        {/* Limitations */}
-        <div className="rounded border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground leading-relaxed">
-          <span className="font-medium">Limitations:</span> The local model (1.5B params) handles classification, extraction, and routing well.
-          It does not handle: user-facing chat, verification fact-checking, synopsis generation, or web search.
-          Those tasks always use capable cloud models via OpenRouter.
-        </div>
-        {/* Pipeline Routing (Advanced mode only, Ollama reachable) */}
-        {showPipelineRouting && pipelineProviders && (
-          <>
-            <div className="my-1 h-px bg-border" />
-            <button
-              type="button"
-              className="flex w-full cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-left hover:bg-muted/50"
-              onClick={() => setPipelineOpen((v) => !v)}
-              aria-expanded={pipelineOpen}
-            >
-              {pipelineOpen ? (
-                <ChevronDown className="h-3 w-3 text-muted-foreground" />
-              ) : (
-                <ChevronRight className="h-3 w-3 text-muted-foreground" />
-              )}
-              <span className="text-xs font-medium">Pipeline Routing</span>
-              <InfoTip text="Shows which provider handles each pipeline stage. Configured via server environment variables." />
-            </button>
-            {pipelineOpen && (
-              <div className="grid gap-1.5">
-                {Object.entries(STAGE_LABELS).map(([stage, label]) => {
-                  const provider = pipelineProviders[stage as keyof typeof pipelineProviders] ?? "bifrost"
-                  const isOllama = provider === "ollama"
-                  const isLocked = LOCKED_STAGES.has(stage)
-                  return (
-                    <div key={stage} className="flex items-center justify-between px-1">
-                      <span className="text-xs text-muted-foreground">{label}</span>
-                      <span className="flex items-center gap-1.5">
-                        {isLocked && (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Lock className="h-3 w-3 text-muted-foreground/50" />
-                            </TooltipTrigger>
-                            <TooltipContent side="left" className="max-w-48">
-                              <p>Always uses cloud models</p>
-                            </TooltipContent>
-                          </Tooltip>
-                        )}
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            "text-[10px]",
-                            isOllama
-                              ? "bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/30"
-                              : "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/30",
-                          )}
-                        >
-                          {isOllama ? "Ollama" : "Cloud"}
-                        </Badge>
-                      </span>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
-function SectionHeading({
-  icon: Icon,
-  label,
-  open,
-  onToggle,
-}: {
-  icon: typeof Cpu
-  label: string
-  open: boolean
-  onToggle: () => void
-}) {
-  return (
-    <button
-      type="button"
-      className="mb-2 flex w-full cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-left hover:bg-muted/50"
-      onClick={onToggle}
-      aria-expanded={open}
-    >
-      {open ? (
-        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-      ) : (
-        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-      )}
-      <Icon className="h-4 w-4 text-muted-foreground" />
-      <h3 className="text-sm font-medium">{label}</h3>
-    </button>
-  )
-}
-
-function InfoTip({ text }: { text: string }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Info className="h-3.5 w-3.5 shrink-0 cursor-help text-muted-foreground/50 hover:text-muted-foreground" />
-      </TooltipTrigger>
-      <TooltipContent side="top" className="max-w-64">
-        <p>{text}</p>
-      </TooltipContent>
-    </Tooltip>
-  )
-}
-
-function LabelWithInfo({ label, info }: { label: string; info: string }) {
-  return (
-    <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
-      {label}
-      <InfoTip text={info} />
-    </span>
-  )
-}
-
-function Row({ label, value, mono, info }: { label: string; value: string; mono?: boolean; info?: string }) {
-  return (
-    <div className="flex items-center justify-between">
-      {info ? (
-        <LabelWithInfo label={label} info={info} />
-      ) : (
-        <span className="text-sm text-muted-foreground">{label}</span>
-      )}
-      <span className={cn("text-sm", mono && "font-mono text-xs")}>{value}</span>
-    </div>
-  )
-}
-
-function ToggleRow({
-  label,
-  enabled,
-  onToggle,
-  info,
-}: {
-  label: string
-  enabled: boolean
-  onToggle: (value: boolean) => void
-  info?: string
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4">
-      {info ? (
-        <LabelWithInfo label={label} info={info} />
-      ) : (
-        <span className="text-sm text-muted-foreground">{label}</span>
-      )}
-      <Switch size="sm" checked={enabled} onCheckedChange={onToggle} />
-    </div>
-  )
-}
-
-function SliderRow({
-  label,
-  value,
-  onChange,
-  min,
-  max,
-  step,
-  info,
-}: {
-  label: string
-  value: number
-  onChange: (value: number) => void
-  min: number
-  max: number
-  step: number
-  info?: string
-}) {
-  const display = step >= 1 ? String(value) : value.toFixed(2)
-  return (
-    <div className="flex items-center justify-between gap-4">
-      <div className="flex min-w-0 items-center gap-1.5">
-        <LabelWithInfo
-          label={`${label}: ${display}`}
-          info={info ?? label}
-        />
-      </div>
-      <Slider
-        value={[value]}
-        onValueChange={([v]) => onChange(v)}
-        min={min}
-        max={max}
-        step={step}
-        className="w-32"
-        aria-label={label}
-      />
-    </div>
-  )
-}
-
-function PipelineToggle({
-  label,
-  enabled,
-  onToggle,
-  description,
-  children,
-}: {
-  label: string
-  enabled: boolean
-  onToggle: (value: boolean) => void
-  description: string
-  children?: React.ReactNode
-}) {
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex flex-col gap-0.5">
-          <span className="text-sm font-medium">{label}</span>
-          <span className="text-[11px] leading-tight text-muted-foreground">{description}</span>
-        </div>
-        <Switch size="sm" checked={enabled} onCheckedChange={onToggle} />
-      </div>
-      {enabled && children && (
-        <div className="ml-4 space-y-2 border-l-2 border-muted pl-3">
-          {children}
-        </div>
-      )}
     </div>
   )
 }
