@@ -3,7 +3,7 @@
 
 import { useCallback, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { adminRebuildIndexes, adminRescore, adminRegenerateSummaries, adminClearDomain, fetchOllamaStatus, enableOllama, disableOllama, fetchHealthStatus } from "@/lib/api"
+import { adminRebuildIndexes, adminRescore, adminRegenerateSummaries, adminClearDomain, fetchOllamaStatus, enableOllama, disableOllama, fetchHealthStatus, fetchDataSources, enableDataSource, disableDataSource } from "@/lib/api"
 import type { KBStats } from "@/lib/api"
 import type { ServerSettings, SettingsUpdate, ProviderCredits, OllamaStatus, HealthStatusResponse } from "@/lib/types"
 import type { SectionKey } from "./settings-primitives"
@@ -27,6 +27,7 @@ import {
   CreditCard,
   ExternalLink,
   Lock,
+  Globe,
 } from "lucide-react"
 import { SyncSection } from "./sync-section"
 import { SectionHeading, InfoTip, LabelWithInfo, Row } from "./settings-primitives"
@@ -203,6 +204,9 @@ export function SystemSection({
       {/* -- Local LLM (Ollama) -- */}
       <SectionHeading icon={Cpu} label="Local LLM (Ollama)" open={sections.ollama} onToggle={() => toggleSection("ollama")} />
       {sections.ollama && <OllamaSection settings={settings} onRefresh={onRefresh} />}
+
+      {/* -- Data Sources -- */}
+      <DataSourcesSection sections={sections} toggleSection={toggleSection} />
 
       {/* -- KB Management -- */}
       <SectionHeading icon={HardDrive} label="KB Management" open={sections.kb_admin} onToggle={() => toggleSection("kb_admin")} />
@@ -402,7 +406,8 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
 
   const isActive = settings.internal_llm_provider === "ollama"
   const hwLabel = settings.ollama_url?.includes("cerid-ollama") ? "Docker container" : settings.ollama_url ?? "\u2014"
-  const showPipelineRouting = uiMode === "advanced" && ollamaStatus?.reachable
+  const ollamaReachable = ollamaStatus?.reachable ?? false
+  const showPipelineRouting = uiMode === "advanced"
   const pipelineProviders = healthStatus?.pipeline_providers ?? settings.pipeline_providers
 
   return (
@@ -485,6 +490,11 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
             </button>
             {pipelineOpen && (
               <div className="grid gap-1.5">
+                {!ollamaReachable && (
+                  <p className="mb-2 text-[11px] text-muted-foreground">
+                    Install <a href="https://ollama.com" target="_blank" rel="noopener" className="text-primary underline">Ollama</a> to enable local pipeline routing.
+                  </p>
+                )}
                 {Object.entries(STAGE_LABELS).map(([stage, label]) => {
                   const provider = pipelineProviders[stage as keyof typeof pipelineProviders] ?? "bifrost"
                   const isOllama = provider === "ollama"
@@ -524,5 +534,60 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
         )}
       </CardContent>
     </Card>
+  )
+}
+
+/* ---- Data Sources sub-component ---- */
+
+function DataSourcesSection({
+  sections,
+  toggleSection,
+}: {
+  sections: Record<SectionKey, boolean>
+  toggleSection: (key: SectionKey) => void
+}) {
+  const { data: dataSources } = useQuery({
+    queryKey: ["data-sources"],
+    queryFn: fetchDataSources,
+    staleTime: 30_000,
+  })
+
+  return (
+    <>
+      <SectionHeading icon={Globe} label="Data Sources" open={sections.data_sources ?? false} onToggle={() => toggleSection("data_sources" as SectionKey)} />
+      {(sections.data_sources ?? false) && dataSources && (
+        <Card className="mb-4">
+          <CardContent className="space-y-2 pt-4">
+            {dataSources.sources.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No data sources available.</p>
+            ) : (
+              dataSources.sources.map((source) => (
+                <div key={source.name} className="flex items-center justify-between rounded-md border px-3 py-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium capitalize">{source.name.replace(/_/g, " ")}</p>
+                    <p className="text-[11px] text-muted-foreground">{source.description}</p>
+                    {source.requires_api_key && !source.configured && (
+                      <p className="mt-0.5 text-[10px] text-yellow-500">Set {source.api_key_env_var} in .env to enable</p>
+                    )}
+                  </div>
+                  <Switch
+                    size="sm"
+                    checked={source.enabled && source.configured}
+                    disabled={!source.configured}
+                    onCheckedChange={(checked) => {
+                      if (checked) {
+                        enableDataSource(source.name).catch(() => {})
+                      } else {
+                        disableDataSource(source.name).catch(() => {})
+                      }
+                    }}
+                  />
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+      )}
+    </>
   )
 }

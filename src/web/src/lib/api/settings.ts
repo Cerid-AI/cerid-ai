@@ -226,6 +226,24 @@ export async function fetchInternalProvider(): Promise<{ provider: string; model
 }
 
 // ---------------------------------------------------------------------------
+// Data Sources
+// ---------------------------------------------------------------------------
+
+export async function fetchDataSources(): Promise<{ sources: Array<{ name: string; description: string; enabled: boolean; configured: boolean; requires_api_key: boolean; api_key_env_var: string; domains: string[] }>; total: number }> {
+  const res = await fetch(`${MCP_BASE}/data-sources`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error("Failed to fetch data sources")
+  return res.json()
+}
+
+export async function enableDataSource(name: string): Promise<void> {
+  await fetch(`${MCP_BASE}/data-sources/${name}/enable`, { method: "POST", headers: mcpHeaders() })
+}
+
+export async function disableDataSource(name: string): Promise<void> {
+  await fetch(`${MCP_BASE}/data-sources/${name}/disable`, { method: "POST", headers: mcpHeaders() })
+}
+
+// ---------------------------------------------------------------------------
 // Automations
 // ---------------------------------------------------------------------------
 

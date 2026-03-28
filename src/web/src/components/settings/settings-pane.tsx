@@ -23,13 +23,13 @@ import type { SectionKey } from "./settings-primitives"
 
 type LoadState = "loading" | "error" | "ready"
 
-const SETTINGS_SECTIONS_VERSION = 2
+const SETTINGS_SECTIONS_VERSION = 3
 
 function readSectionState(): Record<SectionKey, boolean> {
   const defaults: Record<SectionKey, boolean> = {
     connection: true, knowledge_ingestion: true, features: true,
     retrieval: true, search: true, taxonomy: true, infra_sync: true,
-    ollama: true, kb_admin: true, credits: true,
+    ollama: true, kb_admin: true, credits: true, data_sources: false,
   }
   try {
     const ver = localStorage.getItem("cerid-settings-sections-v")

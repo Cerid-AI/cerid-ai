@@ -88,6 +88,7 @@ export function ChatPanel() {
   const [ollamaDismissed, setOllamaDismissed] = useState(() => {
     try { return localStorage.getItem("cerid-ollama-dismissed") === "1" } catch { return false }
   })
+  const [ollamaShowSetup, setOllamaShowSetup] = useState(false)
   const { data: ollamaHealth } = useQuery({
     queryKey: ["health-ollama-banner"],
     queryFn: fetchHealthStatus,
@@ -434,27 +435,50 @@ export function ChatPanel() {
 
       {/* Ollama recommendation — shown when no local stages and user has chatted */}
       {!isSimple && ollamaLocalCount === 0 && (active?.messages?.length ?? 0) > 2 && !ollamaDismissed && (
-        <div className="mx-4 mb-2 rounded-lg border border-teal-500/30 bg-teal-500/10 px-4 py-2.5">
-          <div className="flex items-center gap-3">
-            <Cpu className="h-4 w-4 shrink-0 text-teal-400" />
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-medium">Speed up with local AI</p>
-              <p className="text-[11px] text-muted-foreground">Enable Ollama for faster verification — runs locally, no API costs.</p>
-            </div>
+        ollamaShowSetup ? (
+          <div className="mx-4 mb-2 rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-4 py-3">
+            <p className="text-xs font-medium text-yellow-400">Ollama not detected</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Install Ollama from <a href="https://ollama.com" target="_blank" rel="noopener" className="text-primary underline">ollama.com</a>, then run <code className="rounded bg-muted px-1">ollama serve</code> in your terminal.
+            </p>
             <button
-              onClick={() => { enableOllama().catch(() => {}); setOllamaDismissed(true) }}
-              className="shrink-0 rounded-md border border-teal-500/40 px-2 py-1 text-[11px] font-medium text-teal-400 hover:bg-teal-500/10"
+              onClick={() => { setOllamaShowSetup(false); setOllamaDismissed(true); try { localStorage.setItem("cerid-ollama-dismissed", "1") } catch { /* noop */ } }}
+              className="mt-2 text-[10px] text-muted-foreground hover:text-foreground"
             >
-              Enable
-            </button>
-            <button
-              onClick={() => { setOllamaDismissed(true); try { localStorage.setItem("cerid-ollama-dismissed", "1") } catch { /* noop */ } }}
-              className="shrink-0 text-muted-foreground hover:text-foreground"
-            >
-              <X className="h-3.5 w-3.5" />
+              Dismiss
             </button>
           </div>
-        </div>
+        ) : (
+          <div className="mx-4 mb-2 rounded-lg border border-teal-500/30 bg-teal-500/10 px-4 py-2.5">
+            <div className="flex items-center gap-3">
+              <Cpu className="h-4 w-4 shrink-0 text-teal-400" />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-medium">Speed up with local AI</p>
+                <p className="text-[11px] text-muted-foreground">Enable Ollama for faster verification — runs locally, no API costs.</p>
+              </div>
+              <button
+                onClick={async () => {
+                  try {
+                    await enableOllama()
+                    setOllamaDismissed(true)
+                    try { localStorage.setItem("cerid-ollama-dismissed", "1") } catch { /* noop */ }
+                  } catch {
+                    setOllamaShowSetup(true)
+                  }
+                }}
+                className="shrink-0 rounded-md border border-teal-500/40 px-2 py-1 text-[11px] font-medium text-teal-400 hover:bg-teal-500/10"
+              >
+                Enable
+              </button>
+              <button
+                onClick={() => { setOllamaDismissed(true); try { localStorage.setItem("cerid-ollama-dismissed", "1") } catch { /* noop */ } }}
+                className="shrink-0 text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        )
       )}
 
       {/* Messages */}
