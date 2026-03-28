@@ -213,6 +213,14 @@ export async function enableOllama(): Promise<{ status: string; provider: string
   return res.json()
 }
 
+export async function pullOllamaModel(model: string): Promise<Response> {
+  return fetch(`${MCP_BASE}/ollama/pull`, {
+    method: "POST",
+    headers: { ...mcpHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ model }),
+  })
+}
+
 export async function disableOllama(): Promise<{ status: string; provider: string }> {
   const res = await fetch(`${MCP_BASE}/providers/ollama/disable`, { method: "POST", headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, `Disable Ollama failed: ${res.status}`))

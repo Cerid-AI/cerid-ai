@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
-import { Cpu, Database, X, Zap, Sparkles, MessageSquarePlus, Clock, ShieldCheck } from "lucide-react"
+import { Check, Cpu, Database, Loader2 as Loader2Icon, X, Zap, Sparkles, MessageSquarePlus, Clock, ShieldCheck } from "lucide-react"
 import { CreditBanner } from "./credit-banner"
 import { ChatToolbar } from "./chat-toolbar"
 import { ChatMessages } from "./chat-messages"
@@ -30,7 +30,7 @@ import { useVerificationOrchestrator } from "@/hooks/use-verification-orchestrat
 import { useUIMode } from "@/contexts/ui-mode-context"
 import { UploadDialog } from "@/components/kb/upload-dialog"
 import { useQuery } from "@tanstack/react-query"
-import { uploadFile, enableOllama, fetchHealthStatus } from "@/lib/api"
+import { uploadFile, enableOllama, fetchOllamaStatus, pullOllamaModel, fetchHealthStatus } from "@/lib/api"
 import type { ChatMessage } from "@/lib/types"
 import { MODELS } from "@/lib/types"
 import { uuid } from "@/lib/utils"
@@ -89,6 +89,9 @@ export function ChatPanel() {
     try { return localStorage.getItem("cerid-ollama-dismissed") === "1" } catch { return false }
   })
   const [ollamaShowSetup, setOllamaShowSetup] = useState(false)
+  const [ollamaSetupActive, setOllamaSetupActive] = useState(false)
+  const [setupSteps, setSetupSteps] = useState<Array<{ label: string; status: "done" | "active" | "pending" }>>([])
+
   const { data: ollamaHealth } = useQuery({
     queryKey: ["health-ollama-banner"],
     queryFn: fetchHealthStatus,
@@ -99,6 +102,77 @@ export function ChatPanel() {
   const ollamaLocalCount = ollamaHealth?.pipeline_providers
     ? Object.values(ollamaHealth.pipeline_providers).filter(p => p === "ollama").length
     : 0
+
+  const runOllamaSetup = useCallback(async () => {
+    setOllamaSetupActive(true)
+    const steps: Array<{ label: string; status: "done" | "active" | "pending" }> = [
+      { label: "Checking Ollama...", status: "active" },
+      { label: "Pulling qwen2.5:1.5b (1GB)...", status: "pending" },
+      { label: "Enabling local pipeline", status: "pending" },
+      { label: "Setup complete", status: "pending" },
+    ]
+    setSetupSteps([...steps])
+
+    try {
+      // Step 1: Check status
+      const status = await fetchOllamaStatus()
+
+      if (!status.reachable) {
+        steps[0] = { label: "Ollama not reachable \u2014 install from ollama.com", status: "done" }
+        setSetupSteps([...steps])
+        setOllamaShowSetup(true)
+        setOllamaSetupActive(false)
+        return
+      }
+
+      steps[0] = { label: "Ollama detected", status: "done" }
+
+      // Step 2: Pull model if missing
+      steps[1] = { ...steps[1], status: "active" }
+      setSetupSteps([...steps])
+
+      if (!status.default_model_installed) {
+        const pullRes = await pullOllamaModel(status.default_model || "qwen2.5:1.5b")
+        if (!pullRes.ok) throw new Error("Model pull failed")
+        // Consume the streaming response to wait for completion
+        const reader = pullRes.body?.getReader()
+        if (reader) {
+          while (true) {
+            const { done } = await reader.read()
+            if (done) break
+          }
+        }
+      }
+      steps[1] = { label: "\u2713 " + (status.default_model || "qwen2.5:1.5b") + " ready", status: "done" }
+
+      // Step 3: Enable
+      steps[2] = { ...steps[2], status: "active" }
+      setSetupSteps([...steps])
+      await enableOllama()
+      steps[2] = { label: "\u2713 Local pipeline enabled", status: "done" }
+
+      // Step 4: Done
+      steps[3] = { label: "\u2713 Setup complete \u2014 verification now 10\u00d7 faster", status: "done" }
+      setSetupSteps([...steps])
+
+      // Dismiss after 3 seconds
+      setTimeout(() => {
+        setOllamaSetupActive(false)
+        setOllamaDismissed(true)
+        try { localStorage.setItem("cerid-ollama-dismissed", "1") } catch { /* noop */ }
+      }, 3000)
+    } catch (err) {
+      const activeIdx = steps.findIndex(s => s.status === "active")
+      if (activeIdx >= 0) {
+        steps[activeIdx] = {
+          ...steps[activeIdx],
+          status: "done",
+          label: "\u2717 Setup failed: " + (err instanceof Error ? err.message : "unknown error"),
+        }
+      }
+      setSetupSteps([...steps])
+    }
+  }, [])
 
   const currentModelObj = useMemo(() => MODELS.find((m) => m.id === selectedModel) ?? MODELS[0], [selectedModel])
 
@@ -433,8 +507,28 @@ export function ChatPanel() {
         </div>
       )}
 
+      {/* Ollama setup progress panel */}
+      {ollamaSetupActive && (
+        <div className="mx-4 mb-2 rounded-lg border border-teal-500/30 bg-teal-500/10 px-4 py-3">
+          <div className="flex items-center gap-2 mb-2">
+            <Cpu className="h-4 w-4 text-teal-400" />
+            <span className="text-xs font-medium">Setting up Ollama...</span>
+          </div>
+          <div className="space-y-1 font-mono text-[10px] text-muted-foreground">
+            {setupSteps.map((step, i) => (
+              <div key={i} className="flex items-center gap-1.5">
+                {step.status === "done" && <Check className="h-3 w-3 text-green-400" />}
+                {step.status === "active" && <Loader2Icon className="h-3 w-3 animate-spin" />}
+                {step.status === "pending" && <span className="h-3 w-3" />}
+                <span>{step.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Ollama recommendation — shown when no local stages and user has chatted */}
-      {!isSimple && ollamaLocalCount === 0 && (active?.messages?.length ?? 0) > 2 && !ollamaDismissed && (
+      {!isSimple && !ollamaSetupActive && ollamaLocalCount === 0 && (active?.messages?.length ?? 0) > 2 && !ollamaDismissed && (
         ollamaShowSetup ? (
           <div className="mx-4 mb-2 rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-4 py-3">
             <p className="text-xs font-medium text-yellow-400">Ollama not detected</p>
@@ -457,15 +551,7 @@ export function ChatPanel() {
                 <p className="text-[11px] text-muted-foreground">Enable Ollama for faster verification — runs locally, no API costs.</p>
               </div>
               <button
-                onClick={async () => {
-                  try {
-                    await enableOllama()
-                    setOllamaDismissed(true)
-                    try { localStorage.setItem("cerid-ollama-dismissed", "1") } catch { /* noop */ }
-                  } catch {
-                    setOllamaShowSetup(true)
-                  }
-                }}
+                onClick={() => { runOllamaSetup() }}
                 className="shrink-0 rounded-md border border-teal-500/40 px-2 py-1 text-[11px] font-medium text-teal-400 hover:bg-teal-500/10"
               >
                 Enable
