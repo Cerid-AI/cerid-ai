@@ -5,9 +5,10 @@ Run the project test suites. Accept an optional argument to scope:
 - `frontend` or `fe`: Run only frontend tests (vitest)
 - A specific file path: Run tests for just that file
 
-**Python tests** must run in Docker because the host macOS lacks chromadb:
+**Python tests** must run in Docker because the host macOS lacks chromadb.
+The container needs build tools for PyStemmer (C extension):
 ```
-docker run --rm -v "$(pwd)/src/mcp:/work" -w /work python:3.11-slim bash -c "pip install -q -r requirements.txt -r requirements-dev.txt && python -m pytest tests/ -v --tb=short"
+docker run --rm -v "$(pwd)/src/mcp:/work" -w /work python:3.11-slim bash -c "apt-get update -qq && apt-get install -y -qq gcc build-essential libffi-dev > /dev/null 2>&1 && pip install -q -r requirements.txt -r requirements-dev.txt && python -m pytest tests/ -v --tb=short"
 ```
 
 **Frontend tests** run locally:

@@ -2,6 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import "@testing-library/jest-dom/vitest"
+import { afterEach } from "vitest"
+import { cleanup } from "@testing-library/react"
+
+// Ensure React Testing Library cleanup runs after every test and flush
+// pending requestAnimationFrame callbacks to avoid jsdom teardown errors.
+afterEach(() => {
+  cleanup()
+})
 
 // Polyfill ResizeObserver for jsdom (required by Radix ScrollArea)
 if (typeof globalThis.ResizeObserver === "undefined") {
