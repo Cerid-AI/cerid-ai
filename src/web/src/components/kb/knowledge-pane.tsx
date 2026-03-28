@@ -16,7 +16,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Search, X, Loader2, AlertCircle, RefreshCcw, Upload, CheckCircle, Tag, Settings2, ArrowUpDown, ArrowDownAZ, CalendarArrowDown, Star, FileUp, Clock, CircleHelp, LayoutGrid } from "lucide-react"
+import { Search, X, Loader2, AlertCircle, RefreshCcw, Upload, CheckCircle, Tag, Settings2, ArrowUpDown, ArrowDownAZ, CalendarArrowDown, Star, FileUp, Clock, CircleHelp, LayoutGrid, List } from "lucide-react"
+import { DomainBadge } from "@/components/ui/domain-badge"
+import { cn } from "@/lib/utils"
 import { ArtifactCard } from "./artifact-card"
 import { TaxonomyTree } from "./taxonomy-tree"
 import { GraphPreview } from "./graph-preview"
@@ -114,9 +116,17 @@ export function KnowledgePane() {
   const [clientSource, setClientSource] = useState("gui")
   const [dateFilter, setDateFilter] = useState("all")
   const [displayLimit, setDisplayLimit] = useState(PAGE_SIZE)
+  const [viewMode, setViewMode] = useState<"grid" | "list">(() => {
+    try { return (localStorage.getItem("cerid-kb-view") as "grid" | "list") ?? "grid" } catch { return "grid" }
+  })
   const { isDragOver, dragHandlers } = useDragDrop(setPendingFiles)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const queryClient = useQueryClient()
+
+  const toggleView = (mode: "grid" | "list") => {
+    setViewMode(mode)
+    try { localStorage.setItem("cerid-kb-view", mode) } catch { /* noop */ }
+  }
 
   // Load ingestion log from sessionStorage on mount
   useEffect(() => {
@@ -500,12 +510,6 @@ export function KnowledgePane() {
           </Select>
         </div>
 
-        <TaxonomyTree
-          filter={taxonomyFilter}
-          onFilterChange={setTaxonomyFilter}
-          artifactCounts={domainCounts}
-        />
-
         {/* Tag section */}
         {availableTags.length > 0 && (
           <div className="space-y-1.5">
@@ -620,6 +624,22 @@ export function KnowledgePane() {
             <ArrowDownAZ className="h-2.5 w-2.5" />
             Name
           </Button>
+          <div className="ml-auto flex items-center gap-1">
+            <button
+              onClick={() => toggleView("grid")}
+              className={cn("rounded p-1", viewMode === "grid" ? "bg-muted" : "hover:bg-muted/50")}
+              aria-label="Grid view"
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={() => toggleView("list")}
+              className={cn("rounded p-1", viewMode === "list" ? "bg-muted" : "hover:bg-muted/50")}
+              aria-label="List view"
+            >
+              <List className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
       )}
 
@@ -658,85 +678,123 @@ export function KnowledgePane() {
         )}
       </div>
 
-      {/* Results */}
-      <ScrollArea className="min-h-0 flex-1">
-        <div className="min-w-0 max-w-full space-y-2 overflow-hidden p-4">
-          {isLoading && (
-            <div className="flex items-center justify-center py-12 text-muted-foreground">
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              <span className="text-sm">{activeSearch ? "Searching..." : "Loading artifacts..."}</span>
-            </div>
-          )}
-
-          {!isLoading && isError && (
-            <div className="flex flex-col items-center gap-3 py-12 text-center">
-              <AlertCircle className="h-8 w-8 text-destructive" />
-              <div>
-                <p className="text-sm font-medium text-destructive">Failed to load artifacts</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {errorDetail instanceof Error ? errorDetail.message : "Connection error — check backend services"}
-                </p>
-              </div>
-              <Button variant="outline" size="sm" onClick={() => refetch()}>
-                <RefreshCcw className="mr-1.5 h-3 w-3" />
-                Retry
-              </Button>
-            </div>
-          )}
-
-          {!isLoading && !isError && results.length === 0 && (
-            <div className="py-12 text-center text-sm text-muted-foreground">
-              {activeSearch ? "No results found" : "No artifacts in the knowledge base"}
-            </div>
-          )}
-
-          {paginatedResults.map((result) => (
-            <ArtifactCard
-              key={`${result.artifact_id}-${result.chunk_index}`}
-              result={result}
-              isSelected={selectedArtifactId === result.artifact_id}
-              onSelect={() =>
-                setSelectedArtifactId(
-                  selectedArtifactId === result.artifact_id ? null : result.artifact_id,
-                )
-              }
-              onInject={() => injectResult(result)}
-              domains={domainList}
-              onRecategorize={handleRecategorize}
-              onPreview={setPreviewArtifactId}
-              onDelete={handleDelete}
-              onUpdateTags={handleUpdateTags}
-              onReIngest={handleReIngest}
-              showSource={clientSource === "all"}
+      {/* Main content: taxonomy sidebar + cards */}
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        {/* Taxonomy sidebar — hidden on narrow viewports */}
+        <div className="hidden w-48 shrink-0 border-r overflow-y-auto lg:block">
+          <div className="p-2">
+            <TaxonomyTree
+              filter={taxonomyFilter}
+              onFilterChange={setTaxonomyFilter}
+              artifactCounts={domainCounts}
             />
-          ))}
-
-          {/* Load more */}
-          {hasMore && !isLoading && (
-            <div className="flex flex-col items-center gap-1 pt-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 text-xs"
-                onClick={() => setDisplayLimit((prev) => prev + PAGE_SIZE)}
-              >
-                Load more
-              </Button>
-              <span className="text-[10px] text-muted-foreground">
-                Showing {paginatedResults.length} of {totalCount} artifacts
-              </span>
-            </div>
-          )}
+          </div>
         </div>
 
-        {/* Graph preview for selected artifact */}
-        {selectedArtifactId && (
-          <>
-            <Separator />
-            <GraphPreview artifactId={selectedArtifactId} />
-          </>
-        )}
-      </ScrollArea>
+        {/* Cards/list area */}
+        <div className="flex-1 min-w-0 overflow-hidden">
+          <ScrollArea className="h-full">
+            <div className="min-w-0 max-w-full overflow-hidden">
+              {isLoading && (
+                <div className="flex items-center justify-center py-12 text-muted-foreground">
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <span className="text-sm">{activeSearch ? "Searching..." : "Loading artifacts..."}</span>
+                </div>
+              )}
+
+              {!isLoading && isError && (
+                <div className="flex flex-col items-center gap-3 py-12 text-center">
+                  <AlertCircle className="h-8 w-8 text-destructive" />
+                  <div>
+                    <p className="text-sm font-medium text-destructive">Failed to load artifacts</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {errorDetail instanceof Error ? errorDetail.message : "Connection error — check backend services"}
+                    </p>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => refetch()}>
+                    <RefreshCcw className="mr-1.5 h-3 w-3" />
+                    Retry
+                  </Button>
+                </div>
+              )}
+
+              {!isLoading && !isError && results.length === 0 && (
+                <div className="py-12 text-center text-sm text-muted-foreground">
+                  {activeSearch ? "No results found" : "No artifacts in the knowledge base"}
+                </div>
+              )}
+
+              {!isLoading && !isError && results.length > 0 && (
+                viewMode === "grid" ? (
+                  <div className="grid grid-cols-2 gap-2 p-3 lg:grid-cols-3">
+                    {paginatedResults.map((result) => (
+                      <ArtifactCard
+                        key={`${result.artifact_id}-${result.chunk_index}`}
+                        result={result}
+                        compact
+                        isSelected={selectedArtifactId === result.artifact_id}
+                        onSelect={() =>
+                          setSelectedArtifactId(
+                            selectedArtifactId === result.artifact_id ? null : result.artifact_id,
+                          )
+                        }
+                        onInject={() => injectResult(result)}
+                        domains={domainList}
+                        onRecategorize={handleRecategorize}
+                        onPreview={setPreviewArtifactId}
+                        onDelete={handleDelete}
+                        onUpdateTags={handleUpdateTags}
+                        onReIngest={handleReIngest}
+                        showSource={clientSource === "all"}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="divide-y">
+                    {paginatedResults.map((result) => (
+                      <KBListItem
+                        key={`${result.artifact_id}-${result.chunk_index}`}
+                        result={result}
+                        isSelected={selectedArtifactId === result.artifact_id}
+                        onSelect={() =>
+                          setSelectedArtifactId(
+                            selectedArtifactId === result.artifact_id ? null : result.artifact_id,
+                          )
+                        }
+                      />
+                    ))}
+                  </div>
+                )
+              )}
+
+              {/* Load more */}
+              {hasMore && !isLoading && (
+                <div className="flex flex-col items-center gap-1 pt-2 pb-4">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs"
+                    onClick={() => setDisplayLimit((prev) => prev + PAGE_SIZE)}
+                  >
+                    Load more
+                  </Button>
+                  <span className="text-[10px] text-muted-foreground">
+                    Showing {paginatedResults.length} of {totalCount} artifacts
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Graph preview for selected artifact */}
+            {selectedArtifactId && (
+              <>
+                <Separator />
+                <GraphPreview artifactId={selectedArtifactId} />
+              </>
+            )}
+          </ScrollArea>
+        </div>
+      </div>
 
       {injectedContext.length > 0 && (
         <div className="border-t px-4 py-1.5 text-xs text-muted-foreground">
@@ -762,6 +820,55 @@ export function KnowledgePane() {
       />
 
       <TagManager open={tagManagerOpen} onOpenChange={setTagManagerOpen} localTags={availableTags} />
+    </div>
+  )
+}
+
+/** Returns a human-readable relative time string like "3d ago". */
+function timeAgo(date: string): string {
+  const now = Date.now()
+  const then = new Date(date).getTime()
+  if (isNaN(then)) return ""
+  const diffMs = now - then
+  const seconds = Math.floor(diffMs / 1000)
+  if (seconds < 60) return "just now"
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  if (days < 30) return `${days}d ago`
+  const months = Math.floor(days / 30)
+  if (months < 12) return `${months}mo ago`
+  const years = Math.floor(months / 12)
+  return `${years}y ago`
+}
+
+function KBListItem({ result, isSelected, onSelect }: {
+  result: KBQueryResult
+  isSelected: boolean
+  onSelect: () => void
+}) {
+  const preview = (result.content || "").replace(/[#*_\[\]|]/g, "").replace(/\s+/g, " ").trim().slice(0, 120)
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      className={cn(
+        "flex items-center gap-3 px-4 py-2 cursor-pointer hover:bg-muted/50 transition-colors",
+        isSelected && "bg-muted",
+      )}
+      onClick={onSelect}
+      onKeyDown={(e) => { if (e.key === "Enter") onSelect() }}
+    >
+      <DomainBadge domain={result.domain} />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium">{result.filename}</p>
+        <p className="truncate text-xs text-muted-foreground">{preview || "No preview"}</p>
+      </div>
+      {result.ingested_at && (
+        <span className="shrink-0 text-[10px] text-muted-foreground">{timeAgo(result.ingested_at)}</span>
+      )}
     </div>
   )
 }

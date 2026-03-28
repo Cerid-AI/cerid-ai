@@ -494,6 +494,7 @@ async def verify_response_streaming(
                         expert_mode=expert_mode,
                         source_artifact_ids=source_artifact_ids,
                         response_context=response_context,
+                        pre_fetched_kb=batch_kb_context or None,
                     ),
                     timeout=claim_timeout,
                 )

@@ -483,6 +483,25 @@ async def extract_claims(
     if len(response_text) < min_length:
         return [], "none"
 
+    # Fast path: short responses use heuristic only (saves 3-5s LLM call).
+    # For responses under 300 chars the heuristic is sufficient — the text
+    # is simple enough that regex patterns catch factual sentences reliably.
+    if len(response_text) < 300:
+        try:
+            heuristic_claims = _extract_claims_heuristic(response_text)
+            if heuristic_claims:
+                heuristic_claims = _resolve_pronouns_heuristic(
+                    heuristic_claims, response_text, user_query,
+                )
+                logger.debug(
+                    "Fast-path heuristic extraction for short response "
+                    "(%d chars, %d claims)",
+                    len(response_text), len(heuristic_claims),
+                )
+                return heuristic_claims[:max_claims], "heuristic"
+        except Exception as exc:
+            logger.debug("Fast-path heuristic failed (%s), continuing to LLM", exc)
+
     # Pre-extraction: surface ignorance admissions and recency limitations
     # that the LLM prompt ("exclude meta-commentary") and heuristic
     # (NON_FACTUAL_PATTERNS blocks "I ...") would otherwise drop.

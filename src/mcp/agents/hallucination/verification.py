@@ -821,6 +821,42 @@ async def verify_claims_batch_external(
 
 
 # ---------------------------------------------------------------------------
+# Pre-fetched KB context filtering
+# ---------------------------------------------------------------------------
+
+def _text_overlap(context: str, claim: str) -> float:
+    """Simple word overlap ratio for relevance filtering.
+
+    Returns the fraction of claim words that appear in the context text.
+    Used to filter batch-fetched KB results to those relevant to a specific claim.
+    """
+    claim_words = set(claim.lower().split())
+    if not claim_words:
+        return 0.0
+    context_words = set(context.lower().split())
+    return len(claim_words & context_words) / len(claim_words)
+
+
+def _filter_batch_kb(
+    batch_results: list[dict[str, Any]], claim: str,
+) -> list[dict[str, Any]]:
+    """Filter pre-fetched batch KB results to those relevant to a specific claim.
+
+    Returns results sorted by relevance descending, limited to top 5 to match
+    the per-claim lightweight_kb_query default.
+    """
+    scored: list[tuple[float, dict[str, Any]]] = []
+    for r in batch_results:
+        content = r.get("content", "") or ""
+        overlap = _text_overlap(content, claim)
+        if overlap > 0.1:
+            scored.append((overlap, r))
+    # Sort by overlap descending, then by original relevance as tiebreaker
+    scored.sort(key=lambda x: (x[0], x[1].get("relevance", 0.0)), reverse=True)
+    return [r for _, r in scored[:5]]
+
+
+# ---------------------------------------------------------------------------
 # Main claim verification
 # ---------------------------------------------------------------------------
 
@@ -835,6 +871,7 @@ async def verify_claim(
     expert_mode: bool = False,
     source_artifact_ids: list[str] | None = None,
     response_context: str | None = None,
+    pre_fetched_kb: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Verify a single claim against the knowledge base and user memories.
 
@@ -888,18 +925,25 @@ async def verify_claim(
         return result
 
     try:
-        # Exclude 'conversations' domain from general KB query to avoid
-        # self-verification against feedback-ingested LLM responses.
-        verification_domains = [d for d in config.DOMAINS if d != "conversations"]
-        # Use lightweight retrieval (vector + BM25 hybrid only) — skips graph
-        # expansion, cross-encoder, quality boost, MMR, and context assembly
-        # for significantly faster per-claim verification.
-        kb_results = await lightweight_kb_query(
-            query=claim,
-            domains=verification_domains,
-            top_k=5,
-            chroma_client=chroma_client,
-        )
+        # When batch KB context was pre-fetched by the streaming orchestrator,
+        # filter it for relevance to this specific claim instead of making
+        # another round-trip to ChromaDB.  This eliminates N per-claim KB
+        # queries and reuses the single batch query results.
+        if pre_fetched_kb is not None:
+            kb_results = _filter_batch_kb(pre_fetched_kb, claim)
+        else:
+            # Exclude 'conversations' domain from general KB query to avoid
+            # self-verification against feedback-ingested LLM responses.
+            verification_domains = [d for d in config.DOMAINS if d != "conversations"]
+            # Use lightweight retrieval (vector + BM25 hybrid only) — skips graph
+            # expansion, cross-encoder, quality boost, MMR, and context assembly
+            # for significantly faster per-claim verification.
+            kb_results = await lightweight_kb_query(
+                query=claim,
+                domains=verification_domains,
+                top_k=5,
+                chroma_client=chroma_client,
+            )
 
         # Also query user-confirmed memories (filtered by memory_type)
         memory_results = await _query_memories(claim, chroma_client, top_k=2)

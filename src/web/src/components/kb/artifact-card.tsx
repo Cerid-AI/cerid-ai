@@ -47,9 +47,11 @@ interface ArtifactCardProps {
   onReIngest?: (artifactId: string) => Promise<void>
   /** When true, show the client_source badge on each card. */
   showSource?: boolean
+  /** When true, show a compact card with no content preview or action buttons. */
+  compact?: boolean
 }
 
-export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, onRecategorize, onPreview, onDelete, onUpdateTags, onReIngest, showSource }: ArtifactCardProps) {
+export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, onRecategorize, onPreview, onDelete, onUpdateTags, onReIngest, showSource, compact }: ArtifactCardProps) {
   const [expanded, setExpanded] = useState(false)
   const [showRecategorize, setShowRecategorize] = useState(false)
   const [recategorizing, setRecategorizing] = useState(false)
@@ -118,7 +120,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
       }}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect() } }}
     >
-      <CardContent className="min-w-0 overflow-hidden px-3 py-2">
+      <CardContent className={cn("min-w-0 overflow-hidden", compact ? "px-2 py-1.5" : "px-3 py-2")}>
         {/* Header row */}
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
@@ -206,7 +208,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
         </div>
 
         {/* Content */}
-        {cleanContent.length > 10 ? (
+        {!compact && (cleanContent.length > 10 ? (
           <p className={cn(
             "mt-2 text-xs leading-relaxed text-muted-foreground [overflow-wrap:anywhere]",
             !expanded && "line-clamp-2",
@@ -221,10 +223,10 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
           <p className="mt-2 text-xs italic text-muted-foreground">
             No summary available
           </p>
-        ) : null}
+        ) : null)}
 
         {/* Recategorize inline picker */}
-        {showRecategorize && domains && onRecategorize && (
+        {!compact && showRecategorize && domains && onRecategorize && (
           <div className="mt-2 flex flex-wrap items-center gap-1 rounded border bg-muted/30 p-2">
             <span className="text-[10px] text-muted-foreground">Move to:</span>
             {domains.filter((d) => d !== result.domain).map((d) => (
@@ -256,7 +258,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
         )}
 
         {/* Inline tag editing */}
-        {editingTags && onUpdateTags && (
+        {!compact && editingTags && onUpdateTags && (
           <div className="mt-2 rounded border bg-muted/30 p-2" onClick={(e) => e.stopPropagation()}>
             <div className="flex flex-wrap gap-1 mb-1.5">
               {editedTags.map((tag) => (
@@ -309,7 +311,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
         )}
 
         {/* Delete confirmation */}
-        {confirmDelete && onDelete && (
+        {!compact && confirmDelete && onDelete && (
           <div className="mt-2 flex items-center gap-2 rounded border border-destructive/30 bg-destructive/10 p-2" onClick={(e) => e.stopPropagation()}>
             <span className="text-[11px] text-destructive">Delete this artifact?</span>
             <div className="flex-1" />
@@ -333,7 +335,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
         )}
 
         {/* Actions */}
-        <div className="mt-2 flex items-center gap-0.5">
+        {!compact && <div className="mt-2 flex items-center gap-0.5">
           {domains && onRecategorize && (
             <Button
               variant="ghost"
@@ -425,7 +427,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
           >
             <PlusCircle className="h-3 w-3" />
           </Button>
-        </div>
+        </div>}
       </CardContent>
     </Card>
   )
