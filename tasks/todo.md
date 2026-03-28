@@ -145,6 +145,60 @@ Deep debugging session fixing production crashes and polishing features built in
 
 ---
 
+## Phase 51: Hardening, RAG Evolution & Architecture Refinement (2026-03-28)
+
+> **Full plan:** [`docs/plans/PLAN_PHASE51_HARDENING.md`](../docs/plans/PLAN_PHASE51_HARDENING.md)
+> **Driven by:** Monte Carlo evaluation (33 tests), code quality audit (7.2/10), RAG competitive research (15 frameworks, 25+ papers)
+
+### Track 1: Error Handling & Resilience
+- [ ] Exception hierarchy (`errors.py`) — replace 135 bare `except Exception` blocks
+- [ ] Multi-tier graceful degradation (Full RAG → Lite RAG → Direct LLM → Cached)
+- [ ] Standardized logging levels across all routers
+
+### Track 2: Verification Pipeline
+- [ ] Close Monte Carlo gaps: complex claim recall 14%→50%+, ignorance 60%→80%+
+- [ ] Fix verdict parsing for text-wrapped JSON
+- [ ] Metamorphic verification (MetaRAG approach, Pro tier)
+- [ ] Local verification via Ollama (FaithLens-style)
+
+### Track 3: RAG Evolution
+- [ ] Retrieval-level caching (30min TTL, Redis, 60-80% hit target)
+- [ ] Parent-child document retrieval (two-tier chunking)
+- [ ] HyDE fallback (hypothetical document retrieval for low-confidence queries)
+- [ ] Graph RAG (LightRAG evaluation + prototype, Pro tier)
+
+### Track 4: Repository Architecture
+- [ ] Separate dev/eval tests from core (pytest markers: unit/integration/eval)
+- [ ] requirements-eval.txt for optional eval dependencies
+- [ ] Tier enforcement hardening (replace inline checks with `@require_feature()`)
+- [ ] Health check split: `/health/live`, `/health/ready`, `/health/status`
+
+### Track 5: Ollama Extensibility
+- [ ] Per-stage Ollama routing (extraction, decomposition, verification, reranking)
+- [ ] Independent circuit breakers per pipeline stage
+- [ ] Auto-detect models + resource-aware recommendations
+
+### Track 6: Code Quality
+- [ ] God file decomposition (verification.py, query_agent.py, api.ts, test_hallucination.py)
+- [ ] Magic numbers → named constants (`config/constants.py`)
+- [ ] Logging discipline standardization
+
+### Track 7: Evaluation & Quality
+- [ ] RAGAS integration (faithfulness, context precision/recall)
+- [ ] Monte Carlo corpus expansion 54→150+ scenarios
+- [ ] CI eval gate (weekly automated, alert on >5% regression)
+
+### Verification Fixes Applied (2026-03-28) ✅
+- [x] StreamingClaimBadge interactive (click-to-expand, details, references)
+- [x] Bidirectional temporal pattern in CURRENT_EVENT_PATTERNS[2]
+- [x] Strong temporal year threshold 2025+→2024+
+- [x] 11 frontend tests for StreamingClaimBadge
+- [x] 4 backend tests for bidirectional pattern matching
+- [x] 7 backend tests for _reclassify_recency
+- [x] Monte Carlo evaluation harness (33 tests, 54 scenarios, 200 random samples)
+
+---
+
 ## Sentry Wiring + Verification Fixes + Ollama Add-On (2026-03-22) ✅
 
 Infrastructure, verification pipeline, and local LLM integration session.
