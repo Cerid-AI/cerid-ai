@@ -507,16 +507,16 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
                     anext_task.cancel()
                     try:
                         await anext_task
-                    except (asyncio.CancelledError, Exception):
-                        pass
+                    except (asyncio.CancelledError, Exception) as exc:
+                        logger.debug("Agent anext task cleanup: %s", exc)
                 # Now the generator is idle — safe to close
                 try:
                     await gen.aclose()
-                except (RuntimeError, asyncio.CancelledError, GeneratorExit):
+                except (RuntimeError, asyncio.CancelledError, GeneratorExit) as exc:
                     # RuntimeError: generator still running despite cancel-wait
                     # CancelledError: cancel scope still active during cleanup
                     # GeneratorExit: nested generator cleanup during our own exit
-                    pass
+                    logger.debug("Generator close cleanup: %s", exc)
 
         except GeneratorExit:
             # Client disconnected — Starlette closed the async generator.

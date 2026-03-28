@@ -13,12 +13,12 @@ jinja2>=3.1,<4
 
 # Databases
 chromadb>=0.5,<0.6
-neo4j>=5.0,<7
+neo4j>=5.0,<6
 redis>=4.0,<8
 
 # AI / NLP
 tiktoken>=0.5,<1
-langgraph>=0.3.0,<1.1
+langgraph>=0.3.0,<1.0
 
 # File parsing
 pdfplumber>=0.10,<0.12
@@ -40,11 +40,8 @@ bcrypt>=4.0,<6
 # Logging
 structlog>=24,<26
 
-# Templating
-Jinja2>=3.1,<4
-
 # Utilities
-cryptography>=42,<48
+cryptography>=42,<47
 python-multipart
 
 # Plugins (optional — install for CERID_TIER=pro features)

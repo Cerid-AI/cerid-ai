@@ -92,7 +92,7 @@ async def mcp_sse_endpoint(request: Request):
             try:
                 evicted_queue.put_nowait(None)  # Sentinel signals event_stream to stop
             except asyncio.QueueFull:
-                pass
+                logger.warning("MCP SSE queue full, eviction sentinel dropped for session %s", oldest_key)
         logger.warning(f"[MCP] Evicted oldest session {oldest_key} (cap={_MAX_SESSIONS})")
     _sessions[session_id] = queue
     logger.info(f"[MCP] SSE opened: {session_id}")

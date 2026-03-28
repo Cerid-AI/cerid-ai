@@ -23,7 +23,7 @@ import {
   fetchObservabilityHealthScore,
   fetchHealthStatus,
 } from "@/lib/api"
-import type { MetricAggregation, HealthStatusResponse, PipelineStage } from "@/lib/types"
+import type { MetricAggregation, PipelineStage } from "@/lib/types"
 
 // ---------------------------------------------------------------------------
 // Time window options

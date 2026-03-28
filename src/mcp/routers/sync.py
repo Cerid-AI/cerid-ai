@@ -56,8 +56,8 @@ async def sync_export_endpoint(req: ExportRequest):
                 try:
                     manifest = read_manifest(sync_dir)
                     since = manifest.get("last_exported_at")
-                except (FileNotFoundError, ValueError):
-                    pass
+                except (FileNotFoundError, ValueError) as exc:
+                    logger.warning("Could not read sync manifest for incremental export: %s", exc)
 
             result = export_all(
                 driver=get_neo4j(),

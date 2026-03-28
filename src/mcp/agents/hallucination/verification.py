@@ -21,7 +21,6 @@ import httpx
 import config
 from agents.hallucination.confidence import (
     _build_verification_details,
-    _check_numeric_alignment,
     _compute_adjusted_confidence,
 )
 from agents.hallucination.extraction import _reclassify_recency
@@ -37,9 +36,9 @@ from agents.hallucination.patterns import (
     _pick_verification_model,
 )
 from agents.hallucination.verdict_parsing import (
+    _interpret_recency_verdict,
     _invert_evasion_verdict,
     _invert_ignorance_verdict,
-    _interpret_recency_verdict,
     _parse_verification_verdict,
 )
 from utils.circuit_breaker import CircuitOpenError, NonTransientError
@@ -55,7 +54,7 @@ class CreditExhaustedError(NonTransientError):
     the circuit would just add a 90s delay on top of an already-broken state.
     """
 
-    def __init__(self, provider: str = "openrouter"):
+    def __init__(self, provider: str = "openrouter") -> None:
         self.provider = provider
         super().__init__(f"{provider} credits exhausted (HTTP 402)")
 

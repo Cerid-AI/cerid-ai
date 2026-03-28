@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from agents.hallucination.patterns import PERCENT_RE, YEAR_RE
+from config.constants import NUMERIC_MATCH_RATIO_THRESHOLD, QUALITY_TIER_EXCELLENT
 
 __all__ = [
     "_check_numeric_alignment",
@@ -71,9 +72,9 @@ def _check_numeric_alignment(
 
     match_ratio = matches / total_checks
 
-    if match_ratio >= 0.8:
+    if match_ratio >= QUALITY_TIER_EXCELLENT:
         return 0.03   # Numbers align well
-    elif match_ratio <= 0.2 and total_checks >= 2:
+    elif match_ratio <= NUMERIC_MATCH_RATIO_THRESHOLD and total_checks >= 2:
         return -0.05  # Numbers conflict — likely inverted fact
     return 0.0
 

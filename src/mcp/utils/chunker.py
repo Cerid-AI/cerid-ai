@@ -18,6 +18,8 @@ import re
 
 import tiktoken
 
+from config.constants import CHUNK_OVERLAP_RATIO
+
 _ENCODING = tiktoken.get_encoding("cl100k_base")
 
 # Sentence boundary regex — handles common abbreviations to avoid false splits
@@ -61,7 +63,7 @@ def make_context_header(
 def chunk_text_token(
     text: str,
     max_tokens: int = 512,
-    overlap: float = 0.2,
+    overlap: float = CHUNK_OVERLAP_RATIO,
 ) -> list[str]:
     """Split text into token-limited chunks with overlap."""
     tokens = _ENCODING.encode(text)
@@ -126,7 +128,7 @@ def _split_paragraphs(text: str) -> list[str]:
 def chunk_text_semantic(
     text: str,
     max_tokens: int = 512,
-    overlap: float = 0.2,
+    overlap: float = CHUNK_OVERLAP_RATIO,
 ) -> list[str]:
     """Split text into chunks on paragraph boundaries, respecting token limits.
 
@@ -219,7 +221,7 @@ def chunk_with_parents(
     text: str,
     artifact_id: str,
     max_tokens: int = 512,
-    overlap: float = 0.2,
+    overlap: float = CHUNK_OVERLAP_RATIO,
     mode: str | None = None,
     context_header: str = "",
 ) -> list[dict]:
@@ -340,7 +342,7 @@ def get_parent_chunks(
 def chunk_text(
     text: str,
     max_tokens: int = 512,
-    overlap: float = 0.2,
+    overlap: float = CHUNK_OVERLAP_RATIO,
     mode: str | None = None,
     context_header: str = "",
 ) -> list[str]:

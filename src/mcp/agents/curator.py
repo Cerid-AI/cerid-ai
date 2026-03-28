@@ -23,6 +23,7 @@ from typing import Any
 import httpx
 
 import config
+from config.constants import QUALITY_TIER_EXCELLENT, QUALITY_TIER_FAIR, QUALITY_TIER_GOOD
 from db.neo4j.artifacts import list_artifacts, update_artifact_summary
 from utils.circuit_breaker import CircuitOpenError
 from utils.llm_client import call_llm
@@ -465,7 +466,12 @@ async def curate(
 
     score_dist = {"excellent": 0, "good": 0, "fair": 0, "poor": 0}
     for s in score_values:
-        tier = "excellent" if s >= 0.8 else "good" if s >= 0.6 else "fair" if s >= 0.4 else "poor"
+        tier = (
+            "excellent" if s >= QUALITY_TIER_EXCELLENT
+            else "good" if s >= QUALITY_TIER_GOOD
+            else "fair" if s >= QUALITY_TIER_FAIR
+            else "poor"
+        )
         score_dist[tier] += 1
 
     return {

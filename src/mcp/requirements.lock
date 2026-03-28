@@ -18,7 +18,7 @@ anyio==4.13.0 \
 apscheduler==3.11.2 \
     --hash=sha256:2a9966b052ec805f020c8c4c3ae6e6a06e24b1bf19f2e11d91d8cca0473eef41 \
     --hash=sha256:ce005177f741409db4e4dd40a7431b76feb856b9dd69d57e0da49d6715bfd26d
-    # via -r requirements.txt
+    # via -r /work/requirements.txt
 asgiref==3.11.1 \
     --hash=sha256:5f184dc43b7e763efe848065441eac62229c9f7b0475f41f80e207a114eda4ce \
     --hash=sha256:e8667a091e69529631969fd45dc268fa79b99c92c5fcdda727757e52146ec133
@@ -92,12 +92,12 @@ bcrypt==5.0.0 \
     --hash=sha256:f8429e1c410b4073944f03bd778a9e066e7fad723564a52ff91841d278dfc822 \
     --hash=sha256:fc746432b951e92b58317af8e0ca746efe93e66555f1b40888865ef5bf56446b
     # via
-    #   -r requirements.txt
+    #   -r /work/requirements.txt
     #   chromadb
 bm25s==0.3.3 \
     --hash=sha256:03941f4e2a3610cbbaefa614c22d0e164a53c1e3201a4330cba45081260fd934 \
     --hash=sha256:c2567435da193ea8bf8801c471ae972cfc8f4415002f2e024f4c55d0fbc0f12f
-    # via -r requirements.txt
+    # via -r /work/requirements.txt
 build==1.4.2 \
     --hash=sha256:35b14e1ee329c186d3f08466003521ed7685ec15ecffc07e68d706090bf161d1 \
     --hash=sha256:7a4d8651ea877cb2a89458b1b198f2e69f536c95e89129dbf5d448045d60db88
@@ -364,7 +364,7 @@ chroma-hnswlib==0.7.6 \
 chromadb==0.5.23 \
     --hash=sha256:360a12b9795c5a33cb1f839d14410ccbde662ef1accd36153b0ae22312edabd1 \
     --hash=sha256:ffe5bdd7276d12cb682df0d38a13aa37573e6a3678e71889ac45f539ae05ad7e
-    # via -r requirements.txt
+    # via -r /work/requirements.txt
 click==8.3.1 \
     --hash=sha256:12ff4785d337a1bb490bb7e9c2b1ee5da3112e94a8622f26a6c77f5d2fc6842a \
     --hash=sha256:981153a64e25f12d547d3426c367a4857371575ee7ad18df2a6183ab0545b2a6
@@ -422,7 +422,7 @@ cryptography==46.0.6 \
     --hash=sha256:ed3775295fb91f70b4027aeba878d79b3e55c0b3e97eaa4de71f8f23a9f2eb77 \
     --hash=sha256:ed418c37d095aeddf5336898a132fba01091f0ac5844e3e8018506f014b6d2c4
     # via
-    #   -r requirements.txt
+    #   -r /work/requirements.txt
     #   pdfminer-six
 distro==1.9.0 \
     --hash=sha256:2fa77c6fd8940f116ee1d6b94a2f90b13b5ea8d019b98bc8bafdcabcdd9bdbed \
@@ -440,7 +440,7 @@ fastapi==0.135.2 \
     --hash=sha256:0af0447d541867e8db2a6a25c23a8c4bd80e2394ac5529bd87501bbb9e240ca5 \
     --hash=sha256:88a832095359755527b7f63bb4c6bc9edb8329a026189eed83d6c1afcf419d56
     # via
-    #   -r requirements.txt
+    #   -r /work/requirements.txt
     #   chromadb
     #   sentry-sdk
 filelock==3.25.2 \
@@ -609,7 +609,7 @@ httpx==0.28.1 \
     --hash=sha256:75e98c5f16b0f35b567856f597f06ff2270a374470a5c2392242528e3e3e42fc \
     --hash=sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad
     # via
-    #   -r requirements.txt
+    #   -r /work/requirements.txt
     #   chromadb
     #   langgraph-sdk
     #   langsmith
@@ -635,7 +635,7 @@ importlib-resources==6.5.2 \
 jinja2==3.1.6 \
     --hash=sha256:0137fb05990d35f1275a587e9aee6d56da821fc83491a0fb838183be43f66d6d \
     --hash=sha256:85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67
-    # via -r requirements.txt
+    # via -r /work/requirements.txt
 jsonpatch==1.33 \
     --hash=sha256:0ae28c0cd062bbd8b8ecc26d7d164fbbea9652a1a3693f3b956c1eae5145dade \
     --hash=sha256:9fcd4009c41e6d12348b4a0ff2563ba56a2923a7dfee731d004e212e1ee5030c
@@ -655,10 +655,10 @@ langchain-core==1.2.23 \
     #   langgraph
     #   langgraph-checkpoint
     #   langgraph-prebuilt
-langgraph==1.0.10 \
-    --hash=sha256:73bd10ee14a8020f31ef07e9cd4c1a70c35cc07b9c2b9cd637509a10d9d51e29 \
-    --hash=sha256:7c298bef4f6ea292fcf9824d6088fe41a6727e2904ad6066f240c4095af12247
-    # via -r requirements.txt
+langgraph==0.5.0 \
+    --hash=sha256:74e33efb6527602b79bfcc4e3d0bfbb15b8d86fa25bb417fdd8d3306456cf8de \
+    --hash=sha256:7ad6d42f2a44e93e225cc65c59fac51c55ae549c9824adc22971d00e5ac26443
+    # via -r /work/requirements.txt
 langgraph-checkpoint==4.0.1 \
     --hash=sha256:b433123735df11ade28829e40ce25b9be614930cd50245ff2af60629234befd9 \
     --hash=sha256:e3adcd7a0e0166f3b48b8cf508ce0ea366e7420b5a73aa81289888727769b034
@@ -1031,10 +1031,10 @@ mpmath==1.3.0 \
     --hash=sha256:7a28eb2a9774d00c7bc92411c19a89209d5da7c4c9a9e227be8330a23a25b91f \
     --hash=sha256:a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c
     # via sympy
-neo4j==6.1.0 \
-    --hash=sha256:3bd93941f3a3559af197031157220af9fd71f4f93a311db687bd69ffa417b67d \
-    --hash=sha256:b5dde8c0d8481e7b6ae3733569d990dd3e5befdc5d452f531ad1884ed3500b84
-    # via -r requirements.txt
+neo4j==5.28.3 \
+    --hash=sha256:0625aaaf0963bc99a7231e946952f579792c3be22687192b20e0b74aa1233a2b \
+    --hash=sha256:dbf6d9211b861bc3dd62dccbf8a74d1e33e0c602084dd123b753edf46e1fdfad
+    # via -r /work/requirements.txt
 numpy==2.4.3 \
     --hash=sha256:0200b25c687033316fb39f0ff4e3e690e8957a2c3c8d22499891ec58c37a3eb5 \
     --hash=sha256:0448e7f9caefb34b4b7dd2b77f21e8906e5d6f0365ad525f9f4f530b13df2afc \
@@ -1147,7 +1147,7 @@ onnxruntime==1.24.4 \
 openpyxl==3.1.5 \
     --hash=sha256:5282c12b107bffeef825f4617dc029afaf41d0ea60823bbb665ef3079dc79de2 \
     --hash=sha256:cf0e3cf56142039133628b5acffe8ef0c12bc902d2aadd3e0fe5878dc08d1050
-    # via -r requirements.txt
+    # via -r /work/requirements.txt
 opentelemetry-api==1.40.0 \
     --hash=sha256:159be641c0b04d11e9ecd576906462773eb97ae1b657730f0ecf64d32071569f \
     --hash=sha256:82dd69331ae74b06f6a874704be0cfaa49a1650e1537d4a813b86ecef7d0ecf9
@@ -1400,7 +1400,7 @@ pandas==3.0.1 \
     --hash=sha256:d54855f04f8246ed7b6fc96b05d4871591143c46c0b6f4af874764ed0d2d6f06 \
     --hash=sha256:de09668c1bf3b925c07e5762291602f0d789eca1b3a781f99c1c78f6cac0e7ea \
     --hash=sha256:eca8b4510f6763f3d37359c2105df03a7a221a508f30e396a51d0713d462e68a
-    # via -r requirements.txt
+    # via -r /work/requirements.txt
 pdfminer-six==20251230 \
     --hash=sha256:9ff2e3466a7dfc6de6fd779478850b6b7c2d9e9405aa2a5869376a822771f485 \
     --hash=sha256:e8f68a14c57e00c2d7276d26519ea64be1b48f91db1cdc776faa80528ca06c1e
@@ -1408,7 +1408,7 @@ pdfminer-six==20251230 \
 pdfplumber==0.11.9 \
     --hash=sha256:33ec5580959ba524e9100138746e090879504c42955df1b8a997604dd326c443 \
     --hash=sha256:481224b678b2bbdbf376e2c39bf914144eef7c3d301b4a28eebf0f7f6109d6dc
-    # via -r requirements.txt
+    # via -r /work/requirements.txt
 pillow==12.1.1 \
     --hash=sha256:02f84dfad02693676692746df05b89cf25597560db2857363a208e393429f5e9 \
     --hash=sha256:0330d233c1a0ead844fc097a7d16c0abff4c12e856c0b325f231820fee1f39da \
@@ -1529,7 +1529,7 @@ pydantic==2.12.5 \
     --hash=sha256:4d351024c75c0f085a9febbb665ce8c0c6ec5d30e903bdb6394b7ede26aebb49 \
     --hash=sha256:e561593fccf61e8a20fc46dfc2dfe075b8be7d0188df33f221ad1f0139180f9d
     # via
-    #   -r requirements.txt
+    #   -r /work/requirements.txt
     #   chromadb
     #   fastapi
     #   langchain-core
@@ -1665,7 +1665,7 @@ pygments==2.19.2 \
 pyjwt==2.12.1 \
     --hash=sha256:28ca37c070cad8ba8cd9790cd940535d40274d22f80ab87f3ac6a713e6e8454c \
     --hash=sha256:c74a7a2adf861c04d002db713dd85f84beb242228e671280bf709d765b03672b
-    # via -r requirements.txt
+    # via -r /work/requirements.txt
 pypdfium2==5.6.0 \
     --hash=sha256:258624da8ef45cdc426e11b33e9d83f9fb723c1c201c6e0f4ab5a85966c6b876 \
     --hash=sha256:282dc030e767cd61bd0299f9d581052b91188e2b87561489057a8e7963e7e0cb \
@@ -1781,7 +1781,7 @@ pystemmer==3.0.0 \
     --hash=sha256:f6f3db949aa4e0f97be9b800bf1c026229f373e39ebfead8975569a87af39f29 \
     --hash=sha256:f8f6ac3d031776d4512e7feb0f4411b43dacda3de91c24c418d2cff7e4e2db82 \
     --hash=sha256:fb5f68508790a149b7b759e8dc44b3809086712e166f1ebc95196a82c4af3328
-    # via -r requirements.txt
+    # via -r /work/requirements.txt
 python-dateutil==2.9.0.post0 \
     --hash=sha256:37dd54208da7e1cd875388217d5e00ebd4179249f90fb72437e91a35459a0ad3 \
     --hash=sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427
@@ -1792,7 +1792,7 @@ python-dateutil==2.9.0.post0 \
 python-docx==1.2.0 \
     --hash=sha256:3fd478f3250fbbbfd3b94fe1e985955737c145627498896a8a6bf81f4baf66c7 \
     --hash=sha256:7bc9d7b7d8a69c9c02ca09216118c86552704edc23bac179283f2e38f86220ce
-    # via -r requirements.txt
+    # via -r /work/requirements.txt
 python-dotenv==1.2.2 \
     --hash=sha256:1d8214789a24de455a8b8bd8ae6fe3c6b69a5e3d64aa8a8e5d68e694bbcb285a \
     --hash=sha256:2c371a91fbd7ba082c2c1dc1f8bf89ca22564a087c2c287cd9b662adde799cf3
@@ -1800,7 +1800,7 @@ python-dotenv==1.2.2 \
 python-multipart==0.0.22 \
     --hash=sha256:2b2cd894c83d21bf49d702499531c7bafd057d730c201782048f7945d82de155 \
     --hash=sha256:7340bef99a7e0032613f56dc36027b959fd3b30a787ed62d310e951f7c3a3a58
-    # via -r requirements.txt
+    # via -r /work/requirements.txt
 pytz==2026.1.post1 \
     --hash=sha256:3378dde6a0c3d26719182142c56e60c7f9af7e968076f31aae569d72a0358ee1 \
     --hash=sha256:f2fd16142fda348286a75e1a524be810bb05d444e5a081f37f7affc635035f7a
@@ -1888,7 +1888,7 @@ pyyaml==6.0.3 \
 redis==7.4.0 \
     --hash=sha256:64a6ea7bf567ad43c964d2c30d82853f8df927c5c9017766c55a1d1ed95d18ad \
     --hash=sha256:a9c74a5c893a5ef8455a5adb793a31bb70feb821c86eccb62eebef5a19c429ec
-    # via -r requirements.txt
+    # via -r /work/requirements.txt
 regex==2026.2.28 \
     --hash=sha256:00945d007fd74a9084d2ab79b695b595c6b7ba3698972fadd43e23230c6979c1 \
     --hash=sha256:00f2b8d9615aa165fdff0a13f1a92049bfad555ee91e20d246a51aa0b556c60a \
@@ -2009,7 +2009,7 @@ requests==2.33.0 \
     --hash=sha256:3324635456fa185245e24865e810cecec7b4caf933d7eb133dcde67d48cee69b \
     --hash=sha256:c7ebc5e8b0f21837386ad0e1c8fe8b829fa5f544d8df3b2253bff14ef29d7652
     # via
-    #   -r requirements.txt
+    #   -r /work/requirements.txt
     #   huggingface-hub
     #   kubernetes
     #   langsmith
@@ -2034,7 +2034,7 @@ rich==14.3.3 \
 sentry-sdk[fastapi]==2.56.0 \
     --hash=sha256:5afafb744ceb91d22f4cc650c6bd048ac6af5f7412dcc6c59305a2e36f4dbc02 \
     --hash=sha256:fdab72030b69625665b2eeb9738bdde748ad254e8073085a0ce95382678e8168
-    # via -r requirements.txt
+    # via -r /work/requirements.txt
 shellingham==1.5.4 \
     --hash=sha256:7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686 \
     --hash=sha256:8dbca0739d487e5bd35ab3ca4b36e11c4078f3a234bfce294b0a0291363404de
@@ -2053,7 +2053,7 @@ starlette==1.0.0 \
 structlog==25.5.0 \
     --hash=sha256:098522a3bebed9153d4570c6d0288abf80a031dfdb2048d59a49e9dc2190fc98 \
     --hash=sha256:a8453e9b9e636ec59bd9e79bbd4a72f025981b3ba0f5837aebf48f02f37a7f9f
-    # via -r requirements.txt
+    # via -r /work/requirements.txt
 sympy==1.14.0 \
     --hash=sha256:d3d3fe8df1e5a0b42f0e7bdf50541697dbe7d23746e894990c030e2b05e72517 \
     --hash=sha256:e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5
@@ -2122,7 +2122,7 @@ tiktoken==0.12.0 \
     --hash=sha256:f61c0aea5565ac82e2ec50a05e02a6c44734e91b51c10510b084ea1b8e633a71 \
     --hash=sha256:fc530a28591a2d74bce821d10b418b26a094bf33839e69042a6e86ddb7a7fb27 \
     --hash=sha256:ffc5288f34a8bc02e1ea7047b8d041104791d2ddbf42d1e5fa07822cbffe16bd
-    # via -r requirements.txt
+    # via -r /work/requirements.txt
 tokenizers==0.20.3 \
     --hash=sha256:04627b7b502fa6a2a005e1bd446fa4247d89abcb1afaa1b81eb90e21aba9a60f \
     --hash=sha256:07d7851a72717321022f3774e84aa9d595a041d643fafa2e87fbc9b18711dac0 \
@@ -2314,7 +2314,7 @@ uvicorn[standard]==0.42.0 \
     --hash=sha256:96c30f5c7abe6f74ae8900a70e92b85ad6613b745d4879eb9b16ccad15645359 \
     --hash=sha256:9b1f190ce15a2dd22e7758651d9b6d12df09a13d51ba5bf4fc33c383a48e1775
     # via
-    #   -r requirements.txt
+    #   -r /work/requirements.txt
     #   chromadb
 uvloop==0.22.1 \
     --hash=sha256:017bd46f9e7b78e81606329d07141d3da446f8798c6baeec124260e22c262772 \

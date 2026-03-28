@@ -15,7 +15,6 @@ Error types: none (health endpoints never raise)
 from __future__ import annotations
 
 import logging
-import os
 import time
 
 from fastapi import APIRouter
@@ -72,8 +71,8 @@ def health_check() -> dict:
     try:
         redis_client = get_redis()
         credits_exhausted = redis_client.get("cerid:openrouter:credits_exhausted") == "1"
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Redis credits_exhausted check failed: %s", exc)
 
     # Ollama status (when enabled)
     import os
@@ -86,7 +85,8 @@ def health_check() -> dict:
             resp = httpx.get(f"{ollama_url}/api/tags", timeout=1)
             models = [m.get("name", "") for m in resp.json().get("models", [])] if resp.status_code == 200 else []
             ollama_status = {"reachable": True, "models": len(models), "url": ollama_url}
-        except Exception:
+        except Exception as exc:
+            logger.debug("Ollama health probe failed: %s", exc)
             ollama_status = {"reachable": False, "url": ollama_url}
 
     result: dict = {
@@ -167,20 +167,21 @@ def degradation_status():
         result["can_retrieve"] = tier_info.get("can_retrieve", True)
         result["can_verify"] = tier_info.get("can_verify", True)
         result["can_generate"] = tier_info.get("can_generate", True)
-    except Exception:
+    except Exception as exc:
+        logger.warning("Degradation status unavailable: %s", exc)
         result["degradation_tier"] = "unknown"
     # Add feature tier
     try:
-        from config.features import FEATURE_FLAGS, FEATURE_TIER
+        from config.features import FEATURE_TIER
         result["feature_tier"] = FEATURE_TIER
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Feature tier unavailable: %s", exc)
     # Add pipeline provider config
     try:
         from config.settings import PIPELINE_PROVIDERS
         result["pipeline_providers"] = PIPELINE_PROVIDERS
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Pipeline providers unavailable: %s", exc)
     return result
 
 

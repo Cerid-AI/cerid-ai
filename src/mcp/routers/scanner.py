@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 import config
+from config.constants import MIN_QUALITY_SCORE
 from deps import get_redis
 from services.folder_scanner import (
     clear_scan_state,
@@ -37,7 +38,7 @@ router = APIRouter(tags=["scanner"])
 
 class ScanRequest(BaseModel):
     path: str
-    min_quality: float = 0.4
+    min_quality: float = MIN_QUALITY_SCORE
     max_file_size_mb: int = 50
     dry_run: bool = False
     exclude_patterns: list[str] = Field(default_factory=list)

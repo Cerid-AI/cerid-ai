@@ -10,6 +10,7 @@ import logging
 import os
 import signal
 import traceback
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import sentry_sdk
@@ -162,7 +163,7 @@ def _signal_handler(signum: int, frame) -> None:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Install signal handlers AFTER uvicorn startup (uvicorn overwrites module-level handlers)
     signal.signal(signal.SIGTERM, _signal_handler)
     signal.signal(signal.SIGINT, _signal_handler)
@@ -444,5 +445,5 @@ if os.getenv("CERID_EVAL_ENABLED", "").lower() in ("1", "true", "yes"):
 
 
 @app.get("/")
-def root():
+def root() -> dict[str, str]:
     return {"service": "AI Companion MCP Server", "version": "1.0.0", "status": "running"}

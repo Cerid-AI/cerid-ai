@@ -15,6 +15,7 @@ import logging
 import httpx
 
 import config.settings as config
+from config.constants import DEFAULT_LLM_TEMPERATURE
 from middleware.request_id import tracing_headers
 from utils.circuit_breaker import get_breaker
 
@@ -55,7 +56,7 @@ async def call_bifrost(
     *,
     breaker_name: str,
     model: str | None = None,
-    temperature: float = 0.3,
+    temperature: float = DEFAULT_LLM_TEMPERATURE,
     max_tokens: int = 2000,
     timeout: float | None = None,
     extra_payload: dict | None = None,

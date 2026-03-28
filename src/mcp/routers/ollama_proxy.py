@@ -18,13 +18,14 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from config.constants import OLLAMA_CONNECT_TIMEOUT, OLLAMA_READ_TIMEOUT
 from utils.circuit_breaker import CircuitOpenError, get_breaker
 
 router = APIRouter(prefix="/ollama", tags=["ollama"])
 logger = logging.getLogger("ai-companion.ollama")
 
-_TIMEOUT = 120.0  # Ollama inference can be slow on first load
-_CONNECT_TIMEOUT = 10.0
+_TIMEOUT = OLLAMA_READ_TIMEOUT
+_CONNECT_TIMEOUT = OLLAMA_CONNECT_TIMEOUT
 
 # ---------------------------------------------------------------------------
 # Helpers

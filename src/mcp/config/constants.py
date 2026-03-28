@@ -35,10 +35,28 @@ CHUNK_OVERLAP_RATIO = 0.2
 PARENT_CHILD_RATIO_MIN = 4  # min child:parent token ratio
 PARENT_CHILD_RATIO_MAX = 8
 
+# ── Quality scoring ────────────────────────────────────────────────
+QUALITY_TIER_EXCELLENT = 0.8
+QUALITY_TIER_GOOD = 0.6
+QUALITY_TIER_FAIR = 0.4
+MIN_QUALITY_SCORE = 0.4
+
+# ── Memory ─────────────────────────────────────────────────────────
+MEMORY_HALF_LIFE_DAYS = 30.0
+
+# ── Retry / backoff ───────────────────────────────────────────────
+MAX_RETRIES = 3
+RETRY_BASE_DELAY = 1.0
+RETRY_MAX_DELAY = 30.0
+
+# ── LLM defaults ──────────────────────────────────────────────────
+DEFAULT_LLM_TEMPERATURE = 0.3
+
 # ── Verification ────────────────────────────────────────────────────
 MAX_CLAIMS_PER_RESPONSE = 20
 CONFIDENCE_FLOOR = 0.3
 CONFIDENCE_CEILING = 0.95
+NUMERIC_MATCH_RATIO_THRESHOLD = 0.2
 
 # ── Observability ───────────────────────────────────────────────────
 OBSERVABILITY_RETENTION_SECONDS = 10_000
@@ -71,9 +89,19 @@ __all__ = [
     "CHUNK_OVERLAP_RATIO",
     "PARENT_CHILD_RATIO_MIN",
     "PARENT_CHILD_RATIO_MAX",
+    "QUALITY_TIER_EXCELLENT",
+    "QUALITY_TIER_GOOD",
+    "QUALITY_TIER_FAIR",
+    "MIN_QUALITY_SCORE",
+    "MEMORY_HALF_LIFE_DAYS",
+    "MAX_RETRIES",
+    "RETRY_BASE_DELAY",
+    "RETRY_MAX_DELAY",
+    "DEFAULT_LLM_TEMPERATURE",
     "MAX_CLAIMS_PER_RESPONSE",
     "CONFIDENCE_FLOOR",
     "CONFIDENCE_CEILING",
+    "NUMERIC_MATCH_RATIO_THRESHOLD",
     "OBSERVABILITY_RETENTION_SECONDS",
     "METRICS_HISTORY_LENGTH",
     "AI_SNIPPET_MAX_CHARS",

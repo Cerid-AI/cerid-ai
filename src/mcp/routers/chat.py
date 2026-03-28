@@ -227,7 +227,7 @@ async def _attempt_stream(
                                     actual_model_emitted = True
                                     break
                         except (json.JSONDecodeError, UnicodeDecodeError):
-                            pass
+                            pass  # Expected during SSE streaming — partial chunks
                     # Capture usage from the final SSE chunk (before [DONE])
                     try:
                         text_chunk = chunk.decode(errors="replace")
@@ -238,7 +238,7 @@ async def _attempt_stream(
                                 if "usage" in parsed_chunk:
                                     usage_data = parsed_chunk["usage"]
                     except (json.JSONDecodeError, UnicodeDecodeError):
-                        pass
+                        pass  # Expected during SSE streaming — partial chunks
                     yield chunk
             except (httpx.ReadError, httpx.RemoteProtocolError, httpx.ReadTimeout, httpx.StreamClosed) as exc:
                 logger.warning(
@@ -267,8 +267,8 @@ async def _attempt_stream(
                                 "Chat cost: model=%s prompt=%d completion=%d cost=$%.6f",
                                 bare_model, prompt_tokens, completion_tokens, cost,
                             )
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("Failed to record chat cost metrics: %s", exc)
 
         return _success_gen()
 

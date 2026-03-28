@@ -16,6 +16,7 @@ from chromadb.config import Settings as ChromaSettings
 from neo4j import GraphDatabase
 
 import config
+from config.constants import MAX_RETRIES, RETRY_BASE_DELAY, RETRY_MAX_DELAY
 
 logger = logging.getLogger("ai-companion")
 
@@ -29,7 +30,10 @@ def parse_chroma_url(url: str | None = None) -> tuple[str, int]:
     return host, port
 
 
-def _retry(fn, label: str, attempts: int = 3, base_delay: float = 1.0, max_delay: float = 30.0):
+def _retry(
+    fn, label: str, attempts: int = MAX_RETRIES,
+    base_delay: float = RETRY_BASE_DELAY, max_delay: float = RETRY_MAX_DELAY,
+):
     """Retry a connectivity check with exponential backoff and jitter."""
     import random
 

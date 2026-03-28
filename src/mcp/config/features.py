@@ -44,10 +44,10 @@ DEFAULT_TENANT_ID = os.getenv("CERID_DEFAULT_TENANT", "default")
 FEATURE_FLAGS = {
     # Pro-only features (disabled in community tier)
     "ocr_parsing":         FEATURE_TIER == "pro",
-    "audio_transcription": FEATURE_TIER == "pro",
-    "image_understanding": FEATURE_TIER == "pro",
+    "audio_transcription": FEATURE_TIER == "pro",  # Reserved — checked via plugin manifest tier field
+    "image_understanding": FEATURE_TIER == "pro",  # Reserved — checked via plugin manifest tier field
     "semantic_dedup":      FEATURE_TIER == "pro",
-    "advanced_analytics":  FEATURE_TIER == "pro",
+    "advanced_analytics":  FEATURE_TIER == "pro",  # Reserved — checked via plugin manifest tier field
     "metamorphic_verification": FEATURE_TIER == "pro",
     "multi_user":          CERID_MULTI_USER or FEATURE_TIER == "pro",
     # Community features (always enabled)
@@ -148,6 +148,7 @@ if COST_SENSITIVITY not in ("low", "medium", "high"):
 
 def log_feature_toggles() -> None:
     """Log all feature toggle states at startup."""
+    _config_logger.info("Feature tier: %s", FEATURE_TIER)
     enabled = [k for k, v in FEATURE_TOGGLES.items() if v]
     disabled = [k for k, v in FEATURE_TOGGLES.items() if not v]
     _config_logger.info(
