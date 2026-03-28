@@ -22,7 +22,7 @@ from db import neo4j as graph
 from deps import get_chroma, get_neo4j, get_redis
 from parsers import parse_file
 from utils import cache
-from utils.chunker import chunk_text, make_context_header
+from utils.chunker import PARENT_CHILD_ENABLED, chunk_text, make_context_header
 from utils.metadata import ai_categorize, extract_metadata
 from utils.time import utcnow_iso
 
@@ -104,10 +104,27 @@ def _reingest_artifact(
     filename = metadata.get("filename", "") if metadata else ""
     sub_cat = metadata.get("sub_category", "") if metadata else ""
     ctx_header = make_context_header(filename=filename, domain=domain, sub_category=sub_cat)
-    chunks = chunk_text(
-        content, max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP,
-        context_header=ctx_header,
-    )
+    # Parent-child chunking (feature-flagged via ENABLE_PARENT_CHILD_RETRIEVAL)
+    try:
+        if PARENT_CHILD_ENABLED:
+            from utils.chunker import chunk_with_parents
+            pc_chunks = chunk_with_parents(
+                content, artifact_id=artifact_id,
+                max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP,
+                context_header=ctx_header,
+            )
+            chunks = [c["text"] for c in pc_chunks]
+        else:
+            chunks = chunk_text(
+                content, max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP,
+                context_header=ctx_header,
+            )
+    except Exception as e:
+        logger.warning("Parent-child chunking failed (re-ingest), falling back: %s", e)
+        chunks = chunk_text(
+            content, max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP,
+            context_header=ctx_header,
+        )
 
     # Contextual enrichment — LLM-generated situational summaries per chunk
     if config.ENABLE_CONTEXTUAL_CHUNKS:
@@ -243,10 +260,27 @@ def ingest_content(
     ctx_header = make_context_header(
         filename=fname_for_header, domain=domain, sub_category=sub_cat_for_header,
     )
-    chunks = chunk_text(
-        content, max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP,
-        context_header=ctx_header,
-    )
+    # Parent-child chunking (feature-flagged via ENABLE_PARENT_CHILD_RETRIEVAL)
+    try:
+        if PARENT_CHILD_ENABLED:
+            from utils.chunker import chunk_with_parents
+            pc_chunks = chunk_with_parents(
+                content, artifact_id=artifact_id,
+                max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP,
+                context_header=ctx_header,
+            )
+            chunks = [c["text"] for c in pc_chunks]
+        else:
+            chunks = chunk_text(
+                content, max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP,
+                context_header=ctx_header,
+            )
+    except Exception as e:
+        logger.warning("Parent-child chunking failed, falling back to standard: %s", e)
+        chunks = chunk_text(
+            content, max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP,
+            context_header=ctx_header,
+        )
 
     # Contextual enrichment — LLM-generated situational summaries per chunk
     if config.ENABLE_CONTEXTUAL_CHUNKS:

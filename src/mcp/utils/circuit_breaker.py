@@ -237,6 +237,9 @@ _searxng = AsyncCircuitBreaker("searxng", failure_threshold=3, recovery_timeout=
 _ragas_eval = AsyncCircuitBreaker("ragas_eval", failure_threshold=3, recovery_timeout=60)
 _trading_agent = AsyncCircuitBreaker("trading-agent", failure_threshold=3, recovery_timeout=120)
 
+# Dynamic per-stage Ollama breakers — lazily created for "ollama-{stage}" names.
+_dynamic_ollama_breakers: dict[str, AsyncCircuitBreaker] = {}
+
 
 def get_breaker(name: str) -> AsyncCircuitBreaker:
     """Get a named circuit breaker instance."""
@@ -258,6 +261,13 @@ def get_breaker(name: str) -> AsyncCircuitBreaker:
         "trading-agent": _trading_agent,
     }
     breaker = _breakers.get(name)
-    if breaker is None:
-        raise ValueError(f"Unknown circuit breaker: {name}")
-    return breaker
+    if breaker is not None:
+        return breaker
+    # Auto-create per-stage Ollama breakers (e.g. "ollama-claim_extraction")
+    if name.startswith("ollama-"):
+        if name not in _dynamic_ollama_breakers:
+            _dynamic_ollama_breakers[name] = AsyncCircuitBreaker(
+                name, failure_threshold=3, recovery_timeout=30,
+            )
+        return _dynamic_ollama_breakers[name]
+    raise ValueError(f"Unknown circuit breaker: {name}")

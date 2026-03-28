@@ -95,6 +95,9 @@ SEMANTIC_CACHE_TTL = int(os.getenv("SEMANTIC_CACHE_TTL", "600"))
 SEMANTIC_CACHE_MAX_ENTRIES = int(os.getenv("SEMANTIC_CACHE_MAX_ENTRIES", "500"))
 SEMANTIC_CACHE_HNSW_EF = int(os.getenv("SEMANTIC_CACHE_HNSW_EF", "50"))
 
+# Degradation tiers: circuit-breaker-aware graceful degradation (Phase 51)
+ENABLE_DEGRADATION_TIERS = os.getenv("ENABLE_DEGRADATION_TIERS", "false").lower() == "true"
+
 # ---------------------------------------------------------------------------
 # Smart Orchestration
 # NOTE: ENABLE_MODEL_ROUTER is a client-side hint only.

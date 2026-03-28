@@ -565,7 +565,7 @@ async def verify_response_streaming(
 
             collected_results[i] = result
 
-            yield {
+            claim_event: dict[str, Any] = {
                 "type": "claim_verified",
                 "index": i,
                 "claim": claims[i],
@@ -583,6 +583,19 @@ async def verify_response_streaming(
                 "verification_answer": result.get("verification_answer", ""),
                 **({"circular_source": True} if result.get("circular_source") else {}),
             }
+
+            # Optional metamorphic scoring enrichment (Pro tier)
+            try:
+                from config.features import is_feature_enabled
+                if is_feature_enabled("metamorphic_verification"):
+                    from agents.hallucination.metamorphic import metamorphic_score
+                    meta_result = await metamorphic_score(claims[i], response_context or "")
+                    if meta_result and not meta_result.get("skipped"):
+                        claim_event["metamorphic_score"] = meta_result
+            except Exception as exc:
+                logger.debug("Metamorphic scoring skipped: %s", exc)
+
+            yield claim_event
 
             # Emit credit_error event once when first 402 is detected
             if result.get("credit_exhausted") and not credit_error_emitted:

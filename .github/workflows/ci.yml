@@ -19,6 +19,22 @@ jobs:
       - run: pip install ruff==0.15.4
       - run: ruff check src/mcp/
 
+    - name: Check for inline tier checks
+      run: |
+        cd src/mcp
+        VIOLATIONS=$(grep -rn "FEATURE_TIER" --include="*.py" | grep -v "config/features.py" | grep -v "__pycache__" | grep -v ".venv" | grep -v "tests/" | grep -v "# noqa" | wc -l)
+        if [ "$VIOLATIONS" -gt 2 ]; then
+          echo "::error::Found $VIOLATIONS inline FEATURE_TIER references outside config/features.py"
+          grep -rn "FEATURE_TIER" --include="*.py" | grep -v "config/features.py" | grep -v "__pycache__" | grep -v ".venv" | grep -v "tests/"
+          exit 1
+        fi
+
+    - name: Check for silent except passes
+      run: |
+        cd src/mcp
+        VIOLATIONS=$(grep -rn "except.*:" --include="*.py" -A1 | grep -B1 "pass$" | grep -v "__pycache__" | grep -v ".venv" | grep "except" | wc -l)
+        echo "Silent except:pass blocks: $VIOLATIONS (target: 0)"
+
   typecheck:
     runs-on: ubuntu-latest
     timeout-minutes: 10

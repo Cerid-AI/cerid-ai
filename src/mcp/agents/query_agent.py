@@ -95,6 +95,26 @@ async def agent_query(
 ) -> dict[str, Any]:
     """Execute multi-domain query with reranking, graph expansion, and context assembly."""
     timer = StepTimer(enabled=debug_timing)
+
+    # ---------------------------------------------------------------------------
+    # Degradation tier gate — adjust behavior based on system health
+    # ---------------------------------------------------------------------------
+    _tier = None
+    try:
+        from config.features import ENABLE_DEGRADATION_TIERS
+        if ENABLE_DEGRADATION_TIERS:
+            from utils.degradation import DegradationTier, degradation
+            _tier = degradation.current_tier()
+            if _tier == DegradationTier.OFFLINE:
+                logger.info("Degradation tier: OFFLINE — returning static error")
+                return {"context": "", "sources": [], "confidence": 0.0,
+                        "domains_searched": domains if domains else DOMAINS,
+                        "total_results": 0, "token_budget_used": 0,
+                        "graph_results": 0, "results": [],
+                        "degradation_tier": "offline"}
+    except Exception as exc:
+        logger.debug("Degradation check skipped: %s", exc)
+
     from config.features import (
         ENABLE_ADAPTIVE_RETRIEVAL,
         ENABLE_INTELLIGENT_ASSEMBLY,
@@ -103,6 +123,21 @@ async def agent_query(
         ENABLE_QUERY_DECOMPOSITION,
         ENABLE_SEMANTIC_CACHE,
     )
+
+    # Degradation: CACHED tier — only serve from semantic cache, skip retrieval
+    # DIRECT tier — skip retrieval, go straight to LLM (use_kb effectively False)
+    _degradation_skip_retrieval = False
+    _degradation_cache_only = False
+    try:
+        if _tier == DegradationTier.CACHED:
+            _degradation_cache_only = True
+            _degradation_skip_retrieval = True
+            logger.info("Degradation tier: CACHED — semantic cache only")
+        elif _tier == DegradationTier.DIRECT:
+            _degradation_skip_retrieval = True
+            logger.info("Degradation tier: DIRECT — skipping retrieval")
+    except Exception:
+        pass
 
     # Semantic cache early-return — check before any retrieval work
     _query_embedding: np.ndarray | None = None
@@ -120,6 +155,24 @@ async def agent_query(
                         return cached
             except Exception as e:
                 logger.debug("Semantic cache lookup skipped: %s", e)
+
+    # Degradation: CACHED tier — if semantic cache missed, return empty
+    if _degradation_cache_only:
+        return {"context": "", "sources": [], "confidence": 0.0,
+                "domains_searched": domains if domains else DOMAINS,
+                "total_results": 0, "token_budget_used": 0,
+                "graph_results": 0, "results": [],
+                "degradation_tier": "cached", "retrieval_skipped": True,
+                "retrieval_reason": "degradation_cached_miss"}
+
+    # Degradation: DIRECT tier — skip all retrieval, return empty KB context
+    if _degradation_skip_retrieval:
+        return {"context": "", "sources": [], "confidence": 0.0,
+                "domains_searched": domains if domains else DOMAINS,
+                "total_results": 0, "token_budget_used": 0,
+                "graph_results": 0, "results": [],
+                "degradation_tier": "direct", "retrieval_skipped": True,
+                "retrieval_reason": "degradation_direct"}
 
     search_query = query
     if conversation_messages:
@@ -183,8 +236,26 @@ async def agent_query(
 
     # Step 0.5: Query decomposition — may split into parallel sub-queries
     _skip_normal_retrieval = False
+    _retrieval_cache_hit = False
     with timer.step("vector_search"):
-        if ENABLE_QUERY_DECOMPOSITION:
+        # Retrieval cache: check before hitting ChromaDB
+        if _query_embedding is not None:
+            try:
+                from utils.retrieval_cache import retrieval_cache
+                _cached_results = retrieval_cache.get(
+                    _query_embedding.tolist(), effective_top_k,
+                )
+                if _cached_results is not None:
+                    results = _cached_results
+                    _skip_normal_retrieval = True
+                    _retrieval_cache_hit = True
+                    logger.debug("Retrieval cache hit (top_k=%d)", effective_top_k)
+                else:
+                    logger.debug("Retrieval cache miss")
+            except Exception as exc:
+                logger.debug("Retrieval cache lookup failed: %s", exc)
+
+        if not _skip_normal_retrieval and ENABLE_QUERY_DECOMPOSITION:
             from utils.query_decomposer import decompose_query, needs_decomposition, parallel_retrieve
             if needs_decomposition(search_query):
                 sub_queries = await decompose_query(search_query)
@@ -208,6 +279,16 @@ async def agent_query(
                 chroma_client=chroma_client,
             )
 
+        # Retrieval cache: store after successful ChromaDB retrieval
+        if not _retrieval_cache_hit and _query_embedding is not None and results:
+            try:
+                from utils.retrieval_cache import retrieval_cache
+                retrieval_cache.set(
+                    _query_embedding.tolist(), effective_top_k, results,
+                )
+            except Exception as exc:
+                logger.debug("Retrieval cache store failed: %s", exc)
+
     # Search adjacent domains at reduced weight when specific domains are requested.
     # Skipped when strict_domains=True (consumer isolation — no cross-domain bleed).
     if not strict_domains and domains and set(domains) != set(DOMAINS):
@@ -226,6 +307,28 @@ async def agent_query(
                 )
                 r["cross_domain"] = True
             results.extend(cross_results)
+
+    # HyDE fallback — if top score is below threshold, generate hypothetical doc and re-search
+    if results and not _retrieval_cache_hit:
+        try:
+            from utils.hyde import generate_hypothetical_document, reciprocal_rank_fusion, should_trigger_hyde
+            _top_score = results[0].get("relevance", 0) if results else 0
+            if should_trigger_hyde(_top_score):
+                _hyde_domain = (effective_domains[0] if effective_domains and len(effective_domains) == 1
+                                else None)
+                _hypothetical = await generate_hypothetical_document(search_query, _hyde_domain)
+                if _hypothetical:
+                    _hyde_results = await multi_domain_query(
+                        query=_hypothetical,
+                        domains=effective_domains,
+                        top_k=effective_top_k,
+                        chroma_client=chroma_client,
+                    )
+                    if _hyde_results:
+                        results = reciprocal_rank_fusion(results, _hyde_results)
+                        logger.debug("HyDE fallback activated, merged %d results", len(results))
+        except Exception as exc:
+            logger.debug("HyDE fallback skipped: %s", exc)
 
     results = deduplicate_results(results)
 

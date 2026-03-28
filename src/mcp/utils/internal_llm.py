@@ -53,11 +53,16 @@ async def call_internal_llm(
     temperature: float = 0.1,
     max_tokens: int = 500,
     response_format: dict | None = None,
+    stage: str = "general",
 ) -> str:
     """Route internal LLM call to configured provider.
 
     Returns the assistant message content as a string.
     Falls back through: Ollama → direct OpenRouter → Bifrost.
+
+    Args:
+        stage: Pipeline stage name (e.g. "claim_extraction", "query_decomposition").
+               Used for per-stage circuit breaker isolation when provider is Ollama.
     """
     provider = getattr(config, "INTERNAL_LLM_PROVIDER", "bifrost")
 
@@ -65,6 +70,7 @@ async def call_internal_llm(
         return await _call_ollama(
             messages, temperature=temperature, max_tokens=max_tokens,
             json_mode=response_format is not None and response_format.get("type") == "json_object",
+            stage=stage,
         )
     else:
         # Default: direct OpenRouter via unified client
@@ -83,13 +89,17 @@ async def _call_ollama(
     temperature: float,
     max_tokens: int,
     json_mode: bool = False,
+    stage: str = "general",
 ) -> str:
     """Call local Ollama instance for internal operations."""
     import httpx
 
     ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
     model = getattr(config, "INTERNAL_LLM_MODEL", "") or config.OLLAMA_DEFAULT_MODEL
-    breaker = get_breaker("ollama")
+    # Per-stage circuit breaker isolation: each pipeline stage gets its own
+    # breaker so a failing stage (e.g. claim_extraction) doesn't block others.
+    breaker_name = f"ollama-{stage}" if stage != "general" else "ollama"
+    breaker = get_breaker(breaker_name)
 
     async def _do_call() -> str:
         payload: dict = {

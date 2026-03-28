@@ -7,6 +7,16 @@
  * and per-message verification selection.
  *
  * Extracted from ChatPanel to keep verification concerns cohesive.
+ *
+ * TODO: Verification scoping — show verification for the most recent assistant
+ * response only. When user clicks a previous assistant reply, swap to that
+ * message's verification cards. Currently verification state persists across
+ * all messages and doesn't clear on new responses. This requires:
+ *   1. Track "selectedVerificationMessageId" in this hook
+ *   2. Auto-set to latest assistant message ID when a new response completes
+ *   3. When user clicks a previous message bubble, update selectedVerificationMessageId
+ *   4. Filter allVerificationReports / streaming state by selectedVerificationMessageId
+ *   5. Clear streaming verification state when a new user message is sent
  */
 
 import { useState, useMemo, useEffect, useCallback, useRef } from "react"
