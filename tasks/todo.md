@@ -1,7 +1,7 @@
 # Cerid AI — Task Tracker
 
 > **Last updated:** 2026-03-28
-> **Current status:** Phase 51 Week 1-3 sprints complete. 1608+ Python tests, 496+ frontend tests.
+> **Current status:** Phase 51 hardening complete. 1646+ Python tests, 496+ frontend tests. 9-job CI green.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md) — 0 open
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE42-50.md](../docs/plans/DEVELOPMENT_PLAN_PHASE42-50.md) (Phases A-D + 42-50)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
@@ -159,16 +159,16 @@ Deep debugging session fixing production crashes and polishing features built in
 - [x] 7 priority silent-pass blocks fixed with logging
 - [ ] Full 345 bare except sweep (tracked, progressive — ruff BLE001 in CI)
 
-### Track 2: Verification Pipeline (partial)
+### Track 2: Verification Pipeline ✅
 - [x] Pattern expansion: complex claims (arithmetic, logical, statistical), ignorance (9 new patterns)
 - [x] Ignorance patterns scoped to avoid matching recency hedges
-- [ ] Metamorphic verification (MetaRAG, Pro tier) — future sprint
+- [x] Metamorphic verification (`agents/hallucination/metamorphic.py`, Pro tier)
 - [ ] Local verification via Ollama — future sprint
 
-### Track 3: RAG Evolution (partial)
+### Track 3: RAG Evolution ✅
 - [x] Retrieval-level caching (`utils/retrieval_cache.py` — Redis, generation-counter invalidation)
+- [x] HyDE fallback retrieval (`utils/hyde.py`)
 - [ ] Parent-child document retrieval — future sprint
-- [ ] HyDE fallback — future sprint
 - [ ] Graph RAG prototype — future sprint
 
 ### Track 4: Repository Architecture ✅
@@ -185,16 +185,18 @@ Deep debugging session fixing production crashes and polishing features built in
 
 ### Track 6: Code Quality ✅
 - [x] God file decomposition: verification.py 1590→1208 lines (verdict_parsing.py + confidence.py extracted)
+- [x] query_agent.py decomposition: 1134→382 lines (decomposer.py + assembler.py extracted)
 - [x] api.ts 1425→6 files (kb.ts, chat.ts, settings.ts, verification.ts, common.ts, index.ts)
+- [x] settings-pane.tsx 1311→295 lines
 - [x] Magic numbers → `config/constants.py` (30 constants centralized)
-- [ ] query_agent.py decomposition — future sprint
 - [ ] Type safety hardening — future sprint
 
-### Track 7: Evaluation & Quality (partial)
+### Track 7: Evaluation & Quality ✅
 - [x] Eval test infrastructure: `tests/eval/`, `requirements-eval.txt`, baselines directory
 - [x] Monte Carlo eval moved to `tests/eval/` with updated docstrings
-- [ ] RAGAS integration — future sprint
-- [ ] Monte Carlo expansion 54→150+ — future sprint
+- [x] Monte Carlo expansion 54→150 scenarios
+- [x] RAGAS evaluation scaffold (50-entry golden dataset)
+- [ ] RAGAS full integration — future sprint
 
 ### Track 8: Context-Limit & Compaction Defenses ✅
 - [x] CLAUDE.md: "ONE pattern" table, module responsibility map, constants reference

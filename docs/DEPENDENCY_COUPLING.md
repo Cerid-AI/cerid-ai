@@ -138,7 +138,7 @@ The [cerid-trading-agent](https://github.com/Cerid-AI/cerid-trading-agent) depen
 | Change `/agent/query` request schema | Query silently fails or 422s | Update `CeridClient.agent_query()` payload |
 | Change `/agent/hallucination` request schema | Hallucination check 422s | Update `CeridClient.hallucination_check()` payload (fields: `response_text`, `conversation_id`) |
 | Change `/agent/memory/extract` request schema | Memory extraction 422s | Update `CeridClient.memory_extract()` payload (fields: `response_text`, `conversation_id`) |
-| Change `/health` response shape | Health check may false-fail | Trading agent checks `status == "ok"` — keep that key |
+| Change `/health` response shape | Health check may false-fail | Trading agent checks `status == "ok"` — keep that key. New probes `/health/live` (liveness) and `/health/ready` (readiness, 503 when deps down) are available for orchestrator integration |
 | Enable `CERID_API_KEY` | All unauthenticated requests rejected (401) | Set same key in trading agent's `.env` as `CERID_API_KEY` and add `X-API-Key` header to `CeridClient` |
 | Remove `llm-network` Docker network | Container-name routing breaks | Trading agent falls back to `localhost:8888` but only if port is exposed |
 | Change MCP container name from `cerid-mcp` | Docker DNS resolution fails | Update trading agent's `docker-compose.yml` `cerid_mcp_url` |

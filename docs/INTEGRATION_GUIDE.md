@@ -1,7 +1,7 @@
 # Cerid AI — Integration Guide for New Cerid-Series Agents
 
-> **Last updated:** 2026-03-21
-> **Applies to:** Phase 50+
+> **Last updated:** 2026-03-28
+> **Applies to:** Phase 51+
 > **Reference implementation:** cerid-trading-agent (`docs/DEPENDENCY_COUPLING.md`)
 
 ---
@@ -17,7 +17,7 @@ Cerid AI is a self-hosted personal AI knowledge companion that exposes a stable 
 - **SDK API:** Stable `/sdk/v1/` endpoints for external consumers with per-client rate limiting, domain access control, and typed Pydantic response models.
 - **A2A Protocol:** Agent-to-Agent communication via `/.well-known/agent.json` agent cards. Task lifecycle (create/status/cancel) with Redis-backed storage. Remote agent discovery and invocation via A2A client.
 - **Plugin System:** Extend functionality via manifest-based plugins (`plugins/` directory). Plugin management API (7 endpoints), tier gating (community/pro), BSL-1.1 licensing.
-- **27 MCP Tools:** 19 core + 5 trading + `pkb_web_search` + `pkb_memory_recall` + `pkb_ingest_multimodal`.
+- **26 MCP Tools:** 18 core + 5 trading + `pkb_web_search` + `pkb_memory_recall` + `pkb_ingest_multimodal`.
 
 New cerid-series agents (e.g., trading, compliance, research) integrate by registering as consumers, defining their KB domain, and calling SDK endpoints. Alternatively, agents can discover and invoke cerid-ai via the A2A protocol.
 

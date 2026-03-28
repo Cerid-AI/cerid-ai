@@ -4,7 +4,7 @@
 
 A privacy-first, local-first workspace that unifies multi-domain knowledge bases (code, finance, projects, personal artifacts) into a context-aware LLM interface with RAG-powered retrieval, file ingestion, and intelligent agents.
 
-[![Status](https://img.shields.io/badge/Status-Phase%2050%20Complete-green)]()
+[![Status](https://img.shields.io/badge/Status-Phase%2051%20Complete-green)]()
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue)](LICENSE)
 
 ---
@@ -17,7 +17,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 
 - **React GUI** at port 3000 — streaming chat, knowledge browser, monitoring & audit dashboards
 - **Multi-Provider LLM Access** via Bifrost gateway (Claude, GPT, Grok, Gemini, DeepSeek, Llama)
-- **9 Intelligent Agents** — Query (LLM reranking), Triage (LangGraph), Rectification, Audit, Maintenance, Hallucination Detection, Memory Extraction, Curation, Self-RAG
+- **10 Intelligent Agents** — Query (LLM reranking), Triage (LangGraph), Rectification, Audit, Maintenance, Hallucination Detection, Memory Extraction, Curation, Self-RAG, Decomposer
 - **Trading Agent Integration** — 5 MCP tools + SDK endpoints for signal enrichment, herd detection, Kelly sizing, cascade confirmation, and longshot calibration (opt-in via `CERID_TRADING_ENABLED`)
 - **26 MCP Tools** for knowledge base, trading, web search, memory, and multi-modal operations via MCP protocol
 - **A2A Protocol** — Agent-to-Agent communication for remote agent discovery and task invocation
@@ -26,7 +26,10 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 - **Local LLM via Ollama** — Air-gapped deployment with local model routing
 - **Visual Workflow Builder** — DAG-based workflow engine with drag-and-drop SVG canvas
 - **Electron Desktop App** — Native macOS + Windows app with Docker lifecycle management
-- **Hallucination Detection** — claim extraction + KB verification with per-message truth audit
+- **Hallucination Detection** — claim extraction + KB verification with per-message truth audit + metamorphic verification (Pro tier)
+- **Graceful Degradation** — 5-tier automatic service degradation (FULL → REDUCED → MINIMAL → CACHE_ONLY → OFFLINE)
+- **Exception Hierarchy** — typed `CeridError` subclasses with `@handle_errors` decorator, zero silent failures
+- **Per-Stage Ollama Routing** — 8 pipeline stages independently routable to local or cloud LLM
 - **Memory Extraction** — facts, decisions, preferences extracted from conversations and stored as KB artifacts
 - **Smart Model Router** — complexity scoring, cost sensitivity, auto-switch recommendations
 - **Smart Model Switching** — cost estimation for model switches, summarize-and-switch, "start fresh" option, color-coded context usage gauge
@@ -40,7 +43,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 - **Multi-Machine Sync** via Dropbox — JSONL export/import with auto-import on startup
 - **Source Attribution** — collapsible source references with relevance scores on chat responses
 - **Model Context Breaks** — provider-colored model badges, switch dividers between model changes
-- **GitHub Actions CI/CD** with 2,034+ tests (1549+ pytest + 485+ frontend)
+- **GitHub Actions CI/CD** with 2,142+ tests (1646+ pytest + 496+ frontend)
 - **Three-Tier AI Categorization** (manual, smart, pro) via Bifrost
 - **Obsidian Vault Integration** — auto-sync vault notes into knowledge base
 - **Reproducible Builds** — pip-compile lock files with hashes, pinned Docker images, Dependabot
@@ -378,7 +381,7 @@ cerid-ai/
 │   ├── docker-compose.yml             # MCP server service
 │   ├── requirements.txt               # Human-editable dependency ranges
 │   ├── requirements.lock              # pip-compile with hashes (reproducible)
-│   ├── requirements-dev.txt           # Test dependencies
+│   ├── requirements-dev.txt           # Test + dev dependencies
 │   ├── requirements-dev.lock          # Dev lock file with hashes
 │   │
 │   ├── routers/                       # FastAPI routers (13 modules)
@@ -445,7 +448,7 @@ cerid-ai/
 │   │   ├── rate_limit.py              # Sliding window rate limiter + headers
 │   │   └── request_id.py             # X-Request-ID middleware
 │   │
-│   └── tests/                         # 1549+ pytest tests (73 test files)
+│   └── tests/                         # 1646+ pytest tests
 │
 ├── src/web/                           # React GUI (Phase 6+)
 │   ├── .nvmrc                         # Node version source of truth (22)
@@ -461,7 +464,7 @@ cerid-ai/
 │       │                              # use-model-router, use-model-switch,
 │       │                              # use-smart-suggestions, use-live-metrics
 │       ├── contexts/                  # KB injection context provider
-│       ├── __tests__/                 # 485+ vitest tests (45 test files)
+│       ├── __tests__/                 # 496+ vitest tests
 │       └── components/
 │           ├── layout/                # Sidebar, status bar, split-pane
 │           ├── chat/                  # Chat panel, input, bubbles, dashboard,

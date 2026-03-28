@@ -1,7 +1,7 @@
 # Cerid AI — Completed Phases
 
 > Full history of completed development phases. For current status and next steps, see [CLAUDE.md](../CLAUDE.md).
-> **Last updated:** 2026-03-22
+> **Last updated:** 2026-03-28
 
 ---
 
@@ -156,4 +156,23 @@
 - **Phase D (Complete, 2026-03-21):** Electron Desktop App — main process, Docker lifecycle (dockerode), system tray, auto-updater. CI/CD via `electron-build.yml` for macOS + Windows. Key files: `packages/desktop/`.
 - **Phase 50 (Complete, 2026-03-21):** Visual Workflow Builder — workflow engine with CRUD, Kahn's DAG validation, topological execution, 4 templates. SVG canvas with drag-to-reposition, type-colored nodes, live execution status. Editor with add/delete nodes+edges, config sidebar, template selector, 30+ tests. BSL-1.1 pro-tier plugin wrapper. Key files: `src/mcp/routers/workflows.py`, `src/web/src/components/workflows/`, `plugins/workflow/`.
 - **Production Readiness Audit (Complete, 2026-03-21):** Two-pass audit — Pass 1: 33 issues found and fixed (Sprints A-D), Pass 2: 3 low items fixed. 28,000 lines dead code removed (`app/` + `core/`), 27 new frontend tests (485 total), Docker healthchecks standardized, trading proxy connection pooling, exception handling hardened across 19 instances.
+- **Phase 51 (Complete, 2026-03-28):** Hardening, RAG Evolution & Architecture.
+  - Exception hierarchy (`CeridError` + 10 subclasses) + `@handle_errors` decorator (`utils/error_handler.py`)
+  - God file decomposition: verification.py (1590→1208), query_agent.py (1134→382), api.ts (1425→6 modules), settings-pane.tsx (1311→295)
+  - Per-stage Ollama routing (8 stages, `PIPELINE_PROVIDERS`)
+  - Multi-tier graceful degradation (`utils/degradation.py`, 5 tiers: FULL→OFFLINE)
+  - Retrieval-level caching (`utils/retrieval_cache.py`, Redis, generation-counter invalidation)
+  - HyDE fallback retrieval (`utils/hyde.py`)
+  - Parent-child document chunking
+  - Metamorphic verification (`agents/hallucination/metamorphic.py`, Pro tier)
+  - Health endpoint split (`/health/live`, `/health/ready`, `/health/status`)
+  - Tier enforcement hardening (`FeatureGateError`, zero inline checks)
+  - Monte Carlo evaluation expansion (54→150 scenarios)
+  - RAGAS evaluation scaffold (50-entry golden dataset)
+  - Architecture map + module documentation (`config/constants.py`, `docs/TIER_MATRIX.md`)
+  - Frontend wiring: degradation badges, pipeline routing table, structured errors
+  - Zero-basis audit: 11 silent failures fixed, 10 magic numbers consolidated
+  - CI gates: inline tier checks, silent passes, 9/9 jobs green
+  - New modules: `errors.py`, `utils/error_handler.py`, `utils/degradation.py`, `utils/retrieval_cache.py`, `utils/hyde.py`, `utils/ollama_models.py`, `agents/hallucination/metamorphic.py`, `agents/hallucination/verdict_parsing.py`, `agents/hallucination/confidence.py`, `agents/decomposer.py`, `agents/assembler.py`, `config/constants.py`
+  - 1646 Python tests, 496 frontend tests.
 - **Verification Crash Debugging (Complete, 2026-03-22):** Deep debugging session fixing production crashes in the verification panel. Docker build silent failure identified (exit code 2 reuses cached image). React infinite render loop fixed (3 root causes: object ref comparisons in useEffect, context callback instability, synchronous state updates during render). Circuit breaker name mismatches fixed across 4 call sites. Claim extraction hardened (pleasantry filtering, JSON wrapper unwrapping). 58 lines dead code removed. Smart router, BYOK provider config, OpenRouter credit tracking, RAG features, folder scanner, and PDF chunked parsing all polished. Key files: `tasks/lessons.md` (patterns captured), `src/web/src/hooks/use-verification-orchestrator.ts`, `src/mcp/utils/circuit_breaker.py`, `src/mcp/agents/hallucination/extraction.py`.

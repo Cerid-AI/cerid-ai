@@ -8,16 +8,26 @@
 ## MCP Server API (src/mcp/main.py)
 
 **Core endpoints:**
-- `GET /health` — DB connectivity check (returns `version`, `services` status)
+- `GET /health` — Full health check with circuit breaker states (cached 10s)
+- `GET /health/live` — Liveness probe (always 200 unless process crashed)
+- `GET /health/ready` — Readiness probe (503 when critical deps unreachable)
+- `GET /health/status` — Detailed degradation report with circuit breaker states, pipeline providers, feature tier, and per-capability flags (`can_retrieve`, `can_verify`, `can_generate`)
 - `GET /collections` — List ChromaDB collections
+- `GET /scheduler` — Scheduled job status
 - `POST /query` — Query knowledge base (domain, top_k)
 - `POST /ingest` — Ingest text content
 
-**Ingestion endpoints (Phase 1):**
+**Ingestion endpoints (Phase 1+):**
 - `POST /ingest_file` — Ingest a file with parsing, metadata, optional AI categorization
+- `POST /ingest_batch` — Batch ingest multiple text items
+- `POST /ingest/feedback` — Submit ingestion quality feedback
 - `POST /recategorize` — Move artifact between domains (moves chunks between collections)
 - `GET /artifacts` — List ingested artifacts (filter by domain)
+- `GET /artifacts/{artifact_id}` — Full artifact detail (Neo4j metadata + reassembled ChromaDB chunks)
+- `GET /artifacts/{artifact_id}/related` — Related artifacts via graph expansion
+- `POST /artifacts/{artifact_id}/feedback` — Submit quality feedback (inject/dismiss signals)
 - `GET /ingest_log` — View audit trail from Redis
+- `GET /digest` — Summary of recent KB activity, connections, and health status
 
 **Agent endpoints (Phase 2+):**
 - `POST /agent/query` — Multi-domain query with LLM reranking, context assembly, and optional Self-RAG validation
@@ -27,11 +37,17 @@
 - `POST /agent/audit` — Audit reports (activity, ingestion stats, costs, query patterns, conversations)
 - `POST /agent/maintain` — Maintenance routines (health, stale detection, collection analysis, orphan cleanup)
 
-**Phase 7 endpoints:**
+**Verification & hallucination endpoints (Phase 7+):**
 - `POST /agent/hallucination` — Check LLM response for hallucinations against KB with 4-level verification fallback (KB-only → external cross-model/web-search for unverified/uncertain claims)
 - `GET /agent/hallucination/{conversation_id}` — Retrieve stored hallucination report
+- `POST /agent/hallucination/feedback` — Record user feedback on a verification claim (correct/incorrect)
+- `POST /agent/verify-stream` — SSE streaming truth verification with keepalive heartbeats, supports expert mode (Grok 4) and anti-circularity via `source_artifact_ids`
+- `POST /verification/save` — Persist verification report to Neo4j
+- `GET /verification/{conversation_id}` — Retrieve saved verification report
 - `POST /agent/memory/extract` — Extract and store memories from conversation
 - `POST /agent/memory/archive` — Archive old conversation memories
+- `POST /agent/curate` — Score artifact quality across the KB (Phase 14)
+- `POST /agent/curate/estimate` — Estimate synopsis generation cost before running
 
 **Auth endpoints (Phase 33, conditional on `CERID_MULTI_USER=true`):**
 - `POST /auth/register` — Create new user account (returns JWT tokens)
@@ -44,9 +60,9 @@
 - `GET /auth/me/api-key/status` — Check if user has an active API key
 - `GET /auth/me/usage` — Get per-user usage metrics from Redis
 
-**Artifact detail & feedback (Phase 16G, 19E):**
-- `GET /artifacts/{artifact_id}` — Full artifact detail (Neo4j metadata + reassembled ChromaDB chunks)
-- `POST /artifacts/{artifact_id}/feedback` — Submit quality feedback (inject/dismiss signals)
+**Chat endpoints:**
+- `POST /chat/stream` — Stream chat completion directly via OpenRouter proxy (SSE)
+- `POST /chat/compress` — Compress conversation history to fit target token budget
 
 **Sync endpoints (Phase 21A):**
 - `POST /sync/export` — Trigger incremental or full export to sync directory
@@ -57,18 +73,60 @@
 - `GET /settings` — Server configuration and feature flags (includes `enable_self_rag`)
 - `PATCH /settings` — Partial settings update (supports `enable_self_rag`)
 - `GET /memories` — List/filter memories (type, conversation_id, limit, offset)
+- `POST /memories/extract` — Extract memories from text (standalone endpoint)
 - `PATCH /memories/{id}` — Update memory summary
 - `DELETE /memories/{id}` — Delete a memory
 
 **File upload:**
 - `POST /upload` — Upload file with optional domain, sub_category, tags, categorize_mode (50MB max)
 - `GET /upload/supported` — List supported file extensions
+- `GET /archive/files` — List files in the archive directory
+
+**Taxonomy & tags:**
+- `GET /taxonomy` — Get full taxonomy tree
+- `POST /taxonomy/domain` — Add a new domain
+- `POST /taxonomy/subcategory` — Add a new sub-category
+- `POST /taxonomy/artifact` — Assign taxonomy to an artifact
+- `GET /tags` — List all tags
+- `GET /tags/suggest` — Tag suggestions for typeahead
+- `POST /tags/merge` — Merge duplicate tags
+
+**User state:**
+- `GET /user-state` — Current user state
+- `GET /user-state/conversations` — List conversations
+- `GET /user-state/conversations/{conv_id}` — Get single conversation
+- `POST /user-state/conversations` — Save conversation
+- `POST /user-state/conversations/bulk` — Bulk save conversations
+- `DELETE /user-state/conversations/{conv_id}` — Delete conversation
+- `PATCH /user-state/preferences` — Update user preferences
+
+**KB admin:**
+- `GET /admin/kb/capabilities` — Parser capabilities report
+- `GET /admin/kb/stats` — KB statistics (artifact counts, chunk counts, domain distribution)
+- `POST /admin/artifacts/{artifact_id}/reingest` — Re-ingest an existing artifact
+- `POST /admin/kb/rebuild-index` — Rebuild search index
+- `POST /admin/kb/rescore` — Rescore artifact quality
+- `POST /admin/kb/regenerate-summaries` — Regenerate artifact summaries
+- `POST /admin/kb/clear-domain/{domain}` — Clear all artifacts in a domain
+- `DELETE /admin/artifacts/{artifact_id}` — Delete a specific artifact
+
+**Scanner (folder watcher):**
+- `POST /admin/scan` — Start a folder scan
+- `GET /admin/scan/state` — Current scan state
+- `GET /admin/scan/preview` — Preview files that would be scanned
+- `GET /admin/scan/{scan_id}` — Get scan result
+- `POST /admin/scan/reset` — Reset scanner state
+
+**Eval (retrieval evaluation):**
+- `POST /api/eval/run` — Run evaluation benchmark
+- `GET /api/eval/benchmarks` — List benchmark files
 
 **MCP protocol:**
 - `GET /mcp/sse` — SSE stream (MCP protocol, JSON-RPC 2.0)
+- `POST /mcp/sse` — SSE stream (POST variant)
 - `POST /mcp/messages?sessionId=X` — JSON-RPC handler
 
-### MCP Tools (27 total)
+### MCP Tools (26 total)
 
 **Core tools (19):**
 - `pkb_query` — Single-domain query
@@ -118,6 +176,7 @@ Versioned facade for cerid-series consumers (trading-agent, future projects). De
 | `gui` (default) | 20 req/min | 10 req/min | 10 req/min |
 | `trading-agent` | 80 req/min | — | — |
 | `_default` (unknown) | 10 req/min | 5 req/min | 5 req/min |
+| `boardroom-agent` | 60 req/min | — | — |
 
 Configured in `CONSUMER_REGISTRY` in `config/settings.py`. Rate limits are auto-derived from the registry.
 
@@ -350,7 +409,10 @@ curl -X POST http://localhost:8888/recategorize \
 ## Verification
 
 ```bash
-curl http://localhost:8888/health
+curl http://localhost:8888/health              # full health check (cached 10s)
+curl http://localhost:8888/health/live          # liveness probe (always 200)
+curl http://localhost:8888/health/ready         # readiness probe (503 if deps down)
+curl http://localhost:8888/health/status        # degradation report + pipeline providers
 curl http://localhost:8888/collections
 curl http://localhost:8888/artifacts
 curl http://localhost:8888/ingest_log?limit=10
@@ -358,7 +420,7 @@ curl http://localhost:8888/ingest_log?limit=10
 # With API key auth enabled (set CERID_API_KEY env var):
 curl http://localhost:8888/artifacts \
   -H "X-API-Key: $CERID_API_KEY"
-# Exempt from auth: /health, /api/v1/health, /, /docs, /openapi.json, /redoc, /mcp/*
+# Exempt from auth: /health, /health/*, /api/v1/health, /, /docs, /openapi.json, /redoc, /mcp/*
 ```
 
 ---
@@ -462,6 +524,14 @@ make deps-check
 
 ### Providers (BYOK)
 - `GET /providers` — List configured LLM providers
+- `GET /providers/configured` — List providers with active API keys
+- `GET /providers/internal` — Current internal LLM provider
+- `PUT /providers/internal` — Update internal LLM provider at runtime
+- `GET /providers/credits` — OpenRouter credit balance
+- `GET /providers/routing` — Current model routing configuration
+- `GET /providers/config` — Provider configuration
+- `PUT /providers/config` — Update provider configuration
+- `GET /providers/{name}` — Get specific provider details
 - `POST /providers/{name}/validate` — Validate provider API key
 
 ### Model Assignments
@@ -472,8 +542,12 @@ make deps-check
 ### Automations
 - `GET /automations` — List user automations
 - `POST /automations` — Create automation
+- `GET /automations/presets` — List automation presets
+- `GET /automations/{id}` — Get automation details
 - `PUT /automations/{id}` — Update automation
 - `DELETE /automations/{id}` — Delete automation
+- `POST /automations/{id}/enable` — Enable automation
+- `POST /automations/{id}/disable` — Disable automation
 - `POST /automations/{id}/run` — Manual run
 - `GET /automations/{id}/history` — Run history
 
@@ -481,23 +555,34 @@ make deps-check
 - `GET /.well-known/agent.json` — Agent Card
 - `POST /a2a/tasks` — Create task
 - `GET /a2a/tasks/{id}` — Task status
+- `POST /a2a/tasks/{id}/cancel` — Cancel a running task
+- `GET /a2a/tasks/{id}/history` — Task execution history
 
 ### Observability
 - `GET /observability/metrics` — Aggregated metrics
+- `GET /observability/metrics/{name}` — Time-series data for a specific metric
 - `GET /observability/health-score` — Composite health score (0-100)
 - `GET /observability/cost` — LLM cost breakdown
 - `GET /observability/quality` — Retrieval quality metrics
 
 ### Plugins
 - `GET /plugins` — List plugins with status
+- `GET /plugins/{name}` — Get plugin details
 - `POST /plugins/{name}/enable` — Enable plugin
 - `POST /plugins/{name}/disable` — Disable plugin
+- `GET /plugins/{name}/config` — Get plugin configuration
+- `PUT /plugins/{name}/config` — Update plugin configuration
+- `POST /plugins/scan` — Scan for new plugins
 
 ### Workflows
 - `GET /workflows` — List workflows
 - `POST /workflows` — Create workflow
-- `POST /workflows/{id}/run` — Execute workflow
 - `GET /workflows/templates` — Predefined templates
+- `GET /workflows/{id}` — Get workflow details
+- `PUT /workflows/{id}` — Update workflow
+- `DELETE /workflows/{id}` — Delete workflow
+- `POST /workflows/{id}/run` — Execute workflow
+- `GET /workflows/{id}/runs` — List workflow runs
 
 ### Ollama (Local LLM Add-On)
 
@@ -506,12 +591,10 @@ make deps-check
 - `POST /ollama/chat` — Chat with local model (streaming + non-streaming)
 - `POST /ollama/pull` — Pull/download a model (streaming progress)
 
-**Configuration & management:**
+**Configuration & management (under `/providers/` router — see Providers section above):**
 - `GET /providers/ollama/status` — Ollama status: `{ enabled, url, reachable, models[], default_model, default_model_installed }`
 - `POST /providers/ollama/enable` — Enable Ollama as internal LLM provider (checks connectivity, updates runtime config)
 - `POST /providers/ollama/disable` — Disable Ollama, fall back to OpenRouter
-- `GET /providers/internal` — Current internal LLM provider: `{ provider, model, intelligence_model, ollama_available }`
-- `PUT /providers/internal` — Update internal LLM provider at runtime (not persisted to .env)
 
 **Default model:** `qwen2.5:1.5b` (1.5B params, ~1GB, runs on CPU or GPU)
 
@@ -532,9 +615,20 @@ make deps-check
 
 Stable endpoints for the cerid-boardroom agent (`X-Client-ID: boardroom-agent`):
 
-- `GET /sdk/v1/ops/health` — Boardroom-specific health check
+- `GET /sdk/v1/ops/health` — Boardroom-specific health check (tier, domains)
 - `POST /sdk/v1/ops/competitive-scan` — Competitive landscape analysis against KB
 - `POST /sdk/v1/ops/strategy-brief` — Strategy brief generation from KB context
+- `GET /sdk/v1/ops/governance-log` — Query boardroom audit trail for agent actions and approvals
+
+### Trading Proxy (gated by `CERID_TRADING_ENABLED`)
+
+GUI proxy routes to the external trading agent at `TRADING_AGENT_URL`:
+- `GET /api/trading/sessions` — List trading sessions
+- `GET /api/trading/sessions/{name}/portfolio` — Session portfolio
+- `GET /api/trading/sessions/{name}/positions` — Session positions
+- `GET /api/trading/sessions/{name}/signals` — Session signals
+- `GET /api/trading/aggregate/portfolio` — Aggregate portfolio across sessions
+- `GET /api/trading/market-data` — Market data feed
 
 ### Web Search
 - Tool: `pkb_web_search` — Search web with verification
