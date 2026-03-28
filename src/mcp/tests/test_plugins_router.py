@@ -189,16 +189,25 @@ class TestEnableDisable:
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
              patch("config.FEATURE_TIER", "community"), \
+             patch("config.features.FEATURE_TIER", "community"), \
              patch("routers.plugins.get_redis", return_value=mock_redis):
+            from errors import CeridError, error_response
             from routers.plugins import router
 
             app = FastAPI()
             app.include_router(router)
-            client = TestClient(app)
+
+            @app.exception_handler(CeridError)
+            async def _handler(request, exc):
+                from fastapi.responses import JSONResponse
+                status = 403 if exc.error_code.startswith("FEATURE_GATE_") else 500
+                return JSONResponse(status_code=status, content=error_response(exc))
+
+            client = TestClient(app, raise_server_exceptions=False)
 
             response = client.post("/plugins/cerid-plugin-ocr/enable")
             assert response.status_code == 403
-            assert "pro" in response.json()["detail"].lower()
+            assert "pro" in response.json()["message"].lower()
 
     def test_enable_pro_plugin_on_pro_tier(self, tmp_path: Path):
         plugin_dir = _make_plugin_dir(tmp_path)
@@ -206,6 +215,7 @@ class TestEnableDisable:
 
         with patch("config.PLUGIN_DIR", str(plugin_dir)), \
              patch("config.FEATURE_TIER", "pro"), \
+             patch("config.features.FEATURE_TIER", "pro"), \
              patch("routers.plugins.get_redis", return_value=mock_redis), \
              patch("plugins.get_loaded_plugins", return_value={}):
             from routers.plugins import router

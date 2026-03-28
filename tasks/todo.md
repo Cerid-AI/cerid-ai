@@ -1,7 +1,7 @@
 # Cerid AI — Task Tracker
 
 > **Last updated:** 2026-03-28
-> **Current status:** All phases through 50 complete + Sentry + Verification Fixes + Ollama Add-On. 1549+ Python tests, 485+ frontend tests.
+> **Current status:** Phase 51 Week 1-3 sprints complete. 1608+ Python tests, 496+ frontend tests.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md) — 0 open
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE42-50.md](../docs/plans/DEVELOPMENT_PLAN_PHASE42-50.md) (Phases A-D + 42-50)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
@@ -145,48 +145,63 @@ Deep debugging session fixing production crashes and polishing features built in
 
 ---
 
-## Phase 51: Hardening, RAG Evolution & Architecture Refinement (2026-03-28)
+## Phase 51: Hardening, RAG Evolution & Commercial-Grade Architecture (2026-03-28)
 
 > **Full plan:** [`docs/plans/PLAN_PHASE51_HARDENING.md`](../docs/plans/PLAN_PHASE51_HARDENING.md)
-> **Driven by:** Monte Carlo evaluation (33 tests), code quality audit (7.2/10), RAG competitive research (15 frameworks, 25+ papers)
+> **Driven by:** 3 deep research audits — architecture (29 routers, 10 agents mapped), verification pipeline (3,368 lines audited), production RAG (15 frameworks, 25+ papers)
+> **Scope:** 6 weeks, 8 tracks, 22 sprints with verification gates per sprint
+> **Codebase:** 35,769 lines Python (excl. venv/tests), 352 bare `except Exception` across 88 files
 
-### Track 1: Error Handling & Resilience
-- [ ] Exception hierarchy (`errors.py`) — replace 135 bare `except Exception` blocks
-- [ ] Multi-tier graceful degradation (Full RAG → Lite RAG → Direct LLM → Cached)
-- [ ] Standardized logging levels across all routers
+### Track 1: Error Handling & Resilience ✅
+- [x] Exception hierarchy (`errors.py`) + `@handle_errors` decorator + `FeatureGateError`
+- [x] Multi-tier graceful degradation (`utils/degradation.py` — 5 tiers)
+- [x] CeridError → FastAPI exception handler with auto status codes (402/403/422/429/500)
+- [x] 7 priority silent-pass blocks fixed with logging
+- [ ] Full 345 bare except sweep (tracked, progressive — ruff BLE001 in CI)
 
-### Track 2: Verification Pipeline
-- [ ] Close Monte Carlo gaps: complex claim recall 14%→50%+, ignorance 60%→80%+
-- [ ] Fix verdict parsing for text-wrapped JSON
-- [ ] Metamorphic verification (MetaRAG approach, Pro tier)
-- [ ] Local verification via Ollama (FaithLens-style)
+### Track 2: Verification Pipeline (partial)
+- [x] Pattern expansion: complex claims (arithmetic, logical, statistical), ignorance (9 new patterns)
+- [x] Ignorance patterns scoped to avoid matching recency hedges
+- [ ] Metamorphic verification (MetaRAG, Pro tier) — future sprint
+- [ ] Local verification via Ollama — future sprint
 
-### Track 3: RAG Evolution
-- [ ] Retrieval-level caching (30min TTL, Redis, 60-80% hit target)
-- [ ] Parent-child document retrieval (two-tier chunking)
-- [ ] HyDE fallback (hypothetical document retrieval for low-confidence queries)
-- [ ] Graph RAG (LightRAG evaluation + prototype, Pro tier)
+### Track 3: RAG Evolution (partial)
+- [x] Retrieval-level caching (`utils/retrieval_cache.py` — Redis, generation-counter invalidation)
+- [ ] Parent-child document retrieval — future sprint
+- [ ] HyDE fallback — future sprint
+- [ ] Graph RAG prototype — future sprint
 
-### Track 4: Repository Architecture
-- [ ] Separate dev/eval tests from core (pytest markers: unit/integration/eval)
-- [ ] requirements-eval.txt for optional eval dependencies
-- [ ] Tier enforcement hardening (replace inline checks with `@require_feature()`)
-- [ ] Health check split: `/health/live`, `/health/ready`, `/health/status`
+### Track 4: Repository Architecture ✅
+- [x] Dev/eval separation: `requirements-eval.txt`, `tests/eval/`, pytest markers, `make test`/`test-all`/`test-eval`
+- [x] Tier enforcement: zero inline checks, `@require_feature()` + `check_tier()` everywhere, `FeatureGateError`
+- [x] Health check split: `/health/live`, `/health/ready`, `/health/status` with degradation tier + pipeline providers
+- [x] `docs/TIER_MATRIX.md` created with full feature-to-tier mapping
 
-### Track 5: Ollama Extensibility
-- [ ] Per-stage Ollama routing (extraction, decomposition, verification, reranking)
-- [ ] Independent circuit breakers per pipeline stage
-- [ ] Auto-detect models + resource-aware recommendations
+### Track 5: Ollama Extensibility ✅
+- [x] Per-stage routing (`PIPELINE_PROVIDERS` — 8 stages, env var overrides, backward compat)
+- [x] `get_stage_provider()` helper function
+- [ ] Independent circuit breakers per stage — future sprint (config ready)
+- [ ] Auto-detect models + GUI — future sprint
 
-### Track 6: Code Quality
-- [ ] God file decomposition (verification.py, query_agent.py, api.ts, test_hallucination.py)
-- [ ] Magic numbers → named constants (`config/constants.py`)
-- [ ] Logging discipline standardization
+### Track 6: Code Quality ✅
+- [x] God file decomposition: verification.py 1590→1208 lines (verdict_parsing.py + confidence.py extracted)
+- [x] api.ts 1425→6 files (kb.ts, chat.ts, settings.ts, verification.ts, common.ts, index.ts)
+- [x] Magic numbers → `config/constants.py` (30 constants centralized)
+- [ ] query_agent.py decomposition — future sprint
+- [ ] Type safety hardening — future sprint
 
-### Track 7: Evaluation & Quality
-- [ ] RAGAS integration (faithfulness, context precision/recall)
-- [ ] Monte Carlo corpus expansion 54→150+ scenarios
-- [ ] CI eval gate (weekly automated, alert on >5% regression)
+### Track 7: Evaluation & Quality (partial)
+- [x] Eval test infrastructure: `tests/eval/`, `requirements-eval.txt`, baselines directory
+- [x] Monte Carlo eval moved to `tests/eval/` with updated docstrings
+- [ ] RAGAS integration — future sprint
+- [ ] Monte Carlo expansion 54→150+ — future sprint
+
+### Track 8: Context-Limit & Compaction Defenses ✅
+- [x] CLAUDE.md: "ONE pattern" table, module responsibility map, constants reference
+- [x] Import path stability: re-export bridges on verification.py decomposition + api.ts split
+- [x] Foundation test suite (21 tests) with descriptive docstrings
+- [ ] Full module documentation pass — future sprint
+- [ ] CI pattern-violation checks — future sprint
 
 ### Verification Fixes Applied (2026-03-28) ✅
 - [x] StreamingClaimBadge interactive (click-to-expand, details, references)

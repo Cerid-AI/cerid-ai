@@ -1,5 +1,6 @@
 .PHONY: lock-python lock-python-dev lock-all install-hooks deps-check \
-       lint-frontend test-frontend typecheck-frontend build-frontend check-all help
+       lint-frontend test-frontend typecheck-frontend build-frontend check-all \
+       test test-all test-eval help
 
 # -- Python deps --
 lock-python:
@@ -33,6 +34,16 @@ typecheck-frontend:
 build-frontend:
 	cd src/web && npm run build
 
+# -- Python tests (tiered) --
+test:
+	cd src/mcp && python -m pytest tests/ --ignore=tests/eval -x -q
+
+test-all:
+	cd src/mcp && python -m pytest tests/ -x -q
+
+test-eval:
+	cd src/mcp && python -m pytest tests/eval/ -v --tb=short
+
 # -- Combined --
 check-all: deps-check lint-frontend typecheck-frontend test-frontend
 
@@ -47,4 +58,7 @@ help:
 	@echo "  test-frontend      Run Vitest on src/web/"
 	@echo "  typecheck-frontend Run TypeScript type check on src/web/"
 	@echo "  build-frontend     Build production bundle"
+	@echo "  test               Run unit + integration tests (skip eval)"
+	@echo "  test-all           Run ALL tests including eval"
+	@echo "  test-eval          Run evaluation harness only (Monte Carlo, RAGAS)"
 	@echo "  check-all          Run deps-check + lint + typecheck + test"

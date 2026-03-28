@@ -57,6 +57,15 @@ from agents.hallucination.streaming import (  # noqa: F401
 )
 
 # ---------------------------------------------------------------------------
+# Re-exports from confidence.py
+# ---------------------------------------------------------------------------
+from agents.hallucination.confidence import (  # noqa: F401
+    _build_verification_details,
+    _check_numeric_alignment,
+    _compute_adjusted_confidence,
+)
+
+# ---------------------------------------------------------------------------
 # Re-exports from verification.py
 # ---------------------------------------------------------------------------
 # System prompts (accessed by tests via inline import)
@@ -67,10 +76,7 @@ from agents.hallucination.verification import (  # noqa: F401  # noqa: F401
     _SYSTEM_EVASION_VERIFICATION,
     _SYSTEM_IGNORANCE_VERIFICATION,
     _SYSTEM_RECENCY_VERIFICATION,
-    _build_verification_details,
     _check_history_consistency,
-    _check_numeric_alignment,
-    _compute_adjusted_confidence,
     _interpret_recency_verdict,
     _invert_evasion_verdict,
     _invert_ignorance_verdict,

@@ -226,22 +226,21 @@ class TestIngestMultimodal:
 
     @pytest.mark.asyncio
     async def test_ingest_blocked_in_community(self):
-        """ingest_multimodal returns error in community tier."""
+        """ingest_multimodal raises FeatureGateError in community tier."""
+        from errors import FeatureGateError
         from services.multimodal import ingest_multimodal
 
-        with patch("services.multimodal.config") as mock_config:
-            mock_config.FEATURE_TIER = "community"
-            result = await ingest_multimodal("/some/file.mp3")
-
-        assert result["status"] == "error"
-        assert "CERID_TIER=pro" in result["error"]
+        with patch("config.features.FEATURE_TIER", "community"), \
+             pytest.raises(FeatureGateError, match="pro"):
+            await ingest_multimodal("/some/file.mp3")
 
     @pytest.mark.asyncio
     async def test_ingest_file_not_found(self):
         """ingest_multimodal returns error for missing files."""
         from services.multimodal import ingest_multimodal
 
-        with patch("services.multimodal.config") as mock_config:
+        with patch("services.multimodal.config") as mock_config, \
+             patch("config.features.FEATURE_TIER", "pro"):
             mock_config.FEATURE_TIER = "pro"
             result = await ingest_multimodal("/nonexistent/file.mp3")
 

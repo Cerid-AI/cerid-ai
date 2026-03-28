@@ -103,8 +103,8 @@ async def get_internal_provider():
         ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
         resp = httpx.get(f"{ollama_url}/api/tags", timeout=3)
         ollama_available = resp.status_code == 200
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Ollama availability check failed: %s", exc)
 
     return {
         "provider": getattr(config, "INTERNAL_LLM_PROVIDER", "bifrost"),
@@ -159,8 +159,8 @@ async def get_ollama_status():
                     config.OLLAMA_DEFAULT_MODEL in m.get("name", "")
                     for m in models_data
                 )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Ollama status check failed: %s", exc)
 
     return result
 

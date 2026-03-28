@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 import config
 from agents.curator import _is_truncated_summary, curate
+from config.features import is_tier_met
 from config.features import CERID_MULTI_USER
 from db.neo4j.artifacts import delete_artifact, list_artifacts
 from deps import get_chroma, get_neo4j
@@ -131,7 +132,6 @@ async def get_parser_capabilities():
         ".png": "ocr", ".jpg": "ocr", ".jpeg": "ocr", ".tiff": "ocr", ".bmp": "ocr",
         ".mp3": "audio", ".wav": "audio", ".m4a": "audio", ".ogg": "audio", ".flac": "audio",
     }
-    tier = os.getenv("CERID_TIER", "community")
     registered_exts = {c["extension"] for c in capabilities}
     for ext, plugin in pro_extensions.items():
         if ext not in registered_exts:
@@ -139,12 +139,12 @@ async def get_parser_capabilities():
                 "extension": ext,
                 "parser": plugin,
                 "tier": "pro",
-                "available": tier == "pro",
+                "available": is_tier_met("pro"),
             })
 
     return ParserCapabilitiesResponse(
         capabilities=[ParserCapability(**c) for c in capabilities],
-        tier=tier,
+        tier=config.FEATURE_TIER,
     )
 
 
@@ -398,8 +398,8 @@ async def kb_stats():
             try:
                 collection = chroma.get_collection(name=coll_name)
                 chunk_count = collection.count()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Failed to get chunk count for collection %s: %s", coll_name, exc)
             total_chunks += chunk_count
 
             # Count synopsis candidates

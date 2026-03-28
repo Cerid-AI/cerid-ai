@@ -30,7 +30,8 @@ def _encrypt_value(value: str) -> str:
         from utils.encryption import encrypt_field
 
         return encrypt_field(value) if value else value
-    except Exception:
+    except Exception as exc:
+        logger.debug("Encryption unavailable, returning plaintext: %s", exc)
         return value
 
 
@@ -40,7 +41,8 @@ def _decrypt_value(value: str) -> str:
         from utils.encryption import decrypt_field
 
         return decrypt_field(value) if value else value
-    except Exception:
+    except Exception as exc:
+        logger.debug("Decryption unavailable, returning raw value: %s", exc)
         return value
 
 

@@ -128,11 +128,13 @@ class TestTierGating:
         )
         (d / "plugin.py").write_text("def register(): pass\n")
 
-        with patch("config.FEATURE_TIER", "community"):
+        with patch("config.FEATURE_TIER", "community"), \
+             patch("config.features.FEATURE_TIER", "community"):
             result = load_plugins(str(tmp_path))
         assert result == []
 
     @patch("config.FEATURE_TIER", "pro")
+    @patch("config.features.FEATURE_TIER", "pro")
     def test_pro_plugin_loads_in_pro(self, tmp_path):
         """Pro-tier plugins load when tier is pro."""
         from plugins import _loaded_plugins, load_plugins

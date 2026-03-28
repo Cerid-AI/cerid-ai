@@ -178,8 +178,8 @@ def _get_run_history(automation_id: str, limit: int = 20) -> list[AutomationRun]
         if raw is not None:
             try:
                 runs.append(AutomationRun(**json.loads(raw)))
-            except Exception:
-                pass
+            except Exception as e:
+                _logger.warning("Failed to parse run history entry %s for automation %s: %s", rid_str, automation_id, e)
     return runs
 
 

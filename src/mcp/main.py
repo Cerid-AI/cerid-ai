@@ -25,10 +25,12 @@ sentry_sdk.init(
     enable_logs=True,
 )
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from config.features import CERID_MULTI_USER
+from errors import CeridError, error_response
 from config.settings import CERID_TRADING_ENABLED
 from db import neo4j as graph
 from deps import close_chroma, close_neo4j, close_redis, get_neo4j
@@ -309,8 +311,8 @@ async def lifespan(app: FastAPI):
         from deps import get_redis
         from utils.semantic_cache import flush_cache
         flush_cache(get_redis())
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Semantic cache flush failed during shutdown: %s", exc)
     close_neo4j()
     close_chroma()
     close_redis()
@@ -322,6 +324,21 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+
+@app.exception_handler(CeridError)
+async def cerid_error_handler(request: Request, exc: CeridError) -> JSONResponse:
+    """Global handler for all CeridError subclasses — returns structured JSON."""
+    status = 500
+    if exc.error_code.startswith("PROVIDER_CREDIT_"):
+        status = 402
+    elif exc.error_code.startswith("PROVIDER_RATE_"):
+        status = 429
+    elif exc.error_code.startswith("FEATURE_GATE_"):
+        status = 403
+    elif exc.error_code.startswith("CONFIG_"):
+        status = 422
+    return JSONResponse(status_code=status, content=error_response(exc))
 
 # Middleware stack (LIFO in Starlette — last added runs first)
 # 1. CORS (added first, runs last — wraps response headers)

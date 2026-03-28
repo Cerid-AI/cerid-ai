@@ -18,7 +18,7 @@ Before beginning any development work in this repo, if not already done in this 
 
 Cerid AI is a self-hosted, privacy-first Personal AI Knowledge Companion. It unifies multi-domain knowledge bases (code, finance, projects, artifacts) into a context-aware LLM interface with RAG-powered retrieval and intelligent agents. Knowledge base stays local; LLM API calls send query context to the configured provider. Optional cloud sync (Dropbox) for cross-machine settings/conversations, encrypted when CERID_ENCRYPTION_KEY is set.
 
-**Status:** All phases through 50 complete. 1549+ Python tests, 485+ frontend tests. 9 agents, 26 MCP tools (18 core + 5 trading + pkb_web_search + pkb_memory_recall + pkb_ingest_multimodal), hybrid BM25s+vector search with semantic chunking, cross-encoder reranking (ONNX, three modes), switchable client-side embeddings (Matryoshka, zero-migration), contextual chunking (LLM-generated situational summaries), advanced RAG pipeline (adaptive retrieval gate, query decomposition with parallel sub-retrieval, MMR diversity reordering, intelligent context assembly with facet coverage, ColBERT-inspired late interaction scoring, semantic query cache with quantized int8 embeddings), circuit breakers on all Bifrost + Neo4j calls, shared Bifrost call utility with singleton httpx connection pool, distributed request tracing, adaptive quality feedback, per-domain tag vocabulary with typeahead UI, improved synopsis generation, streaming verification with 4 claim types (evasion/citation/recency/ignorance) + interactive inline verification (ClaimOverlay popovers, footnote markers, source navigation) + expert verification mode (Grok 4) + per-message verification selection, Self-RAG validation loop, smart routing (direct-to-OpenRouter chat proxy, capability-based model scoring, three-way routing mode, proactive model switch on ignorance detection), context-aware chat (corrections, token-budget KB injection, semantic dedup), advanced response formatting (15 MD component overrides, collapsible code blocks, TOC for long responses), right-click context menus on toolbar icons, drag-drop ingestion on KB pane + chat input + artifact drag-to-chat, infrastructure settings + search tuning sliders, KB admin endpoints (rebuild/rescore/clear/delete/stats) + Settings GUI, incremental knowledge sync with tombstones and conflict resolution, sync GUI with export/import/status dashboard, archive storage mode, mypy type checking in CI, React GUI with iPad/tablet responsive touch UX, LAN access with robust multi-interface IP detection and stale-IP auto-fix, pre-flight validation (port conflicts, env vars, disk space), post-startup reachability checks, guided `setup.sh` installer, configurable port overrides (`CERID_PORT_*`), optional Caddy HTTPS gateway and Cloudflare Tunnel for demos, multi-user auth foundations (opt-in JWT, tenant context, per-user API keys, usage metering), marketing website at cerid.ai (Next.js 16 + Vercel), brand identity (teal accent color system), Simple/Advanced mode (progressive disclosure), settings reorganization (3-tab layout with user experience presets), first-run onboarding dialog, marketing site refreshed (changelog, SEO, animations), MCP server performance optimization (lightweight verification retrieval, connection pooling, parallel graph expansion, deferred cache persistence, startup pre-warming). Infrastructure security hardened (Redis auth, port binding, resource limits, security headers, nginx hardening). CI/CD 9-job pipeline with timeouts. See [`docs/COMPLETED_PHASES.md`](docs/COMPLETED_PHASES.md) for history.
+**Status:** All phases through 50 complete. 1549+ Python tests, 485+ frontend tests, ruff BLE001 enforced. 9 agents, 26 MCP tools (18 core + 5 trading + pkb_web_search + pkb_memory_recall + pkb_ingest_multimodal), hybrid BM25s+vector search with semantic chunking, cross-encoder reranking (ONNX, three modes), switchable client-side embeddings (Matryoshka, zero-migration), contextual chunking (LLM-generated situational summaries), advanced RAG pipeline (adaptive retrieval gate, query decomposition with parallel sub-retrieval, MMR diversity reordering, intelligent context assembly with facet coverage, ColBERT-inspired late interaction scoring, semantic query cache with quantized int8 embeddings), circuit breakers on all Bifrost + Neo4j calls, shared Bifrost call utility with singleton httpx connection pool, distributed request tracing, adaptive quality feedback, per-domain tag vocabulary with typeahead UI, improved synopsis generation, streaming verification with 4 claim types (evasion/citation/recency/ignorance) + interactive inline verification (ClaimOverlay popovers, footnote markers, source navigation) + expert verification mode (Grok 4) + per-message verification selection, Self-RAG validation loop, smart routing (direct-to-OpenRouter chat proxy, capability-based model scoring, three-way routing mode, proactive model switch on ignorance detection), context-aware chat (corrections, token-budget KB injection, semantic dedup), advanced response formatting (15 MD component overrides, collapsible code blocks, TOC for long responses), right-click context menus on toolbar icons, drag-drop ingestion on KB pane + chat input + artifact drag-to-chat, infrastructure settings + search tuning sliders, KB admin endpoints (rebuild/rescore/clear/delete/stats) + Settings GUI, incremental knowledge sync with tombstones and conflict resolution, sync GUI with export/import/status dashboard, archive storage mode, mypy type checking in CI, React GUI with iPad/tablet responsive touch UX, LAN access with robust multi-interface IP detection and stale-IP auto-fix, pre-flight validation (port conflicts, env vars, disk space), post-startup reachability checks, guided `setup.sh` installer, configurable port overrides (`CERID_PORT_*`), optional Caddy HTTPS gateway and Cloudflare Tunnel for demos, multi-user auth foundations (opt-in JWT, tenant context, per-user API keys, usage metering), marketing website at cerid.ai (Next.js 16 + Vercel), brand identity (teal accent color system), Simple/Advanced mode (progressive disclosure), settings reorganization (3-tab layout with user experience presets), first-run onboarding dialog, marketing site refreshed (changelog, SEO, animations), MCP server performance optimization (lightweight verification retrieval, connection pooling, parallel graph expansion, deferred cache persistence, startup pre-warming). Infrastructure security hardened (Redis auth, port binding, resource limits, security headers, nginx hardening). CI/CD 9-job pipeline with timeouts. See [`docs/COMPLETED_PHASES.md`](docs/COMPLETED_PHASES.md) for history.
 
 **Next:** See [`tasks/todo.md`](tasks/todo.md).
 
@@ -223,6 +223,46 @@ docker run --rm -v "$(pwd)/src/mcp:/work" -w /work python:3.11-slim bash -c "pip
 ```
 Frontend tests: `cd src/web && npx vitest run`
 
+## Cross-Cutting Patterns (THE ONE way to do each concern)
+
+> **Context resilience:** After compaction events, AI agents must use THESE patterns — no alternatives. Each concern has exactly ONE canonical implementation.
+
+| Concern | The ONE Pattern | Canonical Location |
+|---------|----------------|--------------------|
+| Error handling | `@handle_errors()` decorator | `utils/error_handler.py` |
+| Error types | `CeridError` hierarchy | `errors.py` |
+| Feature gating | `@require_feature()` decorator | `config/features.py` |
+| Configuration | `os.getenv()` in `config/settings.py` | `config/settings.py` |
+| Constants | Named constants (no magic numbers) | `config/constants.py` |
+| Circuit breakers | `circuit_breaker(name)` context manager | `utils/circuit_breaker.py` |
+| Redis cache keys | `cerid:{domain}:{key}` prefix convention | `utils/retrieval_cache.py` |
+| API error responses | `CeridError` → auto-converted via FastAPI exception handler | `main.py` |
+
+**Rules:**
+- Typed errors (`CeridError` subclasses) are the ONLY way to signal failures. No `raise HTTPException` in business logic.
+- `@require_feature("feature_name")` is the ONLY tier gate. No inline `if FEATURE_TIER == "pro"` checks.
+- All numeric constants live in `config/constants.py`. Import from there.
+- Every `except` block MUST either log + degrade or raise a typed error. Zero silent `pass` blocks.
+
+## Module Responsibility Map
+
+| Module | Responsibility | Key Classes/Functions |
+|--------|---------------|---------------------|
+| `agents/query_agent.py` | RAG retrieval pipeline (8 strategies) | `QueryAgent.query()` |
+| `agents/hallucination/` | Claim extraction + verification (5 modules) | `verify_response_streaming()` |
+| `agents/memory.py` | Memory extraction, decay, conflict resolution | `MemoryAgent` |
+| `agents/curator.py` | KB quality scoring + recommendations | `CuratorAgent` |
+| `services/ingestion.py` | File parsing → chunking → ChromaDB + Neo4j | `ingest_file()`, `ingest_content()` |
+| `utils/llm_client.py` | Direct OpenRouter HTTP calls | `llm_call()` |
+| `utils/smart_router.py` | Model capability scoring + routing | `SmartRouter.route()` |
+| `utils/circuit_breaker.py` | Circuit breaker registry | `circuit_breaker(name)` |
+| `config/settings.py` | All env var config | Module-level constants |
+| `config/constants.py` | All magic numbers | Pure values, no logic |
+| `config/features.py` | Feature flags + `@require_feature` | `FEATURE_FLAGS`, `@require_feature()` |
+| `errors.py` | Exception hierarchy | `CeridError` and subclasses |
+| `tools.py` | MCP tool registry (26 tools) | `@mcp_tool()` decorator |
+| `routers/sdk.py` | Stable external API (`/sdk/v1/`) | Versioned contract |
+
 ## Conventions
 
 - **Session start:** Run `./scripts/validate-env.sh --quick` at the beginning of every session. If the session-start hook reports missing plugins or MCP servers, run `bash ~/dotfiles/install.sh` before proceeding with any other work
@@ -234,7 +274,7 @@ Frontend tests: `cd src/web && npx vitest run`
 - Infrastructure DB data at `stacks/infrastructure/data/` (.gitignored)
 - ChromaDB metadata values are strings/ints only (lists stored as JSON strings)
 - ChromaDB client version must match server (currently `>=0.5,<0.6`)
-- Error responses use `HTTPException` (returns `{"detail": "..."}`)
+- Error responses use typed `CeridError` exceptions → auto-converted to JSON via FastAPI exception handler in `main.py`. Do NOT use `HTTPException` in business logic — only in routers for HTTP-specific concerns (404, 401)
 - Neo4j Cypher: use explicit RETURN clauses, not map projections (breaks with Python string ops)
 - Deduplication: SHA-256 of parsed text, atomic via Neo4j UNIQUE CONSTRAINT on `content_hash`
 - Batch ChromaDB writes: single `collection.add()` call per ingest, not per-chunk

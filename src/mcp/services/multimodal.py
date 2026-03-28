@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import config
+from config.features import check_tier
 from services.ingestion import ingest_content
 
 logger = logging.getLogger("ai-companion.multimodal")
@@ -144,12 +145,8 @@ async def ingest_multimodal(
     Returns:
         Ingestion result dict with plugin_used and extracted_chars.
     """
-    # Feature gate
-    if config.FEATURE_TIER != "pro":
-        return {
-            "status": "error",
-            "error": "Multi-modal ingestion requires CERID_TIER=pro",
-        }
+    # Feature gate — all multi-modal plugins require pro tier
+    check_tier("pro", context="Multi-modal ingestion:")
 
     path = Path(file_path)
     if not path.exists():

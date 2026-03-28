@@ -407,6 +407,33 @@ OLLAMA_DEFAULT_MODEL = os.getenv("OLLAMA_DEFAULT_MODEL", "qwen2.5:1.5b")
 INTELLIGENCE_MODEL = os.getenv("INTELLIGENCE_MODEL", "")  # empty = auto-select
 
 # ---------------------------------------------------------------------------
+# Per-Stage Pipeline Providers
+#   Each pipeline stage can independently route to "ollama" or "bifrost".
+#   Override per-stage via env vars: PROVIDER_CLAIM_EXTRACTION=bifrost
+#   Backward compat: INTERNAL_LLM_PROVIDER=ollama sets ALL stages to ollama.
+# ---------------------------------------------------------------------------
+_global_provider = os.getenv("INTERNAL_LLM_PROVIDER", "bifrost")
+
+PIPELINE_PROVIDERS: dict[str, str] = {
+    "claim_extraction": os.getenv("PROVIDER_CLAIM_EXTRACTION", _global_provider),
+    "query_decomposition": os.getenv("PROVIDER_QUERY_DECOMPOSITION", _global_provider),
+    "topic_extraction": os.getenv("PROVIDER_TOPIC_EXTRACTION", _global_provider),
+    "memory_resolution": os.getenv("PROVIDER_MEMORY_RESOLUTION", _global_provider),
+    "verification_simple": os.getenv("PROVIDER_VERIFICATION_SIMPLE", _global_provider),
+    "verification_complex": os.getenv("PROVIDER_VERIFICATION_COMPLEX", "bifrost"),
+    "reranking": os.getenv("PROVIDER_RERANKING", _global_provider),
+    "chat_generation": os.getenv("PROVIDER_CHAT_GENERATION", "bifrost"),
+}
+
+
+def get_stage_provider(stage: str) -> str:
+    """Return the LLM provider for a given pipeline stage.
+
+    Falls back to 'bifrost' for unknown stages.
+    """
+    return PIPELINE_PROVIDERS.get(stage, "bifrost")
+
+# ---------------------------------------------------------------------------
 # Trading Agent Integration
 # ---------------------------------------------------------------------------
 CERID_TRADING_ENABLED = os.getenv("CERID_TRADING_ENABLED", "false").lower() in ("true", "1")

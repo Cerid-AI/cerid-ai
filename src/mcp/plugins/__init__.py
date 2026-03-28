@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 import config
+from config.features import is_tier_met
 
 logger = logging.getLogger("ai-companion.plugins")
 
@@ -104,9 +105,10 @@ def _load_single_plugin(plugin_dir: Path) -> dict[str, Any] | None:
 
     # Check feature tier requirement
     required_tier = manifest.get("tier", "community")
-    if required_tier == "pro" and config.FEATURE_TIER != "pro":
+    if not is_tier_met(required_tier):
         logger.info(
-            f"Plugin '{name}' requires 'pro' tier (current: '{config.FEATURE_TIER}')"
+            "Plugin '%s' requires '%s' tier (current: '%s')",
+            name, required_tier, config.FEATURE_TIER,
         )
         return None
 

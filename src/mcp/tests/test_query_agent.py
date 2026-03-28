@@ -332,7 +332,7 @@ class TestRerankResults:
         # Python content should rank higher despite lower original score
         assert reranked[0]["artifact_id"] in ("a1", "a3")
 
-    @patch("agents.query_agent.config")
+    @patch("agents.assembler.config")
     def test_cross_encoder_fallback_to_llm(self, mock_config):
         """When cross-encoder fails, falls back to LLM reranking."""
         mock_config.RERANK_MODE = "cross_encoder"
@@ -344,7 +344,7 @@ class TestRerankResults:
         ]
 
         with patch("utils.reranker.rerank", side_effect=RuntimeError("model not found")):
-            with patch("agents.query_agent._rerank_llm", new_callable=AsyncMock) as mock_llm:
+            with patch("agents.assembler._rerank_llm", new_callable=AsyncMock) as mock_llm:
                 mock_llm.return_value = sorted(
                     results, key=lambda x: x["relevance"], reverse=True,
                 )
@@ -361,7 +361,7 @@ class TestRerankResults:
             _make_result(relevance=0.9, artifact_id="a2"),
         ]
 
-        with patch("agents.query_agent.config") as mock_config:
+        with patch("agents.assembler.config") as mock_config:
             mock_config.RERANK_MODE = "none"
             reranked = asyncio.get_event_loop().run_until_complete(
                 rerank_results(results, "test", use_reranking=True)

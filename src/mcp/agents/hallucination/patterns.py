@@ -189,6 +189,17 @@ IGNORANCE_ADMISSION_PATTERNS = [
         r".*?(?:no |not |there (?:is|was) no |I (?:don'?t|do not) )",
         re.I,
     ),
+    # Capability limitations
+    re.compile(r"I'?m unable to\b", re.I),
+    re.compile(r"I cannot access\b", re.I),
+    re.compile(r"I don'?t have the ability\b", re.I),
+    re.compile(r"beyond my capabilities\b", re.I),
+    # Real-time data caveats (require negation/limitation context to avoid matching recency hedges)
+    re.compile(r"I don'?t have real-time\b", re.I),
+    re.compile(r"I cannot browse\b", re.I),
+    re.compile(r"my training data (?:does not|doesn'?t|may not|cannot|only)", re.I),
+    re.compile(r"my knowledge cutoff (?:prevents|limits|means I can'?t|does not)", re.I),
+    re.compile(r"I lack access to\b", re.I),
 ]
 
 # ---------------------------------------------------------------------------
@@ -305,6 +316,13 @@ COMPLEX_CLAIM_PATTERNS = [
         r"\b(?:unlike|whereas|in contrast|compared to|relative to)\b",
         r"\b(?:requires|depends on|prerequisite|necessary for)\b",
         r"\b(?:increased|decreased|doubled|tripled|grew|declined) .{0,20} (?:by|from|to) \d",
+        # Arithmetic / computation
+        r"\b\d+\s*[×÷+\-*/]\s*\d+",
+        r"\b(?:factorial|probability|sum of|product of|average of|total of)\b",
+        # Logical reasoning (quantifier + conclusion)
+        r"\b(?:every|all|no|none|some)\b.*\b(?:therefore|thus|hence|must|cannot|implies)\b",
+        # Statistical claims
+        r"\b(?:average|median|mean|standard deviation|correlation|statistically significant|p-value|confidence interval)\b",
     ]
 ]
 

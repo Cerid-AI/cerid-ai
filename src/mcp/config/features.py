@@ -1,11 +1,21 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Feature flags, toggles, and plugin configuration."""
+"""Feature flags, toggles, and plugin configuration.
+
+This is the canonical location for all tier-gating primitives:
+- ``is_feature_enabled()``  — runtime check
+- ``require_feature()``     — async endpoint decorator (raises 403)
+- ``check_feature()``       — sync helper (raises CeridError)
+"""
 from __future__ import annotations
 
+import asyncio as _asyncio
+import functools as _functools
 import logging as _logging
 import os
+from collections.abc import Callable as _Callable
+from typing import Any as _Any
 
 # ---------------------------------------------------------------------------
 # Plugin System & Feature Tiers
@@ -144,3 +154,103 @@ def log_feature_toggles() -> None:
         ", ".join(sorted(enabled)) or "none",
         ", ".join(sorted(disabled)) or "none",
     )
+
+
+# ---------------------------------------------------------------------------
+# Tier-based feature gating (canonical location)
+# ---------------------------------------------------------------------------
+
+def is_feature_enabled(feature_name: str) -> bool:
+    """Check if a tier-gated feature is enabled (fail-closed for unknown)."""
+    if feature_name not in FEATURE_FLAGS:
+        _config_logger.warning(
+            "Unknown feature flag: '%s' — defaulting to disabled", feature_name
+        )
+        return False
+    return FEATURE_FLAGS[feature_name]
+
+
+def require_feature(feature_name: str) -> _Callable:
+    """Decorator that gates a FastAPI endpoint behind a feature flag (async only).
+
+    Usage::
+
+        @router.post("/endpoint")
+        @require_feature("ocr_parsing")
+        async def my_endpoint():
+            ...
+    """
+    def decorator(func: _Callable) -> _Callable:
+        if not _asyncio.iscoroutinefunction(func):
+            raise TypeError(
+                f"@require_feature can only decorate async functions, "
+                f"but '{func.__name__}' is synchronous."
+            )
+
+        @_functools.wraps(func)
+        async def wrapper(*args: _Any, **kwargs: _Any) -> _Any:
+            if not is_feature_enabled(feature_name):
+                from fastapi import HTTPException
+
+                raise HTTPException(
+                    status_code=403,
+                    detail=(
+                        f"Feature '{feature_name}' requires Cerid AI Pro. "
+                        f"Current tier: {FEATURE_TIER}. "
+                        f"Set CERID_TIER=pro to enable."
+                    ),
+                )
+            return await func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
+def check_feature(feature_name: str) -> None:
+    """Synchronous tier check — raises ``FeatureGateError`` if feature is disabled.
+
+    Use in service functions and sync helpers where ``@require_feature`` cannot
+    be applied (it requires async).  Routers should prefer ``@require_feature``.
+    """
+    if not is_feature_enabled(feature_name):
+        from errors import FeatureGateError
+
+        raise FeatureGateError(
+            f"Feature '{feature_name}' requires Cerid AI Pro. "
+            f"Current tier: {FEATURE_TIER}. Set CERID_TIER=pro to enable.",
+        )
+
+
+def check_tier(required_tier: str, *, context: str = "") -> None:
+    """Synchronous tier comparison — raises ``FeatureGateError`` if unmet.
+
+    Use for dynamic tier checks where the required tier comes from metadata
+    (e.g. plugin manifests) rather than a named feature flag.
+    """
+    if required_tier == "pro" and FEATURE_TIER != "pro":
+        from errors import FeatureGateError
+
+        msg = f"Requires 'pro' tier (current: '{FEATURE_TIER}')."
+        if context:
+            msg = f"{context} {msg}"
+        raise FeatureGateError(msg)
+
+
+def is_tier_met(required_tier: str) -> bool:
+    """Check if the current tier meets the requirement (no exception)."""
+    if required_tier == "pro":
+        return FEATURE_TIER == "pro"
+    return True
+
+
+def get_feature_status() -> dict:
+    """Return the status of all feature flags."""
+    return {
+        "tier": FEATURE_TIER,
+        "features": {
+            name: {
+                "enabled": enabled,
+                "tier_required": "pro" if not enabled else "community",
+            }
+            for name, enabled in FEATURE_FLAGS.items()
+        },
+    }

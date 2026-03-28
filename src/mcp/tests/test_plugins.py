@@ -112,6 +112,7 @@ class TestPluginLoader:
             result = load_plugins(str(tmp_path))
             assert result == []
 
+    @patch("config.features.FEATURE_TIER", "pro")
     @patch("config.FEATURE_TIER", "pro")
     def test_load_plugin_pro_tier_allowed(self, tmp_path):
         """Pro-tier plugin loads when running pro tier."""
@@ -259,6 +260,7 @@ class TestFeatureFlags:
         async def dummy_endpoint():
             return {"ok": True}
 
-        with patch("config.FEATURE_FLAGS", {"test_allowed_feature": True}):
+        with patch("config.FEATURE_FLAGS", {"test_allowed_feature": True}), \
+             patch("config.features.FEATURE_FLAGS", {"test_allowed_feature": True}):
             result = await dummy_endpoint()
             assert result == {"ok": True}

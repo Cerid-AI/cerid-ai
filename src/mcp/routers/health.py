@@ -1,13 +1,25 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Health check and collection listing endpoints."""
+"""Health check and collection listing endpoints.
+
+Endpoints:
+  /health        — Full health check (cached, backward compat)
+  /health/live   — Liveness probe (always 200 unless process crashed)
+  /health/ready  — Readiness probe (checks all critical dependencies)
+  /health/status — Detailed degradation report with circuit breaker states
+
+Dependencies: deps.py (service connections), utils/degradation.py (tier system)
+Error types: none (health endpoints never raise)
+"""
 from __future__ import annotations
 
 import logging
+import os
 import time
 
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 
 from deps import get_chroma, get_neo4j, get_redis
 
@@ -108,6 +120,67 @@ def health_check_endpoint():
     result = health_check()
     _health_cache = result
     _health_cache_ts = now
+    return result
+
+
+@router.get("/health/live")
+def liveness_probe():
+    """Liveness probe — is the process running? Always 200.
+
+    Used by Docker healthcheck and orchestrator liveness gates.
+    No dependency checks — fast and reliable.
+    """
+    return {"status": "alive", "version": "1.0.0"}
+
+
+@router.get("/health/ready")
+def readiness_probe():
+    """Readiness probe — are all critical dependencies reachable?
+
+    Returns 200 if all critical services (Neo4j, ChromaDB, Redis) are up.
+    Returns 503 if any critical dependency is unreachable.
+    Used by orchestrator readiness gates to hold traffic until ready.
+    """
+    result = health_check()
+    services = result.get("services", {})
+    all_ready = all(v == "connected" for v in services.values())
+    status_code = 200 if all_ready else 503
+    return JSONResponse(
+        status_code=status_code,
+        content={"ready": all_ready, "services": services},
+    )
+
+
+@router.get("/health/status")
+def degradation_status():
+    """Detailed degradation report with circuit breaker states and tier info.
+
+    Returns current degradation tier, per-service status, circuit breaker
+    states, uptime, version, and feature tier information.
+    """
+    result = health_check()
+    # Add degradation tier from DegradationManager
+    try:
+        from utils.degradation import degradation
+        tier_info = degradation.status_report()
+        result["degradation_tier"] = tier_info.get("tier", "unknown")
+        result["can_retrieve"] = tier_info.get("can_retrieve", True)
+        result["can_verify"] = tier_info.get("can_verify", True)
+        result["can_generate"] = tier_info.get("can_generate", True)
+    except Exception:
+        result["degradation_tier"] = "unknown"
+    # Add feature tier
+    try:
+        from config.features import FEATURE_FLAGS, FEATURE_TIER
+        result["feature_tier"] = FEATURE_TIER
+    except Exception:
+        pass
+    # Add pipeline provider config
+    try:
+        from config.settings import PIPELINE_PROVIDERS
+        result["pipeline_providers"] = PIPELINE_PROVIDERS
+    except Exception:
+        pass
     return result
 
 
