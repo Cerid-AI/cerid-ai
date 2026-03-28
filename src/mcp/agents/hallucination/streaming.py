@@ -281,7 +281,7 @@ async def verify_response_streaming(
     # must still yield a summary instead of dying with an unhandled exception.
     # On timeout/error, fall back to heuristic extraction so claims are still
     # produced even when the LLM is unreachable.
-    EXTRACTION_TIMEOUT = 30  # seconds — Bifrost default is 20s
+    EXTRACTION_TIMEOUT = 10  # seconds — reduced for streaming speed (was 30s)
     try:
         claims, method = await asyncio.wait_for(
             extract_claims(response_text, user_query=user_query),
@@ -335,12 +335,10 @@ async def verify_response_streaming(
         return
 
     # Build topic context for claim verification (prevents ambiguous claims).
-    # When user_query is provided, the heuristic is fast and sufficient —
-    # skip the LLM call to save 500ms–2s off the critical path.
-    if user_query:
-        response_context = _heuristic_response_context(response_text, user_query)
-    else:
-        response_context = await _extract_response_context(response_text, user_query)
+    # Always use heuristic in streaming to save 1-2s off the critical path.
+    # The LLM context extraction adds latency without meaningful quality gain
+    # in the streaming path where speed is prioritized.
+    response_context = _heuristic_response_context(response_text, user_query)
 
     # Classify each claim's type for frontend display
     def _claim_type(claim_text: str) -> str:

@@ -20,9 +20,10 @@ interface TaxonomyTreeProps {
   filter: TaxonomyFilter
   onFilterChange: (filter: TaxonomyFilter) => void
   artifactCounts?: Map<string, number>
+  onRecategorize?: (artifactId: string, newDomain: string) => Promise<void>
 }
 
-export function TaxonomyTree({ filter, onFilterChange, artifactCounts }: TaxonomyTreeProps) {
+export function TaxonomyTree({ filter, onFilterChange, artifactCounts, onRecategorize }: TaxonomyTreeProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [addingDomain, setAddingDomain] = useState(false)
   const [newDomainName, setNewDomainName] = useState("")
@@ -179,7 +180,29 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts }: Taxonom
 
             return (
               <div key={domain}>
-                <div className="group flex items-center">
+                <div
+                  className="group flex items-center rounded transition-all"
+                  onDragOver={(e) => {
+                    if (onRecategorize) {
+                      e.preventDefault()
+                      e.currentTarget.classList.add("ring-2", "ring-primary/50")
+                    }
+                  }}
+                  onDragLeave={(e) => {
+                    e.currentTarget.classList.remove("ring-2", "ring-primary/50")
+                  }}
+                  onDrop={async (e) => {
+                    e.preventDefault()
+                    e.currentTarget.classList.remove("ring-2", "ring-primary/50")
+                    if (!onRecategorize) return
+                    try {
+                      const data = JSON.parse(e.dataTransfer.getData("application/cerid-artifact"))
+                      if (data.artifact_id) {
+                        await onRecategorize(data.artifact_id, domain)
+                      }
+                    } catch { /* invalid drop data */ }
+                  }}
+                >
                   <button
                     className={cn(
                       "flex flex-1 items-center gap-1.5 rounded px-2 py-1 text-left text-xs transition-colors",

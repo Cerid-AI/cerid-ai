@@ -16,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Search, X, Loader2, AlertCircle, RefreshCcw, Upload, CheckCircle, Tag, Settings2, ArrowUpDown, ArrowDownAZ, CalendarArrowDown, Star, FileUp, Clock, CircleHelp, LayoutGrid, List } from "lucide-react"
+import { Search, X, Loader2, AlertCircle, RefreshCcw, Upload, CheckCircle, Tag, Settings2, ArrowUpDown, ArrowDownAZ, CalendarArrowDown, Star, FileUp, Clock, CircleHelp, LayoutGrid, List, Eye, ArrowRightLeft, Trash2 } from "lucide-react"
 import { DomainBadge } from "@/components/ui/domain-badge"
 import { cn } from "@/lib/utils"
 import { ArtifactCard } from "./artifact-card"
@@ -687,6 +687,11 @@ export function KnowledgePane() {
               filter={taxonomyFilter}
               onFilterChange={setTaxonomyFilter}
               artifactCounts={domainCounts}
+              onRecategorize={async (artifactId, newDomain) => {
+                await recategorizeArtifact(artifactId, newDomain)
+                queryClient.invalidateQueries({ queryKey: ["artifacts"] })
+                queryClient.invalidateQueries({ queryKey: ["taxonomy"] })
+              }}
             />
           </div>
         </div>
@@ -761,6 +766,11 @@ export function KnowledgePane() {
                             selectedArtifactId === result.artifact_id ? null : result.artifact_id,
                           )
                         }
+                        onPreview={() => setPreviewArtifactId(result.artifact_id)}
+                        onDelete={() => handleDelete(result.artifact_id)}
+                        onRecategorize={() => {
+                          setSelectedArtifactId(result.artifact_id)
+                        }}
                       />
                     ))}
                   </div>
@@ -844,10 +854,19 @@ function timeAgo(date: string): string {
   return `${years}y ago`
 }
 
-function KBListItem({ result, isSelected, onSelect }: {
+/** Strip directory path prefixes from filenames — handles both unix and windows separators. */
+function normalizeFilename(raw: string): string {
+  const parts = raw.replace(/\\/g, "/").split("/")
+  return parts[parts.length - 1] || raw
+}
+
+function KBListItem({ result, isSelected, onSelect, onPreview, onDelete, onRecategorize }: {
   result: KBQueryResult
   isSelected: boolean
   onSelect: () => void
+  onPreview?: () => void
+  onDelete?: () => void
+  onRecategorize?: () => void
 }) {
   const preview = (result.content || "").replace(/[#*_\[\]|]/g, "").replace(/\s+/g, " ").trim().slice(0, 120)
   return (
@@ -855,16 +874,30 @@ function KBListItem({ result, isSelected, onSelect }: {
       role="button"
       tabIndex={0}
       className={cn(
-        "flex items-center gap-3 px-4 py-2 cursor-pointer hover:bg-muted/50 transition-colors",
+        "group flex items-center gap-3 px-4 py-2 cursor-pointer hover:bg-muted/50 transition-colors",
         isSelected && "bg-muted",
       )}
       onClick={onSelect}
       onKeyDown={(e) => { if (e.key === "Enter") onSelect() }}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData("application/cerid-artifact", JSON.stringify({
+          artifact_id: result.artifact_id,
+          filename: result.filename,
+          domain: result.domain,
+        }))
+        e.dataTransfer.effectAllowed = "copy"
+      }}
     >
       <DomainBadge domain={result.domain} />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{result.filename}</p>
+        <p className="truncate text-sm font-medium" title={result.filename}>{normalizeFilename(result.filename)}</p>
         <p className="truncate text-xs text-muted-foreground">{preview || "No preview"}</p>
+      </div>
+      <div className="flex shrink-0 items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        {onPreview && <button title="Preview" onClick={(e) => { e.stopPropagation(); onPreview() }} className="rounded p-1 hover:bg-muted"><Eye className="h-3.5 w-3.5 text-muted-foreground" /></button>}
+        {onRecategorize && <button title="Recategorize" onClick={(e) => { e.stopPropagation(); onRecategorize() }} className="rounded p-1 hover:bg-muted"><ArrowRightLeft className="h-3.5 w-3.5 text-muted-foreground" /></button>}
+        {onDelete && <button title="Delete" onClick={(e) => { e.stopPropagation(); onDelete() }} className="rounded p-1 hover:bg-muted"><Trash2 className="h-3.5 w-3.5 text-muted-foreground" /></button>}
       </div>
       {result.ingested_at && (
         <span className="shrink-0 text-[10px] text-muted-foreground">{timeAgo(result.ingested_at)}</span>

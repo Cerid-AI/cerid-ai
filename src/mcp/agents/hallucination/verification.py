@@ -909,6 +909,18 @@ async def verify_claim(
     ext_kb_threshold = config.EXTERNAL_VERIFY_KB_THRESHOLD
 
     # --- Fact-level cache: skip re-verification for previously seen claims ---
+    # Skip verification for trivially short claims (greetings, fragments)
+    if len(claim.strip()) < 10:
+        return {
+            "claim": claim,
+            "status": "skipped",
+            "similarity": 0.0,
+            "confidence": 1.0,
+            "reason": "Claim too short to verify",
+            "verification_method": "short_claim_skip",
+            "source_urls": [],
+        }
+
     cached = await get_cached_verdict(redis_client, claim)
     if cached and cached.get("status") in ("verified", "unverified"):
         logger.info("Claim cache hit: '%s' -> %s", claim[:50], cached["status"])

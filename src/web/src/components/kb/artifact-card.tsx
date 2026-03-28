@@ -14,6 +14,12 @@ import { cn } from "@/lib/utils"
 /** Touch device detection — pointer type is static per device, so module-level is fine. */
 const isTouchDevice = typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches
 
+/** Strip directory path prefixes from filenames — handles both unix and windows separators. */
+function normalizeFilename(raw: string): string {
+  const parts = raw.replace(/\\/g, "/").split("/")
+  return parts[parts.length - 1] || raw
+}
+
 /** Returns a human-readable relative time string like "3d ago", "2h ago", "5m ago". */
 function timeAgo(date: string): string {
   const now = Date.now()
@@ -125,7 +131,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
-              <p className="min-w-0 truncate text-sm font-medium">{result.filename}</p>
+              <p className="min-w-0 truncate text-sm font-medium" title={result.filename}>{normalizeFilename(result.filename)}</p>
               {chunkCount != null && (
                 <Badge variant="outline" className="shrink-0 gap-0.5 text-[9px] px-1.5 py-0">
                   <Layers className="h-2.5 w-2.5" />
@@ -177,6 +183,11 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
               </div>
             )}
           </div>
+          {compact && result.content && (
+            <p className="mt-0.5 truncate text-[11px] leading-tight text-muted-foreground">
+              {result.content.replace(/[#*_\[\]|>]/g, "").replace(/\s+/g, " ").trim().slice(0, 80)}
+            </p>
+          )}
           <TooltipProvider delayDuration={0}>
             <div className="flex flex-col items-end gap-1">
               {showRelevance && (
@@ -334,37 +345,37 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
           </div>
         )}
 
-        {/* Actions */}
-        {!compact && <div className="mt-2 flex items-center gap-0.5">
+        {/* Actions — always visible; compact mode uses smaller icons in a single row */}
+        <div className={cn("flex items-center gap-0.5", compact ? "mt-1" : "mt-2")}>
           {domains && onRecategorize && (
             <Button
               variant="ghost"
               size="icon"
-              className="artifact-action-btn h-6 w-6"
+              className={cn("artifact-action-btn", compact ? "h-5 w-5" : "h-6 w-6")}
               onClick={(e) => {
                 e.stopPropagation()
                 setShowRecategorize(!showRecategorize)
               }}
               title="Move to another domain"
             >
-              <ArrowRightLeft className="h-3 w-3" />
+              <ArrowRightLeft className={compact ? "h-2.5 w-2.5" : "h-3 w-3"} />
             </Button>
           )}
           {onPreview && (
             <Button
               variant="ghost"
               size="icon"
-              className="artifact-action-btn h-6 w-6"
+              className={cn("artifact-action-btn", compact ? "h-5 w-5" : "h-6 w-6")}
               onClick={(e) => {
                 e.stopPropagation()
                 onPreview(result.artifact_id)
               }}
               title="Preview content"
             >
-              <Eye className="h-3 w-3" />
+              <Eye className={compact ? "h-2.5 w-2.5" : "h-3 w-3"} />
             </Button>
           )}
-          {onUpdateTags && (
+          {!compact && onUpdateTags && (
             <Button
               variant="ghost"
               size="icon"
@@ -380,7 +391,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
               <Tags className="h-3 w-3" />
             </Button>
           )}
-          {onReIngest && (
+          {!compact && onReIngest && (
             <Button
               variant="ghost"
               size="icon"
@@ -404,30 +415,30 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
             <Button
               variant="ghost"
               size="icon"
-              className="artifact-action-btn h-6 w-6 hover:text-destructive"
+              className={cn("artifact-action-btn hover:text-destructive", compact ? "h-5 w-5" : "h-6 w-6")}
               onClick={(e) => {
                 e.stopPropagation()
                 setConfirmDelete(!confirmDelete)
               }}
               title="Delete artifact"
             >
-              <Trash2 className="h-3 w-3" />
+              <Trash2 className={compact ? "h-2.5 w-2.5" : "h-3 w-3"} />
             </Button>
           )}
           <div className="flex-1" />
           <Button
             variant="ghost"
             size="icon"
-            className="artifact-action-btn h-6 w-6 text-primary"
+            className={cn("artifact-action-btn text-primary", compact ? "h-5 w-5" : "h-6 w-6")}
             onClick={(e) => {
               e.stopPropagation()
               onInject()
             }}
             title="Inject into chat context"
           >
-            <PlusCircle className="h-3 w-3" />
+            <PlusCircle className={compact ? "h-2.5 w-2.5" : "h-3 w-3"} />
           </Button>
-        </div>}
+        </div>
       </CardContent>
     </Card>
   )
