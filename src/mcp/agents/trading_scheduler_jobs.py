@@ -10,7 +10,35 @@ from typing import Any
 import httpx
 import structlog
 
+from utils.circuit_breaker import CircuitOpenError, get_breaker
+
 logger = structlog.get_logger(__name__)
+
+
+async def _get_trading(url: str, timeout: float = 30.0) -> httpx.Response:
+    """GET request to trading agent through circuit breaker."""
+    breaker = get_breaker("trading-agent")
+
+    async def _fetch() -> httpx.Response:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            return resp
+
+    return await breaker.call(_fetch)
+
+
+async def _post_trading(url: str, json: dict, timeout: float = 30.0) -> httpx.Response:
+    """POST request to trading agent through circuit breaker."""
+    breaker = get_breaker("trading-agent")
+
+    async def _fetch() -> httpx.Response:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(url, json=json)
+            resp.raise_for_status()
+            return resp
+
+    return await breaker.call(_fetch)
 
 
 async def run_trading_autoresearch(
@@ -22,10 +50,8 @@ async def run_trading_autoresearch(
     GET /aggregate/performance -> analyze -> store as (:TradingInsight) in Neo4j.
     """
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.get(f"{trading_agent_url}/aggregate/performance")
-            resp.raise_for_status()
-            perf_data: dict[str, Any] = resp.json()
+        resp = await _get_trading(f"{trading_agent_url}/aggregate/performance")
+        perf_data: dict[str, Any] = resp.json()
 
         # Store insight in Neo4j
         await neo4j.execute_write(
@@ -53,30 +79,28 @@ async def run_platt_scaling_mirror(
     Trading agent is authoritative; cerid-ai only mirrors for KB queries.
     """
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.get(f"{trading_agent_url}/sessions")
-            resp.raise_for_status()
-            sessions: list[dict[str, Any]] = resp.json()
+        resp = await _get_trading(f"{trading_agent_url}/sessions")
+        sessions: list[dict[str, Any]] = resp.json()
 
         mirrored = 0
         for session in sessions:
             name = session.get("name", "")
             # Trading agent exposes Platt params via session performance
-            perf_resp = None
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                perf_resp = await client.get(
-                    f"{trading_agent_url}/sessions/{name}/performance"
+            try:
+                perf_resp = await _get_trading(
+                    f"{trading_agent_url}/sessions/{name}/performance", timeout=10.0
                 )
-            if perf_resp and perf_resp.status_code == 200:
-                perf = perf_resp.json()
-                platt = perf.get("platt_params", {})
-                if platt.get("A") is not None:
-                    await neo4j.execute_write(
-                        "MERGE (p:PlattCalibration {session: $session}) "
-                        "SET p.A = $a, p.B = $b, p.updated_at = datetime()",
-                        session=name, a=platt["A"], b=platt.get("B", 0),
-                    )
-                    mirrored += 1
+            except (CircuitOpenError, httpx.HTTPStatusError):
+                continue
+            perf = perf_resp.json()
+            platt = perf.get("platt_params", {})
+            if platt.get("A") is not None:
+                await neo4j.execute_write(
+                    "MERGE (p:PlattCalibration {session: $session}) "
+                    "SET p.A = $a, p.B = $b, p.updated_at = datetime()",
+                    session=name, a=platt["A"], b=platt.get("B", 0),
+                )
+                mirrored += 1
 
         logger.info("platt_mirror_complete", sessions_mirrored=mirrored)
         return {"status": "ok", "mirrored": mirrored}
@@ -94,16 +118,21 @@ async def run_longshot_surface_rebuild(
     Pulls calibration points and stores in Neo4j for longshot queries.
     """
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
+        try:
+            resp = await _post_trading(
                 f"{trading_agent_url}/sdk/v1/trading/longshot-surface",
                 json={"asset": "ETH", "date_range": "30d"},
             )
-            # This might not exist yet on trading agent side
-            if resp.status_code != 200:
+        except CircuitOpenError:
+            logger.debug("longshot_surface_circuit_open")
+            return {"status": "skipped"}
+        except httpx.HTTPStatusError as exc:
+            # This endpoint might not exist yet on trading agent side
+            if exc.response.status_code in {404, 501}:
                 logger.debug("longshot_surface_endpoint_unavailable")
                 return {"status": "skipped"}
-            data: dict[str, Any] = resp.json()
+            raise
+        data: dict[str, Any] = resp.json()
 
         points = data.get("calibration_points", [])
         stored = 0

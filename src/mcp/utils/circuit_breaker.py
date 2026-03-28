@@ -235,6 +235,7 @@ _openrouter = AsyncCircuitBreaker("openrouter", failure_threshold=5, recovery_ti
 _tavily = AsyncCircuitBreaker("tavily", failure_threshold=3, recovery_timeout=30)
 _searxng = AsyncCircuitBreaker("searxng", failure_threshold=3, recovery_timeout=30)
 _ragas_eval = AsyncCircuitBreaker("ragas_eval", failure_threshold=3, recovery_timeout=60)
+_trading_agent = AsyncCircuitBreaker("trading-agent", failure_threshold=3, recovery_timeout=120)
 
 
 def get_breaker(name: str) -> AsyncCircuitBreaker:
@@ -254,6 +255,7 @@ def get_breaker(name: str) -> AsyncCircuitBreaker:
         "ragas_eval": _ragas_eval,
         "neo4j": _neo4j,
         "ollama": _ollama,
+        "trading-agent": _trading_agent,
     }
     breaker = _breakers.get(name)
     if breaker is None:
