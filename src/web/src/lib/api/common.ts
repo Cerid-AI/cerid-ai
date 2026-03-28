@@ -41,8 +41,41 @@ export function mcpHeaders(extra: Record<string, string> = {}): Record<string, s
 export async function extractError(res: Response, fallback: string): Promise<string> {
   try {
     const body = await res.json()
+    // CeridError format: { error_code, message, details }
+    if (body.error_code && body.message) {
+      return `[${body.error_code}] ${body.message}`
+    }
+    // Legacy format: { detail: "..." }
     return body.detail ?? fallback
   } catch {
     return fallback
+  }
+}
+
+/** Parsed structured error with typed discriminators. */
+export interface ParsedError {
+  message: string
+  error_code?: string
+  details?: Record<string, unknown>
+  isFeatureGate: boolean
+  isCreditExhausted: boolean
+  isRateLimit: boolean
+}
+
+/** Parse CeridError structured response — handles both new and legacy error formats. */
+export async function parseStructuredError(res: Response, fallback: string): Promise<ParsedError> {
+  try {
+    const body = await res.json()
+    const code: string = body.error_code ?? ""
+    return {
+      message: body.message ?? body.detail ?? fallback,
+      error_code: code || undefined,
+      details: body.details ?? undefined,
+      isFeatureGate: code.startsWith("FEATURE_GATE_"),
+      isCreditExhausted: code.startsWith("PROVIDER_CREDIT_"),
+      isRateLimit: code.startsWith("PROVIDER_RATE_"),
+    }
+  } catch {
+    return { message: fallback, isFeatureGate: false, isCreditExhausted: false, isRateLimit: false }
   }
 }

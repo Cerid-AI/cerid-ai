@@ -3,9 +3,9 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { fetchSettings, updateSettings, fetchKBStats, adminRebuildIndexes, adminRescore, adminRegenerateSummaries, adminClearDomain, fetchProviderCredits, fetchOllamaStatus, enableOllama, disableOllama } from "@/lib/api"
+import { fetchSettings, updateSettings, fetchKBStats, adminRebuildIndexes, adminRescore, adminRegenerateSummaries, adminClearDomain, fetchProviderCredits, fetchOllamaStatus, enableOllama, disableOllama, fetchHealthStatus } from "@/lib/api"
 import type { KBStats } from "@/lib/api"
-import type { ServerSettings, SettingsUpdate, RoutingMode, ProviderCredits, OllamaStatus } from "@/lib/types"
+import type { ServerSettings, SettingsUpdate, RoutingMode, ProviderCredits, OllamaStatus, HealthStatusResponse } from "@/lib/types"
 import { useSettings } from "@/hooks/use-settings"
 import { cn } from "@/lib/utils"
 import { PRESETS, detectActivePreset } from "@/lib/settings-presets"
@@ -45,6 +45,7 @@ import {
   Trash2,
   CreditCard,
   ExternalLink,
+  Lock,
 } from "lucide-react"
 import { SyncSection } from "./sync-section"
 import { PluginsSection } from "./plugins-section"
@@ -979,13 +980,34 @@ function Header() {
   )
 }
 
+const STAGE_LABELS: Record<string, string> = {
+  claim_extraction: "Claim Extraction",
+  query_decomposition: "Query Decomposition",
+  topic_extraction: "Topic Extraction",
+  memory_resolution: "Memory Resolution",
+  verification_simple: "Simple Verification",
+  verification_complex: "Complex Verification",
+  reranking: "Reranking",
+  chat_generation: "Chat Generation",
+}
+
+const LOCKED_STAGES = new Set(["verification_complex", "chat_generation"])
+
 function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRefresh: () => void }) {
   const { data: ollamaStatus, refetch: refetchOllama, isLoading } = useQuery<OllamaStatus>({
     queryKey: ["ollama-status"],
     queryFn: fetchOllamaStatus,
     staleTime: 30_000,
   })
+  const { data: healthStatus } = useQuery<HealthStatusResponse>({
+    queryKey: ["health-status"],
+    queryFn: fetchHealthStatus,
+    refetchInterval: 30_000,
+    retry: 1,
+  })
+  const { mode: uiMode } = useUIMode()
   const [toggling, setToggling] = useState(false)
+  const [pipelineOpen, setPipelineOpen] = useState(false)
 
   const handleToggle = useCallback(async () => {
     if (!ollamaStatus) return
@@ -1006,6 +1028,8 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
 
   const isActive = settings.internal_llm_provider === "ollama"
   const hwLabel = settings.ollama_url?.includes("cerid-ollama") ? "Docker container" : settings.ollama_url ?? "—"
+  const showPipelineRouting = uiMode === "advanced" && ollamaStatus?.reachable
+  const pipelineProviders = healthStatus?.pipeline_providers ?? settings.pipeline_providers
 
   return (
     <Card className="mb-2">
@@ -1067,6 +1091,63 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
           It does not handle: user-facing chat, verification fact-checking, synopsis generation, or web search.
           Those tasks always use capable cloud models via OpenRouter.
         </div>
+        {/* Pipeline Routing (Advanced mode only, Ollama reachable) */}
+        {showPipelineRouting && pipelineProviders && (
+          <>
+            <div className="my-1 h-px bg-border" />
+            <button
+              type="button"
+              className="flex w-full cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-left hover:bg-muted/50"
+              onClick={() => setPipelineOpen((v) => !v)}
+              aria-expanded={pipelineOpen}
+            >
+              {pipelineOpen ? (
+                <ChevronDown className="h-3 w-3 text-muted-foreground" />
+              ) : (
+                <ChevronRight className="h-3 w-3 text-muted-foreground" />
+              )}
+              <span className="text-xs font-medium">Pipeline Routing</span>
+              <InfoTip text="Shows which provider handles each pipeline stage. Configured via server environment variables." />
+            </button>
+            {pipelineOpen && (
+              <div className="grid gap-1.5">
+                {Object.entries(STAGE_LABELS).map(([stage, label]) => {
+                  const provider = pipelineProviders[stage as keyof typeof pipelineProviders] ?? "bifrost"
+                  const isOllama = provider === "ollama"
+                  const isLocked = LOCKED_STAGES.has(stage)
+                  return (
+                    <div key={stage} className="flex items-center justify-between px-1">
+                      <span className="text-xs text-muted-foreground">{label}</span>
+                      <span className="flex items-center gap-1.5">
+                        {isLocked && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Lock className="h-3 w-3 text-muted-foreground/50" />
+                            </TooltipTrigger>
+                            <TooltipContent side="left" className="max-w-48">
+                              <p>Always uses cloud models</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        )}
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "text-[10px]",
+                            isOllama
+                              ? "bg-green-500/10 text-green-700 dark:text-green-400 border-green-500/30"
+                              : "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/30",
+                          )}
+                        >
+                          {isOllama ? "Ollama" : "Cloud"}
+                        </Badge>
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </>
+        )}
       </CardContent>
     </Card>
   )

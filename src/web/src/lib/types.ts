@@ -113,6 +113,55 @@ export interface HealthResponse {
   openrouter_credits_exhausted?: boolean
 }
 
+// ---------------------------------------------------------------------------
+// Phase 51: Degradation tiers, pipeline routing, structured errors
+// ---------------------------------------------------------------------------
+
+export type DegradationTier = "full" | "lite" | "direct" | "cached" | "offline"
+
+export type PipelineStage =
+  | "claim_extraction"
+  | "query_decomposition"
+  | "topic_extraction"
+  | "memory_resolution"
+  | "verification_simple"
+  | "verification_complex"
+  | "reranking"
+  | "chat_generation"
+
+export type PipelineProviders = Partial<Record<PipelineStage, "ollama" | "bifrost">>
+
+/** Extended health from GET /health/status — includes degradation + pipeline routing. */
+export interface HealthStatusResponse extends HealthResponse {
+  degradation_tier?: DegradationTier
+  can_retrieve?: boolean
+  can_verify?: boolean
+  can_generate?: boolean
+  feature_tier?: string
+  pipeline_providers?: PipelineProviders
+}
+
+/** Structured error response from CeridError hierarchy. */
+export interface CeridErrorResponse {
+  error_code: string
+  message: string
+  details: Record<string, unknown> | null
+}
+
+/** Metamorphic verification score (Pro tier). */
+export interface MetamorphicScore {
+  score: number
+  factoid_count: number
+  suspicious_count: number
+  details: Array<{
+    factoid: string
+    synonym_entailed: boolean
+    antonym_entailed: boolean
+    status: "ok" | "suspicious" | "likely_hallucinated"
+  }>
+  skipped?: boolean
+}
+
 export interface OpenRouterCredits {
   available: boolean
   credits_remaining?: number | null
@@ -425,6 +474,7 @@ export interface StreamingClaim extends BaseClaim {
   status?: "verified" | "unverified" | "uncertain" | "error" | "pending" | "skipped"
   similarity?: number
   source?: string
+  metamorphic_score?: MetamorphicScore
 }
 
 export interface HallucinationReport {
@@ -554,6 +604,7 @@ export interface ServerSettings {
   // Trading agent integration
   trading_enabled?: boolean
   // Ollama add-on (local LLM for pipeline tasks)
+  pipeline_providers?: PipelineProviders
   ollama_enabled?: boolean
   ollama_url?: string
   internal_llm_provider?: string

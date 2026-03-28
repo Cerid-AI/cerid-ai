@@ -15,12 +15,15 @@ import {
   TrendingUp,
   Zap,
   Database,
+  Shield,
+  Cpu,
 } from "lucide-react"
 import {
   fetchObservabilityMetrics,
   fetchObservabilityHealthScore,
+  fetchHealthStatus,
 } from "@/lib/api"
-import type { MetricAggregation } from "@/lib/types"
+import type { MetricAggregation, HealthStatusResponse, PipelineStage } from "@/lib/types"
 
 // ---------------------------------------------------------------------------
 // Time window options
@@ -215,6 +218,12 @@ export function ObservabilityDashboard() {
     refetchInterval: 10_000,
   })
 
+  const { data: healthStatus } = useQuery({
+    queryKey: ["health-status"],
+    queryFn: fetchHealthStatus,
+    refetchInterval: 15_000,
+  })
+
   const metrics = metricsData?.metrics
 
   // Build sparkline data from aggregation counts (we show the metric averages as
@@ -235,6 +244,20 @@ export function ObservabilityDashboard() {
     }
     return result
   }, [metrics])
+
+  // Pipeline routing stats
+  const pipelineStats = useMemo(() => {
+    const providers = healthStatus?.pipeline_providers
+    if (!providers) return null
+    const allStages: PipelineStage[] = [
+      "claim_extraction", "query_decomposition", "topic_extraction",
+      "memory_resolution", "verification_simple", "verification_complex",
+      "reranking", "chat_generation",
+    ]
+    const total = allStages.length
+    const ollamaCount = allStages.filter((s) => providers[s] === "ollama").length
+    return { total, ollamaCount, providers }
+  }, [healthStatus?.pipeline_providers])
 
   // Cost: sum from the llm_cost_usd metric
   const totalCost = metrics?.llm_cost_usd
@@ -271,6 +294,69 @@ export function ObservabilityDashboard() {
           <Gauge className="h-4 w-4 text-teal-500" />
           <span className="text-xs font-medium">System Health:</span>
           <GradeBadge grade={healthData.grade} score={healthData.score} />
+        </div>
+      )}
+
+      {/* Degradation Tier + Pipeline Routing cards */}
+      {healthStatus && (
+        <div className="grid grid-cols-2 gap-3">
+          {/* Degradation Tier Card */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 p-3 pb-1">
+              <CardTitle className="text-xs font-medium text-muted-foreground">Degradation Tier</CardTitle>
+              <Shield className="h-4 w-4 text-teal-500" />
+            </CardHeader>
+            <CardContent className="p-3 pt-0">
+              <span className={cn(
+                "inline-block rounded-md px-2 py-0.5 text-lg font-bold uppercase",
+                healthStatus.degradation_tier === "full" && "bg-green-500/15 text-green-700 dark:text-green-400",
+                healthStatus.degradation_tier === "lite" && "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400",
+                healthStatus.degradation_tier === "direct" && "bg-blue-500/15 text-blue-700 dark:text-blue-400",
+                healthStatus.degradation_tier === "cached" && "bg-orange-500/15 text-orange-700 dark:text-orange-400",
+                healthStatus.degradation_tier === "offline" && "bg-red-500/15 text-red-700 dark:text-red-400",
+              )}>
+                {healthStatus.degradation_tier ?? "unknown"}
+              </span>
+              <div className="mt-1.5 flex items-center gap-2 text-xs">
+                <span className="flex items-center gap-1">
+                  Retrieve
+                  <span className={healthStatus.can_retrieve ? "text-green-500" : "text-red-500"}>●</span>
+                </span>
+                <span className="flex items-center gap-1">
+                  Verify
+                  <span className={healthStatus.can_verify ? "text-green-500" : "text-red-500"}>●</span>
+                </span>
+                <span className="flex items-center gap-1">
+                  Generate
+                  <span className={healthStatus.can_generate ? "text-green-500" : "text-red-500"}>●</span>
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Pipeline Routing Card */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 p-3 pb-1">
+              <CardTitle className="text-xs font-medium text-muted-foreground">Pipeline Routing</CardTitle>
+              <Cpu className="h-4 w-4 text-purple-500" />
+            </CardHeader>
+            <CardContent className="p-3 pt-0">
+              <div className="text-xl font-bold tabular-nums leading-tight">
+                {pipelineStats ? `${pipelineStats.ollamaCount}/${pipelineStats.total} local` : "—"}
+              </div>
+              {pipelineStats && (
+                <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground">
+                  {Object.entries(pipelineStats.providers).map(([stage, provider]) => (
+                    <span key={stage}>
+                      <span className="font-medium">{stage.replace(/_/g, " ")}</span>
+                      {" "}
+                      <span className={provider === "ollama" ? "text-green-500" : "text-blue-500"}>{provider}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
       )}
 

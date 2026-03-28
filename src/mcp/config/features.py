@@ -48,6 +48,7 @@ FEATURE_FLAGS = {
     "image_understanding": FEATURE_TIER == "pro",
     "semantic_dedup":      FEATURE_TIER == "pro",
     "advanced_analytics":  FEATURE_TIER == "pro",
+    "metamorphic_verification": FEATURE_TIER == "pro",
     "multi_user":          CERID_MULTI_USER or FEATURE_TIER == "pro",
     # Community features (always enabled)
     "hierarchical_taxonomy": True,

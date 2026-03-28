@@ -5,6 +5,7 @@ import { MCP_BASE, mcpHeaders, extractError } from "./common"
 
 import type {
   HealthResponse,
+  HealthStatusResponse,
   ServerSettings,
   SettingsUpdate,
   SetupStatus,
@@ -34,6 +35,12 @@ import type { AuthTokens, AuthUser, UsageInfo } from "../types"
 export async function fetchHealth(): Promise<HealthResponse> {
   const res = await fetch(`${MCP_BASE}/health`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, `Health check failed: ${res.status}`))
+  return res.json()
+}
+
+export async function fetchHealthStatus(): Promise<HealthStatusResponse> {
+  const res = await fetch(`${MCP_BASE}/health/status`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error("Health status fetch failed")
   return res.json()
 }
 

@@ -3,7 +3,7 @@
 
 import { useQuery } from "@tanstack/react-query"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { fetchHealth, fetchProviderCredits } from "@/lib/api"
+import { fetchHealthStatus, fetchProviderCredits } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 const SERVICE_INFO: Record<string, { purpose: string; tech: string }> = {
@@ -15,7 +15,7 @@ const SERVICE_INFO: Record<string, { purpose: string; tech: string }> = {
 export function StatusBar() {
   const { data: health, isError, isLoading, dataUpdatedAt } = useQuery({
     queryKey: ["health"],
-    queryFn: fetchHealth,
+    queryFn: fetchHealthStatus,
     refetchInterval: 15_000,
     retry: 1,
   })
@@ -72,6 +72,36 @@ export function StatusBar() {
             <p className="text-muted-foreground">Last checked: {lastChecked}</p>
           </TooltipContent>
         </Tooltip>
+
+        {health?.degradation_tier && health.degradation_tier !== "full" && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className={cn(
+                "rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
+                health.degradation_tier === "lite" && "bg-yellow-500/20 text-yellow-400",
+                health.degradation_tier === "direct" && "bg-orange-500/20 text-orange-400",
+                health.degradation_tier === "cached" && "bg-red-500/20 text-red-400",
+                health.degradation_tier === "offline" && "bg-red-500/30 text-red-300 animate-pulse",
+              )}>
+                {health.degradation_tier}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-xs">
+              <p className="font-medium">Degraded: {health.degradation_tier} tier</p>
+              <div className="mt-1 space-y-0.5 text-xs">
+                <p>Retrieve: {health.can_retrieve ? "\u2713" : "\u2717"}</p>
+                <p>Verify: {health.can_verify ? "\u2713" : "\u2717"}</p>
+                <p>Generate: {health.can_generate ? "\u2713" : "\u2717"}</p>
+              </div>
+              {health.pipeline_providers && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {Object.values(health.pipeline_providers).filter(p => p === "ollama").length}/
+                  {Object.values(health.pipeline_providers).length} stages local
+                </p>
+              )}
+            </TooltipContent>
+          </Tooltip>
+        )}
 
         {services && (
           <div className="flex items-center gap-3">

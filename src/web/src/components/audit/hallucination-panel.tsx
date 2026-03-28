@@ -352,6 +352,25 @@ export function StreamingClaimBadge({ claim }: { claim: StreamingClaim }) {
               </a>
             )}
           </div>
+          {/* Metamorphic verification badge (Pro tier only) */}
+          {claim.metamorphic_score && !claim.metamorphic_score.skipped && (
+            <div className="mt-1 flex items-center gap-1 text-xs">
+              <Sparkles className="h-3 w-3 text-purple-400" />
+              <span className={cn(
+                "font-medium",
+                claim.metamorphic_score.score >= 0.8 && "text-green-400",
+                claim.metamorphic_score.score >= 0.5 && claim.metamorphic_score.score < 0.8 && "text-yellow-400",
+                claim.metamorphic_score.score < 0.5 && "text-red-400",
+              )}>
+                {Math.round(claim.metamorphic_score.score * 100)}% metamorphic
+              </span>
+              {claim.metamorphic_score.suspicious_count > 0 && (
+                <span className="text-muted-foreground">
+                  ({claim.metamorphic_score.suspicious_count} suspicious)
+                </span>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -6,6 +6,24 @@ import { render, screen } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 vi.mock("@/lib/api", () => ({
+  fetchHealthStatus: vi.fn().mockResolvedValue({
+    status: "healthy",
+    services: { chromadb: "connected", redis: "connected", neo4j: "connected" },
+    degradation_tier: "full",
+    can_retrieve: true,
+    can_verify: true,
+    can_generate: true,
+    pipeline_providers: {
+      claim_extraction: "ollama",
+      query_decomposition: "ollama",
+      topic_extraction: "ollama",
+      memory_resolution: "ollama",
+      verification_simple: "ollama",
+      verification_complex: "bifrost",
+      reranking: "ollama",
+      chat_generation: "bifrost",
+    },
+  }),
   fetchObservabilityMetrics: vi.fn().mockResolvedValue({
     metrics: {
       query_latency_ms: { count: 50, min: 100, max: 2000, avg: 450, p50: 400, p95: 1200, sum: 22500 },
