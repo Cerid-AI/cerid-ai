@@ -50,8 +50,10 @@ USE_BIFROST = os.getenv("CERID_USE_BIFROST", "false").lower() == "true"
 BIFROST_URL = os.getenv("BIFROST_URL", "http://bifrost:8080/v1")
 BIFROST_TIMEOUT = float(os.getenv("BIFROST_TIMEOUT", "20.0"))
 
-# Default model for internal LLM calls (reranking, hallucination, memory extraction)
-LLM_INTERNAL_MODEL = CATEGORIZE_MODELS["smart"]
+# Default model for internal LLM calls (reranking, hallucination, memory extraction).
+# Uses gpt-4o-mini by default — cheap ($0.15/$0.60 per 1M tokens), reliable, no rate limits.
+# The free Llama model hits 429 rate limits frequently, causing 10s+ retry delays.
+LLM_INTERNAL_MODEL = os.getenv("LLM_INTERNAL_MODEL", "openrouter/openai/gpt-4o-mini")
 
 # ---------------------------------------------------------------------------
 # Paths

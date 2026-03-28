@@ -179,9 +179,25 @@ export function KBContextPanel({
       <ScrollArea className="min-h-0 flex-1">
         <div className="min-w-0 space-y-2 p-3">
           {isLoading && (
-            <div className="flex items-center justify-center py-8 text-muted-foreground">
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              <span className="text-sm">Searching knowledge base...</span>
+            <div className="space-y-1 px-3 py-4">
+              <div className="flex items-center gap-2">
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                <span className="text-xs font-medium">Searching knowledge base...</span>
+              </div>
+              <div className="space-y-0.5 font-mono text-[10px] text-muted-foreground/70">
+                {kbStats ? (
+                  <p>
+                    {"\u2192"} Querying {activeDomains.size > 0 ? activeDomains.size : Object.keys(kbStats.domains).length}{" "}
+                    domain{(activeDomains.size > 0 ? activeDomains.size : Object.keys(kbStats.domains).length) !== 1 ? "s" : ""}
+                    {activeDomains.size > 0 && (
+                      <span className="text-muted-foreground/50"> ({[...activeDomains].join(", ")})</span>
+                    )}
+                  </p>
+                ) : (
+                  <p>{"\u2192"} Querying all domains</p>
+                )}
+                <p>{"\u2192"} Hybrid search (BM25 + vector)</p>
+              </div>
             </div>
           )}
 

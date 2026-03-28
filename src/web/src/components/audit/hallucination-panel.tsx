@@ -9,6 +9,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { ShieldOff, Shield, ShieldCheck, Loader2, ThumbsUp, ThumbsDown, ExternalLink, AlertTriangle, ChevronDown, ChevronUp, Search, X, Sparkles, Highlighter } from "lucide-react"
 import { submitClaimFeedback, verifySingleClaim } from "@/lib/api"
 import type { HallucinationReport, HallucinationClaim, StreamingClaim } from "@/lib/types"
+import type { VerificationPhase, ActivityLogEntry } from "@/hooks/use-verification-stream"
 import { getClaimDisplayStatus, DISPLAY_STATUS_COLORS, verificationMethodLabel, verificationMethodColor, stripMarkdown } from "@/lib/verification-utils"
 import { cn } from "@/lib/utils"
 
@@ -31,6 +32,51 @@ const REFUTED_SUB_LABELS: Record<string, { label: string; color: string }> = {
   factual: { label: "factual error", color: "text-red-700 dark:text-red-400 border-red-500/30" },
   outdated: { label: "outdated data", color: "text-amber-400 border-amber-500/30" },
   numeric: { label: "numeric mismatch", color: "text-rose-400 border-rose-500/30" },
+}
+
+/** Compact activity console showing live verification pipeline events. */
+function VerificationActivityLog({ entries, phase }: { entries: ActivityLogEntry[]; phase?: VerificationPhase }) {
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  // Auto-scroll to bottom when new entries arrive
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    }
+  }, [entries.length])
+
+  const isActive = phase !== undefined && phase !== "idle" && phase !== "done"
+  if (!isActive || entries.length === 0) return null
+
+  return (
+    <div className="mb-3 rounded-md border border-muted bg-muted/30 p-2">
+      <div className="mb-1.5 flex items-center gap-2">
+        <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+        <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+          Verification Pipeline
+        </span>
+      </div>
+      <div
+        ref={scrollRef}
+        className="max-h-24 space-y-0.5 overflow-y-auto font-mono text-[10px] text-muted-foreground/80"
+      >
+        {entries.map((entry, i) => (
+          <div key={i} className="flex items-start gap-1.5">
+            <span className="shrink-0 text-muted-foreground/50">{entry.time}</span>
+            <span
+              className={cn(
+                entry.type === "error" && "text-red-400",
+                entry.type === "success" && "text-green-400",
+                entry.type === "info" && "text-muted-foreground",
+              )}
+            >
+              {entry.message}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 function ClaimBadge({
@@ -388,6 +434,10 @@ interface HallucinationPanelProps {
   conversationId?: string
   /** Streaming claims for real-time display. */
   streamingClaims?: StreamingClaim[]
+  /** Current verification pipeline phase. */
+  verificationPhase?: VerificationPhase
+  /** Live activity log from the verification stream. */
+  activityLog?: ActivityLogEntry[]
   /** Index of claim focused from inline annotation click. */
   focusedClaimIndex?: number | null
   /** Callback when a claim card is clicked in the panel. */
@@ -410,7 +460,7 @@ interface HallucinationPanelProps {
 
 export function HallucinationPanel({
   report, loading, featureEnabled = false,
-  conversationId, streamingClaims,
+  conversationId, streamingClaims, verificationPhase, activityLog,
   focusedClaimIndex, onClaimFocus, onClose,
   expertVerification, toggleExpertVerification,
   inlineMarkups, toggleInlineMarkups,
@@ -481,6 +531,11 @@ export function HallucinationPanel({
     return (
       <div className="flex h-full flex-col">
         <PanelHeader onClose={onClose} expertVerification={expertVerification} toggleExpertVerification={toggleExpertVerification} inlineMarkups={inlineMarkups} toggleInlineMarkups={toggleInlineMarkups} />
+        {activityLog && activityLog.length > 0 && (
+          <div className="px-4 pt-2">
+            <VerificationActivityLog entries={activityLog} phase={verificationPhase} />
+          </div>
+        )}
         <div className="flex gap-3 px-4 py-2 text-xs">
           <span className="text-muted-foreground">
             {resolved.length}/{streamingClaims.length} verified
@@ -508,11 +563,15 @@ export function HallucinationPanel({
     return (
       <div className="flex h-full flex-col">
         <PanelHeader onClose={onClose} expertVerification={expertVerification} toggleExpertVerification={toggleExpertVerification} inlineMarkups={inlineMarkups} toggleInlineMarkups={toggleInlineMarkups} />
-        <div className="flex flex-1 items-center justify-center p-3">
-          <div className="flex items-center gap-2">
-            <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
-            <span className="text-xs text-muted-foreground">Analyzing response...</span>
-          </div>
+        <div className="p-3">
+          {activityLog && activityLog.length > 0 ? (
+            <VerificationActivityLog entries={activityLog} phase={verificationPhase} />
+          ) : (
+            <div className="flex items-center gap-2 py-4">
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
+              <span className="text-xs text-muted-foreground">Analyzing response...</span>
+            </div>
+          )}
         </div>
       </div>
     )

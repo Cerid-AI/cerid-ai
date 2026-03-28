@@ -7,6 +7,20 @@ import type { StreamingClaim, HallucinationReport } from "@/lib/types"
 
 export type VerificationPhase = "idle" | "extracting" | "verifying" | "done" | "error"
 
+export interface ActivityLogEntry {
+  time: string
+  message: string
+  type: "info" | "success" | "error"
+}
+
+/** Format elapsed milliseconds as MM:SS. */
+function formatElapsed(ms: number): string {
+  const totalSec = Math.floor(ms / 1000)
+  const min = String(Math.floor(totalSec / 60)).padStart(2, "0")
+  const sec = String(totalSec % 60).padStart(2, "0")
+  return `${min}:${sec}`
+}
+
 interface StreamingSummary {
   verified: number
   unverified: number
@@ -53,6 +67,8 @@ interface UseVerificationStreamReturn {
   sessionEstCost: number
   /** Credit exhaustion error message (set when provider returns 402). */
   creditError: string | null
+  /** Live activity log entries from the verification pipeline. */
+  activityLog: ActivityLogEntry[]
 }
 
 /**
@@ -81,6 +97,8 @@ export function useVerificationStream(
   const [summary, setSummary] = useState<StreamingSummary | null>(null)
   const [extractionMethod, setExtractionMethod] = useState<string | null>(null)
   const [creditError, setCreditError] = useState<string | null>(null)
+  const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([])
+  const streamStartRef = useRef<number>(0)
   const abortRef = useRef<(() => void) | null>(null)
   const hasReceivedEventsRef = useRef(false)
   const responseTextRef = useRef(responseText)
@@ -114,6 +132,7 @@ export function useVerificationStream(
     setSummary(null)
     setExtractionMethod(null)
     setCreditError(null)
+    setActivityLog([])
   }, [conversationId])
 
   // Clear stale verification state when a new response starts streaming (triggerKey resets to 0)
@@ -125,6 +144,7 @@ export function useVerificationStream(
       setSummary(null)
       setExtractionMethod(null)
       setCreditError(null)
+      setActivityLog([])
     }
     prevTriggerKey.current = triggerKey
   }, [triggerKey])
@@ -165,12 +185,24 @@ export function useVerificationStream(
     setSummary(null)
     setExtractionMethod(null)
     setCreditError(null)
+    setActivityLog([])
+    streamStartRef.current = Date.now()
+    // Seed the first log entry synchronously (elapsed = 0)
+    setActivityLog([{ time: "00:00", message: "Extracting claims...", type: "info" }])
 
     const { response, abort } = streamVerification(text, conversationId, undefined, modelRef.current, query, historyRef.current, expertModeRef.current, sourceArtifactIdsRef.current)
     abortRef.current = abort
 
     let cancelled = false
     let receivedSummary = false
+    // Track claim count locally for log messages (avoids stale state reads)
+    let extractedClaimCount = 0
+
+    /** Append an activity log entry with elapsed time from stream start. */
+    const logEntry = (message: string, type: ActivityLogEntry["type"]) => {
+      const elapsed = Date.now() - streamStartRef.current
+      setActivityLog((prev) => [...prev, { time: formatElapsed(elapsed), message, type }])
+    }
 
     // Timeout: abort verification if it takes too long.
     // Backend total deadline is 90s (parallel verification with 15s per-claim
@@ -224,9 +256,12 @@ export function useVerificationStream(
                   setExtractionMethod(event.method ?? null)
                   setPhase("verifying")
                   hasReceivedEventsRef.current = true
+                  logEntry(`Extracted ${extractedClaimCount} claim${extractedClaimCount !== 1 ? "s" : ""} (${event.method ?? "unknown"})`, "info")
+                  logEntry("Querying knowledge base...", "info")
                   break
 
                 case "claim_extracted":
+                  extractedClaimCount++
                   setClaims((prev) => [
                     ...prev,
                     {
@@ -241,8 +276,17 @@ export function useVerificationStream(
                   // after extraction_complete had already transitioned it.
                   break
 
-                case "claim_verified":
+                case "claim_verified": {
                   setPhase("verifying")
+                  const claimNum = (event.index ?? 0) + 1
+                  const conf = event.confidence != null ? ` (${event.verification_method ?? "KB"} match ${(event.confidence as number).toFixed(2)})` : ""
+                  if (event.status === "verified") {
+                    logEntry(`Claim ${claimNum}: supported${conf}`, "success")
+                  } else if (event.status === "unverified") {
+                    logEntry(`Claim ${claimNum}: refuted (${event.verification_method ?? "external"})`, "error")
+                  } else {
+                    logEntry(`Claim ${claimNum}: ${event.status ?? "uncertain"}${conf}`, "info")
+                  }
                   setClaims((prev) =>
                     prev.map((c) =>
                       c.index === event.index
@@ -267,9 +311,11 @@ export function useVerificationStream(
                     ),
                   )
                   break
+                }
 
                 case "credit_error":
                   setCreditError(event.message ?? "LLM provider credits exhausted")
+                  logEntry("Credit exhausted — verification incomplete", "error")
                   break
 
                 case "summary":
@@ -290,6 +336,7 @@ export function useVerificationStream(
                   setSessionClaimsChecked(sessionRef.current.claimsChecked)
                   setSessionEstCost(sessionRef.current.estCost)
                   setPhase("done")
+                  logEntry(`Complete — ${event.verified ?? 0}/${event.total ?? 0} claims verified`, "success")
                   break
 
                 case "consistency_check":
@@ -309,6 +356,7 @@ export function useVerificationStream(
 
                 case "error":
                   setPhase("error")
+                  logEntry("Verification error", "error")
                   break
               }
             } catch {
@@ -391,5 +439,6 @@ export function useVerificationStream(
     sessionClaimsChecked,
     sessionEstCost,
     creditError,
+    activityLog,
   }
 }

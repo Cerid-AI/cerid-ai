@@ -614,6 +614,8 @@ export function ChatPanel() {
           featureEnabled={hallucinationEnabled}
           conversationId={activeId ?? undefined}
           streamingClaims={verification.phase !== "idle" && verification.phase !== "done" ? verification.claims : undefined}
+          verificationPhase={verification.phase}
+          activityLog={verification.activityLog}
           focusedClaimIndex={focusedClaimIndex}
           onClaimFocus={setFocusedClaimIndex}
           onClose={() => setShowKB(false)}
