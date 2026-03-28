@@ -27,7 +27,7 @@ import config
 
 logger = logging.getLogger("ai-companion.contextual")
 
-_BIFROST_URL = f"{config.BIFROST_URL}/v1/chat/completions"
+_BIFROST_URL = f"{config.BIFROST_URL}/chat/completions"
 _TIMEOUT = 30.0
 
 
