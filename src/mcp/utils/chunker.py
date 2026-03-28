@@ -13,6 +13,7 @@ by providing the embedding model with source context.
 
 from __future__ import annotations
 
+import os
 import re
 
 import tiktoken
@@ -199,6 +200,137 @@ def chunk_text_semantic(
         chunks.append("\n\n".join(current_parts))
 
     return chunks
+
+
+# ---------------------------------------------------------------------------
+# Parent-child chunking
+# ---------------------------------------------------------------------------
+
+PARENT_CHILD_ENABLED = os.getenv(
+    "ENABLE_PARENT_CHILD_RETRIEVAL", "false"
+).lower() in ("true", "1")
+
+# Child chunk size: parent max // 4 (~128 tokens for 512-token parents)
+_CHILD_CHUNK_TOKENS = 128
+_CHILD_OVERLAP_RATIO = 0.1  # 10% overlap for small child chunks
+
+
+def chunk_with_parents(
+    text: str,
+    artifact_id: str,
+    max_tokens: int = 512,
+    overlap: float = 0.2,
+    mode: str | None = None,
+    context_header: str = "",
+) -> list[dict]:
+    """Create a two-tier chunking hierarchy (parent + child chunks).
+
+    Parent chunks are created at *max_tokens* granularity using the standard
+    chunking pipeline.  Each parent is then split into smaller child chunks
+    (~128 tokens) that are used for search precision while the parent provides
+    generation context.
+
+    Returns a flat list of dicts, each with keys:
+        chunk_id, text, chunk_level ("parent" | "child"),
+        parent_chunk_id, child_index, parent_token_count
+    """
+    if not PARENT_CHILD_ENABLED:
+        # Feature flag off — fall back to standard flat chunking.
+        raw = chunk_text(
+            text,
+            max_tokens=max_tokens,
+            overlap=overlap,
+            mode=mode,
+            context_header=context_header,
+        )
+        return [
+            {
+                "chunk_id": f"{artifact_id}_chunk_{i}",
+                "text": c,
+                "chunk_level": "flat",
+                "parent_chunk_id": None,
+                "child_index": None,
+                "parent_token_count": None,
+            }
+            for i, c in enumerate(raw)
+        ]
+
+    # --- Step 1: create parent chunks (standard pipeline) ----------------
+    parent_texts = chunk_text(
+        text,
+        max_tokens=max_tokens,
+        overlap=overlap,
+        mode=mode,
+        context_header=context_header,
+    )
+
+    results: list[dict] = []
+
+    for parent_idx, parent_text in enumerate(parent_texts):
+        parent_id = f"{artifact_id}_parent_{parent_idx}"
+        parent_token_count = count_tokens(parent_text)
+
+        # Emit the parent chunk
+        results.append(
+            {
+                "chunk_id": parent_id,
+                "text": parent_text,
+                "chunk_level": "parent",
+                "parent_chunk_id": parent_id,
+                "child_index": None,
+                "parent_token_count": parent_token_count,
+            }
+        )
+
+        # --- Step 2: split parent into child chunks ----------------------
+        child_texts = chunk_text_token(
+            parent_text,
+            max_tokens=_CHILD_CHUNK_TOKENS,
+            overlap=_CHILD_OVERLAP_RATIO,
+        )
+
+        for child_idx, child_text in enumerate(child_texts):
+            child_id = f"{artifact_id}_child_{parent_idx}_{child_idx}"
+            results.append(
+                {
+                    "chunk_id": child_id,
+                    "text": child_text,
+                    "chunk_level": "child",
+                    "parent_chunk_id": parent_id,
+                    "child_index": child_idx,
+                    "parent_token_count": parent_token_count,
+                }
+            )
+
+    return results
+
+
+def get_parent_chunks(
+    child_chunk_ids: list[str],
+    all_chunks: list[dict],
+) -> list[dict]:
+    """Given child chunk IDs, return the corresponding unique parent chunks."""
+    # Build a lookup: parent_chunk_id → parent dict
+    parent_map: dict[str, dict] = {}
+    for chunk in all_chunks:
+        if chunk["chunk_level"] == "parent":
+            parent_map[chunk["chunk_id"]] = chunk
+
+    # Collect parent IDs referenced by the requested children
+    child_lookup = {c["chunk_id"]: c for c in all_chunks}
+    seen: set[str] = set()
+    parents: list[dict] = []
+    for cid in child_chunk_ids:
+        child = child_lookup.get(cid)
+        if child is None:
+            continue
+        pid = child.get("parent_chunk_id")
+        if pid and pid not in seen:
+            seen.add(pid)
+            parent = parent_map.get(pid)
+            if parent:
+                parents.append(parent)
+    return parents
 
 
 # ---------------------------------------------------------------------------

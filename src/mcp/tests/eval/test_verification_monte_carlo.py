@@ -8,6 +8,7 @@ calibration across a large synthetic corpus of diverse claim types. Each
 category covers realistic edge cases to evaluate algorithm efficacy.
 
 Baseline: 84% classification accuracy (2026-03-28, 54 scenarios).
+Expanded: 150 scenarios (2026-03-28, +96 new across 5 categories).
 Target: 90% classification accuracy (Phase 51 Sprint 2A).
 
 Run: python -m pytest tests/eval/test_verification_monte_carlo.py -v --tb=short
@@ -233,6 +234,239 @@ CITATION_CLAIMS = [
 ]
 
 
+# --- Citation verification claims (20 scenarios) ---
+CITATION_VERIFICATION_CLAIMS = [
+    # Correct citation format — specific sources
+    LabeledClaim("According to WHO (2025), malaria cases decreased by 28% globally", "factual",
+                 is_current_event=True, description="WHO citation with year and statistic"),
+    LabeledClaim("Smith et al. (2024) demonstrated that transformer models scale logarithmically with data", "factual",
+                 is_current_event=True, description="academic et al. citation"),
+    LabeledClaim("A 2023 meta-analysis in The Lancet found a 15% reduction in cardiovascular events", "factual",
+                 is_current_event=True, description="journal-specific meta-analysis citation"),
+    LabeledClaim("Per the US Census Bureau (2020), the US population was 331.4 million", "factual",
+                 description="government agency census citation"),
+    LabeledClaim("NASA's Jet Propulsion Laboratory confirmed the asteroid's trajectory in 2024", "factual",
+                 is_current_event=True, description="NASA JPL specific citation"),
+    LabeledClaim("The IPCC Sixth Assessment Report (2022) states that global warming will exceed 1.5C by 2040", "factual",
+                 is_current_event=True, description="IPCC report citation with projection"),
+    LabeledClaim("According to IEEE Spectrum's 2024 rankings, Python remains the most popular language", "factual",
+                 is_current_event=True, description="IEEE ranking citation"),
+    LabeledClaim("Brown et al. (2020) introduced GPT-3 with 175 billion parameters in their NeurIPS paper", "factual",
+                 description="specific NeurIPS paper citation"),
+    LabeledClaim("The World Bank estimates global GDP growth at 2.4% for 2024", "factual",
+                 is_current_event=True, description="World Bank economic citation"),
+    LabeledClaim("According to a peer-reviewed study in JAMA, the vaccine efficacy was 94.1%", "factual",
+                 description="JAMA journal citation with specific number"),
+    # Vague citations — missing specifics
+    LabeledClaim("Studies show that coffee is healthy for most adults", "factual",
+                 description="vague 'studies show' with no source"),
+    LabeledClaim("Research suggests that meditation reduces stress by up to 40%", "factual",
+                 description="vague 'research suggests' with imprecise stat"),
+    LabeledClaim("Experts say that AI will replace 30% of jobs by 2030", "factual",
+                 description="vague 'experts say' with projection"),
+    LabeledClaim("Some scientists believe dark matter makes up 27% of the universe", "factual",
+                 description="vague 'some scientists' attribution"),
+    LabeledClaim("It has been reported that sleep deprivation increases accident risk by 300%", "factual",
+                 description="passive voice vague citation"),
+    # Invented or suspicious sources
+    LabeledClaim("The Journal of Made-Up Science reports that gravity is caused by dark photons", "factual",
+                 description="clearly invented journal name"),
+    LabeledClaim("Dr. John Fakename's 2023 study proved telekinesis is real", "factual",
+                 description="suspicious author name with implausible claim"),
+    LabeledClaim("The International Bureau of Factual Information confirmed these numbers", "factual",
+                 description="invented organization name"),
+    LabeledClaim("According to the 2024 Global Truth Index, misinformation decreased by 50%", "factual",
+                 is_current_event=True, description="plausible but likely invented index"),
+    LabeledClaim("A Stanford University study published in Nature found that reading improves empathy by 22%", "factual",
+                 description="real institution + journal but unverifiable specific claim"),
+]
+
+# --- Multi-hop reasoning claims (20 scenarios, added to MATH_LOGICAL_CLAIMS conceptually but separate array) ---
+MULTI_HOP_REASONING_CLAIMS = [
+    # Correct transitive/logical chains
+    LabeledClaim("If A > B and B > C, then A > C", "factual",
+                 is_complex=True, description="transitive inequality — valid"),
+    LabeledClaim("Given that all mammals are warm-blooded and whales are mammals, whales are warm-blooded", "factual",
+                 is_complex=True, description="valid syllogism — mammals/whales"),
+    LabeledClaim("Since the population grew 3% annually for 5 years from 1 million, it is now approximately 1.16 million", "factual",
+                 is_complex=True, description="compound growth calculation — correct"),
+    LabeledClaim("If every square is a rectangle and every rectangle is a parallelogram, then every square is a parallelogram", "factual",
+                 is_complex=True, description="transitive set inclusion — valid"),
+    LabeledClaim("Since the car travels 60 mph for 2.5 hours, it covers 150 miles", "factual",
+                 is_complex=True, description="rate-time-distance — correct"),
+    LabeledClaim("If the interest rate is 5% and the principal is $10,000, the annual interest is $500", "factual",
+                 is_complex=True, description="simple interest calculation — correct"),
+    LabeledClaim("Because all birds have feathers and penguins are birds, penguins have feathers", "factual",
+                 is_complex=True, description="valid syllogism — birds/penguins"),
+    LabeledClaim("If inflation is 3% and your raise is 2%, your real purchasing power decreased by approximately 1%", "factual",
+                 is_complex=True, description="real wage calculation — approximately correct"),
+    LabeledClaim("Since water freezes at 0C and the temperature is -5C, the water will freeze", "factual",
+                 is_complex=True, description="conditional temperature reasoning — valid"),
+    LabeledClaim("A 20% discount on a $50 item followed by a 10% tax gives a final price of $44", "factual",
+                 is_complex=True, description="sequential percentage calculation — correct"),
+    # Incorrect logical chains
+    LabeledClaim("If some dogs are pets and some pets are cats, then some dogs are cats", "factual",
+                 is_complex=True, description="invalid syllogism — undistributed middle"),
+    LabeledClaim("Since the population doubled every 10 years for 30 years from 1 million, it is now 9 million", "factual",
+                 is_complex=True, description="exponential growth — wrong answer (should be 8M)"),
+    LabeledClaim("If A implies B and B implies C, then C implies A", "factual",
+                 is_complex=True, description="affirming the consequent — invalid"),
+    LabeledClaim("Because correlation between ice cream sales and drowning is high, ice cream causes drowning", "factual",
+                 is_complex=True, description="correlation-causation fallacy"),
+    LabeledClaim("If 80% of smokers get cancer, then 80% of cancer patients are smokers", "factual",
+                 is_complex=True, description="base rate fallacy — invalid inversion"),
+    LabeledClaim("Since the average salary is $60,000 and there are 100 employees, the total payroll is $6 million", "factual",
+                 is_complex=True, description="mean-total calculation — valid only if all earn average"),
+    LabeledClaim("If a train leaves at 9 AM going 100 mph and another leaves at 10 AM going 150 mph, they meet at 11 AM", "factual",
+                 is_complex=True, description="relative speed problem — needs verification"),
+    LabeledClaim("Because no reptiles are mammals and no mammals are insects, no reptiles are insects", "factual",
+                 is_complex=True, description="negative syllogism — actually valid"),
+    LabeledClaim("If you invest $1000 at 7% annual return, you will have $2000 in approximately 10 years", "factual",
+                 is_complex=True, description="rule of 72 — correct approximation"),
+    LabeledClaim("A 50% increase followed by a 50% decrease returns to the original value", "factual",
+                 is_complex=True, description="percentage misconception — actually gives 75% of original"),
+]
+
+# --- Numeric precision claims (20 scenarios) ---
+NUMERIC_PRECISION_CLAIMS = [
+    # Currency / price claims (current events)
+    LabeledClaim("The iPhone 16 starts at $799", "factual",
+                 is_current_event=True, description="consumer electronics price"),
+    LabeledClaim("A gallon of gas in the US averages $3.50", "factual",
+                 is_current_event=True, description="commodity price — volatile"),
+    LabeledClaim("The US federal minimum wage is $7.25 per hour", "factual",
+                 is_current_event=True, description="wage rate — could change"),
+    LabeledClaim("Bitcoin reached an all-time high above $100,000 in 2024", "factual",
+                 is_current_event=True, description="cryptocurrency milestone"),
+    # Percentages — stable facts
+    LabeledClaim("Approximately 71% of Earth's surface is covered by water", "factual",
+                 description="well-known geographic percentage"),
+    LabeledClaim("The human body is approximately 60% water by weight", "factual",
+                 description="biology percentage"),
+    LabeledClaim("Nitrogen makes up about 78% of Earth's atmosphere", "factual",
+                 description="atmospheric composition percentage"),
+    LabeledClaim("The global literacy rate is approximately 87%", "factual",
+                 is_current_event=True, description="global statistic — slowly changing"),
+    # Dates — historical precision
+    LabeledClaim("The Berlin Wall fell on November 9, 1989", "factual",
+                 description="precise historical date"),
+    LabeledClaim("The first moon landing was on July 20, 1969", "factual",
+                 description="precise historical date — Apollo 11"),
+    LabeledClaim("The Titanic sank on April 15, 1912", "factual",
+                 description="precise historical date"),
+    LabeledClaim("D-Day was June 6, 1944", "factual",
+                 description="precise historical date — WWII"),
+    # Mathematical constants
+    LabeledClaim("Pi equals approximately 3.14159", "factual",
+                 is_complex=True, description="mathematical constant — truncated"),
+    LabeledClaim("Euler's number e is approximately 2.71828", "factual",
+                 is_complex=True, description="mathematical constant"),
+    LabeledClaim("The golden ratio phi is approximately 1.618", "factual",
+                 is_complex=True, description="mathematical constant"),
+    LabeledClaim("The square root of 2 is approximately 1.41421", "factual",
+                 is_complex=True, description="irrational number approximation"),
+    # Wrong numbers (should still be classified as factual type)
+    LabeledClaim("There are 52 states in the United States", "factual",
+                 description="wrong number — actually 50 states"),
+    LabeledClaim("The boiling point of water is 110 degrees Celsius at sea level", "factual",
+                 description="wrong number — actually 100C"),
+    LabeledClaim("Light travels at 300,000 miles per second", "factual",
+                 description="wrong unit — 300K km/s not miles/s"),
+    LabeledClaim("Mount Everest is 9,849 meters tall", "factual",
+                 is_complex=True, description="wrong number — actually 8,849m"),
+]
+
+# --- Domain-specific claims (15 scenarios) ---
+DOMAIN_SPECIFIC_CLAIMS = [
+    # Finance
+    LabeledClaim("The S&P 500 returned approximately 24% in 2023", "factual",
+                 is_current_event=True, description="stock market annual return"),
+    LabeledClaim("The US national debt exceeded $34 trillion in 2024", "factual",
+                 is_current_event=True, description="national debt milestone"),
+    LabeledClaim("A traditional IRA contribution limit for 2024 is $7,000 for individuals under 50", "factual",
+                 is_current_event=True, description="tax law contribution limit"),
+    # Programming / Code
+    LabeledClaim("Python uses indentation for block scope instead of curly braces", "factual",
+                 description="programming language design fact"),
+    LabeledClaim("Git was created by Linus Torvalds in 2005 for Linux kernel development", "factual",
+                 description="software history fact"),
+    LabeledClaim("JavaScript is single-threaded but uses an event loop for concurrency", "factual",
+                 description="language runtime architecture"),
+    # Science
+    LabeledClaim("Water boils at 100 degrees Celsius at standard atmospheric pressure", "factual",
+                 description="chemistry fact — boiling point"),
+    LabeledClaim("The speed of sound in air at room temperature is approximately 343 meters per second", "factual",
+                 is_complex=True, description="physics constant with condition"),
+    LabeledClaim("Mitochondria are often called the powerhouse of the cell", "factual",
+                 description="biology — common characterization"),
+    # Medicine
+    LabeledClaim("The recommended daily vitamin D intake is 600 IU for adults up to age 70", "factual",
+                 description="medical guideline — nutrition"),
+    LabeledClaim("Normal resting heart rate for adults ranges from 60 to 100 beats per minute", "factual",
+                 description="medical reference range"),
+    LabeledClaim("The average human body temperature is approximately 98.6 degrees Fahrenheit", "factual",
+                 description="medical baseline — slightly outdated"),
+    # Law / Policy
+    LabeledClaim("The US Constitution has 27 amendments", "factual",
+                 description="constitutional law fact"),
+    LabeledClaim("GDPR came into effect on May 25, 2018", "factual",
+                 description="regulatory date"),
+    LabeledClaim("The Fair Labor Standards Act established the 40-hour work week in the US", "factual",
+                 description="labor law historical fact"),
+]
+
+# --- Adversarial claims (15 scenarios) ---
+ADVERSARIAL_CLAIMS = [
+    # Common misconceptions
+    LabeledClaim("The Great Wall of China is visible from space with the naked eye", "factual",
+                 description="common misconception — not actually visible"),
+    LabeledClaim("Einstein failed math in school", "factual",
+                 description="common myth — he excelled at math"),
+    LabeledClaim("Humans only use 10% of their brains", "factual",
+                 description="neuroscience myth — we use all of our brain"),
+    LabeledClaim("Goldfish have a three-second memory span", "factual",
+                 description="animal myth — goldfish remember for months"),
+    LabeledClaim("Lightning never strikes the same place twice", "factual",
+                 description="weather myth — it frequently does"),
+    # Reversed causality / correlation
+    LabeledClaim("Cold weather causes the common cold", "factual",
+                 description="correlation vs causation — viruses cause colds"),
+    LabeledClaim("Eating carrots significantly improves your eyesight", "factual",
+                 description="WWII propaganda myth — minor vitamin A benefit"),
+    LabeledClaim("Cracking your knuckles causes arthritis", "factual",
+                 description="medical myth — no causal link found"),
+    # Outdated facts presented as current
+    LabeledClaim("Pluto is the ninth planet in our solar system", "factual",
+                 description="outdated — reclassified as dwarf planet in 2006"),
+    LabeledClaim("There are nine planets in the solar system", "factual",
+                 description="outdated count — eight since 2006"),
+    LabeledClaim("The Brontosaurus is a well-known dinosaur species", "factual",
+                 description="taxonomic complexity — reclassified then re-established"),
+    # Subtle numerical errors
+    LabeledClaim("A marathon is 26.1 miles long", "factual",
+                 is_complex=True, description="subtle error — actually 26.2 miles (26.219)"),
+    LabeledClaim("The speed of light is exactly 300,000 kilometers per second", "factual",
+                 is_complex=True, description="rounded — actually 299,792.458 km/s"),
+    LabeledClaim("There are 365 days in a year", "factual",
+                 description="simplified — actually 365.25 on average"),
+    LabeledClaim("A US gallon contains 4 liters", "factual",
+                 is_complex=True, description="wrong conversion — actually 3.785 liters"),
+    # Misleading framing
+    LabeledClaim("Vaccines cause autism according to a 1998 study", "factual",
+                 description="retracted Wakefield study — disproven"),
+    LabeledClaim("MSG is dangerous and causes headaches in most people", "factual",
+                 description="food myth — FDA classifies MSG as GRAS"),
+    LabeledClaim("We lose most of our body heat through our heads", "factual",
+                 description="common myth — heat loss is proportional to surface area"),
+    LabeledClaim("Sugar makes children hyperactive", "factual",
+                 description="parenting myth — not supported by research"),
+    LabeledClaim("Shaving makes hair grow back thicker", "factual",
+                 description="grooming myth — no effect on thickness"),
+    LabeledClaim("Napoleon Bonaparte was exceptionally short", "factual",
+                 description="historical myth — he was average height for his era"),
+]
+
+
 # ---------------------------------------------------------------------------
 # Monte Carlo Evaluation Classes
 # ---------------------------------------------------------------------------
@@ -283,7 +517,11 @@ class TestMonteCarloClaimClassification:
 
     def test_overall_classification_accuracy(self):
         """Overall classification accuracy across all claim types."""
-        all_claims = FACTUAL_CLAIMS + RECENCY_CLAIMS + IGNORANCE_CLAIMS
+        all_claims = (
+            FACTUAL_CLAIMS + RECENCY_CLAIMS + IGNORANCE_CLAIMS +
+            CITATION_VERIFICATION_CLAIMS + MULTI_HOP_REASONING_CLAIMS +
+            NUMERIC_PRECISION_CLAIMS + DOMAIN_SPECIFIC_CLAIMS + ADVERSARIAL_CLAIMS
+        )
         correct = 0
         misclassified = []
         for c in all_claims:
@@ -770,7 +1008,11 @@ class TestMonteCarloEndToEndSummary:
         metrics = {}
 
         # 1. Claim classification
-        all_claims = FACTUAL_CLAIMS + RECENCY_CLAIMS + IGNORANCE_CLAIMS
+        all_claims = (
+            FACTUAL_CLAIMS + RECENCY_CLAIMS + IGNORANCE_CLAIMS +
+            CITATION_VERIFICATION_CLAIMS + MULTI_HOP_REASONING_CLAIMS +
+            NUMERIC_PRECISION_CLAIMS + DOMAIN_SPECIFIC_CLAIMS + ADVERSARIAL_CLAIMS
+        )
         correct = 0
         for c in all_claims:
             predicted = "ignorance" if _is_ignorance_admission(c.text) else (
@@ -833,9 +1075,120 @@ class TestMonteCarloEndToEndSummary:
         corpus_size = (
             len(FACTUAL_CLAIMS) + len(RECENCY_CLAIMS) + len(CURRENT_EVENT_CLAIMS) +
             len(MATH_LOGICAL_CLAIMS) + len(IGNORANCE_CLAIMS) + len(EVASION_SCENARIOS) +
-            len(CITATION_CLAIMS)
+            len(CITATION_CLAIMS) + len(CITATION_VERIFICATION_CLAIMS) +
+            len(MULTI_HOP_REASONING_CLAIMS) + len(NUMERIC_PRECISION_CLAIMS) +
+            len(DOMAIN_SPECIFIC_CLAIMS) + len(ADVERSARIAL_CLAIMS)
         )
-        print(f"  Corpus: {corpus_size} synthetic scenarios across 7 categories")
+        print(f"  Corpus: {corpus_size} synthetic scenarios across 12 categories")
         print(f"  Verdict inversion: {len(TestMonteCarloVerdictInversion.IGNORANCE_VERDICTS) + len(TestMonteCarloVerdictInversion.EVASION_VERDICTS) + len(TestMonteCarloVerdictInversion.RECENCY_VERDICTS)} scenarios")
         print("  Confidence calibration: 200 random Monte Carlo samples")
         print("=" * 60 + "\n")
+
+
+class TestMonteCarloCitationVerification:
+    """Evaluate citation detection across diverse citation patterns."""
+
+    def _classify_claim(self, text: str) -> str:
+        """Classify a claim using the actual pipeline logic."""
+        if _is_ignorance_admission(text):
+            return "ignorance"
+        if _is_recency_claim(text):
+            return "recency"
+        reclassified = _reclassify_recency(text, "factual")
+        if reclassified == "recency":
+            return "recency"
+        return "factual"
+
+    def test_citation_detection(self):
+        """Claims with specific citations should be classified as factual.
+
+        Citation claims contain verifiable source references (journals, agencies,
+        named authors). They should be classified as factual (not ignorance or
+        evasion). Some with recent years may be reclassified to recency, which
+        is acceptable — the key is they should NOT be ignorance.
+        """
+        correct = 0
+        misclassified = []
+        for c in CITATION_VERIFICATION_CLAIMS:
+            predicted = self._classify_claim(c.text)
+            # Citation claims should be factual or recency (if time-sensitive), never ignorance
+            if predicted in ("factual", "recency"):
+                correct += 1
+            else:
+                misclassified.append(f"  - {c.description}: expected factual/recency, got {predicted}")
+        accuracy = correct / len(CITATION_VERIFICATION_CLAIMS)
+        assert accuracy >= 0.90, (
+            f"Citation detection accuracy {accuracy:.1%} < 90%. Misclassified:\n"
+            + "\n".join(misclassified)
+        )
+
+    def test_specific_vs_vague_citations_all_factual(self):
+        """Both specific and vague citations should classify as factual type."""
+        specific = [c for c in CITATION_VERIFICATION_CLAIMS if "et al." in c.text or "WHO" in c.text or "Lancet" in c.text]
+        vague = [c for c in CITATION_VERIFICATION_CLAIMS if "Studies show" in c.text or "Research suggests" in c.text or "Experts say" in c.text]
+        for c in specific + vague:
+            predicted = self._classify_claim(c.text)
+            assert predicted in ("factual", "recency"), (
+                f"Citation claim should be factual/recency: '{c.description}' classified as '{predicted}'"
+            )
+
+
+class TestMonteCarloAdversarialClaims:
+    """Evaluate handling of adversarial and misconception claims."""
+
+    def _classify_claim(self, text: str) -> str:
+        """Classify a claim using the actual pipeline logic."""
+        if _is_ignorance_admission(text):
+            return "ignorance"
+        if _is_recency_claim(text):
+            return "recency"
+        reclassified = _reclassify_recency(text, "factual")
+        if reclassified == "recency":
+            return "recency"
+        return "factual"
+
+    def test_adversarial_not_blindly_accepted(self):
+        """Adversarial claims should be classified as factual (verifiable).
+
+        These are common misconceptions and near-miss facts. The classification
+        pipeline should label them as factual (meaning they NEED verification),
+        not as ignorance or evasion. The verification step (not classification)
+        is responsible for marking them as unverified.
+        """
+        correct = 0
+        misclassified = []
+        for c in ADVERSARIAL_CLAIMS:
+            predicted = self._classify_claim(c.text)
+            if predicted == "factual":
+                correct += 1
+            else:
+                misclassified.append(f"  - {c.description}: expected factual, got {predicted}")
+        accuracy = correct / len(ADVERSARIAL_CLAIMS)
+        assert accuracy >= 0.85, (
+            f"Adversarial classification accuracy {accuracy:.1%} < 85%. "
+            f"These should be classified as factual (needing verification):\n"
+            + "\n".join(misclassified)
+        )
+
+    def test_misconceptions_detected_as_complex_when_numeric(self):
+        """Adversarial claims with numbers should be detected as complex."""
+        numeric_adversarial = [c for c in ADVERSARIAL_CLAIMS if c.is_complex]
+        detected = sum(1 for c in numeric_adversarial if _is_complex_claim(c.text))
+        # At least some numeric adversarial claims should be flagged
+        assert detected >= 1, (
+            f"Should detect at least 1 numeric adversarial as complex, got {detected}/{len(numeric_adversarial)}"
+        )
+
+    def test_multi_hop_reasoning_detected_as_complex(self):
+        """Multi-hop reasoning claims should be detected as complex.
+
+        NOTE: The _is_complex_claim detector looks for conditional/comparative
+        language. Claims with 'if', 'then', 'because', 'given that' should
+        be caught. Pure syllogisms without these markers may be missed.
+        """
+        detected = sum(1 for c in MULTI_HOP_REASONING_CLAIMS if _is_complex_claim(c.text))
+        recall = detected / len(MULTI_HOP_REASONING_CLAIMS)
+        assert detected >= 5, (
+            f"Should detect at least 5 multi-hop claims as complex, got {detected}/{len(MULTI_HOP_REASONING_CLAIMS)} "
+            f"(recall: {recall:.1%})"
+        )

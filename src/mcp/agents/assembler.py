@@ -91,7 +91,7 @@ async def rerank_results(
         return await _rerank_cross_encoder(results, query)
     if mode == "llm":
         return await _rerank_llm(results, query)
-    # mode == "none" or unknown
+    # Fallback: no reranking (mode is "none" or unrecognised)
     return results
 
 

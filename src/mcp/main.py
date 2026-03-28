@@ -275,6 +275,13 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Bifrost disabled (CERID_USE_BIFROST=false) — LLM calls route directly to OpenRouter")
 
+    # Ollama model availability check (non-blocking)
+    try:
+        from utils.ollama_models import startup_model_check
+        await startup_model_check()
+    except Exception as e:
+        logger.debug("Ollama model check skipped: %s", e)
+
     yield
 
     # Shutdown: stop scheduler, flush caches, close connections, clear MCP sessions
