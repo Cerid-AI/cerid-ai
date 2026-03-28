@@ -12,20 +12,6 @@ from typing import Any
 import numpy as np
 
 import config
-from config import DOMAINS
-from utils.cache import log_event
-
-# ---------------------------------------------------------------------------
-# Re-export bridges -- backward compatibility for existing importers
-# ---------------------------------------------------------------------------
-from agents.decomposer import (  # noqa: F401
-    _enrich_query,
-    _format_chroma_result,
-    _get_adjacent_domains,
-    graph_expand_results,
-    lightweight_kb_query,
-    multi_domain_query,
-)
 from agents.assembler import (  # noqa: F401
     _apply_quality_and_summaries,
     _enrich_summaries,
@@ -38,6 +24,20 @@ from agents.assembler import (  # noqa: F401
     deduplicate_results,
     rerank_results,
 )
+
+# ---------------------------------------------------------------------------
+# Re-export bridges -- backward compatibility for existing importers
+# ---------------------------------------------------------------------------
+from agents.decomposer import (  # noqa: F401
+    _enrich_query,
+    _format_chroma_result,
+    _get_adjacent_domains,
+    graph_expand_results,
+    lightweight_kb_query,
+    multi_domain_query,
+)
+from config import DOMAINS
+from utils.cache import log_event
 
 logger = logging.getLogger("ai-companion.query_agent")
 

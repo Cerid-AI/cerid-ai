@@ -13,8 +13,7 @@ from pydantic import BaseModel, Field
 
 import config
 from agents.curator import _is_truncated_summary, curate
-from config.features import is_tier_met
-from config.features import CERID_MULTI_USER
+from config.features import CERID_MULTI_USER, is_tier_met
 from db.neo4j.artifacts import delete_artifact, list_artifacts
 from deps import get_chroma, get_neo4j
 from utils.bm25 import rebuild_all as rebuild_bm25_all
@@ -114,7 +113,6 @@ class ReingestResponse(BaseModel):
 @router.get("/admin/kb/capabilities", response_model=ParserCapabilitiesResponse)
 async def get_parser_capabilities():
     """Return supported file types and which parser/plugin handles each."""
-    import os
 
     from parsers.registry import PARSER_REGISTRY
 

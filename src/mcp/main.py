@@ -43,10 +43,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from config.features import CERID_MULTI_USER
-from errors import CeridError, error_response
 from config.settings import CERID_TRADING_ENABLED
 from db import neo4j as graph
 from deps import close_chroma, close_neo4j, close_redis, get_neo4j
+from errors import CeridError, error_response
 from middleware.auth import APIKeyMiddleware
 from middleware.rate_limit import RateLimitMiddleware
 from middleware.request_id import RequestIDMiddleware

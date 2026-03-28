@@ -12,19 +12,6 @@ from unittest.mock import patch
 
 import pytest
 
-from errors import (
-    CeridError,
-    CreditExhaustedError,
-    IngestionError,
-    ProviderError,
-    RateLimitError,
-    RetrievalError,
-    RoutingError,
-    VerificationError,
-    error_response,
-)
-from utils.error_handler import handle_errors
-from utils.degradation import DegradationManager, DegradationTier
 from config.constants import (
     BIFROST_TIMEOUT,
     CHUNK_OVERLAP_RATIO,
@@ -45,7 +32,19 @@ from config.constants import (
     RETRIEVAL_CACHE_TTL,
     VERIFICATION_TIMEOUT,
 )
-
+from errors import (
+    CeridError,
+    CreditExhaustedError,
+    IngestionError,
+    ProviderError,
+    RateLimitError,
+    RetrievalError,
+    RoutingError,
+    VerificationError,
+    error_response,
+)
+from utils.degradation import DegradationManager, DegradationTier
+from utils.error_handler import handle_errors
 
 # ---------------------------------------------------------------------------
 # TestCeridErrorHierarchy

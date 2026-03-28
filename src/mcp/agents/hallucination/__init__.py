@@ -18,6 +18,15 @@ compatibility — callers can continue to use:
 import httpx  # noqa: F401
 
 # ---------------------------------------------------------------------------
+# Re-exports from confidence.py
+# ---------------------------------------------------------------------------
+from agents.hallucination.confidence import (  # noqa: F401
+    _build_verification_details,
+    _check_numeric_alignment,
+    _compute_adjusted_confidence,
+)
+
+# ---------------------------------------------------------------------------
 # Re-exports from extraction.py
 # ---------------------------------------------------------------------------
 from agents.hallucination.extraction import (  # noqa: F401
@@ -54,15 +63,6 @@ from agents.hallucination.persistence import (  # noqa: F401
 from agents.hallucination.streaming import (  # noqa: F401
     check_hallucinations,
     verify_response_streaming,
-)
-
-# ---------------------------------------------------------------------------
-# Re-exports from confidence.py
-# ---------------------------------------------------------------------------
-from agents.hallucination.confidence import (  # noqa: F401
-    _build_verification_details,
-    _check_numeric_alignment,
-    _compute_adjusted_confidence,
 )
 
 # ---------------------------------------------------------------------------
