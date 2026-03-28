@@ -1,0 +1,77 @@
+[
+    {
+        "query": "What is the capital of France?",
+        "ground_truth": "The capital of France is Paris.",
+        "contexts": [
+            "Paris is the capital and most populous city of France, with an estimated population of over 2 million residents."
+        ]
+    },
+    {
+        "query": "How does photosynthesis work?",
+        "ground_truth": "Photosynthesis converts light energy into chemical energy. Plants absorb CO2 and water, using sunlight to produce glucose and oxygen.",
+        "contexts": [
+            "Photosynthesis is a process used by plants and other organisms to convert light energy into chemical energy stored in glucose.",
+            "During photosynthesis, chlorophyll absorbs sunlight to split water molecules and fix carbon dioxide into sugar."
+        ]
+    },
+    {
+        "query": "What is a Python list comprehension?",
+        "ground_truth": "A list comprehension is a concise way to create lists in Python using the syntax [expression for item in iterable if condition].",
+        "contexts": [
+            "List comprehensions provide a concise way to create lists. The syntax is [expression for item in iterable]. An optional if clause can filter items."
+        ]
+    },
+    {
+        "query": "Explain the theory of general relativity.",
+        "ground_truth": "General relativity describes gravity as the curvature of spacetime caused by mass and energy. Massive objects warp spacetime, and this curvature determines how objects move.",
+        "contexts": [
+            "Einstein's general theory of relativity, published in 1915, describes gravitation as the curvature of spacetime caused by mass-energy.",
+            "In general relativity, massive objects cause spacetime to curve. Objects follow geodesics through this curved spacetime."
+        ]
+    },
+    {
+        "query": "What is the difference between TCP and UDP?",
+        "ground_truth": "TCP is connection-oriented with guaranteed delivery and ordering. UDP is connectionless with no delivery guarantees, making it faster but less reliable.",
+        "contexts": [
+            "TCP (Transmission Control Protocol) is connection-oriented, providing reliable, ordered delivery of data between applications.",
+            "UDP (User Datagram Protocol) is a connectionless protocol that does not guarantee delivery or ordering, but has lower overhead than TCP."
+        ]
+    },
+    {
+        "query": "What causes tides on Earth?",
+        "ground_truth": "Tides are primarily caused by the gravitational pull of the Moon and, to a lesser extent, the Sun on Earth's oceans.",
+        "contexts": [
+            "Ocean tides are caused primarily by the Moon's gravitational attraction on Earth's water. The Sun also contributes, but its effect is about half that of the Moon."
+        ]
+    },
+    {
+        "query": "How does a hash table work?",
+        "ground_truth": "A hash table stores key-value pairs. It uses a hash function to compute an index into an array of buckets, from which the desired value can be found in average O(1) time.",
+        "contexts": [
+            "A hash table uses a hash function to map keys to bucket indices. Collisions are resolved via chaining or open addressing.",
+            "Hash tables provide average-case O(1) time complexity for insertions, deletions, and lookups."
+        ]
+    },
+    {
+        "query": "What is CRISPR-Cas9?",
+        "ground_truth": "CRISPR-Cas9 is a gene-editing tool that allows scientists to precisely alter DNA sequences. It uses a guide RNA to direct the Cas9 enzyme to cut DNA at a specific location.",
+        "contexts": [
+            "CRISPR-Cas9 is a genome editing technology derived from a bacterial immune system. It uses a guide RNA to direct the Cas9 nuclease to a target DNA sequence for cleavage."
+        ]
+    },
+    {
+        "query": "What is the CAP theorem in distributed systems?",
+        "ground_truth": "The CAP theorem states that a distributed system can provide at most two of three guarantees simultaneously: Consistency, Availability, and Partition tolerance.",
+        "contexts": [
+            "The CAP theorem, proposed by Eric Brewer, states that in any distributed data store, only two of three properties can be guaranteed: consistency, availability, and partition tolerance."
+        ]
+    },
+    {
+        "query": "How do neural networks learn?",
+        "ground_truth": "Neural networks learn through backpropagation. During training, the network makes predictions, computes a loss, and adjusts weights via gradient descent to minimize the error.",
+        "contexts": [
+            "Neural networks learn by adjusting connection weights through backpropagation of errors.",
+            "During training, a loss function measures prediction error. Gradient descent is used to update weights in the direction that minimizes the loss."
+        ]
+    }
+]
