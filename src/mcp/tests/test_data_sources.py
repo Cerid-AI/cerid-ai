@@ -5,9 +5,7 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from utils.data_sources import registry
 from utils.data_sources.base import DataSourceRegistry

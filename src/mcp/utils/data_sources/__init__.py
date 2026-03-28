@@ -10,7 +10,7 @@ Dependencies: httpx (async HTTP), config/settings.py
 Error types: none (source failures are silent -- never blocks retrieval)
 """
 
-from .base import DataSource, DataSourceResult, DataSourceRegistry, registry
+from .base import DataSource, DataSourceRegistry, DataSourceResult, registry
 from .finance import ExchangeRatesSource
 from .wikipedia import WikipediaSource
 from .wolfram import WolframAlphaSource
