@@ -119,6 +119,14 @@ def get_context_budget_for_model(model: str | None) -> int:
 QUERY_RERANK_CANDIDATES = 15        # max candidates sent to reranker
 QUERY_CONTEXT_MESSAGES = 5          # max conversation messages used for query enrichment
 
+# ---------------------------------------------------------------------------
+# RAG Mode — controls automatic knowledge injection behavior
+#   smart  = classify intent, inject for factual/code/analytical, skip for creative/conversational
+#   always = always inject full KB context regardless of intent
+#   manual = only inject when user explicitly requests it
+# ---------------------------------------------------------------------------
+RAG_MODE = os.getenv("RAG_MODE", "smart")
+
 # Rerank mode: "cross_encoder" (fast local ONNX), "llm" (Bifrost), "none"
 RERANK_MODE = os.getenv("RERANK_MODE", "cross_encoder")
 

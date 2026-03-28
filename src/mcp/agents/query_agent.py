@@ -174,6 +174,32 @@ async def agent_query(
                 "degradation_tier": "direct", "retrieval_skipped": True,
                 "retrieval_reason": "degradation_direct"}
 
+    # Smart Auto-RAG: classify intent and adjust retrieval
+    try:
+        from utils.query_classifier import classify_query_intent, get_rag_config
+        _query_intent = classify_query_intent(query)
+        _rag_config = get_rag_config(_query_intent)
+
+        # Get RAG mode from settings (smart/always/manual)
+        import config as _cfg
+        _rag_mode = getattr(_cfg, "RAG_MODE", "smart")
+        if _rag_mode == "always":
+            _rag_config = get_rag_config("factual")  # Force full RAG
+        elif _rag_mode == "manual":
+            _rag_config = get_rag_config("conversational")  # Skip auto RAG
+
+        if _rag_config["top_k"] == 0:
+            # Conversational — skip retrieval entirely
+            return {"context": "", "sources": [], "confidence": 0.0,
+                    "domains_searched": domains if domains else DOMAINS,
+                    "total_results": 0, "token_budget_used": 0,
+                    "graph_results": 0, "results": [],
+                    "intent": _query_intent, "rag_skipped": True}
+    except Exception as exc:
+        logger.debug("Smart Auto-RAG classification skipped: %s", exc)
+        _query_intent = "factual"
+        _rag_config = {"inject": True, "top_k": 10, "decompose": True, "rerank": True}
+
     search_query = query
     if conversation_messages:
         search_query = _enrich_query(
@@ -183,7 +209,7 @@ async def agent_query(
             logger.info(f"Enriched query: {query!r} → {search_query!r}")
 
     # Step 0: Adaptive retrieval gate — may short-circuit or reduce top_k
-    effective_top_k = top_k
+    effective_top_k = min(top_k, _rag_config["top_k"]) if _rag_config["top_k"] > 0 else top_k
     if ENABLE_ADAPTIVE_RETRIEVAL:
         from utils.retrieval_gate import classify_retrieval_need
         decision = classify_retrieval_need(query)
@@ -350,6 +376,27 @@ async def agent_query(
                 neo4j_driver=neo4j_driver,
             )
         graph_results_added = len(results) - graph_count_before
+
+    # Enrich with external data sources for factual/analytical queries
+    try:
+        from utils.data_sources import registry as data_source_registry
+        if _query_intent in ("factual", "analytical") and data_source_registry.has_enabled_sources():
+            _ext_results = await data_source_registry.query_all(query)
+            if _ext_results:
+                # Add external results with lower relevance weight
+                for er in _ext_results[:3]:  # max 3 external results
+                    results.append({
+                        "content": f"[{er['source_name']}] {er['content']}",
+                        "relevance": er.get("confidence", 0.7) * 0.8,  # slightly lower than KB
+                        "artifact_id": f"external:{er['source_name'].lower()}",
+                        "filename": er.get("title", er["source_name"]),
+                        "domain": "external",
+                        "chunk_index": 0,
+                        "source_url": er.get("source_url", ""),
+                    })
+                logger.debug("Added %d external data source results", len(_ext_results[:3]))
+    except Exception as exc:
+        logger.debug("External data source enrichment skipped: %s", exc)
 
     from utils.temporal import is_within_window, parse_temporal_intent, recency_score
     temporal_days = parse_temporal_intent(query)

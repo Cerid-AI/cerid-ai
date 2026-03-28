@@ -129,6 +129,18 @@ export function StatusBar() {
           </div>
         )}
 
+        {/* Ollama local stages indicator */}
+        {health?.pipeline_providers && Object.values(health.pipeline_providers).filter(p => p === "ollama").length === 0 && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="text-[10px] text-yellow-500/70">&#x26A1; 0 local</span>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              <p>All pipeline stages use cloud APIs. Enable Ollama for faster local processing.</p>
+            </TooltipContent>
+          </Tooltip>
+        )}
+
         {/* Credits indicator — pushed to the right */}
         {credits?.configured && credits.balance != null && (
           <div className="ml-auto">

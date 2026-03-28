@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
-import { Database, Zap, Sparkles, MessageSquarePlus, Clock, ShieldCheck } from "lucide-react"
+import { Cpu, Database, X, Zap, Sparkles, MessageSquarePlus, Clock, ShieldCheck } from "lucide-react"
 import { CreditBanner } from "./credit-banner"
 import { ChatToolbar } from "./chat-toolbar"
 import { ChatMessages } from "./chat-messages"
@@ -29,7 +29,8 @@ import { useSmartSuggestions } from "@/hooks/use-smart-suggestions"
 import { useVerificationOrchestrator } from "@/hooks/use-verification-orchestrator"
 import { useUIMode } from "@/contexts/ui-mode-context"
 import { UploadDialog } from "@/components/kb/upload-dialog"
-import { uploadFile } from "@/lib/api"
+import { useQuery } from "@tanstack/react-query"
+import { uploadFile, enableOllama, fetchHealthStatus } from "@/lib/api"
 import type { ChatMessage } from "@/lib/types"
 import { MODELS } from "@/lib/types"
 import { uuid } from "@/lib/utils"
@@ -82,6 +83,21 @@ export function ChatPanel() {
   const [showKB, setShowKB] = useState(() => window.innerWidth >= 1024)
   const [pendingChatFiles, setPendingChatFiles] = useState<File[]>([])
   const [focusedClaimIndex, setFocusedClaimIndex] = useState<number | null>(null)
+
+  // Ollama recommendation banner state
+  const [ollamaDismissed, setOllamaDismissed] = useState(() => {
+    try { return localStorage.getItem("cerid-ollama-dismissed") === "1" } catch { return false }
+  })
+  const { data: ollamaHealth } = useQuery({
+    queryKey: ["health-ollama-banner"],
+    queryFn: fetchHealthStatus,
+    refetchInterval: 30_000,
+    retry: 1,
+    staleTime: 15_000,
+  })
+  const ollamaLocalCount = ollamaHealth?.pipeline_providers
+    ? Object.values(ollamaHealth.pipeline_providers).filter(p => p === "ollama").length
+    : 0
 
   const currentModelObj = useMemo(() => MODELS.find((m) => m.id === selectedModel) ?? MODELS[0], [selectedModel])
 
@@ -413,6 +429,31 @@ export function ChatPanel() {
         <div className="flex items-center gap-2 px-3 py-1 text-[11px] text-amber-500 bg-amber-500/5 border-b border-amber-500/10">
           <ShieldCheck className="h-3 w-3" />
           Expert verification active — ~15× standard cost
+        </div>
+      )}
+
+      {/* Ollama recommendation — shown when no local stages and user has chatted */}
+      {!isSimple && ollamaLocalCount === 0 && (active?.messages?.length ?? 0) > 2 && !ollamaDismissed && (
+        <div className="mx-4 mb-2 rounded-lg border border-teal-500/30 bg-teal-500/10 px-4 py-2.5">
+          <div className="flex items-center gap-3">
+            <Cpu className="h-4 w-4 shrink-0 text-teal-400" />
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-medium">Speed up with local AI</p>
+              <p className="text-[11px] text-muted-foreground">Enable Ollama for faster verification — runs locally, no API costs.</p>
+            </div>
+            <button
+              onClick={() => { enableOllama().catch(() => {}); setOllamaDismissed(true) }}
+              className="shrink-0 rounded-md border border-teal-500/40 px-2 py-1 text-[11px] font-medium text-teal-400 hover:bg-teal-500/10"
+            >
+              Enable
+            </button>
+            <button
+              onClick={() => { setOllamaDismissed(true); try { localStorage.setItem("cerid-ollama-dismissed", "1") } catch { /* noop */ } }}
+              className="shrink-0 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
       )}
 
