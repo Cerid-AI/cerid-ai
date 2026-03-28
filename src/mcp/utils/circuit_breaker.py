@@ -59,6 +59,22 @@ class NonTransientError(Exception):
     """
 
 
+def _is_client_error(exc: Exception) -> bool:
+    """Check if an exception represents an HTTP 4xx client error.
+
+    Client errors (400, 401, 403, 404, 422) indicate OUR request is malformed
+    or unauthorized — not that the service is down. These should NOT count as
+    circuit breaker failures because retrying won't help and the service is
+    actually healthy.
+    """
+    # httpx.HTTPStatusError has a .response.status_code
+    if hasattr(exc, "response") and hasattr(exc.response, "status_code"):
+        return 400 <= exc.response.status_code < 500
+    # String-based detection as fallback
+    msg = str(exc).lower()
+    return "400 bad request" in msg or "401 " in msg or "403 " in msg or "404 " in msg or "422 " in msg
+
+
 class AsyncCircuitBreaker:
     """Async circuit breaker with failure counting and automatic recovery."""
 
@@ -104,6 +120,10 @@ class AsyncCircuitBreaker:
             result = await fn(*args, **kwargs)
         except Exception as exc:
             if isinstance(exc, self.excluded_exceptions):
+                raise
+            # Don't count HTTP 4xx client errors as failures — they indicate
+            # our request is malformed, not that the service is down.
+            if _is_client_error(exc):
                 raise
             await self._on_failure(exc)
             raise
