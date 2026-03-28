@@ -15,6 +15,8 @@ export interface UseKBContextReturn {
   executionTime: number
   isLoading: boolean
   error: Error | null
+  isError: boolean
+  refetch: () => void
   /** True once at least one KB query has returned data. */
   hasQueried: boolean
 
@@ -63,7 +65,7 @@ export function useKBContext(
   // Stable key for conversation context (re-query when message count changes)
   const contextMsgCount = recentMessages?.length ?? 0
 
-  const { data, isLoading, error } = useQuery<AgentQueryResponse>({
+  const { data, isLoading, isError, error, refetch } = useQuery<AgentQueryResponse>({
     queryKey: ["kb-query", effectiveQuery, domainKey, contextMsgCount],
     queryFn: () =>
       queryKB(
@@ -74,6 +76,7 @@ export function useKBContext(
       ),
     enabled: !!effectiveQuery && effectiveQuery.length > 2,
     staleTime: 15_000,
+    retry: 1,
   })
 
   const toggleDomain = useCallback((domain: string) => {
@@ -128,6 +131,8 @@ export function useKBContext(
     executionTime: data?.execution_time_ms ?? 0,
     isLoading,
     error: error ?? null,
+    isError,
+    refetch,
     hasQueried: data !== undefined,
 
     activeDomains,

@@ -6,7 +6,7 @@ import { DOMAIN_BADGE_COLORS } from "@/lib/constants"
 
 export function DomainBadge({ domain }: { domain: string }) {
   return (
-    <Badge variant="outline" className={`text-xs capitalize ${DOMAIN_BADGE_COLORS[domain] ?? ""}`}>
+    <Badge variant="outline" className={`text-xs capitalize ${DOMAIN_BADGE_COLORS[domain] ?? "bg-zinc-500/20 text-zinc-400"}`}>
       {domain}
     </Badge>
   )

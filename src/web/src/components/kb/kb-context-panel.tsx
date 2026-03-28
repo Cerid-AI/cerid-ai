@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { X, Search, Loader2, Zap, Upload, Database, FileText, Layers, Archive, FileInput } from "lucide-react"
+import { X, Search, Loader2, Zap, Upload, Database, FileText, Layers, Archive, FileInput, AlertCircle } from "lucide-react"
 import { ArtifactCard } from "./artifact-card"
 import { DomainFilter } from "./domain-filter"
 import { TagFilter } from "./tag-filter"
@@ -30,6 +30,8 @@ export function KBContextPanel({
   totalResults,
   isLoading,
   error,
+  isError,
+  refetch,
   hasQueried,
   activeDomains,
   toggleDomain,
@@ -183,9 +185,11 @@ export function KBContextPanel({
             </div>
           )}
 
-          {error && (
-            <div className="py-4 text-center text-sm text-destructive">
-              Failed to query knowledge base
+          {isError && (
+            <div className="flex flex-col items-center gap-2 py-8 text-muted-foreground">
+              <AlertCircle className="h-4 w-4 text-destructive" />
+              <span className="text-sm">Knowledge query failed</span>
+              <button onClick={() => refetch()} className="text-xs text-primary hover:underline">Retry</button>
             </div>
           )}
 

@@ -91,7 +91,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
     <Card
       ref={cardRef}
       className={cn(
-        "w-full min-w-0 max-w-full cursor-pointer overflow-hidden transition-colors",
+        "w-full min-w-0 max-w-full cursor-pointer overflow-hidden transition-colors py-2 gap-1",
         isSelected && "ring-2 ring-primary",
       )}
       role="button"
@@ -190,7 +190,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
                       </div>
                     </div>
                   </TooltipTrigger>
-                  <TooltipContent>Relevance: {relevancePct}% match to query</TooltipContent>
+                  <TooltipContent side="left">Relevance: {relevancePct}% match to query</TooltipContent>
                 </Tooltip>
               )}
               {result.quality_score != null && (
@@ -198,7 +198,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
                   <TooltipTrigger asChild>
                     <span><QualityBadge score={result.quality_score} /></span>
                   </TooltipTrigger>
-                  <TooltipContent>Quality: Q{Math.round(result.quality_score * 100)} — higher is better</TooltipContent>
+                  <TooltipContent side="left">Quality: Q{Math.round(result.quality_score * 100)} — higher is better</TooltipContent>
                 </Tooltip>
               )}
             </div>

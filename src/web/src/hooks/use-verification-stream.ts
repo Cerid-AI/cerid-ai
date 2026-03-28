@@ -173,10 +173,9 @@ export function useVerificationStream(
     let receivedSummary = false
 
     // Timeout: abort verification if it takes too long.
-    // Backend can take up to 120s for 10 claims with retries, rate limits,
-    // web search escalation, and consistency checking.  180s provides
-    // headroom for worst-case scenarios with multiple 429 retries.
-    const STREAM_TIMEOUT_MS = 180_000
+    // Backend total deadline is 90s (parallel verification with 15s per-claim
+    // timeouts).  90s frontend timeout matches the backend ceiling.
+    const STREAM_TIMEOUT_MS = 90_000
     const timeoutId = setTimeout(() => {
       if (!cancelled) {
         cancelled = true

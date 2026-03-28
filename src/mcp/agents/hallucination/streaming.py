@@ -279,6 +279,8 @@ async def verify_response_streaming(
 
     # Extraction with timeout — if Bifrost hangs or crashes, the generator
     # must still yield a summary instead of dying with an unhandled exception.
+    # On timeout/error, fall back to heuristic extraction so claims are still
+    # produced even when the LLM is unreachable.
     EXTRACTION_TIMEOUT = 30  # seconds — Bifrost default is 20s
     try:
         claims, method = await asyncio.wait_for(
@@ -287,16 +289,35 @@ async def verify_response_streaming(
         )
     except TimeoutError:
         logger.error(
-            "Claim extraction timed out after %ds for conversation %s",
+            "Claim extraction timed out after %ds for conversation %s — "
+            "falling back to heuristic",
             EXTRACTION_TIMEOUT, conversation_id,
         )
         claims, method = [], "timeout"
     except Exception as extraction_exc:
         logger.error(
-            "Claim extraction failed for conversation %s: %s",
+            "Claim extraction failed for conversation %s: %s — "
+            "falling back to heuristic",
             conversation_id, extraction_exc,
         )
         claims, method = [], "error"
+
+    # Heuristic fallback when LLM extraction timed out or crashed.
+    # extract_claims() has its own internal LLM→heuristic fallback, but if
+    # the entire call timed out (e.g. Bifrost hung), we never reached the
+    # heuristic path inside it.  Run it directly here.
+    if not claims and method in ("timeout", "error"):
+        try:
+            from agents.hallucination.extraction import _extract_claims_heuristic
+            claims = _extract_claims_heuristic(response_text)
+            if claims:
+                method = "heuristic"
+                logger.info(
+                    "Heuristic fallback produced %d claims after %s",
+                    len(claims), method,
+                )
+        except Exception as heuristic_exc:
+            logger.warning("Heuristic extraction also failed: %s", heuristic_exc)
 
     if not claims:
         yield {

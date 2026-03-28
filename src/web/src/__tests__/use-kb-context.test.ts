@@ -210,9 +210,10 @@ describe("useKBContext", () => {
     const wrapper = createWrapper()
     const { result } = renderHook(() => useKBContext("test query"), { wrapper })
 
+    // Hook has retry: 1, so wait for both attempts to fail before checking error
     await waitFor(() => {
-      expect(result.current.error).toBeTruthy()
-    })
+      expect(result.current.isError).toBe(true)
+    }, { timeout: 5000 })
     expect(result.current.error?.message).toBe("Network error")
   })
 
