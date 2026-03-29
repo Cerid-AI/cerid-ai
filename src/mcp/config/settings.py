@@ -90,8 +90,8 @@ TEMPORAL_RECENCY_WEIGHT = 0.1        # max boost from recency (added to relevanc
 # ---------------------------------------------------------------------------
 # Hybrid Search
 # ---------------------------------------------------------------------------
-HYBRID_VECTOR_WEIGHT = float(os.getenv("HYBRID_VECTOR_WEIGHT", "0.6"))
-HYBRID_KEYWORD_WEIGHT = float(os.getenv("HYBRID_KEYWORD_WEIGHT", "0.4"))
+HYBRID_VECTOR_WEIGHT = float(os.getenv("HYBRID_VECTOR_WEIGHT", "0.5"))
+HYBRID_KEYWORD_WEIGHT = float(os.getenv("HYBRID_KEYWORD_WEIGHT", "0.5"))
 BM25_DATA_DIR = os.path.join(os.getenv("DATA_DIR", "data"), "bm25")
 QUERY_CONTEXT_MAX_CHARS = 14_000    # default max chars assembled for LLM context
 
@@ -145,9 +145,9 @@ RERANK_ONNX_FILENAME = os.getenv("RERANK_ONNX_FILENAME", "onnx/model.onnx")
 RERANK_MODEL_CACHE_DIR = os.getenv("RERANK_MODEL_CACHE_DIR", "")
 
 # Score blending weights (cross-encoder or LLM score vs original hybrid score)
-RERANK_CE_WEIGHT = float(os.getenv("RERANK_CE_WEIGHT", "0.6"))
-RERANK_LLM_WEIGHT = float(os.getenv("RERANK_LLM_WEIGHT", "0.6"))
-RERANK_ORIGINAL_WEIGHT = float(os.getenv("RERANK_ORIGINAL_WEIGHT", "0.4"))
+RERANK_CE_WEIGHT = float(os.getenv("RERANK_CE_WEIGHT", "0.4"))
+RERANK_LLM_WEIGHT = float(os.getenv("RERANK_LLM_WEIGHT", "0.4"))
+RERANK_ORIGINAL_WEIGHT = float(os.getenv("RERANK_ORIGINAL_WEIGHT", "0.6"))
 
 # ---------------------------------------------------------------------------
 # Knowledge Graph Traversal
