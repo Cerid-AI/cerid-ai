@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 
+import config
 from middleware.request_id import tracing_headers
 from utils.circuit_breaker import CircuitOpenError, get_breaker
 
@@ -128,7 +129,7 @@ async def call_llm(
         )
 
     if not model:
-        model = os.getenv("INTERNAL_LLM_MODEL", "") or "meta-llama/llama-3.3-70b-instruct"
+        model = os.getenv("INTERNAL_LLM_MODEL", "") or config.LLM_INTERNAL_MODEL
 
     model = _strip_openrouter_prefix(model)
 
@@ -209,7 +210,7 @@ async def call_llm_raw(
         )
 
     if not model:
-        model = os.getenv("INTERNAL_LLM_MODEL", "") or "meta-llama/llama-3.3-70b-instruct"
+        model = os.getenv("INTERNAL_LLM_MODEL", "") or config.LLM_INTERNAL_MODEL
 
     model = _strip_openrouter_prefix(model)
 
