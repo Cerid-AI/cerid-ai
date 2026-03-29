@@ -70,7 +70,9 @@ def _check_model(
     valid: list[str], invalid: list[str], pricing_updated: list[str], context: str,
 ) -> None:
     """Check a single model against the OpenRouter catalog."""
-    entry = catalog.get(_strip_prefix(model_id))
+    # Strip openrouter/ prefix and :online/:free suffixes for catalog lookup
+    lookup = _strip_prefix(model_id).split(":")[0]
+    entry = catalog.get(lookup)
     if entry is None:
         invalid.append(f"{model_id} ({context})")
         return
