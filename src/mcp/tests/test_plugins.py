@@ -249,7 +249,7 @@ class TestFeatureFlags:
             with pytest.raises(HTTPException) as exc_info:
                 await dummy_endpoint()
             assert exc_info.value.status_code == 403
-            assert "Pro" in exc_info.value.detail
+            assert "tier" in exc_info.value.detail.lower()
 
     @pytest.mark.asyncio
     async def test_require_feature_allows_enabled(self):

@@ -23,7 +23,7 @@ def _make_plugin_dir(tmp_path: Path) -> Path:
         "version": "0.1.0",
         "description": "OCR parsing plugin",
         "type": "parser",
-        "tier_required": "pro",
+        "tier": "pro",
         "capabilities": ["parser"],
         "file_types": [".pdf", ".tiff"],
     }))
@@ -36,7 +36,7 @@ def _make_plugin_dir(tmp_path: Path) -> Path:
         "version": "0.2.0",
         "description": "Advanced analytics plugin",
         "type": "middleware",
-        "tier_required": "community",
+        "tier": "community",
         "capabilities": ["analytics"],
     }))
 
@@ -372,7 +372,7 @@ class TestScanPlugins:
                 "version": "1.0.0",
                 "description": "A new plugin",
                 "type": "parser",
-                "tier_required": "community",
+                "tier": "community",
             }))
 
             # Rescan
