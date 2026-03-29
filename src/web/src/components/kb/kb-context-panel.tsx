@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { X, Search, Loader2, Zap, Upload, Database, FileText, Layers, Archive, FileInput, AlertCircle } from "lucide-react"
+import { X, Search, Loader2, Zap, Upload, Database, FileText, Layers, Archive, FileInput, AlertCircle, Globe } from "lucide-react"
 import { ArtifactCard } from "./artifact-card"
 import { DomainFilter } from "./domain-filter"
 import { TagFilter } from "./tag-filter"
@@ -215,19 +215,34 @@ export function KBContextPanel({
             </div>
           )}
 
-          {results.map((result) => (
-            <ArtifactCard
-              key={`${result.artifact_id}-${result.chunk_index}`}
-              result={result}
-              isSelected={selectedArtifactId === result.artifact_id}
-              onSelect={() =>
-                setSelectedArtifactId(
-                  selectedArtifactId === result.artifact_id ? null : result.artifact_id,
-                )
-              }
-              onInject={() => injectResult(result)}
-            />
-          ))}
+          {results.map((result) =>
+            result.domain === "external" ? (
+              <div key={`${result.artifact_id}-${result.chunk_index}`} className="flex items-start gap-2 rounded-md border px-3 py-2">
+                <Globe className="h-3.5 w-3.5 shrink-0 text-blue-400 mt-0.5" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-medium">{result.filename}</p>
+                  <p className="mt-0.5 text-[11px] text-muted-foreground line-clamp-2">{result.content}</p>
+                  {result.source_url && (
+                    <a href={result.source_url} target="_blank" rel="noopener noreferrer" className="mt-0.5 inline-block text-[10px] text-primary hover:underline">
+                      Source &rarr;
+                    </a>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <ArtifactCard
+                key={`${result.artifact_id}-${result.chunk_index}`}
+                result={result}
+                isSelected={selectedArtifactId === result.artifact_id}
+                onSelect={() =>
+                  setSelectedArtifactId(
+                    selectedArtifactId === result.artifact_id ? null : result.artifact_id,
+                  )
+                }
+                onInject={() => injectResult(result)}
+              />
+            ),
+          )}
         </div>
 
         {/* Graph preview for selected artifact */}

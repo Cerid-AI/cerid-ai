@@ -244,6 +244,7 @@ export interface KBQueryResult {
   cross_domain?: boolean
   quality_score?: number
   summary?: string
+  source_url?: string
 }
 
 export interface AgentQueryResponse {
@@ -576,6 +577,7 @@ export interface ServerSettings {
   redis_url?: string
   archive_path?: string
   chunking_mode?: string
+  rag_mode?: string
   // Search tuning (read-write)
   hybrid_vector_weight?: number
   hybrid_keyword_weight?: number
@@ -651,6 +653,7 @@ export interface SettingsUpdate {
   semantic_cache_threshold?: number
   enable_memory_consolidation?: boolean
   enable_context_compression?: boolean
+  rag_mode?: string
   // Ollama add-on
   internal_llm_provider?: string
   internal_llm_model?: string

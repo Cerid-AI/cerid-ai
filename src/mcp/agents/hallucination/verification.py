@@ -976,6 +976,25 @@ async def verify_claim(
             if r.get("relevance", 0) >= config.VERIFICATION_MIN_RELEVANCE
         ]
 
+        # --- Data source enrichment: when KB has no results, check external
+        # data sources BEFORE falling back to expensive LLM verification.
+        if not all_results and not streaming:
+            try:
+                from utils.data_sources import registry as ds_registry
+                if ds_registry.has_enabled_sources():
+                    ext_facts = await ds_registry.query_all(claim)
+                    for fact in ext_facts[:2]:
+                        all_results.append({
+                            "content": fact.get("content", ""),
+                            "relevance": fact.get("confidence", 0.7) * 0.7,
+                            "artifact_id": f"external:{fact.get('source_name', 'unknown')}",
+                            "filename": fact.get("title", "External Source"),
+                            "domain": "external",
+                            "source_url": fact.get("source_url", ""),
+                        })
+            except Exception as exc:
+                logger.debug("Data source enrichment for verification skipped: %s", exc)
+
         # --- Anti-circularity: penalise KB results that were injected into
         # the LLM prompt.  These cannot independently verify a claim because
         # the response was *derived* from them — matching is expected.

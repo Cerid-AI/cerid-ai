@@ -86,10 +86,15 @@ export function useModelSwitch({
         case "summarize": {
           setIsSummarizing(true)
           try {
+            // Abort if summarization takes >20s — don't leave user stuck
+            const controller = new AbortController()
+            const timer = setTimeout(() => controller.abort(), 20_000)
             const summary = await summarizeConversation(
               messages.map((m) => ({ role: m.role, content: m.content })),
               currentModel.id,
+              controller.signal,
             )
+            clearTimeout(timer)
             const summaryMessage: ChatMessage = {
               id: uuid(),
               role: "system",
@@ -99,7 +104,7 @@ export function useModelSwitch({
             onReplaceMessages([summaryMessage])
             onModelChange(targetModelId)
           } catch (err) {
-            if (import.meta.env.DEV) console.error("[model-switch] Summarization failed, falling back to continue:", err)
+            if (import.meta.env.DEV) console.error("[model-switch] Summarization failed, switching without summary:", err)
             onModelChange(targetModelId)
           } finally {
             setIsSummarizing(false)
@@ -108,6 +113,7 @@ export function useModelSwitch({
         }
 
         case "fresh":
+          setIsSummarizing(false)  // Clear any stuck summarizing state
           onClearMessages()
           onModelChange(targetModelId)
           break

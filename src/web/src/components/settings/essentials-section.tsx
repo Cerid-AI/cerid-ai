@@ -48,6 +48,23 @@ export function EssentialsSection({ settings, sections, toggleSection, patch }: 
               />
             )}
 
+            <div className="flex items-center justify-between">
+              <LabelWithInfo label="RAG Mode" info="How the system decides when to inject KB context into queries" />
+              <Select
+                value={settings.rag_mode ?? "smart"}
+                onValueChange={(v) => patch({ rag_mode: v })}
+              >
+                <SelectTrigger size="sm" className="w-36">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="smart">Smart (auto-detect)</SelectItem>
+                  <SelectItem value="always">Always inject KB</SelectItem>
+                  <SelectItem value="manual">Manual only</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
             <div className="my-1 h-px bg-border" />
 
             <div className="flex items-center justify-between">

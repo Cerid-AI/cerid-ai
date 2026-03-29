@@ -95,6 +95,9 @@ SEMANTIC_CACHE_TTL = int(os.getenv("SEMANTIC_CACHE_TTL", "600"))
 SEMANTIC_CACHE_MAX_ENTRIES = int(os.getenv("SEMANTIC_CACHE_MAX_ENTRIES", "500"))
 SEMANTIC_CACHE_HNSW_EF = int(os.getenv("SEMANTIC_CACHE_HNSW_EF", "50"))
 
+# Parent-child chunking retrieval (Phase 51)
+ENABLE_PARENT_CHILD_RETRIEVAL = os.getenv("ENABLE_PARENT_CHILD_RETRIEVAL", "false").lower() in ("true", "1")
+
 # Degradation tiers: circuit-breaker-aware graceful degradation (Phase 51)
 ENABLE_DEGRADATION_TIERS = os.getenv("ENABLE_DEGRADATION_TIERS", "false").lower() == "true"
 
@@ -134,6 +137,7 @@ FEATURE_TOGGLES: dict[str, bool] = {
     "enable_model_router": ENABLE_MODEL_ROUTER,
     "enable_memory_consolidation": ENABLE_MEMORY_CONSOLIDATION,
     "enable_context_compression": ENABLE_CONTEXT_COMPRESSION,
+    "enable_parent_child_retrieval": ENABLE_PARENT_CHILD_RETRIEVAL,
 }
 
 # ---------------------------------------------------------------------------

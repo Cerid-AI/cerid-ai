@@ -123,6 +123,9 @@ class SettingsUpdateRequest(BaseModel):
     enable_context_compression: bool | None = Field(
         None, description="Enable LLM-based conversation context compression"
     )
+    rag_mode: str | None = Field(
+        None, description="RAG injection mode: smart, always, or manual"
+    )
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -169,6 +172,7 @@ async def get_settings_endpoint():
         "redis_url": _redact_url(config.REDIS_URL),
         "archive_path": config.ARCHIVE_PATH,
         "chunking_mode": config.CHUNKING_MODE,
+        "rag_mode": config.RAG_MODE,
         # Search tuning (read-write)
         "hybrid_vector_weight": config.HYBRID_VECTOR_WEIGHT,
         "hybrid_keyword_weight": config.HYBRID_KEYWORD_WEIGHT,
@@ -353,6 +357,16 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
     if req.enable_context_compression is not None:
         set_toggle("enable_context_compression", req.enable_context_compression)
         updated["enable_context_compression"] = req.enable_context_compression
+
+    if req.rag_mode is not None:
+        valid_rag_modes = ("smart", "always", "manual")
+        if req.rag_mode not in valid_rag_modes:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid rag_mode: '{req.rag_mode}'. Must be one of {valid_rag_modes}",
+            )
+        config.RAG_MODE = req.rag_mode
+        updated["rag_mode"] = req.rag_mode
 
     if not updated:
         raise HTTPException(
