@@ -30,7 +30,7 @@ describe("KBContextIndicator", () => {
 
   it("renders indicator when sources present", () => {
     render(<KBContextIndicator sources={[makeSource()]} />)
-    expect(screen.getByText(/KB context sent to LLM/i)).toBeTruthy()
+    expect(screen.getByText(/Context sent to LLM/i)).toBeTruthy()
   })
 
   it("shows source count", () => {

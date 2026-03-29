@@ -6,8 +6,9 @@ import type { ServerSettings, SettingsUpdate } from "@/lib/types"
 import type { SectionKey } from "./settings-primitives"
 import { cn } from "@/lib/utils"
 import { PRESETS, detectActivePreset } from "@/lib/settings-presets"
+import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card"
-import { ChevronDown, ChevronRight, Cpu, SearchIcon } from "lucide-react"
+import { ChevronDown, ChevronRight, Cpu, SearchIcon, Layers } from "lucide-react"
 import { SectionHeading, Row, SliderRow, PipelineToggle } from "./settings-primitives"
 
 interface PipelineSectionProps {
@@ -260,6 +261,68 @@ export function PipelineSection({ settings, sections, toggleSection, patch }: Pi
               value={(settings.temporal_recency_weight ?? 0.1).toFixed(2)}
               info="Maximum boost from document recency"
             />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* -- Custom Smart RAG Config (Pro tier) -- */}
+      <SectionHeading icon={Layers} label="Smart RAG Config" open={sections.rag_config} onToggle={() => toggleSection("rag_config")} />
+      {sections.rag_config && (
+        <Card className="mb-4">
+          <CardHeader className="px-4 pb-2 pt-4">
+            <CardDescription className="flex items-center gap-2 text-xs">
+              Per-source weights and toggles for Custom Smart RAG mode.
+              {(settings.feature_tier ?? "community") === "community" && (
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-teal-500">Pro</Badge>
+              )}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4 px-4 pb-4">
+            {(settings.feature_tier ?? "community") === "community" ? (
+              <p className="text-xs text-muted-foreground">
+                Upgrade to Pro tier to configure per-source weights, memory type toggles, and custom RAG presets.
+                Smart mode (automatic KB + memory + external) is available on all tiers.
+              </p>
+            ) : (
+              <>
+                <SliderRow
+                  label="KB Source Weight"
+                  value={1.0}
+                  onChange={() => {}}
+                  min={0} max={2} step={0.1}
+                  info="Weight multiplier for KB relevance scores"
+                />
+                <SliderRow
+                  label="Memory Weight"
+                  value={1.0}
+                  onChange={() => {}}
+                  min={0} max={2} step={0.1}
+                  info="Weight multiplier for memory recall scores"
+                />
+                <SliderRow
+                  label="External Weight"
+                  value={1.0}
+                  onChange={() => {}}
+                  min={0} max={2} step={0.1}
+                  info="Weight multiplier for external source scores"
+                />
+
+                <div className="h-px bg-border" />
+
+                <div className="space-y-2">
+                  <p className="text-xs font-medium">Memory Type Filters</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Select which memory types are included in Smart/Custom Smart recall.
+                  </p>
+                  {["empirical", "decision", "preference", "project_context", "temporal", "conversational"].map((type) => (
+                    <label key={type} className="flex items-center gap-2 text-xs">
+                      <input type="checkbox" defaultChecked className="rounded border-muted-foreground/30" />
+                      {type.replace("_", " ")}
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
       )}

@@ -3,7 +3,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react"
 import { fetchSettings, updateSettings, syncPreferences, fetchUserState } from "@/lib/api"
-import type { RoutingMode, SettingsUpdate } from "@/lib/types"
+import type { RagMode, RoutingMode, SettingsUpdate } from "@/lib/types"
 
 function readBool(key: string): boolean {
   try { return localStorage.getItem(key) === "true" } catch { return false }
@@ -105,6 +105,14 @@ export function useSettings() {
     })
   }, [])
 
+  const [ragMode, setRagModeState] = useState<RagMode>(() => {
+    try {
+      const v = localStorage.getItem("cerid-rag-mode")
+      if (v === "manual" || v === "smart" || v === "custom_smart") return v
+    } catch { /* noop */ }
+    return "manual"
+  })
+
   const [costSensitivity, setCostSensitivity] = useState<"low" | "medium" | "high">(() => {
     try {
       const v = localStorage.getItem("cerid-cost-sensitivity")
@@ -134,6 +142,13 @@ export function useSettings() {
         }
         if (s.enable_hallucination_check !== undefined) hydrateHallucination(s.enable_hallucination_check)
         if (s.enable_memory_extraction !== undefined) hydrateMemory(s.enable_memory_extraction)
+        if (s.rag_mode && !localStorage.getItem("cerid-rag-mode")) {
+          const rm = s.rag_mode as string
+          if (rm === "manual" || rm === "smart" || rm === "custom_smart") {
+            setRagModeState(rm as RagMode)
+            persist("cerid-rag-mode", rm)
+          }
+        }
         if (s.enable_model_router !== undefined) {
           const current = localStorage.getItem("cerid-routing-mode")
           if (current !== "auto") {
@@ -222,6 +237,12 @@ export function useSettings() {
     updateSettings({ auto_inject_threshold: value }).catch(() => { /* noop */ })
   }, [])
 
+  const setRagMode = useCallback((mode: RagMode) => {
+    setRagModeState(mode)
+    persist("cerid-rag-mode", mode)
+    updateSettings({ rag_mode: mode }).catch(() => { /* noop */ })
+  }, [])
+
   const updateCostSensitivity = useCallback((value: "low" | "medium" | "high") => {
     setCostSensitivity(value)
     persist("cerid-cost-sensitivity", value)
@@ -231,6 +252,7 @@ export function useSettings() {
   return {
     feedbackLoop, toggleFeedbackLoop,
     showDashboard, toggleDashboard,
+    ragMode, setRagMode,
     routingMode, setRoutingMode, cycleRoutingMode,
     autoInject, toggleAutoInject,
     autoInjectThreshold, setAutoInjectThreshold,

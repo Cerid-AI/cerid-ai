@@ -214,6 +214,32 @@ Deep debugging session fixing production crashes and polishing features built in
 - [x] 7 backend tests for _reclassify_recency
 - [x] Monte Carlo evaluation harness (33 tests, 54 scenarios, 200 random samples)
 
+### Memory Salience Bug Fixes (Sprint 1) ✅ 2026-03-29
+- [x] Fix `stability_days` encoding: Neo4j `-1.0` sentinel → `999999.0` (match ChromaDB `"inf"`)
+- [x] Fix `pkb_memory_archive` outputSchema (was copy-pasted from `pkb_memory_extract`)
+- [x] Fix `pkb_memory_recall` output — expose `memory_type`, `age_days`, `source_authority`, `summary`, `base_similarity`
+- [x] Fix `calculate_memory_score` docstring retention figure ("71%" → "~94.9%")
+- [x] Remove dead code `MEMORY_TYPE_REINFORCEMENT_BOOST` from settings.py
+- [x] Harden migration script idempotency guard (`meta.get()` → `"key" in meta`)
+
+### Unified RAG Modes — All Sprints Complete ✅ 2026-03-29
+> **Plan:** [`docs/plans/PLAN_MEMORY_SALIENCE.md`](../docs/plans/PLAN_MEMORY_SALIENCE.md) + [RAG Modes plan](../.claude/plans/)
+- [x] New `agents/retrieval_orchestrator.py` — wraps `agent_query()` + `recall_memories()` in parallel
+- [x] Three modes: manual (pass-through), smart (auto KB+memory+external), custom_smart (Pro, per-source weights)
+- [x] Config: `RAG_ORCHESTRATION_MODE`, `MEMORY_RECALL_TOP_K/MIN_SCORE/TIMEOUT_MS` in settings.py
+- [x] Feature flag: `custom_smart_rag` (Pro tier), `ENABLE_MEMORY_RECALL` toggle
+- [x] `/agent/query` gains `rag_mode` + `source_config` params, routes through orchestrator in smart modes
+- [x] New endpoint: `POST /agent/memory/recall` for explicit memory browsing
+- [x] Response enriched with `source_breakdown` (kb/memory/external) + `rag_mode` field
+- [x] Frontend Sprint 2: Knowledge Console UI + RAG mode selector ✅ 2026-03-29
+- [x] Frontend Sprint 3: memories-pane.tsx updated to 6-type schema with legacy fallback ✅ 2026-03-29
+- [x] Frontend Sprint 3: Manual mode memory recall + external sections in KB pane ✅ 2026-03-29
+- [x] Sprint 4: Custom Smart RAG config UI (Pro tier) — pipeline-section.tsx ✅ 2026-03-29
+- [x] Sprint 5: Backend tests — 16 tests across 5 classes in test_retrieval_orchestrator.py ✅ 2026-03-29
+- [x] Sprint 6: `pkb_agent_query` MCP tool gains `rag_mode` + `source_config` params ✅ 2026-03-29
+- [x] Sprint 6: SDK `/sdk/v1/query` inherits `rag_mode` support (already delegates to `/agent/query`) ✅ 2026-03-29
+- [x] Sprint 6: Docs updated — API_REFERENCE.md, TIER_MATRIX.md ✅ 2026-03-29
+
 ---
 
 ## Sentry Wiring + Verification Fixes + Ollama Add-On (2026-03-22) ✅

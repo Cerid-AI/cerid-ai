@@ -18,22 +18,34 @@ import {
   Loader2,
   X,
   Archive,
+  Clock,
+  MessageSquare,
+  FolderKanban,
 } from "lucide-react"
 import { fetchMemories, updateMemory, deleteMemory, archiveMemories } from "@/lib/api"
 import type { Memory } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 const MEMORY_TYPES = [
-  { key: "fact", label: "Facts", icon: Lightbulb, bg: "bg-blue-500/10", text: "text-blue-500" },
+  { key: "empirical", label: "Empirical", icon: Lightbulb, bg: "bg-blue-500/10", text: "text-blue-500" },
   { key: "decision", label: "Decisions", icon: ArrowRight, bg: "bg-amber-500/10", text: "text-amber-500" },
   { key: "preference", label: "Preferences", icon: Bookmark, bg: "bg-green-500/10", text: "text-green-500" },
-  { key: "action_item", label: "Action Items", icon: CheckCircle, bg: "bg-red-500/10", text: "text-red-500" },
+  { key: "project_context", label: "Project", icon: FolderKanban, bg: "bg-purple-500/10", text: "text-purple-500" },
+  { key: "temporal", label: "Temporal", icon: Clock, bg: "bg-orange-500/10", text: "text-orange-500" },
+  { key: "conversational", label: "Conversational", icon: MessageSquare, bg: "bg-cyan-500/10", text: "text-cyan-500" },
 ] as const
+
+// Legacy type mapping for memories created before Phase 51
+const LEGACY_TYPE_MAP: Record<string, string> = {
+  fact: "empirical",
+  action_item: "project_context",
+}
 
 type MemoryTypeKey = (typeof MEMORY_TYPES)[number]["key"]
 
 function getTypeConfig(type: string) {
-  return MEMORY_TYPES.find((t) => t.key === type) ?? MEMORY_TYPES[0]
+  const mapped = LEGACY_TYPE_MAP[type] ?? type
+  return MEMORY_TYPES.find((t) => t.key === mapped) ?? MEMORY_TYPES[0]
 }
 
 function formatDate(iso: string): string {
@@ -100,11 +112,12 @@ export default function MemoriesPane() {
   }, [loadMemories])
 
   const typeCounts = memories.reduce<Record<string, number>>((acc, m) => {
-    acc[m.type] = (acc[m.type] ?? 0) + 1
+    const mapped = LEGACY_TYPE_MAP[m.type] ?? m.type
+    acc[mapped] = (acc[mapped] ?? 0) + 1
     return acc
   }, {})
 
-  const filtered = filter ? memories.filter((m) => m.type === filter) : memories
+  const filtered = filter ? memories.filter((m) => (LEGACY_TYPE_MAP[m.type] ?? m.type) === filter) : memories
 
   const handleEdit = (memory: Memory) => {
     setEditingId(memory.id)

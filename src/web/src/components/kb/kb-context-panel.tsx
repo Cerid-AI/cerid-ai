@@ -1,13 +1,14 @@
 // Copyright (c) 2026 Justin Michaels. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useCallback, useEffect } from "react"
+import { useState, useCallback, useEffect, useMemo } from "react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { X, Search, Loader2, Zap, Upload, Database, FileText, Layers, Archive, FileInput, AlertCircle, Globe } from "lucide-react"
+import { X, Search, Loader2, Zap, Upload, Database, FileText, Layers, Archive, FileInput, AlertCircle, Globe, Brain, ChevronDown, ChevronRight, Plus } from "lucide-react"
 import { ArtifactCard } from "./artifact-card"
 import { DomainFilter } from "./domain-filter"
 import { TagFilter } from "./tag-filter"
@@ -16,8 +17,9 @@ import { UploadDialog } from "./upload-dialog"
 import { useSettings } from "@/hooks/use-settings"
 import { useDragDrop } from "@/hooks/use-drag-drop"
 import type { UseKBContextReturn } from "@/hooks/use-kb-context"
-import { uploadFile, fetchKBStats } from "@/lib/api"
+import { uploadFile, fetchKBStats, recallMemories } from "@/lib/api"
 import type { KBStats } from "@/lib/api"
+import type { MemoryRecallResult, KBQueryResult } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 interface KBContextPanelProps extends UseKBContextReturn {
@@ -49,6 +51,38 @@ export function KBContextPanel({
 }: KBContextPanelProps) {
   const confidencePct = Math.round(confidence * 100)
   const { autoInject, toggleAutoInject } = useSettings()
+
+  // Memory recall state
+  const [memoryResults, setMemoryResults] = useState<MemoryRecallResult[]>([])
+  const [memoryLoading, setMemoryLoading] = useState(false)
+  const [memorySectionOpen, setMemorySectionOpen] = useState(true)
+  const [externalSectionOpen, setExternalSectionOpen] = useState(true)
+
+  // Auto-recall memories when results change (piggyback on KB query)
+  const latestQuery = manualQuery || ""
+  useEffect(() => {
+    if (!hasQueried || !results.length) return
+    setMemoryLoading(true)
+    // Use the query that produced the current KB results
+    recallMemories(latestQuery || results[0]?.content?.slice(0, 100) || "", 5, 0.4)
+      .then(setMemoryResults)
+      .catch(() => setMemoryResults([]))
+      .finally(() => setMemoryLoading(false))
+  }, [hasQueried, results.length, latestQuery]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Separate external sources from KB results
+  const { kbResults, externalResults } = useMemo(() => {
+    const kb: KBQueryResult[] = []
+    const ext: KBQueryResult[] = []
+    for (const r of results) {
+      if (r.domain === "external" || r.source_url) {
+        ext.push(r)
+      } else {
+        kb.push(r)
+      }
+    }
+    return { kbResults: kb, externalResults: ext }
+  }, [results])
 
   // Drag-drop for file ingestion
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
@@ -215,33 +249,140 @@ export function KBContextPanel({
             </div>
           )}
 
-          {results.map((result) =>
-            result.domain === "external" ? (
-              <div key={`${result.artifact_id}-${result.chunk_index}`} className="flex items-start gap-2 rounded-md border px-3 py-2">
-                <Globe className="h-3.5 w-3.5 shrink-0 text-blue-400 mt-0.5" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium">{result.filename}</p>
-                  <p className="mt-0.5 text-[11px] text-muted-foreground line-clamp-2">{result.content}</p>
-                  {result.source_url && (
-                    <a href={result.source_url} target="_blank" rel="noopener noreferrer" className="mt-0.5 inline-block text-[10px] text-primary hover:underline">
-                      Source &rarr;
-                    </a>
+          {/* KB Results */}
+          {kbResults.map((result) => (
+            <ArtifactCard
+              key={`${result.artifact_id}-${result.chunk_index}`}
+              result={result}
+              isSelected={selectedArtifactId === result.artifact_id}
+              onSelect={() =>
+                setSelectedArtifactId(
+                  selectedArtifactId === result.artifact_id ? null : result.artifact_id,
+                )
+              }
+              onInject={() => injectResult(result)}
+            />
+          ))}
+
+          {/* Memories section */}
+          {hasQueried && (
+            <div className="mt-3 border rounded-md overflow-hidden">
+              <button
+                className="flex w-full items-center gap-2 px-3 py-2 hover:bg-muted/50 text-left"
+                onClick={() => setMemorySectionOpen(!memorySectionOpen)}
+              >
+                {memorySectionOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                <Brain className="h-3 w-3 text-purple-400" />
+                <span className="flex-1 text-xs font-medium">Memories</span>
+                {memoryLoading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+                <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-purple-500/10 text-purple-500">
+                  {memoryResults.length}
+                </Badge>
+              </button>
+              {memorySectionOpen && (
+                <div className="space-y-1 px-3 pb-2">
+                  {memoryResults.length === 0 && !memoryLoading && (
+                    <p className="text-[11px] text-muted-foreground py-1">No relevant memories</p>
                   )}
+                  {memoryResults.map((m, i) => (
+                    <div key={`mem-${m.memory_id}-${i}`} className="flex items-start gap-2 rounded-md border px-2.5 py-1.5">
+                      <Brain className={cn("h-3 w-3 shrink-0 mt-0.5", {
+                        "text-blue-400": m.memory_type === "empirical",
+                        "text-amber-400": m.memory_type === "decision",
+                        "text-green-400": m.memory_type === "preference",
+                        "text-purple-400": m.memory_type === "project_context",
+                        "text-orange-400": m.memory_type === "temporal",
+                        "text-cyan-400": m.memory_type === "conversational",
+                      })} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-1">
+                          <p className="truncate text-[11px] font-medium">{m.summary || m.content.slice(0, 60)}</p>
+                          <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">{Math.round(m.relevance * 100)}%</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                          <Badge variant="outline" className="text-[9px] px-1 py-0">{m.memory_type}</Badge>
+                          <span>{Math.round(m.age_days)}d</span>
+                        </div>
+                      </div>
+                      <TooltipProvider delayDuration={0}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 shrink-0"
+                              onClick={() => injectResult({
+                                artifact_id: m.memory_id,
+                                filename: `Memory: ${m.memory_type}`,
+                                domain: "conversations",
+                                relevance: m.relevance,
+                                chunk_index: 0,
+                                content: m.content,
+                                collection: "memories",
+                                ingested_at: "",
+                              })}
+                            >
+                              <Plus className="h-3 w-3" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Inject into chat</TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </div>
+                  ))}
                 </div>
-              </div>
-            ) : (
-              <ArtifactCard
-                key={`${result.artifact_id}-${result.chunk_index}`}
-                result={result}
-                isSelected={selectedArtifactId === result.artifact_id}
-                onSelect={() =>
-                  setSelectedArtifactId(
-                    selectedArtifactId === result.artifact_id ? null : result.artifact_id,
-                  )
-                }
-                onInject={() => injectResult(result)}
-              />
-            ),
+              )}
+            </div>
+          )}
+
+          {/* External sources section */}
+          {hasQueried && externalResults.length > 0 && (
+            <div className="mt-2 border rounded-md overflow-hidden">
+              <button
+                className="flex w-full items-center gap-2 px-3 py-2 hover:bg-muted/50 text-left"
+                onClick={() => setExternalSectionOpen(!externalSectionOpen)}
+              >
+                {externalSectionOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                <Globe className="h-3 w-3 text-green-400" />
+                <span className="flex-1 text-xs font-medium">External</span>
+                <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-green-500/10 text-green-500">
+                  {externalResults.length}
+                </Badge>
+              </button>
+              {externalSectionOpen && (
+                <div className="space-y-1 px-3 pb-2">
+                  {externalResults.map((result) => (
+                    <div key={`ext-${result.artifact_id}-${result.chunk_index}`} className="flex items-start gap-2 rounded-md border px-2.5 py-1.5">
+                      <Globe className="h-3 w-3 shrink-0 text-green-400 mt-0.5" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[11px] font-medium">{result.filename}</p>
+                        <p className="mt-0.5 text-[10px] text-muted-foreground line-clamp-2">{result.content}</p>
+                        {result.source_url && (
+                          <a href={result.source_url} target="_blank" rel="noopener noreferrer" className="mt-0.5 inline-block text-[10px] text-primary hover:underline">
+                            Source &rarr;
+                          </a>
+                        )}
+                      </div>
+                      <TooltipProvider delayDuration={0}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 shrink-0"
+                              onClick={() => injectResult(result)}
+                            >
+                              <Plus className="h-3 w-3" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Inject into chat</TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </div>
 

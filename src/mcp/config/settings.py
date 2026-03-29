@@ -378,14 +378,6 @@ MEMORY_TYPE_STABILITY: dict[str, float] = {
     "temporal": 0.0,                 # "Meeting on Tuesday" — event-based step function
     "conversational": 3.0,           # Casual chat, small talk — very fast exponential
 }
-MEMORY_TYPE_REINFORCEMENT_BOOST: dict[str, float] = {
-    "empirical": 0.0,
-    "decision": 0.3,
-    "preference": 0.2,
-    "project_context": 0.1,
-    "temporal": 0.0,
-    "conversational": 0.05,
-}
 # Power-law decay types get long-tail preservation; exponential types fade fast.
 MEMORY_POWER_LAW_TYPES = {"empirical", "decision", "preference"}
 MEMORY_EXPONENTIAL_TYPES = {"project_context", "temporal", "conversational"}
@@ -413,6 +405,14 @@ MEMORY_TYPE_MIGRATION: dict[str, str] = {
 
 # Max access log entries stored per memory node (for recency-weighted counting).
 MEMORY_ACCESS_LOG_MAX = 50
+
+# ---------------------------------------------------------------------------
+# Retrieval Orchestration (RAG modes)
+# ---------------------------------------------------------------------------
+RAG_ORCHESTRATION_MODE = os.getenv("RAG_ORCHESTRATION_MODE", "manual")  # manual|smart|custom_smart
+MEMORY_RECALL_TOP_K = int(os.getenv("MEMORY_RECALL_TOP_K", "5"))
+MEMORY_RECALL_MIN_SCORE = float(os.getenv("MEMORY_RECALL_MIN_SCORE", "0.4"))
+MEMORY_RECALL_TIMEOUT_MS = int(os.getenv("MEMORY_RECALL_TIMEOUT_MS", "200"))
 
 # ---------------------------------------------------------------------------
 # Scheduled Maintenance — cron expressions

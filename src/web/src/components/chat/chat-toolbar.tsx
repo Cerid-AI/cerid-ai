@@ -16,7 +16,8 @@ import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { useRef, useEffect, useState, useCallback } from "react"
-import { Plus, Database, Rss, LayoutDashboard, Zap, Shield, ShieldCheck, MoreVertical, Brain, Check } from "lucide-react"
+import { Plus, Database, Rss, LayoutDashboard, Zap, Shield, ShieldCheck, MoreVertical, Brain, Check, Layers } from "lucide-react"
+import type { RagMode } from "@/lib/types"
 import { ModelSelect } from "./model-select"
 import { cn } from "@/lib/utils"
 
@@ -213,6 +214,9 @@ interface ChatToolbarProps {
   // Dashboard
   showDashboard: boolean
   toggleDashboard: () => void
+  // RAG mode
+  ragMode: RagMode
+  setRagMode: (mode: RagMode) => void
   // Routing
   routingMode: string
   setRoutingMode: (mode: "manual" | "recommend" | "auto") => void
@@ -234,10 +238,15 @@ export function ChatToolbar({
   feedbackLoop, toggleFeedbackLoop,
   memoryExtraction, toggleMemoryExtraction,
   showDashboard, toggleDashboard,
+  ragMode, setRagMode,
   routingMode, setRoutingMode, cycleRoutingMode,
   selectedModel, onModelChange,
   onNewChat,
 }: ChatToolbarProps) {
+  const cycleRagMode = useCallback(() => {
+    const next: RagMode = ragMode === "manual" ? "smart" : ragMode === "smart" ? "custom_smart" : "manual"
+    setRagMode(next)
+  }, [ragMode, setRagMode])
   return (
     <div className="flex items-center gap-2 border-b px-4 py-2">
       <Button variant="ghost" size="sm" onClick={onNewChat}>
@@ -249,6 +258,32 @@ export function ChatToolbar({
         {/* Advanced-only toggles */}
         {!isSimple && (
         <>
+        {/* RAG mode toggle */}
+        <ToolbarButtonWithMenu
+          icon={<Layers className="h-4 w-4" />}
+          active={ragMode !== "manual"}
+          onClick={cycleRagMode}
+          ariaLabel={`RAG mode: ${ragMode}`}
+          tooltip={
+            ragMode === "manual" ? "RAG: Manual"
+              : ragMode === "smart" ? "RAG: Smart (auto KB + memory + external)"
+              : "RAG: Custom Smart (Pro)"
+          }
+          menuContent={
+            <>
+              <MenuLabel>RAG Mode</MenuLabel>
+              <MenuRadioItem checked={ragMode === "manual"} onClick={() => setRagMode("manual")}>Manual</MenuRadioItem>
+              <MenuRadioItem checked={ragMode === "smart"} onClick={() => setRagMode("smart")}>Smart</MenuRadioItem>
+              <MenuRadioItem checked={ragMode === "custom_smart"} onClick={() => setRagMode("custom_smart")}>
+                <span className="flex items-center gap-1">
+                  Custom
+                  <Badge variant="outline" className="text-[9px] ml-1 px-1 py-0 text-teal-500">Pro</Badge>
+                </span>
+              </MenuRadioItem>
+            </>
+          }
+        />
+
         {/* KB toggle + settings menu */}
         <ToolbarButtonWithMenu
           icon={<Database className="h-4 w-4" />}
@@ -381,6 +416,13 @@ export function ChatToolbar({
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-48">
+              <button
+                className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent", ragMode !== "manual" && "text-brand bg-brand/10")}
+                onClick={cycleRagMode}
+              >
+                <Layers className="h-4 w-4" />
+                {ragMode === "manual" ? "RAG: Manual" : ragMode === "smart" ? "RAG: Smart" : "RAG: Custom"}
+              </button>
               <button
                 className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent", feedbackLoop && "text-brand bg-brand/10")}
                 onClick={toggleFeedbackLoop}

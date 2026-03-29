@@ -160,6 +160,7 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
           chunk_index: r.chunk_index,
           tags: r.tags,
           quality_score: r.quality_score,
+          source_type: r.source_url ? "external" as const : "kb" as const,
         }))
 
         const contextParts = dedupedSources.map(formatChunkWithHeader)

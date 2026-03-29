@@ -1,0 +1,240 @@
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Unified Retrieval Orchestrator — combines KB, memory, and external sources.
+
+Wraps ``agent_query()`` without modifying the existing 22-step RAG pipeline.
+Three modes:
+
+- **manual**: pass-through to ``agent_query()`` (existing behavior)
+- **smart**: parallel KB + memory recall, external source separation
+- **custom_smart** (Pro): smart + user-configurable source weights/toggles
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from typing import Any
+
+from config.settings import (
+    MEMORY_RECALL_MIN_SCORE,
+    MEMORY_RECALL_TIMEOUT_MS,
+    MEMORY_RECALL_TOP_K,
+)
+
+logger = logging.getLogger("ai-companion.retrieval")
+
+
+async def orchestrated_query(
+    query: str,
+    rag_mode: str = "manual",
+    domains: list[str] | None = None,
+    top_k: int = 10,
+    use_reranking: bool = True,
+    conversation_messages: list[dict[str, str]] | None = None,
+    chroma_client: Any = None,
+    redis_client: Any = None,
+    neo4j_driver: Any = None,
+    memory_top_k: int | None = None,
+    memory_min_score: float | None = None,
+    source_config: dict | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Unified retrieval across KB, memories, and external sources.
+
+    In manual mode, this is a pure pass-through to ``agent_query()``.
+    In smart/custom_smart modes, memory recall runs in parallel with the
+    KB query and results are grouped into a ``source_breakdown``.
+    """
+    from agents.query_agent import agent_query
+
+    if memory_top_k is None:
+        memory_top_k = MEMORY_RECALL_TOP_K
+    if memory_min_score is None:
+        memory_min_score = MEMORY_RECALL_MIN_SCORE
+
+    # --- Manual mode: pure pass-through ---
+    if rag_mode == "manual":
+        result = await agent_query(
+            query=query,
+            domains=domains,
+            top_k=top_k,
+            use_reranking=use_reranking,
+            conversation_messages=conversation_messages,
+            chroma_client=chroma_client,
+            redis_client=redis_client,
+            neo4j_driver=neo4j_driver,
+            **kwargs,
+        )
+        return result
+
+    # --- Smart / Custom Smart: parallel KB + memory recall ---
+    kb_task = agent_query(
+        query=query,
+        domains=domains,
+        top_k=top_k,
+        use_reranking=use_reranking,
+        conversation_messages=conversation_messages,
+        chroma_client=chroma_client,
+        redis_client=redis_client,
+        neo4j_driver=neo4j_driver,
+        **kwargs,
+    )
+
+    memory_task = _recall_with_timeout(
+        query=query,
+        chroma_client=chroma_client,
+        neo4j_driver=neo4j_driver,
+        top_k=memory_top_k,
+        min_score=memory_min_score,
+        timeout_ms=MEMORY_RECALL_TIMEOUT_MS,
+    )
+
+    kb_result, memory_results = await asyncio.gather(kb_task, memory_task)
+
+    # Separate external results from KB results
+    kb_sources = []
+    external_sources = []
+    for r in kb_result.get("results", []):
+        if r.get("source_type") == "external" or r.get("source_url"):
+            external_sources.append(r)
+        else:
+            kb_sources.append(r)
+
+    # Format memory results for source_breakdown
+    memory_sources = [
+        {
+            "content": m.get("text", ""),
+            "relevance": m.get("adjusted_score", 0.0),
+            "memory_type": m.get("memory_type", "empirical"),
+            "age_days": m.get("age_days", 0.0),
+            "summary": m.get("summary", ""),
+            "memory_id": m.get("memory_id", ""),
+            "source_authority": m.get("source_authority", 0.7),
+            "base_similarity": m.get("base_similarity", 0.0),
+            "access_count": m.get("access_count", 0),
+            "source_type": "memory",
+        }
+        for m in memory_results
+    ]
+
+    # Apply custom_smart source config (weights/toggles)
+    if rag_mode == "custom_smart" and source_config:
+        kb_sources, memory_sources, external_sources = _apply_source_config(
+            kb_sources, memory_sources, external_sources, source_config,
+        )
+
+    # Build source_breakdown
+    source_breakdown = {
+        "kb": kb_sources,
+        "memory": memory_sources,
+        "external": external_sources,
+    }
+
+    # Enrich the base result with orchestrator data
+    kb_result["source_breakdown"] = source_breakdown
+    kb_result["rag_mode"] = rag_mode
+
+    # Append memory context to the assembled context string
+    if memory_sources:
+        memory_context = _format_memory_context(memory_sources)
+        existing_context = kb_result.get("context", "")
+        if existing_context:
+            kb_result["context"] = f"{existing_context}\n\n{memory_context}"
+        else:
+            kb_result["context"] = memory_context
+
+    return kb_result
+
+
+async def _recall_with_timeout(
+    query: str,
+    chroma_client: Any,
+    neo4j_driver: Any,
+    top_k: int,
+    min_score: float,
+    timeout_ms: int,
+) -> list[dict]:
+    """Run memory recall with a hard timeout, returning empty on failure."""
+    try:
+        from agents.memory import recall_memories
+
+        return await asyncio.wait_for(
+            recall_memories(
+                query=query,
+                chroma_client=chroma_client,
+                neo4j_driver=neo4j_driver,
+                top_k=top_k,
+                min_score=min_score,
+            ),
+            timeout=timeout_ms / 1000.0,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Memory recall timed out after %dms", timeout_ms)
+        return []
+    except Exception as e:
+        logger.warning("Memory recall failed: %s", e)
+        return []
+
+
+def _format_memory_context(memory_sources: list[dict]) -> str:
+    """Format memory results as a context block for the LLM."""
+    lines = ["[Memory Context]"]
+    for m in memory_sources:
+        summary = m.get("summary") or m.get("content", "")[:80]
+        mem_type = m.get("memory_type", "")
+        score = m.get("relevance", 0.0)
+        lines.append(f"- [{mem_type}] {summary} (score: {score:.2f})")
+    return "\n".join(lines)
+
+
+def _apply_source_config(
+    kb_sources: list[dict],
+    memory_sources: list[dict],
+    external_sources: list[dict],
+    source_config: dict,
+) -> tuple[list[dict], list[dict], list[dict]]:
+    """Apply custom_smart source weights and toggles.
+
+    source_config shape:
+        {
+            "kb_enabled": True,
+            "memory_enabled": True,
+            "external_enabled": True,
+            "kb_weight": 1.0,
+            "memory_weight": 1.0,
+            "external_weight": 1.0,
+            "memory_types": ["empirical", "decision", ...],  # optional filter
+        }
+    """
+    if not source_config.get("kb_enabled", True):
+        kb_sources = []
+    if not source_config.get("memory_enabled", True):
+        memory_sources = []
+    if not source_config.get("external_enabled", True):
+        external_sources = []
+
+    # Apply weight scaling to relevance scores
+    kb_weight = source_config.get("kb_weight", 1.0)
+    memory_weight = source_config.get("memory_weight", 1.0)
+    external_weight = source_config.get("external_weight", 1.0)
+
+    for s in kb_sources:
+        if "relevance" in s:
+            s["relevance"] = s["relevance"] * kb_weight
+    for s in memory_sources:
+        if "relevance" in s:
+            s["relevance"] = s["relevance"] * memory_weight
+    for s in external_sources:
+        if "relevance" in s:
+            s["relevance"] = s["relevance"] * external_weight
+
+    # Optional per-memory-type filter
+    allowed_types = source_config.get("memory_types")
+    if allowed_types:
+        memory_sources = [
+            m for m in memory_sources if m.get("memory_type") in allowed_types
+        ]
+
+    return kb_sources, memory_sources, external_sources

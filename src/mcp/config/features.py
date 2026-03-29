@@ -54,9 +54,11 @@ FEATURE_FLAGS = {
     "metamorphic_verification": _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
     # Enterprise-only features
     "multi_user":          CERID_MULTI_USER or _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["enterprise"],
-    "sso_saml":            _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["enterprise"],
+    "sso_saml":            _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["enterprise"],  # Scaffolded — no implementation yet. Enterprise roadmap item.
     "audit_logging":       _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["enterprise"],
     "priority_support":    _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["enterprise"],
+    # Pro-only: custom smart RAG mode with per-source weights
+    "custom_smart_rag": _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
     # Community features (always enabled)
     "hierarchical_taxonomy": True,
     "file_upload_gui":       True,
@@ -75,6 +77,7 @@ ENABLE_ENCRYPTION = os.getenv("ENABLE_ENCRYPTION", "false").lower() == "true"
 ENABLE_AUTO_INJECT = os.getenv("ENABLE_AUTO_INJECT", "false").lower() == "true"
 ENABLE_SELF_RAG = os.getenv("ENABLE_SELF_RAG", "true").lower() == "true"
 ENABLE_CONTEXTUAL_CHUNKS = os.getenv("ENABLE_CONTEXTUAL_CHUNKS", "false").lower() == "true"
+ENABLE_MEMORY_RECALL = os.getenv("ENABLE_MEMORY_RECALL", "true").lower() == "true"
 # CERID_ENCRYPTION_KEY is read directly from env by utils/encryption.py
 # Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 
@@ -135,6 +138,7 @@ FEATURE_TOGGLES: dict[str, bool] = {
     "enable_auto_inject": ENABLE_AUTO_INJECT,
     "enable_self_rag": ENABLE_SELF_RAG,
     "enable_contextual_chunks": ENABLE_CONTEXTUAL_CHUNKS,
+    "enable_memory_recall": ENABLE_MEMORY_RECALL,
     "enable_adaptive_retrieval": ENABLE_ADAPTIVE_RETRIEVAL,
     "enable_query_decomposition": ENABLE_QUERY_DECOMPOSITION,
     "enable_mmr_diversity": ENABLE_MMR_DIVERSITY,

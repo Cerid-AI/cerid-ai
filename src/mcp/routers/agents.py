@@ -37,6 +37,8 @@ class AgentQueryRequest(BaseModel):
     model: str | None = Field(None, description="Generating model (for Self-RAG metadata)")
     enable_self_rag: bool | None = Field(None, description="Override Self-RAG toggle (None = use server config)")
     strict_domains: bool | None = Field(None, description="When True, disables cross-domain affinity bleed. None = use consumer default.")
+    rag_mode: str | None = Field(None, description="RAG mode: manual, smart, or custom_smart. None = use server default.")
+    source_config: dict | None = Field(None, description="Custom Smart source weights/toggles (Pro tier only)")
 
 
 class TriageFileRequest(BaseModel):
@@ -62,6 +64,12 @@ class HallucinationCheckRequest(BaseModel):
     conversation_id: str
     threshold: float | None = Field(None, ge=0.0, le=1.0)
     model: str | None = None
+
+
+class MemoryRecallRequest(BaseModel):
+    query: str
+    top_k: int = Field(10, ge=1, le=50)
+    min_score: float = Field(0.3, ge=0.0, le=1.0)
 
 
 class MemoryExtractionRequest(BaseModel):
@@ -169,21 +177,50 @@ async def agent_query_endpoint(req: AgentQueryRequest, request: Request):
         consumer_strict = consumer.get("strict_domains", False)
         strict_domains = req.strict_domains if req.strict_domains else consumer_strict
 
-        from agents.query_agent import agent_query
-        result = await agent_query(
-            query=req.query,
-            domains=req.domains,
-            top_k=req.top_k,
-            use_reranking=req.use_reranking,
-            conversation_messages=req.conversation_messages,
-            chroma_client=get_chroma(),
-            redis_client=get_redis(),
-            neo4j_driver=get_neo4j(),
-            debug_timing=debug_timing,
-            allowed_domains=allowed_domains,
-            strict_domains=strict_domains,
-            model=req.model,
-        )
+        # Resolve RAG mode: request > server default
+        from config.settings import RAG_ORCHESTRATION_MODE
+        rag_mode = req.rag_mode or RAG_ORCHESTRATION_MODE
+
+        # Gate custom_smart behind Pro tier
+        if rag_mode == "custom_smart":
+            from config.features import is_feature_enabled
+            if not is_feature_enabled("custom_smart_rag"):
+                rag_mode = "smart"  # Graceful downgrade
+
+        if rag_mode in ("smart", "custom_smart"):
+            from agents.retrieval_orchestrator import orchestrated_query
+            result = await orchestrated_query(
+                query=req.query,
+                rag_mode=rag_mode,
+                domains=req.domains,
+                top_k=req.top_k,
+                use_reranking=req.use_reranking,
+                conversation_messages=req.conversation_messages,
+                chroma_client=get_chroma(),
+                redis_client=get_redis(),
+                neo4j_driver=get_neo4j(),
+                source_config=req.source_config,
+                debug_timing=debug_timing,
+                allowed_domains=allowed_domains,
+                strict_domains=strict_domains,
+                model=req.model,
+            )
+        else:
+            from agents.query_agent import agent_query
+            result = await agent_query(
+                query=req.query,
+                domains=req.domains,
+                top_k=req.top_k,
+                use_reranking=req.use_reranking,
+                conversation_messages=req.conversation_messages,
+                chroma_client=get_chroma(),
+                redis_client=get_redis(),
+                neo4j_driver=get_neo4j(),
+                debug_timing=debug_timing,
+                allowed_domains=allowed_domains,
+                strict_domains=strict_domains,
+                model=req.model,
+            )
 
         # Self-RAG: validate claims and refine retrieval if enabled
         use_self_rag = req.enable_self_rag if req.enable_self_rag is not None else config.ENABLE_SELF_RAG
@@ -360,6 +397,48 @@ async def claim_feedback_endpoint(req: ClaimFeedbackRequest):
         raise
     except Exception as e:
         logger.error(f"Claim feedback error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/agent/memory/recall")
+async def memory_recall_endpoint(req: MemoryRecallRequest):
+    """Recall relevant memories with salience-aware scoring.
+
+    Used by the frontend in manual mode for explicit memory browsing,
+    and internally by the orchestrator in smart modes.
+    """
+    try:
+        from agents.memory import recall_memories
+        from utils.time import utcnow_iso
+
+        results = await recall_memories(
+            query=req.query,
+            chroma_client=get_chroma(),
+            neo4j_driver=get_neo4j(),
+            top_k=req.top_k,
+            min_score=req.min_score,
+        )
+        return {
+            "memories": [
+                {
+                    "id": m.get("memory_id", ""),
+                    "text": m.get("text", ""),
+                    "score": m.get("adjusted_score", 0.0),
+                    "access_count": m.get("access_count", 0),
+                    "memory_type": m.get("memory_type", "empirical"),
+                    "age_days": m.get("age_days", 0.0),
+                    "source_authority": m.get("source_authority", 0.7),
+                    "summary": m.get("summary", ""),
+                    "base_similarity": m.get("base_similarity", 0.0),
+                    "created_at": "",
+                }
+                for m in results
+            ],
+            "total_recalled": len(results),
+            "timestamp": utcnow_iso(),
+        }
+    except Exception as e:
+        logger.error(f"Memory recall error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

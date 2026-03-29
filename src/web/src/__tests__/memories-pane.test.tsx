@@ -72,9 +72,10 @@ describe("MemoriesPane", () => {
     vi.stubGlobal("fetch", mockFetch({ memories: mockMemories, total: mockMemories.length }))
     render(<MemoriesPane />)
     await screen.findByText(/FastAPI/)
-    // Type badges show singular form: "Fact", "Decision" (via label.replace(/s$/, ""))
-    expect(screen.getByText("Fact")).toBeInTheDocument()
-    expect(screen.getByText("Decision")).toBeInTheDocument()
+    // Legacy types mapped: fact→empirical, action_item→project_context
+    // "Empirical" appears in both filter button and card badge, so use getAllByText
+    expect(screen.getAllByText("Empirical").length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText("Decision").length).toBeGreaterThanOrEqual(1)
   })
 
   it("shows empty state when no memories", async () => {
@@ -85,15 +86,16 @@ describe("MemoriesPane", () => {
     })
   })
 
-  it("shows filter buttons for all 4 memory types", async () => {
+  it("shows filter buttons for all 6 memory types", async () => {
     vi.stubGlobal("fetch", mockFetch({ memories: mockMemories, total: mockMemories.length }))
     render(<MemoriesPane />)
     await screen.findByText(/FastAPI/)
-    // Filter buttons show plural labels: "Facts", "Decisions", "Preferences", "Action Items"
-    expect(screen.getByText("Facts")).toBeInTheDocument()
-    expect(screen.getByText("Decisions")).toBeInTheDocument()
-    expect(screen.getByText("Preferences")).toBeInTheDocument()
-    expect(screen.getByText("Action Items")).toBeInTheDocument()
+    // Phase 51: 6 memory types — filter button labels
+    // Some labels appear in both filter buttons and card badges, so use getAllByText
+    const labels = ["Empirical", "Decisions", "Preferences", "Project", "Temporal", "Conversational"]
+    for (const label of labels) {
+      expect(screen.getAllByText(label).length).toBeGreaterThanOrEqual(1)
+    }
   })
 
   it("shows conversation ID in metadata", async () => {

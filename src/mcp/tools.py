@@ -152,6 +152,16 @@ MCP_TOOLS = [
                     "description": "Enable intelligent reranking",
                     "default": True,
                 },
+                "rag_mode": {
+                    "type": "string",
+                    "enum": ["manual", "smart", "custom_smart"],
+                    "description": "RAG mode: manual (KB only), smart (KB + memory + external), custom_smart (Pro, configurable weights)",
+                    "default": "manual",
+                },
+                "source_config": {
+                    "type": "object",
+                    "description": "Custom Smart source weights/toggles (Pro tier only). Keys: kb_enabled, memory_enabled, external_enabled, kb_weight, memory_weight, external_weight, memory_types",
+                },
             },
             "required": ["query"],
         },
@@ -163,6 +173,16 @@ MCP_TOOLS = [
                 "confidence": {"type": "number", "description": "Average relevance 0.0-1.0"},
                 "domains_searched": {"type": "array", "items": {"type": "string"}},
                 "total_results": {"type": "integer"},
+                "source_breakdown": {
+                    "type": "object",
+                    "description": "Per-source results (smart/custom_smart modes only)",
+                    "properties": {
+                        "kb": {"type": "array", "items": {"type": "object"}},
+                        "memory": {"type": "array", "items": {"type": "object"}},
+                        "external": {"type": "array", "items": {"type": "object"}},
+                    },
+                },
+                "rag_mode": {"type": "string", "description": "Active RAG mode used for this query"},
             },
         },
     },
@@ -457,8 +477,10 @@ MCP_TOOLS = [
         "outputSchema": {
             "type": "object",
             "properties": {
-                "memories_stored": {"type": "integer"},
-                "results": {"type": "array", "items": {"type": "object"}},
+                "archived_count": {"type": "integer"},
+                "retention_days": {"type": "integer"},
+                "cutoff_date": {"type": "string"},
+                "timestamp": {"type": "string"},
             },
         },
     },
@@ -614,7 +636,11 @@ MCP_TOOLS = [
                             "text": {"type": "string"},
                             "score": {"type": "number"},
                             "access_count": {"type": "integer"},
-                            "source": {"type": "string"},
+                            "memory_type": {"type": "string"},
+                            "age_days": {"type": "number"},
+                            "source_authority": {"type": "number"},
+                            "summary": {"type": "string"},
+                            "base_similarity": {"type": "number"},
                             "created_at": {"type": "string"},
                         },
                     },
@@ -731,6 +757,20 @@ async def execute_tool(name: str, arguments: dict) -> Any:
     elif name == "pkb_collections":
         return list_collections()
     elif name == "pkb_agent_query":
+        rag_mode = arguments.get("rag_mode", "manual")
+        if rag_mode in ("smart", "custom_smart"):
+            from agents.retrieval_orchestrator import orchestrated_query
+            return await orchestrated_query(
+                query=arguments.get("query", ""),
+                rag_mode=rag_mode,
+                domains=arguments.get("domains"),
+                top_k=arguments.get("top_k", 10),
+                use_reranking=arguments.get("use_reranking", True),
+                chroma_client=get_chroma(),
+                redis_client=get_redis(),
+                neo4j_driver=get_neo4j(),
+                source_config=arguments.get("source_config"),
+            )
         from agents.query_agent import agent_query
         return await agent_query(
             query=arguments.get("query", ""),
@@ -892,7 +932,11 @@ async def execute_tool(name: str, arguments: dict) -> Any:
                     "text": m.get("text", ""),
                     "score": m.get("adjusted_score", 0.0),
                     "access_count": m.get("access_count", 0),
-                    "source": m.get("memory_type", "fact"),
+                    "memory_type": m.get("memory_type", "empirical"),
+                    "age_days": m.get("age_days", 0.0),
+                    "source_authority": m.get("source_authority", 0.7),
+                    "summary": m.get("summary", ""),
+                    "base_similarity": m.get("base_similarity", 0.0),
                     "created_at": "",  # not available from vector search metadata
                 }
                 for m in results

@@ -487,7 +487,7 @@ def calculate_memory_score(
     # --- Decay model selection ---
     if memory_type in config.MEMORY_POWER_LAW_TYPES:
         # FSRS-inspired power-law: (1 + t / (9 * S))^(-0.5)
-        # At t=S: retains 71%. At t=4S: retains 45%. At t=12S: retains 27%.
+        # At t=S: retains ~94.9%. At t=4S: retains ~82.5%. At t=12S: retains ~68.4%.
         decay = (1.0 + max(0.0, age_days) / (9.0 * stability_days)) ** (-0.5)
     else:
         # Exponential decay: 2^(-t / S) — fast fade for transient content.

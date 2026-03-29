@@ -75,7 +75,8 @@ def migrate_memory_salience(driver) -> dict[str, Any]:
             new_type = "empirical"
 
         stability = stability_map.get(new_type, 30.0)
-        stability_val = -1.0 if stability == float("inf") else stability
+        # Use 999999.0 as sentinel for infinite stability (matches ChromaDB's "inf" string)
+        stability_val = 999999.0 if stability == float("inf") else stability
 
         with driver.session() as session:
             session.run(

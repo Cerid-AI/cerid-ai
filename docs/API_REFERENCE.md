@@ -30,7 +30,8 @@
 - `GET /digest` — Summary of recent KB activity, connections, and health status
 
 **Agent endpoints (Phase 2+):**
-- `POST /agent/query` — Multi-domain query with LLM reranking, context assembly, and optional Self-RAG validation
+- `POST /agent/query` — Multi-domain query with LLM reranking, context assembly, optional Self-RAG validation, and unified RAG modes (manual/smart/custom_smart)
+- `POST /agent/memory/recall` — Direct memory recall endpoint for manual mode browsing
 - `POST /agent/triage` — LangGraph-powered file triage (validate → parse → categorize → chunk)
 - `POST /agent/triage/batch` — Batch triage with per-file error recovery
 - `POST /agent/rectify` — Knowledge base health checks (duplicates, stale, orphans, distribution)
@@ -48,6 +49,13 @@
 - `POST /agent/memory/archive` — Archive old conversation memories
 - `POST /agent/curate` — Score artifact quality across the KB (Phase 14)
 - `POST /agent/curate/estimate` — Estimate synopsis generation cost before running
+
+**Trading agent KB enrichment endpoints (gated by `CERID_TRADING_ENABLED`):**
+- `POST /agent/trading/signal` — Enrich a trading signal with KB context
+- `POST /agent/trading/herd-detect` — Detect herd behavior via correlation graph violations
+- `POST /agent/trading/kelly-size` — Query historical CV_edge for Kelly criterion position sizing
+- `POST /agent/trading/cascade-confirm` — Confirm cascade liquidation pattern against historical data
+- `POST /agent/trading/longshot-surface` — Query stored calibration surface for longshot probability estimates
 
 **Auth endpoints (Phase 33, conditional on `CERID_MULTI_USER=true`):**
 - `POST /auth/register` — Create new user account (returns JWT tokens)
@@ -134,7 +142,7 @@
 - `pkb_ingest_file` — Ingest a file with parsing and metadata
 - `pkb_health` — Service health check
 - `pkb_collections` — List ChromaDB collections
-- `pkb_agent_query` — Multi-domain query with LLM reranking
+- `pkb_agent_query` — Multi-domain query with LLM reranking and RAG modes (manual/smart/custom_smart)
 - `pkb_artifacts` — List/filter ingested artifacts
 - `pkb_recategorize` — Move artifact between domains
 - `pkb_triage` — LangGraph-powered file triage
@@ -164,10 +172,17 @@
 
 Versioned facade for cerid-series consumers (trading-agent, future projects). Delegates to existing agent endpoints but provides a stable contract that survives internal refactoring.
 
-- `POST /sdk/v1/query` — KB query with reranking (delegates to `/agent/query`)
+- `POST /sdk/v1/query` — KB query with reranking and RAG modes (delegates to `/agent/query`, supports `rag_mode` and `source_config`)
 - `POST /sdk/v1/hallucination` — Hallucination detection (delegates to `/agent/hallucination`)
 - `POST /sdk/v1/memory/extract` — Memory extraction (delegates to `/agent/memory/extract`)
 - `GET /sdk/v1/health` — Health check with `version`, `services`, `features` (subset of feature toggles relevant to consumers), and `internal_llm` (current internal LLM provider and model)
+
+**SDK Trading endpoints (gated by `CERID_TRADING_ENABLED`):**
+- `POST /sdk/v1/trading/signal` — Trading signal enrichment via KB (delegates to `/agent/trading/signal`)
+- `POST /sdk/v1/trading/herd-detect` — Herd behavior detection (delegates to `/agent/trading/herd-detect`)
+- `POST /sdk/v1/trading/kelly-size` — Kelly criterion position sizing (delegates to `/agent/trading/kelly-size`)
+- `POST /sdk/v1/trading/cascade-confirm` — Cascade liquidation confirmation (delegates to `/agent/trading/cascade-confirm`)
+- `POST /sdk/v1/trading/longshot-surface` — Longshot opportunity surfacing (delegates to `/agent/trading/longshot-surface`)
 
 **Client identification:** Send `X-Client-ID` header to get per-client rate limiting. Each client ID gets an independent rate budget:
 
@@ -263,12 +278,22 @@ curl -X POST http://localhost:8888/agent/query \
 - `model` — Generating model name (for metadata tracking)
 - `enable_self_rag` — Override server-side `ENABLE_SELF_RAG` toggle (null = use server config)
 
+**RAG mode fields (optional):**
+- `rag_mode` — `"manual"` (KB only, default), `"smart"` (KB + memory + external in parallel), or `"custom_smart"` (Pro tier, configurable weights/toggles)
+- `source_config` — Custom Smart weights/toggles (Pro tier only). Keys: `kb_enabled`, `memory_enabled`, `external_enabled`, `kb_weight`, `memory_weight`, `external_weight`, `memory_types`
+
+When `rag_mode` is `"smart"` or `"custom_smart"`, the response includes:
+- `source_breakdown` — `{kb: [...], memory: [...], external: [...]}` with per-source results
+- `rag_mode` — The active mode used for the query
+- Memory results are appended to `context` under a `[Memory Context]` header
+
 **Key Functions:**
 - `multi_domain_query()` — Parallel ChromaDB queries across domains
 - `deduplicate_results()` — Remove duplicate chunks
 - `rerank_results()` — Cross-encoder (ONNX) relevance reranking (falls back to embedding sort)
 - `assemble_context()` — Build context within token budget
 - `agent_query()` — Main orchestration function
+- `orchestrated_query()` — Unified orchestrator wrapping agent_query + memory recall + external separation (in `agents/retrieval_orchestrator.py`)
 - `self_rag_enhance()` — Iterative claim verification and targeted retrieval refinement (in `agents/self_rag.py`)
 
 ### Triage Agent (`agents/triage.py`)

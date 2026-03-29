@@ -22,6 +22,8 @@ import type {
   UploadResult,
   ParserCapability,
   ArtifactFilterParams,
+  RagMode,
+  MemoryRecallResult,
 } from "../types"
 
 // --- Knowledge Base ---
@@ -44,6 +46,45 @@ export async function queryKB(
     }),
   })
   if (!res.ok) throw new Error(await extractError(res, `KB query failed: ${res.status}`))
+  return res.json()
+}
+
+export async function queryKBOrchestrated(
+  query: string,
+  ragMode: RagMode,
+  domains?: string[],
+  topK = 10,
+  conversationMessages?: { role: string; content: string }[],
+  sourceConfig?: Record<string, unknown>,
+): Promise<AgentQueryResponse> {
+  const res = await fetch(`${MCP_BASE}/agent/query`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      query,
+      rag_mode: ragMode,
+      domains: domains ?? null,
+      top_k: topK,
+      use_reranking: true,
+      conversation_messages: conversationMessages ?? null,
+      source_config: sourceConfig ?? null,
+    }),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `KB query failed: ${res.status}`))
+  return res.json()
+}
+
+export async function recallMemories(
+  query: string,
+  topK = 5,
+  minScore = 0.4,
+): Promise<MemoryRecallResult[]> {
+  const res = await fetch(`${MCP_BASE}/agent/memory/recall`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ query, top_k: topK, min_score: minScore }),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Memory recall failed: ${res.status}`))
   return res.json()
 }
 

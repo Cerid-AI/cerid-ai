@@ -14,6 +14,7 @@ import { ChatMessages } from "./chat-messages"
 import { ChatInput } from "./chat-input"
 import { SplitPane } from "@/components/layout/split-pane"
 import { KBContextPanel } from "@/components/kb/kb-context-panel"
+import { KnowledgeConsole } from "@/components/kb/knowledge-console"
 import { HallucinationPanel } from "@/components/audit/hallucination-panel"
 import { VerificationStatusBar } from "@/components/audit/verification-status-bar"
 import { ChatDashboard } from "./chat-dashboard"
@@ -22,6 +23,7 @@ import { useChat } from "@/hooks/use-chat"
 import { useChatSend } from "@/hooks/use-chat-send"
 import { useConversationsContext } from "@/contexts/conversations-context"
 import { useKBContext } from "@/hooks/use-kb-context"
+import { useOrchestratedQuery } from "@/hooks/use-orchestrated-query"
 import { useSettings } from "@/hooks/use-settings"
 import { useModelRouter } from "@/hooks/use-model-router"
 import { useModelSwitch } from "@/hooks/use-model-switch"
@@ -63,6 +65,7 @@ export function ChatPanel() {
   const {
     feedbackLoop, toggleFeedbackLoop,
     showDashboard, toggleDashboard,
+    ragMode, setRagMode,
     routingMode, setRoutingMode, cycleRoutingMode,
     autoInject, toggleAutoInject, autoInjectThreshold, setAutoInjectThreshold,
     costSensitivity,
@@ -220,6 +223,7 @@ export function ChatPanel() {
   }, [messages])
 
   const kbContext = useKBContext(latestUserMessage, recentMessages)
+  const orchestratedContext = useOrchestratedQuery(latestUserMessage, ragMode, recentMessages)
   const { injectedContext, clearInjected } = kbContext
 
   // --- Model routing ---
@@ -419,6 +423,8 @@ export function ChatPanel() {
         toggleMemoryExtraction={toggleMemoryExtraction}
         showDashboard={showDashboard}
         toggleDashboard={toggleDashboard}
+        ragMode={ragMode}
+        setRagMode={setRagMode}
         routingMode={routingMode}
         setRoutingMode={setRoutingMode}
         cycleRoutingMode={cycleRoutingMode}
@@ -735,7 +741,11 @@ export function ChatPanel() {
       </Panel>
       <PanelSeparator className="h-1 bg-border transition-colors hover:bg-primary/20 active:bg-primary/30" />
       <Panel defaultSize={67} minSize={20}>
-        <KBContextPanel {...kbContext} onClose={() => setShowKB(false)} />
+        {ragMode === "manual" ? (
+          <KBContextPanel {...kbContext} onClose={() => setShowKB(false)} />
+        ) : (
+          <KnowledgeConsole {...orchestratedContext} ragMode={ragMode} onClose={() => setShowKB(false)} />
+        )}
       </Panel>
     </Group>
   )

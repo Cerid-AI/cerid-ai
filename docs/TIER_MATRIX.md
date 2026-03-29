@@ -22,9 +22,9 @@
 | Query decomposition | ✓ | ✓ | ✓ | — |
 | HyDE fallback | ✓ | ✓ | ✓ | — |
 | Retrieval cache | ✓ | ✓ | ✓ | — |
-| Smart auto-RAG | ✓ | ✓ | ✓ | — |
+| Smart RAG (KB + memory + external) | ✓ | ✓ | ✓ | — |
+| Custom Smart RAG (per-source weights, memory type filters) | — | ✓ | ✓ | `custom_smart_rag` |
 | Parent-child chunking | ✓ | ✓ | ✓ | env flag |
-| Graph RAG (LightRAG) | — | ✓ | ✓ | `graph_rag` |
 | **Verification** | | | | |
 | Hallucination detection | ✓ | ✓ | ✓ | — |
 | Streaming verification | ✓ | ✓ | ✓ | — |
@@ -44,7 +44,7 @@
 | Ollama local LLM | ✓ | ✓ | ✓ | — |
 | **Infrastructure** | | | | |
 | Multi-user JWT auth | — | — | ✓ | `multi_user` |
-| SSO/SAML | — | — | ✓ | `sso_saml` |
+| SSO/SAML (planned) | — | — | ✓ | `sso_saml` |
 | Audit logging | — | — | ✓ | `audit_logging` |
 | SLA & priority support | — | — | ✓ | contractual |
 

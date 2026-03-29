@@ -10,6 +10,8 @@ export interface ChatMessage {
   sourcesUsed?: SourceRef[]
 }
 
+export type RagMode = "manual" | "smart" | "custom_smart"
+
 export interface SourceRef {
   artifact_id: string
   filename: string
@@ -19,6 +21,7 @@ export interface SourceRef {
   chunk_index: number
   tags?: string[]
   quality_score?: number
+  source_type?: "kb" | "memory" | "external"
 }
 
 export interface Conversation {
@@ -81,7 +84,6 @@ export const PROVIDER_COLORS: Record<string, string> = {
   OpenAI: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
   Google: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
   xAI: "bg-slate-500/15 text-slate-700 dark:text-slate-300",
-  DeepSeek: "bg-cyan-500/15 text-cyan-700 dark:text-cyan-400",
   Meta: "bg-indigo-500/15 text-indigo-700 dark:text-indigo-400",
 }
 
@@ -247,6 +249,33 @@ export interface KBQueryResult {
   source_url?: string
 }
 
+export interface MemoryRecallResult {
+  content: string
+  relevance: number
+  memory_type: string
+  age_days: number
+  summary: string
+  memory_id: string
+  source_authority: number
+  base_similarity: number
+  access_count: number
+  source_type: "memory"
+}
+
+export interface ExternalSourceResult {
+  content: string
+  relevance: number
+  source_url: string
+  source_name?: string
+  source_type: "external"
+}
+
+export interface SourceBreakdown {
+  kb: KBQueryResult[]
+  memory: MemoryRecallResult[]
+  external: ExternalSourceResult[]
+}
+
 export interface AgentQueryResponse {
   query: string
   domains_queried: string[]
@@ -257,6 +286,8 @@ export interface AgentQueryResponse {
   reranking_used: boolean
   execution_time_ms: number
   timestamp: string
+  source_breakdown?: SourceBreakdown
+  rag_mode?: RagMode
 }
 
 export interface RelatedArtifact {
@@ -577,7 +608,7 @@ export interface ServerSettings {
   redis_url?: string
   archive_path?: string
   chunking_mode?: string
-  rag_mode?: string
+  rag_mode?: RagMode
   // Search tuning (read-write)
   hybrid_vector_weight?: number
   hybrid_keyword_weight?: number
@@ -653,7 +684,7 @@ export interface SettingsUpdate {
   semantic_cache_threshold?: number
   enable_memory_consolidation?: boolean
   enable_context_compression?: boolean
-  rag_mode?: string
+  rag_mode?: RagMode
   // Ollama add-on
   internal_llm_provider?: string
   internal_llm_model?: string
@@ -661,7 +692,7 @@ export interface SettingsUpdate {
 
 export interface Memory {
   id: string
-  type: string // facts, decisions, preferences, action-items
+  type: string // empirical, decision, preference, project_context, temporal, conversational
   content: string
   conversation_id: string
   created_at: string
