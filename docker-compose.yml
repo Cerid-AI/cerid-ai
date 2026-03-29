@@ -182,7 +182,7 @@ services:
       - OLLAMA_ENABLED=${OLLAMA_ENABLED:-false}
       - OLLAMA_URL=${OLLAMA_URL:-http://cerid-ollama:11434}
       - INTERNAL_LLM_PROVIDER=${INTERNAL_LLM_PROVIDER:-bifrost}
-      - INTERNAL_LLM_MODEL=${INTERNAL_LLM_MODEL:-llama3.2:3b}
+      - INTERNAL_LLM_MODEL=${INTERNAL_LLM_MODEL:-openrouter/openai/gpt-4o-mini}
     depends_on:
       neo4j:
         condition: service_healthy
