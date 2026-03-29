@@ -5,7 +5,7 @@ import { useState } from "react"
 import {
   MessageSquare, Database, HeartPulse, BarChart3, Brain, Settings,
   Sun, Moon, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Plus, History,
-  TrendingUp,
+  TrendingUp, Shield,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -27,6 +27,8 @@ interface SidebarProps {
   theme: "dark" | "light"
   onToggleTheme: () => void
   tradingEnabled?: boolean
+  featureTier?: string
+  onCycleTier?: () => void
 }
 
 const NAV_ITEMS: { pane: Pane; icon: typeof MessageSquare; label: string }[] = [
@@ -47,7 +49,10 @@ function readBool(key: string, fallback: boolean): boolean {
 
 const SIMPLE_PANES = new Set<Pane>(["chat", "memories", "settings"])
 
-export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse, theme, onToggleTheme, tradingEnabled }: SidebarProps) {
+const TIER_LABELS: Record<string, string> = { community: "Core", pro: "Pro", enterprise: "Ent" }
+const TIER_COLORS: Record<string, string> = { community: "text-zinc-400", pro: "text-teal-500", enterprise: "text-purple-400" }
+
+export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse, theme, onToggleTheme, tradingEnabled, featureTier, onCycleTier }: SidebarProps) {
   const { conversations, activeId, setActiveId, create, remove } = useConversationsContext()
   const { toggle: toggleMode, isSimple } = useUIMode()
   const [historyExpanded, setHistoryExpanded] = useState(() => readBool("cerid-sidebar-history", true))
@@ -230,6 +235,40 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
             </TooltipTrigger>
             {collapsed && <TooltipContent side="right">Toggle theme</TooltipContent>}
           </Tooltip>
+
+          {/* Tier toggle (dev/demo) */}
+          {onCycleTier && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  className={cn(
+                    "flex w-full items-center rounded-md px-3 py-1.5 text-sm hover:bg-accent",
+                    collapsed && "justify-center px-0"
+                  )}
+                  onClick={onCycleTier}
+                  aria-label="Cycle feature tier"
+                >
+                  {!collapsed ? (
+                    <>
+                      <Shield className={cn("mr-2 h-3.5 w-3.5 shrink-0", TIER_COLORS[featureTier ?? "community"])} />
+                      <span className={cn("flex-1 text-left text-xs font-medium", TIER_COLORS[featureTier ?? "community"])}>
+                        {TIER_LABELS[featureTier ?? "community"] ?? "Core"}
+                      </span>
+                    </>
+                  ) : (
+                    <span className={cn("text-[10px] font-bold", TIER_COLORS[featureTier ?? "community"])}>
+                      {(TIER_LABELS[featureTier ?? "community"] ?? "C")[0]}
+                    </span>
+                  )}
+                </button>
+              </TooltipTrigger>
+              {collapsed && (
+                <TooltipContent side="right">
+                  Tier: {TIER_LABELS[featureTier ?? "community"]} — click to cycle
+                </TooltipContent>
+              )}
+            </Tooltip>
+          )}
         </div>
       </div>
     </TooltipProvider>

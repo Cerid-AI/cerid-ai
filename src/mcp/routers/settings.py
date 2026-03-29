@@ -384,3 +384,29 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
 
     logger.info(f"Settings updated: {updated}")
     return {"status": "success", "updated": updated}
+
+
+class TierOverrideRequest(BaseModel):
+    tier: str = Field(..., description="Runtime tier: community, pro, or enterprise")
+
+
+@router.post("/settings/tier")
+async def set_tier_endpoint(req: TierOverrideRequest):
+    """Runtime tier override — recomputes feature flags in memory.
+
+    Transient only (lost on restart). For persistent changes, set
+    ``CERID_TIER`` in ``.env``.
+    """
+    valid_tiers = ("community", "pro", "enterprise")
+    if req.tier not in valid_tiers:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid tier: '{req.tier}'. Must be one of {valid_tiers}",
+        )
+    from config.features import set_tier
+    new_tier = set_tier(req.tier)
+    # Also update the config module reference used by GET /settings
+    config.FEATURE_TIER = new_tier
+    config.FEATURE_FLAGS = features_mod.FEATURE_FLAGS
+    logger.info("Runtime tier override: %s", new_tier)
+    return {"status": "success", "tier": new_tier, "feature_flags": features_mod.FEATURE_FLAGS}

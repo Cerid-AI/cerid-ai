@@ -24,8 +24,6 @@ import {
   Wrench,
   HardDrive,
   Trash2,
-  CreditCard,
-  ExternalLink,
   Lock,
   Globe,
 } from "lucide-react"
@@ -55,7 +53,7 @@ interface SystemSectionProps {
 
 export function SystemSection({
   settings, sections, toggleSection, /* patch — reserved for future settings mutation */
-  credits, kbStats, kbLoading, kbAction, kbResult,
+  kbStats, kbLoading, kbAction, kbResult,
   loadKBStats, runKBAction, clearConfirmDomain, setClearConfirmDomain, onRefresh,
 }: SystemSectionProps) {
   return (
@@ -85,64 +83,6 @@ export function SystemSection({
                 ))}
               </div>
             </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* -- Provider Credits -- */}
-      <SectionHeading icon={CreditCard} label="Provider Credits" open={sections.credits} onToggle={() => toggleSection("credits")} />
-      {sections.credits && (
-        <Card className="mb-4">
-          <CardContent className="grid gap-3 pt-4">
-            {credits?.configured ? (
-              <>
-                <div className="flex items-center justify-between">
-                  <LabelWithInfo label="Balance" info="Remaining OpenRouter credits" />
-                  <span className={cn(
-                    "text-sm font-semibold tabular-nums",
-                    credits.status === "ok" && "text-green-600 dark:text-green-400",
-                    credits.status === "low" && "text-yellow-600 dark:text-yellow-400",
-                    credits.status === "exhausted" && "text-red-600 dark:text-red-400",
-                    credits.status === "error" && "text-muted-foreground",
-                  )}>
-                    ${credits.balance?.toFixed(2) ?? "\u2014"}
-                  </span>
-                </div>
-                {credits.warning && (
-                  <p className="text-xs text-yellow-600 dark:text-yellow-400">{credits.warning}</p>
-                )}
-                <div className="my-1 h-px bg-border" />
-                <Row label="Today" value={credits.usage_daily != null ? `$${credits.usage_daily.toFixed(4)}` : "\u2014"} info="Spend today" />
-                <Row label="This Week" value={credits.usage_weekly != null ? `$${credits.usage_weekly.toFixed(2)}` : "\u2014"} info="Spend this week" />
-                <Row label="This Month" value={credits.usage_monthly != null ? `$${credits.usage_monthly.toFixed(2)}` : "\u2014"} info="Spend this month" />
-                <Row label="Total Used" value={credits.total_usage != null ? `$${credits.total_usage.toFixed(2)}` : "\u2014"} info="Lifetime credits consumed" />
-                <div className="my-1 h-px bg-border" />
-                <div className="flex gap-2">
-                  <a
-                    href={credits.top_up_url ?? "https://openrouter.ai/settings/credits"}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex h-8 items-center gap-1.5 rounded-md bg-brand px-3 text-xs font-medium text-brand-foreground hover:bg-brand/90"
-                  >
-                    Add Credits
-                    <ExternalLink className="h-3 w-3" />
-                  </a>
-                  <a
-                    href={credits.account_url ?? "https://openrouter.ai/settings"}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs font-medium hover:bg-accent"
-                  >
-                    Manage Account
-                    <ExternalLink className="h-3 w-3" />
-                  </a>
-                </div>
-              </>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                No OpenRouter API key configured. Add one in the setup wizard or environment variables.
-              </p>
-            )}
           </CardContent>
         </Card>
       )}

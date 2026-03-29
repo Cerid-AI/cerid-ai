@@ -13,7 +13,8 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
-import { Settings, Loader2, AlertCircle, RefreshCw } from "lucide-react"
+import { Settings, Loader2, AlertCircle, RefreshCw, Crown } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 import { PluginsSection } from "./plugins-section"
 import { PaneErrorBoundary } from "@/components/ui/pane-error-boundary"
 import { EssentialsSection } from "./essentials-section"
@@ -204,21 +205,31 @@ export default function SettingsPane() {
                   settings.enable_hallucination_check === (preset.settings.enable_hallucination_check ?? false) &&
                   settings.enable_feedback_loop === (preset.settings.enable_feedback_loop ?? false) &&
                   settings.enable_memory_extraction === (preset.settings.enable_memory_extraction ?? false)
+                const tier = settings.feature_tier ?? "community"
+                const locked = preset.requiresPro && tier === "community"
                 return (
                   <button
                     key={preset.id}
                     type="button"
-                    onClick={() => applyUserPreset(preset)}
+                    onClick={() => !locked && applyUserPreset(preset)}
+                    disabled={locked}
                     className={cn(
                       "rounded-lg border p-3 text-left transition-colors",
-                      isActive
-                        ? "border-brand bg-brand/5"
-                        : "border-muted hover:border-muted-foreground/30",
+                      locked
+                        ? "opacity-50 cursor-not-allowed border-muted"
+                        : isActive
+                          ? "border-brand bg-brand/5"
+                          : "border-muted hover:border-muted-foreground/30",
                     )}
                   >
                     <div className="flex items-center gap-1.5">
                       <span>{preset.emoji}</span>
                       <span className="text-sm font-medium">{preset.label}</span>
+                      {locked && (
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-teal-500 border-teal-500/30">
+                          <Crown className="mr-0.5 h-2.5 w-2.5" />Pro
+                        </Badge>
+                      )}
                     </div>
                     <p className="mt-1 text-[11px] leading-tight text-muted-foreground">
                       {preset.description}
@@ -239,7 +250,7 @@ export default function SettingsPane() {
 
               <TabsContent value="essentials" className="space-y-1 pt-2">
                 <PaneErrorBoundary label="Essentials">
-                  <EssentialsSection settings={settings} sections={sections} toggleSection={toggleSection} patch={patch} />
+                  <EssentialsSection settings={settings} sections={sections} toggleSection={toggleSection} patch={patch} credits={credits} />
                 </PaneErrorBoundary>
               </TabsContent>
 

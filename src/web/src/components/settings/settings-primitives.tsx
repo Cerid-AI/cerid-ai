@@ -8,7 +8,25 @@ import { Slider } from "@/components/ui/slider"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ChevronDown, ChevronRight, Info } from "lucide-react"
 
+import { Badge } from "@/components/ui/badge"
+
 export type SectionKey = "connection" | "knowledge_ingestion" | "features" | "retrieval" | "search" | "taxonomy" | "infra_sync" | "ollama" | "kb_admin" | "credits" | "data_sources" | "rag_config"
+
+/**
+ * Wraps children with a disabled overlay + Pro badge when the current tier
+ * is community. On Pro/Enterprise the children render normally.
+ */
+export function ProGate({ tier, children }: { tier: string; children: React.ReactNode }) {
+  if (tier !== "community") return <>{children}</>
+  return (
+    <div className="relative">
+      <div className="opacity-40 pointer-events-none select-none">{children}</div>
+      <Badge variant="outline" className="absolute right-0 top-0 text-[10px] px-1.5 py-0 text-teal-500 border-teal-500/30">
+        Pro
+      </Badge>
+    </div>
+  )
+}
 
 export function SectionHeading({
   icon: Icon,

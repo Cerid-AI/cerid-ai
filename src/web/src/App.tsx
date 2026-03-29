@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Justin Michaels. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { lazy, Suspense, useCallback, useEffect, useState } from "react"
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { Loader2 } from "lucide-react"
 import { AppErrorBoundary } from "@/components/layout/app-error-boundary"
 import { PaneErrorBoundary } from "@/components/ui/pane-error-boundary"
@@ -12,7 +12,7 @@ import { ConversationsProvider } from "@/contexts/conversations-context"
 import { AuthProvider } from "@/contexts/auth-context"
 import { UIModeProvider } from "@/contexts/ui-mode-context"
 import { ProtectedRoute } from "@/components/auth/protected-route"
-import { fetchSettings, fetchSetupStatus } from "@/lib/api"
+import { fetchSettings, fetchSetupStatus, setTierOverride } from "@/lib/api"
 import { OnboardingDialog } from "@/components/onboarding/onboarding-dialog"
 import { SetupWizard } from "@/components/setup/setup-wizard"
 
@@ -35,13 +35,30 @@ function PaneLoader() {
 export default function App() {
   const [multiUser, setMultiUser] = useState(false)
   const [tradingEnabled, setTradingEnabled] = useState(false)
+  const [featureTier, setFeatureTier] = useState("community")
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null)
+  const tierCycling = useRef(false)
   const [showOnboarding, setShowOnboarding] = useState(() => {
     try { return !localStorage.getItem("cerid-onboarding-complete") } catch { return false }
   })
 
   const handleOnboardingComplete = useCallback(() => setShowOnboarding(false), [])
   const handleSetupComplete = useCallback(() => setSetupRequired(false), [])
+
+  const cycleTier = useCallback(async () => {
+    if (tierCycling.current) return
+    tierCycling.current = true
+    const order = ["community", "pro", "enterprise"] as const
+    const next = order[(order.indexOf(featureTier as typeof order[number]) + 1) % order.length]
+    try {
+      const res = await setTierOverride(next)
+      setFeatureTier(res.tier)
+    } catch (err) {
+      if (import.meta.env.DEV) console.warn("Tier override failed:", err)
+    } finally {
+      tierCycling.current = false
+    }
+  }, [featureTier])
 
   useEffect(() => {
     // Check setup status first, then load settings
@@ -62,6 +79,7 @@ export default function App() {
       .then((s) => {
         setMultiUser(!!s.multi_user)
         setTradingEnabled(!!s.trading_enabled)
+        setFeatureTier(s.feature_tier ?? "community")
       })
       .catch((err) => { if (import.meta.env.DEV) console.warn("Settings fetch failed:", err) })
   }, [])
@@ -89,7 +107,7 @@ export default function App() {
     {showOnboarding && <OnboardingDialog open={showOnboarding} onComplete={handleOnboardingComplete} />}
     <ConversationsProvider>
     <KBInjectionProvider>
-    <AppLayout tradingEnabled={tradingEnabled}>
+    <AppLayout tradingEnabled={tradingEnabled} featureTier={featureTier} onCycleTier={cycleTier}>
       {(activePane) => {
         switch (activePane) {
           case "chat":

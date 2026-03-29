@@ -9,9 +9,11 @@ import { useTheme } from "@/hooks/use-theme"
 interface AppLayoutProps {
   children: (activePane: Pane) => React.ReactNode
   tradingEnabled?: boolean
+  featureTier?: string
+  onCycleTier?: () => void
 }
 
-export function AppLayout({ children, tradingEnabled }: AppLayoutProps) {
+export function AppLayout({ children, tradingEnabled, featureTier, onCycleTier }: AppLayoutProps) {
   const [activePane, setActivePane] = useState<Pane>("chat")
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.innerWidth < 1024)
   const { theme, toggleTheme } = useTheme()
@@ -34,6 +36,8 @@ export function AppLayout({ children, tradingEnabled }: AppLayoutProps) {
           theme={theme}
           onToggleTheme={toggleTheme}
           tradingEnabled={tradingEnabled}
+          featureTier={featureTier}
+          onCycleTier={onCycleTier}
         />
         <main key={activePane} className="flex-1 animate-in fade-in duration-200 overflow-hidden">{children(activePane)}</main>
       </div>

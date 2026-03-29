@@ -262,6 +262,36 @@ def is_tier_met(required_tier: str) -> bool:
     return current_level >= required_level
 
 
+def set_tier(new_tier: str) -> str:
+    """Runtime tier override — recomputes FEATURE_FLAGS in place.
+
+    This is a transient override (lost on restart). For persistent
+    changes, set ``CERID_TIER`` in ``.env``.
+    """
+    global FEATURE_TIER  # noqa: PLW0603
+    if new_tier not in _TIER_LEVELS:
+        raise ValueError(f"Invalid tier: {new_tier!r} (valid: {list(_TIER_LEVELS)})")
+    FEATURE_TIER = new_tier
+    level = _TIER_LEVELS[new_tier]
+    pro_level = _TIER_LEVELS["pro"]
+    ent_level = _TIER_LEVELS["enterprise"]
+    FEATURE_FLAGS.update({
+        "ocr_parsing": level >= pro_level,
+        "audio_transcription": level >= pro_level,
+        "image_understanding": level >= pro_level,
+        "semantic_dedup": level >= pro_level,
+        "advanced_analytics": level >= pro_level,
+        "metamorphic_verification": level >= pro_level,
+        "custom_smart_rag": level >= pro_level,
+        "multi_user": CERID_MULTI_USER or level >= ent_level,
+        "sso_saml": level >= ent_level,
+        "audit_logging": level >= ent_level,
+        "priority_support": level >= ent_level,
+    })
+    _config_logger.info("Runtime tier override: %s (flags recomputed)", new_tier)
+    return new_tier
+
+
 def _get_feature_tier(feature_name: str) -> str:
     """Determine the minimum tier required for a feature flag."""
     # Enterprise-only features

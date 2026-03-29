@@ -8,8 +8,8 @@ import { cn } from "@/lib/utils"
 import { PRESETS, detectActivePreset } from "@/lib/settings-presets"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card"
-import { ChevronDown, ChevronRight, Cpu, SearchIcon, Layers } from "lucide-react"
-import { SectionHeading, Row, SliderRow, PipelineToggle } from "./settings-primitives"
+import { ChevronDown, ChevronRight, Cpu, SearchIcon, Layers, Crown } from "lucide-react"
+import { SectionHeading, Row, SliderRow, PipelineToggle, ProGate } from "./settings-primitives"
 
 interface PipelineSectionProps {
   settings: ServerSettings
@@ -36,26 +36,40 @@ export function PipelineSection({ settings, sections, toggleSection, patch }: Pi
             {/* -- Preset cards -- */}
             {(() => {
               const activePreset = detectActivePreset(settings as unknown as Record<string, unknown>)
+              const tier = settings.feature_tier ?? "community"
               return (
                 <div className="grid grid-cols-3 gap-2">
-                  {Object.entries(PRESETS).map(([key, preset]) => (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => patch(preset.values)}
-                      className={cn(
-                        "rounded-lg border p-2.5 text-left transition-colors",
-                        activePreset === key
-                          ? "border-primary bg-primary/5"
-                          : "border-muted hover:border-muted-foreground/30",
-                      )}
-                    >
-                      <span className="text-sm font-medium">{preset.label}</span>
-                      <p className="mt-0.5 text-[11px] leading-tight text-muted-foreground">
-                        {preset.description}
-                      </p>
-                    </button>
-                  ))}
+                  {Object.entries(PRESETS).map(([key, preset]) => {
+                    const locked = key === "maximum" && tier === "community"
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => !locked && patch(preset.values)}
+                        disabled={locked}
+                        className={cn(
+                          "rounded-lg border p-2.5 text-left transition-colors",
+                          locked
+                            ? "opacity-50 cursor-not-allowed border-muted"
+                            : activePreset === key
+                              ? "border-primary bg-primary/5"
+                              : "border-muted hover:border-muted-foreground/30",
+                        )}
+                      >
+                        <span className="flex items-center gap-1 text-sm font-medium">
+                          {preset.label}
+                          {locked && (
+                            <Badge variant="outline" className="text-[10px] px-1 py-0 text-teal-500 border-teal-500/30">
+                              <Crown className="mr-0.5 h-2.5 w-2.5" />Pro
+                            </Badge>
+                          )}
+                        </span>
+                        <p className="mt-0.5 text-[11px] leading-tight text-muted-foreground">
+                          {preset.description}
+                        </p>
+                      </button>
+                    )
+                  })}
                 </div>
               )
             })()}
@@ -278,13 +292,8 @@ export function PipelineSection({ settings, sections, toggleSection, patch }: Pi
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 px-4 pb-4">
-            {(settings.feature_tier ?? "community") === "community" ? (
-              <p className="text-xs text-muted-foreground">
-                Upgrade to Pro tier to configure per-source weights, memory type toggles, and custom RAG presets.
-                Smart mode (automatic KB + memory + external) is available on all tiers.
-              </p>
-            ) : (
-              <>
+            <ProGate tier={settings.feature_tier ?? "community"}>
+              <div className="grid gap-4">
                 <SliderRow
                   label="KB Source Weight"
                   value={1.0}
@@ -321,8 +330,8 @@ export function PipelineSection({ settings, sections, toggleSection, patch }: Pi
                     </label>
                   ))}
                 </div>
-              </>
-            )}
+              </div>
+            </ProGate>
           </CardContent>
         </Card>
       )}

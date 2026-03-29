@@ -15,6 +15,8 @@ export interface UserPreset {
   settings: SettingsUpdate
   /** localStorage overrides applied alongside the server settings */
   local: Record<string, string>
+  /** When true, this preset requires Pro tier to activate */
+  requiresPro?: boolean
 }
 
 export const USER_PRESETS: UserPreset[] = [
@@ -90,6 +92,7 @@ export const USER_PRESETS: UserPreset[] = [
     emoji: "🔧",
     description: "All features enabled. Maximum quality, higher latency.",
     uiMode: "advanced",
+    requiresPro: true,
     settings: {
       enable_feedback_loop: true,
       enable_hallucination_check: true,

@@ -1,9 +1,10 @@
 // Copyright (c) 2026 Justin Michaels. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ServerSettings, SettingsUpdate, RoutingMode } from "@/lib/types"
+import type { ServerSettings, SettingsUpdate, RoutingMode, ProviderCredits } from "@/lib/types"
 import type { SectionKey } from "./settings-primitives"
 import { useSettings } from "@/hooks/use-settings"
+import { cn } from "@/lib/utils"
 import { Card, CardContent } from "@/components/ui/card"
 import {
   Select,
@@ -12,7 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Database, ToggleLeft } from "lucide-react"
+import { Database, ToggleLeft, CreditCard, ExternalLink } from "lucide-react"
 import { SectionHeading, LabelWithInfo, Row, ToggleRow, SliderRow } from "./settings-primitives"
 
 interface EssentialsSectionProps {
@@ -20,13 +21,61 @@ interface EssentialsSectionProps {
   sections: Record<SectionKey, boolean>
   toggleSection: (key: SectionKey) => void
   patch: (update: SettingsUpdate) => Promise<void>
+  credits?: ProviderCredits
 }
 
-export function EssentialsSection({ settings, sections, toggleSection, patch }: EssentialsSectionProps) {
+export function EssentialsSection({ settings, sections, toggleSection, patch, credits }: EssentialsSectionProps) {
   const { routingMode, setRoutingMode } = useSettings()
 
   return (
     <>
+      {/* -- Provider Credits -- */}
+      <SectionHeading icon={CreditCard} label="Provider Credits" open={sections.credits} onToggle={() => toggleSection("credits")} />
+      {sections.credits && (
+        <Card className="mb-4">
+          <CardContent className="grid gap-3 pt-4">
+            {credits?.configured ? (
+              <>
+                <div className="flex items-center justify-between">
+                  <LabelWithInfo label="Balance" info="Remaining OpenRouter credits" />
+                  <span className={cn(
+                    "text-sm font-semibold tabular-nums",
+                    credits.status === "ok" && "text-green-600 dark:text-green-400",
+                    credits.status === "low" && "text-yellow-600 dark:text-yellow-400",
+                    credits.status === "exhausted" && "text-red-600 dark:text-red-400",
+                    credits.status === "error" && "text-muted-foreground",
+                  )}>
+                    ${credits.balance?.toFixed(2) ?? "\u2014"}
+                  </span>
+                </div>
+                {credits.warning && (
+                  <p className="text-xs text-yellow-600 dark:text-yellow-400">{credits.warning}</p>
+                )}
+                <div className="my-1 h-px bg-border" />
+                <Row label="Today" value={credits.usage_daily != null ? `$${credits.usage_daily.toFixed(4)}` : "\u2014"} info="Spend today" />
+                <Row label="This Month" value={credits.usage_monthly != null ? `$${credits.usage_monthly.toFixed(2)}` : "\u2014"} info="Spend this month" />
+                <div className="my-1 h-px bg-border" />
+                <div className="flex gap-2">
+                  <a
+                    href={credits.top_up_url ?? "https://openrouter.ai/settings/credits"}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md bg-brand px-3 text-xs font-medium text-brand-foreground hover:bg-brand/90"
+                  >
+                    Add Credits
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                </div>
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                No OpenRouter API key configured.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* -- Knowledge & Ingestion -- */}
       <SectionHeading icon={Database} label="Knowledge & Ingestion" open={sections.knowledge_ingestion} onToggle={() => toggleSection("knowledge_ingestion")} />
       {sections.knowledge_ingestion && (

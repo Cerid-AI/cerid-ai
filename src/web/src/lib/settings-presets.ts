@@ -10,9 +10,9 @@ export interface SettingsPreset {
 }
 
 export const PRESETS: Record<string, SettingsPreset> = {
-  essential: {
-    label: "Balanced",
-    description: "Smart defaults — good quality with reasonable speed",
+  efficient: {
+    label: "Efficient",
+    description: "Fast retrieval with smart defaults",
     values: {
       enable_self_rag: true,
       enable_hallucination_check: true,
@@ -28,8 +28,8 @@ export const PRESETS: Record<string, SettingsPreset> = {
       enable_context_compression: true,
     },
   },
-  recommended: {
-    label: "Recommended",
+  balanced: {
+    label: "Balanced",
     description: "Best balance of quality and speed",
     values: {
       enable_self_rag: true,
@@ -49,8 +49,8 @@ export const PRESETS: Record<string, SettingsPreset> = {
     },
   },
   maximum: {
-    label: "Maximum Quality",
-    description: "All pipeline stages — best results, higher latency",
+    label: "Maximum",
+    description: "All pipeline stages enabled — requires Pro tier",
     values: {
       enable_self_rag: true,
       enable_hallucination_check: true,

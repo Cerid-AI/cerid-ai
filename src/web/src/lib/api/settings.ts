@@ -62,6 +62,16 @@ export async function updateSettings(settings: SettingsUpdate): Promise<{ status
   return res.json()
 }
 
+export async function setTierOverride(tier: string): Promise<{ status: string; tier: string; feature_flags: Record<string, boolean> }> {
+  const res = await fetch(`${MCP_BASE}/settings/tier`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ tier }),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Tier override failed: ${res.status}`))
+  return res.json()
+}
+
 // -- Auth API (Phase 31 — multi-user) ----------------------------------------
 
 export async function authRegister(
