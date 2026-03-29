@@ -148,17 +148,33 @@ async def get_ollama_status():
         "default_model_installed": False,
     }
 
+    # Try configured URL first, then fall back to host.docker.internal
+    # (handles native macOS Ollama accessed from inside Docker)
+    urls_to_try = [ollama_url]
+    if "host.docker.internal" not in ollama_url:
+        urls_to_try.append("http://host.docker.internal:11434")
+
     try:
         async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.get(f"{ollama_url}/api/tags")
-            if resp.status_code == 200:
-                result["reachable"] = True
-                models_data = resp.json().get("models", [])
-                result["models"] = [m.get("name", "") for m in models_data]
-                result["default_model_installed"] = any(
-                    config.OLLAMA_DEFAULT_MODEL in m.get("name", "")
-                    for m in models_data
-                )
+            for url in urls_to_try:
+                try:
+                    resp = await client.get(f"{url}/api/tags")
+                    if resp.status_code == 200:
+                        result["reachable"] = True
+                        result["url"] = url
+                        models_data = resp.json().get("models", [])
+                        result["models"] = [m.get("name", "") for m in models_data]
+                        result["default_model_installed"] = any(
+                            config.OLLAMA_DEFAULT_MODEL in m.get("name", "")
+                            for m in models_data
+                        )
+                        # Persist the working URL for subsequent calls
+                        if url != ollama_url:
+                            os.environ["OLLAMA_URL"] = url
+                            logger.info("Ollama found at %s (auto-detected)", url)
+                        break
+                except Exception:
+                    continue
     except Exception as exc:
         logger.warning("Ollama status check failed: %s", exc)
 
