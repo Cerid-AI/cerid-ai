@@ -153,6 +153,132 @@ def _record_file_scanned(
     redis.set(_KEY_LAST_SCAN_AT, utcnow_iso())
 
 
+async def _extract_and_scan_archive(
+    archive_path: str,
+    root_path: str,
+    valid_extensions: set[str],
+    exclude_dirs: set[str],
+    max_size: int,
+    min_quality: float,
+    dry_run: bool,
+    sem: asyncio.Semaphore,
+) -> AsyncIterator[ScanResult]:
+    """Extract a zip/tar archive to a temp dir and scan its contents."""
+    import shutil
+    import tarfile
+    import tempfile
+    import zipfile
+
+    archive_size = os.path.getsize(archive_path)
+    max_archive = 500 * 1024 * 1024  # 500MB
+    if archive_size > max_archive:
+        yield ScanResult(
+            path=archive_path, status="skipped",
+            file_size_bytes=archive_size,
+            error_msg=f"archive too large ({archive_size // (1024*1024)}MB > 500MB limit)",
+        )
+        return
+
+    tmp_dir = tempfile.mkdtemp(prefix="cerid-extract-")
+    extracted_count = 0
+    try:
+        # Extract
+        name_lower = os.path.basename(archive_path).lower()
+        if name_lower.endswith(".zip"):
+            with zipfile.ZipFile(archive_path, "r") as zf:
+                # Security: check for path traversal
+                for info in zf.infolist():
+                    if ".." in info.filename or info.filename.startswith("/"):
+                        continue
+                    zf.extract(info, tmp_dir)
+                    extracted_count += 1
+        elif name_lower.endswith((".tar.gz", ".tgz", ".tar.bz2", ".tar")):
+            with tarfile.open(archive_path, "r:*") as tf:
+                for member in tf.getmembers():
+                    if ".." in member.name or member.name.startswith("/"):
+                        continue
+                    if member.isfile():
+                        tf.extract(member, tmp_dir, filter="data")
+                        extracted_count += 1
+        else:
+            yield ScanResult(path=archive_path, status="skipped", error_msg="unsupported archive format")
+            return
+
+        if extracted_count == 0:
+            yield ScanResult(path=archive_path, status="skipped", error_msg="empty archive")
+            return
+
+        # Scan extracted files (reuse scan_folder logic inline)
+        redis = get_redis()
+        for dirpath, _, filenames in os.walk(tmp_dir):
+            dir_name = os.path.basename(dirpath).lower()
+            if dir_name in exclude_dirs or dir_name.startswith("."):
+                continue
+            for fname in filenames:
+                if fname.startswith(".") or fname.lower() in JUNK_FILE_PATTERNS:
+                    continue
+                suffix = Path(fname).suffix.lower()
+                if suffix not in valid_extensions:
+                    continue
+
+                fpath = os.path.join(dirpath, fname)
+                try:
+                    fsize = os.path.getsize(fpath)
+                except OSError:
+                    continue
+                if fsize > max_size or fsize == 0:
+                    continue
+
+                if dry_run:
+                    domain, sub_cat = _detect_domain_from_path(fpath, tmp_dir)
+                    yield ScanResult(
+                        path=f"{archive_path}:{fname}",
+                        status="preview", domain=domain, file_size_bytes=fsize,
+                    )
+                    continue
+
+                # Dedup check
+                try:
+                    content_hash = await asyncio.to_thread(_file_content_hash, fpath)
+                except OSError:
+                    continue
+                if redis.get(f"{_KEY_FILES}:{content_hash}"):
+                    yield ScanResult(path=f"{archive_path}:{fname}", status="duplicate", file_size_bytes=fsize)
+                    continue
+
+                domain, sub_cat = _detect_domain_from_path(fpath, tmp_dir)
+                async with sem:
+                    try:
+                        parsed = await asyncio.to_thread(_parse_file, fpath)
+                        text = parsed.get("text", "")
+                        if not text.strip():
+                            _record_file_scanned(redis, content_hash, fpath, "low_quality")
+                            yield ScanResult(path=f"{archive_path}:{fname}", status="low_quality", domain=domain, file_size_bytes=fsize)
+                            continue
+                        result = await asyncio.to_thread(
+                            ingest_content, text, domain or "general",
+                            {"filename": fname, "sub_category": sub_cat, "client_source": f"archive:{os.path.basename(archive_path)}"},
+                        )
+                        quality = result.get("quality_score", 0.0)
+                        if quality < min_quality:
+                            _record_file_scanned(redis, content_hash, fpath, "low_quality")
+                            yield ScanResult(path=f"{archive_path}:{fname}", status="low_quality", quality_score=quality, domain=domain, file_size_bytes=fsize)
+                        else:
+                            _record_file_scanned(redis, content_hash, fpath, "ingested")
+                            yield ScanResult(
+                                path=f"{archive_path}:{fname}", status="ingested",
+                                quality_score=quality, domain=domain,
+                                artifact_id=result.get("artifact_id", ""), file_size_bytes=fsize,
+                            )
+                    except Exception as e:
+                        _record_file_scanned(redis, content_hash, fpath, "error")
+                        yield ScanResult(path=f"{archive_path}:{fname}", status="error", error_msg=str(e), file_size_bytes=fsize)
+    except Exception as e:
+        yield ScanResult(path=archive_path, status="error", error_msg=f"archive extraction failed: {e}")
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 async def scan_folder(
     root_path: str,
     *,
@@ -212,9 +338,13 @@ async def scan_folder(
                 yield ScanResult(path=file_path, status="skipped", error_msg="junk file")
                 continue
 
-            # Skip archives (TODO: extract in Sprint 3)
+            # Extract archives and process contents
             if suffix in ARCHIVE_EXTENSIONS or name_lower.endswith((".tar.gz", ".tar.bz2")):
-                yield ScanResult(path=file_path, status="skipped", error_msg="archive (extraction not yet supported)")
+                async for r in _extract_and_scan_archive(
+                    file_path, root_path, valid_extensions, exclude_dirs,
+                    max_size, min_quality, dry_run, sem,
+                ):
+                    yield r
                 continue
 
             # Check extension

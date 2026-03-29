@@ -15,6 +15,7 @@ import uuid
 from dataclasses import asdict
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 import config
@@ -65,11 +66,19 @@ class ScanState(BaseModel):
     total_errored: int = 0
 
 
+class PreviewRequest(BaseModel):
+    path: str
+    max_file_size_mb: int = 50
+
 class PreviewResponse(BaseModel):
     total_files: int = 0
+    total_scanned: int = 0
     total_size_mb: float = 0.0
     by_extension: dict = Field(default_factory=dict)
     by_domain: dict = Field(default_factory=dict)
+    estimated_chunks: int = 0
+    estimated_storage_mb: float = 0.0
+    skipped: dict = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +86,7 @@ class PreviewResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 _active_scans: dict[str, ScanProgress] = {}
+_scan_flags: dict[str, dict[str, bool]] = {}  # scan_id → {"paused": bool, "cancelled": bool}
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +97,7 @@ async def _run_scan(scan_id: str, req: ScanRequest) -> None:
     """Background task that drives the scan_folder async generator."""
     progress = _active_scans[scan_id]
     progress.status = "running"
+    flags = _scan_flags.setdefault(scan_id, {"paused": False, "cancelled": False})
     results: list[dict] = []
 
     try:
@@ -97,6 +108,20 @@ async def _run_scan(scan_id: str, req: ScanRequest) -> None:
             exclude_patterns=set(req.exclude_patterns) if req.exclude_patterns else None,
             dry_run=req.dry_run,
         ):
+            # Check cancel
+            if flags["cancelled"]:
+                progress.status = "cancelled"
+                break
+
+            # Check pause — wait until resumed
+            while flags["paused"] and not flags["cancelled"]:
+                progress.status = "paused"
+                await asyncio.sleep(0.5)
+            if flags["cancelled"]:
+                progress.status = "cancelled"
+                break
+            progress.status = "running"
+
             progress.files_scanned += 1
             progress.elapsed_s = round(time.time() - _scan_start_times[scan_id], 2)
 
@@ -109,11 +134,12 @@ async def _run_scan(scan_id: str, req: ScanRequest) -> None:
 
             results.append(asdict(result))
 
-        progress.status = "complete"
+        if progress.status != "cancelled":
+            progress.status = "complete"
         progress.results = results
         progress.elapsed_s = round(time.time() - _scan_start_times[scan_id], 2)
         logger.info(
-            f"Scan {scan_id} complete: {progress.files_ingested} ingested, "
+            f"Scan {scan_id} {progress.status}: {progress.files_ingested} ingested, "
             f"{progress.files_skipped} skipped, {progress.files_errored} errored "
             f"({progress.elapsed_s:.1f}s)"
         )
@@ -188,15 +214,21 @@ def scan_state() -> ScanState:
 
 
 @router.get("/admin/scan/preview")
-async def scan_preview(
+async def scan_preview_get(
     path: str = Query(..., description="Directory to preview"),
     max_file_size_mb: int = Query(50, description="Max file size in MB"),
 ) -> PreviewResponse:
-    """Quick preview of a directory without ingesting."""
+    """Quick preview of a directory without ingesting (GET)."""
     _validate_scan_path(path)
-    result = await asyncio.to_thread(
-        lambda: asyncio.run(preview_folder(path, max_file_size_mb=max_file_size_mb))
-    ) if False else await preview_folder(path, max_file_size_mb=max_file_size_mb)
+    result = await preview_folder(path, max_file_size_mb=max_file_size_mb)
+    return PreviewResponse(**result)
+
+
+@router.post("/admin/scan/preview")
+async def scan_preview_post(req: PreviewRequest) -> PreviewResponse:
+    """Quick preview of a directory without ingesting (POST)."""
+    _validate_scan_path(req.path)
+    result = await preview_folder(req.path, max_file_size_mb=req.max_file_size_mb)
     return PreviewResponse(**result)
 
 
@@ -206,6 +238,87 @@ def get_scan_progress(scan_id: str) -> ScanProgress:
     if scan_id not in _active_scans:
         raise HTTPException(status_code=404, detail=f"Scan not found: {scan_id}")
     return _active_scans[scan_id]
+
+
+@router.get("/admin/scan/{scan_id}/stream")
+async def stream_scan_progress(scan_id: str) -> StreamingResponse:
+    """SSE stream of scan progress — real-time updates without polling."""
+    if scan_id not in _active_scans:
+        raise HTTPException(status_code=404, detail=f"Scan not found: {scan_id}")
+
+    async def _event_generator():
+        import json as _json
+
+        last_scanned = 0
+        while True:
+            progress = _active_scans.get(scan_id)
+            if not progress:
+                break
+
+            # Only emit when something changed
+            if progress.files_scanned != last_scanned or progress.status in ("complete", "cancelled", "error"):
+                last_scanned = progress.files_scanned
+                # Estimate ETA
+                eta_s = 0.0
+                if progress.files_scanned > 0 and progress.files_total_estimate > 0:
+                    rate = progress.files_scanned / max(progress.elapsed_s, 0.1)
+                    remaining = progress.files_total_estimate - progress.files_scanned
+                    eta_s = round(remaining / rate, 1) if rate > 0 else 0.0
+
+                event = {
+                    "type": "progress",
+                    "status": progress.status,
+                    "files_scanned": progress.files_scanned,
+                    "files_total": progress.files_total_estimate,
+                    "files_ingested": progress.files_ingested,
+                    "files_skipped": progress.files_skipped,
+                    "files_errored": progress.files_errored,
+                    "elapsed_s": progress.elapsed_s,
+                    "eta_s": eta_s,
+                }
+                yield f"data: {_json.dumps(event)}\n\n"
+
+            if progress.status in ("complete", "cancelled", "error"):
+                yield f"data: {_json.dumps({'type': 'complete', 'status': progress.status})}\n\n"
+                break
+
+            await asyncio.sleep(1)
+
+    return StreamingResponse(
+        _event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/admin/scan/{scan_id}/pause")
+def pause_scan(scan_id: str) -> dict:
+    """Pause an active scan."""
+    if scan_id not in _active_scans:
+        raise HTTPException(status_code=404, detail=f"Scan not found: {scan_id}")
+    flags = _scan_flags.setdefault(scan_id, {"paused": False, "cancelled": False})
+    flags["paused"] = True
+    return {"scan_id": scan_id, "status": "paused"}
+
+
+@router.post("/admin/scan/{scan_id}/resume")
+def resume_scan(scan_id: str) -> dict:
+    """Resume a paused scan."""
+    if scan_id not in _active_scans:
+        raise HTTPException(status_code=404, detail=f"Scan not found: {scan_id}")
+    flags = _scan_flags.setdefault(scan_id, {"paused": False, "cancelled": False})
+    flags["paused"] = False
+    return {"scan_id": scan_id, "status": "resumed"}
+
+
+@router.post("/admin/scan/{scan_id}/cancel")
+def cancel_scan(scan_id: str) -> dict:
+    """Cancel an active scan."""
+    if scan_id not in _active_scans:
+        raise HTTPException(status_code=404, detail=f"Scan not found: {scan_id}")
+    flags = _scan_flags.setdefault(scan_id, {"paused": False, "cancelled": False})
+    flags["cancelled"] = True
+    return {"scan_id": scan_id, "status": "cancelled"}
 
 
 @router.post("/admin/scan/reset")

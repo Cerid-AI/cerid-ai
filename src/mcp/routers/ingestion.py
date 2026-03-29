@@ -62,7 +62,7 @@ class BatchIngestItem(BaseModel):
 
 
 class BatchIngestRequest(BaseModel):
-    items: list[BatchIngestItem] = Field(..., max_length=20)
+    items: list[BatchIngestItem] = Field(..., max_length=100)
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
