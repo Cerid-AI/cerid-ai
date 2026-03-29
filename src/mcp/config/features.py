@@ -20,8 +20,11 @@ from typing import Any as _Any
 # ---------------------------------------------------------------------------
 # Plugin System & Feature Tiers
 # ---------------------------------------------------------------------------
-# Feature tier: "community" (OSS) or "pro" (commercial plugins enabled)
+# Feature tier: "community" (OSS), "pro" (commercial plugins), or "enterprise"
 FEATURE_TIER = os.getenv("CERID_TIER", "community")
+
+# Hierarchical tier levels: enterprise ⊃ pro ⊃ community
+_TIER_LEVELS = {"community": 0, "pro": 1, "enterprise": 2}
 
 # Plugin directory (relative to app root or absolute path)
 PLUGIN_DIR = os.getenv("CERID_PLUGIN_DIR", os.path.join(os.path.dirname(os.path.dirname(__file__)), "plugins"))
@@ -40,16 +43,20 @@ CERID_JWT_REFRESH_TTL = int(os.getenv("CERID_JWT_REFRESH_TTL", "604800"))  # 7 d
 DEFAULT_TENANT_ID = os.getenv("CERID_DEFAULT_TENANT", "default")
 
 # Feature flags: controls what's available per tier
-# Community features are always enabled; pro features require CERID_TIER=pro
+# Community features are always enabled; pro features require CERID_TIER=pro or enterprise
 FEATURE_FLAGS = {
-    # Pro-only features (disabled in community tier)
-    "ocr_parsing":         FEATURE_TIER == "pro",
-    "audio_transcription": FEATURE_TIER == "pro",  # Reserved — checked via plugin manifest tier field
-    "image_understanding": FEATURE_TIER == "pro",  # Reserved — checked via plugin manifest tier field
-    "semantic_dedup":      FEATURE_TIER == "pro",
-    "advanced_analytics":  FEATURE_TIER == "pro",  # Reserved — checked via plugin manifest tier field
-    "metamorphic_verification": FEATURE_TIER == "pro",
-    "multi_user":          CERID_MULTI_USER or FEATURE_TIER == "pro",
+    # Pro-only features (requires pro or enterprise tier)
+    "ocr_parsing":         _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
+    "audio_transcription": _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
+    "image_understanding": _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
+    "semantic_dedup":      _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
+    "advanced_analytics":  _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
+    "metamorphic_verification": _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
+    # Enterprise-only features
+    "multi_user":          CERID_MULTI_USER or _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["enterprise"],
+    "sso_saml":            _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["enterprise"],
+    "audit_logging":       _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["enterprise"],
+    "priority_support":    _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["enterprise"],
     # Community features (always enabled)
     "hierarchical_taxonomy": True,
     "file_upload_gui":       True,
@@ -204,9 +211,9 @@ def require_feature(feature_name: str) -> _Callable:
                 raise HTTPException(
                     status_code=403,
                     detail=(
-                        f"Feature '{feature_name}' requires Cerid AI Pro. "
+                        f"Feature '{feature_name}' requires a higher Cerid AI tier. "
                         f"Current tier: {FEATURE_TIER}. "
-                        f"Set CERID_TIER=pro to enable."
+                        f"Upgrade your tier to enable."
                     ),
                 )
             return await func(*args, **kwargs)
@@ -224,8 +231,8 @@ def check_feature(feature_name: str) -> None:
         from errors import FeatureGateError
 
         raise FeatureGateError(
-            f"Feature '{feature_name}' requires Cerid AI Pro. "
-            f"Current tier: {FEATURE_TIER}. Set CERID_TIER=pro to enable.",
+            f"Feature '{feature_name}' requires a higher Cerid AI tier. "
+            f"Current tier: {FEATURE_TIER}. Upgrade your tier to enable.",
         )
 
 
@@ -235,10 +242,10 @@ def check_tier(required_tier: str, *, context: str = "") -> None:
     Use for dynamic tier checks where the required tier comes from metadata
     (e.g. plugin manifests) rather than a named feature flag.
     """
-    if required_tier == "pro" and FEATURE_TIER != "pro":
+    if not is_tier_met(required_tier):
         from errors import FeatureGateError
 
-        msg = f"Requires 'pro' tier (current: '{FEATURE_TIER}')."
+        msg = f"Requires '{required_tier}' tier (current: '{FEATURE_TIER}')."
         if context:
             msg = f"{context} {msg}"
         raise FeatureGateError(msg)
@@ -246,9 +253,24 @@ def check_tier(required_tier: str, *, context: str = "") -> None:
 
 def is_tier_met(required_tier: str) -> bool:
     """Check if the current tier meets the requirement (no exception)."""
-    if required_tier == "pro":
-        return FEATURE_TIER == "pro"
-    return True
+    current_level = _TIER_LEVELS.get(FEATURE_TIER, 0)
+    required_level = _TIER_LEVELS.get(required_tier, 0)
+    return current_level >= required_level
+
+
+def _get_feature_tier(feature_name: str) -> str:
+    """Determine the minimum tier required for a feature flag."""
+    # Enterprise-only features
+    if feature_name in ("sso_saml", "audit_logging", "priority_support"):
+        return "enterprise"
+    if feature_name == "multi_user":
+        return "enterprise"  # multi_user is enterprise (env override available)
+    # Community features (always enabled)
+    if feature_name in ("hierarchical_taxonomy", "file_upload_gui",
+                        "encryption_at_rest", "truth_audit", "live_metrics"):
+        return "community"
+    # Everything else is pro
+    return "pro"
 
 
 def get_feature_status() -> dict:
@@ -258,7 +280,7 @@ def get_feature_status() -> dict:
         "features": {
             name: {
                 "enabled": enabled,
-                "tier_required": "pro" if not enabled else "community",
+                "tier_required": _get_feature_tier(name),
             }
             for name, enabled in FEATURE_FLAGS.items()
         },

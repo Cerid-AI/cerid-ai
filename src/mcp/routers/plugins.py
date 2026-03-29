@@ -126,7 +126,7 @@ def _set_plugin_config_redis(name: str, cfg: dict[str, Any]) -> None:
 
 def _resolve_status(manifest: dict[str, Any], enabled: bool) -> str:
     """Determine the display status for a plugin."""
-    tier_required = manifest.get("tier_required", manifest.get("tier", "community"))
+    tier_required = manifest.get("tier", "community")
     if not is_tier_met(tier_required):
         return "requires_pro"
     if not enabled:
@@ -143,7 +143,7 @@ def _resolve_status(manifest: dict[str, Any], enabled: bool) -> str:
 def _manifest_to_info(manifest: dict[str, Any], enabled: bool) -> PluginInfo:
     """Convert a raw manifest + enabled flag to PluginInfo."""
     name = manifest.get("name", "unknown")
-    tier_required = manifest.get("tier_required", manifest.get("tier", "community"))
+    tier_required = manifest.get("tier", "community")
     status = _resolve_status(manifest, enabled)
     return PluginInfo(
         name=name,
@@ -192,7 +192,7 @@ def enable_plugin(name: str) -> PluginInfo:
     if name not in manifests:
         raise HTTPException(status_code=404, detail=f"Plugin '{name}' not found")
     manifest = manifests[name]
-    tier_required = manifest.get("tier_required", manifest.get("tier", "community"))
+    tier_required = manifest.get("tier", "community")
     check_tier(tier_required, context=f"Plugin '{name}':")
     _set_plugin_enabled_redis(name, True)
     logger.info("Plugin '%s' enabled", name)

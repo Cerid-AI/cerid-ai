@@ -932,7 +932,9 @@ export interface QualityMetricsResponse {
 
 // ── Plugins ──────────────────────────────────────────────────────────────────
 
-export type PluginStatus = "installed" | "active" | "error" | "disabled" | "requires_pro"
+export type PluginStatus = "installed" | "active" | "error" | "disabled" | "requires_pro" | "requires_enterprise"
+
+export type FeatureTier = "community" | "pro" | "enterprise"
 
 export interface Plugin {
   name: string
@@ -1026,7 +1028,7 @@ export interface WorkflowTemplate {
 export interface ParserCapability {
   extension: string
   parser: string
-  tier: "community" | "pro"
+  tier: "community" | "pro" | "enterprise"
   available?: boolean
 }
 

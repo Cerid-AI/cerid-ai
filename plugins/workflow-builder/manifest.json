@@ -2,7 +2,7 @@
   "name": "cerid-workflow-builder",
   "version": "0.1.0",
   "description": "Visual Workflow Builder — DAG composition and execution engine for agent pipelines",
-  "tier_required": "pro",
+  "tier": "pro",
   "capabilities": ["workflow-visualization", "dag-composition", "pipeline-execution"],
   "config_schema": {
     "max_nodes_per_workflow": {

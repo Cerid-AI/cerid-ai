@@ -273,6 +273,20 @@ Frontend tests: `cd src/web && npx vitest run`
 | `utils/ollama_models.py` | Ollama model management | `list_models()`, `pull_model()` |
 | `routers/sdk.py` | Stable external API (`/sdk/v1/`) | Versioned contract |
 
+## Product Tiers
+
+| Tier | License | Env Var |
+|------|---------|---------|
+| Core | Apache-2.0 | `CERID_TIER=community` (default) |
+| Pro | BSL-1.1 | `CERID_TIER=pro` |
+| Enterprise | Commercial | `CERID_TIER=enterprise` |
+
+- Gate features with `@require_feature("feature_name")` decorator (async endpoints)
+- Gate sync functions with `check_feature("feature_name")` or `check_tier("pro")`
+- Plugin tier: set `"tier": "pro"` in `manifest.json`
+- Enterprise includes all Pro features. Pro includes all Core features.
+- See `docs/TIER_MATRIX.md` for complete feature matrix.
+
 ## Compliance — USG Technology Restrictions
 
 **No Chinese-origin AI models or technology.** As of 2026-03-28, the codebase has been purged of all Chinese-origin model references (DeepSeek, Qwen/Alibaba, Baichuan, Yi, GLM/Zhipu, MiniMax, Moonshot, 01.AI) for USG alignment.
