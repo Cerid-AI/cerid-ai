@@ -82,4 +82,4 @@ def get_rag_config(intent: str) -> dict:
         "creative": {"inject": False, "top_k": 3, "decompose": False, "rerank": False},
         "conversational": {"inject": False, "top_k": 0, "decompose": False, "rerank": False},
     }
-    return configs.get(intent, configs["factual"])
+    return configs.get(intent) or configs["factual"]

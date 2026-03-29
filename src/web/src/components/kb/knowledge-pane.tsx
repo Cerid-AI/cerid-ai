@@ -868,7 +868,7 @@ function KBListItem({ result, isSelected, onSelect, onPreview, onDelete, onRecat
   onDelete?: () => void
   onRecategorize?: () => void
 }) {
-  const preview = (result.content || "").replace(/[#*_\[\]|]/g, "").replace(/\s+/g, " ").trim().slice(0, 120)
+  const preview = (result.content || "").replace(/[#*_[\]|]/g, "").replace(/\s+/g, " ").trim().slice(0, 120)
   return (
     <div
       role="button"

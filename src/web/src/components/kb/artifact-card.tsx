@@ -185,7 +185,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
           </div>
           {compact && result.content && (
             <p className="mt-0.5 truncate text-[11px] leading-tight text-muted-foreground">
-              {result.content.replace(/[#*_\[\]|>]/g, "").replace(/\s+/g, " ").trim().slice(0, 80)}
+              {result.content.replace(/[#*_[\]|>]/g, "").replace(/\s+/g, " ").trim().slice(0, 80)}
             </p>
           )}
           <TooltipProvider delayDuration={0}>
