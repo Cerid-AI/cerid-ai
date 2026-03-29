@@ -247,6 +247,7 @@ export interface KBQueryResult {
   quality_score?: number
   summary?: string
   source_url?: string
+  source_type?: "kb" | "memory" | "external"
 }
 
 export interface MemoryRecallResult {

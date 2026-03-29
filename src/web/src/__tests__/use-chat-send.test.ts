@@ -19,12 +19,10 @@ vi.mock("@/lib/api", () => ({
 }))
 
 // Mock model-router (avoid testing routing logic here).
-// Factory cannot reference top-level imports due to vi.mock hoisting,
-// so we return a dynamic getter that reads MODELS at call time.
 vi.mock("@/lib/model-router", () => ({
-  recommendModel: vi.fn().mockImplementation(() => {
-    const { MODELS: M } = require("@/lib/types")
-    return { model: M[0], estimatedCost: 0, reasoning: "", savingsVsCurrent: 0 }
+  recommendModel: vi.fn().mockReturnValue({
+    model: { id: "openrouter/anthropic/claude-sonnet-4.6", effectiveContextWindow: 800_000 },
+    estimatedCost: 0, reasoning: "", savingsVsCurrent: 0,
   }),
 }))
 

@@ -5,7 +5,7 @@ import { useCallback, useRef, useState } from "react"
 import type { ChatMessage, KBQueryResult, SourceRef } from "@/lib/types"
 import { MODELS } from "@/lib/types"
 import { recommendModel } from "@/lib/model-router"
-import { deduplicateChunks, formatChunkWithHeader, formatMemoryForInjection, memoryToKBResult } from "@/lib/kb-utils"
+import { deduplicateChunks, formatChunkWithHeader, memoryToKBResult } from "@/lib/kb-utils"
 import { estimateTokenCount, uuid } from "@/lib/utils"
 import { compressConversation, queryKB, recallMemories } from "@/lib/api"
 
