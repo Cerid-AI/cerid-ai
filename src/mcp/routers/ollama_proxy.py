@@ -33,8 +33,27 @@ _CONNECT_TIMEOUT = OLLAMA_CONNECT_TIMEOUT
 
 
 def _ollama_base_url() -> str:
-    """Return the configured Ollama base URL."""
-    return os.getenv("OLLAMA_URL", "http://localhost:11434")
+    """Return the configured Ollama base URL.
+
+    Falls back to ``host.docker.internal`` when the primary URL contains
+    a Docker container name that may not be running (native macOS Ollama).
+    """
+    url = os.getenv("OLLAMA_URL", "http://localhost:11434")
+    # If URL points to a Docker container name, also try host.docker.internal
+    if "cerid-ollama" in url:
+        import httpx as _hx
+        try:
+            _hx.get(f"{url}/api/tags", timeout=2)
+            return url
+        except Exception:
+            fallback = "http://host.docker.internal:11434"
+            try:
+                _hx.get(f"{fallback}/api/tags", timeout=2)
+                os.environ["OLLAMA_URL"] = fallback
+                return fallback
+            except Exception:
+                pass
+    return url
 
 
 def _ollama_enabled() -> bool:
@@ -281,8 +300,9 @@ async def pull_model(req: PullRequest):
     """Pull (download) a model to the local Ollama server.
 
     Returns a streaming response with download progress.
+    No OLLAMA_ENABLED gate — pulling is a setup action that should work
+    before Ollama is formally enabled in the pipeline.
     """
-    _require_enabled()
     base_url = _ollama_base_url()
 
     async def _progress_generator():
