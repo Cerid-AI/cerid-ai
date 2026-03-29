@@ -267,9 +267,14 @@ export function ChatToolbar({
               </MenuCheckboxItem>
               <MenuSeparator />
               <MenuLabel>Injection threshold</MenuLabel>
-              {[0.70, 0.80, 0.85, 0.90].map((t) => (
-                <MenuRadioItem key={t} checked={autoInjectThreshold === t} onClick={() => setAutoInjectThreshold(t)}>
-                  {Math.round(t * 100)}% relevance
+              {[
+                { value: 0.10, label: "Broad (10%)" },
+                { value: 0.15, label: "Standard (15%)" },
+                { value: 0.25, label: "Focused (25%)" },
+                { value: 0.40, label: "Strict (40%)" },
+              ].map((t) => (
+                <MenuRadioItem key={t.value} checked={autoInjectThreshold === t.value} onClick={() => setAutoInjectThreshold(t.value)}>
+                  {t.label}
                 </MenuRadioItem>
               ))}
             </>

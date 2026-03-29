@@ -92,13 +92,13 @@ export function EssentialsSection({ settings, sections, toggleSection, patch, cr
                 label="Injection Threshold"
                 value={settings.auto_inject_threshold}
                 onChange={(v) => patch({ auto_inject_threshold: v })}
-                min={0.5} max={1} step={0.05}
+                min={0.05} max={0.5} step={0.05}
                 info="Minimum relevance score to auto-inject (higher = more selective)"
               />
             )}
 
             <div className="flex items-center justify-between">
-              <LabelWithInfo label="RAG Mode" info="How the system decides when to inject KB context into queries" />
+              <LabelWithInfo label="KB Injection Mode" info="When to include KB context in queries (Smart detects relevance, Always includes context)" />
               <Select
                 value={settings.rag_mode ?? "smart"}
                 onValueChange={(v) => patch({ rag_mode: v })}

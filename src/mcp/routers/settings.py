@@ -54,7 +54,7 @@ class SettingsUpdateRequest(BaseModel):
         None, description="Toggle automatic KB context injection for high-confidence results"
     )
     auto_inject_threshold: float | None = Field(
-        None, ge=0.5, le=1.0, description="Minimum relevance score for auto-injection"
+        None, ge=0.0, le=1.0, description="Minimum relevance score for auto-injection"
     )
     enable_model_router: bool | None = Field(
         None, description="Toggle automatic model routing based on query complexity"
@@ -359,7 +359,7 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
         updated["enable_context_compression"] = req.enable_context_compression
 
     if req.rag_mode is not None:
-        valid_rag_modes = ("smart", "always", "manual")
+        valid_rag_modes = ("smart", "always", "manual", "custom_smart")
         if req.rag_mode not in valid_rag_modes:
             raise HTTPException(
                 status_code=400,

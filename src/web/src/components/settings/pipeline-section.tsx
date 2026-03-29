@@ -233,14 +233,14 @@ export function PipelineSection({ settings, sections, toggleSection, patch }: Pi
           <CardContent className="grid gap-4 pt-4">
             <SliderRow
               label="Vector Weight"
-              value={settings.hybrid_vector_weight ?? 0.6}
+              value={settings.hybrid_vector_weight ?? 0.5}
               onChange={(v) => patch({ hybrid_vector_weight: v })}
               min={0} max={1} step={0.05}
               info="Weight for vector similarity in hybrid search (0-1)"
             />
             <SliderRow
               label="Keyword Weight"
-              value={settings.hybrid_keyword_weight ?? 0.4}
+              value={settings.hybrid_keyword_weight ?? 0.5}
               onChange={(v) => patch({ hybrid_keyword_weight: v })}
               min={0} max={1} step={0.05}
               info="Weight for BM25 keyword matching in hybrid search (0-1)"
@@ -250,14 +250,14 @@ export function PipelineSection({ settings, sections, toggleSection, patch }: Pi
 
             <SliderRow
               label="Rerank LLM Weight"
-              value={settings.rerank_llm_weight ?? 0.6}
+              value={settings.rerank_llm_weight ?? 0.4}
               onChange={(v) => patch({ rerank_llm_weight: v })}
               min={0} max={1} step={0.05}
               info="Weight for LLM-based reranking score (0-1)"
             />
             <SliderRow
               label="Rerank Original Weight"
-              value={settings.rerank_original_weight ?? 0.4}
+              value={settings.rerank_original_weight ?? 0.6}
               onChange={(v) => patch({ rerank_original_weight: v })}
               min={0} max={1} step={0.05}
               info="Weight for original relevance score in reranking (0-1)"
