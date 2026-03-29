@@ -13,7 +13,6 @@ import {
   RefreshCw,
   Lightbulb,
   ArrowRight,
-  CheckCircle,
   Bookmark,
   Loader2,
   X,

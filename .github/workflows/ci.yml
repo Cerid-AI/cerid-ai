@@ -124,11 +124,15 @@ jobs:
           # CVE-2026-4539: ReDoS in pygments AdlLexer — local-only, we don't use ADL lexer, no upstream fix
           # CVE-2025-8869 / CVE-2026-1703: pip tar/wheel extraction — build-time only, Python 3.11 has PEP 706
           # CVE-2026-24049: wheel path traversal — build-time only, not runtime-exploitable
+          # CVE-2026-28277: langgraph msgpack deserialization — post-exploitation only, requires checkpoint store write access, we don't use langgraph checkpoints
+          # CVE-2026-27794: langgraph-checkpoint pickle fallback — post-exploitation only, requires cache backend write access, we don't enable langgraph caching
           pip-audit --desc \
             --ignore-vuln CVE-2026-4539 \
             --ignore-vuln CVE-2025-8869 \
             --ignore-vuln CVE-2026-1703 \
-            --ignore-vuln CVE-2026-24049
+            --ignore-vuln CVE-2026-24049 \
+            --ignore-vuln CVE-2026-28277 \
+            --ignore-vuln CVE-2026-27794
       - name: ReDoS regex audit (dlint)
         run: |
           pip install dlint flake8

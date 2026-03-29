@@ -608,7 +608,7 @@ export interface ServerSettings {
   redis_url?: string
   archive_path?: string
   chunking_mode?: string
-  rag_mode?: RagMode
+  rag_mode?: string  // KB injection mode: "smart" | "always" | "manual"
   // Search tuning (read-write)
   hybrid_vector_weight?: number
   hybrid_keyword_weight?: number
@@ -684,7 +684,7 @@ export interface SettingsUpdate {
   semantic_cache_threshold?: number
   enable_memory_consolidation?: boolean
   enable_context_compression?: boolean
-  rag_mode?: RagMode
+  rag_mode?: string  // KB injection mode in SettingsUpdate
   // Ollama add-on
   internal_llm_provider?: string
   internal_llm_model?: string
