@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Justin Michaels. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import type { ChatMessage, KBQueryResult, SourceRef } from "@/lib/types"
 import { MODELS } from "@/lib/types"
 import { recommendModel } from "@/lib/model-router"
@@ -303,11 +303,9 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
   const resetAutoInjectCount = useCallback(() => setLastAutoInjectCount(0), [])
 
   // Reset session injection history when conversation changes
-  const prevActiveId = useRef(options.activeId)
-  if (options.activeId !== prevActiveId.current) {
-    prevActiveId.current = options.activeId
+  useEffect(() => {
     injectedHistoryRef.current = new Set()
-  }
+  }, [options.activeId])
 
   return { autoRouteNotice, lastAutoInjectCount, resetAutoInjectCount, handleSend }
 }
