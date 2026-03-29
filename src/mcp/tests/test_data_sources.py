@@ -58,7 +58,7 @@ def test_registry_list_sources():
 
     wolfram = by_name["wolfram_alpha"]
     assert wolfram["requires_api_key"] is True
-    assert wolfram["api_key_env_var"] == "WOLFRAM_APP_ID"
+    assert wolfram["api_key_env_var"] == "WOLFRAM_APP_ID"  # pragma: allowlist secret
 
     exchange = by_name["exchange_rates"]
     assert exchange["domains"] == ["finance"]

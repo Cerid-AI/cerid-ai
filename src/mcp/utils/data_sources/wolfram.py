@@ -15,7 +15,7 @@ class WolframAlphaSource(DataSource):
     name = "wolfram_alpha"
     description = "Wolfram Alpha -- computational knowledge. Requires WOLFRAM_APP_ID."
     requires_api_key = True
-    api_key_env_var = "WOLFRAM_APP_ID"
+    api_key_env_var = "WOLFRAM_APP_ID"  # pragma: allowlist secret
     domains: list[str] = []  # all domains
 
     async def query(self, query: str, **kwargs) -> list[DataSourceResult]:
