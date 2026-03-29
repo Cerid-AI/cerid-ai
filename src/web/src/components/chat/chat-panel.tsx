@@ -118,10 +118,12 @@ export function ChatPanel() {
       const status = await fetchOllamaStatus()
 
       if (!status.reachable) {
-        steps[0] = { label: "Ollama not reachable \u2014 install from ollama.com", status: "done" }
+        steps[0] = { label: "\u2717 Ollama not running", status: "done" }
+        steps[1] = { label: "Install from ollama.com, then run: ollama serve", status: "done" }
+        steps[2] = { label: "Click \u201cRetry\u201d below after starting Ollama", status: "done" }
+        steps[3] = { label: "Waiting for Ollama...", status: "pending" }
         setSetupSteps([...steps])
-        setOllamaShowSetup(true)
-        setOllamaSetupActive(false)
+        // Keep setup panel visible — don't hide it
         return
       }
 
@@ -512,18 +514,35 @@ export function ChatPanel() {
         <div className="mx-4 mb-2 rounded-lg border border-teal-500/30 bg-teal-500/10 px-4 py-3">
           <div className="flex items-center gap-2 mb-2">
             <Cpu className="h-4 w-4 text-teal-400" />
-            <span className="text-xs font-medium">Setting up Ollama...</span>
+            <span className="text-xs font-medium">
+              {setupSteps.some(s => s.label.includes("not running")) ? "Ollama Setup Required" : "Setting up Ollama..."}
+            </span>
           </div>
           <div className="space-y-1 font-mono text-[10px] text-muted-foreground">
             {setupSteps.map((step, i) => (
               <div key={i} className="flex items-center gap-1.5">
-                {step.status === "done" && <Check className="h-3 w-3 text-green-400" />}
+                {step.status === "done" && step.label.startsWith("\u2717") && <X className="h-3 w-3 text-red-400" />}
+                {step.status === "done" && !step.label.startsWith("\u2717") && <Check className="h-3 w-3 text-green-400" />}
                 {step.status === "active" && <Loader2Icon className="h-3 w-3 animate-spin" />}
-                {step.status === "pending" && <span className="h-3 w-3" />}
+                {step.status === "pending" && <span className="h-3 w-3 text-muted-foreground/30">○</span>}
                 <span>{step.label}</span>
               </div>
             ))}
           </div>
+          {/* Show install link + retry when Ollama not detected */}
+          {setupSteps.some(s => s.label.includes("not running")) && (
+            <div className="mt-3 flex items-center gap-2">
+              <a href="https://ollama.com" target="_blank" rel="noopener" className="rounded-md border border-teal-500/40 px-2.5 py-1 text-[11px] font-medium text-teal-400 hover:bg-teal-500/10">
+                Install Ollama
+              </a>
+              <button onClick={() => runOllamaSetup()} className="rounded-md border border-muted px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:border-foreground/30">
+                Retry
+              </button>
+              <button onClick={() => { setOllamaSetupActive(false); setOllamaDismissed(true); try { localStorage.setItem("cerid-ollama-dismissed", "1") } catch { /* noop */ } }} className="ml-auto text-[10px] text-muted-foreground hover:text-foreground">
+                Dismiss
+              </button>
+            </div>
+          )}
         </div>
       )}
 
