@@ -3,7 +3,7 @@
 
 import { useCallback, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { adminRebuildIndexes, adminRescore, adminRegenerateSummaries, adminClearDomain, fetchOllamaStatus, enableOllama, disableOllama, fetchHealthStatus, fetchDataSources, enableDataSource, disableDataSource } from "@/lib/api"
+import { adminRebuildIndexes, adminRescore, adminRegenerateSummaries, adminClearDomain, fetchOllamaStatus, enableOllama, disableOllama, pullOllamaModel, fetchHealthStatus, fetchDataSources, enableDataSource, disableDataSource } from "@/lib/api"
 import type { KBStats } from "@/lib/api"
 import type { ServerSettings, SettingsUpdate, ProviderCredits, OllamaStatus, HealthStatusResponse } from "@/lib/types"
 import type { SectionKey } from "./settings-primitives"
@@ -26,6 +26,10 @@ import {
   Trash2,
   Lock,
   Globe,
+  Download,
+  RefreshCw,
+  CheckCircle2,
+  ExternalLink,
 } from "lucide-react"
 import { SyncSection } from "./sync-section"
 import { SectionHeading, InfoTip, LabelWithInfo, Row } from "./settings-primitives"
@@ -326,6 +330,8 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
   const { mode: uiMode } = useUIMode()
   const [toggling, setToggling] = useState(false)
   const [pipelineOpen, setPipelineOpen] = useState(false)
+  const [setupStep, setSetupStep] = useState<string | null>(null)
+  const [setupError, setSetupError] = useState<string | null>(null)
 
   const handleToggle = useCallback(async () => {
     if (!ollamaStatus) return
@@ -343,6 +349,44 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
     }
     setToggling(false)
   }, [ollamaStatus, settings.internal_llm_provider, refetchOllama, onRefresh])
+
+  const runSetupWizard = useCallback(async () => {
+    setSetupError(null)
+    try {
+      // Step 1: Check connectivity
+      setSetupStep("Checking Ollama connection...")
+      const status = await fetchOllamaStatus()
+      if (!status.reachable) {
+        setSetupStep(null)
+        setSetupError("Ollama is not running. Install it from ollama.com, then run 'ollama serve' and try again.")
+        return
+      }
+      // Step 2: Pull default model if missing
+      if (!status.default_model_installed) {
+        const model = status.default_model || "llama3.2:3b"
+        setSetupStep(`Pulling ${model} (~2GB)...`)
+        const res = await pullOllamaModel(model)
+        // Consume the streaming response to wait for completion
+        if (res.body) {
+          const reader = res.body.getReader()
+          while (true) {
+            const { done } = await reader.read()
+            if (done) break
+          }
+        }
+      }
+      // Step 3: Enable
+      setSetupStep("Enabling Ollama...")
+      await enableOllama()
+      await refetchOllama()
+      onRefresh()
+      setSetupStep("complete")
+      setTimeout(() => setSetupStep(null), 3000)
+    } catch (e) {
+      setSetupStep(null)
+      setSetupError(e instanceof Error ? e.message : "Setup failed")
+    }
+  }, [refetchOllama, onRefresh])
 
   const isActive = settings.internal_llm_provider === "ollama"
   const hwLabel = settings.ollama_url?.includes("cerid-ollama") ? "Docker container" : settings.ollama_url ?? "\u2014"
@@ -380,35 +424,79 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
             <Badge variant="secondary" className="text-[10px]">Not installed</Badge>
           )}
         </div>
+
+        {/* Setup wizard — shown when Ollama is not reachable */}
+        {!ollamaReachable && !isActive && (
+          <div className="rounded-lg border border-dashed border-muted-foreground/30 p-3 space-y-2">
+            {setupStep === "complete" ? (
+              <div className="flex items-center gap-2 text-xs text-green-600 dark:text-green-400">
+                <CheckCircle2 className="h-4 w-4" />
+                <span className="font-medium">Ollama enabled successfully!</span>
+              </div>
+            ) : setupStep ? (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <span>{setupStep}</span>
+              </div>
+            ) : (
+              <>
+                <p className="text-xs text-muted-foreground">
+                  Run pipeline tasks locally for free. Requires{" "}
+                  <a href="https://ollama.com" target="_blank" rel="noopener noreferrer" className="text-primary underline inline-flex items-center gap-0.5">
+                    Ollama<ExternalLink className="h-2.5 w-2.5" />
+                  </a>{" "}
+                  installed and running.
+                </p>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="default" className="h-7 text-xs" onClick={runSetupWizard}>
+                    <Download className="mr-1 h-3 w-3" />
+                    Set Up Ollama
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => { setSetupError(null); refetchOllama() }}>
+                    <RefreshCw className="mr-1 h-3 w-3" />
+                    Check Again
+                  </Button>
+                </div>
+              </>
+            )}
+            {setupError && (
+              <p className="text-xs text-red-600 dark:text-red-400">{setupError}</p>
+            )}
+          </div>
+        )}
+
         {/* Active toggle */}
         <div className="flex items-center justify-between">
           <LabelWithInfo label="Route pipeline tasks to Ollama" info="When on, claim extraction, query decomposition, memory resolution, and topic extraction use the local model. When off, uses OpenRouter." />
           <Switch
             checked={isActive}
             onCheckedChange={handleToggle}
-            disabled={toggling || (!ollamaStatus?.reachable && !isActive)}
+            disabled={toggling || (!ollamaReachable && !isActive)}
           />
         </div>
-        {/* Model */}
-        <Row label="Model" value={settings.internal_llm_model ?? "llama3.2:3b"} mono info="Lightweight model for pipeline intelligence tasks" />
-        {/* Default model installed? */}
-        {ollamaStatus?.reachable && (
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-muted-foreground">Default model installed</span>
-            <Badge variant={ollamaStatus.default_model_installed ? "default" : "secondary"} className="text-[10px]">
-              {ollamaStatus.default_model_installed ? "Yes" : "No \u2014 run: ollama pull " + ollamaStatus.default_model}
-            </Badge>
-          </div>
+        {/* Model + connection — show when reachable or active */}
+        {(ollamaReachable || isActive) && (
+          <>
+            <Row label="Model" value={settings.internal_llm_model ?? "llama3.2:3b"} mono info="Lightweight model for pipeline intelligence tasks" />
+            {ollamaReachable && !ollamaStatus?.default_model_installed && (
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">Default model</span>
+                <Button size="sm" variant="outline" className="h-6 text-[10px]" onClick={runSetupWizard} disabled={!!setupStep}>
+                  <Download className="mr-1 h-2.5 w-2.5" />
+                  Pull {ollamaStatus?.default_model ?? "llama3.2:3b"}
+                </Button>
+              </div>
+            )}
+            <Row label="Endpoint" value={hwLabel} mono info="Ollama server URL (Docker container or native)" />
+            <Row label="Active provider" value={isActive ? "Ollama (local, $0)" : "OpenRouter (cloud)"} info="Which LLM handles internal pipeline operations" />
+          </>
         )}
-        {/* Connection */}
-        <Row label="Endpoint" value={hwLabel} mono info="Ollama server URL (Docker container or native)" />
-        {/* Provider */}
-        <Row label="Active provider" value={isActive ? "Ollama (local, $0)" : "OpenRouter (cloud)"} info="Which LLM handles internal pipeline operations" />
         {/* Limitations */}
         <div className="rounded border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground leading-relaxed">
-          <span className="font-medium">Limitations:</span> The local model (1.5B params) handles classification, extraction, and routing well.
-          It does not handle: user-facing chat, verification fact-checking, synopsis generation, or web search.
-          Those tasks always use capable cloud models via OpenRouter.
+          <span className="font-medium">{ollamaReachable ? "Limitations:" : "What Ollama does:"}</span>{" "}
+          {ollamaReachable
+            ? "The local model handles classification, extraction, and routing well. Chat, verification, and synopsis generation always use cloud models via OpenRouter."
+            : "Handles claim extraction, query decomposition, memory resolution, and topic extraction locally for $0. Chat and verification always use cloud models."}
         </div>
         {/* Pipeline Routing (Advanced mode only, Ollama reachable) */}
         {showPipelineRouting && pipelineProviders && (
