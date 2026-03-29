@@ -281,7 +281,7 @@ async def verify_response_streaming(
     # must still yield a summary instead of dying with an unhandled exception.
     # On timeout/error, fall back to heuristic extraction so claims are still
     # produced even when the LLM is unreachable.
-    EXTRACTION_TIMEOUT = 10  # seconds — reduced for streaming speed (was 30s)
+    EXTRACTION_TIMEOUT = 15  # seconds — gpt-4o-mini JSON mode needs 3-12s typical
     try:
         claims, method = await asyncio.wait_for(
             extract_claims(response_text, user_query=user_query),

@@ -486,7 +486,7 @@ async def extract_claims(
     # Fast path: short responses use heuristic only (saves 3-5s LLM call).
     # For responses under 300 chars the heuristic is sufficient — the text
     # is simple enough that regex patterns catch factual sentences reliably.
-    if len(response_text) < 300:
+    if len(response_text) < 500:
         try:
             heuristic_claims = _extract_claims_heuristic(response_text)
             if heuristic_claims:
