@@ -559,7 +559,8 @@ export function ChatPanel() {
             <div className="mt-3 space-y-2">
               <p className="text-[11px] text-muted-foreground">Open Terminal (Spotlight → &quot;Terminal&quot;), then copy &amp; paste:</p>
               {[
-                { os: "macOS / Linux", cmd: "curl -fsSL https://ollama.com/install.sh | sh && ollama serve" },
+                { os: "macOS", cmd: "curl -fsSL https://ollama.com/install.sh | sh && open -a Ollama" },
+                { os: "Linux", cmd: "curl -fsSL https://ollama.com/install.sh | sh && ollama serve" },
               ].map(({ os, cmd }) => (
                 <OllamaCopyRow key={os} os={os} cmd={cmd} accent="teal" />
               ))}
@@ -584,7 +585,8 @@ export function ChatPanel() {
             <p className="mt-1 text-[11px] text-muted-foreground">Open Terminal (Spotlight → &quot;Terminal&quot;), then copy &amp; paste:</p>
             <div className="mt-1.5 space-y-1">
               {[
-                { os: "macOS / Linux", cmd: "curl -fsSL https://ollama.com/install.sh | sh && ollama serve" },
+                { os: "macOS", cmd: "curl -fsSL https://ollama.com/install.sh | sh && open -a Ollama" },
+                { os: "Linux", cmd: "curl -fsSL https://ollama.com/install.sh | sh && ollama serve" },
               ].map(({ os, cmd }) => (
                 <OllamaCopyRow key={os} os={os} cmd={cmd} accent="yellow" />
               ))}

@@ -520,7 +520,8 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
                 </ol>
                 <div className="space-y-1.5">
                   {[
-                    { os: "macOS / Linux", cmd: "curl -fsSL https://ollama.com/install.sh | sh && ollama serve" },
+                    { os: "macOS", cmd: "curl -fsSL https://ollama.com/install.sh | sh && open -a Ollama" },
+                    { os: "Linux", cmd: "curl -fsSL https://ollama.com/install.sh | sh && ollama serve" },
                   ].map(({ os, cmd }) => (
                     <div key={os} className="flex items-center gap-2 rounded border bg-muted/50 px-2.5 py-1.5">
                       <span className="text-[10px] font-semibold text-muted-foreground w-10 shrink-0">{os}</span>
