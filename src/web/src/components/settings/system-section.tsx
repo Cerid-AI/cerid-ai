@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Justin Michaels. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { adminRebuildIndexes, adminRescore, adminRegenerateSummaries, adminClearDomain, fetchOllamaStatus, enableOllama, disableOllama, pullOllamaModel, fetchHealthStatus, fetchDataSources, enableDataSource, disableDataSource } from "@/lib/api"
 import type { KBStats } from "@/lib/api"
@@ -330,8 +330,11 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
   const { mode: uiMode } = useUIMode()
   const [toggling, setToggling] = useState(false)
   const [pipelineOpen, setPipelineOpen] = useState(false)
-  const [setupStep, setSetupStep] = useState<string | null>(null)
-  const [setupError, setSetupError] = useState<string | null>(null)
+  // Wizard state: null (idle), "install" (show instructions), "polling" (waiting for Ollama), "pulling" (model download), "enabling", "complete"
+  const [wizardPhase, setWizardPhase] = useState<string | null>(null)
+  const [wizardError, setWizardError] = useState<string | null>(null)
+  const [pullProgress, setPullProgress] = useState("")
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const handleToggle = useCallback(async () => {
     if (!ollamaStatus) return
@@ -350,43 +353,77 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
     setToggling(false)
   }, [ollamaStatus, settings.internal_llm_provider, refetchOllama, onRefresh])
 
-  const runSetupWizard = useCallback(async () => {
-    setSetupError(null)
-    try {
-      // Step 1: Check connectivity
-      setSetupStep("Checking Ollama connection...")
-      const status = await fetchOllamaStatus()
-      if (!status.reachable) {
-        setSetupStep(null)
-        setSetupError("Ollama is not running. Install it from ollama.com, then run 'ollama serve' and try again.")
-        return
-      }
-      // Step 2: Pull default model if missing
-      if (!status.default_model_installed) {
-        const model = status.default_model || "llama3.2:3b"
-        setSetupStep(`Pulling ${model} (~2GB)...`)
-        const res = await pullOllamaModel(model)
-        // Consume the streaming response to wait for completion
-        if (res.body) {
-          const reader = res.body.getReader()
-          while (true) {
-            const { done } = await reader.read()
-            if (done) break
+  // Start the wizard — show install instructions first, then poll for connectivity
+  const startWizard = useCallback(() => {
+    setWizardError(null)
+    setPullProgress("")
+    setWizardPhase("install")
+  }, [])
+
+  // Poll for Ollama becoming reachable after user installs it
+  const startPolling = useCallback(() => {
+    setWizardPhase("polling")
+    setWizardError(null)
+    if (pollingRef.current) clearInterval(pollingRef.current)
+    pollingRef.current = setInterval(async () => {
+      try {
+        const status = await fetchOllamaStatus()
+        if (status.reachable) {
+          if (pollingRef.current) { clearInterval(pollingRef.current); pollingRef.current = null }
+          await refetchOllama()
+          // Auto-advance: pull model if needed, then enable
+          if (!status.default_model_installed) {
+            const model = status.default_model || "llama3.2:3b"
+            setWizardPhase("pulling")
+            setPullProgress(`Downloading ${model}...`)
+            try {
+              const res = await pullOllamaModel(model)
+              if (res.body) {
+                const reader = res.body.getReader()
+                const decoder = new TextDecoder()
+                while (true) {
+                  const { done, value } = await reader.read()
+                  if (done) break
+                  const text = decoder.decode(value, { stream: true })
+                  // Parse progress from Ollama NDJSON stream
+                  for (const line of text.split("\n").filter(Boolean)) {
+                    try {
+                      const evt = JSON.parse(line.replace(/^data:\s*/, ""))
+                      if (evt.total && evt.completed) {
+                        const pct = Math.round((evt.completed / evt.total) * 100)
+                        setPullProgress(`Downloading ${model}... ${pct}%`)
+                      } else if (evt.status) {
+                        setPullProgress(evt.status)
+                      }
+                    } catch { /* ignore parse errors */ }
+                  }
+                }
+              }
+            } catch (e) {
+              setWizardPhase(null)
+              setWizardError(e instanceof Error ? e.message : "Model pull failed")
+              return
+            }
+          }
+          // Enable
+          setWizardPhase("enabling")
+          try {
+            await enableOllama()
+            await refetchOllama()
+            onRefresh()
+            setWizardPhase("complete")
+            setTimeout(() => setWizardPhase(null), 4000)
+          } catch (e) {
+            setWizardPhase(null)
+            setWizardError(e instanceof Error ? e.message : "Enable failed")
           }
         }
-      }
-      // Step 3: Enable
-      setSetupStep("Enabling Ollama...")
-      await enableOllama()
-      await refetchOllama()
-      onRefresh()
-      setSetupStep("complete")
-      setTimeout(() => setSetupStep(null), 3000)
-    } catch (e) {
-      setSetupStep(null)
-      setSetupError(e instanceof Error ? e.message : "Setup failed")
-    }
+      } catch { /* polling error — keep trying */ }
+    }, 3000)
   }, [refetchOllama, onRefresh])
+
+  // Cleanup polling on unmount
+  useEffect(() => () => { if (pollingRef.current) clearInterval(pollingRef.current) }, [])
 
   const isActive = settings.internal_llm_provider === "ollama"
   const hwLabel = settings.ollama_url?.includes("cerid-ollama") ? "Docker container" : settings.ollama_url ?? "\u2014"
@@ -427,40 +464,84 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
 
         {/* Setup wizard — shown when Ollama is not reachable */}
         {!ollamaReachable && !isActive && (
-          <div className="rounded-lg border border-dashed border-muted-foreground/30 p-3 space-y-2">
-            {setupStep === "complete" ? (
+          <div className="rounded-lg border border-dashed border-muted-foreground/30 p-3 space-y-3">
+            {wizardPhase === "complete" ? (
               <div className="flex items-center gap-2 text-xs text-green-600 dark:text-green-400">
                 <CheckCircle2 className="h-4 w-4" />
-                <span className="font-medium">Ollama enabled successfully!</span>
+                <span className="font-medium">Ollama enabled successfully! Pipeline tasks now run locally for free.</span>
               </div>
-            ) : setupStep ? (
+            ) : wizardPhase === "enabling" ? (
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                <span>{setupStep}</span>
+                <span>Enabling Ollama routing...</span>
+              </div>
+            ) : wizardPhase === "pulling" ? (
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span>{pullProgress || "Pulling model..."}</span>
+                </div>
+                <p className="text-[10px] text-muted-foreground/60">This may take a few minutes depending on your connection.</p>
+              </div>
+            ) : wizardPhase === "polling" ? (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span>Waiting for Ollama to start...</span>
+                </div>
+                <p className="text-[10px] text-muted-foreground/60">
+                  Checking every 3 seconds. Once detected, model download and setup will continue automatically.
+                </p>
+                <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => { if (pollingRef.current) clearInterval(pollingRef.current); setWizardPhase(null) }}>
+                  Cancel
+                </Button>
+              </div>
+            ) : wizardPhase === "install" ? (
+              <div className="space-y-3">
+                <p className="text-xs font-medium">Install Ollama</p>
+                <div className="space-y-2">
+                  <div className="rounded border bg-muted/50 px-3 py-2">
+                    <p className="text-[11px] font-medium text-muted-foreground mb-1">macOS</p>
+                    <code className="text-[11px] select-all">brew install ollama && ollama serve</code>
+                  </div>
+                  <div className="rounded border bg-muted/50 px-3 py-2">
+                    <p className="text-[11px] font-medium text-muted-foreground mb-1">Linux</p>
+                    <code className="text-[11px] select-all">curl -fsSL https://ollama.com/install.sh | sh && ollama serve</code>
+                  </div>
+                  <div className="rounded border bg-muted/50 px-3 py-2">
+                    <p className="text-[11px] font-medium text-muted-foreground mb-1">Windows</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Download from{" "}
+                      <a href="https://ollama.com/download" target="_blank" rel="noopener noreferrer" className="text-primary underline">ollama.com/download</a>
+                    </p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="default" className="h-7 text-xs" onClick={startPolling}>
+                    <RefreshCw className="mr-1 h-3 w-3" />
+                    I&apos;ve installed it — continue setup
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setWizardPhase(null)}>
+                    Cancel
+                  </Button>
+                </div>
               </div>
             ) : (
               <>
                 <p className="text-xs text-muted-foreground">
-                  Run pipeline tasks locally for free. Requires{" "}
-                  <a href="https://ollama.com" target="_blank" rel="noopener noreferrer" className="text-primary underline inline-flex items-center gap-0.5">
-                    Ollama<ExternalLink className="h-2.5 w-2.5" />
-                  </a>{" "}
-                  installed and running.
+                  Run pipeline tasks locally for free with a small local LLM. No API costs for internal operations.
                 </p>
-                <div className="flex gap-2">
-                  <Button size="sm" variant="default" className="h-7 text-xs" onClick={runSetupWizard}>
-                    <Download className="mr-1 h-3 w-3" />
-                    Set Up Ollama
-                  </Button>
-                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => { setSetupError(null); refetchOllama() }}>
-                    <RefreshCw className="mr-1 h-3 w-3" />
-                    Check Again
-                  </Button>
-                </div>
+                <Button size="sm" variant="default" className="h-7 text-xs" onClick={startWizard}>
+                  <Download className="mr-1 h-3 w-3" />
+                  Set Up Ollama
+                </Button>
               </>
             )}
-            {setupError && (
-              <p className="text-xs text-red-600 dark:text-red-400">{setupError}</p>
+            {wizardError && (
+              <div className="space-y-1">
+                <p className="text-xs text-red-600 dark:text-red-400">{wizardError}</p>
+                <Button size="sm" variant="outline" className="h-6 text-[10px]" onClick={startWizard}>Try again</Button>
+              </div>
             )}
           </div>
         )}
@@ -481,7 +562,7 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
             {ollamaReachable && !ollamaStatus?.default_model_installed && (
               <div className="flex items-center justify-between">
                 <span className="text-xs text-muted-foreground">Default model</span>
-                <Button size="sm" variant="outline" className="h-6 text-[10px]" onClick={runSetupWizard} disabled={!!setupStep}>
+                <Button size="sm" variant="outline" className="h-6 text-[10px]" onClick={startPolling} disabled={!!wizardPhase}>
                   <Download className="mr-1 h-2.5 w-2.5" />
                   Pull {ollamaStatus?.default_model ?? "llama3.2:3b"}
                 </Button>
