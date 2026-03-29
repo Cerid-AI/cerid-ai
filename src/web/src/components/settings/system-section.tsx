@@ -513,7 +513,11 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
             ) : wizardPhase === "install" ? (
               <div className="space-y-3">
                 <p className="text-xs font-medium">Install Ollama</p>
-                <p className="text-[11px] text-muted-foreground">Copy the command for your OS, paste it in your terminal, then click continue. Setup will auto-detect Ollama and finish configuration.</p>
+                <ol className="text-[11px] text-muted-foreground list-decimal list-inside space-y-0.5">
+                  <li>Open <strong>Terminal</strong> (macOS: Spotlight → &quot;Terminal&quot;, Linux: Ctrl+Alt+T, Windows: PowerShell)</li>
+                  <li>Copy the command below and paste it into your terminal</li>
+                  <li>Click <strong>Continue</strong> — Cerid will detect Ollama and finish setup automatically</li>
+                </ol>
                 <div className="space-y-1.5">
                   {[
                     { os: "macOS", cmd: "brew install ollama && ollama serve" },

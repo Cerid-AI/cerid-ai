@@ -557,7 +557,7 @@ export function ChatPanel() {
           {/* Show install instructions + retry when Ollama not detected */}
           {setupSteps.some(s => s.label.includes("not running")) && (
             <div className="mt-3 space-y-2">
-              <p className="text-[11px] text-muted-foreground">Copy the command for your OS and paste in terminal:</p>
+              <p className="text-[11px] text-muted-foreground">Open Terminal (Spotlight → &quot;Terminal&quot;), then copy &amp; paste:</p>
               {[
                 { os: "macOS", cmd: "brew install ollama && ollama serve" },
                 { os: "Linux", cmd: "curl -fsSL https://ollama.com/install.sh | sh && ollama serve" },
@@ -582,7 +582,7 @@ export function ChatPanel() {
         ollamaShowSetup ? (
           <div className="mx-4 mb-2 rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-4 py-3">
             <p className="text-xs font-medium text-yellow-400">Ollama not detected</p>
-            <p className="mt-1 text-[11px] text-muted-foreground">Copy and run in your terminal:</p>
+            <p className="mt-1 text-[11px] text-muted-foreground">Open Terminal (Spotlight → &quot;Terminal&quot;), then copy &amp; paste:</p>
             <div className="mt-1.5 space-y-1">
               {[
                 { os: "macOS", cmd: "brew install ollama && ollama serve" },
