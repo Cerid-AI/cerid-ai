@@ -535,18 +535,22 @@ export function ChatPanel() {
               </div>
             ))}
           </div>
-          {/* Show install link + retry when Ollama not detected */}
+          {/* Show install instructions + retry when Ollama not detected */}
           {setupSteps.some(s => s.label.includes("not running")) && (
-            <div className="mt-3 flex items-center gap-2">
-              <a href="https://ollama.com" target="_blank" rel="noopener" className="rounded-md border border-teal-500/40 px-2.5 py-1 text-[11px] font-medium text-teal-400 hover:bg-teal-500/10">
-                Install Ollama
-              </a>
-              <button onClick={() => runOllamaSetup()} className="rounded-md border border-muted px-2.5 py-1 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:border-foreground/30">
-                Retry
-              </button>
-              <button onClick={() => { setOllamaSetupActive(false); setOllamaDismissed(true); try { localStorage.setItem("cerid-ollama-dismissed", "1") } catch { /* noop */ } }} className="ml-auto text-[10px] text-muted-foreground hover:text-foreground">
-                Dismiss
-              </button>
+            <div className="mt-3 space-y-2">
+              <p className="text-[11px] text-muted-foreground">Install Ollama, then click Retry:</p>
+              <div className="rounded border border-teal-500/20 bg-background/50 px-2.5 py-1.5 text-[10px] font-mono text-muted-foreground">
+                <span className="font-semibold text-teal-400">macOS:</span> brew install ollama && ollama serve<br />
+                <span className="font-semibold text-teal-400">Linux:</span> curl -fsSL https://ollama.com/install.sh | sh && ollama serve
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => runOllamaSetup()} className="rounded-md border border-teal-500/40 px-2.5 py-1 text-[11px] font-medium text-teal-400 hover:bg-teal-500/10">
+                  Retry
+                </button>
+                <button onClick={() => { setOllamaSetupActive(false); setOllamaDismissed(true); try { localStorage.setItem("cerid-ollama-dismissed", "1") } catch { /* noop */ } }} className="ml-auto text-[10px] text-muted-foreground hover:text-foreground">
+                  Dismiss
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -557,15 +561,21 @@ export function ChatPanel() {
         ollamaShowSetup ? (
           <div className="mx-4 mb-2 rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-4 py-3">
             <p className="text-xs font-medium text-yellow-400">Ollama not detected</p>
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              Install Ollama from <a href="https://ollama.com" target="_blank" rel="noopener" className="text-primary underline">ollama.com</a>, then run <code className="rounded bg-muted px-1">ollama serve</code> in your terminal.
-            </p>
-            <button
-              onClick={() => { setOllamaShowSetup(false); setOllamaDismissed(true); try { localStorage.setItem("cerid-ollama-dismissed", "1") } catch { /* noop */ } }}
-              className="mt-2 text-[10px] text-muted-foreground hover:text-foreground"
-            >
-              Dismiss
-            </button>
+            <div className="mt-1.5 rounded border border-yellow-500/20 bg-background/50 px-2.5 py-1.5 text-[10px] font-mono text-muted-foreground">
+              <span className="font-semibold text-yellow-400">macOS:</span> brew install ollama && ollama serve<br />
+              <span className="font-semibold text-yellow-400">Linux:</span> curl -fsSL https://ollama.com/install.sh | sh && ollama serve
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <button onClick={() => runOllamaSetup()} className="rounded-md border border-yellow-500/40 px-2.5 py-1 text-[11px] font-medium text-yellow-400 hover:bg-yellow-500/10">
+                I&apos;ve installed it
+              </button>
+              <button
+                onClick={() => { setOllamaShowSetup(false); setOllamaDismissed(true); try { localStorage.setItem("cerid-ollama-dismissed", "1") } catch { /* noop */ } }}
+                className="text-[10px] text-muted-foreground hover:text-foreground"
+              >
+                Dismiss
+              </button>
+            </div>
           </div>
         ) : (
           <div className="mx-4 mb-2 rounded-lg border border-teal-500/30 bg-teal-500/10 px-4 py-2.5">
