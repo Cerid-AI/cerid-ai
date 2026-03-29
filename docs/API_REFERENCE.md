@@ -584,6 +584,14 @@ make deps-check
 - `POST /workflows/{id}/run` — Execute workflow
 - `GET /workflows/{id}/runs` — List workflow runs
 
+### Data Sources (External Knowledge)
+- `GET /data-sources` — List registered external data sources with enabled status
+- `POST /data-sources/{name}/enable` — Enable an external data source
+- `POST /data-sources/{name}/disable` — Disable an external data source
+
+### Model Registry Validation
+- `GET /providers/models/validate` — Validate model registry against OpenRouter (checks availability of all 20+ registered models)
+
 ### Ollama (Local LLM Add-On)
 
 **Proxy endpoints** (require `OLLAMA_ENABLED=true`):
@@ -596,7 +604,7 @@ make deps-check
 - `POST /providers/ollama/enable` — Enable Ollama as internal LLM provider (checks connectivity, updates runtime config)
 - `POST /providers/ollama/disable` — Disable Ollama, fall back to OpenRouter
 
-**Default model:** `qwen2.5:1.5b` (1.5B params, ~1GB, runs on CPU or GPU)
+**Default model:** `llama3.2:3b` (3B params, ~2GB, runs on CPU or GPU)
 
 **Pipeline tasks routed to internal LLM:**
 - Claim extraction (verification)

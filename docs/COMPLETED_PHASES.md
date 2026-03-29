@@ -1,7 +1,7 @@
 # Cerid AI — Completed Phases
 
 > Full history of completed development phases. For current status and next steps, see [CLAUDE.md](../CLAUDE.md).
-> **Last updated:** 2026-03-28
+> **Last updated:** 2026-03-29
 
 ---
 
@@ -180,4 +180,23 @@
   - Replaced Qwen 2.5 1.5B with Llama 3.2 3B as default Ollama model (15 files)
   - Approved providers: OpenAI, Anthropic, Google, xAI, Meta, Microsoft, Mistral
   - Compliance verification: `grep` returns 0 results for banned terms
+- **Session 2026-03-29: Verification Pipeline + Smart RAG + Tier System**
+  - Fixed root cause of verification slowness: docker-compose defaulted INTERNAL_LLM_MODEL to Ollama model name (llama3.2:3b) causing 400 Bad Request on every extraction call
+  - Fixed Bifrost double-path URL bug (/v1/v1/chat/completions)
+  - Fixed circuit breaker false trips on HTTP 4xx client errors
+  - Removed hardcoded llama-3.3-70b-instruct fallback in llm_client.py
+  - Default extraction model changed to gpt-4o-mini via model registry
+  - Dynamic model registry with OpenRouter auto-validation (20 models, startup check)
+  - Smart Auto-RAG: query intent classifier (factual/code/analytical/creative/conversational)
+  - External data sources: Wikipedia, Wolfram Alpha, Exchange Rates with pluggable framework
+  - Verification activity console: real-time monospace pipeline log
+  - KB context activity indicator: domain count + retrieval strategy
+  - Ollama auto-install flow with 4-step setup wizard
+  - KB layout overhaul: taxonomy sidebar + grid/list view toggle
+  - Three-tier system (Core/Pro/Enterprise) with hierarchical enforcement
+  - USG compliance: removed all Chinese-origin technology (DeepSeek, Qwen)
+  - Model switching fixes: summarize timeout + start fresh stuck state
+  - Wired unwired Phase 51 features: RAG mode selector, data source display, verification data enrichment, parent-child chunking flag
+  - New modules: `utils/model_registry.py`, `utils/query_classifier.py`, `utils/data_sources/` (4 files), `routers/data_sources.py`
+  - 1673 Python tests, 496 frontend tests.
 - **Verification Crash Debugging (Complete, 2026-03-22):** Deep debugging session fixing production crashes in the verification panel. Docker build silent failure identified (exit code 2 reuses cached image). React infinite render loop fixed (3 root causes: object ref comparisons in useEffect, context callback instability, synchronous state updates during render). Circuit breaker name mismatches fixed across 4 call sites. Claim extraction hardened (pleasantry filtering, JSON wrapper unwrapping). 58 lines dead code removed. Smart router, BYOK provider config, OpenRouter credit tracking, RAG features, folder scanner, and PDF chunked parsing all polished. Key files: `tasks/lessons.md` (patterns captured), `src/web/src/hooks/use-verification-orchestrator.ts`, `src/mcp/utils/circuit_breaker.py`, `src/mcp/agents/hallucination/extraction.py`.

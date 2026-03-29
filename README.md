@@ -43,7 +43,11 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 - **Multi-Machine Sync** via Dropbox — JSONL export/import with auto-import on startup
 - **Source Attribution** — collapsible source references with relevance scores on chat responses
 - **Model Context Breaks** — provider-colored model badges, switch dividers between model changes
-- **GitHub Actions CI/CD** with 2,142+ tests (1646+ pytest + 496+ frontend)
+- **Smart Auto-RAG** — query intent classification (factual/code/analytical/creative/conversational) with automatic retrieval strategy selection
+- **External Data Sources** — pluggable framework for Wikipedia, Wolfram Alpha, Exchange Rates with enable/disable management
+- **Dynamic Model Registry** — OpenRouter auto-validation of 20+ models at startup, runtime model management
+- **Verification Activity Console** — real-time monospace pipeline log showing each verification stage
+- **GitHub Actions CI/CD** with 2,169+ tests (1673+ pytest + 496+ frontend)
 - **Three-Tier AI Categorization** (manual, smart, pro) via Bifrost
 - **Obsidian Vault Integration** — auto-sync vault notes into knowledge base
 - **Reproducible Builds** — pip-compile lock files with hashes, pinned Docker images, Dependabot
