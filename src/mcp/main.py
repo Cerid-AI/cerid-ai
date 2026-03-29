@@ -296,6 +296,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     except Exception as e:
         logger.debug("Ollama model check skipped: %s", e)
 
+    # Validate model registry against OpenRouter
+    try:
+        from utils.model_registry import validate_models
+        result = await validate_models()
+        if result.get("invalid"):
+            logger.warning(
+                "Model registry has %d invalid/deprecated models: %s",
+                len(result["invalid"]),
+                result["invalid"],
+            )
+        else:
+            logger.info("Model registry validated: %d models OK", len(result.get("valid", [])))
+    except Exception as e:
+        logger.debug("Model validation skipped: %s", e)
+
     yield
 
     # Shutdown: stop scheduler, flush caches, close connections, clear MCP sessions

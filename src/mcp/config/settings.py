@@ -7,6 +7,8 @@ from __future__ import annotations
 import logging as _logging
 import os
 
+from utils.model_registry import get_model
+
 # ---------------------------------------------------------------------------
 # PDF Parsing (memory-safe chunked extraction)
 # ---------------------------------------------------------------------------
@@ -53,7 +55,8 @@ BIFROST_TIMEOUT = float(os.getenv("BIFROST_TIMEOUT", "20.0"))
 # Default model for internal LLM calls (reranking, hallucination, memory extraction).
 # Uses gpt-4o-mini by default — cheap ($0.15/$0.60 per 1M tokens), reliable, no rate limits.
 # The free Llama model hits 429 rate limits frequently, causing 10s+ retry delays.
-LLM_INTERNAL_MODEL = os.getenv("LLM_INTERNAL_MODEL", "openrouter/openai/gpt-4o-mini")
+# Default sourced from model registry (utils/model_registry.py).
+LLM_INTERNAL_MODEL = os.getenv("LLM_INTERNAL_MODEL", "") or get_model("internal", "default")
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -187,39 +190,35 @@ HALLUCINATION_MAX_CLAIMS = int(os.getenv("HALLUCINATION_MAX_CLAIMS", "10"))
 # ---------------------------------------------------------------------------
 # Primary model for ALL verification LLM calls — must be non-rate-limited.
 # GPT-4o-mini: 1000 RPM, $0.15/$0.60 per 1M tokens.
-VERIFICATION_MODEL = os.getenv("VERIFICATION_MODEL", "openrouter/openai/gpt-4o-mini")
+# Defaults sourced from model registry (utils/model_registry.py).
+VERIFICATION_MODEL = os.getenv("VERIFICATION_MODEL", "") or get_model("verification", "default")
 
 # Pool of non-rate-limited models for cross-model diversity selection.
 # _pick_verification_model() picks from this pool, preferring a different
 # model family than the generator to avoid correlated hallucinations.
-VERIFICATION_MODEL_POOL = [
-    "openrouter/openai/gpt-4o-mini",       # OpenAI — $0.15/$0.60
-    "openrouter/google/gemini-2.5-flash",   # Google — $0.30/$2.50
-    "openrouter/x-ai/grok-4.1-fast",       # xAI — $0.20/$0.50, web search capable
-]
+from utils.model_registry import ACTIVE_MODELS as _ACTIVE_MODELS  # noqa: E402
+
+VERIFICATION_MODEL_POOL = _ACTIVE_MODELS["verification"]["pool"]
 
 # Model with live web search for current-event claim verification.
 # The `:online` suffix enables OpenRouter's native web search plugin
 # which uses xAI's built-in web_search tool for Grok models.
-# Grok 4.1 Fast: $0.20/$0.50 per 1M tokens, web search currently free.
 VERIFICATION_CURRENT_EVENT_MODEL = os.getenv(
-    "VERIFICATION_CURRENT_EVENT_MODEL",
-    "openrouter/x-ai/grok-4.1-fast:online",
-)
+    "VERIFICATION_CURRENT_EVENT_MODEL", "",
+) or get_model("verification", "web_search")
 
 # Stronger model for consistency checking (cross-turn contradiction detection).
 # Needs better reasoning than GPT-4o-mini; Gemini 2.5 Flash is 10x cheaper than
 # Sonnet but significantly better at nuanced multi-text comparison.
 VERIFICATION_CONSISTENCY_MODEL = os.getenv(
-    "VERIFICATION_CONSISTENCY_MODEL",
-    "openrouter/google/gemini-2.5-flash",
-)
+    "VERIFICATION_CONSISTENCY_MODEL", "",
+) or get_model("verification", "consistency")
+
 # Stronger model for complex factual claims (causal, comparative, multi-hop).
 # Falls back to VERIFICATION_MODEL pool for simple factual claims.
 VERIFICATION_COMPLEX_MODEL = os.getenv(
-    "VERIFICATION_COMPLEX_MODEL",
-    "openrouter/google/gemini-2.5-flash",
-)
+    "VERIFICATION_COMPLEX_MODEL", "",
+) or get_model("verification", "complex")
 
 # Expert-tier verification model — high-capability reasoning model for
 # users who want maximum verification quality at higher cost.
@@ -233,7 +232,7 @@ VERIFICATION_EXPERT_MODEL = os.getenv(
 # External (Cross-Model) Verification
 # ---------------------------------------------------------------------------
 ENABLE_EXTERNAL_VERIFICATION = os.getenv("ENABLE_EXTERNAL_VERIFICATION", "true").lower() == "true"
-EXTERNAL_VERIFY_MODEL = os.getenv("EXTERNAL_VERIFY_MODEL", "openrouter/openai/gpt-4o-mini")
+EXTERNAL_VERIFY_MODEL = os.getenv("EXTERNAL_VERIFY_MODEL", "") or get_model("verification", "default")
 EXTERNAL_VERIFY_KB_THRESHOLD = float(os.getenv("EXTERNAL_VERIFY_KB_THRESHOLD", "0.5"))
 EXTERNAL_VERIFY_MAX_TOKENS = 250
 EXTERNAL_VERIFY_TEMPERATURE = 0.0

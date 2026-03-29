@@ -369,6 +369,14 @@ async def update_model_provider_config(body: dict):
     return {"status": "updated"}
 
 
+@router.get("/models/validate")
+async def validate_model_registry():
+    """Validate all active models against OpenRouter catalog."""
+    from utils.model_registry import validate_models
+
+    return await validate_models()
+
+
 @router.get("/{name}")
 async def get_provider(name: str):
     """Get details for a single provider including available models."""
