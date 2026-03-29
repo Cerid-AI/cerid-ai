@@ -286,7 +286,7 @@ SELF_RAG_REFINED_TOP_K = int(os.getenv("SELF_RAG_REFINED_TOP_K", "5"))
 # ---------------------------------------------------------------------------
 # Auto-Injection
 # ---------------------------------------------------------------------------
-AUTO_INJECT_THRESHOLD = float(os.getenv("AUTO_INJECT_THRESHOLD", "0.82"))
+AUTO_INJECT_THRESHOLD = float(os.getenv("AUTO_INJECT_THRESHOLD", "0.15"))
 AUTO_INJECT_MAX = int(os.getenv("AUTO_INJECT_MAX", "3"))
 
 # ---------------------------------------------------------------------------

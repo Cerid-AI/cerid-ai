@@ -27,7 +27,7 @@ describe("useSettings", () => {
     expect(result.current.showDashboard).toBe(false)
     expect(result.current.routingMode).toBe("manual")
     expect(result.current.autoInject).toBe(false)
-    expect(result.current.autoInjectThreshold).toBe(0.82)
+    expect(result.current.autoInjectThreshold).toBe(0.15)
     expect(result.current.costSensitivity).toBe("medium")
     expect(result.current.hallucinationEnabled).toBe(false)
   })

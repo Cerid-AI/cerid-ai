@@ -7,7 +7,7 @@ import { MODELS } from "@/lib/types"
 import { recommendModel } from "@/lib/model-router"
 import { deduplicateChunks, formatChunkWithHeader } from "@/lib/kb-utils"
 import { estimateTokenCount, uuid } from "@/lib/utils"
-import { compressConversation } from "@/lib/api"
+import { compressConversation, queryKB } from "@/lib/api"
 
 /** How many user+assistant pairs to keep in client-side sliding window fallback. */
 const FALLBACK_KEEP_PAIRS = 3
@@ -55,7 +55,7 @@ interface UseChatSendReturn {
   autoRouteNotice: string | null
   lastAutoInjectCount: number
   resetAutoInjectCount: () => void
-  handleSend: (content: string) => void
+  handleSend: (content: string) => Promise<void>
 }
 
 /**
@@ -88,7 +88,7 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
   const compressingRef = useRef(false)
 
   const handleSend = useCallback(
-    (content: string) => {
+    async (content: string) => {
       options.onBeforeSend?.()
 
       // Auto-routing: silently switch model if recommendation exists
@@ -124,25 +124,38 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
       const manuallyInjected = [...options.injectedContext]
       const injectedIds = new Set(manuallyInjected.map((r) => r.artifact_id))
 
-      // Auto-inject high-confidence KB results, limited by token budget
+      // Auto-inject: query KB with the CURRENT message (not stale results from previous message)
       let autoInjectedCount = 0
-      if (options.autoInject && options.kbResults.length > 0) {
-        const modelObj = MODELS.find((m) => m.id === modelToUse) ?? MODELS[0]
-        // Reserve budget: conversation history + user message + response (~1000 tokens) + system overhead (~200)
-        const historyTokens = (options.activeMessages ?? []).reduce((sum, m) => sum + estimateTokenCount(m.content), 0)
-        const userTokens = estimateTokenCount(content)
-        const manualTokens = manuallyInjected.reduce((sum, r) => sum + estimateTokenCount(r.content), 0)
-        const reservedTokens = historyTokens + userTokens + manualTokens + 1200
-        let remainingBudget = modelObj.effectiveContextWindow - reservedTokens
+      if (options.autoInject) {
+        let freshResults = options.kbResults
+        // Fire a fresh KB query with the outgoing message to avoid stale-results timing issue
+        if (content.length > 2) {
+          try {
+            const fresh = await queryKB(content, undefined, 10)
+            if (fresh?.results?.length) {
+              freshResults = fresh.results
+            }
+          } catch {
+            // Fall back to existing kbResults on error
+          }
+        }
+        if (freshResults.length > 0) {
+          const modelObj = MODELS.find((m) => m.id === modelToUse) ?? MODELS[0]
+          const historyTokens = (options.activeMessages ?? []).reduce((sum, m) => sum + estimateTokenCount(m.content), 0)
+          const userTokens = estimateTokenCount(content)
+          const manualTokens = manuallyInjected.reduce((sum, r) => sum + estimateTokenCount(r.content), 0)
+          const reservedTokens = historyTokens + userTokens + manualTokens + 1200
+          let remainingBudget = modelObj.effectiveContextWindow - reservedTokens
 
-        const candidates = options.kbResults
-          .filter((r) => r.relevance >= options.autoInjectThreshold && !injectedIds.has(r.artifact_id))
-        for (const c of candidates) {
-          const chunkTokens = estimateTokenCount(c.content)
-          if (chunkTokens > remainingBudget) break
-          manuallyInjected.push(c)
-          remainingBudget -= chunkTokens
-          autoInjectedCount++
+          const candidates = freshResults
+            .filter((r) => r.relevance >= options.autoInjectThreshold && !injectedIds.has(r.artifact_id))
+          for (const c of candidates) {
+            const chunkTokens = estimateTokenCount(c.content)
+            if (chunkTokens > remainingBudget) break
+            manuallyInjected.push(c)
+            remainingBudget -= chunkTokens
+            autoInjectedCount++
+          }
         }
       }
 

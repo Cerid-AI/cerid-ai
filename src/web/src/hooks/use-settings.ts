@@ -81,7 +81,7 @@ export function useSettings() {
     } catch { /* noop */ }
     return "manual"
   })
-  const [autoInjectThreshold, setAutoInjectThresholdState] = useState(() => readFloat("cerid-auto-inject-threshold", 0.82))
+  const [autoInjectThreshold, setAutoInjectThresholdState] = useState(() => readFloat("cerid-auto-inject-threshold", 0.15))
 
   const [inlineMarkups, setInlineMarkupsState] = useState(() => {
     try { const v = localStorage.getItem("cerid-inline-markups"); return v === null ? true : v === "true" } catch { return true }
