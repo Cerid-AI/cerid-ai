@@ -41,6 +41,8 @@ def _format_chroma_result(
     metadata: dict[str, Any],
 ) -> dict[str, Any]:
     """Build a standardized result dict from a ChromaDB chunk."""
+    from utils.retrieval_profile import deserialize_profile
+
     return {
         "content": content,
         "relevance": round(relevance, 4),
@@ -54,6 +56,7 @@ def _format_chroma_result(
         "sub_category": metadata.get("sub_category", ""),
         "tags_json": metadata.get("tags_json", "[]"),
         "keywords": metadata.get("keywords", "[]"),
+        "retrieval_profile": deserialize_profile(metadata.get("retrieval_profile")),
     }
 
 
@@ -222,12 +225,19 @@ async def multi_domain_query(
                 if bm25_hits:
                     bm25_map = dict(bm25_hits)
 
+                    from utils.retrieval_profile import get_hybrid_weights
+
                     for entry in formatted:
                         kw_score = bm25_map.pop(entry["chunk_id"], 0.0)
                         vector_score = entry["relevance"]
+                        # Use per-chunk profile to adjust hybrid weights
+                        vw, kw_w = get_hybrid_weights(
+                            entry.get("retrieval_profile"),
+                            config.HYBRID_VECTOR_WEIGHT,
+                            config.HYBRID_KEYWORD_WEIGHT,
+                        )
                         entry["relevance"] = round(
-                            config.HYBRID_VECTOR_WEIGHT * vector_score
-                            + config.HYBRID_KEYWORD_WEIGHT * kw_score,
+                            vw * vector_score + kw_w * kw_score,
                             4,
                         )
 

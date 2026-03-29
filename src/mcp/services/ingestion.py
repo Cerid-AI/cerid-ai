@@ -305,7 +305,22 @@ def ingest_content(
         base_meta["near_duplicate_similarity"] = str(near_dup["similarity"])
 
     chunk_ids = [f"{artifact_id}_chunk_{i}" for i in range(len(chunks))]
-    chunk_metadatas = [{**base_meta, "chunk_index": i} for i in range(len(chunks))]
+
+    # Compute per-chunk retrieval profile for scoring strategy selection
+    from utils.retrieval_profile import compute_retrieval_profile, serialize_profile
+
+    _file_type = base_meta.get("file_type", metadata.get("file_type", "") if metadata else "")
+    _page_count = metadata.get("page_count") if metadata else None
+    _table_count = metadata.get("table_count") if metadata else None
+    _artifact_profile = compute_retrieval_profile(
+        content, file_type=_file_type, page_count=_page_count, table_count=_table_count,
+    )
+    _profile_json = serialize_profile(_artifact_profile)
+
+    chunk_metadatas = [
+        {**base_meta, "chunk_index": i, "retrieval_profile": _profile_json}
+        for i in range(len(chunks))
+    ]
     collection.add(ids=chunk_ids, documents=chunks, metadatas=chunk_metadatas)
 
     # Index for BM25 hybrid search
@@ -490,6 +505,8 @@ async def ingest_file(
     meta["file_type"] = parsed.get("file_type", "")
     if parsed.get("page_count") is not None:
         meta["page_count"] = parsed["page_count"]
+    if parsed.get("table_count") is not None:
+        meta["table_count"] = parsed["table_count"]
     if client_source:
         meta["client_source"] = client_source
     # Run sync ingest_content in thread pool to avoid blocking the event loop

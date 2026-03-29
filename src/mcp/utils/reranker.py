@@ -137,11 +137,18 @@ def rerank(
     documents = [r["content"] for r in candidates]
     ce_scores = _score_pairs(query, documents)
 
+    from utils.retrieval_profile import get_rerank_weights
+
     for result, ce_score in zip(candidates, ce_scores):
         original = result["relevance"]
+        # Per-chunk profile adjusts CE vs original weights
+        ce_w, orig_w = get_rerank_weights(
+            result.get("retrieval_profile"),
+            config.RERANK_CE_WEIGHT,
+            config.RERANK_ORIGINAL_WEIGHT,
+        )
         result["relevance"] = round(
-            config.RERANK_CE_WEIGHT * ce_score
-            + config.RERANK_ORIGINAL_WEIGHT * original,
+            ce_w * ce_score + orig_w * original,
             4,
         )
 
