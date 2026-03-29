@@ -16,13 +16,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Search, X, Loader2, AlertCircle, RefreshCcw, Upload, CheckCircle, Tag, Settings2, ArrowUpDown, ArrowDownAZ, CalendarArrowDown, Star, FileUp, Clock, CircleHelp, LayoutGrid, List, Eye, ArrowRightLeft, Trash2 } from "lucide-react"
+import { Search, X, Loader2, AlertCircle, RefreshCcw, Upload, CheckCircle, Tag, Settings2, ArrowUpDown, ArrowDownAZ, CalendarArrowDown, Star, FileUp, Clock, CircleHelp, LayoutGrid, List, Eye, ArrowRightLeft, Trash2, FolderOpen } from "lucide-react"
 import { DomainBadge } from "@/components/ui/domain-badge"
 import { cn } from "@/lib/utils"
 import { ArtifactCard } from "./artifact-card"
 import { TaxonomyTree } from "./taxonomy-tree"
 import { GraphPreview } from "./graph-preview"
 import { UploadDialog } from "./upload-dialog"
+import { ImportDialog } from "./import-dialog"
 import { TagManager } from "./tag-manager"
 import { fetchArtifacts, queryKB, uploadFile, recategorizeArtifact, adminDeleteArtifact, updateArtifactTags, reIngestArtifact } from "@/lib/api"
 import { useKBInjection } from "@/contexts/kb-injection-context"
@@ -112,6 +113,7 @@ export function KnowledgePane() {
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "success" | "error">("idle")
   const [uploadMessage, setUploadMessage] = useState("")
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  const [showImportDialog, setShowImportDialog] = useState(false)
   const [ingestionLog, setIngestionLog] = useState<Array<{ name: string; time: number; status: "success" | "error" }>>([])
   const [clientSource, setClientSource] = useState("gui")
   const [dateFilter, setDateFilter] = useState("all")
@@ -406,6 +408,15 @@ export function KnowledgePane() {
             )}
             Upload
           </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={() => setShowImportDialog((v) => !v)}
+          >
+            <FolderOpen className="mr-1 h-3 w-3" />
+            Import
+          </Button>
           <input
             ref={fileInputRef}
             type="file"
@@ -444,6 +455,11 @@ export function KnowledgePane() {
           </div>
         )}
       </div>
+
+      {/* Import Folder Dialog */}
+      {showImportDialog && (
+        <ImportDialog onClose={() => { setShowImportDialog(false); refetch() }} />
+      )}
 
       {/* Search + filters */}
       <div className="space-y-2 border-b px-4 py-3">

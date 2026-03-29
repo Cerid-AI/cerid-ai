@@ -44,7 +44,19 @@ class ScanResult:
 DEFAULT_EXCLUDE_DIRS = {
     ".git", "__pycache__", "node_modules", "venv", ".venv", ".env", ".tox",
     "dist", "build", ".cache", ".pytest_cache", ".mypy_cache", "egg-info",
+    "__MACOSX", ".Spotlight-V100", ".Trashes", ".fseventsd", ".TemporaryItems",
+    "Library", "Caches", ".npm", ".yarn", "coverage",
 }
+
+# Files to always skip (junk, temp, system files)
+JUNK_FILE_PATTERNS = {
+    ".ds_store", "thumbs.db", "desktop.ini", ".gitignore", ".gitkeep",
+    ".npmrc", ".yarnrc", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
+}
+
+JUNK_FILE_PREFIXES = ("~$", "._")  # Office temp files, macOS resource forks
+
+ARCHIVE_EXTENSIONS = {".zip", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".7z", ".rar", ".gz", ".bz2"}
 
 # Redis key prefixes
 _KEY_PREFIX = "cerid:scan"
@@ -193,6 +205,17 @@ async def scan_folder(
 
             file_path = entry.path
             suffix = Path(name).suffix.lower()
+            name_lower = name.lower()
+
+            # Skip junk files
+            if name_lower in JUNK_FILE_PATTERNS or any(name.startswith(p) for p in JUNK_FILE_PREFIXES):
+                yield ScanResult(path=file_path, status="skipped", error_msg="junk file")
+                continue
+
+            # Skip archives (TODO: extract in Sprint 3)
+            if suffix in ARCHIVE_EXTENSIONS or name_lower.endswith((".tar.gz", ".tar.bz2")):
+                yield ScanResult(path=file_path, status="skipped", error_msg="archive (extraction not yet supported)")
+                continue
 
             # Check extension
             if suffix not in valid_extensions:
@@ -329,6 +352,11 @@ async def preview_folder(
     total_size = 0
     by_extension: dict[str, int] = {}
     by_domain: dict[str, int] = {}
+    junk_count = 0
+    archive_count = 0
+    oversized_count = 0
+    unsupported_count = 0
+    total_scanned = 0
 
     stack: list[Path] = [root]
     while stack:
@@ -346,8 +374,23 @@ async def preview_folder(
                     if not entry.is_file(follow_symlinks=False):
                         continue
 
+                    total_scanned += 1
+                    name_lower = name.lower()
                     suffix = Path(name).suffix.lower()
+
+                    # Junk detection
+                    if name_lower in JUNK_FILE_PATTERNS or any(name.startswith(p) for p in JUNK_FILE_PREFIXES):
+                        junk_count += 1
+                        continue
+
+                    # Archive detection
+                    if suffix in ARCHIVE_EXTENSIONS or name_lower.endswith((".tar.gz", ".tar.bz2")):
+                        archive_count += 1
+                        continue
+
+                    # Unsupported extension
                     if suffix not in valid_extensions:
+                        unsupported_count += 1
                         continue
 
                     try:
@@ -356,6 +399,7 @@ async def preview_folder(
                         continue
 
                     if stat.st_size > max_size:
+                        oversized_count += 1
                         continue
 
                     total_files += 1
@@ -370,13 +414,23 @@ async def preview_folder(
 
     # Rough chunk estimate: ~500 tokens per chunk, ~4 chars per token, ~2000 chars per chunk
     estimated_chunks = int((total_size / 2000) * 1.2) if total_size else 0  # 20% overlap
+    # Estimated storage: ~3KB per chunk (vector + metadata)
+    estimated_storage_mb = round(estimated_chunks * 3 / 1024, 1)
 
     return {
         "total_files": total_files,
+        "total_scanned": total_scanned,
         "total_size_mb": round(total_size / (1024 * 1024), 2),
         "by_extension": dict(sorted(by_extension.items(), key=lambda x: -x[1])),
         "by_domain": dict(sorted(by_domain.items(), key=lambda x: -x[1])),
         "estimated_chunks": estimated_chunks,
+        "estimated_storage_mb": estimated_storage_mb,
+        "skipped": {
+            "junk": junk_count,
+            "archives": archive_count,
+            "unsupported": unsupported_count,
+            "oversized": oversized_count,
+        },
     }
 
 

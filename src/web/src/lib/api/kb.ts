@@ -512,6 +512,47 @@ export async function fetchArtifactsFiltered(params: ArtifactFilterParams): Prom
 }
 
 // ---------------------------------------------------------------------------
+// Folder Scanner — bulk import
+// ---------------------------------------------------------------------------
+
+export interface ScanPreview {
+  total_files: number
+  total_scanned: number
+  total_size_mb: number
+  by_extension: Record<string, number>
+  by_domain: Record<string, number>
+  estimated_chunks: number
+  estimated_storage_mb: number
+  skipped: { junk: number; archives: number; unsupported: number; oversized: number }
+}
+
+export async function scanPreview(path: string): Promise<ScanPreview> {
+  const res = await fetch(`${MCP_BASE}/admin/scan/preview`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ path }),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Scan preview failed: ${res.status}`))
+  return res.json()
+}
+
+export async function startScan(path: string): Promise<{ scan_id: string; status: string }> {
+  const res = await fetch(`${MCP_BASE}/admin/scan`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ path, dry_run: false }),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Start scan failed: ${res.status}`))
+  return res.json()
+}
+
+export async function getScanProgress(scanId: string): Promise<Record<string, unknown>> {
+  const res = await fetch(`${MCP_BASE}/admin/scan/${scanId}`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Scan progress failed: ${res.status}`))
+  return res.json()
+}
+
+// ---------------------------------------------------------------------------
 // Trading proxy (routed through MCP server's /api/trading/* proxy)
 // ---------------------------------------------------------------------------
 
