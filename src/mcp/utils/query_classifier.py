@@ -20,6 +20,7 @@ Error types: none (always returns a valid intent)
 from __future__ import annotations
 
 import re
+from typing import Any
 
 __all__ = ["classify_query_intent", "get_rag_config"]
 
@@ -73,9 +74,9 @@ def classify_query_intent(query: str) -> str:
     return "factual"
 
 
-def get_rag_config(intent: str) -> dict:
+def get_rag_config(intent: str) -> dict[str, Any]:
     """Return RAG retrieval configuration based on intent."""
-    configs = {
+    configs: dict[str, dict[str, Any]] = {
         "factual": {"inject": True, "top_k": 10, "decompose": True, "rerank": True},
         "code": {"inject": True, "top_k": 10, "decompose": True, "rerank": True, "domains": ["coding"]},
         "analytical": {"inject": True, "top_k": 15, "decompose": True, "rerank": True},
