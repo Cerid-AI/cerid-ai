@@ -3,6 +3,50 @@
 All notable changes to Cerid AI are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.0] - 2026-03-29
+
+### Added
+
+- **Unified RAG modes** — three-mode retrieval orchestrator (manual/smart/custom_smart) with parallel KB + memory + external recall, Knowledge Console UI with per-source toggles, RAG mode selector in chat toolbar
+- **Per-chunk retrieval profiles** — adaptive scoring strategy computed at ingest time (content_density, keyword_richness, table_ratio, number_density → vector/keyword/balanced strategy), per-chunk hybrid weight and reranking weight adjustment
+- **Session-level injection dedup** — tracks which chunks have been sent to the LLM across conversation turns, includes prior-context note so model knows what it was shown before
+- **Memory recall in auto-inject** — fires recallMemories() alongside queryKB() with shared 500ms timeout, memories formatted as `<memory>` tags distinct from `<document>` tags
+- **Ollama install wizard** — guided multi-step flow with platform-specific install commands, copy-to-clipboard buttons, auto-detect polling every 3s, streaming model download progress, host.docker.internal fallback for Docker↔native bridging, pipeline routing on enable (6/8 stages local), status bar indicator showing model + local stage count
+- **Bulk folder import** — preview with estimation (file counts, size, chunks, storage impact), junk detection (DS_Store, Thumbs.db, temp files, macOS resource forks, lock files), archive extraction (zip/tar.gz/tar.bz2), import confirmation dialog, SSE progress streaming, pause/resume/cancel controls
+- **Content filter utility** — binary detection, too-short content, repetitive text, encoding garbage detection — prevents wasting compute on junk content
+- **Settings rationalization** — pipeline presets renamed (Efficient/Balanced/Maximum), Maximum requires Pro tier with ProGate overlay, credits moved from System to Essentials tab, runtime tier toggle in sidebar (Core→Pro→Enterprise cycling)
+- **Split-button toolbar** — replaced hover/long-press menu pattern with visible chevron indicator, popover stays open until dismissed, title headers in each popover
+- **Multi-KB namespace foundation** — collection_name() gains KB_NAMESPACE env var, BM25 index namespaced directory layout, backward-compatible with legacy format
+- **Centralized React Query key registry** — query-keys.ts prevents cache key drift across 25+ useQuery calls
+- **Pre-production cohesion audit** — compliance fixes, documentation alignment, 17 plan files archived, 24 automations router tests
+
+### Changed
+
+- **Auto-inject threshold** — default lowered from 0.82 to 0.15 (matching actual ChromaDB relevance score ranges), slider range changed from 0.5–1.0 to 0.05–0.50, toolbar options: Broad 10% / Standard 15% / Focused 25% / Strict 40%
+- **Hybrid search weights** — rebalanced from 60/40 vector/keyword to 50/50 equal weight
+- **Reranking weights** — CE weight reduced from 60% to 40%, original hybrid score increased to 60% (cross-encoder unreliable on structured/OCR documents)
+- **Context budgets** — Claude 40K→120K chars, Grok 32K→60K, GPT-4o 20K→40K, default 14K→40K chars; max chunks per artifact 2→5
+- **Streaming render** — 50ms setTimeout batching replaced with 16ms requestAnimationFrame (60fps)
+- **KB system prompt** — strengthened from generic "Reference the following" to explicit "READ each document, USE their content, cite specific details, prefer KB over general knowledge"
+- **Batch ingest limit** — raised from 20 to 100 items per request
+- **BM25 index loading** — LRU eviction at 8 domains to cap memory usage
+- **Ollama model pull** — removed OLLAMA_ENABLED gate (pull is a setup action, must work before formal enable)
+
+### Fixed
+
+- **KB auto-inject not working** — two root causes: threshold too high for actual scores, stale query used previous message instead of current outgoing message
+- **Tax return low confidence** — retrieval profile system identifies structured documents and adjusts scoring (relevance 0.38→0.92 after profiling)
+- **Streaming delay** — fresh KB query blocked stream start indefinitely, now races against 500ms timeout
+- **LLM ignoring KB content** — weak system prompt, models sometimes ignored `<document>` tags
+- **Custom Smart RAG mode rejected by server** — missing from PATCH /settings valid_rag_modes
+- **Rerank slider defaults stale** — UI showed 0.6/0.4 when server was 0.4/0.6
+- **DeepSeek provider color remnant** — USG compliance violation in frontend types.ts
+- **React 19 ref-during-render error** — conversation change detection moved to useEffect
+- **ESLint ref access error** — ref read during render body moved into effect
+- **Settings bounds test** — auto_inject_threshold validation changed from ge=0.5 to ge=0.0
+- **Ollama Docker networking** — MCP container couldn't reach native Ollama, added host.docker.internal fallback probe to status, enable, and pull endpoints
+- **Pipeline not routing to Ollama** — enable endpoint now updates PIPELINE_PROVIDERS dict (6 stages to Ollama, 2 locked to cloud)
+
 ## [1.0.0] - 2026-03-26
 
 ### Added

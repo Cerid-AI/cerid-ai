@@ -199,4 +199,22 @@
   - Wired unwired Phase 51 features: RAG mode selector, data source display, verification data enrichment, parent-child chunking flag
   - New modules: `utils/model_registry.py`, `utils/query_classifier.py`, `utils/data_sources/` (4 files), `routers/data_sources.py`
   - 1673 Python tests, 496 frontend tests.
+- **Session 2026-03-29 (continued): Unified RAG Modes + Pre-Production Audit + Pipeline Optimization**
+  - Unified RAG Modes (6 sprints): retrieval orchestrator wrapping agent_query + recall_memories, three modes (manual/smart/custom_smart), Knowledge Console UI, RAG mode selector in toolbar, memory recall in auto-inject, session-level injection dedup with prior-context awareness
+  - Pre-production cohesion audit: DeepSeek remnant removed, phantom graph_rag removed from tier matrix, sso_saml documented as placeholder, 24 automations router tests, API reference updated, 17 plan files archived
+  - Settings rationalization: pipeline presets renamed (Efficient/Balanced/Maximum), Maximum requires Pro tier, ProGate component for visible-but-disabled controls, credits moved to Essentials tab, runtime tier toggle in sidebar
+  - Chat toolbar: replaced hover/long-press menus with split-button chevron pattern
+  - KB auto-inject fix: threshold lowered from 0.82 to 0.15 (matched actual relevance ranges), fresh KB query at send-time with 500ms timeout, stale-results timing bug fixed
+  - Confidence scoring fix: rebalanced hybrid weights (50/50), reduced CE reranking dominance (40/60), per-chunk retrieval profiles (content_density, keyword_richness, table_ratio → adaptive scoring strategy), tax return relevance 0.38→0.92
+  - Context budgets raised: Claude 40K→120K chars, Grok 32K→60K, chunks per artifact 2→5
+  - Streaming: 50ms setTimeout→16ms requestAnimationFrame (60fps), strengthened system prompt for KB utilization
+  - Memory recall wired into auto-inject path alongside KB query
+  - Multi-KB namespace foundation: collection_name() gains KB_NAMESPACE, BM25 namespaced dirs
+  - Large-KB scaling: ChromaDB batch writes (5000 max), BM25 LRU eviction (8 domain cap)
+  - Ollama wizard: guided install with copy-to-clipboard, auto-detect polling, host.docker.internal fallback, model pull without ENABLED gate, pipeline routing on enable (6/8 stages local), status bar indicator
+  - Bulk import: folder scan preview with junk detection (DS_Store, temp files, caches), archive extraction (zip/tar), import confirmation dialog with estimation, SSE progress stream, pause/resume/cancel, batch limit 20→100
+  - New test files: test_retrieval_profile.py (19), test_automations.py (24), use-chat-send.test.ts (11), test_retrieval_orchestrator.py (16)
+  - Content filter utility (binary detection, repetitive content, encoding garbage)
+  - Centralized React Query key registry (query-keys.ts)
+  - 1805 Python tests, 506 frontend tests, 9-job CI green.
 - **Verification Crash Debugging (Complete, 2026-03-22):** Deep debugging session fixing production crashes in the verification panel. Docker build silent failure identified (exit code 2 reuses cached image). React infinite render loop fixed (3 root causes: object ref comparisons in useEffect, context callback instability, synchronous state updates during render). Circuit breaker name mismatches fixed across 4 call sites. Claim extraction hardened (pleasantry filtering, JSON wrapper unwrapping). 58 lines dead code removed. Smart router, BYOK provider config, OpenRouter credit tracking, RAG features, folder scanner, and PDF chunked parsing all polished. Key files: `tasks/lessons.md` (patterns captured), `src/web/src/hooks/use-verification-orchestrator.ts`, `src/mcp/utils/circuit_breaker.py`, `src/mcp/agents/hallucination/extraction.py`.

@@ -47,7 +47,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 - **External Data Sources** — pluggable framework for Wikipedia, Wolfram Alpha, Exchange Rates with enable/disable management
 - **Dynamic Model Registry** — OpenRouter auto-validation of 20+ models at startup, runtime model management
 - **Verification Activity Console** — real-time monospace pipeline log showing each verification stage
-- **GitHub Actions CI/CD** with 2,169+ tests (1673+ pytest + 496+ frontend)
+- **GitHub Actions CI/CD** with 2,311+ tests (1805+ pytest + 506+ frontend)
 - **Three-Tier AI Categorization** (manual, smart, pro) via Bifrost
 - **Obsidian Vault Integration** — auto-sync vault notes into knowledge base
 - **Reproducible Builds** — pip-compile lock files with hashes, pinned Docker images, Dependabot
@@ -468,7 +468,7 @@ cerid-ai/
 │       │                              # use-model-router, use-model-switch,
 │       │                              # use-smart-suggestions, use-live-metrics
 │       ├── contexts/                  # KB injection context provider
-│       ├── __tests__/                 # 496+ vitest tests
+│       ├── __tests__/                 # 506+ vitest tests
 │       └── components/
 │           ├── layout/                # Sidebar, status bar, split-pane
 │           ├── chat/                  # Chat panel, input, bubbles, dashboard,

@@ -119,11 +119,21 @@
 - `DELETE /admin/artifacts/{artifact_id}` — Delete a specific artifact
 
 **Scanner (folder watcher):**
-- `POST /admin/scan` — Start a folder scan
-- `GET /admin/scan/state` — Current scan state
-- `GET /admin/scan/preview` — Preview files that would be scanned
-- `GET /admin/scan/{scan_id}` — Get scan result
-- `POST /admin/scan/reset` — Reset scanner state
+- `POST /admin/scan` — Start async folder scan (returns scan_id)
+- `GET /admin/scan/state` — Persistent scan state from Redis
+- `GET /admin/scan/preview` — Preview files that would be scanned (GET with query params)
+- `POST /admin/scan/preview` — Preview files (POST with JSON body, enhanced: skipped breakdown, storage estimate)
+- `GET /admin/scan/{scan_id}` — Get scan progress/result
+- `GET /admin/scan/{scan_id}/stream` — SSE stream of real-time scan progress with ETA
+- `POST /admin/scan/{scan_id}/pause` — Pause an active scan
+- `POST /admin/scan/{scan_id}/resume` — Resume a paused scan
+- `POST /admin/scan/{scan_id}/cancel` — Cancel an active scan
+- `POST /admin/scan/reset` — Clear all persistent scan state
+
+**Settings management:**
+- `GET /settings` — Current server settings
+- `PATCH /settings` — Update runtime settings (auto_inject_threshold range: 0.0–1.0)
+- `POST /settings/tier` — Runtime tier override (community/pro/enterprise, recomputes feature flags)
 
 **Eval (retrieval evaluation):**
 - `POST /api/eval/run` — Run evaluation benchmark
