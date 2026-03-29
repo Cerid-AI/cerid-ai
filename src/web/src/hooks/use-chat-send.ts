@@ -86,6 +86,9 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
   const [lastAutoInjectCount, setLastAutoInjectCount] = useState(0)
   // Prevent overlapping compression calls
   const compressingRef = useRef(false)
+  // Track which artifact chunks have already been injected this session
+  // so we don't re-send identical context to the model on follow-up turns
+  const injectedHistoryRef = useRef<Set<string>>(new Set())
 
   const handleSend = useCallback(
     async (content: string) => {
@@ -121,8 +124,10 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
       options.addMessage(convoId, userMsg)
 
       // Combine manually injected + auto-injected context
+      // Skip chunks already sent to the model in prior turns (session dedup)
       const manuallyInjected = [...options.injectedContext]
       const injectedIds = new Set(manuallyInjected.map((r) => r.artifact_id))
+      const priorInjected = injectedHistoryRef.current
 
       // Auto-inject: query KB with the CURRENT message, with a 500ms timeout
       // to avoid blocking the stream start. Falls back to stale results on timeout.
@@ -149,7 +154,9 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
           let remainingBudget = modelObj.effectiveContextWindow - reservedTokens
 
           const candidates = freshResults
-            .filter((r) => r.relevance >= options.autoInjectThreshold && !injectedIds.has(r.artifact_id))
+            .filter((r) => r.relevance >= options.autoInjectThreshold
+              && !injectedIds.has(r.artifact_id)
+              && !priorInjected.has(`${r.artifact_id}:${r.chunk_index}`))
           for (const c of candidates) {
             const chunkTokens = estimateTokenCount(c.content)
             if (chunkTokens > remainingBudget) break
@@ -178,10 +185,34 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
         }))
 
         const contextParts = dedupedSources.map(formatChunkWithHeader)
+
+        // Build prior-context summary so the model knows what it was shown before
+        let priorContextNote = ""
+        if (priorInjected.size > 0) {
+          const priorFiles = new Set<string>()
+          for (const key of priorInjected) {
+            const msg = (options.activeMessages ?? []).find(
+              (m) => m.sourcesUsed?.some((s) => `${s.artifact_id}:${s.chunk_index}` === key),
+            )
+            if (msg) {
+              const src = msg.sourcesUsed?.find((s) => `${s.artifact_id}:${s.chunk_index}` === key)
+              if (src?.filename) priorFiles.add(src.filename)
+            }
+          }
+          if (priorFiles.size > 0) {
+            priorContextNote = `\n\nNote: In earlier turns you were also shown content from: ${[...priorFiles].join(", ")}. That context is still relevant — refer to it as needed.`
+          }
+        }
+
         allMessages.push({
           role: "system",
-          content: `You have access to the user's personal knowledge base. The following documents contain information directly relevant to this conversation. READ each <document> carefully and USE their content when answering. Cite specific details, numbers, and facts from these sources. If the documents contain the answer, prefer them over your general knowledge.\n\n${contextParts.join("\n\n")}`,
+          content: `You have access to the user's personal knowledge base. The following documents contain information directly relevant to this conversation. READ each <document> carefully and USE their content when answering. Cite specific details, numbers, and facts from these sources. If the documents contain the answer, prefer them over your general knowledge.${priorContextNote}\n\n${contextParts.join("\n\n")}`,
         })
+
+        // Record injected chunks for session dedup on subsequent turns
+        for (const s of dedupedSources) {
+          priorInjected.add(`${s.artifact_id}:${s.chunk_index}`)
+        }
         options.clearInjected()
       }
 
@@ -254,6 +285,13 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
   )
 
   const resetAutoInjectCount = useCallback(() => setLastAutoInjectCount(0), [])
+
+  // Reset session injection history when conversation changes
+  const prevActiveId = useRef(options.activeId)
+  if (options.activeId !== prevActiveId.current) {
+    prevActiveId.current = options.activeId
+    injectedHistoryRef.current = new Set()
+  }
 
   return { autoRouteNotice, lastAutoInjectCount, resetAutoInjectCount, handleSend }
 }
