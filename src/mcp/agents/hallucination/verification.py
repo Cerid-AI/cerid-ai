@@ -995,8 +995,23 @@ async def verify_claim(
         # Sort by relevance descending
         all_results.sort(key=lambda x: x.get("relevance", 0.0), reverse=True)
 
-        # --- Fallback 1: No KB results at all → try external verification ---
+        # --- Fallback 1: No KB results at all ---
+        # In streaming mode, skip expensive external verification for simple factual
+        # claims when KB has no results. Only escalate to web search for claims that
+        # genuinely need real-time data (recency, current events).
         if not all_results:
+            from agents.hallucination.patterns import _is_current_event_claim, _is_recency_claim
+            needs_web = _is_current_event_claim(claim) or _is_recency_claim(claim) or (not streaming)
+            if not needs_web:
+                return await _cache_result({
+                    "claim": claim,
+                    "status": "unverified",
+                    "similarity": 0.0,
+                    "confidence": 0.4,
+                    "reason": "No KB evidence found (verification skipped for speed)",
+                    "verification_method": "no_kb_fast",
+                    "source_urls": [],
+                })
             ext_result = await _verify_claim_externally(
                 claim, model, force_web_search=True, streaming=streaming,
                 expert_mode=expert_mode, response_context=response_context,

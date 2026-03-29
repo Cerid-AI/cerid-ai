@@ -257,14 +257,13 @@ VERIFICATION_MIN_RELEVANCE = float(os.getenv("VERIFICATION_MIN_RELEVANCE", "0.35
 # (including KB lookup, external calls, and all fallbacks).
 # Reduced from 30s→15s — parallel execution means individual claims
 # shouldn't block the pipeline for half a minute.
-STREAMING_PER_CLAIM_TIMEOUT = float(os.getenv("STREAMING_PER_CLAIM_TIMEOUT", "15"))
+STREAMING_PER_CLAIM_TIMEOUT = float(os.getenv("STREAMING_PER_CLAIM_TIMEOUT", "10"))
 # Extended timeout for expert-tier models (Grok 4 with :online web search)
 # and current-event claims that require web search + reasoning
-STREAMING_EXPERT_CLAIM_TIMEOUT = float(os.getenv("STREAMING_EXPERT_CLAIM_TIMEOUT", "45"))
+STREAMING_EXPERT_CLAIM_TIMEOUT = float(os.getenv("STREAMING_EXPERT_CLAIM_TIMEOUT", "30"))
 # Total deadline for the entire streaming verification loop (all claims).
-# Reduced from 120s→90s — with lower per-claim timeouts and parallel
-# execution, 90s is sufficient headroom for 10 claims at 8 concurrency.
-STREAMING_TOTAL_TIMEOUT = float(os.getenv("STREAMING_TOTAL_TIMEOUT", "90"))
+# With fast-path for no-KB claims + 10s per-claim timeout, 60s is sufficient.
+STREAMING_TOTAL_TIMEOUT = float(os.getenv("STREAMING_TOTAL_TIMEOUT", "60"))
 # Fewer LLM retries on 429 during streaming to avoid compounding delays
 STREAMING_RETRY_ATTEMPTS = int(os.getenv("STREAMING_RETRY_ATTEMPTS", "1"))
 

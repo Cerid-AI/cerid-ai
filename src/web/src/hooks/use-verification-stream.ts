@@ -205,9 +205,9 @@ export function useVerificationStream(
     }
 
     // Timeout: abort verification if it takes too long.
-    // Backend total deadline is 90s (parallel verification with 15s per-claim
-    // timeouts).  90s frontend timeout matches the backend ceiling.
-    const STREAM_TIMEOUT_MS = 90_000
+    // Backend total deadline is 60s (fast-path for no-KB claims + 10s per-claim
+    // timeouts).  60s frontend timeout matches the backend ceiling.
+    const STREAM_TIMEOUT_MS = 60_000
     const timeoutId = setTimeout(() => {
       if (!cancelled) {
         cancelled = true
