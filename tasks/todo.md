@@ -79,6 +79,37 @@ Roadmap covers two tracks: **Infrastructure** (deployment, BYOK, packaging, repo
   - Editor: add/delete nodes+edges, config sidebar, template selector, 30+ tests
   - BSL-1.1 pro-tier plugin wrapper
 
+### Future Development — Open Items
+
+- [ ] **External APIs in Knowledge Console**
+  - Show enabled APIs with status in Knowledge Console external section
+  - Inline enable/disable toggles per API
+  - Add 3+ free public APIs: DuckDuckGo Instant Answers, Open Library, PubChem
+  - Move data sources from System tab to more prominent Essentials location
+  - Each follows `DataSource` ABC pattern in `utils/data_sources/`
+
+- [ ] **Watched Folders Management**
+  - CRUD API: `POST/GET/PATCH/DELETE /watched-folders` with Redis storage
+  - Per-folder: enable/disable, domain override, exclude patterns, search_enabled toggle
+  - Per-folder scan isolation (namespaced Redis state keys)
+  - Tag ingested artifacts with `watched_folder_id` in ChromaDB metadata
+  - `search_enabled: false` excludes folder's chunks from RAG queries
+  - Settings UI: folder list with toggles, scan button, stats, add/remove
+  - Optional per-folder external DB binding (architecture hook, Pro tier)
+
+- [ ] **RAG Orchestration Resilience**
+  - Source availability awareness (check enabled + configured before querying)
+  - Folder-aware domain routing (`exclude_folder_ids` filter in decomposer)
+  - Graceful degradation: partial source_breakdown on failure, circuit breaker awareness
+  - Per-source timing (`_timings: {kb_ms, memory_ms, external_ms}`)
+  - `source_status` in response: `{kb: "ok", memory: "timeout", external: "ok"}`
+
+- [ ] **Ollama Content Triage (Bulk Import)**
+  - When Ollama enabled, use it for content value assessment during folder scan
+  - Score 1-5 (skip low-value, ingest high-value, adjust quality_score)
+  - Async, non-blocking, falls back to heuristic scoring
+  - `ENABLE_AI_TRIAGE` env var (default: true when Ollama enabled)
+
 ### Execution Dependencies
 
 - **Phases A + B** can run in parallel (infrastructure vs settings)
