@@ -8,6 +8,68 @@ export const metadata: Metadata = {
 
 const PHASES = [
   {
+    phase: 51,
+    date: "Mar 2026",
+    title: "Memory Salience Improvements",
+    highlights: [
+      "6-type memory classification (empirical, decision, preference, project_context, temporal, conversational)",
+      "Per-type decay models: power-law for decisions, exponential for conversations, no decay for empirical facts",
+      "Recency-weighted access counts with FSRS-inspired reinforcement",
+      "Source authority weighting (user-stated > LLM-extracted > web search)",
+      "Migration tooling for existing knowledge bases",
+    ],
+    tag: "Memory",
+  },
+  {
+    phase: 50,
+    date: "Mar 2026",
+    title: "Visual Workflow Builder",
+    highlights: [
+      "DAG execution engine with Kahn's cycle detection",
+      "SVG canvas with drag-to-reposition and type-colored nodes",
+      "4 built-in workflow templates",
+      "Live execution status tracking",
+    ],
+    tag: "Workflows",
+  },
+  {
+    phase: "D",
+    date: "Mar 2026",
+    title: "Electron Desktop App",
+    highlights: [
+      "Native macOS + Windows packaging",
+      "Docker lifecycle management via dockerode",
+      "System tray integration and auto-updater",
+    ],
+    tag: "Desktop",
+  },
+  {
+    phase: "A-C",
+    date: "Mar 2026",
+    title: "Platform Foundation",
+    highlights: [
+      "Unified Docker Compose with first-run setup wizard",
+      "BYOK model configuration with 5 provider support",
+      "Web search fallback with auto-learn ingestion",
+      "A2A protocol support for agent-to-agent communication",
+      "Repository architecture separation (core/app/plugins/enterprise)",
+    ],
+    tag: "Platform",
+  },
+  {
+    phase: "38-39",
+    date: "Mar 2026",
+    title: "Performance & Security Hardening",
+    highlights: [
+      "MCP server optimization (60-80% verification latency reduction)",
+      "Expert verification mode (Grok 4) with per-message selection",
+      "Privacy hardening (CORS, port binding, encryption, audit TTL)",
+      "Quantized reranker (91MB to 23MB, 3-4x faster)",
+      "Production readiness audit (33 issues fixed across 4 sprints)",
+    ],
+    tag: "Performance",
+  },
+  {
     phase: 37,
     date: "Mar 2026",
     title: "UX Polish & Marketing Refresh",

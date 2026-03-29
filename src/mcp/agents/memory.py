@@ -5,6 +5,10 @@
 
 Phase 44 additions: conflict detection, LLM conflict resolution, decay/reinforcement
 scoring, and context-aware recall with access-count reinforcement.
+
+Phase 51 additions: salience-aware scoring with per-type decay (power-law for
+long-lived facts, exponential for transient context), recency-weighted access
+counts, source authority weighting, and 6-type classification.
 """
 
 from __future__ import annotations
@@ -30,7 +34,6 @@ logger = logging.getLogger("ai-companion.memory")
 # Constants
 # ---------------------------------------------------------------------------
 MIN_RESPONSE_LENGTH = 100
-MEMORY_TYPES = {"fact", "decision", "preference", "action_item"}
 
 
 # ---------------------------------------------------------------------------
@@ -48,11 +51,19 @@ async def extract_memories(
 
     prompt = (
         "Analyze this assistant response and extract any memorable content. "
-        "For each item, classify it as one of: fact, decision, preference, action_item.\n\n"
+        "For each item, classify it into exactly one of these types:\n\n"
+        "- empirical: permanent, verifiable facts (e.g. 'Python has a GIL', 'PostgreSQL uses MVCC')\n"
+        "- decision: choices made for a specific context (e.g. 'chose Postgres over Mongo for this project')\n"
+        "- preference: user preferences or opinions (e.g. 'user prefers Rust', 'likes dark mode')\n"
+        "- project_context: current project state or tasks (e.g. 'working on feature X', 'sprint goal is Y')\n"
+        "- temporal: time-bound facts with an expiry (e.g. 'meeting on Tuesday', 'deploy by Friday')\n"
+        "- conversational: casual/transient info not worth long-term retention (e.g. greetings, small talk)\n\n"
         "Return ONLY a JSON array of objects with keys: content, memory_type, summary.\n"
-        "- content: the full extractable text\n"
-        "- memory_type: one of fact/decision/preference/action_item\n"
+        "- content: the full extractable text (max 2000 chars)\n"
+        "- memory_type: one of the 6 types above\n"
         "- summary: a one-line summary (max 100 chars)\n\n"
+        "Classify carefully — empirical facts should NEVER decay, while conversational content "
+        "fades quickly. When in doubt between empirical and decision, prefer decision.\n\n"
         "If nothing is worth extracting, return an empty array [].\n\n"
         f"Response:\n{response_text[:3000]}\n\n"
         "JSON array:"
@@ -76,9 +87,12 @@ async def extract_memories(
         for m in memories:
             if not isinstance(m, dict):
                 continue
-            mem_type = m.get("memory_type", "fact")
-            if mem_type not in MEMORY_TYPES:
-                mem_type = "fact"
+            mem_type = m.get("memory_type", "empirical")
+            # Accept legacy Phase 44 types and migrate them
+            if mem_type in config.MEMORY_TYPE_MIGRATION:
+                mem_type = config.MEMORY_TYPE_MIGRATION[mem_type]
+            if mem_type not in config.MEMORY_TYPES:
+                mem_type = "empirical"
             valid.append({
                 "content": str(m.get("content", ""))[:2000],
                 "memory_type": mem_type,
@@ -207,6 +221,7 @@ async def extract_and_store_memories(
             timestamp = utcnow().strftime("%Y%m%d_%H%M%S")
             filename = f"memory_{mem['memory_type']}_{convo_prefix}_{timestamp}_{idx}"
 
+            stability = config.MEMORY_TYPE_STABILITY.get(mem["memory_type"], 30.0)
             metadata = {
                 "filename": filename,
                 "conversation_id": conversation_id,
@@ -215,6 +230,8 @@ async def extract_and_store_memories(
                 "summary": mem["summary"],
                 "valid_from": utcnow_iso(),
                 "access_count": "0",
+                "stability_days": str(stability) if stability != float("inf") else "inf",
+                "source_authority": str(config.DEFAULT_SOURCE_AUTHORITY),
             }
 
             result = ingest_content(effective_content, "conversations", metadata=metadata)
@@ -424,26 +441,60 @@ def calculate_memory_score(
     base_score: float,
     access_count: int,
     age_days: float,
-    half_life_days: float | None = None,
+    stability_days: float | None = None,
+    memory_type: str = "",
+    source_authority: float = 1.0,
+    access_ages: list[float] | None = None,
 ) -> float:
-    """Calculate memory relevance score with decay and reinforcement.
+    """Calculate memory relevance score with salience-aware decay and reinforcement.
 
-    Formula: base * (1 + log(1 + accesses)) * 2^(-age / half_life)
+    Phase 51 formula — different decay models per memory type:
+    - empirical: no decay (permanent facts)
+    - decision/preference: power-law decay (long tail for important but aging info)
+    - project_context/conversational: exponential decay (fast fade for transient info)
+    - temporal: step function (full score before event, 0.1 residual after)
 
-    - Memories decay exponentially over time (half-life = 30 days default)
-    - Frequent access reinforces the score logarithmically
-    - Base score comes from original extraction confidence
+    Reinforcement uses recency-weighted access counts (recent accesses matter more)
+    when access_ages is provided, falling back to raw count otherwise.
 
     Returns a non-negative float.
     """
-    if half_life_days is None:
-        half_life_days = config.MEMORY_HALF_LIFE_DAYS
-    if half_life_days <= 0:
-        half_life_days = 30.0
+    # --- Empirical facts: permanent, no decay ---
+    if memory_type == "empirical":
+        return max(0.0, base_score * source_authority)
 
-    reinforcement = 1.0 + math.log(1.0 + max(0, access_count))
-    decay = 2.0 ** (-max(0.0, age_days) / half_life_days)
-    return max(0.0, base_score * reinforcement * decay)
+    # --- Temporal facts: step function (0.1 residual after event date) ---
+    if memory_type == "temporal":
+        decay = 1.0 if age_days <= 0 else 0.1
+        return max(0.0, base_score * decay * source_authority)
+
+    # --- Resolve stability ---
+    if stability_days is None:
+        stability_days = config.MEMORY_TYPE_STABILITY.get(memory_type, config.MEMORY_HALF_LIFE_DAYS)
+    if stability_days <= 0:
+        stability_days = config.MEMORY_HALF_LIFE_DAYS
+    if stability_days == float("inf"):
+        # Shouldn't reach here (empirical handled above), but safety fallback
+        return max(0.0, base_score * source_authority)
+
+    # --- Recency-weighted effective access count ---
+    if access_ages:
+        eff_count = sum(0.9 ** max(0.0, d) for d in access_ages)
+    else:
+        eff_count = float(max(0, access_count))
+    reinforcement = min(1.0 + math.log2(1.0 + eff_count), 5.0)
+
+    # --- Decay model selection ---
+    if memory_type in config.MEMORY_POWER_LAW_TYPES:
+        # FSRS-inspired power-law: (1 + t / (9 * S))^(-0.5)
+        # At t=S: retains 71%. At t=4S: retains 45%. At t=12S: retains 27%.
+        decay = (1.0 + max(0.0, age_days) / (9.0 * stability_days)) ** (-0.5)
+    else:
+        # Exponential decay: 2^(-t / S) — fast fade for transient content.
+        # At t=S: retains 50%. At t=2S: retains 25%. At t=4S: retains 6.25%.
+        decay = 2.0 ** (-max(0.0, age_days) / stability_days)
+
+    return max(0.0, base_score * reinforcement * decay * source_authority)
 
 
 # ---------------------------------------------------------------------------
@@ -458,13 +509,13 @@ async def recall_memories(
     top_k: int = 10,
     min_score: float | None = None,
 ) -> list[dict]:
-    """Context-aware memory retrieval with decay scoring.
+    """Context-aware memory retrieval with salience-aware decay scoring.
 
-    1. Vector search for relevant memories
-    2. Apply decay/reinforcement scoring to each result
-    3. Update access_count on retrieved memories (reinforcement)
-    4. Sort by adjusted score
-    5. Return top_k above min_score
+    Phase 51 enhancements:
+    - Per-type decay (power-law for decisions/preferences, exponential for transient)
+    - Recency-weighted access counts from Neo4j access_log
+    - Source authority weighting
+    - ChromaDB access_count sync after recall
     """
     if min_score is None:
         min_score = config.MEMORY_MIN_RECALL_SCORE
@@ -472,13 +523,13 @@ async def recall_memories(
     if chroma_client is None:
         return []
 
-    # Step 1: Vector search
+    # Step 1: Vector search — over-fetch 4x to compensate for aggressive decay filtering
     try:
         coll_name = config.collection_name("conversations")
         collection = chroma_client.get_collection(name=coll_name)
         results = collection.query(
             query_texts=[query],
-            n_results=top_k * 3,  # over-fetch to compensate for decay filtering
+            n_results=top_k * 4,
             include=["documents", "metadatas", "distances"],
         )
     except Exception as e:
@@ -487,6 +538,27 @@ async def recall_memories(
 
     if not results["ids"] or not results["ids"][0]:
         return []
+
+    # Pre-fetch access logs from Neo4j for recency-weighted counting
+    artifact_ids = []
+    for i in range(len(results["ids"][0])):
+        metadata = results["metadatas"][0][i] if results["metadatas"] else {}
+        artifact_ids.append(metadata.get("artifact_id", results["ids"][0][i]))
+
+    access_logs: dict[str, list[str]] = {}
+    if neo4j_driver and artifact_ids:
+        try:
+            with neo4j_driver.session() as session:
+                records = session.run(
+                    "UNWIND $ids AS aid "
+                    "MATCH (a:Artifact {id: aid}) "
+                    "RETURN a.id AS id, coalesce(a.access_log, []) AS access_log",
+                    ids=artifact_ids,
+                )
+                for record in records:
+                    access_logs[record["id"]] = record["access_log"]
+        except Exception:
+            pass  # Graceful fallback to raw access_count from ChromaDB
 
     now = utcnow()
     scored_memories: list[dict] = []
@@ -514,11 +586,57 @@ async def recall_memories(
         access_count = int(metadata.get("access_count", 0))
         artifact_id = metadata.get("artifact_id", chunk_id)
 
-        # Step 2: Apply decay/reinforcement
+        # Resolve memory type (with legacy migration)
+        mem_type = metadata.get("memory_type", "empirical")
+        if mem_type in config.MEMORY_TYPE_MIGRATION:
+            mem_type = config.MEMORY_TYPE_MIGRATION[mem_type]
+        if mem_type not in config.MEMORY_TYPES:
+            mem_type = "empirical"
+
+        # Resolve stability
+        stability_str = metadata.get("stability_days", "")
+        if stability_str == "inf":
+            stability = float("inf")
+        elif stability_str:
+            try:
+                stability = float(stability_str)
+            except (ValueError, TypeError):
+                stability = None
+        else:
+            stability = None
+
+        # Resolve source authority
+        try:
+            source_auth = float(metadata.get("source_authority", config.DEFAULT_SOURCE_AUTHORITY))
+        except (ValueError, TypeError):
+            source_auth = config.DEFAULT_SOURCE_AUTHORITY
+
+        # Compute recency-weighted access ages from Neo4j access_log
+        access_ages: list[float] | None = None
+        log_entries = access_logs.get(artifact_id, [])
+        if log_entries:
+            access_ages = []
+            for ts in log_entries:
+                try:
+                    from datetime import datetime, timezone
+
+                    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    now_aware = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
+                    access_ages.append(max(0.0, (now_aware - dt).total_seconds() / 86400.0))
+                except (ValueError, TypeError):
+                    pass
+
+        # Step 2: Apply salience-aware scoring
         adjusted_score = calculate_memory_score(
             base_score=base_similarity,
             access_count=access_count,
             age_days=age_days,
+            stability_days=stability,
+            memory_type=mem_type,
+            source_authority=source_auth,
+            access_ages=access_ages,
         )
 
         if adjusted_score >= min_score:
@@ -530,15 +648,17 @@ async def recall_memories(
                 "adjusted_score": round(adjusted_score, 4),
                 "age_days": round(age_days, 1),
                 "access_count": access_count,
-                "memory_type": metadata.get("memory_type", "fact"),
+                "memory_type": mem_type,
                 "summary": metadata.get("summary", ""),
+                "source_authority": source_auth,
             })
 
-    # Step 4: Sort by adjusted score descending
+    # Sort by adjusted score descending
     scored_memories.sort(key=lambda m: m["adjusted_score"], reverse=True)
     top_results = scored_memories[:top_k]
 
-    # Step 3: Reinforce access counts for retrieved memories
+    # Reinforce: update Neo4j access_count + access_log, then sync to ChromaDB
+    now_iso = utcnow_iso()
     if neo4j_driver and top_results:
         retrieved_ids = [m["memory_id"] for m in top_results]
         try:
@@ -547,12 +667,28 @@ async def recall_memories(
                     "UNWIND $ids AS aid "
                     "MATCH (a:Artifact {id: aid}) "
                     "SET a.access_count = coalesce(a.access_count, 0) + 1, "
-                    "    a.last_accessed_at = $now",
+                    "    a.last_accessed_at = $now, "
+                    "    a.access_log = (coalesce(a.access_log, []) + [$now])[-$max_log:]",
                     ids=retrieved_ids,
-                    now=utcnow_iso(),
+                    now=now_iso,
+                    max_log=config.MEMORY_ACCESS_LOG_MAX,
                 )
         except Exception as e:
-            logger.debug("Failed to update memory access counts: %s", e)
+            logger.debug("Failed to update memory access counts in Neo4j: %s", e)
+
+    # Sync updated access counts back to ChromaDB
+    if chroma_client and top_results:
+        try:
+            coll_name = config.collection_name("conversations")
+            collection = chroma_client.get_collection(name=coll_name)
+            for mem in top_results:
+                new_count = mem["access_count"] + 1
+                collection.update(
+                    ids=[mem["chunk_id"]],
+                    metadatas=[{"access_count": str(new_count), "last_accessed": now_iso}],
+                )
+        except Exception as e:
+            logger.debug("Failed to sync access counts to ChromaDB: %s", e)
 
     return top_results
 

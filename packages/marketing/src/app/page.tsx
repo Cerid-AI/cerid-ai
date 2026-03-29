@@ -103,11 +103,11 @@ export default function Home() {
 
           {/* Stats strip */}
           <div className="mx-auto mt-12 flex max-w-lg flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
-            <span>1,300+ tests</span>
+            <span>1,950+ tests</span>
             <span className="text-border">·</span>
             <span>9 AI agents</span>
             <span className="text-border">·</span>
-            <span>18 tools</span>
+            <span>27 tools</span>
             <span className="text-border">·</span>
             <span>Verified responses</span>
           </div>

@@ -364,8 +364,55 @@ MEMORY_RETENTION_DAYS = int(os.getenv("MEMORY_RETENTION_DAYS", "180"))
 
 # Memory Conflict Detection & Decay (Phase 44)
 MEMORY_CONFLICT_THRESHOLD = float(os.getenv("MEMORY_CONFLICT_THRESHOLD", "0.85"))
-MEMORY_HALF_LIFE_DAYS = float(os.getenv("MEMORY_HALF_LIFE_DAYS", "30.0"))
+MEMORY_HALF_LIFE_DAYS = float(os.getenv("MEMORY_HALF_LIFE_DAYS", "30.0"))  # legacy fallback
 MEMORY_MIN_RECALL_SCORE = float(os.getenv("MEMORY_MIN_RECALL_SCORE", "0.3"))
+
+# Memory Salience — per-type stability and scoring (Phase 51)
+# Stability = base half-life in days for decay. Higher = slower fade.
+# "empirical" uses float("inf") — permanent facts never decay.
+MEMORY_TYPE_STABILITY: dict[str, float] = {
+    "empirical": float("inf"),       # "Python has a GIL" — no decay
+    "decision": 90.0,                # "Chose Postgres over Mongo" — slow power-law
+    "preference": 60.0,              # "User prefers Rust" — moderate power-law
+    "project_context": 14.0,         # "Working on feature X" — fast exponential
+    "temporal": 0.0,                 # "Meeting on Tuesday" — event-based step function
+    "conversational": 3.0,           # Casual chat, small talk — very fast exponential
+}
+MEMORY_TYPE_REINFORCEMENT_BOOST: dict[str, float] = {
+    "empirical": 0.0,
+    "decision": 0.3,
+    "preference": 0.2,
+    "project_context": 0.1,
+    "temporal": 0.0,
+    "conversational": 0.05,
+}
+# Power-law decay types get long-tail preservation; exponential types fade fast.
+MEMORY_POWER_LAW_TYPES = {"empirical", "decision", "preference"}
+MEMORY_EXPONENTIAL_TYPES = {"project_context", "temporal", "conversational"}
+
+# Source authority weights — how much to trust different memory sources.
+SOURCE_AUTHORITY_WEIGHTS: dict[str, float] = {
+    "user_stated": 1.0,
+    "user_document": 0.9,
+    "llm_extracted": 0.7,
+    "agent_inferred": 0.5,
+    "web_search": 0.4,
+}
+# Default source authority for memories without an explicit source type.
+DEFAULT_SOURCE_AUTHORITY = 0.7
+
+# All valid memory types (Phase 51 expansion from Phase 44's 4 types to 6).
+MEMORY_TYPES = {"empirical", "decision", "preference", "project_context", "temporal", "conversational"}
+
+# Mapping from legacy Phase 44 types to Phase 51 types (for migration).
+MEMORY_TYPE_MIGRATION: dict[str, str] = {
+    "fact": "empirical",
+    "action_item": "project_context",
+    # "decision" and "preference" remain unchanged
+}
+
+# Max access log entries stored per memory node (for recency-weighted counting).
+MEMORY_ACCESS_LOG_MAX = 50
 
 # ---------------------------------------------------------------------------
 # Scheduled Maintenance — cron expressions

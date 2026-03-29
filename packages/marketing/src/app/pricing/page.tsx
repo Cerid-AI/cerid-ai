@@ -23,7 +23,7 @@ const PLANS = [
       "Hybrid BM25s + vector search",
       "Streaming verification",
       "Knowledge graph",
-      "18 MCP tools",
+      "27 MCP tools",
       "Self-RAG validation",
       "Smart model routing",
       "Universal file ingestion",

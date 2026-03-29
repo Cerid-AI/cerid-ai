@@ -89,9 +89,9 @@ const FEATURES = [
   },
   {
     icon: MessageSquare,
-    title: "18 MCP Tools",
+    title: "27 MCP Tools",
     description:
-      "Full Model Context Protocol integration. Query, ingest, search, manage taxonomy, and more — all via MCP.",
+      "Full Model Context Protocol integration. Query, ingest, search, manage taxonomy, web search, memory recall, and more — all via MCP.",
     tag: "Integration",
   },
   {
@@ -135,6 +135,13 @@ const FEATURES = [
     description:
       "Non-blocking file ingestion with asyncio. Watch-directory queue pattern processes uploads without blocking the API.",
     tag: "Ingestion",
+  },
+  {
+    icon: Brain,
+    title: "Memory Salience",
+    description:
+      "6-type memory classification with per-type decay models. Empirical facts never decay, conversations fade fast, decisions use power-law long-tail recall.",
+    tag: "Memory",
   },
 ]
 

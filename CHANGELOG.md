@@ -3,6 +3,120 @@
 All notable changes to Cerid AI are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.0.0] - 2026-03-26
+
+### Added
+
+- **Hallucination detection and verification pipeline** — real-time claim extraction with LLM-powered topic context, fact-level verification with caching, four claim types (evasion, citation, recency, ignorance), refuted claim highlighting with inline footnotes, expert verification mode (Grok), per-message verification selection, and streaming verification via SSE
+- **Smart model routing** — cost-sensitive routing across OpenRouter providers, free-model preference for pipeline tasks, temporal query detection with web search escalation, model fallback retry chains, stale-cutoff exclusion, and three-way routing mode (manual/recommend/auto)
+- **Ollama local LLM provider** — optional air-gapped deployment with hardware-aware GPU detection (NVIDIA/AMD/Metal/CPU), frontend settings UI, health integration, cost tracking, Tier 1 pipeline task routing, and automatic fallback to OpenRouter
+- **OpenRouter credit management** — balance display, usage statistics, auto-detect credit exhaustion with user banner, graceful 402 degradation, and model fallback metadata in chat stream
+- **Knowledge Base intelligence** — drag-and-drop ingestion on KB pane and chat input, hierarchical taxonomy (domains/sub-categories/tags), artifact quality scoring with quality-weighted retrieval, semantic deduplication, filters, pagination, batch upload with progress counter, and artifact preview dialog
+- **RAG retrieval pipeline** — cross-encoder reranking (ONNX, three modes), contextual chunking with LLM-generated summaries, Self-RAG validation loop, adaptive retrieval gate, query decomposition with parallel sub-retrieval, MMR diversity reordering, ColBERT-inspired late interaction scoring, and anti-circularity to prevent KB from verifying its own injected context
+- **Trading integration** — GUI pane with KPIs and session cards, 5 MCP tools, SDK endpoints, 3 scheduler jobs (autoresearch, Platt mirror, longshot surface), gated by feature flag
+- **Conversation intelligence** — AI-powered synopsis generation, memory extraction, topic extraction for verification, conversation-aware KB queries with confidence-gated auto-injection
+- **Memory salience system (Phase 51)** — 6-type memory classification (empirical, decision, preference, project_context, temporal, conversational) with per-type decay models: no decay for empirical facts, FSRS-inspired power-law for decisions/preferences, exponential for conversational/project context, step-function for temporal events. Recency-weighted access counts, source authority weighting, ChromaDB/Neo4j dual-store sync, and migration tooling
+- **Visual Workflow Builder** — DAG execution engine with topological ordering, cycle detection via Kahn's algorithm, 4 built-in templates, and SVG canvas editor
+- **Multi-modal KB plugins** — OCR, audio transcription, and vision processing for knowledge ingestion
+- **Observability dashboard** — 8 Redis time-series metrics, health scoring (weighted A-F grade), sparkline visualization, and digest view
+- **Plugin foundation** — manifest-based loading, feature tier gating, management API (7 endpoints), and GUI
+- **Cloud sync** — user state persistence (settings, mode, conversations) with JSONL export/import, tombstone support, conflict resolution strategies, and optional Fernet encryption
+- **Electron desktop application** — Docker lifecycle management, DMG packaging with notarization, auto-updater, and quit-on-export prompt
+- **Marketing website** — Next.js 16 on Vercel with Sentry instrumentation, global error boundary, and SEO optimization
+- **Multi-user authentication foundations** — opt-in JWT with tenant context, per-user API keys, usage metering, and 9 auth endpoints
+- **A2A Protocol support** — agent card discovery, task lifecycle management, and Redis-backed storage for agent-to-agent communication
+- **Autonomous folder-scan ingestion** — host-side scanner with quality gating, rate limiting, chunked PDF parsing, and MCP crash resilience
+- **Cross-platform support** — Windows (WSL2) and Linux installation alongside macOS with guided setup script
+- **Sentry error monitoring** — instrumented across MCP server, marketing site (client/server/edge), and main application with global error boundaries
+- **4-tier evaluation and efficacy suite** — LLM judgment quality tests with beta readiness coverage gaps identified and fixed
+- **Advanced model provider configuration** — direct API keys, failover chains, degraded mode, and BYOK provider support via first-run wizard
+- **Stale-cache auto-detector** — force reload on build version change, self-healing MCP URL for stale LAN IP detection
+- **KB curator subagent** — ingestion quality audits and graph integrity checks
+- **Backup and restore scripts** — Neo4j, ChromaDB, and Redis snapshot utilities with container-pause safety
+- **User automations** — scheduled tasks and trigger-based workflows
+- **LLM prompting optimization** — JSON schema enforcement, few-shot examples, and creativity controls
+- **Email header anonymization** — configurable PII stripping for ingested email content
+- **KB context injection transparency indicator** — shows users when KB content influences responses
+- **Anti-circularity detection** — prevents KB from verifying its own injected context
+
+### Changed
+
+- **Unified LLM client** — consolidated all LLM calls to route directly through OpenRouter with optional Bifrost proxy, eliminating redundant call patterns
+- **Repository architecture separation** — reorganized into core/app/plugins/enterprise layers with clear dependency boundaries
+- **Frontend type consolidation** — extracted `useChatSend` hook, unified type system, and restructured settings pane with Switch/Slider components and 3-tab layout
+- **Light mode overhaul** — warm sand palette with WCAG AA contrast compliance, stronger claim highlights, and complete sweep of bare `text-*-400` colors
+- **Dark mode refinement** — cobalt palette with subtle verification highlights and filter buttons
+- **Production readiness** — multi-pass audit covering error handling, accessibility (33 fixes across 14 components), responsive design, Redis optimization, and console cleanup
+- **Configuration hardening for open-source readiness** — environment validation, CORS tightening, localhost-bound ports, and `.env.example` documentation
+- **Claim extraction improvements** — pronoun resolution for verification context, conversational pleasantry filtering, heuristic fallback tuning, and JSON wrapper handling
+- **Migrated GitHub organization** — all repository references, auto-updater, and documentation URLs updated to Cerid-AI org
+- **Docker memory limits** — tuned for realistic 16GB minimum spec with cgroup-aware memory guard in verification pipeline
+- **Deprecated LibreChat and Streamlit** — removed stale MongoDB, Meilisearch, and RAG API references
+
+### Fixed
+
+- **Verification infinite loop** — resolved multiple root causes: hallucination-panel ref comparison, DOM mutation cycles in claim-span marking, stale context callbacks in effect dependencies, render-depth overflow from unthrottled streaming updates, and circuit breaker double-prefixed names
+- **Verification reliability** — fires on every message (not just first), no longer triggers on conversation switch, correctly handles streaming completion, and supports re-verify with previous message reports
+- **SSE stream stability** — fixed stream interruption errors, StopAsyncIteration handling in keepalive, throttled chunk updates to prevent render overflow, and httpx.ReadError crash prevention
+- **React rendering errors** — resolved Error #310 (conditional hook), Error #185 (report.summary access guard), and ref-during-render violations in live metrics
+- **Settings crash** — MCP URL defaulted to `/api/mcp` instead of `localhost:8888`, synced presets with backend defaults
+- **UUID generation** — secure-context-safe fallback using `crypto.getRandomValues()` for LAN access over plain HTTP
+- **CVE remediation** — setuptools path traversal (CVE-2026-23949), Alpine OpenSSL/libpng, picomatch, express-rate-limit, and Pygments ReDoS (local-only, ignored)
+- **Neo4j auth hardening** — fixed empty password validation and credential verification via Cypher query
+- **ChromaDB reliability** — skip missing collections (eliminated 9+ wasted HTTP calls), filter None metadata values on upload, and sync import fixes
+- **Docker build failures** — added gcc/build-essential for pystemmer compilation, fixed 4+ TypeScript errors, corrected nginx security headers, and archive mount compatibility for macOS virtiofs
+- **Frontend polish** — full-width claim cards, footnote-only click behavior, sidebar delete icon, context menus, KB card overflow, scroll behavior, and global pointer cursors
+- **Healthcheck standardization** — reverted Neo4j/Bifrost/web checks to wget (curl not available in Alpine images)
+- **PDF ingestion** — memory-safe chunked parser respecting Docker memory limits, resilient to MCP crashes on complex files
+- **Code hygiene** — resolved 7 AI slop issues, cleaned dead code, fixed unused imports across multiple audit passes
+
+### Performance
+
+- **Verification pipeline optimization** — 11 fixes including batching current-event claims into a single LLM verification call
+- **Event loop unblocking** — moved blocking operations off the async event loop across backend
+- **Quantized reranker** — reduced memory footprint for cross-encoder reranking with ONNX runtime
+- **Semantic cache** — Arctic Embed M v1.5 (768d) with quantized int8 embeddings and raised Neo4j page cache
+- **Frontend code splitting** — PrismLight with 25 languages (1619KB to 104KB), lazy-loaded components, and disabled production sourcemaps
+- **Systematic audit** — debounce on localStorage writes during SSE, lazy-loading, batch Neo4j operations with UNWIND, Redis SCAN replacing KEYS, and dead code removal (-701 lines)
+- **Skip empty ChromaDB collections** — eliminated redundant HTTP calls during retrieval
+- **Recency claim detection** — optimized verification speed for time-sensitive claims
+- **Verification polling** — reduced 404s and rate limit exhaustion with exponential backoff
+
+### Security
+
+- **CORS hardening** — default tightened from wildcard to localhost origins, configurable via `CORS_ORIGINS`
+- **Port binding** — MCP, Bifrost, GUI, Neo4j, Redis, and ChromaDB ports bound to localhost by default
+- **Sync directory encryption** — optional Fernet encryption when `CERID_ENCRYPTION_KEY` is set
+- **Redis authentication** — `--requirepass` with backward-compatible default, 30-day TTL on audit log entries
+- **SSRF bypass fix** — patched MCP healthcheck SSRF vector
+- **JWT secret validation** — `RuntimeError` at startup when multi-user mode enabled without secret
+- **Container hardening** — non-root Docker user, pinned base images, resource limits, ChromaDB `ALLOW_RESET=false`
+- **Nginx security headers** — HSTS, X-Content-Type-Options, X-Frame-Options, CSP, Referrer-Policy
+- **Archive symlink validation** — added to environment validation script
+- **Dependency CVE management** — Trivy scanning with documented ignore policies, Alpine base image patching, and pip-audit in CI
+
+### Infrastructure
+
+- **CI pipeline (9 jobs)** — lint, typecheck, security scanning, lock-sync, frontend build, tests with 70% coverage floor, Docker build with hadolint, Codecov upload, and license/ReDoS audit
+- **Multi-stage Docker builds** — optimized MCP Dockerfile with build layer separation
+- **Dependabot automation** — weekly grouped PRs for GitHub Actions, npm, Python, and Docker base images
+- **Trivy container scanning** — CRITICAL/HIGH severity with documented CVE ignore rationale
+- **detect-secrets** — pre-commit secret scanning with false positive suppression for test fixtures
+- **Test suite** — 1411+ Python tests (agents, middleware, ingestion, Neo4j, sync, tools, parsers, eval, memory salience) and 545+ frontend tests
+- **Requirements lock management** — pip-compile with hashes, `make lock-python`, and CI freshness validation
+- **Copyright standardization** — consistent Apache-2.0 notation and author attribution across codebase
+- **Makefile targets** — `lock-python`, `install-hooks`, `deps-check`, `lint-frontend`, `test-frontend`, `typecheck-frontend`, `build-frontend`, `check-all`
+
+### Documentation
+
+- **Comprehensive documentation audit** — 27 fixes across 9 files for accuracy and completeness
+- **CONTRIBUTING.md** — developer sync guide for new contributors
+- **API reference** — verification fallback, trading integration, plugin endpoints, and SDK contract
+- **Cross-platform install guide** — macOS, Linux, and Windows (WSL2) with guided setup script
+- **Architecture documentation** — cross-project dependency coupling, dual-path API architecture, and multi-machine setup
+- **Privacy documentation** — accurate data flow descriptions reflecting actual system behavior
+- **Operations guide** — LAN access, Caddy HTTPS gateway, and Cloudflare Tunnel for demos
+
 ## [0.12.0] - 2026-03-05
 
 ### Changed

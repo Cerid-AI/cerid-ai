@@ -8,12 +8,9 @@ Runs benchmark queries against the RAG pipeline and computes metrics.
 Supports different pipeline configurations for A/B comparison with
 latency tracking, per-domain breakdowns, and statistical significance.
 
-NOTE: This module is NOT wired into any API router, CLI command, or
-scheduler.  To use it, run directly via ``python -m eval.harness``
-from the MCP container or import interactively during development.
-
-TODO: Wire into a ``/eval`` router or a ``cerid eval`` CLI sub-command
-so results can be triggered from the React GUI's audit panel.
+Wired into ``routers/eval.py`` (``POST /api/eval/run``, ``GET /api/eval/benchmarks``).
+Gated behind ``CERID_EVAL_ENABLED=true``.  Can also be run directly via
+``python -m eval.harness`` from the MCP container.
 """
 
 from __future__ import annotations

@@ -592,7 +592,7 @@ MCP_TOOLS = [
     },
     {
         "name": "pkb_memory_recall",
-        "description": "Recall relevant memories with decay-adjusted scoring. Memories are reinforced by access. Returns context-aware results sorted by adjusted relevance.",
+        "description": "Recall relevant memories with salience-aware decay scoring. Six memory types (empirical, decision, preference, project_context, temporal, conversational) use per-type decay: power-law for long-lived facts, exponential for transient context, step-function for temporal events. Memories are reinforced by recency-weighted access. Returns results sorted by adjusted relevance.",
         "inputSchema": {
             "type": "object",
             "properties": {

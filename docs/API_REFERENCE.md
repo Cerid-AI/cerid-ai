@@ -642,4 +642,4 @@ GUI proxy routes to the external trading agent at `TRADING_AGENT_URL`:
 - Tool: `pkb_web_search` — Search web with verification
 
 ### Memory Recall
-- Tool: `pkb_memory_recall` — Context-aware memory retrieval with decay scoring
+- Tool: `pkb_memory_recall` — Context-aware memory retrieval with salience-aware decay scoring (6 memory types: empirical, decision, preference, project_context, temporal, conversational)
