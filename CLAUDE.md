@@ -273,6 +273,17 @@ Frontend tests: `cd src/web && npx vitest run`
 | `utils/ollama_models.py` | Ollama model management | `list_models()`, `pull_model()` |
 | `routers/sdk.py` | Stable external API (`/sdk/v1/`) | Versioned contract |
 
+## Compliance — USG Technology Restrictions
+
+**No Chinese-origin AI models or technology.** As of 2026-03-28, the codebase has been purged of all Chinese-origin model references (DeepSeek, Qwen/Alibaba, Baichuan, Yi, GLM/Zhipu, MiniMax, Moonshot, 01.AI) for USG alignment.
+
+**Rules:**
+- Do NOT add model entries for DeepSeek, Qwen, Alibaba, or any Chinese-origin LLM provider
+- Default Ollama model: `llama3.2:3b` (Meta, US-origin) — NOT Qwen
+- Approved providers: OpenAI, Anthropic, Google, xAI, Meta (Llama), Microsoft (Phi), Mistral (French)
+- When adding new models to the selector or pipeline config, verify the model's country of origin
+- Run `grep -rn "deepseek\|qwen\|alibaba\|baichuan\|zhipu" src/ --include="*.py" --include="*.ts" --include="*.tsx"` to verify compliance before committing
+
 ## Conventions
 
 - **Session start:** Run `./scripts/validate-env.sh --quick` at the beginning of every session. If the session-start hook reports missing plugins or MCP servers, run `bash ~/dotfiles/install.sh` before proceeding with any other work

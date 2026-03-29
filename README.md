@@ -16,7 +16,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 **Key Capabilities:**
 
 - **React GUI** at port 3000 — streaming chat, knowledge browser, monitoring & audit dashboards
-- **Multi-Provider LLM Access** via Bifrost gateway (Claude, GPT, Grok, Gemini, DeepSeek, Llama)
+- **Multi-Provider LLM Access** via Bifrost gateway (Claude, GPT, Grok, Gemini, Llama, Mistral)
 - **10 Intelligent Agents** — Query (LLM reranking), Triage (LangGraph), Rectification, Audit, Maintenance, Hallucination Detection, Memory Extraction, Curation, Self-RAG, Decomposer
 - **Trading Agent Integration** — 5 MCP tools + SDK endpoints for signal enrichment, herd detection, Kelly sizing, cascade confirmation, and longshot calibration (opt-in via `CERID_TRADING_ENABLED`)
 - **26 MCP Tools** for knowledge base, trading, web search, memory, and multi-modal operations via MCP protocol
@@ -78,7 +78,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 │  Agents: /agent/query           │    ┌──────────────────────────┐
 │          /agent/triage          │    │    OpenRouter API         │
 │          /agent/rectify         │    │  (Claude, GPT, Gemini,   │
-│          /agent/audit           │    │   Grok, DeepSeek, etc.)  │
+│          /agent/audit           │    │   Grok, Llama, etc.)     │
 │          /agent/maintain        │    └──────────────────────────┘
 │  SSE:   /mcp/sse /mcp/messages  │
 │  Tools: 26 MCP tools (pkb_*)   │

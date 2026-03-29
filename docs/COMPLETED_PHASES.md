@@ -175,4 +175,9 @@
   - CI gates: inline tier checks, silent passes, 9/9 jobs green
   - New modules: `errors.py`, `utils/error_handler.py`, `utils/degradation.py`, `utils/retrieval_cache.py`, `utils/hyde.py`, `utils/ollama_models.py`, `agents/hallucination/metamorphic.py`, `agents/hallucination/verdict_parsing.py`, `agents/hallucination/confidence.py`, `agents/decomposer.py`, `agents/assembler.py`, `config/constants.py`
   - 1646 Python tests, 496 frontend tests.
+- **USG Compliance — Chinese Technology Removal (2026-03-28):**
+  - Removed DeepSeek model entries (types.ts, audit.py, metrics.py)
+  - Replaced Qwen 2.5 1.5B with Llama 3.2 3B as default Ollama model (15 files)
+  - Approved providers: OpenAI, Anthropic, Google, xAI, Meta, Microsoft, Mistral
+  - Compliance verification: `grep` returns 0 results for banned terms
 - **Verification Crash Debugging (Complete, 2026-03-22):** Deep debugging session fixing production crashes in the verification panel. Docker build silent failure identified (exit code 2 reuses cached image). React infinite render loop fixed (3 root causes: object ref comparisons in useEffect, context callback instability, synchronous state updates during render). Circuit breaker name mismatches fixed across 4 call sites. Claim extraction hardened (pleasantry filtering, JSON wrapper unwrapping). 58 lines dead code removed. Smart router, BYOK provider config, OpenRouter credit tracking, RAG features, folder scanner, and PDF chunked parsing all polished. Key files: `tasks/lessons.md` (patterns captured), `src/web/src/hooks/use-verification-orchestrator.ts`, `src/mcp/utils/circuit_breaker.py`, `src/mcp/agents/hallucination/extraction.py`.
