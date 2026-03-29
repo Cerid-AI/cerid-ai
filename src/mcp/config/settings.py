@@ -93,17 +93,17 @@ TEMPORAL_RECENCY_WEIGHT = 0.1        # max boost from recency (added to relevanc
 HYBRID_VECTOR_WEIGHT = float(os.getenv("HYBRID_VECTOR_WEIGHT", "0.5"))
 HYBRID_KEYWORD_WEIGHT = float(os.getenv("HYBRID_KEYWORD_WEIGHT", "0.5"))
 BM25_DATA_DIR = os.path.join(os.getenv("DATA_DIR", "data"), "bm25")
-QUERY_CONTEXT_MAX_CHARS = 14_000    # default max chars assembled for LLM context
+QUERY_CONTEXT_MAX_CHARS = 40_000    # default max chars assembled for LLM context
 
 # Model-aware context char budgets — use larger budgets for large-context models.
 # Keys are model family prefixes (matched via startswith on the model ID).
 MODEL_CONTEXT_CHAR_BUDGETS: dict[str, int] = {
-    "claude": 40_000,       # Claude: 200K context
-    "gemini": 40_000,       # Gemini: 1M context
-    "gpt-4o": 20_000,       # GPT-4o: 128K context
-    "gpt-4o-mini": 14_000,  # GPT-4o-mini: 128K but cheaper, stay conservative
-    "llama": 10_000,        # Llama: 32K–128K context
-    "grok": 32_000,         # Grok: 131K context
+    "claude": 120_000,      # Claude: 1M context — use more of it
+    "gemini": 120_000,      # Gemini: 1M context
+    "gpt-4o": 40_000,       # GPT-4o: 128K context
+    "gpt-4o-mini": 20_000,  # GPT-4o-mini: 128K but cheaper
+    "llama": 16_000,        # Llama: 32K–128K context
+    "grok": 60_000,         # Grok: 2M context — generous budget
 }
 
 
@@ -292,7 +292,7 @@ AUTO_INJECT_MAX = int(os.getenv("AUTO_INJECT_MAX", "3"))
 # ---------------------------------------------------------------------------
 # Context Budget
 # ---------------------------------------------------------------------------
-CONTEXT_MAX_CHUNKS_PER_ARTIFACT = 2  # max chunks from same artifact in assembled context
+CONTEXT_MAX_CHUNKS_PER_ARTIFACT = 5  # max chunks from same artifact in assembled context
 
 # ---------------------------------------------------------------------------
 # Quality Scoring
