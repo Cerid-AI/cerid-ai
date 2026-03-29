@@ -406,7 +406,7 @@ async def set_tier_endpoint(req: TierOverrideRequest):
     from config.features import set_tier
     new_tier = set_tier(req.tier)
     # Also update the config module reference used by GET /settings
-    config.FEATURE_TIER = new_tier
-    config.FEATURE_FLAGS = features_mod.FEATURE_FLAGS
+    config.FEATURE_TIER = new_tier  # noqa — runtime tier override requires config module sync
+    config.FEATURE_FLAGS = features_mod.FEATURE_FLAGS  # noqa
     logger.info("Runtime tier override: %s", new_tier)
     return {"status": "success", "tier": new_tier, "feature_flags": features_mod.FEATURE_FLAGS}
