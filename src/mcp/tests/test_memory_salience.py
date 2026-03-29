@@ -4,12 +4,11 @@
 """Tests for Phase 51 memory salience scoring, classification, and migration."""
 
 import math
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from agents.memory import calculate_memory_score
-
 
 # ---------------------------------------------------------------------------
 # calculate_memory_score — decay curves per type
@@ -225,7 +224,6 @@ class TestMigrationMappings:
     """Verify legacy type migration mappings from config."""
 
     def test_fact_maps_to_empirical(self):
-        from agents.memory import calculate_memory_score
         import config
 
         assert config.MEMORY_TYPE_MIGRATION["fact"] == "empirical"
@@ -296,7 +294,6 @@ class TestMigrateMemorySalience:
         mock_list_result = [record]
 
         call_count = [0]
-        original_run = session.run
 
         def side_effect(*args, **kwargs):
             call_count[0] += 1
