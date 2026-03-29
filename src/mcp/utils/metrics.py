@@ -42,7 +42,6 @@ _MODEL_PRICING: dict[str, tuple[float, float]] = {
     "x-ai/grok-4.1-fast": (0.20, 0.50),
     "openai/o3-mini": (1.10, 4.40),
     "google/gemini-3-flash-preview": (0.50, 3.0),
-    "deepseek/deepseek-chat-v3-0324": (0.20, 0.77),
     "openai/gpt-4o-mini": (0.15, 0.60),
     "google/gemini-2.5-flash": (0.30, 2.50),
     "meta-llama/llama-3.3-70b-instruct": (0.10, 0.32),
@@ -51,7 +50,7 @@ _MODEL_PRICING: dict[str, tuple[float, float]] = {
 # Ollama models — explicitly free (local inference, zero cloud cost).
 # Listed separately so estimate_cost() returns 0.0 intentionally,
 # distinguishable from "unknown model" which also returns 0.0.
-_OLLAMA_MODEL_PREFIXES = ("qwen", "phi", "llama", "gemma", "mistral", "codellama")
+_OLLAMA_MODEL_PREFIXES = ("phi", "llama", "gemma", "mistral", "codellama")
 
 
 def is_ollama_model(model_id: str) -> bool:

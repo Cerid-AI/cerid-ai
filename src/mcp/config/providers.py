@@ -87,7 +87,6 @@ PROVIDER_REGISTRY: dict[str, dict] = {
             "codellama",
             "gemma2",
             "phi3",
-            "qwen2.5",
         ],
     },
 }

@@ -62,7 +62,6 @@ class RouteDecision:
 
 FREE_MODELS = {
     "llama-3.3": "meta-llama/llama-3.3-70b-instruct",
-    "qwen-2.5": "qwen/qwen-2.5-72b-instruct",
 }
 
 CHEAP_MODELS: dict[str, dict[str, str | float]] = {
@@ -239,7 +238,7 @@ async def _classify_with_best_available(query: str) -> Complexity:
 
         ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
         # Pick smallest available model for classification (fastest)
-        small_models = ["phi3", "gemma2", "qwen2.5", "llama3.2", "mistral"]
+        small_models = ["phi3", "gemma2", "llama3.2", "mistral"]
         classifier_model = _ollama_models[0]
         for pref in small_models:
             matching = [m for m in _ollama_models if pref in m]
@@ -357,7 +356,7 @@ async def route(
         ollama_ok = await _check_ollama()
         if ollama_ok and _ollama_models:
             # Pick best available Ollama model
-            preferred = ["llama3.2", "qwen2.5", "phi3", "mistral", "gemma2"]
+            preferred = ["llama3.2", "phi3", "mistral", "gemma2"]
             model = _ollama_models[0]  # default to first available
             for pref in preferred:
                 matching = [m for m in _ollama_models if pref in m]

@@ -419,7 +419,7 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
         </CardTitle>
         <CardDescription className="text-xs">
           Free local inference for pipeline tasks (verification context, query decomposition, memory resolution, claim extraction).
-          Uses qwen2.5:1.5b (~1GB) by default. Falls back to OpenRouter when unavailable.
+          Uses llama3.2:3b (~2GB) by default. Falls back to OpenRouter when unavailable.
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3 pt-0">
@@ -450,7 +450,7 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
           />
         </div>
         {/* Model */}
-        <Row label="Model" value={settings.internal_llm_model ?? "qwen2.5:1.5b"} mono info="Lightweight model for pipeline intelligence tasks" />
+        <Row label="Model" value={settings.internal_llm_model ?? "llama3.2:3b"} mono info="Lightweight model for pipeline intelligence tasks" />
         {/* Default model installed? */}
         {ollamaStatus?.reachable && (
           <div className="flex items-center justify-between">

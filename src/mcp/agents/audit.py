@@ -208,7 +208,6 @@ MODEL_COST_RATES = {
     "openai/gpt-4o-mini": {"input": 0.00015, "output": 0.0006},
     "google/gemini-2.5-flash": {"input": 0.00015, "output": 0.0006},
     "x-ai/grok-4-fast": {"input": 0.003, "output": 0.015},
-    "deepseek/deepseek-chat-v3-0324": {"input": 0.00027, "output": 0.0011},
     "meta-llama/llama-3.3-70b-instruct": {"input": 0.00012, "output": 0.0003},
 }
 

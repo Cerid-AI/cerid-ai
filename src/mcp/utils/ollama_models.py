@@ -23,12 +23,12 @@ logger = logging.getLogger("ai-companion.ollama.models")
 # ---------------------------------------------------------------------------
 
 RECOMMENDED_MODELS: dict[str, str] = {
-    "claim_extraction": "qwen2.5:1.5b",       # fast, 1GB, good at classification
-    "query_decomposition": "qwen2.5:1.5b",    # fast, structured output
-    "topic_extraction": "qwen2.5:1.5b",        # keyword extraction
-    "memory_resolution": "qwen2.5:1.5b",       # pattern matching
+    "claim_extraction": "llama3.2:3b",       # fast, 2GB, good at classification
+    "query_decomposition": "llama3.2:3b",    # fast, structured output
+    "topic_extraction": "llama3.2:3b",        # keyword extraction
+    "memory_resolution": "llama3.2:3b",       # pattern matching
     "verification_simple": "llama3.3:8b",       # needs reasoning for factual claims
-    "reranking": "qwen2.5:1.5b",               # cross-encoder style
+    "reranking": "llama3.2:3b",               # cross-encoder style
     "embedding": "nomic-embed-text",            # zero API cost embedding
 }
 
@@ -69,7 +69,7 @@ def check_model_availability(available: list[dict]) -> dict:
     Returns ``{"available": [...], "missing": [...], "warnings": [...]}``.
     """
     available_names = {m["name"] for m in available}
-    # Also match without tag (e.g. "qwen2.5:1.5b" matches "qwen2.5:1.5b")
+    # Also match without tag (e.g. "llama3.2:3b" matches "llama3.2:3b")
     # and base name (e.g. "nomic-embed-text" matches "nomic-embed-text:latest")
     available_bases = {n.split(":")[0] for n in available_names}
 

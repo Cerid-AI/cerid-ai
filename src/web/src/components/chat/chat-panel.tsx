@@ -107,7 +107,7 @@ export function ChatPanel() {
     setOllamaSetupActive(true)
     const steps: Array<{ label: string; status: "done" | "active" | "pending" }> = [
       { label: "Checking Ollama...", status: "active" },
-      { label: "Pulling qwen2.5:1.5b (1GB)...", status: "pending" },
+      { label: "Pulling llama3.2:3b (2GB)...", status: "pending" },
       { label: "Enabling local pipeline", status: "pending" },
       { label: "Setup complete", status: "pending" },
     ]
@@ -132,7 +132,7 @@ export function ChatPanel() {
       setSetupSteps([...steps])
 
       if (!status.default_model_installed) {
-        const pullRes = await pullOllamaModel(status.default_model || "qwen2.5:1.5b")
+        const pullRes = await pullOllamaModel(status.default_model || "llama3.2:3b")
         if (!pullRes.ok) throw new Error("Model pull failed")
         // Consume the streaming response to wait for completion
         const reader = pullRes.body?.getReader()
@@ -143,7 +143,7 @@ export function ChatPanel() {
           }
         }
       }
-      steps[1] = { label: "\u2713 " + (status.default_model || "qwen2.5:1.5b") + " ready", status: "done" }
+      steps[1] = { label: "\u2713 " + (status.default_model || "llama3.2:3b") + " ready", status: "done" }
 
       // Step 3: Enable
       steps[2] = { ...steps[2], status: "active" }

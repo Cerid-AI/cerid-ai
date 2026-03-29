@@ -67,8 +67,6 @@ export const MODELS: ModelOption[] = [
     capabilities: { reasoning: 92, coding: 85, creative: 65, factual: 80, webSearch: false, vision: false, knowledgeCutoff: "2025-10" } },
   { id: "openrouter/google/gemini-3-flash-preview", label: "Gemini 3 Flash", provider: "Google", contextWindow: 1_048_576, effectiveContextWindow: 838_860, maxOutputTokens: 65_536, inputCostPer1M: 0.50, outputCostPer1M: 3.0,
     capabilities: { reasoning: 82, coding: 85, creative: 78, factual: 84, webSearch: false, vision: true, knowledgeCutoff: "2025-11" } },
-  { id: "openrouter/deepseek/deepseek-chat-v3-0324", label: "DeepSeek V3", provider: "DeepSeek", contextWindow: 163_840, effectiveContextWindow: 131_072, maxOutputTokens: 8_192, inputCostPer1M: 0.20, outputCostPer1M: 0.77,
-    capabilities: { reasoning: 80, coding: 88, creative: 72, factual: 78, webSearch: false, vision: false, knowledgeCutoff: "2025-03" } },
   // --- Tier B: Budget / legacy ---
   { id: "openrouter/openai/gpt-4o-mini", label: "GPT-4o Mini", provider: "OpenAI", contextWindow: 128_000, effectiveContextWindow: 102_400, maxOutputTokens: 16_384, inputCostPer1M: 0.15, outputCostPer1M: 0.60,
     capabilities: { reasoning: 70, coding: 72, creative: 75, factual: 78, webSearch: false, vision: true, knowledgeCutoff: "2024-10" } },

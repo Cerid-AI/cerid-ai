@@ -65,7 +65,7 @@ function mockMultiFetch(settingsData: unknown, kbStatsData: unknown) {
       return Promise.resolve({
         ok: true,
         status: 200,
-        json: () => Promise.resolve({ enabled: false, url: "http://localhost:11434", reachable: false, models: [], default_model: "qwen2.5:1.5b", default_model_installed: false }),
+        json: () => Promise.resolve({ enabled: false, url: "http://localhost:11434", reachable: false, models: [], default_model: "llama3.2:3b", default_model_installed: false }),
         text: () => Promise.resolve("{}"),
       })
     }

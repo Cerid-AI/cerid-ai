@@ -55,7 +55,7 @@ class TestDetectAvailableModels:
         mock_response.raise_for_status = MagicMock()
         mock_response.json.return_value = {
             "models": [
-                {"name": "qwen2.5:1.5b", "size": 1_073_741_824, "modified_at": "2026-01-01"},
+                {"name": "llama3.2:3b", "size": 2_147_483_648, "modified_at": "2026-01-01"},
                 {"name": "llama3.3:8b", "size": 4_294_967_296, "modified_at": "2026-02-01"},
             ]
         }
@@ -69,8 +69,8 @@ class TestDetectAvailableModels:
 
             result = await detect_available_models()
             assert len(result) == 2
-            assert result[0]["name"] == "qwen2.5:1.5b"
-            assert result[0]["size_gb"] == 1.0
+            assert result[0]["name"] == "llama3.2:3b"
+            assert result[0]["size_gb"] == 2.0
 
 
 class TestCheckAvailability:
@@ -95,8 +95,8 @@ class TestCheckAvailability:
 
     def test_check_availability_partial(self):
         """Partial availability correctly splits present vs missing."""
-        available = [{"name": "qwen2.5:1.5b", "size_gb": 1.0, "modified_at": ""}]
+        available = [{"name": "llama3.2:3b", "size_gb": 2.0, "modified_at": ""}]
         report = check_model_availability(available)
-        assert "qwen2.5:1.5b" in report["available"]
+        assert "llama3.2:3b" in report["available"]
         assert "llama3.3:8b" in report["missing"]
         assert "nomic-embed-text" in report["missing"]

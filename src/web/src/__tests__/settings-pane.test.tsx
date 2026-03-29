@@ -46,7 +46,7 @@ const mockSettings = {
   ollama_enabled: false,
   ollama_url: "http://localhost:11434",
   internal_llm_provider: "bifrost",
-  internal_llm_model: "qwen2.5:1.5b",
+  internal_llm_model: "llama3.2:3b",
 }
 
 function mockFetch(data: unknown, status = 200) {
@@ -65,7 +65,7 @@ function mockFetch(data: unknown, status = 200) {
       return Promise.resolve({
         ok: true,
         status: 200,
-        json: () => Promise.resolve({ enabled: false, url: "http://localhost:11434", reachable: false, models: [], default_model: "qwen2.5:1.5b", default_model_installed: false }),
+        json: () => Promise.resolve({ enabled: false, url: "http://localhost:11434", reachable: false, models: [], default_model: "llama3.2:3b", default_model_installed: false }),
         text: () => Promise.resolve("{}"),
       })
     }

@@ -71,7 +71,6 @@ MODEL_TO_PROVIDER: dict[str, str] = {
     "x-ai/": "xai",
     "google/": "google",
     "meta-llama/": "openrouter",  # Meta models only available via OpenRouter
-    "qwen/": "openrouter",
 }
 
 _REDIS_KEY = "cerid:model_providers:config"

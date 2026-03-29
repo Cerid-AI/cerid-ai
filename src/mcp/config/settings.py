@@ -100,7 +100,6 @@ MODEL_CONTEXT_CHAR_BUDGETS: dict[str, int] = {
     "gpt-4o": 20_000,       # GPT-4o: 128K context
     "gpt-4o-mini": 14_000,  # GPT-4o-mini: 128K but cheaper, stay conservative
     "llama": 10_000,        # Llama: 32K–128K context
-    "qwen": 10_000,         # Qwen: 32K–128K context
     "grok": 32_000,         # Grok: 131K context
 }
 
@@ -414,7 +413,7 @@ INTERNAL_LLM_PROVIDER = os.getenv("INTERNAL_LLM_PROVIDER", "bifrost")
 INTERNAL_LLM_MODEL = os.getenv("INTERNAL_LLM_MODEL", "")  # empty = provider default
 
 # Default Ollama model for pipeline tasks — lightweight, runs on CPU or GPU
-OLLAMA_DEFAULT_MODEL = os.getenv("OLLAMA_DEFAULT_MODEL", "qwen2.5:1.5b")
+OLLAMA_DEFAULT_MODEL = os.getenv("OLLAMA_DEFAULT_MODEL", "llama3.2:3b")
 
 # User-configurable default model for high-value intelligence tasks
 # (verification, expert analysis, complex reasoning)

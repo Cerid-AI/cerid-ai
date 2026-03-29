@@ -328,7 +328,7 @@ class TestProviderValidation:
         assert "codellama" in models
         assert "gemma2" in models
         assert "phi3" in models
-        assert "qwen2.5" in models
+        assert "phi3" in models
 
     def test_ollama_base_url_default(self):
         """Ollama base_url should default to localhost:11434."""
