@@ -5,9 +5,12 @@
  * Top toolbar for the chat panel — new-chat button, feature toggles (KB, verification,
  * feedback, dashboard, routing), overflow menu on narrow viewports, and model selector.
  *
- * Each feature toggle uses a primary click action + a settings Popover that opens
- * automatically after a 2-second hover (desktop) or 500ms long-press (touch).
- * No separate trigger button — the main button itself controls both actions.
+ * Each feature toggle uses two interactions:
+ * - **Click** the icon to toggle the feature on/off
+ * - **Click the chevron** (▾) to open a settings popover with detailed options
+ *
+ * The chevron provides a clear affordance that more options exist, and the popover
+ * stays open until explicitly dismissed (click outside or select an option).
  */
 
 import { Button } from "@/components/ui/button"
@@ -15,8 +18,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import { useRef, useEffect, useState, useCallback } from "react"
-import { Plus, Database, Rss, LayoutDashboard, Zap, Shield, ShieldCheck, MoreVertical, Brain, Check, Layers } from "lucide-react"
+import { useState, useCallback } from "react"
+import { Plus, Database, Rss, LayoutDashboard, Zap, Shield, ShieldCheck, MoreVertical, Brain, Check, Layers, ChevronDown } from "lucide-react"
 import type { RagMode } from "@/lib/types"
 import { ModelSelect } from "./model-select"
 import { cn } from "@/lib/utils"
@@ -78,13 +81,22 @@ function MenuSeparator() {
   return <Separator className="-mx-1 my-1" />
 }
 
-/** Toolbar button with a settings popover that opens on 2-second hover (desktop) or long-press (touch). */
+/**
+ * Toolbar button with a companion chevron that opens a settings popover.
+ *
+ * - Click the **icon** to toggle the feature on/off
+ * - Click the **chevron** (▾) to open the settings popover
+ * - Popover stays open until dismissed (click outside or pick an option)
+ *
+ * The title prop shows as a header inside the popover for context.
+ */
 function ToolbarButtonWithMenu({
   icon,
   active,
   onClick,
   tooltip,
   ariaLabel,
+  title,
   menuContent,
   className,
 }: {
@@ -93,94 +105,49 @@ function ToolbarButtonWithMenu({
   onClick: () => void
   tooltip: string
   ariaLabel: string
+  title?: string
   menuContent: React.ReactNode
   className?: string
 }) {
   const [open, setOpen] = useState(false)
-  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const touchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const touchFiredRef = useRef(false)
-
-  const clearHoverTimer = useCallback(() => {
-    if (hoverTimerRef.current) {
-      clearTimeout(hoverTimerRef.current)
-      hoverTimerRef.current = null
-    }
-  }, [])
-
-  const clearTouchTimer = useCallback(() => {
-    if (touchTimerRef.current) {
-      clearTimeout(touchTimerRef.current)
-      touchTimerRef.current = null
-    }
-  }, [])
-
-  useEffect(() => {
-    return () => {
-      clearHoverTimer()
-      clearTouchTimer()
-    }
-  }, [clearHoverTimer, clearTouchTimer])
-
-  const handleButtonMouseEnter = () => {
-    clearHoverTimer()
-    hoverTimerRef.current = setTimeout(() => {
-      setOpen(true)
-    }, 2000)
-  }
-
-  const handleWrapperMouseLeave = () => {
-    clearHoverTimer()
-    setOpen(false)
-  }
-
-  const handleClick = () => {
-    clearHoverTimer()
-    onClick()
-  }
-
-  const handleTouchStart = () => {
-    touchFiredRef.current = false
-    clearTouchTimer()
-    touchTimerRef.current = setTimeout(() => {
-      touchFiredRef.current = true
-      setOpen(true)
-    }, 500)
-  }
-
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    clearTouchTimer()
-    if (touchFiredRef.current) {
-      // Long-press opened the menu — prevent the click from also firing
-      e.preventDefault()
-    }
-  }
 
   return (
-    <div className="relative flex items-center" onMouseLeave={handleWrapperMouseLeave}>
+    <div className="relative flex items-center">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn("h-8 w-8 rounded-r-none", active && "text-brand hover:text-brand bg-brand/10", className)}
+            onClick={onClick}
+            aria-label={ariaLabel}
+          >
+            {icon}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{tooltip}</TooltipContent>
+      </Tooltip>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <span>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className={cn("h-8 w-8", active && "text-brand hover:text-brand bg-brand/10", className)}
-                  onClick={handleClick}
-                  onMouseEnter={handleButtonMouseEnter}
-                  onTouchStart={handleTouchStart}
-                  onTouchEnd={handleTouchEnd}
-                  aria-label={ariaLabel}
-                >
-                  {icon}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{tooltip}</TooltipContent>
-            </Tooltip>
-          </span>
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(
+              "h-8 w-4 min-w-0 rounded-l-none border-l border-border/40 px-0",
+              active && "text-brand hover:text-brand bg-brand/10",
+            )}
+            aria-label={`${ariaLabel} options`}
+          >
+            <ChevronDown className="h-3 w-3" />
+          </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-52">
+        <PopoverContent className="w-56" align="start">
+          {title && (
+            <>
+              <p className="px-2 pb-1 text-xs font-semibold">{title}</p>
+              <MenuSeparator />
+            </>
+          )}
           {menuContent}
         </PopoverContent>
       </Popover>
@@ -264,6 +231,7 @@ export function ChatToolbar({
           active={ragMode !== "manual"}
           onClick={cycleRagMode}
           ariaLabel={`RAG mode: ${ragMode}`}
+          title="RAG Mode"
           tooltip={
             ragMode === "manual" ? "RAG: Manual"
               : ragMode === "smart" ? "RAG: Smart (auto KB + memory + external)"
@@ -290,6 +258,7 @@ export function ChatToolbar({
           active={showKB}
           onClick={onToggleKB}
           ariaLabel={showKB ? "Hide knowledge context" : "Show knowledge context"}
+          title="Knowledge Base"
           tooltip={showKB ? "Hide knowledge context" : "Show knowledge context"}
           menuContent={
             <>
@@ -320,6 +289,7 @@ export function ChatToolbar({
           active={hallucinationEnabled}
           onClick={toggleHallucinationEnabled}
           ariaLabel={hallucinationEnabled ? "Disable response verification" : "Enable response verification"}
+          title="Verification"
           tooltip={
             hallucinationEnabled
               ? expertVerification
@@ -357,6 +327,7 @@ export function ChatToolbar({
               active={feedbackLoop}
               onClick={toggleFeedbackLoop}
               ariaLabel={feedbackLoop ? "Disable feedback loop" : "Enable feedback loop"}
+              title="Learning"
               tooltip={feedbackLoop ? "Feedback loop: ON (responses saved to KB)" : "Feedback loop: OFF"}
               menuContent={
                 <>
@@ -394,6 +365,7 @@ export function ChatToolbar({
               active={routingMode !== "manual"}
               onClick={cycleRoutingMode}
               ariaLabel={`Smart routing: ${routingMode}`}
+              title="Model Routing"
               tooltip={routingMode === "manual" ? "Smart routing: OFF" : routingMode === "recommend" ? "Smart routing: Recommend" : "Smart routing: Auto"}
               menuContent={
                 <>
