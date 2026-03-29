@@ -36,10 +36,10 @@ export function useChat({ onMessageStart, onMessageUpdate, onModelResolved, feed
       let aborted = false
       let resolvedModel = model
 
-      // Throttle UI updates during streaming to prevent render depth overflow.
-      // Accumulate chunks and flush to React state at most every 50ms.
+      // Throttle UI updates during streaming — flush every animation frame
+      // for smooth rendering without overwhelming React's reconciler.
       let lastFlushTime = 0
-      let flushTimer: ReturnType<typeof setTimeout> | null = null
+      let rafId: number | null = null
 
       const flushUpdate = () => {
         lastFlushTime = Date.now()
@@ -50,23 +50,23 @@ export function useChat({ onMessageStart, onMessageUpdate, onModelResolved, feed
         await streamChat(messages, model, (chunk) => {
           accumulated += chunk
           const now = Date.now()
-          if (now - lastFlushTime >= 50) {
-            // Enough time passed — flush immediately
-            if (flushTimer) { clearTimeout(flushTimer); flushTimer = null }
+          if (now - lastFlushTime >= 16) {
+            // Enough time passed (~60fps) — flush immediately
+            if (rafId) { cancelAnimationFrame(rafId); rafId = null }
             flushUpdate()
-          } else if (!flushTimer) {
-            // Schedule a flush for the remaining time
-            flushTimer = setTimeout(() => {
-              flushTimer = null
+          } else if (!rafId) {
+            // Schedule flush on next animation frame
+            rafId = requestAnimationFrame(() => {
+              rafId = null
               flushUpdate()
-            }, 50 - (now - lastFlushTime))
+            })
           }
         }, abortRef.current.signal, (info) => {
           resolvedModel = `openrouter/${info.resolved_model}`
           onModelResolved?.(convoId, resolvedModel)
         })
         // Flush any remaining throttled content
-        if (flushTimer) { clearTimeout(flushTimer); flushTimer = null }
+        if (rafId) { cancelAnimationFrame(rafId); rafId = null }
         flushUpdate()
 
         if (accumulated.length === 0) {

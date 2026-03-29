@@ -124,14 +124,15 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
       const manuallyInjected = [...options.injectedContext]
       const injectedIds = new Set(manuallyInjected.map((r) => r.artifact_id))
 
-      // Auto-inject: query KB with the CURRENT message (not stale results from previous message)
+      // Auto-inject: query KB with the CURRENT message, with a 500ms timeout
+      // to avoid blocking the stream start. Falls back to stale results on timeout.
       let autoInjectedCount = 0
       if (options.autoInject) {
         let freshResults = options.kbResults
-        // Fire a fresh KB query with the outgoing message to avoid stale-results timing issue
         if (content.length > 2) {
           try {
-            const fresh = await queryKB(content, undefined, 10)
+            const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 500))
+            const fresh = await Promise.race([queryKB(content, undefined, 10), timeout])
             if (fresh?.results?.length) {
               freshResults = fresh.results
             }
@@ -179,7 +180,7 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
         const contextParts = dedupedSources.map(formatChunkWithHeader)
         allMessages.push({
           role: "system",
-          content: `Reference the following knowledge base documents when answering. Each <document> is an independent source.\n\n${contextParts.join("\n\n")}`,
+          content: `You have access to the user's personal knowledge base. The following documents contain information directly relevant to this conversation. READ each <document> carefully and USE their content when answering. Cite specific details, numbers, and facts from these sources. If the documents contain the answer, prefer them over your general knowledge.\n\n${contextParts.join("\n\n")}`,
         })
         options.clearInjected()
       }
