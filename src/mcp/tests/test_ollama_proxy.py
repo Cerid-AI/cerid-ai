@@ -70,7 +70,7 @@ class TestOllamaDisabled:
 
     def test_pull_allowed_when_disabled(self):
         """Pull is a setup action — should work even when OLLAMA_ENABLED=false."""
-        from routers.ollama_proxy import PullRequest, pull_model
+        from routers.ollama_proxy import PullRequest
 
         # Just verify pull_model doesn't raise 503 on disabled state
         # (it will fail on connection, not on the enabled gate)
