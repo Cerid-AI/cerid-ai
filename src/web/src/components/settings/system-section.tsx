@@ -423,10 +423,18 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
           setWizardPhase("enabling")
           try {
             await enableOllama()
+            // Refetch both ollama status AND parent settings so the UI
+            // transitions from wizard → connected state cleanly
             await refetchOllama()
             onRefresh()
             setWizardPhase("complete")
-            setTimeout(() => setWizardPhase(null), 4000)
+            // Keep success visible, then refetch again to ensure parent
+            // settings have propagated before hiding the wizard
+            setTimeout(async () => {
+              await refetchOllama()
+              onRefresh()
+              setWizardPhase(null)
+            }, 3000)
           } catch (e) {
             setWizardPhase(null)
             setWizardError(e instanceof Error ? e.message : "Enable failed")
@@ -476,13 +484,16 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
           )}
         </div>
 
-        {/* Setup wizard — shown when Ollama is not reachable */}
-        {!ollamaReachable && !isActive && (
+        {/* Setup wizard — shown when Ollama is not reachable, or when wizard is actively running */}
+        {((!ollamaReachable && !isActive) || wizardPhase) && (
           <div className="rounded-lg border border-dashed border-muted-foreground/30 p-3 space-y-3">
             {wizardPhase === "complete" ? (
-              <div className="flex items-center gap-2 text-xs text-green-600 dark:text-green-400">
-                <CheckCircle2 className="h-4 w-4" />
-                <span className="font-medium">Ollama enabled successfully! Pipeline tasks now run locally for free.</span>
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2 text-xs text-green-600 dark:text-green-400">
+                  <CheckCircle2 className="h-4 w-4" />
+                  <span className="font-medium">Ollama is set up and running!</span>
+                </div>
+                <p className="text-[11px] text-muted-foreground">Pipeline tasks (claim extraction, query decomposition, memory resolution) will now run locally for $0. This section will update momentarily.</p>
               </div>
             ) : wizardPhase === "enabling" ? (
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
