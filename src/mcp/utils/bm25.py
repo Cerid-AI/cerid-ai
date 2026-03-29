@@ -197,16 +197,37 @@ class BM25Index:
 
 
 # ---------------------------------------------------------------------------
-# Module-level index cache
+# Module-level index cache with LRU eviction for large-KB deployments
 # ---------------------------------------------------------------------------
 
 _indexes: dict[str, BM25Index] = {}
+_access_order: list[str] = []  # LRU tracking (most recent at end)
 
 
 def get_index(domain: str) -> BM25Index:
-    """Get or create a BM25 index for the given domain."""
-    if domain not in _indexes:
-        _indexes[domain] = BM25Index(domain, config.BM25_DATA_DIR)
+    """Get or create a BM25 index for the given domain.
+
+    Uses LRU eviction when the number of loaded indexes exceeds
+    ``BM25_MAX_LOADED_DOMAINS`` (default 8) to cap memory usage.
+    """
+    from config.constants import BM25_MAX_LOADED_DOMAINS
+
+    if domain in _indexes:
+        # Move to end (most recently used)
+        if domain in _access_order:
+            _access_order.remove(domain)
+        _access_order.append(domain)
+        return _indexes[domain]
+
+    # Evict LRU indexes if at capacity
+    while len(_indexes) >= BM25_MAX_LOADED_DOMAINS and _access_order:
+        evict = _access_order.pop(0)
+        evicted = _indexes.pop(evict, None)
+        if evicted:
+            logger.debug("BM25 LRU evict: %s (%d docs)", evict, evicted.size)
+
+    _indexes[domain] = BM25Index(domain, config.BM25_DATA_DIR)
+    _access_order.append(domain)
     return _indexes[domain]
 
 

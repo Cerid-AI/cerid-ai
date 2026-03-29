@@ -116,13 +116,17 @@ class TestPatchSettings:
     def test_auto_inject_threshold_bounds(self):
         client = TestClient(_make_app())
 
-        # Below minimum (0.5)
-        response = client.patch("/settings", json={"auto_inject_threshold": 0.1})
+        # Below minimum (0.0) — negative is rejected
+        response = client.patch("/settings", json={"auto_inject_threshold": -0.1})
         assert response.status_code == 422  # Pydantic validation
 
         # Above maximum (1.0)
         response = client.patch("/settings", json={"auto_inject_threshold": 1.5})
         assert response.status_code == 422
+
+        # Valid low threshold (0.1) — accepted after bounds change
+        response = client.patch("/settings", json={"auto_inject_threshold": 0.1})
+        assert response.status_code == 200
 
 
 class TestRAGPipelineSettings:

@@ -98,9 +98,22 @@ DEFAULT_SUB_CATEGORY = "general"
 INBOX_DOMAIN = "inbox"  # files here trigger AI categorization
 
 
-def collection_name(domain: str) -> str:
-    """ChromaDB collection name for a given domain."""
-    return f"domain_{domain.replace(' ', '_').lower()}"
+def collection_name(domain: str, *, namespace: str | None = None) -> str:
+    """ChromaDB collection name for a given domain.
+
+    When ``namespace`` is provided (or ``KB_NAMESPACE`` env var is set to
+    something other than ``"default"``), collections are prefixed for
+    multi-KB isolation: ``kb_{namespace}_{domain}``.
+
+    Backward compatible: default namespace uses legacy ``domain_{slug}`` format.
+    """
+    import os
+
+    ns = namespace or os.getenv("KB_NAMESPACE", "")
+    slug = domain.replace(" ", "_").lower()
+    if ns and ns != "default":
+        return f"kb_{ns}_{slug}"
+    return f"domain_{slug}"
 
 
 # ---------------------------------------------------------------------------

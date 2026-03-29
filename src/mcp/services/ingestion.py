@@ -321,7 +321,19 @@ def ingest_content(
         {**base_meta, "chunk_index": i, "retrieval_profile": _profile_json}
         for i in range(len(chunks))
     ]
-    collection.add(ids=chunk_ids, documents=chunks, metadatas=chunk_metadatas)
+    # Batch ChromaDB writes for large documents (>5000 chunks)
+    from config.constants import CHROMA_MAX_BATCH_SIZE
+
+    if len(chunks) <= CHROMA_MAX_BATCH_SIZE:
+        collection.add(ids=chunk_ids, documents=chunks, metadatas=chunk_metadatas)
+    else:
+        for start in range(0, len(chunks), CHROMA_MAX_BATCH_SIZE):
+            end = min(start + CHROMA_MAX_BATCH_SIZE, len(chunks))
+            collection.add(
+                ids=chunk_ids[start:end],
+                documents=chunks[start:end],
+                metadatas=chunk_metadatas[start:end],
+            )
 
     # Index for BM25 hybrid search
     try:

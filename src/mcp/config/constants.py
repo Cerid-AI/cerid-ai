@@ -67,6 +67,8 @@ AI_SNIPPET_MAX_CHARS = 1500
 PDF_DEFAULT_MAX_PAGES = 200
 PDF_DEFAULT_MEMORY_LIMIT_MB = 1024
 DEDUP_BATCH_SIZE = 100
+CHROMA_MAX_BATCH_SIZE = 5000  # max chunks per ChromaDB add() call for large ingestions
+BM25_MAX_LOADED_DOMAINS = 8   # LRU eviction threshold for in-memory BM25 indexes
 
 __all__ = [
     "MAX_ARTIFACT_LIST",

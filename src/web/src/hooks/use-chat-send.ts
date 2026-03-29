@@ -5,9 +5,9 @@ import { useCallback, useRef, useState } from "react"
 import type { ChatMessage, KBQueryResult, SourceRef } from "@/lib/types"
 import { MODELS } from "@/lib/types"
 import { recommendModel } from "@/lib/model-router"
-import { deduplicateChunks, formatChunkWithHeader } from "@/lib/kb-utils"
+import { deduplicateChunks, formatChunkWithHeader, formatMemoryForInjection, memoryToKBResult } from "@/lib/kb-utils"
 import { estimateTokenCount, uuid } from "@/lib/utils"
-import { compressConversation, queryKB } from "@/lib/api"
+import { compressConversation, queryKB, recallMemories } from "@/lib/api"
 
 /** How many user+assistant pairs to keep in client-side sliding window fallback. */
 const FALLBACK_KEEP_PAIRS = 3
@@ -135,14 +135,20 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
       if (options.autoInject) {
         let freshResults = options.kbResults
         if (content.length > 2) {
-          try {
-            const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 500))
-            const fresh = await Promise.race([queryKB(content, undefined, 10), timeout])
-            if (fresh?.results?.length) {
-              freshResults = fresh.results
+          const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 500))
+          // Fire KB query and memory recall in parallel with shared timeout
+          const [freshKB, freshMemories] = await Promise.all([
+            Promise.race([queryKB(content, undefined, 10), timeout]).catch(() => null),
+            Promise.race([recallMemories(content, 3).catch(() => []), timeout]).catch(() => []),
+          ])
+          if (freshKB?.results?.length) {
+            freshResults = freshKB.results
+          }
+          // Merge memories into the candidate pool as pseudo-KB results
+          if (Array.isArray(freshMemories) && freshMemories.length > 0) {
+            for (const mem of freshMemories) {
+              freshResults.push(memoryToKBResult(mem))
             }
-          } catch {
-            // Fall back to existing kbResults on error
           }
         }
         if (freshResults.length > 0) {
@@ -184,7 +190,17 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
           source_type: r.source_url ? "external" as const : "kb" as const,
         }))
 
-        const contextParts = dedupedSources.map(formatChunkWithHeader)
+        // Separate documents from memories for distinct formatting
+        const docSources = dedupedSources.filter((s) => s.source_type !== "memory")
+        const memorySources = dedupedSources.filter((s) => s.source_type === "memory")
+        const contextParts = docSources.map(formatChunkWithHeader)
+        if (memorySources.length > 0) {
+          const memParts = memorySources.map((m) => {
+            const type = m.filename?.replace("memory:", "") ?? "fact"
+            return `<memory type="${type}" relevance="${m.relevance.toFixed(2)}">\n${m.content}\n</memory>`
+          })
+          contextParts.push("\n[Remembered Context]\n" + memParts.join("\n"))
+        }
 
         // Build prior-context summary so the model knows what it was shown before
         let priorContextNote = ""

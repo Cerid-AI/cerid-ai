@@ -5,7 +5,7 @@
  * KB context utilities — semantic dedup + domain headers for LLM injection.
  */
 
-import type { KBQueryResult } from "./types"
+import type { KBQueryResult, MemoryRecallResult } from "./types"
 
 /**
  * Word-set Jaccard similarity between two texts.
@@ -61,4 +61,36 @@ export function formatChunkWithHeader(source: KBQueryResult): string {
   if (source.relevance != null) attrs.push(`relevance="${source.relevance.toFixed(2)}"`)
   const attrStr = attrs.length > 0 ? " " + attrs.join(" ") : ""
   return `<document${attrStr}>\n${source.content}\n</document>`
+}
+
+/**
+ * Format a memory recall result for LLM injection.
+ * Uses `<memory>` tags to distinguish from KB documents.
+ */
+export function formatMemoryForInjection(memory: MemoryRecallResult): string {
+  const attrs: string[] = []
+  if (memory.memory_type) attrs.push(`type="${memory.memory_type}"`)
+  if (memory.relevance != null) attrs.push(`relevance="${memory.relevance.toFixed(2)}"`)
+  if (memory.age_days != null) attrs.push(`age_days="${Math.round(memory.age_days)}"`)
+  const attrStr = attrs.length > 0 ? " " + attrs.join(" ") : ""
+  const label = memory.summary || memory.content
+  return `<memory${attrStr}>\n${label}\n</memory>`
+}
+
+/**
+ * Convert a MemoryRecallResult to a KBQueryResult shape so it can flow
+ * through the existing dedup/injection pipeline alongside KB chunks.
+ */
+export function memoryToKBResult(memory: MemoryRecallResult): KBQueryResult {
+  return {
+    content: memory.summary || memory.content,
+    relevance: memory.relevance,
+    artifact_id: memory.memory_id,
+    filename: `memory:${memory.memory_type}`,
+    domain: "conversations",
+    chunk_index: 0,
+    collection: "memories",
+    ingested_at: "",
+    source_type: "memory",
+  }
 }
