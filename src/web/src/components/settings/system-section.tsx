@@ -27,8 +27,9 @@ import {
   Lock,
   Globe,
   Download,
-  RefreshCw,
   CheckCircle2,
+  Copy,
+  Check,
 } from "lucide-react"
 import { SyncSection } from "./sync-section"
 import { SectionHeading, InfoTip, LabelWithInfo, Row } from "./settings-primitives"
@@ -314,6 +315,20 @@ const STAGE_LABELS: Record<string, string> = {
 
 const LOCKED_STAGES = new Set(["verification_complex", "chat_generation"])
 
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <Button
+      size="sm" variant="ghost"
+      className="h-6 w-6 p-0 shrink-0"
+      onClick={() => { navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) }) }}
+      aria-label="Copy to clipboard"
+    >
+      {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+    </Button>
+  )
+}
+
 function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRefresh: () => void }) {
   const { data: ollamaStatus, refetch: refetchOllama, isLoading } = useQuery<OllamaStatus>({
     queryKey: ["ollama-status"],
@@ -498,27 +513,22 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
             ) : wizardPhase === "install" ? (
               <div className="space-y-3">
                 <p className="text-xs font-medium">Install Ollama</p>
-                <div className="space-y-2">
-                  <div className="rounded border bg-muted/50 px-3 py-2">
-                    <p className="text-[11px] font-medium text-muted-foreground mb-1">macOS</p>
-                    <code className="text-[11px] select-all">brew install ollama && ollama serve</code>
-                  </div>
-                  <div className="rounded border bg-muted/50 px-3 py-2">
-                    <p className="text-[11px] font-medium text-muted-foreground mb-1">Linux</p>
-                    <code className="text-[11px] select-all">curl -fsSL https://ollama.com/install.sh | sh && ollama serve</code>
-                  </div>
-                  <div className="rounded border bg-muted/50 px-3 py-2">
-                    <p className="text-[11px] font-medium text-muted-foreground mb-1">Windows</p>
-                    <p className="text-[11px] text-muted-foreground">
-                      Download from{" "}
-                      <a href="https://ollama.com/download" target="_blank" rel="noopener noreferrer" className="text-primary underline">ollama.com/download</a>
-                    </p>
-                  </div>
+                <p className="text-[11px] text-muted-foreground">Copy the command for your OS, paste it in your terminal, then click continue. Setup will auto-detect Ollama and finish configuration.</p>
+                <div className="space-y-1.5">
+                  {[
+                    { os: "macOS", cmd: "brew install ollama && ollama serve" },
+                    { os: "Linux", cmd: "curl -fsSL https://ollama.com/install.sh | sh && ollama serve" },
+                  ].map(({ os, cmd }) => (
+                    <div key={os} className="flex items-center gap-2 rounded border bg-muted/50 px-2.5 py-1.5">
+                      <span className="text-[10px] font-semibold text-muted-foreground w-10 shrink-0">{os}</span>
+                      <code className="flex-1 text-[10px] truncate select-all">{cmd}</code>
+                      <CopyButton text={cmd} />
+                    </div>
+                  ))}
                 </div>
                 <div className="flex gap-2">
                   <Button size="sm" variant="default" className="h-7 text-xs" onClick={startPolling}>
-                    <RefreshCw className="mr-1 h-3 w-3" />
-                    I&apos;ve installed it — continue setup
+                    Continue — detect Ollama
                   </Button>
                   <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setWizardPhase(null)}>
                     Cancel

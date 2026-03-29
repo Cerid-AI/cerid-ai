@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
-import { Check, Cpu, Database, Loader2 as Loader2Icon, X, Zap, Sparkles, MessageSquarePlus, Clock, ShieldCheck } from "lucide-react"
+import { Check, Cpu, Copy, Database, Loader2 as Loader2Icon, X, Zap, Sparkles, MessageSquarePlus, Clock, ShieldCheck } from "lucide-react"
 import { CreditBanner } from "./credit-banner"
 import { ChatToolbar } from "./chat-toolbar"
 import { ChatMessages } from "./chat-messages"
@@ -44,6 +44,25 @@ const narrowSubscribe = (cb: () => void) => {
   return () => mq.removeEventListener("change", cb)
 }
 const getIsNarrow = () => window.matchMedia(NARROW_MQ).matches
+
+function OllamaCopyRow({ os, cmd, accent }: { os: string; cmd: string; accent: "teal" | "yellow" }) {
+  const [copied, setCopied] = useState(false)
+  const color = accent === "teal" ? "text-teal-400" : "text-yellow-400"
+  const border = accent === "teal" ? "border-teal-500/20" : "border-yellow-500/20"
+  return (
+    <div className={`flex items-center gap-1.5 rounded border ${border} bg-background/50 px-2 py-1`}>
+      <span className={`text-[10px] font-semibold ${color} w-10 shrink-0`}>{os}</span>
+      <code className="flex-1 text-[10px] truncate select-all font-mono text-muted-foreground">{cmd}</code>
+      <button
+        className="shrink-0 rounded p-0.5 hover:bg-muted"
+        onClick={() => { navigator.clipboard.writeText(cmd).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) }) }}
+        aria-label="Copy"
+      >
+        {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3 text-muted-foreground" />}
+      </button>
+    </div>
+  )
+}
 
 export function ChatPanel() {
   const isNarrow = useSyncExternalStore(narrowSubscribe, getIsNarrow)
@@ -538,11 +557,13 @@ export function ChatPanel() {
           {/* Show install instructions + retry when Ollama not detected */}
           {setupSteps.some(s => s.label.includes("not running")) && (
             <div className="mt-3 space-y-2">
-              <p className="text-[11px] text-muted-foreground">Install Ollama, then click Retry:</p>
-              <div className="rounded border border-teal-500/20 bg-background/50 px-2.5 py-1.5 text-[10px] font-mono text-muted-foreground">
-                <span className="font-semibold text-teal-400">macOS:</span> brew install ollama && ollama serve<br />
-                <span className="font-semibold text-teal-400">Linux:</span> curl -fsSL https://ollama.com/install.sh | sh && ollama serve
-              </div>
+              <p className="text-[11px] text-muted-foreground">Copy the command for your OS and paste in terminal:</p>
+              {[
+                { os: "macOS", cmd: "brew install ollama && ollama serve" },
+                { os: "Linux", cmd: "curl -fsSL https://ollama.com/install.sh | sh && ollama serve" },
+              ].map(({ os, cmd }) => (
+                <OllamaCopyRow key={os} os={os} cmd={cmd} accent="teal" />
+              ))}
               <div className="flex items-center gap-2">
                 <button onClick={() => runOllamaSetup()} className="rounded-md border border-teal-500/40 px-2.5 py-1 text-[11px] font-medium text-teal-400 hover:bg-teal-500/10">
                   Retry
@@ -561,9 +582,14 @@ export function ChatPanel() {
         ollamaShowSetup ? (
           <div className="mx-4 mb-2 rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-4 py-3">
             <p className="text-xs font-medium text-yellow-400">Ollama not detected</p>
-            <div className="mt-1.5 rounded border border-yellow-500/20 bg-background/50 px-2.5 py-1.5 text-[10px] font-mono text-muted-foreground">
-              <span className="font-semibold text-yellow-400">macOS:</span> brew install ollama && ollama serve<br />
-              <span className="font-semibold text-yellow-400">Linux:</span> curl -fsSL https://ollama.com/install.sh | sh && ollama serve
+            <p className="mt-1 text-[11px] text-muted-foreground">Copy and run in your terminal:</p>
+            <div className="mt-1.5 space-y-1">
+              {[
+                { os: "macOS", cmd: "brew install ollama && ollama serve" },
+                { os: "Linux", cmd: "curl -fsSL https://ollama.com/install.sh | sh && ollama serve" },
+              ].map(({ os, cmd }) => (
+                <OllamaCopyRow key={os} os={os} cmd={cmd} accent="yellow" />
+              ))}
             </div>
             <div className="mt-2 flex items-center gap-2">
               <button onClick={() => runOllamaSetup()} className="rounded-md border border-yellow-500/40 px-2.5 py-1 text-[11px] font-medium text-yellow-400 hover:bg-yellow-500/10">
