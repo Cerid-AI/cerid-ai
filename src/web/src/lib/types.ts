@@ -139,6 +139,8 @@ export interface HealthStatusResponse extends HealthResponse {
   can_generate?: boolean
   feature_tier?: string
   pipeline_providers?: PipelineProviders
+  internal_llm_provider?: string
+  internal_llm_model?: string
 }
 
 /** Structured error response from CeridError hierarchy. */

@@ -193,23 +193,44 @@ async def enable_ollama():
 
     ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
 
-    # Verify Ollama is reachable
-    try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.get(f"{ollama_url}/api/tags")
-            if resp.status_code != 200:
-                raise HTTPException(status_code=503, detail="Ollama is not responding")
-    except httpx.ConnectError:
+    # Verify Ollama is reachable — try configured URL then host.docker.internal
+    urls_to_try = [ollama_url]
+    if "host.docker.internal" not in ollama_url:
+        urls_to_try.append("http://host.docker.internal:11434")
+
+    connected = False
+    async with httpx.AsyncClient(timeout=5) as client:
+        for url in urls_to_try:
+            try:
+                resp = await client.get(f"{url}/api/tags")
+                if resp.status_code == 200:
+                    ollama_url = url
+                    if url != os.getenv("OLLAMA_URL", ""):
+                        os.environ["OLLAMA_URL"] = url
+                    connected = True
+                    break
+            except Exception:
+                continue
+
+    if not connected:
         raise HTTPException(
             status_code=503,
-            detail=f"Cannot connect to Ollama at {ollama_url}. "
-                   "Start with: ollama serve (macOS) or docker compose --profile ollama up -d",
+            detail="Cannot connect to Ollama. "
+                   "Start with: open -a Ollama (macOS) or ollama serve (Linux)",
         )
 
     # Update runtime config
     config.INTERNAL_LLM_PROVIDER = "ollama"
-    if not config.INTERNAL_LLM_MODEL:
-        config.INTERNAL_LLM_MODEL = config.OLLAMA_DEFAULT_MODEL
+    config.INTERNAL_LLM_MODEL = config.OLLAMA_DEFAULT_MODEL
+
+    # Update pipeline routing — route eligible stages to Ollama
+    locked_stages = {"verification_complex", "chat_generation"}
+    try:
+        for stage in config.PIPELINE_PROVIDERS:
+            if stage not in locked_stages:
+                config.PIPELINE_PROVIDERS[stage] = "ollama"
+    except Exception:
+        pass
 
     return {
         "status": "enabled",
@@ -223,6 +244,12 @@ async def enable_ollama():
 async def disable_ollama():
     """Disable Ollama — fall back to Bifrost/OpenRouter for pipeline tasks."""
     config.INTERNAL_LLM_PROVIDER = "bifrost"
+    # Revert pipeline routing to cloud
+    try:
+        for stage in config.PIPELINE_PROVIDERS:
+            config.PIPELINE_PROVIDERS[stage] = "bifrost"
+    except Exception:
+        pass
     return {"status": "disabled", "provider": "bifrost"}
 
 

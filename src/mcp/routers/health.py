@@ -182,6 +182,13 @@ def degradation_status():
         result["pipeline_providers"] = PIPELINE_PROVIDERS
     except Exception as exc:
         logger.debug("Pipeline providers unavailable: %s", exc)
+    # Add internal LLM model info for status bar
+    try:
+        import config as _cfg
+        result["internal_llm_provider"] = _cfg.INTERNAL_LLM_PROVIDER
+        result["internal_llm_model"] = _cfg.INTERNAL_LLM_MODEL or _cfg.OLLAMA_DEFAULT_MODEL
+    except Exception:
+        pass
     return result
 
 
