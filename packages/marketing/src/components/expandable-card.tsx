@@ -31,47 +31,56 @@ export function ExpandableCard({
       className="group cursor-pointer border-border bg-card transition-all hover:border-brand/30 hover:shadow-lg hover:shadow-brand/5"
       onClick={() => setOpen((v) => !v)}
     >
-      <CardHeader className="space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand transition-colors group-hover:bg-brand/20">
-              <Icon className="h-5 w-5" />
-            </div>
-            <CardTitle className="text-base">{title}</CardTitle>
-          </div>
-          <ChevronDown
-            className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 ${open ? "rotate-180" : ""}`}
-          />
-        </div>
-        <p className="text-sm leading-relaxed text-muted-foreground">{summary}</p>
-
-        {/* Expandable detail section */}
-        <div
-          className={`grid transition-all duration-300 ease-in-out ${open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}
-        >
-          <div className="overflow-hidden">
-            {image && (
+      <CardHeader className="p-0">
+        <div className="flex">
+          {/* Left badge accent (1/3 width) */}
+          {image && (
+            <div className="hidden sm:flex w-24 shrink-0 items-center justify-center overflow-hidden rounded-l-xl bg-muted/30 border-r border-border/30">
               <img
                 src={image}
-                alt={title}
-                className="mt-2 w-full rounded-lg border border-border/30"
+                alt=""
+                className="h-full w-full object-cover"
                 loading="lazy"
               />
-            )}
-            {detail && (
-              <p className="pt-2 text-xs leading-relaxed text-muted-foreground/80 border-t border-border/50 mt-1">
-                {detail}
-              </p>
-            )}
-            {link && (
-              <a
-                href={link.href}
-                className="mt-2 inline-flex items-center text-xs font-medium text-brand hover:text-brand/80 transition-colors"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {link.label} &rarr;
-              </a>
-            )}
+            </div>
+          )}
+
+          {/* Content (2/3 width) */}
+          <div className="flex-1 space-y-2 p-5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand transition-colors group-hover:bg-brand/20">
+                  <Icon className="h-4 w-4" />
+                </div>
+                <CardTitle className="text-sm font-semibold">{title}</CardTitle>
+              </div>
+              <ChevronDown
+                className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+              />
+            </div>
+            <p className="text-xs leading-relaxed text-muted-foreground">{summary}</p>
+
+            {/* Expandable detail */}
+            <div
+              className={`grid transition-all duration-300 ease-in-out ${open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}
+            >
+              <div className="overflow-hidden">
+                {detail && (
+                  <p className="pt-2 text-[11px] leading-relaxed text-muted-foreground/80 border-t border-border/40 mt-1">
+                    {detail}
+                  </p>
+                )}
+                {link && (
+                  <a
+                    href={link.href}
+                    className="mt-2 inline-flex items-center text-[11px] font-medium text-brand hover:text-brand/80 transition-colors"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {link.label} &rarr;
+                  </a>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </CardHeader>

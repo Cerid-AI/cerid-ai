@@ -32,10 +32,10 @@ export function Navbar() {
     >
       <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
         {/* Wordmark lockup */}
-        <Link href="/" className="flex items-center gap-2.5">
-          <img src="/cerid-logo.svg" alt="Cerid" className="h-8 w-8" />
+        <Link href="/" className="flex items-center gap-3">
+          <img src="/cerid-logo.svg" alt="Cerid" className="h-9 w-9" />
           <div className="flex flex-col">
-            <span className="text-brand-gradient text-base font-bold tracking-[0.15em] uppercase leading-none">
+            <span className="text-brand-shine text-2xl font-bold tracking-[0.18em] uppercase leading-none">
               CERID
             </span>
             <span className="hidden text-[9px] font-medium tracking-widest uppercase text-muted-foreground md:block">

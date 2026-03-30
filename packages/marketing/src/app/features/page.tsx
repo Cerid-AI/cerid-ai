@@ -160,31 +160,31 @@ export default function FeaturesPage() {
 
       {/* Feature categories */}
       {CATEGORIES.map((cat) => (
-        <section key={cat.title} className="py-20 border-b border-border">
+        <section key={cat.title} className="py-12 border-b border-border">
           <div className="mx-auto max-w-6xl px-6">
-            <div className="flex items-center gap-3 mb-10">
+            <div className="flex items-center gap-3 mb-6">
               <h2 className="text-2xl font-bold tracking-tight">{cat.title}</h2>
               <Badge variant="outline" className="text-[10px] uppercase tracking-wider text-brand border-brand/30">
                 {cat.badge}
               </Badge>
             </div>
 
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               {cat.features.map((f) => (
                 <Card key={f.title} className="group border-border bg-card transition-all hover:border-brand/30">
-                  <CardHeader className="space-y-3">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand group-hover:bg-brand/20 transition-colors">
-                        <f.icon className="h-5 w-5" />
+                  <CardHeader className="space-y-2 p-4">
+                    <div className="flex items-center gap-2.5">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand group-hover:bg-brand/20 transition-colors">
+                        <f.icon className="h-4 w-4" />
                       </div>
-                      <CardTitle className="text-base">{f.title}</CardTitle>
+                      <CardTitle className="text-sm">{f.title}</CardTitle>
                     </div>
-                    <p className="text-sm leading-relaxed text-foreground/90">{f.casual}</p>
+                    <p className="text-xs leading-relaxed text-muted-foreground">{f.casual}</p>
                     <details className="group/details">
-                      <summary className="cursor-pointer text-xs font-medium text-brand hover:text-brand/80 transition-colors">
+                      <summary className="cursor-pointer text-[11px] font-medium text-brand hover:text-brand/80 transition-colors">
                         Technical details
                       </summary>
-                      <p className="mt-2 text-xs leading-relaxed text-muted-foreground font-mono">
+                      <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground/80 font-mono border-t border-border/30 pt-1.5">
                         {f.technical}
                       </p>
                     </details>

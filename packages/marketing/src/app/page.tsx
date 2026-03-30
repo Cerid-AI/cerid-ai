@@ -96,7 +96,7 @@ export default function Home() {
   return (
     <>
       {/* ══════════════ HERO ══════════════ */}
-      <section className="relative overflow-hidden py-28 md:py-36 bg-circuit">
+      <section className="relative overflow-hidden py-20 md:py-36 bg-circuit">
         <div className="pointer-events-none absolute inset-0 bg-hero-glow" />
 
         <div className="relative mx-auto max-w-6xl px-6">
@@ -150,7 +150,7 @@ export default function Home() {
           </div>
 
           {/* Consumer-focused stats */}
-          <div className="mx-auto mt-24 max-w-xl">
+          <div className="mx-auto mt-16 max-w-xl">
             <div className="gold-line mx-auto w-20 mb-10" />
             <div className="flex flex-wrap items-center justify-center gap-10 text-center">
               {[
@@ -170,7 +170,7 @@ export default function Home() {
       </section>
 
       {/* ══════════════ HOW IT WORKS (moved up) ══════════════ */}
-      <section className="py-28 border-t divider-gold">
+      <section className="py-20 border-t divider-gold">
         <div className="mx-auto max-w-6xl px-6">
           <div className="text-center">
             <div className="gold-line mx-auto w-16 mb-6" />
@@ -178,7 +178,7 @@ export default function Home() {
             <p className="mt-4 text-muted-foreground">One command to start. Ask a question. Get a verified answer.</p>
           </div>
 
-          <div className="mt-16 grid grid-cols-1 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-4">
+          <div className="mt-12 grid grid-cols-1 gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-4">
             {[
               { n: "1", icon: FolderOpen, title: "Import your files", desc: "Drop a folder or upload files. Cerid parses PDFs, docs, code, emails, and archives automatically." },
               { n: "2", icon: Search, title: "Ask anything", desc: "Natural language queries search all your knowledge. Adaptive retrieval matches the right strategy." },
@@ -199,7 +199,7 @@ export default function Home() {
       </section>
 
       {/* ══════════════ FEATURES (expandable cards) ══════════════ */}
-      <section className="py-28 bg-circuit">
+      <section className="py-20 bg-circuit">
         <div className="mx-auto max-w-6xl px-6">
           <div className="text-center">
             <div className="gold-line mx-auto w-16 mb-6" />
@@ -210,7 +210,7 @@ export default function Home() {
             </p>
           </div>
 
-          <div className="mt-16 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="mt-12 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {FEATURES.map((f) => (
               <ExpandableCard key={f.title} iconName={f.iconName} title={f.title} summary={f.summary} detail={f.detail} link={f.link} image={f.image} />
             ))}
@@ -225,7 +225,7 @@ export default function Home() {
       </section>
 
       {/* ══════════════ PRIVACY ══════════════ */}
-      <section className="py-28 border-t divider-gold bg-muted/20">
+      <section className="py-20 border-t divider-gold bg-muted/20">
         <div className="mx-auto max-w-6xl px-6">
           <div className="grid grid-cols-1 items-center gap-16 md:grid-cols-2">
             <div>
@@ -259,7 +259,7 @@ export default function Home() {
       </section>
 
       {/* ══════════════ WHO IT'S FOR (personas) ══════════════ */}
-      <section className="py-28 bg-circuit">
+      <section className="py-20 bg-circuit">
         <div className="mx-auto max-w-6xl px-6">
           <div className="text-center">
             <div className="gold-line mx-auto w-16 mb-6" />
@@ -267,7 +267,7 @@ export default function Home() {
             <p className="mt-4 text-muted-foreground">Whatever your field, Cerid adapts to how you work.</p>
           </div>
 
-          <div className="mt-16 grid grid-cols-1 gap-6 md:grid-cols-3">
+          <div className="mt-12 grid grid-cols-1 gap-6 md:grid-cols-3">
             {PERSONAS.map((p) => (
               <div key={p.title} className="rounded-xl border border-border bg-card p-7 transition-all hover:border-brand/30 hover:shadow-lg hover:shadow-brand/5">
                 <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand/10 text-brand mb-4">
@@ -290,7 +290,7 @@ export default function Home() {
       </section>
 
       {/* ══════════════ UNDER THE HOOD (developer section) ══════════════ */}
-      <section className="py-28 border-t divider-gold bg-muted/20">
+      <section className="py-20 border-t divider-gold bg-muted/20">
         <div className="mx-auto max-w-6xl px-6">
           <div className="grid grid-cols-1 items-center gap-16 md:grid-cols-2">
             <div>
@@ -322,7 +322,7 @@ export default function Home() {
       </section>
 
       {/* ══════════════ CTA ══════════════ */}
-      <section className="py-28 bg-circuit">
+      <section className="py-20 bg-circuit">
         <div className="mx-auto max-w-3xl px-6 text-center">
           <BrandShield variant="vault" size={56} animate className="mx-auto mb-8" />
           <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Start in 5 minutes</h2>

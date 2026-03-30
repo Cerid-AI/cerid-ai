@@ -115,9 +115,9 @@ export default function PricingPage() {
                   </div>
                 )}
                 <CardHeader className="text-center">
-                  <div className="mx-auto mb-3">
+                  <div className="mx-auto mb-4">
                     {plan.tierImage ? (
-                      <img src={plan.tierImage} alt={plan.name} className="mx-auto h-16 w-16 rounded-xl object-cover" />
+                      <img src={plan.tierImage} alt={plan.name} className="mx-auto w-4/5 rounded-xl object-cover" />
                     ) : (
                       <BrandShield variant={plan.variant} size={44} />
                     )}

@@ -157,6 +157,27 @@
   background-clip: text;
 }
 
+/* --- Wordmark shine sweep animation --- */
+@keyframes shine-sweep {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+.text-brand-shine {
+  background: linear-gradient(
+    90deg,
+    #00E5D8 0%,
+    #7FF9E8 25%,
+    rgba(255, 255, 255, 0.6) 50%,
+    #7FF9E8 75%,
+    #00E5D8 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: shine-sweep 4s ease-in-out infinite;
+}
+
 /* --- Teal glow animation (shield / hero elements) --- */
 @keyframes teal-pulse {
   0%, 100% { box-shadow: 0 0 20px rgba(0, 229, 216, 0.15), 0 0 60px rgba(0, 229, 216, 0.05); }
