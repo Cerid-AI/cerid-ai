@@ -38,8 +38,9 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >
+        <div className="vignette" aria-hidden="true" />
         <Navbar />
-        <main className="min-h-screen">{children}</main>
+        <main className="relative z-[2] min-h-screen">{children}</main>
         <Footer />
       </body>
     </html>

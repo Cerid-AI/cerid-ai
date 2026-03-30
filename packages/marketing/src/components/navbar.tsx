@@ -1,32 +1,56 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
-import { Menu, X } from "lucide-react"
+import { Menu, X, Github } from "lucide-react"
 
 const NAV_LINKS = [
   { href: "/features", label: "Features" },
   { href: "/pricing", label: "Pricing" },
   { href: "/security", label: "Security" },
+  { href: "https://github.com/Cerid-AI/cerid-ai/blob/main/docs/API_REFERENCE.md", label: "Docs", external: true },
 ]
 
 export function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [scrolled, setScrolled] = useState(false)
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 20)
+    onScroll()
+    window.addEventListener("scroll", onScroll, { passive: true })
+    return () => window.removeEventListener("scroll", onScroll)
+  }, [])
 
   return (
-    <header className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-lg">
+    <header
+      className={`sticky top-0 z-50 transition-all duration-300 ${
+        scrolled
+          ? "border-b divider-gold bg-background/85 backdrop-blur-lg"
+          : "bg-transparent"
+      }`}
+    >
       <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
-        <Link href="/" className="flex items-center gap-2 text-xl font-bold tracking-tight">
-          <img src="/cerid-logo.svg" alt="Cerid" className="h-7 w-7" />
-          <span className="bg-gradient-to-r from-brand to-[oklch(0.90_0.14_178)] bg-clip-text text-transparent">CERID</span>
+        {/* Wordmark lockup */}
+        <Link href="/" className="flex items-center gap-2.5">
+          <img src="/cerid-logo.svg" alt="Cerid" className="h-8 w-8" />
+          <div className="flex flex-col">
+            <span className="text-brand-gradient text-base font-bold tracking-[0.15em] uppercase leading-none">
+              CERID
+            </span>
+            <span className="hidden text-[9px] font-medium tracking-widest uppercase text-muted-foreground md:block">
+              Private AI Companion
+            </span>
+          </div>
         </Link>
 
         {/* Desktop nav */}
-        <div className="hidden items-center gap-8 md:flex">
+        <div className="hidden items-center gap-7 md:flex">
           {NAV_LINKS.map((link) => (
             <Link
               key={link.href}
               href={link.href}
+              {...(link.external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
               className="text-sm text-muted-foreground transition-colors hover:text-foreground"
             >
               {link.label}
@@ -36,9 +60,10 @@ export function Navbar() {
             href="https://github.com/Cerid-AI/cerid-ai"
             target="_blank"
             rel="noopener noreferrer"
-            className="rounded-md bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand/90"
+            className="inline-flex items-center gap-2 rounded-lg bg-brand px-5 py-2 text-sm font-semibold text-brand-foreground transition-all hover:bg-brand/90 hover:shadow-lg hover:shadow-brand/20"
           >
-            Get Started
+            <Github className="h-4 w-4" />
+            Download
           </Link>
         </div>
 
@@ -60,6 +85,7 @@ export function Navbar() {
               <Link
                 key={link.href}
                 href={link.href}
+                {...(link.external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
                 onClick={() => setMobileOpen(false)}
                 className="text-sm text-muted-foreground transition-colors hover:text-foreground"
               >
@@ -71,9 +97,10 @@ export function Navbar() {
               target="_blank"
               rel="noopener noreferrer"
               onClick={() => setMobileOpen(false)}
-              className="mt-1 inline-flex h-9 items-center justify-center rounded-md bg-brand px-4 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand/90"
+              className="mt-1 inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-sm font-semibold text-brand-foreground hover:bg-brand/90"
             >
-              Get Started
+              <Github className="h-4 w-4" />
+              Download
             </Link>
           </div>
         </div>
