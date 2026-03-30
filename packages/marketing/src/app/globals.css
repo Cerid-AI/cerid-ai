@@ -159,8 +159,8 @@
 
 /* --- Teal glow animation (shield / hero elements) --- */
 @keyframes teal-pulse {
-  0%, 100% { box-shadow: 0 0 20px #00E5D8/15, 0 0 60px #00E5D8/5; }
-  50% { box-shadow: 0 0 30px #00E5D8/25, 0 0 80px #00E5D8/10; }
+  0%, 100% { box-shadow: 0 0 20px rgba(0, 229, 216, 0.15), 0 0 60px rgba(0, 229, 216, 0.05); }
+  50% { box-shadow: 0 0 30px rgba(0, 229, 216, 0.25), 0 0 80px rgba(0, 229, 216, 0.10); }
 }
 .glow-teal {
   animation: teal-pulse 4s ease-in-out infinite;
@@ -172,7 +172,7 @@
   100% { background-position: 200% center; }
 }
 .shimmer-gold {
-  background: linear-gradient(90deg, transparent 25%, #D4AF37/20 50%, transparent 75%);
+  background: linear-gradient(90deg, transparent 25%, rgba(212, 175, 55, 0.2) 50%, transparent 75%);
   background-size: 200% 100%;
   animation: gold-shimmer 3s ease-in-out infinite;
 }
@@ -180,14 +180,19 @@
 /* --- Subtle circuit-board background pattern --- */
 .bg-circuit {
   background-image:
-    radial-gradient(circle at 25% 25%, #00E5D8/3 1px, transparent 1px),
-    radial-gradient(circle at 75% 75%, #00E5D8/3 1px, transparent 1px);
+    radial-gradient(circle at 25% 25%, rgba(0, 229, 216, 0.04) 1px, transparent 1px),
+    radial-gradient(circle at 75% 75%, rgba(0, 229, 216, 0.04) 1px, transparent 1px);
   background-size: 60px 60px;
 }
 
 /* --- Section divider with gold line --- */
 .divider-gold {
-  border-image: linear-gradient(90deg, transparent, #D4AF37/40, transparent) 1;
+  border-image: linear-gradient(90deg, transparent, rgba(212, 175, 55, 0.4), transparent) 1;
+}
+
+/* --- Radial glow behind hero (used as background utility) --- */
+.bg-hero-glow {
+  background: radial-gradient(ellipse 60% 50% at 50% 40%, rgba(0, 229, 216, 0.06), transparent 70%);
 }
 
 /* --- Floating animation for hero images --- */

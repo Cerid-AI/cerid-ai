@@ -59,7 +59,7 @@ export default function Home() {
           ══════════════════════════════════════════════════════════════ */}
       <section className="relative overflow-hidden py-28 md:py-36 bg-circuit">
         {/* Radial glow behind shield */}
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_60%_50%_at_50%_40%,#00E5D8/6,transparent_70%)]" />
+        <div className="pointer-events-none absolute inset-0 bg-hero-glow" />
 
         <div className="relative mx-auto max-w-6xl px-6">
           <div className="grid grid-cols-1 items-center gap-16 md:grid-cols-2">
