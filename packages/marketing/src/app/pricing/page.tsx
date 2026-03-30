@@ -64,7 +64,7 @@ const PLANS = [
   {
     name: "Cerid Vault",
     variant: "vault" as const,
-    tierImage: "/vault-icon.jpg",
+    tierImage: "/shield-3d.jpg",
     price: "Contact",
     period: "enterprise",
     description: "Secure by Design. Mission Assured.",

@@ -208,21 +208,31 @@ export default function FeaturesPage() {
         </div>
       </section>
 
-      {/* CTA */}
-      <section className="py-20 text-center bg-circuit">
-        <div className="mx-auto max-w-3xl px-6">
-          <BrandShield variant="vault" size={48} animate className="mx-auto mb-6" />
-          <h2 className="text-2xl font-bold">See it in action</h2>
-          <p className="mt-3 text-muted-foreground">Clone the repo and have Cerid running in under five minutes.</p>
-          <Link
-            href="https://github.com/Cerid-AI/cerid-ai"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-8 inline-flex h-11 items-center gap-2 rounded-lg bg-brand px-6 text-sm font-semibold text-brand-foreground shadow-lg shadow-brand/20 hover:bg-brand/90 transition-all"
-          >
-            Get Started
-            <ArrowRight className="h-4 w-4" />
-          </Link>
+      {/* CTA with architecture graphic */}
+      <section className="py-20 bg-circuit">
+        <div className="mx-auto max-w-5xl px-6">
+          <div className="grid grid-cols-1 items-center gap-12 md:grid-cols-2">
+            <div className="flex justify-center">
+              <img src="/architecture.jpg" alt="Extensible Architecture" className="w-full max-w-sm rounded-xl border border-border/30 shadow-xl" loading="lazy" />
+            </div>
+            <div className="text-center md:text-left">
+              <div className="gold-line w-16 mb-4 mx-auto md:mx-0" />
+              <h2 className="text-2xl font-bold">See it in action</h2>
+              <p className="mt-3 text-muted-foreground">
+                Clone the repo and have Cerid running in under five minutes.
+                10 agents, 26 tools, 32 API routers — all yours.
+              </p>
+              <Link
+                href="https://github.com/Cerid-AI/cerid-ai"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-8 inline-flex h-11 items-center gap-2 rounded-lg bg-brand px-6 text-sm font-semibold text-brand-foreground shadow-lg shadow-brand/20 hover:bg-brand/90 transition-all"
+              >
+                Get Started
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </div>
+          </div>
         </div>
       </section>
     </>
