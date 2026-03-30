@@ -1,0 +1,3 @@
+# Base image vulnerabilities — cannot fix without upstream python:3.11-slim update
+# ncurses buffer overflow — base image dependency, no user-facing exposure
+CVE-2025-69720
