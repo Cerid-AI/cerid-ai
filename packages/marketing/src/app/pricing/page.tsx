@@ -11,51 +11,67 @@ import { Badge } from "@/components/ui/badge"
 
 const PLANS = [
   {
-    name: "Community",
+    name: "Cerid Core",
     price: "Free",
     period: "forever",
-    description: "Self-hosted, open source. Full power, no limits.",
+    description: "Self-hosted, open source. Smart. Extensible. Private.",
     badge: null,
-    cta: "Clone on GitHub",
-    ctaHref: "https://github.com/sunrunnerfire/cerid-ai",
+    accent: "",
+    cta: "Get Started",
+    ctaHref: "https://github.com/Cerid-AI/cerid-ai",
+    icon: "/core-icon.jpg",
     features: [
-      "All 9 agents",
-      "Hybrid BM25s + vector search",
-      "Streaming verification",
-      "Knowledge graph",
-      "27 MCP tools",
-      "Self-RAG validation",
-      "Smart model routing",
-      "Universal file ingestion",
-      "Multi-machine sync",
+      "10 AI agents, 26 MCP tools",
+      "Unified RAG modes (Manual + Smart)",
+      "Hybrid BM25 + vector search",
+      "Per-chunk retrieval profiles",
+      "Streaming verification (4 claim types)",
+      "6-type memory layer with salience scoring",
+      "Ollama local LLM support ($0 pipeline)",
       "Cross-encoder reranking (ONNX)",
-      "Contextual chunking",
-      "6-stage adaptive RAG pipeline",
-      "Semantic query cache",
-      "Async batch ingestion",
+      "Bulk folder import with preview",
+      "Multi-machine sync with Dropbox",
       "Simple / Advanced mode",
       "Community support",
     ],
   },
   {
-    name: "Pro",
-    price: "Usage-based",
-    period: "per query / per ingestion",
-    description: "Managed hosting with usage-based pricing. Bring your own LLM key.",
+    name: "Cerid Pro",
+    price: "Paid",
+    period: "per seat",
+    description: "Smart. Secure. Fully Controlled.",
     badge: "Coming Soon",
+    accent: "",
     cta: "Star on GitHub",
-    ctaHref: "https://github.com/sunrunnerfire/cerid-ai",
+    ctaHref: "https://github.com/Cerid-AI/cerid-ai",
+    icon: "/pro-wordmark.jpg",
     features: [
-      "Everything in Community",
-      "Managed cloud hosting",
-      "Multi-user support",
-      "Per-user API key management",
-      "Usage metering dashboard",
-      "Tenant data isolation",
-      "Encrypted API key storage",
-      "Priority support",
-      "Automatic updates",
-      "99.9% uptime SLA",
+      "Everything in Core",
+      "Custom Smart RAG (per-source weights)",
+      "OCR, audio transcription, vision plugins",
+      "Metamorphic verification",
+      "Advanced analytics dashboard",
+      "Semantic deduplication",
+      "Visual workflow builder",
+    ],
+  },
+  {
+    name: "Cerid Vault",
+    price: "Contact",
+    period: "enterprise",
+    description: "Secure by Design. Mission Assured.",
+    badge: "Enterprise",
+    accent: "border-gold",
+    cta: "Contact Sales",
+    ctaHref: "mailto:vault@cerid.ai",
+    icon: "/vault-icon.jpg",
+    features: [
+      "Everything in Pro",
+      "Multi-user JWT auth + tenant isolation",
+      "SSO / SAML integration",
+      "Enterprise audit logging",
+      "SLA & priority support",
+      "Custom deployment assistance",
     ],
   },
 ]
@@ -79,22 +95,25 @@ export default function PricingPage() {
       {/* Plans */}
       <section className="py-16">
         <div className="mx-auto max-w-4xl px-6">
-          <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
             {PLANS.map((plan) => (
               <Card
                 key={plan.name}
-                className={`relative border-border ${
+                className={`relative border-border ${plan.accent} ${
                   plan.badge ? "border-primary/30" : ""
                 }`}
               >
                 {plan.badge && (
                   <div className="absolute -top-3 right-4">
-                    <Badge className="bg-primary text-primary-foreground">
+                    <Badge className={plan.accent ? "bg-gold/20 text-gold border-gold" : "bg-primary text-primary-foreground"}>
                       {plan.badge}
                     </Badge>
                   </div>
                 )}
                 <CardHeader>
+                  {plan.icon && (
+                    <img src={plan.icon} alt={plan.name} className="mb-3 h-16 w-16 rounded-lg object-cover" />
+                  )}
                   <CardTitle className="text-2xl">{plan.name}</CardTitle>
                   <div className="mt-2">
                     <span className="text-4xl font-bold">{plan.price}</span>

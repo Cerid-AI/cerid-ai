@@ -16,8 +16,9 @@ export function Navbar() {
   return (
     <header className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-lg">
       <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
-        <Link href="/" className="text-xl font-bold tracking-tight">
-          Cerid<span className="text-brand">AI</span>
+        <Link href="/" className="flex items-center gap-2 text-xl font-bold tracking-tight">
+          <img src="/cerid-logo.svg" alt="Cerid" className="h-7 w-7" />
+          <span className="bg-gradient-to-r from-brand to-[oklch(0.90_0.14_178)] bg-clip-text text-transparent">CERID</span>
         </Link>
 
         {/* Desktop nav */}
