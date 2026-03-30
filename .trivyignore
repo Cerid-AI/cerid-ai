@@ -1,3 +1,5 @@
 # Base image vulnerabilities — cannot fix without upstream python:3.11-slim update
 # ncurses buffer overflow — base image dependency, no user-facing exposure
 CVE-2025-69720
+# systemd arbitrary code execution — base image libsystemd0/libudev1, containerized (no systemd running)
+CVE-2026-29111
