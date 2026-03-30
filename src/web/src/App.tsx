@@ -60,6 +60,15 @@ export default function App() {
     }
   }, [featureTier])
 
+  // Update favicon + document title based on tier
+  useEffect(() => {
+    const icons: Record<string, string> = { community: "/cerid-core.svg", pro: "/cerid-pro.svg", enterprise: "/cerid-vault.svg" }
+    const titles: Record<string, string> = { community: "Cerid Core", pro: "Cerid Pro", enterprise: "Cerid Vault" }
+    const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
+    if (link) link.href = icons[featureTier] ?? icons.community
+    document.title = titles[featureTier] ?? titles.community
+  }, [featureTier])
+
   useEffect(() => {
     // Check setup status first, then load settings
     fetchSetupStatus()

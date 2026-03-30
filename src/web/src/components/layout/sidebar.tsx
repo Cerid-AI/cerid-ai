@@ -49,8 +49,13 @@ function readBool(key: string, fallback: boolean): boolean {
 
 const SIMPLE_PANES = new Set<Pane>(["chat", "memories", "settings"])
 
-const TIER_LABELS: Record<string, string> = { community: "Core", pro: "Pro", enterprise: "Ent" }
-const TIER_COLORS: Record<string, string> = { community: "text-zinc-400", pro: "text-teal-500", enterprise: "text-purple-400" }
+const TIER_CONFIG: Record<string, { label: string; wordmark: string; tierWord: string; tierClass: string; iconColor: string; icon: string }> = {
+  community: { label: "Core", wordmark: "CERID", tierWord: "CORE", tierClass: "text-muted-foreground", iconColor: "text-brand", icon: "/cerid-core.svg" },
+  pro:       { label: "Pro",  wordmark: "CERID", tierWord: "PRO",  tierClass: "text-muted-foreground", iconColor: "text-brand", icon: "/cerid-pro.svg" },
+  enterprise:{ label: "Vault",wordmark: "CERID", tierWord: "VAULT",tierClass: "text-gold",            iconColor: "text-gold",  icon: "/cerid-vault.svg" },
+}
+const TIER_LABELS: Record<string, string> = { community: "Core", pro: "Pro", enterprise: "Vault" }
+const TIER_COLORS: Record<string, string> = { community: "text-muted-foreground", pro: "text-brand", enterprise: "text-gold" }
 
 export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse, theme, onToggleTheme, tradingEnabled, featureTier, onCycleTier }: SidebarProps) {
   const { conversations, activeId, setActiveId, create, remove } = useConversationsContext()
@@ -88,15 +93,23 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
           collapsed ? "w-14" : "w-52"
         )}
       >
-        {/* Logo area */}
+        {/* Logo area — tier-reactive */}
         <div className="flex h-14 items-center border-b px-3">
-          {!collapsed && (
-            <span className="text-lg font-bold tracking-tight">
-              <span className="bg-gradient-to-r from-brand to-[oklch(0.90_0.14_178)] bg-clip-text text-transparent">CERID</span>
-              {" "}
-              <span className="text-muted-foreground font-medium text-base">VAULT</span>
-            </span>
-          )}
+          {(() => {
+            const tier = TIER_CONFIG[featureTier ?? "community"] ?? TIER_CONFIG.community
+            return collapsed ? (
+              <img src={tier.icon} alt={`Cerid ${tier.label}`} className="h-7 w-7 shrink-0" />
+            ) : (
+              <div className="flex items-center gap-2">
+                <img src={tier.icon} alt={`Cerid ${tier.label}`} className="h-7 w-7 shrink-0" />
+                <span className="text-[15px] font-bold tracking-tight leading-none">
+                  <span className="bg-gradient-to-r from-brand to-[oklch(0.90_0.14_178)] bg-clip-text text-transparent">{tier.wordmark}</span>
+                  {" "}
+                  <span className={cn("font-semibold text-sm", tier.tierClass)}>{tier.tierWord}</span>
+                </span>
+              </div>
+            )
+          })()}
           <Button variant="ghost" size="icon" className={cn("ml-auto h-8 w-8")} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} onClick={onToggleCollapse}>
             {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
           </Button>
