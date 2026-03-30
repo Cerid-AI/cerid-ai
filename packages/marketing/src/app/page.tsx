@@ -29,6 +29,7 @@ const FEATURES = [
     summary: "Ask anything — Cerid searches all your files and finds the best answer, adapting its strategy to each document type.",
     detail: "Three RAG modes (Manual, Smart, Custom Smart) with per-chunk retrieval profiles. Hybrid BM25 + vector search. Cross-encoder reranking. Adaptive pipeline adjusts search depth based on question complexity.",
     link: { href: "/features#retrieval", label: "See pipeline details" },
+    image: "/badge-rag.jpg",
   },
   {
     iconName: "ShieldCheck",
@@ -36,6 +37,7 @@ const FEATURES = [
     summary: "Every response is fact-checked in real time. Inline badges show what's confirmed, uncertain, or needs review.",
     detail: "4-type claim detection (factual, recency, evasion, citation). Streaming SSE verification. Click any footnote to see source, confidence, and reasoning. Expert mode uses frontier models for re-verification.",
     link: { href: "/features#verification", label: "See verification flow" },
+    image: "/badge-verification.jpg",
   },
   {
     iconName: "Bot",
@@ -43,6 +45,7 @@ const FEATURES = [
     summary: "Claude, GPT, Gemini, Llama — or run a free local model with Ollama. Zero lock-in, zero mandatory API costs.",
     detail: "Smart capability-based routing across OpenRouter providers. Guided Ollama install wizard. 6 of 8 pipeline tasks run locally at $0. Proactive model switching on ignorance detection.",
     link: { href: "/features#models", label: "See model routing" },
+    image: "/badge-byom.jpg",
   },
   {
     iconName: "Brain",
@@ -55,6 +58,7 @@ const FEATURES = [
     title: "Totally Private",
     summary: "Your data never leaves your computer. No cloud. No telemetry. Only the query context you choose goes to the LLM.",
     detail: "Self-hosted Docker stack with ChromaDB, Neo4j, Redis — all on your machine. Optional Fernet encryption at rest. Open source Apache-2.0.",
+    image: "/badge-secure.jpg",
   },
   {
     iconName: "FolderOpen",
@@ -206,7 +210,7 @@ export default function Home() {
 
           <div className="mt-16 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {FEATURES.map((f) => (
-              <ExpandableCard key={f.title} iconName={f.iconName} title={f.title} summary={f.summary} detail={f.detail} link={f.link} />
+              <ExpandableCard key={f.title} iconName={f.iconName} title={f.title} summary={f.summary} detail={f.detail} link={f.link} image={f.image} />
             ))}
           </div>
 
@@ -307,8 +311,9 @@ export default function Home() {
                 ))}
               </div>
             </div>
-            <div className="flex justify-center">
+            <div className="flex flex-col items-center gap-4">
               <img src="/architecture.jpg" alt="Extensible Architecture" className="w-full max-w-sm rounded-xl border border-border/30 shadow-xl" loading="lazy" />
+              <img src="/badge-orchestrator.jpg" alt="Local Orchestrator" className="w-32 rounded-lg border border-border/30" loading="lazy" />
             </div>
           </div>
         </div>

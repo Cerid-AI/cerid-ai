@@ -139,15 +139,22 @@ export default function FeaturesPage() {
     <>
       {/* Hero */}
       <section className="bg-circuit py-24 border-b divider-gold">
-        <div className="mx-auto max-w-6xl px-6 text-center">
-          <BrandShield variant="vault" size={48} className="mx-auto mb-6" />
-          <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
-            Features
-          </h1>
-          <p className="mx-auto mt-4 max-w-2xl text-lg text-muted-foreground">
-            Every capability, from casual use to enterprise deployment.
-            Click any feature for the technical details.
-          </p>
+        <div className="mx-auto max-w-6xl px-6">
+          <div className="grid grid-cols-1 items-center gap-12 md:grid-cols-2">
+            <div>
+              <div className="gold-line w-16 mb-6" />
+              <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
+                Features
+              </h1>
+              <p className="mt-4 max-w-lg text-lg text-muted-foreground">
+                Every capability, from casual use to enterprise deployment.
+                Click any feature card for technical details.
+              </p>
+            </div>
+            <div className="flex justify-center">
+              <img src="/features-grid.jpg" alt="Cerid feature capabilities" className="w-full max-w-sm rounded-xl border border-border/30 shadow-xl" />
+            </div>
+          </div>
         </div>
       </section>
 
@@ -189,20 +196,27 @@ export default function FeaturesPage() {
         </section>
       ))}
 
-      {/* Agents grid */}
+      {/* Agents + icon grid */}
       <section className="py-20 bg-muted/20 border-b divider-gold">
         <div className="mx-auto max-w-6xl px-6">
-          <h2 className="text-2xl font-bold tracking-tight mb-10">10 AI Agents</h2>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
-            {[
-              "Query", "Decomposer", "Assembler", "Triage", "Curator",
-              "Rectify", "Audit", "Maintenance", "Memory", "Hallucination",
-            ].map((name) => (
-              <div key={name} className="rounded-lg border border-border bg-card px-3 py-2.5 text-center">
-                <Bot className="mx-auto h-4 w-4 text-brand mb-1" />
-                <p className="text-xs font-medium">{name}</p>
+          <div className="grid grid-cols-1 items-center gap-12 md:grid-cols-2">
+            <div>
+              <h2 className="text-2xl font-bold tracking-tight mb-6">10 AI Agents</h2>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-2 lg:grid-cols-3">
+                {[
+                  "Query", "Decomposer", "Assembler", "Triage", "Curator",
+                  "Rectify", "Audit", "Maintenance", "Memory", "Hallucination",
+                ].map((name) => (
+                  <div key={name} className="rounded-lg border border-border bg-card px-3 py-2.5 text-center">
+                    <Bot className="mx-auto h-4 w-4 text-brand mb-1" />
+                    <p className="text-xs font-medium">{name}</p>
+                  </div>
+                ))}
               </div>
-            ))}
+            </div>
+            <div className="flex justify-center">
+              <img src="/icon-grid.jpg" alt="Cerid icon system" className="w-full max-w-sm rounded-xl border border-border/30 shadow-xl" loading="lazy" />
+            </div>
           </div>
         </div>
       </section>

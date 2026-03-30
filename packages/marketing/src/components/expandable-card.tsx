@@ -14,12 +14,14 @@ export function ExpandableCard({
   summary,
   detail,
   link,
+  image,
 }: {
   iconName: string
   title: string
   summary: string
   detail?: string
   link?: { href: string; label: string }
+  image?: string
 }) {
   const [open, setOpen] = useState(false)
   const Icon = ICON_MAP[iconName] ?? Layers
@@ -48,6 +50,14 @@ export function ExpandableCard({
           className={`grid transition-all duration-300 ease-in-out ${open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}
         >
           <div className="overflow-hidden">
+            {image && (
+              <img
+                src={image}
+                alt={title}
+                className="mt-2 w-full rounded-lg border border-border/30"
+                loading="lazy"
+              />
+            )}
             {detail && (
               <p className="pt-2 text-xs leading-relaxed text-muted-foreground/80 border-t border-border/50 mt-1">
                 {detail}

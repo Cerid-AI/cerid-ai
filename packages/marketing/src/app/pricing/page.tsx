@@ -15,6 +15,7 @@ const PLANS = [
   {
     name: "Cerid Core",
     variant: "core" as const,
+    tierImage: "/core-icon.jpg",
     price: "Free",
     period: "forever",
     description: "Smart. Extensible. Private.",
@@ -41,6 +42,7 @@ const PLANS = [
   {
     name: "Cerid Pro",
     variant: "pro" as const,
+    tierImage: "/pro-wordmark.jpg",
     price: "Paid",
     period: "per seat",
     description: "Smart. Secure. Fully Controlled.",
@@ -62,6 +64,7 @@ const PLANS = [
   {
     name: "Cerid Vault",
     variant: "vault" as const,
+    tierImage: "/vault-icon.jpg",
     price: "Contact",
     period: "enterprise",
     description: "Secure by Design. Mission Assured.",
@@ -113,7 +116,11 @@ export default function PricingPage() {
                 )}
                 <CardHeader className="text-center">
                   <div className="mx-auto mb-3">
-                    <BrandShield variant={plan.variant} size={44} />
+                    {plan.tierImage ? (
+                      <img src={plan.tierImage} alt={plan.name} className="mx-auto h-16 w-16 rounded-xl object-cover" />
+                    ) : (
+                      <BrandShield variant={plan.variant} size={44} />
+                    )}
                   </div>
                   <CardTitle className="text-xl">{plan.name}</CardTitle>
                   <div className="mt-3">
