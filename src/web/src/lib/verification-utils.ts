@@ -26,6 +26,7 @@ interface ClaimLike {
   status: string
   claim_type?: string
   verification_method?: string
+  reason?: string
 }
 
 /** Normalize whitespace: collapse runs of whitespace into single spaces, trim. */
