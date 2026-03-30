@@ -14,6 +14,7 @@ import {
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { BrandShield } from "@/components/brand-shield"
+import { AgentCarousel } from "@/components/agent-carousel"
 
 /* ── Feature categories with casual + technical copy ── */
 
@@ -152,7 +153,7 @@ export default function FeaturesPage() {
               </p>
             </div>
             <div className="flex justify-center">
-              <img src="/features-grid.jpg" alt="Cerid feature capabilities" className="w-full max-w-sm rounded-xl border border-border/30 shadow-xl" />
+              <img src="/hero-tagline.jpg" alt="Cerid — Your Private AI Knowledge Companion" className="w-full max-w-sm rounded-xl border border-border/30 shadow-xl" />
             </div>
           </div>
         </div>
@@ -196,35 +197,17 @@ export default function FeaturesPage() {
         </section>
       ))}
 
-      {/* Agents + icon grid */}
-      <section className="py-20 bg-muted/20 border-b divider-gold">
-        <div className="mx-auto max-w-6xl px-6">
-          <div className="grid grid-cols-1 items-center gap-12 md:grid-cols-2">
-            <div>
-              <h2 className="text-2xl font-bold tracking-tight mb-6">10 AI Agents</h2>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-2 lg:grid-cols-3">
-                {[
-                  "Query", "Decomposer", "Assembler", "Triage", "Curator",
-                  "Rectify", "Audit", "Maintenance", "Memory", "Hallucination",
-                ].map((name) => (
-                  <div key={name} className="rounded-lg border border-border bg-card px-3 py-2.5 text-center">
-                    <Bot className="mx-auto h-4 w-4 text-brand mb-1" />
-                    <p className="text-xs font-medium">{name}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="flex justify-center">
-              <img src="/icon-grid.jpg" alt="Cerid icon system" className="w-full max-w-sm rounded-xl border border-border/30 shadow-xl" loading="lazy" />
-            </div>
-          </div>
+      {/* Agents carousel */}
+      <section className="py-16 bg-muted/20 border-b divider-gold">
+        <div className="mx-auto max-w-xl px-6">
+          <AgentCarousel />
         </div>
       </section>
 
       {/* CTA */}
       <section className="py-20 text-center bg-circuit">
         <div className="mx-auto max-w-3xl px-6">
-          <img src="/hero-tagline.jpg" alt="Cerid — Your Private AI Knowledge Companion" className="mx-auto mb-8 w-full max-w-md rounded-xl border border-border/30 shadow-xl" loading="lazy" />
+          <BrandShield variant="vault" size={48} animate className="mx-auto mb-6" />
           <h2 className="text-2xl font-bold">See it in action</h2>
           <p className="mt-3 text-muted-foreground">Clone the repo and have Cerid running in under five minutes.</p>
           <Link

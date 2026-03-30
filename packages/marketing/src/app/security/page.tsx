@@ -92,13 +92,8 @@ export default function SecurityPage() {
                 designed from the ground up to keep your data under your control.
               </p>
             </div>
-            <div className="flex justify-center gap-4">
-              <div className="flex h-48 w-36 items-center justify-center overflow-hidden rounded-xl border border-border/30 bg-card shadow-lg">
-                <img src="/badge-zerotrust.jpg" alt="Audit & Zero Trust" className="h-full w-full object-contain" />
-              </div>
-              <div className="flex h-48 w-36 items-center justify-center overflow-hidden rounded-xl border border-border/30 bg-card shadow-lg">
-                <img src="/badge-ephemeral.jpg" alt="Ephemeral Data Injection" className="h-full w-full object-contain" />
-              </div>
+            <div className="flex justify-center">
+              <img src="/secure-intel.jpg" alt="Cerid AI — Secure Intelligence, Fully Yours" className="w-full max-w-sm rounded-xl border border-border/30 shadow-xl" />
             </div>
           </div>
         </div>
@@ -121,13 +116,6 @@ export default function SecurityPage() {
               </Card>
             ))}
           </div>
-        </div>
-      </section>
-
-      {/* Brand showcase */}
-      <section className="border-t divider-gold bg-muted/20 py-16">
-        <div className="mx-auto max-w-4xl px-6 flex flex-wrap justify-center gap-6">
-          <img src="/secure-intel.jpg" alt="Secure Intelligence" className="w-64 rounded-xl border border-border/30 shadow-lg" loading="lazy" />
         </div>
       </section>
 
