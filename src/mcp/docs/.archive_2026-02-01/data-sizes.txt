@@ -1,5 +1,0 @@
-  0B	/Users/sunrunner/ai-companion/data/chroma
-516M	/Users/sunrunner/ai-companion/data/neo4j
-268K	/Users/sunrunner/ai-companion/data/neo4j-logs
- 12K	/Users/sunrunner/ai-companion/data/redis
-  0B	/Users/sunrunner/ai-companion/data/uploads
