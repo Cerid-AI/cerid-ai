@@ -6,8 +6,9 @@ export function Footer() {
       <div className="mx-auto max-w-6xl px-6">
         <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
           <div>
-            <p className="text-lg font-bold">
-              Cerid<span className="text-brand">AI</span>
+            <p className="flex items-center gap-2 text-lg font-bold">
+              <img src="/cerid-logo.svg" alt="" className="h-6 w-6" />
+              <span className="text-brand-gradient">CERID</span>
             </p>
             <p className="mt-2 text-sm text-muted-foreground">
               Privacy-first AI knowledge companion. Your data stays yours.

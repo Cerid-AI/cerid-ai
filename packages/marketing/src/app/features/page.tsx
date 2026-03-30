@@ -1,147 +1,136 @@
 import type { Metadata } from "next"
+import Link from "next/link"
 
 export const metadata: Metadata = {
   title: "Features — Cerid AI",
-  description: "Explore Cerid AI's advanced RAG pipeline, 9 intelligent agents, streaming verification, and full knowledge graph.",
+  description: "Full feature breakdown — RAG pipeline, verification, memory layer, Ollama integration, bulk import, and three-tier architecture.",
 }
 
 import {
-  Search,
-  Bot,
-  Database,
-  Shield,
-  GitBranch,
-  Zap,
-  Brain,
-  FileText,
-  RefreshCw,
-  Eye,
-  Layers,
-  MessageSquare,
-  Cpu,
-  HardDrive,
-  Network,
+  Search, Bot, Database, Shield, ShieldCheck, Brain, FileText,
+  Eye, Layers, Cpu, FolderOpen, Lock, ArrowRight,
+  Sparkles, Network, RefreshCw,
 } from "lucide-react"
-import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { BrandShield } from "@/components/brand-shield"
 
-const AGENTS = [
-  { name: "Query", description: "Orchestrates RAG retrieval with context-aware KB injection" },
-  { name: "Triage", description: "Routes queries to the most capable model" },
-  { name: "Curator", description: "Manages knowledge quality and metadata enrichment" },
-  { name: "Rectify", description: "Detects and corrects outdated or conflicting knowledge" },
-  { name: "Audit", description: "Monitors system health and data integrity" },
-  { name: "Maintenance", description: "Handles cleanup, deduplication, and optimization" },
-  { name: "Hallucination", description: "Validates claims against your knowledge base" },
-  { name: "Memory", description: "Manages long-term conversational memory" },
-  { name: "Self-RAG", description: "Self-reflective retrieval for higher accuracy" },
-]
+/* ── Feature categories with casual + technical copy ── */
 
-const FEATURES = [
+const CATEGORIES = [
   {
-    icon: Search,
-    title: "Hybrid Search",
-    description:
-      "BM25s with stemming + ChromaDB vector search. Semantic chunking preserves context across document boundaries.",
-    tag: "Retrieval",
+    title: "Retrieval & RAG",
+    badge: "Core",
+    features: [
+      {
+        icon: Layers,
+        title: "Unified RAG Modes",
+        casual: "Three retrieval strategies that adapt to your question — manual control, smart auto-detection, or fully customizable weights.",
+        technical: "Manual (pass-through), Smart (parallel KB + memory + external recall with source_breakdown), Custom Smart (Pro — per-source weights, memory type filters). Orchestrator wraps the 22-step agent_query pipeline.",
+      },
+      {
+        icon: Search,
+        title: "Hybrid Search",
+        casual: "Combines keyword matching with AI-powered understanding for more accurate results than either approach alone.",
+        technical: "BM25s stemmed keyword index + Snowflake Arctic v1.5 ONNX embeddings (768-dim Matryoshka). Per-chunk retrieval profiles adjust vector/keyword weights adaptively (keyword 70/30 for structured docs, vector 70/30 for prose).",
+      },
+      {
+        icon: Cpu,
+        title: "Cross-Encoder Reranking",
+        casual: "Results are re-ranked by a specialized AI model that deeply compares each result to your question.",
+        technical: "ms-marco-MiniLM-L-6-v2 ONNX cross-encoder. Profile-aware weights (20% CE / 80% original for keyword-strategy docs). Three modes: cross_encoder, llm_rerank, off.",
+      },
+      {
+        icon: RefreshCw,
+        title: "Adaptive Pipeline",
+        casual: "The system automatically adjusts how hard it searches based on the complexity of your question.",
+        technical: "8-stage pipeline: adaptive retrieval gate → query decomposition (max 4 sub-queries) → hybrid search → profile scoring → reranking → MMR diversity (lambda 0.7) → intelligent assembly → semantic cache (int8 quantized HNSW).",
+      },
+    ],
   },
   {
-    icon: Eye,
-    title: "Streaming Verification",
-    description:
-      "Real-time claim verification as the LLM responds. Four claim types: evasion, citation, recency, and ignorance detection.",
-    tag: "Verification",
+    title: "Verification",
+    badge: "Core",
+    features: [
+      {
+        icon: ShieldCheck,
+        title: "Real-Time Claim Verification",
+        casual: "Every AI response is automatically checked for accuracy. See inline badges showing which claims are confirmed.",
+        technical: "4 claim types (factual, recency, evasion, citation). Streaming SSE with per-claim confidence. 4-level verification cascade: KB → external data sources → cross-model (GPT-4o Mini) → web search (Grok). Monte Carlo evaluation harness with 83-claim corpus.",
+      },
+      {
+        icon: Eye,
+        title: "Inline Verification UI",
+        casual: "Click any footnote marker to see the source, confidence score, and reasoning behind the verification.",
+        technical: "ClaimOverlay popovers with source attribution. Footnote superscripts with pointer-events-auto. Expert mode (Grok 4) for re-verification. Per-message verification selection.",
+      },
+    ],
   },
   {
-    icon: RefreshCw,
-    title: "Self-RAG Validation",
-    description:
-      "Self-reflective retrieval-augmented generation. The system validates its own retrieval quality before responding.",
-    tag: "Quality",
+    title: "Memory & Learning",
+    badge: "Core",
+    features: [
+      {
+        icon: Brain,
+        title: "6-Type Memory Layer",
+        casual: "Cerid remembers facts, decisions, preferences, project context, time-sensitive info, and conversation insights.",
+        technical: "Salience formula: base_similarity × source_authority × recency_decay × access_boost × type_weight. FSRS-inspired power-law decay for decisions. Memory recall fires alongside KB query in auto-inject with 500ms timeout.",
+      },
+      {
+        icon: Database,
+        title: "Session Dedup",
+        casual: "The system tracks what it's already shown you, so follow-up questions get fresh context instead of repeating old information.",
+        technical: "injectedHistoryRef tracks artifact:chunk pairs per conversation session. Prior-context note tells the LLM what was shown in earlier turns. History resets on conversation change.",
+      },
+    ],
   },
   {
-    icon: Zap,
-    title: "Smart Model Routing",
-    description:
-      "Three-way routing with capability-based model scoring. Direct-to-OpenRouter chat proxy. Proactive model switching on ignorance detection.",
-    tag: "Routing",
+    title: "Models & Infrastructure",
+    badge: "Core",
+    features: [
+      {
+        icon: Bot,
+        title: "Bring Your Own Model",
+        casual: "Use any AI model from any provider. Claude, GPT, Gemini, Llama — or run a free local model.",
+        technical: "OpenRouter multi-provider routing. Smart capability-based model scoring with three-way routing (manual/recommend/auto). Proactive model switch on ignorance detection.",
+      },
+      {
+        icon: Sparkles,
+        title: "Ollama Local LLM",
+        casual: "Install a free local AI model with a guided wizard. 6 of 8 pipeline tasks run locally at zero cost.",
+        technical: "Guided install wizard with copy-to-clipboard + auto-detect polling. host.docker.internal fallback for Docker↔native. 6/8 stages local (claim extraction, query decomposition, topic extraction, memory resolution, simple verification, reranking). Per-stage circuit breakers.",
+      },
+      {
+        icon: Network,
+        title: "Resilient Architecture",
+        casual: "If any component slows down, the system gracefully adapts rather than failing completely.",
+        technical: "Circuit breakers on all Bifrost + Neo4j calls. 5-tier graceful degradation (full → lite → direct → cached → offline). Shared httpx connection pool. Distributed request tracing via X-Request-ID.",
+      },
+    ],
   },
   {
-    icon: FileText,
-    title: "Universal Ingestion",
-    description:
-      "PDF, Office, email, ebooks, structured data. Watch directories for automatic ingestion. Drag-and-drop in the UI.",
-    tag: "Ingestion",
-  },
-  {
-    icon: GitBranch,
-    title: "Knowledge Graph",
-    description:
-      "Neo4j-backed relationships between artifacts. Domain taxonomy, quality badges, tag vocabulary with typeahead.",
-    tag: "Graph",
-  },
-  {
-    icon: Layers,
-    title: "Context-Aware Chat",
-    description:
-      "Corrections, token-budget KB injection, semantic dedup. Smart KB suggestions surface relevant context automatically.",
-    tag: "Chat",
-  },
-  {
-    icon: MessageSquare,
-    title: "27 MCP Tools",
-    description:
-      "Full Model Context Protocol integration. Query, ingest, search, manage taxonomy, web search, memory recall, and more — all via MCP.",
-    tag: "Integration",
-  },
-  {
-    icon: Network,
-    title: "Circuit Breakers",
-    description:
-      "All Bifrost and Neo4j calls protected by circuit breakers. Graceful degradation when services are overloaded.",
-    tag: "Reliability",
-  },
-  {
-    icon: Layers,
-    title: "Advanced RAG Pipeline",
-    description:
-      "6-stage adaptive pipeline: retrieval gate, query decomposition, hybrid search, MMR diversity, late interaction scoring, and semantic cache.",
-    tag: "Pipeline",
-  },
-  {
-    icon: Cpu,
-    title: "Cross-Encoder Reranking",
-    description:
-      "ONNX-accelerated cross-encoder with three modes. Blends neural reranking with original scores for fine-grained relevance.",
-    tag: "Retrieval",
-  },
-  {
-    icon: FileText,
-    title: "Contextual Chunking",
-    description:
-      "LLM-generated situational summaries prepended to each chunk. Richer context for more precise retrieval hits.",
-    tag: "Ingestion",
-  },
-  {
-    icon: Zap,
-    title: "Semantic Cache",
-    description:
-      "HNSW-indexed query cache with quantized int8 embeddings. O(log n) lookup skips the full pipeline for repeated queries.",
-    tag: "Performance",
-  },
-  {
-    icon: HardDrive,
-    title: "Async Batch Ingestion",
-    description:
-      "Non-blocking file ingestion with asyncio. Watch-directory queue pattern processes uploads without blocking the API.",
-    tag: "Ingestion",
-  },
-  {
-    icon: Brain,
-    title: "Memory Salience",
-    description:
-      "6-type memory classification with per-type decay models. Empirical facts never decay, conversations fade fast, decisions use power-law long-tail recall.",
-    tag: "Memory",
+    title: "Import & Management",
+    badge: "Core",
+    features: [
+      {
+        icon: FolderOpen,
+        title: "Bulk Folder Import",
+        casual: "Scan an entire folder, preview what will be imported, then confirm. Handles zip files and filters junk automatically.",
+        technical: "Preview with estimation (chunks, storage). Archive extraction (zip/tar.gz). Junk filtering (DS_Store, temp files, Office locks, macOS resource forks). SSE progress streaming. Pause/resume/cancel. Batch limit 100.",
+      },
+      {
+        icon: FileText,
+        title: "Universal Parsing",
+        casual: "PDFs, Word docs, Excel, emails, ebooks, plain text, code — Cerid handles them all.",
+        technical: "pdfplumber with table extraction + Markdown serialization. Parsers: PDF, DOCX, XLSX, CSV, TXT, MD, EML, MBOX, EPUB, RTF. OCR/audio/vision via Pro plugins. Per-chunk retrieval profiles computed at ingest time.",
+      },
+      {
+        icon: Lock,
+        title: "Multi-KB Namespace",
+        casual: "Organize knowledge into separate spaces that don't mix. Each namespace has its own search index.",
+        technical: "KB_NAMESPACE env var. collection_name(domain, namespace) with backward-compatible legacy format. BM25 namespaced directory layout. ChromaDB batch writes (5000 max). BM25 LRU eviction at 8 domains.",
+      },
+    ],
   },
 ]
 
@@ -149,154 +138,89 @@ export default function FeaturesPage() {
   return (
     <>
       {/* Hero */}
-      <section className="bg-gradient-to-b from-background to-muted/30 py-20">
+      <section className="bg-circuit py-24 border-b divider-gold">
         <div className="mx-auto max-w-6xl px-6 text-center">
+          <BrandShield variant="vault" size={48} className="mx-auto mb-6" />
           <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
             Features
           </h1>
           <p className="mx-auto mt-4 max-w-2xl text-lg text-muted-foreground">
-            A complete AI knowledge system with retrieval, verification,
-            intelligent agents, and a knowledge graph — all running locally.
+            Every capability, from casual use to enterprise deployment.
+            Click any feature for the technical details.
           </p>
         </div>
       </section>
 
-      {/* Feature Grid */}
-      <section className="py-16">
-        <div className="mx-auto max-w-6xl px-6">
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {FEATURES.map((feature, i) => (
-              <Card
-                key={feature.title}
-                className="animate-in fade-in slide-in-from-bottom-2 fill-mode-both border-border bg-card"
-                style={{ animationDelay: `${i * 80}ms`, animationDuration: "500ms" }}
-              >
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <feature.icon className="h-6 w-6 text-primary" />
-                    <Badge variant="secondary" className="text-xs">
-                      {feature.tag}
-                    </Badge>
-                  </div>
-                  <CardTitle className="mt-3 text-lg">{feature.title}</CardTitle>
-                  <CardDescription>{feature.description}</CardDescription>
-                </CardHeader>
-              </Card>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* 6-Stage Pipeline */}
-      <section className="border-t border-border bg-muted/50 py-16">
-        <div className="mx-auto max-w-6xl px-6">
-          <div className="text-center">
-            <h2 className="text-3xl font-bold tracking-tight">
-              6-Stage Retrieval Pipeline
-            </h2>
-            <p className="mx-auto mt-4 max-w-2xl text-muted-foreground">
-              Every query passes through an adaptive pipeline that maximizes
-              relevance while minimizing latency.
-            </p>
-          </div>
-          <div className="mx-auto mt-10 flex max-w-4xl flex-wrap items-center justify-center gap-2 text-sm">
-            {[
-              { label: "Adaptive Gate", desc: "Complexity classification" },
-              { label: "Query Decomposition", desc: "Parallel sub-queries" },
-              { label: "Hybrid Search", desc: "BM25s + vectors" },
-              { label: "MMR Diversity", desc: "Non-redundant results" },
-              { label: "Late Interaction", desc: "Token-level scoring" },
-              { label: "Semantic Cache", desc: "O(log n) lookup" },
-            ].map((stage, i) => (
-              <div key={stage.label} className="flex items-center gap-2">
-                <div className="rounded-lg border border-brand/30 bg-brand/5 px-3 py-2 text-center">
-                  <p className="font-medium">{stage.label}</p>
-                  <p className="text-xs text-muted-foreground">{stage.desc}</p>
-                </div>
-                {i < 5 && <span className="text-muted-foreground">→</span>}
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Agents */}
-      <section className="border-t border-border py-16">
-        <div className="mx-auto max-w-6xl px-6">
-          <div className="text-center">
-            <div className="inline-flex items-center gap-2 text-primary">
-              <Bot className="h-5 w-5" />
-              <span className="text-sm font-semibold uppercase tracking-wider">
-                Agent System
-              </span>
+      {/* Feature categories */}
+      {CATEGORIES.map((cat) => (
+        <section key={cat.title} className="py-20 border-b border-border">
+          <div className="mx-auto max-w-6xl px-6">
+            <div className="flex items-center gap-3 mb-10">
+              <h2 className="text-2xl font-bold tracking-tight">{cat.title}</h2>
+              <Badge variant="outline" className="text-[10px] uppercase tracking-wider text-brand border-brand/30">
+                {cat.badge}
+              </Badge>
             </div>
-            <h2 className="mt-3 text-3xl font-bold tracking-tight">
-              9 intelligent agents
-            </h2>
-            <p className="mx-auto mt-4 max-w-2xl text-muted-foreground">
-              Specialized agents collaborate to ensure high-quality retrieval,
-              verification, and knowledge management.
-            </p>
-          </div>
 
-          <div className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {AGENTS.map((agent) => (
-              <div
-                key={agent.name}
-                className="rounded-lg border border-border bg-card p-4"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10 text-primary">
-                    <Cpu className="h-4 w-4" />
-                  </div>
-                  <h3 className="font-semibold">{agent.name}</h3>
-                </div>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  {agent.description}
-                </p>
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+              {cat.features.map((f) => (
+                <Card key={f.title} className="group border-border bg-card transition-all hover:border-brand/30">
+                  <CardHeader className="space-y-3">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand group-hover:bg-brand/20 transition-colors">
+                        <f.icon className="h-5 w-5" />
+                      </div>
+                      <CardTitle className="text-base">{f.title}</CardTitle>
+                    </div>
+                    <p className="text-sm leading-relaxed text-foreground/90">{f.casual}</p>
+                    <details className="group/details">
+                      <summary className="cursor-pointer text-xs font-medium text-brand hover:text-brand/80 transition-colors">
+                        Technical details
+                      </summary>
+                      <p className="mt-2 text-xs leading-relaxed text-muted-foreground font-mono">
+                        {f.technical}
+                      </p>
+                    </details>
+                  </CardHeader>
+                </Card>
+              ))}
+            </div>
+          </div>
+        </section>
+      ))}
+
+      {/* Agents grid */}
+      <section className="py-20 bg-muted/20 border-b divider-gold">
+        <div className="mx-auto max-w-6xl px-6">
+          <h2 className="text-2xl font-bold tracking-tight mb-10">10 AI Agents</h2>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
+            {[
+              "Query", "Decomposer", "Assembler", "Triage", "Curator",
+              "Rectify", "Audit", "Maintenance", "Memory", "Hallucination",
+            ].map((name) => (
+              <div key={name} className="rounded-lg border border-border bg-card px-3 py-2.5 text-center">
+                <Bot className="mx-auto h-4 w-4 text-brand mb-1" />
+                <p className="text-xs font-medium">{name}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* Architecture */}
-      <section className="py-16">
-        <div className="mx-auto max-w-6xl px-6">
-          <div className="text-center">
-            <h2 className="text-3xl font-bold tracking-tight">
-              Architecture
-            </h2>
-            <p className="mx-auto mt-4 max-w-2xl text-muted-foreground">
-              Six core services working together on a shared Docker network.
-            </p>
-          </div>
-
-          <div className="mt-10 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {[
-              { icon: Brain, name: "MCP Server", port: "8888", tech: "FastAPI / Python 3.11" },
-              { icon: Zap, name: "Bifrost Gateway", port: "8080", tech: "Semantic intent routing" },
-              { icon: HardDrive, name: "ChromaDB", port: "8001", tech: "Vector database" },
-              { icon: GitBranch, name: "Neo4j", port: "7474", tech: "Graph database" },
-              { icon: Database, name: "Redis", port: "6379", tech: "Cache + audit log" },
-              { icon: Shield, name: "React GUI", port: "3000", tech: "React 19 + Vite + nginx" },
-            ].map((svc) => (
-              <div
-                key={svc.name}
-                className="flex items-start gap-4 rounded-lg border border-border bg-card p-4"
-              >
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-                  <svc.icon className="h-5 w-5" />
-                </div>
-                <div>
-                  <h3 className="font-semibold">{svc.name}</h3>
-                  <p className="text-sm text-muted-foreground">
-                    Port {svc.port} &middot; {svc.tech}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
+      {/* CTA */}
+      <section className="py-20 text-center">
+        <div className="mx-auto max-w-3xl px-6">
+          <h2 className="text-2xl font-bold">See it in action</h2>
+          <p className="mt-3 text-muted-foreground">Clone the repo and have Cerid running in under five minutes.</p>
+          <Link
+            href="https://github.com/Cerid-AI/cerid-ai"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-8 inline-flex h-11 items-center gap-2 rounded-lg bg-brand px-6 text-sm font-semibold text-brand-foreground shadow-lg shadow-brand/20 hover:bg-brand/90 transition-all"
+          >
+            Get Started
+            <ArrowRight className="h-4 w-4" />
+          </Link>
         </div>
       </section>
     </>

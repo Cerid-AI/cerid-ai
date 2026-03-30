@@ -148,3 +148,53 @@
 .text-gold-light { color: oklch(0.85 0.10 85); }
 .border-gold { border-color: oklch(0.78 0.12 85 / 50%); }
 .bg-gold\/10 { background: oklch(0.78 0.12 85 / 10%); }
+
+/* --- Brand wordmark gradient (#00E5D8 → #7FF9E8) --- */
+.text-brand-gradient {
+  background: linear-gradient(135deg, #00E5D8, #7FF9E8);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* --- Teal glow animation (shield / hero elements) --- */
+@keyframes teal-pulse {
+  0%, 100% { box-shadow: 0 0 20px #00E5D8/15, 0 0 60px #00E5D8/5; }
+  50% { box-shadow: 0 0 30px #00E5D8/25, 0 0 80px #00E5D8/10; }
+}
+.glow-teal {
+  animation: teal-pulse 4s ease-in-out infinite;
+}
+
+/* --- Gold shimmer for premium elements --- */
+@keyframes gold-shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+.shimmer-gold {
+  background: linear-gradient(90deg, transparent 25%, #D4AF37/20 50%, transparent 75%);
+  background-size: 200% 100%;
+  animation: gold-shimmer 3s ease-in-out infinite;
+}
+
+/* --- Subtle circuit-board background pattern --- */
+.bg-circuit {
+  background-image:
+    radial-gradient(circle at 25% 25%, #00E5D8/3 1px, transparent 1px),
+    radial-gradient(circle at 75% 75%, #00E5D8/3 1px, transparent 1px);
+  background-size: 60px 60px;
+}
+
+/* --- Section divider with gold line --- */
+.divider-gold {
+  border-image: linear-gradient(90deg, transparent, #D4AF37/40, transparent) 1;
+}
+
+/* --- Floating animation for hero images --- */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-8px); }
+}
+.float {
+  animation: float 6s ease-in-out infinite;
+}
