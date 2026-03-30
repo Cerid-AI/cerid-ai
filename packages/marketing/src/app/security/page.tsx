@@ -79,18 +79,24 @@ export default function SecurityPage() {
   return (
     <>
       {/* Hero */}
-      <section className="bg-gradient-to-b from-background to-muted/30 py-20">
-        <div className="mx-auto max-w-6xl px-6 text-center">
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
-            <Shield className="h-8 w-8 text-primary" />
+      <section className="bg-circuit py-24 border-b divider-gold">
+        <div className="mx-auto max-w-6xl px-6">
+          <div className="grid grid-cols-1 items-center gap-12 md:grid-cols-2">
+            <div>
+              <div className="gold-line w-16 mb-6" />
+              <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
+                Security & Privacy
+              </h1>
+              <p className="mt-4 max-w-lg text-lg text-muted-foreground">
+                Privacy is not a feature — it&apos;s the architecture. Cerid AI is
+                designed from the ground up to keep your data under your control.
+              </p>
+            </div>
+            <div className="flex justify-center gap-4">
+              <img src="/badge-zerotrust.jpg" alt="Audit & Zero Trust" className="w-36 rounded-xl border border-border/30 shadow-lg" />
+              <img src="/badge-ephemeral.jpg" alt="Ephemeral Data Injection" className="w-36 rounded-xl border border-border/30 shadow-lg" />
+            </div>
           </div>
-          <h1 className="mt-6 text-4xl font-bold tracking-tight sm:text-5xl">
-            Security & Privacy
-          </h1>
-          <p className="mx-auto mt-4 max-w-2xl text-lg text-muted-foreground">
-            Privacy is not a feature — it is the architecture. Cerid AI is
-            designed from the ground up to keep your data under your control.
-          </p>
         </div>
       </section>
 
@@ -111,6 +117,14 @@ export default function SecurityPage() {
               </Card>
             ))}
           </div>
+        </div>
+      </section>
+
+      {/* Brand showcase */}
+      <section className="border-t divider-gold bg-muted/20 py-16">
+        <div className="mx-auto max-w-4xl px-6 flex flex-wrap justify-center gap-6">
+          <img src="/secure-intel.jpg" alt="Secure Intelligence" className="w-64 rounded-xl border border-border/30 shadow-lg" loading="lazy" />
+          <img src="/badge-classrag.jpg" alt="Classification-Aware RAG" className="w-40 rounded-xl border border-border/30 shadow-lg" loading="lazy" />
         </div>
       </section>
 

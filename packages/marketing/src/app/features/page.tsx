@@ -222,8 +222,9 @@ export default function FeaturesPage() {
       </section>
 
       {/* CTA */}
-      <section className="py-20 text-center">
+      <section className="py-20 text-center bg-circuit">
         <div className="mx-auto max-w-3xl px-6">
+          <img src="/hero-tagline.jpg" alt="Cerid — Your Private AI Knowledge Companion" className="mx-auto mb-8 w-full max-w-md rounded-xl border border-border/30 shadow-xl" loading="lazy" />
           <h2 className="text-2xl font-bold">See it in action</h2>
           <p className="mt-3 text-muted-foreground">Clone the repo and have Cerid running in under five minutes.</p>
           <Link

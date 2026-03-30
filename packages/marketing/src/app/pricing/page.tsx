@@ -155,6 +155,26 @@ export default function PricingPage() {
         </div>
       </section>
 
+      {/* Enterprise showcase */}
+      <section className="border-t divider-gold bg-circuit py-20">
+        <div className="mx-auto max-w-5xl px-6">
+          <div className="grid grid-cols-1 items-center gap-12 md:grid-cols-2">
+            <div>
+              <div className="gold-line w-16 mb-6" />
+              <h2 className="text-2xl font-bold tracking-tight">Enterprise Ready</h2>
+              <p className="mt-4 text-muted-foreground">
+                Cerid Vault brings IC-grade security to your knowledge infrastructure.
+                Multi-user auth, audit logging, SSO, and SLA support.
+              </p>
+              <img src="/vault-wordmark.jpg" alt="CERID VAULT" className="mt-6 w-full max-w-xs rounded-lg border border-gold/30 shadow-lg" loading="lazy" />
+            </div>
+            <div className="flex justify-center">
+              <img src="/shield-3d.jpg" alt="Cerid Vault 3D Shield" className="w-full max-w-sm rounded-xl shadow-xl" loading="lazy" />
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* BYOK */}
       <section className="border-t divider-gold bg-muted/20 py-20">
         <div className="mx-auto max-w-4xl px-6 text-center">

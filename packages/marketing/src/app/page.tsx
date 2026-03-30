@@ -52,6 +52,7 @@ const FEATURES = [
     title: "Learns From You",
     summary: "Cerid remembers your preferences, decisions, and key facts. Each conversation makes the system smarter.",
     detail: "6-type memory salience scoring: empirical facts, decisions, preferences, project context, temporal events, conversational insights. Memory recall auto-injects alongside KB context.",
+    image: "/badge-agents.jpg",
   },
   {
     iconName: "Lock",
@@ -65,6 +66,7 @@ const FEATURES = [
     title: "Easy Import",
     summary: "Point at a folder — Cerid scans, previews, and indexes everything. PDFs, docs, code, notes, even zip archives.",
     detail: "Bulk folder scan with estimation preview. Archive extraction (zip/tar). Automatic junk filtering. SSE progress streaming with pause/resume controls. 30+ file types supported.",
+    image: "/badge-architecture.jpg",
   },
 ]
 
