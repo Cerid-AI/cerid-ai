@@ -25,7 +25,7 @@ const PLANS = [
     ctaHref: "https://github.com/Cerid-AI/cerid-ai",
     ctaStyle: "border border-border bg-background hover:bg-accent hover:text-accent-foreground",
     features: [
-      "10 AI agents, 26 MCP tools",
+      "10 AI agents, 21 MCP tools",
       "Unified RAG (Manual + Smart modes)",
       "Hybrid BM25 + vector search",
       "Per-chunk retrieval profiles",
@@ -76,7 +76,7 @@ const PLANS = [
     features: [
       "Everything in Pro",
       "Multi-user JWT auth + tenant isolation",
-      "SSO / SAML integration",
+      "SSO / SAML integration (planned)",
       "Enterprise audit logging",
       "SLA & priority support",
       "Custom deployment assistance",

@@ -13,30 +13,36 @@ import traceback
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-import sentry_sdk
-
-
-def _sentry_before_send(event, hint):
-    """Use CeridError.error_code as Sentry fingerprint for better grouping."""
-    exc_info = hint.get("exc_info")
-    if exc_info:
-        _, exc, _ = exc_info
-        if hasattr(exc, "error_code"):
-            event["fingerprint"] = [exc.error_code]
-    return event
-
-
-sentry_sdk.init(
-    dsn=os.environ.get("SENTRY_DSN"),
-    environment=os.environ.get("SENTRY_ENVIRONMENT", "development"),
-    release=os.environ.get("SENTRY_RELEASE"),
-    send_default_pii=False,  # Privacy-first: don't send API keys, IPs, or request bodies
-    traces_sample_rate=0.1,
-    profile_session_sample_rate=1.0,
-    profile_lifecycle="trace",
-    enable_logs=True,
-    before_send=_sentry_before_send,
+# Sentry is OPT-IN only — requires both SENTRY_DSN and ENABLE_SENTRY=true.
+# When disabled, no telemetry data leaves the machine.
+_sentry_enabled = (
+    os.environ.get("ENABLE_SENTRY", "false").lower() in ("true", "1")
+    and os.environ.get("SENTRY_DSN", "")
 )
+
+if _sentry_enabled:
+    import sentry_sdk
+
+    def _sentry_before_send(event, hint):
+        """Use CeridError.error_code as Sentry fingerprint for better grouping."""
+        exc_info = hint.get("exc_info")
+        if exc_info:
+            _, exc, _ = exc_info
+            if hasattr(exc, "error_code"):
+                event["fingerprint"] = [exc.error_code]
+        return event
+
+    sentry_sdk.init(
+        dsn=os.environ.get("SENTRY_DSN"),
+        environment=os.environ.get("SENTRY_ENVIRONMENT", "development"),
+        release=os.environ.get("SENTRY_RELEASE"),
+        send_default_pii=False,
+        traces_sample_rate=0.1,
+        profile_session_sample_rate=1.0,
+        profile_lifecycle="trace",
+        enable_logs=True,
+        before_send=_sentry_before_send,
+    )
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware

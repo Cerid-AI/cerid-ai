@@ -26,7 +26,7 @@ const DOC_SECTIONS = [
     icon: Code2,
     docs: [
       { name: "REST API Reference", desc: "All 178 endpoints across 32 routers with request/response shapes", href: `${GITHUB}/docs/API_REFERENCE.md` },
-      { name: "MCP Tools", desc: "26 Model Context Protocol tools for AI agent integration", href: `${GITHUB}/docs/API_REFERENCE.md#mcp-tools` },
+      { name: "MCP Tools", desc: "21 core MCP tools for knowledge base, memory, and verification", href: `${GITHUB}/docs/API_REFERENCE.md#mcp-tools` },
       { name: "SDK Endpoints", desc: "Stable versioned API for external consumers", href: `${GITHUB}/docs/API_REFERENCE.md#sdk-api` },
     ],
   },

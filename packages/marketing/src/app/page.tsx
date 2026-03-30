@@ -57,7 +57,7 @@ const FEATURES = [
   {
     iconName: "Lock",
     title: "Totally Private",
-    summary: "Your data never leaves your computer. No cloud. No telemetry. Only the query context you choose goes to the LLM.",
+    summary: "Your data never leaves your computer. No cloud. Telemetry is opt-in and off by default. Only the query context you choose goes to the LLM.",
     detail: "Self-hosted Docker stack with ChromaDB, Neo4j, Redis — all on your machine. Optional Fernet encryption at rest. Open source Apache-2.0.",
     image: "/badge-secure.jpg",
   },
@@ -88,7 +88,7 @@ const PERSONAS = [
     icon: Code2,
     title: "Developers",
     highlight: "Self-host with Docker. Extend with MCP tools. Full API access.",
-    bullets: ["26 MCP tools, 10 AI agents, 32 API routers", "Plugin system with BSL-1.1 commercial tier", "Ollama local LLM for $0 pipeline costs"],
+    bullets: ["21 core MCP tools, 10 AI agents, 32 API routers", "Plugin system with BSL-1.1 commercial tier", "Ollama local LLM for $0 pipeline costs"],
   },
 ]
 
@@ -156,7 +156,7 @@ export default function Home() {
               {[
                 { value: "100%", label: "Private" },
                 { value: "30+", label: "File Types" },
-                { value: "5 min", label: "Setup" },
+                { value: "Quick", label: "Setup" },
                 { value: "Free", label: "Open Source" },
               ].map((s) => (
                 <div key={s.label} className="min-w-[70px]">
@@ -232,7 +232,7 @@ export default function Home() {
               <div className="gold-line w-16 mb-6" />
               <h2 className="text-3xl font-bold tracking-tight">Privacy by design</h2>
               <p className="mt-4 text-lg text-muted-foreground">
-                Your knowledge base stays on your machine. Cerid never phones home.
+                Your knowledge base stays on your machine. Telemetry is opt-in and disabled by default.
               </p>
               <ul className="mt-8 space-y-5">
                 {[

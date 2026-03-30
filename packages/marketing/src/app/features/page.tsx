@@ -220,7 +220,7 @@ export default function FeaturesPage() {
               <h2 className="text-2xl font-bold">See it in action</h2>
               <p className="mt-3 text-muted-foreground">
                 Clone the repo and have Cerid running in under five minutes.
-                10 agents, 26 tools, 32 API routers — all yours.
+                10 agents, 21 core tools, 32 API routers — all yours.
               </p>
               <Link
                 href="https://github.com/Cerid-AI/cerid-ai"

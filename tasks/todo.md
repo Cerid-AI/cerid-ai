@@ -110,6 +110,54 @@ Roadmap covers two tracks: **Infrastructure** (deployment, BYOK, packaging, repo
   - Async, non-blocking, falls back to heuristic scoring
   - `ENABLE_AI_TRIAGE` env var (default: true when Ollama enabled)
 
+- [ ] **Direct Provider SDKs**
+  - Add direct API key support for Anthropic, OpenAI, Google (bypass OpenRouter)
+  - Provider selection in settings: OpenRouter (default) vs direct API
+  - Key validation per provider
+  - Preserves OpenRouter as fallback aggregator
+
+- [ ] **Expanded File Type Handling**
+  - Specialized parsers for code files (AST extraction for Python, JS/TS, Go, Rust)
+  - Table-aware Excel parsing (preserve sheet structure, formulas as metadata)
+  - Image OCR for scanned PDFs (Pro tier, requires Tesseract or LLM vision)
+  - Audio transcription for meeting notes (Pro tier, requires Whisper)
+  - Markdown frontmatter extraction (YAML/TOML headers → metadata)
+
+- [ ] **Pro Tier Purchase Path**
+  - Stripe integration for Pro tier licensing
+  - License key validation endpoint
+  - Self-serve upgrade flow from Core → Pro in Settings
+  - Usage-based or per-seat pricing model
+  - Waitlist/early access program as interim
+
+- [ ] **Startup Wizard & Setup Streamlining**
+  - Web-based first-run wizard (runs before main app if no config detected)
+  - Docker detection and auto-install guidance
+  - API key setup with provider validation
+  - Ollama install option integrated into wizard
+  - Remove age encryption requirement for first-time setup
+  - Pre-built Docker images on GitHub Container Registry (skip local build)
+  - Target: actual 5-minute setup for Docker-ready users
+
+- [ ] **SSO / SAML Implementation (Enterprise)**
+  - SAML 2.0 SP implementation with IdP metadata import
+  - Integration with common IdPs (Okta, Azure AD, OneLogin)
+  - Tenant-scoped SSO configuration
+  - Currently scaffolded as feature flag only — needs full implementation
+
+- [ ] **Separate Trading Tools**
+  - Move 5 trading MCP tools to cerid-trading-agent repo
+  - Trading tools become an external integration via SDK
+  - Core Cerid repo ships 21 MCP tools (no trading dependency)
+  - Trading agent connects via A2A protocol or SDK endpoints
+
+- [ ] **Bulk Import Remaining Features**
+  - Ollama content triage (score 1-5 for value assessment)
+  - Persistent import queue (Redis-backed, survives restarts)
+  - File type error recovery (magic byte sniffing, fallback parsing)
+  - Import progress in Knowledge Console UI
+  - Scheduled folder re-scan (cron-based watch)
+
 ### Execution Dependencies
 
 - **Phases A + B** can run in parallel (infrastructure vs settings)
