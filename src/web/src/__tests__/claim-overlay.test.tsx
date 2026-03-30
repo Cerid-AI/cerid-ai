@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { render, screen, fireEvent, cleanup } from "@testing-library/react"
+import { render, screen, fireEvent, cleanup, act } from "@testing-library/react"
 import { ClaimOverlay } from "@/components/chat/claim-overlay"
 import type { HallucinationClaim } from "@/lib/types"
 import type { ClaimSpan } from "@/lib/verification-utils"
@@ -56,7 +56,10 @@ describe("ClaimOverlay", () => {
     })
   })
 
-  it("renders popover on footnote click", () => {
+  /** Flush requestAnimationFrame used by claim-overlay listener attachment. */
+  const flushRAF = () => act(async () => { await new Promise((r) => requestAnimationFrame(r)) })
+
+  it("renders popover on footnote click", async () => {
     const container = createContainerWithMark()
     const claim = makeClaim()
     const span = makeSpan()
@@ -68,6 +71,8 @@ describe("ClaimOverlay", () => {
         claimSpans={[span]}
       />,
     )
+
+    await flushRAF()
 
     // Click the footnote superscript (marks are not clickable)
     const footnote = container.querySelector("[data-cerid-footnote]") as HTMLElement
@@ -82,7 +87,7 @@ describe("ClaimOverlay", () => {
     document.body.removeChild(container)
   })
 
-  it("shows correct claim status badge in popover", () => {
+  it("shows correct claim status badge in popover", async () => {
     const container = createContainerWithMark()
     const claim = makeClaim({ status: "unverified", verification_method: "cross_model" })
     const span = makeSpan({ displayStatus: "refuted" })
@@ -95,13 +100,15 @@ describe("ClaimOverlay", () => {
       />,
     )
 
+    await flushRAF()
+
     fireEvent.click(container.querySelector("[data-cerid-footnote]")!)
     expect(screen.getByText("refuted")).toBeInTheDocument()
 
     document.body.removeChild(container)
   })
 
-  it("shows source filename when source_artifact_id is present", () => {
+  it("shows source filename when source_artifact_id is present", async () => {
     const container = createContainerWithMark()
     const onArtifactClick = vi.fn()
     const claim = makeClaim({ source_filename: "notes.pdf", source_artifact_id: "art-99" })
@@ -115,6 +122,8 @@ describe("ClaimOverlay", () => {
         onArtifactClick={onArtifactClick}
       />,
     )
+
+    await flushRAF()
 
     fireEvent.click(container.querySelector("[data-cerid-footnote]")!)
     // Expand details to see source info
@@ -138,7 +147,7 @@ describe("ClaimOverlay", () => {
     document.body.removeChild(container)
   })
 
-  it("dismisses popover on Escape key", () => {
+  it("dismisses popover on Escape key", async () => {
     const container = createContainerWithMark()
     const claim = makeClaim()
     const span = makeSpan()
@@ -151,6 +160,8 @@ describe("ClaimOverlay", () => {
       />,
     )
 
+    await flushRAF()
+
     // Open popover
     fireEvent.click(container.querySelector("[data-cerid-footnote]")!)
     expect(screen.getByText("verified")).toBeInTheDocument()
@@ -162,7 +173,7 @@ describe("ClaimOverlay", () => {
     document.body.removeChild(container)
   })
 
-  it("shows verification method badge for cross-model claims", () => {
+  it("shows verification method badge for cross-model claims", async () => {
     const container = createContainerWithMark()
     const claim = makeClaim({ verification_method: "cross_model" })
     const span = makeSpan()
@@ -175,13 +186,15 @@ describe("ClaimOverlay", () => {
       />,
     )
 
+    await flushRAF()
+
     fireEvent.click(container.querySelector("[data-cerid-footnote]")!)
     expect(screen.getByText("cross-model")).toBeInTheDocument()
 
     document.body.removeChild(container)
   })
 
-  it("shows source snippet in popover", () => {
+  it("shows source snippet in popover", async () => {
     const container = createContainerWithMark()
     const claim = makeClaim({ source_snippet: "Paris is the capital city of France." })
     const span = makeSpan()
@@ -194,6 +207,8 @@ describe("ClaimOverlay", () => {
       />,
     )
 
+    await flushRAF()
+
     fireEvent.click(container.querySelector("[data-cerid-footnote]")!)
     // Expand details to see source snippet
     fireEvent.click(screen.getByText("More"))
@@ -202,7 +217,7 @@ describe("ClaimOverlay", () => {
     document.body.removeChild(container)
   })
 
-  it("shows similarity percentage", () => {
+  it("shows similarity percentage", async () => {
     const container = createContainerWithMark()
     const claim = makeClaim({ similarity: 0.87 })
     const span = makeSpan()
@@ -214,6 +229,8 @@ describe("ClaimOverlay", () => {
         claimSpans={[span]}
       />,
     )
+
+    await flushRAF()
 
     fireEvent.click(container.querySelector("[data-cerid-footnote]")!)
     // Expand details to see similarity

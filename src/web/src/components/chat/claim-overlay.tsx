@@ -75,24 +75,34 @@ export function ClaimOverlay({ container, claims, claimSpans, onClaimFocus, onAr
 
   // Attach listeners: click only on footnotes [N], hover tooltip on both marks and footnotes.
   // Marks (highlighted text) should not be clickable — only the superscript reference is.
+  // Use requestAnimationFrame to ensure DOM elements are settled after React render.
   useEffect(() => {
     if (!container) return
-    const marks = container.querySelectorAll<HTMLElement>("[data-cerid-claim]")
-    const footnotes = container.querySelectorAll<HTMLElement>("[data-cerid-footnote]")
 
-    // Footnotes: click + hover
-    for (const el of footnotes) {
-      el.addEventListener("click", handleMarkClick)
-      el.addEventListener("mouseenter", handleMouseEnter)
-      el.addEventListener("mouseleave", handleMouseLeave)
-    }
-    // Marks: hover tooltip only (no click — text should not be interactive)
-    for (const el of marks) {
-      el.addEventListener("mouseenter", handleMouseEnter)
-      el.addEventListener("mouseleave", handleMouseLeave)
-    }
+    let cancelled = false
+    const rafId = requestAnimationFrame(() => {
+      if (cancelled) return
+      const marks = container.querySelectorAll<HTMLElement>("[data-cerid-claim]")
+      const footnotes = container.querySelectorAll<HTMLElement>("[data-cerid-footnote]")
+
+      // Footnotes: click + hover
+      for (const el of footnotes) {
+        el.addEventListener("click", handleMarkClick)
+        el.addEventListener("mouseenter", handleMouseEnter)
+        el.addEventListener("mouseleave", handleMouseLeave)
+      }
+      // Marks: hover tooltip only (no click — text should not be interactive)
+      for (const el of marks) {
+        el.addEventListener("mouseenter", handleMouseEnter)
+        el.addEventListener("mouseleave", handleMouseLeave)
+      }
+    })
 
     return () => {
+      cancelled = true
+      cancelAnimationFrame(rafId)
+      const footnotes = container.querySelectorAll<HTMLElement>("[data-cerid-footnote]")
+      const marks = container.querySelectorAll<HTMLElement>("[data-cerid-claim]")
       for (const el of footnotes) {
         el.removeEventListener("click", handleMarkClick)
         el.removeEventListener("mouseenter", handleMouseEnter)
@@ -168,7 +178,7 @@ export function ClaimOverlay({ container, claims, claimSpans, onClaimFocus, onAr
   const claim = resolveClaimData(active.index)
   if (!claim) return null
 
-  const displayStatus = getClaimDisplayStatus(claim.status, claim.verification_method, claim.claim_type)
+  const displayStatus = getClaimDisplayStatus(claim.status, claim.verification_method, claim.claim_type, claim.reason)
   const methodLabel = verificationMethodLabel(claim.verification_method)
   const methodColor = verificationMethodColor(claim.verification_method)
 

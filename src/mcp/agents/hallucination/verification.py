@@ -960,14 +960,20 @@ async def verify_claim(
         # Also query user-confirmed memories (filtered by memory_type)
         memory_results = await _query_memories(claim, chroma_client, top_k=2)
 
-        # Merge KB results with memory results
+        # Merge KB results with memory results — but treat memories as
+        # supporting context, NOT authoritative ground truth. Memories
+        # derived from conversations may contain incorrect LLM claims.
         all_results = list(kb_results)
         for mr in memory_results:
-            # Preserve raw relevance for escalation decisions
+            # Skip feedback-loop ingested content (circular self-verification)
+            cs = mr.get("client_source", "")
+            if cs in ("feedback_loop", "folder_scanner"):
+                continue
             raw_rel = mr["relevance"]
             mr["_raw_relevance"] = raw_rel
-            # Memories get an authority boost (user-confirmed content)
-            mr["relevance"] = min(1.0, round(raw_rel + MEMORY_AUTHORITY_BOOST, 4))
+            # Reduced authority boost — memories support but don't prove
+            mr["relevance"] = min(1.0, round(raw_rel + MEMORY_AUTHORITY_BOOST * 0.5, 4))
+            mr["verification_method"] = "memory"  # tag for UI disambiguation
             all_results.append(mr)
 
         # Filter out results below verification relevance threshold

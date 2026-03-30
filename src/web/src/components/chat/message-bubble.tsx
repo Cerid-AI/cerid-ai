@@ -455,7 +455,8 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
       // Add footnote superscript after the LAST marked segment
       if (lastMark) {
         const sup = document.createElement("sup")
-        sup.className = "ml-0.5 cursor-pointer text-[10px] font-semibold text-brand hover:text-brand/80"
+        sup.className = "ml-0.5 cursor-pointer text-[10px] font-semibold text-brand hover:text-brand/80 relative z-10"
+        sup.style.pointerEvents = "auto"
         sup.textContent = `[${i + 1}]`
         sup.dataset.ceridFootnote = String(i)
         lastMark.parentNode?.insertBefore(sup, lastMark.nextSibling)

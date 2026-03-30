@@ -67,7 +67,7 @@ export function matchClaimsToText(text: string, claims: ClaimLike[], domTextCont
     const claimText = stripMarkdown(c.claim).trim()
     if (!claimText) continue
 
-    const displayStatus = getClaimDisplayStatus(c.status, c.verification_method, c.claim_type)
+    const displayStatus = getClaimDisplayStatus(c.status, c.verification_method, c.claim_type, c.reason)
     const claimLower = claimText.toLowerCase()
 
     // Tier 1: exact substring match (case-insensitive)
@@ -195,12 +195,23 @@ export function getClaimDisplayStatus(
   status: string,
   verificationMethod?: string,
   claimType?: string,
+  reason?: string,
 ): ClaimDisplayStatus {
   // Evasion claims get special orange treatment regardless of verification outcome
   if (claimType === "evasion") return "evasion"
   // Citation verification gets purple treatment
   if (claimType === "citation") return "citation"
-  if (status === "verified") return "verified"
+  if (status === "verified") {
+    // Guard: if the reason text contradicts the "verified" status,
+    // downgrade to "uncertain" — prevents conflicting trust signals
+    if (reason) {
+      const r = reason.toLowerCase()
+      if (r.includes("error") || r.includes("incorrect") || r.includes("contradict") || r.includes("inaccurate") || r.includes("wrong")) {
+        return "uncertain"
+      }
+    }
+    return "verified"
+  }
   if (
     status === "unverified" &&
     (verificationMethod === "cross_model" || verificationMethod === "web_search")
