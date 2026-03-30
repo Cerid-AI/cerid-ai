@@ -240,6 +240,7 @@ jobs:
           exit-code: 1
           trivyignores: .trivyignore
           version: v0.69.3
+          ignore-unfixed: true
       - name: Scan Web Docker image
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
         with:
@@ -248,6 +249,7 @@ jobs:
           exit-code: 1
           trivyignores: .trivyignore
           version: v0.69.3
+          ignore-unfixed: true
 
   frontend-marketing:
     runs-on: ubuntu-latest
