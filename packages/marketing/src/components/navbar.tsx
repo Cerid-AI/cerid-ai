@@ -30,15 +30,15 @@ export function Navbar() {
           : "bg-transparent"
       }`}
     >
-      <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
+      <nav className="mx-auto flex h-20 max-w-6xl items-center justify-between px-6">
         {/* Wordmark lockup */}
         <Link href="/" className="flex items-center gap-3">
-          <img src="/cerid-logo.svg" alt="Cerid" className="h-9 w-9" />
+          <img src="/cerid-logo.svg" alt="Cerid" className="h-10 w-10" />
           <div className="flex flex-col">
-            <span className="text-brand-shine text-2xl font-bold tracking-[0.18em] uppercase leading-none">
+            <span className="text-brand-shine text-4xl font-bold tracking-[0.2em] uppercase leading-none">
               CERID
             </span>
-            <span className="hidden text-[9px] font-medium tracking-widest uppercase text-muted-foreground md:block">
+            <span className="hidden text-[10px] font-medium tracking-[0.25em] uppercase text-muted-foreground md:block mt-0.5">
               Private AI Companion
             </span>
           </div>
