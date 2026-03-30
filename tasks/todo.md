@@ -158,6 +158,63 @@ Roadmap covers two tracks: **Infrastructure** (deployment, BYOK, packaging, repo
   - Import progress in Knowledge Console UI
   - Scheduled folder re-scan (cron-based watch)
 
+- [ ] **Private Mode (Ephemeral Sessions)**
+  - Toggle in toolbar or settings: "Private Mode" — nothing remembered, nothing saved
+  - Conversation not added to history, memories not extracted, feedback loop disabled
+  - Configurable security levels:
+    - Level 1 (default): no history, no memory extraction
+    - Level 2: also disable KB context injection (pure LLM, no local data exposure)
+    - Level 3: also force local-only models (Ollama), no external API calls
+    - Level 4: also clear Redis query cache on session end
+  - Visual indicator in chat panel (lock icon, muted toolbar) so user knows mode is active
+  - Session data wiped on conversation close (not just hidden)
+
+- [ ] **Conversation Management UX**
+  - Hover-reveal action buttons on each conversation in sidebar history:
+    - Delete (trash icon) — removes from history with confirmation
+    - Archive (box icon) — moves to archived state (saved but hidden from main list)
+  - Archived conversations accessible via "View archived" toggle at bottom of history
+  - Bulk select/delete for history cleanup
+  - Search within conversation history
+
+- [ ] **Pro Mode Configuration & Feature Access**
+  - Clear Pro settings pane showing all Pro-gated features with status
+  - Feature discovery: show what Pro unlocks with preview/demo for each
+  - Pro feature toggle dashboard (enable/disable individual Pro features)
+  - License key entry and validation in settings
+  - Visual distinction between Core and Pro UI elements throughout
+
+- [ ] **Agent Communication Console**
+  - Optional console-style panel (toggle from toolbar or settings)
+  - Real-time ticker-scroll showing agent activity:
+    - "Query Agent → decomposing into 3 sub-queries..."
+    - "Decomposer → searching finance domain..."
+    - "Verification Agent → checking claim 2/4 against KB..."
+  - Color-coded by agent (brand teal for retrieval, gold for verification, etc.)
+  - Collapsible/dockable panel (bottom or side position)
+  - Filterable by agent type
+  - Useful for debugging, transparency, and "seeing the intelligence work"
+
+- [ ] **Model Management & Auto-Update Detection**
+  - Dedicated model management pane in Settings (separate from pipeline settings)
+  - Shows all available models with: provider, cost, context window, capabilities
+  - Auto-detection of new model releases via OpenRouter API polling
+  - Notification badge when new models are available ("3 new models available")
+  - One-click model update: swap to newer version with capability comparison
+  - Model deprecation warnings (e.g., "GPT-4o is superseded by GPT-5.4")
+  - Cost comparison view: current model vs alternatives
+  - Prevent casual users from being stuck on outdated models
+
+- [ ] **Enterprise Feature Scaffolding**
+  - All Enterprise/Vault features should have:
+    - Feature flag in `config/features.py` (already done for most)
+    - Router endpoint stubs returning 403 with upgrade message
+    - UI placeholders in Settings showing "Available in Cerid Vault"
+    - Documentation in TIER_MATRIX.md (already done)
+  - Actual implementation deferred to future enterprise development phase
+  - Scaffolded features: SSO/SAML, advanced audit logging, SIEM export,
+    tenant management UI, compliance reporting, dedicated support portal
+
 ### Execution Dependencies
 
 - **Phases A + B** can run in parallel (infrastructure vs settings)
