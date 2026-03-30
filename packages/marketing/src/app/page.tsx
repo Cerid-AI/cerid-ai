@@ -289,38 +289,6 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ══════════════ UNDER THE HOOD (developer section) ══════════════ */}
-      <section className="py-20 border-t divider-gold bg-muted/20">
-        <div className="mx-auto max-w-6xl px-6">
-          <div className="grid grid-cols-1 items-center gap-16 md:grid-cols-2">
-            <div>
-              <div className="gold-line w-16 mb-6" />
-              <h2 className="text-3xl font-bold tracking-tight">Under the hood</h2>
-              <p className="mt-4 text-muted-foreground">For engineers who want to understand the architecture.</p>
-              <div className="mt-8 grid grid-cols-2 gap-4">
-                {[
-                  { value: "10", label: "AI Agents" },
-                  { value: "26", label: "MCP Tools" },
-                  { value: "32", label: "API Routers" },
-                  { value: "2,311+", label: "Tests" },
-                  { value: "9/9", label: "CI Green" },
-                  { value: "6/8", label: "Local Pipeline" },
-                ].map((s) => (
-                  <div key={s.label} className="rounded-lg border border-border bg-card px-4 py-3">
-                    <p className="text-lg font-bold text-brand text-glow-brand">{s.value}</p>
-                    <p className="text-xs text-muted-foreground">{s.label}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="flex flex-col items-center gap-4">
-              <img src="/architecture.jpg" alt="Extensible Architecture" className="w-full max-w-sm rounded-xl border border-border/30 shadow-xl" loading="lazy" />
-              <img src="/badge-orchestrator.jpg" alt="Local Orchestrator" className="w-32 rounded-lg border border-border/30" loading="lazy" />
-            </div>
-          </div>
-        </div>
-      </section>
-
       {/* ══════════════ CTA ══════════════ */}
       <section className="py-20 bg-circuit">
         <div className="mx-auto max-w-3xl px-6 text-center">

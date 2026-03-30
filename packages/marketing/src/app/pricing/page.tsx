@@ -155,23 +155,33 @@ export default function PricingPage() {
         </div>
       </section>
 
-      {/* Enterprise showcase */}
+      {/* Deployment */}
       <section className="border-t divider-gold bg-circuit py-20">
-        <div className="mx-auto max-w-5xl px-6">
-          <div className="grid grid-cols-1 items-center gap-12 md:grid-cols-2">
-            <div>
-              <div className="gold-line w-16 mb-6" />
-              <h2 className="text-2xl font-bold tracking-tight">Enterprise Ready</h2>
-              <p className="mt-4 text-muted-foreground">
-                Cerid Vault brings IC-grade security to your knowledge infrastructure.
-                Multi-user auth, audit logging, SSO, and SLA support.
-              </p>
-              <img src="/vault-wordmark.jpg" alt="CERID VAULT" className="mt-6 w-full max-w-xs rounded-lg border border-gold/30 shadow-lg" loading="lazy" />
-            </div>
-            <div className="flex justify-center">
-              <img src="/shield-3d.jpg" alt="Cerid Vault 3D Shield" className="w-full max-w-sm rounded-xl shadow-xl" loading="lazy" />
-            </div>
+        <div className="mx-auto max-w-4xl px-6">
+          <div className="text-center mb-10">
+            <div className="gold-line mx-auto w-16 mb-4" />
+            <h2 className="text-2xl font-bold tracking-tight">Easy to deploy</h2>
+            <p className="mt-3 text-muted-foreground">One script installs everything. Runs on any modern machine.</p>
           </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {[
+              { label: "Operating System", value: "macOS, Linux, Windows (WSL2)" },
+              { label: "RAM", value: "16 GB minimum" },
+              { label: "Disk", value: "10 GB free space" },
+              { label: "Docker", value: "Docker Desktop or Engine" },
+              { label: "Startup", value: "One command: ./scripts/start-cerid.sh" },
+              { label: "Services", value: "5 containers auto-configured" },
+            ].map((spec) => (
+              <div key={spec.label} className="rounded-lg border border-border bg-card px-4 py-3">
+                <p className="text-xs font-medium text-muted-foreground">{spec.label}</p>
+                <p className="mt-1 text-sm font-semibold">{spec.value}</p>
+              </div>
+            ))}
+          </div>
+          <p className="mt-6 text-center text-xs text-muted-foreground">
+            No cloud account needed. No API keys required to start (Ollama runs fully local).
+            Add an OpenRouter key later for access to Claude, GPT, and other frontier models.
+          </p>
         </div>
       </section>
 

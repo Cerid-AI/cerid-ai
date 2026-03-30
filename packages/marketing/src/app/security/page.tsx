@@ -5,73 +5,62 @@ export const metadata: Metadata = {
   description: "How Cerid AI keeps your data private: local-first architecture, encrypted secrets, infrastructure hardening, and zero telemetry.",
 }
 
-import {
-  Shield,
-  Lock,
-  Eye,
-  Server,
-  Key,
-  Database,
-  HardDrive,
-  Wifi,
-  ShieldCheck,
-} from "lucide-react"
-import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { SecurityCard } from "@/components/security-card"
 
 const SECURITY_FEATURES = [
   {
-    icon: Lock,
+    iconName: "Lock",
     title: "Knowledge Stays Local",
-    description:
-      "Your documents, embeddings, and metadata live on your machine. Only relevant context from queries is sent to your chosen LLM provider for processing.",
+    description: "Your documents, embeddings, and metadata live on your machine.",
+    detail: "All data is stored in local Docker containers — ChromaDB for vector embeddings, Neo4j for the knowledge graph, and Redis for caching. Only the relevant context from your queries is sent to the LLM provider you choose. You can run Ollama for fully offline operation with zero data leaving your network.",
   },
   {
-    icon: Key,
+    iconName: "Key",
     title: "Encrypted at Rest",
-    description:
-      "API keys are Fernet-encrypted. Secrets managed with age encryption. Environment variables never committed to git.",
+    description: "API keys are Fernet-encrypted. Secrets managed with age encryption.",
+    detail: "All API keys and credentials are encrypted using the Fernet symmetric encryption scheme before storage. The master encryption key is set via the CERID_ENCRYPTION_KEY environment variable. Secrets are managed with age encryption. Environment variables are never committed to git — a comprehensive .env.example documents all available options.",
   },
   {
-    icon: Shield,
+    iconName: "Shield",
     title: "Authentication & Authorization",
-    description:
-      "Optional multi-user JWT auth with bcrypt password hashing (cost 12). Short-lived access tokens (15 min) with refresh token revocation.",
+    description: "Optional multi-user JWT auth with bcrypt password hashing.",
+    detail: "When CERID_MULTI_USER is enabled, the system uses JWT-based authentication with bcrypt password hashing (cost factor 12). Access tokens are short-lived (15 minutes) with separate refresh tokens (7 days) that support revocation. Per-user API key management enables programmatic access with usage metering.",
   },
   {
-    icon: Eye,
+    iconName: "Eye",
     title: "Rate Limiting",
-    description:
-      "Sliding-window rate limiting with per-user keys when authenticated. Path-specific limits protect ingestion and agent endpoints.",
+    description: "Sliding-window rate limiting with per-client isolation.",
+    detail: "A sliding-window rate limiter enforces per-client quotas via the X-Client-ID header. Default limits are 20 req/min for the GUI, 80 req/min for trading agents, and 10 req/min for unknown clients. Path-specific limits protect ingestion and agent endpoints from abuse. All limits are configurable via CONSUMER_REGISTRY.",
   },
   {
-    icon: Server,
+    iconName: "Server",
     title: "Infrastructure Hardening",
-    description:
-      "Redis authentication enabled. Ports bound to 127.0.0.1. Container resource limits. Security headers via nginx and Caddy.",
+    description: "Ports bound to localhost. Container resource limits. Security headers.",
+    detail: "Redis requires authentication. All database ports (Neo4j 7474/7687, ChromaDB 8001, Redis 6379) are bound to 127.0.0.1 — not accessible from the network. Docker containers have memory and CPU resource limits. Nginx and optional Caddy reverse proxy add security headers (X-Frame-Options, X-Content-Type-Options, Strict-Transport-Security).",
   },
   {
-    icon: Database,
+    iconName: "Database",
     title: "Database Security",
-    description:
-      "Neo4j credential validation on every health check. ChromaDB reset disabled in production. Query parameterization throughout.",
+    description: "Credential validation. Reset disabled. Query parameterization.",
+    detail: "Neo4j credentials are validated on every health check to catch misconfigurations early. The ChromaDB reset endpoint is disabled in production to prevent accidental data loss. All database queries use parameterization to prevent injection attacks. Content hashes use SHA-256 with a UNIQUE constraint for atomic deduplication.",
   },
   {
-    icon: HardDrive,
+    iconName: "HardDrive",
     title: "No Vendor Lock-in",
-    description:
-      "Self-hosted with full data portability. Export and import your entire knowledge base. Switch LLM providers freely.",
+    description: "Self-hosted with full data portability.",
+    detail: "Export your entire knowledge base as JSONL files at any time via the sync API. Import on another machine or restore from backup. Switch LLM providers freely — Cerid routes through OpenRouter supporting 20+ model providers. Run Ollama locally for zero external dependencies. All data formats are open and documented.",
   },
   {
-    icon: Wifi,
+    iconName: "Wifi",
     title: "LAN Access Controls",
-    description:
-      "Optional Caddy HTTPS gateway. Multi-interface IP detection with stale-IP auto-fix. CORS origin restrictions.",
+    description: "HTTPS gateway. IP detection. CORS restrictions.",
+    detail: "An optional Caddy reverse proxy provides automatic HTTPS with Let's Encrypt certificates. The startup script detects all network interfaces and configures LAN access URLs for iPad and other devices. CORS origins are restricted to configured domains. Stale IP addresses are automatically detected and corrected on startup.",
   },
   {
-    icon: ShieldCheck,
+    iconName: "ShieldCheck",
     title: "CI/CD Security",
-    description:
-      "Secret detection in CI pipeline. CodeQL SAST analysis. Dependabot for dependency updates. mypy type checking.",
+    description: "Secret detection. Dependency audit. Type checking.",
+    detail: "The 9-job CI pipeline includes: detect-secrets scanning all tracked files, bandit static analysis for Python security issues, pip-audit for dependency vulnerabilities (including transitive), Trivy container image scanning for CRITICAL/HIGH CVEs, ruff linting with inline tier-check enforcement, and mypy type checking. All jobs must pass before the Docker image is built.",
   },
 ]
 
@@ -99,21 +88,18 @@ export default function SecurityPage() {
         </div>
       </section>
 
-      {/* Security Grid */}
+      {/* Security Grid — click to expand */}
       <section className="py-16 bg-circuit">
         <div className="mx-auto max-w-6xl px-6">
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {SECURITY_FEATURES.map((feature) => (
-              <Card
+              <SecurityCard
                 key={feature.title}
-                className="border-border bg-card"
-              >
-                <CardHeader>
-                  <feature.icon className="mb-2 h-6 w-6 text-primary" />
-                  <CardTitle className="text-lg">{feature.title}</CardTitle>
-                  <CardDescription>{feature.description}</CardDescription>
-                </CardHeader>
-              </Card>
+                iconName={feature.iconName}
+                title={feature.title}
+                description={feature.description}
+                detail={feature.detail}
+              />
             ))}
           </div>
         </div>
