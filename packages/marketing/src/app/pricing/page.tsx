@@ -105,11 +105,11 @@ export default function PricingPage() {
             {PLANS.map((plan) => (
               <Card
                 key={plan.name}
-                className={`relative flex flex-col border-border ${plan.accent}`}
+                className={`relative flex flex-col overflow-visible border-border ${plan.accent}`}
               >
                 {plan.badge && (
-                  <div className="absolute -top-3 right-4">
-                    <Badge className={plan.variant === "vault" ? "bg-gold/20 text-gold border border-gold" : "bg-brand/20 text-brand border border-brand/30"}>
+                  <div className="absolute -top-3 right-4 z-10">
+                    <Badge className={plan.variant === "vault" ? "bg-gold/20 text-gold border border-gold shadow-md" : "bg-brand/20 text-brand border border-brand/30 shadow-md"}>
                       {plan.badge}
                     </Badge>
                   </div>

@@ -93,14 +93,14 @@ export default function SecurityPage() {
               </p>
             </div>
             <div className="flex justify-center">
-              <img src="/secure-intel.jpg" alt="Cerid AI — Secure Intelligence, Fully Yours" className="w-full max-w-sm rounded-xl border border-border/30 shadow-xl" />
+              <img src="/secure-intel.jpg" alt="Cerid AI — Secure Intelligence, Fully Yours" className="w-full max-w-lg rounded-xl border border-border/30 shadow-xl" />
             </div>
           </div>
         </div>
       </section>
 
       {/* Security Grid */}
-      <section className="py-16">
+      <section className="py-16 bg-circuit">
         <div className="mx-auto max-w-6xl px-6">
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {SECURITY_FEATURES.map((feature) => (
@@ -120,7 +120,7 @@ export default function SecurityPage() {
       </section>
 
       {/* Data flow */}
-      <section className="border-t border-border bg-muted/50 py-16">
+      <section className="border-t divider-gold bg-muted/30 py-16">
         <div className="mx-auto max-w-4xl px-6">
           <h2 className="text-center text-2xl font-bold tracking-tight">
             What leaves your machine?

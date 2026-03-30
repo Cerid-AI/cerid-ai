@@ -153,7 +153,7 @@ export default function FeaturesPage() {
               </p>
             </div>
             <div className="flex justify-center">
-              <img src="/hero-tagline.jpg" alt="Cerid — Your Private AI Knowledge Companion" className="w-full max-w-sm rounded-xl border border-border/30 shadow-xl" />
+              <img src="/hero-tagline.jpg" alt="Cerid — Your Private AI Knowledge Companion" className="w-full max-w-lg rounded-xl border border-border/30 shadow-xl" />
             </div>
           </div>
         </div>
@@ -172,25 +172,29 @@ export default function FeaturesPage() {
 
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               {cat.features.map((f) => (
-                <Card key={f.title} className="group border-border bg-card transition-all hover:border-brand/30">
-                  <CardHeader className="space-y-2 p-4">
-                    <div className="flex items-center gap-2.5">
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand group-hover:bg-brand/20 transition-colors">
-                        <f.icon className="h-4 w-4" />
-                      </div>
-                      <CardTitle className="text-sm">{f.title}</CardTitle>
-                    </div>
-                    <p className="text-xs leading-relaxed text-muted-foreground">{f.casual}</p>
-                    <details className="group/details">
-                      <summary className="cursor-pointer text-[11px] font-medium text-brand hover:text-brand/80 transition-colors">
-                        Technical details
-                      </summary>
-                      <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground/80 font-mono border-t border-border/30 pt-1.5">
-                        {f.technical}
-                      </p>
-                    </details>
-                  </CardHeader>
-                </Card>
+                <details key={f.title} className="group/card">
+                  <summary className="cursor-pointer list-none">
+                    <Card className="border-border bg-card transition-all hover:border-brand/30 hover:shadow-md hover:shadow-brand/5">
+                      <CardHeader className="space-y-2 p-4">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2.5">
+                            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand/10 text-brand">
+                              <f.icon className="h-4 w-4" />
+                            </div>
+                            <CardTitle className="text-sm">{f.title}</CardTitle>
+                          </div>
+                          <svg className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform group-open/card:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+                        </div>
+                        <p className="text-xs leading-relaxed text-muted-foreground">{f.casual}</p>
+                      </CardHeader>
+                    </Card>
+                  </summary>
+                  <div className="mx-4 mb-3 rounded-b-lg border border-t-0 border-border bg-muted/30 px-4 py-3">
+                    <p className="text-[11px] leading-relaxed text-muted-foreground/80 font-mono">
+                      {f.technical}
+                    </p>
+                  </div>
+                </details>
               ))}
             </div>
           </div>
@@ -198,8 +202,8 @@ export default function FeaturesPage() {
       ))}
 
       {/* Agents carousel */}
-      <section className="py-16 bg-muted/20 border-b divider-gold">
-        <div className="mx-auto max-w-xl px-6">
+      <section className="py-20 bg-circuit border-b divider-gold">
+        <div className="mx-auto max-w-4xl px-6">
           <AgentCarousel />
         </div>
       </section>

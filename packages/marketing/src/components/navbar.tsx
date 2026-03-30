@@ -8,7 +8,7 @@ const NAV_LINKS = [
   { href: "/features", label: "Features" },
   { href: "/pricing", label: "Pricing" },
   { href: "/security", label: "Security" },
-  { href: "https://github.com/Cerid-AI/cerid-ai/blob/main/docs/API_REFERENCE.md", label: "Docs", external: true },
+  { href: "/docs", label: "Docs" },
 ]
 
 export function Navbar() {
@@ -50,7 +50,6 @@ export function Navbar() {
             <Link
               key={link.href}
               href={link.href}
-              {...(link.external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
               className="text-sm text-muted-foreground transition-colors hover:text-foreground"
             >
               {link.label}
@@ -85,8 +84,7 @@ export function Navbar() {
               <Link
                 key={link.href}
                 href={link.href}
-                {...(link.external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
-                onClick={() => setMobileOpen(false)}
+                  onClick={() => setMobileOpen(false)}
                 className="text-sm text-muted-foreground transition-colors hover:text-foreground"
               >
                 {link.label}
