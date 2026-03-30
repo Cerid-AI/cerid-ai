@@ -90,7 +90,13 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
       >
         {/* Logo area */}
         <div className="flex h-14 items-center border-b px-3">
-          {!collapsed && <span className="text-lg font-semibold tracking-tight">Cerid <span className="text-brand">AI</span></span>}
+          {!collapsed && (
+            <span className="text-lg font-bold tracking-tight">
+              <span className="bg-gradient-to-r from-brand to-[oklch(0.90_0.14_178)] bg-clip-text text-transparent">CERID</span>
+              {" "}
+              <span className="text-muted-foreground font-medium text-base">VAULT</span>
+            </span>
+          )}
           <Button variant="ghost" size="icon" className={cn("ml-auto h-8 w-8")} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} onClick={onToggleCollapse}>
             {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
           </Button>

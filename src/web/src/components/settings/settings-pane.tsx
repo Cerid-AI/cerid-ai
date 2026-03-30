@@ -226,7 +226,7 @@ export default function SettingsPane() {
                       <span>{preset.emoji}</span>
                       <span className="text-sm font-medium">{preset.label}</span>
                       {locked && (
-                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-teal-500 border-teal-500/30">
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-gold border-gold">
                           <Crown className="mr-0.5 h-2.5 w-2.5" />Pro
                         </Badge>
                       )}

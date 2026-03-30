@@ -21,7 +21,7 @@ export function ProGate({ tier, children }: { tier: string; children: React.Reac
   return (
     <div className="relative">
       <div className="opacity-40 pointer-events-none select-none">{children}</div>
-      <Badge variant="outline" className="absolute right-0 top-0 text-[10px] px-1.5 py-0 text-teal-500 border-teal-500/30">
+      <Badge variant="outline" className="absolute right-0 top-0 text-[10px] px-1.5 py-0 text-gold border-gold">
         Pro
       </Badge>
     </div>

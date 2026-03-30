@@ -245,7 +245,7 @@ export function ChatToolbar({
               <MenuRadioItem checked={ragMode === "custom_smart"} onClick={() => setRagMode("custom_smart")}>
                 <span className="flex items-center gap-1">
                   Custom
-                  <Badge variant="outline" className="text-[9px] ml-1 px-1 py-0 text-teal-500">Pro</Badge>
+                  <Badge variant="outline" className="text-[9px] ml-1 px-1 py-0 text-gold">Pro</Badge>
                 </span>
               </MenuRadioItem>
             </>

@@ -1,4 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
-  <rect width="32" height="32" rx="8" fill="#18181b"/>
-  <text x="16" y="22" text-anchor="middle" font-family="system-ui" font-size="18" font-weight="bold" fill="white">C</text>
+  <!-- Shield background (navy deep #0A1F3D) -->
+  <path d="M16 1L3 7v10c0 7.2 5.5 13.5 13 15 7.5-1.5 13-7.8 13-15V7L16 1z" fill="#0A1F3D"/>
+  <!-- Shield border (metallic gold #D4AF37) -->
+  <path d="M16 1L3 7v10c0 7.2 5.5 13.5 13 15 7.5-1.5 13-7.8 13-15V7L16 1z" stroke="#D4AF37" stroke-width="1.2" fill="none"/>
+  <!-- Glowing C (teal #00E5D8) -->
+  <text x="16" y="22" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="bold" fill="#00E5D8">C</text>
+  <!-- Subtle glow effect -->
+  <text x="16" y="22" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="bold" fill="#00E5D8" opacity="0.3" filter="blur(2px)">C</text>
 </svg>
