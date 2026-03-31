@@ -318,3 +318,35 @@
 - `response_format: {"type": "json_object"}` forces LLMs to return objects, not arrays
 - Claims may be wrapped: `{"claims": [...]}` — always unwrap before processing
 - Pleasantry patterns must match ANYWHERE in sentence, not just at start
+
+## Session 2026-03-30 Audit Lessons
+
+### useCallback dependency ordering matters — temporal dead zone
+**When:** Adding `pullAndEnable` to `startPolling`'s deps array.
+**Problem:** `startPolling` was defined before `pullAndEnable` but referenced it in deps. JavaScript's temporal dead zone means `const` declarations cannot be accessed before initialization — causes `ReferenceError` at render time.
+**Fix:** Always define referenced callbacks BEFORE callbacks that depend on them. `pullAndEnable` must be declared before `startPolling`.
+
+### URL path injection in f-strings — always encode
+**When:** Building URLs with user-provided query strings (PubChem data source).
+**Problem:** `f"https://api.example.com/search/{query}/results"` — if `query` contains `/`, `..`, or special characters, it changes the URL structure. `httpx.params=` only encodes query parameters, NOT path segments.
+**Fix:** Always use `urllib.parse.quote(query, safe="")` for path segments in f-string URLs.
+
+### Blocking subprocess in async handlers
+**When:** Hardware detection in `GET /providers/ollama/recommendations`.
+**Problem:** `subprocess.check_output` blocks the entire async event loop. `sysctl` and `lscpu` can take 10-100ms each, stalling all concurrent requests.
+**Fix:** Use `await asyncio.to_thread(functools.partial(subprocess.check_output, ...))` to offload blocking calls to the thread pool.
+
+### Module-level dicts populated at import time go stale after runtime config changes
+**When:** `RECOMMENDED_MODELS` dict in `ollama_models.py` was populated once at import from env vars.
+**Problem:** When `/providers/ollama/enable` updates `config.OLLAMA_DEFAULT_MODEL` at runtime, the dict still holds the import-time value. `check_model_availability()` then warns about the wrong model.
+**Fix:** Have callers use `get_recommended_models()` (which reads current env) instead of the stale module-level dict.
+
+### Background task closures capture stale data — re-read before writing
+**When:** `_run_scan` in watched_folders captures `data` dict from request handler scope.
+**Problem:** If a concurrent PATCH request modifies the folder config while the scan runs in the background, `_save_folder(data)` at the end overwrites those changes with the stale snapshot.
+**Fix:** Re-load the current state from Redis inside the background task before writing scan results. Only merge the scan-specific fields (`stats`, `last_scanned_at`).
+
+### Path traversal in watched folder registration
+**When:** `POST /watched-folders` accepts any path from the user.
+**Problem:** Without root confinement, a user could register `/etc`, `/proc`, or symlinks that escape the intended archive directory. The background scan then iterates all files.
+**Fix:** Validate that the resolved path is within allowed roots (`ARCHIVE_PATH` or `~/cerid-archive`).

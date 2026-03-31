@@ -13,26 +13,48 @@ interface SourceAttributionProps {
   sources: SourceRef[]
 }
 
+/**
+ * Deduplicate sources at the file level — show each artifact once with
+ * the highest relevance and quality score across its chunks.
+ */
+function deduplicateByArtifact(sources: SourceRef[]): SourceRef[] {
+  const map = new Map<string, SourceRef>()
+  for (const src of sources) {
+    const existing = map.get(src.artifact_id)
+    if (!existing) {
+      map.set(src.artifact_id, src)
+    } else {
+      // Keep highest relevance, but always take the best quality_score from either
+      const bestQuality = Math.max(src.quality_score ?? 0, existing.quality_score ?? 0) || undefined
+      const winner = src.relevance > existing.relevance ? src : existing
+      map.set(src.artifact_id, { ...winner, quality_score: bestQuality })
+    }
+  }
+  return [...map.values()]
+}
+
 export function SourceAttribution({ sources }: SourceAttributionProps) {
   const [open, setOpen] = useState(false)
 
-  if (sources.length === 0) return null
+  const dedupedSources = deduplicateByArtifact(sources)
+
+  if (dedupedSources.length === 0) return null
 
   return (
     <Collapsible.Root open={open} onOpenChange={setOpen} className="mt-1">
       <Collapsible.Trigger asChild>
         <button
           className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-          aria-label={`${open ? "Hide" : "Show"} ${sources.length} source${sources.length !== 1 ? "s" : ""}`}
+          aria-label={`${open ? "Hide" : "Show"} ${dedupedSources.length} source${dedupedSources.length !== 1 ? "s" : ""}`}
         >
           <ChevronRight className={cn("h-3 w-3 transition-transform", open && "rotate-90")} />
           <FileText className="h-3 w-3" />
-          <span>{sources.length} source{sources.length !== 1 ? "s" : ""}</span>
+          <span>{dedupedSources.length} source{dedupedSources.length !== 1 ? "s" : ""}</span>
         </button>
       </Collapsible.Trigger>
       <Collapsible.Content className="mt-1.5 space-y-1">
-        {sources.map((src) => (
-          <SourceCard key={`${src.artifact_id}-${src.chunk_index}`} source={src} />
+        {dedupedSources.map((src) => (
+          <SourceCard key={src.artifact_id} source={src} />
         ))}
       </Collapsible.Content>
     </Collapsible.Root>

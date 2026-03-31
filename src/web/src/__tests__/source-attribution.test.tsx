@@ -107,4 +107,24 @@ describe("SourceAttribution", () => {
     expect(screen.getByText("coding")).toBeInTheDocument()
     expect(screen.getByText("finance")).toBeInTheDocument()
   })
+
+  it("deduplicates multiple chunks from the same artifact", async () => {
+    const user = userEvent.setup()
+    const sources: SourceRef[] = [
+      { artifact_id: "art-1", filename: "report.pdf", domain: "research", relevance: 0.85, chunk_index: 0 },
+      { artifact_id: "art-1", filename: "report.pdf", domain: "research", relevance: 0.72, chunk_index: 1 },
+      { artifact_id: "art-1", filename: "report.pdf", domain: "research", relevance: 0.60, chunk_index: 2 },
+      { artifact_id: "art-2", filename: "notes.md", domain: "general", relevance: 0.55, chunk_index: 0 },
+    ]
+    render(<SourceAttribution sources={sources} />)
+
+    // Should show 2 deduplicated sources, not 4
+    expect(screen.getByText("2 sources")).toBeInTheDocument()
+
+    await user.click(screen.getByText("2 sources"))
+    // Only one "report.pdf" card
+    expect(screen.getAllByText("report.pdf")).toHaveLength(1)
+    // Highest relevance kept
+    expect(screen.getByText("85%")).toBeInTheDocument()
+  })
 })

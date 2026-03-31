@@ -3,9 +3,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { adminRebuildIndexes, adminRescore, adminRegenerateSummaries, adminClearDomain, fetchOllamaStatus, enableOllama, disableOllama, pullOllamaModel, fetchHealthStatus, fetchDataSources, enableDataSource, disableDataSource } from "@/lib/api"
+import { adminRebuildIndexes, adminRescore, adminRegenerateSummaries, adminClearDomain, fetchOllamaStatus, fetchOllamaRecommendations, enableOllama, disableOllama, pullOllamaModel, fetchHealthStatus, fetchDataSources, enableDataSource, disableDataSource, fetchWatchedFolders, addWatchedFolder, updateWatchedFolder, removeWatchedFolder, scanWatchedFolder } from "@/lib/api"
+import type { WatchedFolder } from "@/lib/api/settings"
 import type { KBStats } from "@/lib/api"
-import type { ServerSettings, SettingsUpdate, ProviderCredits, OllamaStatus, HealthStatusResponse } from "@/lib/types"
+import type { ServerSettings, SettingsUpdate, ProviderCredits, OllamaStatus, OllamaRecommendations, HealthStatusResponse } from "@/lib/types"
 import type { SectionKey } from "./settings-primitives"
 import { useUIMode } from "@/contexts/ui-mode-context"
 import { cn } from "@/lib/utils"
@@ -30,6 +31,8 @@ import {
   CheckCircle2,
   Copy,
   Check,
+  FolderOpen,
+  Play,
 } from "lucide-react"
 import { SyncSection } from "./sync-section"
 import { SectionHeading, InfoTip, LabelWithInfo, Row } from "./settings-primitives"
@@ -151,6 +154,10 @@ export function SystemSection({
 
       {/* -- Data Sources -- */}
       <DataSourcesSection sections={sections} toggleSection={toggleSection} />
+
+      {/* -- Watched Folders -- */}
+      <SectionHeading icon={FolderOpen} label="Watched Folders" open={sections.watched_folders ?? false} onToggle={() => toggleSection("watched_folders")} />
+      {(sections.watched_folders ?? false) && <WatchedFoldersSection />}
 
       {/* -- KB Management -- */}
       <SectionHeading icon={HardDrive} label="KB Management" open={sections.kb_admin} onToggle={() => toggleSection("kb_admin")} />
@@ -344,10 +351,14 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
   const { mode: uiMode } = useUIMode()
   const [toggling, setToggling] = useState(false)
   const [pipelineOpen, setPipelineOpen] = useState(false)
-  // Wizard state: null (idle), "install" (show instructions), "polling" (waiting for Ollama), "pulling" (model download), "enabling", "complete"
+  // Wizard state: null (idle), "install", "polling", "model-select", "pulling", "enabling", "complete"
   const [wizardPhase, setWizardPhase] = useState<string | null>(null)
   const [wizardError, setWizardError] = useState<string | null>(null)
   const [pullProgress, setPullProgress] = useState("")
+  const [modelRecs, setModelRecs] = useState<OllamaRecommendations | null>(null)
+  const [selectedModel, setSelectedModel] = useState<string | null>(null)
+  const [modelMgmtOpen, setModelMgmtOpen] = useState(false)
+  const [switching, setSwitching] = useState(false)
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const handleToggle = useCallback(async () => {
@@ -374,7 +385,56 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
     setWizardPhase("install")
   }, [])
 
-  // Poll for Ollama becoming reachable after user installs it
+  // Pull model and enable Ollama — shared by wizard and direct setup
+  const pullAndEnable = useCallback(async (model: string) => {
+    setWizardPhase("pulling")
+    setPullProgress(`Downloading ${model}...`)
+    try {
+      const res = await pullOllamaModel(model)
+      if (res.body) {
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          const text = decoder.decode(value, { stream: true })
+          for (const line of text.split("\n").filter(Boolean)) {
+            try {
+              const evt = JSON.parse(line.replace(/^data:\s*/, ""))
+              if (evt.total && evt.completed) {
+                const pct = Math.round((evt.completed / evt.total) * 100)
+                setPullProgress(`Downloading ${model}... ${pct}%`)
+              } else if (evt.status) {
+                setPullProgress(evt.status)
+              }
+            } catch { /* ignore parse errors */ }
+          }
+        }
+      }
+    } catch (e) {
+      setWizardPhase(null)
+      setWizardError(e instanceof Error ? e.message : "Model pull failed")
+      return
+    }
+    // Enable with selected model
+    setWizardPhase("enabling")
+    try {
+      await enableOllama(model)
+      await refetchOllama()
+      onRefresh()
+      setWizardPhase("complete")
+      setTimeout(async () => {
+        await refetchOllama()
+        onRefresh()
+        setWizardPhase(null)
+      }, 3000)
+    } catch (e) {
+      setWizardPhase(null)
+      setWizardError(e instanceof Error ? e.message : "Enable failed")
+    }
+  }, [refetchOllama, onRefresh])
+
+  // Poll for Ollama becoming reachable, then show model selection
   const startPolling = useCallback(() => {
     setWizardPhase("polling")
     setWizardError(null)
@@ -385,67 +445,56 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
         if (status.reachable) {
           if (pollingRef.current) { clearInterval(pollingRef.current); pollingRef.current = null }
           await refetchOllama()
-          // Auto-advance: pull model if needed, then enable
-          if (!status.default_model_installed) {
-            const model = status.default_model || "llama3.2:3b"
-            setWizardPhase("pulling")
-            setPullProgress(`Downloading ${model}...`)
-            try {
-              const res = await pullOllamaModel(model)
-              if (res.body) {
-                const reader = res.body.getReader()
-                const decoder = new TextDecoder()
-                while (true) {
-                  const { done, value } = await reader.read()
-                  if (done) break
-                  const text = decoder.decode(value, { stream: true })
-                  // Parse progress from Ollama NDJSON stream
-                  for (const line of text.split("\n").filter(Boolean)) {
-                    try {
-                      const evt = JSON.parse(line.replace(/^data:\s*/, ""))
-                      if (evt.total && evt.completed) {
-                        const pct = Math.round((evt.completed / evt.total) * 100)
-                        setPullProgress(`Downloading ${model}... ${pct}%`)
-                      } else if (evt.status) {
-                        setPullProgress(evt.status)
-                      }
-                    } catch { /* ignore parse errors */ }
-                  }
-                }
-              }
-            } catch (e) {
-              setWizardPhase(null)
-              setWizardError(e instanceof Error ? e.message : "Model pull failed")
-              return
-            }
-          }
-          // Enable
-          setWizardPhase("enabling")
+          // Fetch hardware-aware recommendations and show model selection
           try {
-            await enableOllama()
-            // Refetch both ollama status AND parent settings so the UI
-            // transitions from wizard → connected state cleanly
-            await refetchOllama()
-            onRefresh()
-            setWizardPhase("complete")
-            // Keep success visible, then refetch again to ensure parent
-            // settings have propagated before hiding the wizard
-            setTimeout(async () => {
-              await refetchOllama()
-              onRefresh()
-              setWizardPhase(null)
-            }, 3000)
-          } catch (e) {
-            setWizardPhase(null)
-            setWizardError(e instanceof Error ? e.message : "Enable failed")
+            const recs = await fetchOllamaRecommendations()
+            setModelRecs(recs)
+            setSelectedModel(recs.recommended)
+            setWizardPhase("model-select")
+          } catch {
+            // Fallback: skip model selection, use default
+            const fallbackModel = status.default_model || "llama3.2:3b"
+            setSelectedModel(fallbackModel)
+            await pullAndEnable(fallbackModel)
           }
         }
       } catch { /* polling error — keep trying */ }
     }, 3000)
-  }, [refetchOllama, onRefresh])
+  }, [refetchOllama, onRefresh, pullAndEnable])
 
   // Cleanup polling on unmount
   useEffect(() => () => { if (pollingRef.current) clearInterval(pollingRef.current) }, [])
+
+  // Load recommendations for the model management panel
+  const loadRecommendations = useCallback(async () => {
+    if (modelRecs) return // already loaded
+    try {
+      const recs = await fetchOllamaRecommendations()
+      setModelRecs(recs)
+    } catch { /* non-critical */ }
+  }, [modelRecs])
+
+  // Switch active model (pull if needed, then enable)
+  const switchModel = useCallback(async (modelId: string) => {
+    setSwitching(true)
+    setWizardError(null)
+    try {
+      // Check if model is already installed
+      const installed = ollamaStatus?.models ?? []
+      if (!installed.includes(modelId)) {
+        await pullAndEnable(modelId)
+      } else {
+        // Already installed — just switch
+        await enableOllama(modelId)
+        await refetchOllama()
+        onRefresh()
+      }
+      setModelMgmtOpen(false)
+    } catch (e) {
+      setWizardError(e instanceof Error ? e.message : "Model switch failed")
+    }
+    setSwitching(false)
+  }, [ollamaStatus, pullAndEnable, refetchOllama, onRefresh])
 
   const isActive = settings.internal_llm_provider === "ollama"
   const hwLabel = settings.ollama_url?.includes("cerid-ollama") ? "Docker container" : settings.ollama_url ?? "\u2014"
@@ -462,7 +511,7 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
         </CardTitle>
         <CardDescription className="text-xs">
           Free local inference for pipeline tasks (verification context, query decomposition, memory resolution, claim extraction).
-          Uses llama3.2:3b (~2GB) by default. Falls back to OpenRouter when unavailable.
+          Model auto-recommended based on your hardware. Falls back to OpenRouter when unavailable.
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3 pt-0">
@@ -507,6 +556,65 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
                   <span>{pullProgress || "Pulling model..."}</span>
                 </div>
                 <p className="text-[10px] text-muted-foreground/60">This may take a few minutes depending on your connection.</p>
+              </div>
+            ) : wizardPhase === "model-select" && modelRecs ? (
+              <div className="space-y-3">
+                <div>
+                  <p className="text-xs font-medium">Choose a Model</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    Detected {modelRecs.hardware.ram_gb}GB RAM
+                    {modelRecs.hardware.gpu ? ` \u00b7 ${modelRecs.hardware.gpu}` : ""}
+                  </p>
+                </div>
+                <div className="space-y-1.5">
+                  {modelRecs.models.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      disabled={!m.compatible}
+                      className={cn(
+                        "w-full rounded-lg border p-2.5 text-left transition-colors",
+                        selectedModel === m.id
+                          ? "border-brand bg-brand/5"
+                          : m.compatible
+                            ? "border-border hover:border-muted-foreground/50"
+                            : "border-border opacity-40 cursor-not-allowed",
+                      )}
+                      onClick={() => m.compatible && setSelectedModel(m.id)}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-medium">{m.name}</span>
+                          <span className="text-[10px] text-muted-foreground">{m.size_gb}GB</span>
+                          {m.recommended && (
+                            <Badge variant="default" className="text-[9px] h-4 bg-brand/20 text-brand border-brand/30">
+                              Recommended
+                            </Badge>
+                          )}
+                        </div>
+                        <span className="text-[10px] text-muted-foreground">{m.origin}</span>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground mt-1 leading-relaxed">{m.description}</p>
+                      {!m.compatible && (
+                        <p className="text-[10px] text-red-500 mt-0.5">Requires {m.min_ram_gb}GB+ RAM</p>
+                      )}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="default"
+                    className="h-7 text-xs"
+                    disabled={!selectedModel}
+                    onClick={() => selectedModel && pullAndEnable(selectedModel)}
+                  >
+                    Install {modelRecs.models.find((m) => m.id === selectedModel)?.name ?? selectedModel}
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setWizardPhase(null)}>
+                    Cancel
+                  </Button>
+                </div>
               </div>
             ) : wizardPhase === "polling" ? (
               <div className="space-y-2">
@@ -582,16 +690,138 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
         {/* Model + connection — show when reachable or active */}
         {(ollamaReachable || isActive) && (
           <>
-            <Row label="Model" value={settings.internal_llm_model ?? "llama3.2:3b"} mono info="Lightweight model for pipeline intelligence tasks" />
-            {ollamaReachable && !ollamaStatus?.default_model_installed && (
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">Default model</span>
-                <Button size="sm" variant="outline" className="h-6 text-[10px]" onClick={startPolling} disabled={!!wizardPhase}>
-                  <Download className="mr-1 h-2.5 w-2.5" />
-                  Pull {ollamaStatus?.default_model ?? "llama3.2:3b"}
-                </Button>
+            {/* Model selector */}
+            <div className="flex items-center justify-between">
+              <LabelWithInfo label="Active model" info="The local LLM used for pipeline tasks. Click Change to see available options." />
+              <div className="flex items-center gap-2">
+                <code className="text-[11px] text-muted-foreground font-mono">
+                  {settings.internal_llm_model || ollamaStatus?.default_model || "—"}
+                </code>
+                {ollamaReachable && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-6 text-[10px]"
+                    disabled={switching || !!wizardPhase}
+                    onClick={() => { setModelMgmtOpen((v) => !v); loadRecommendations() }}
+                  >
+                    Change
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {/* Model management panel */}
+            {modelMgmtOpen && ollamaReachable && (
+              <div className="rounded-lg border border-dashed border-muted-foreground/30 p-3 space-y-3">
+                <div>
+                  <p className="text-xs font-medium">Model Selection</p>
+                  {modelRecs && (
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      {modelRecs.hardware.ram_gb}GB RAM
+                      {modelRecs.hardware.gpu && modelRecs.hardware.gpu !== "CPU only" ? ` · ${modelRecs.hardware.gpu}` : ""}
+                      {modelRecs.hardware.cpu ? ` · ${modelRecs.hardware.cpu}` : ""}
+                    </p>
+                  )}
+                </div>
+                {modelRecs ? (
+                  <div className="space-y-1.5">
+                    {modelRecs.models.map((m) => {
+                      const isInstalled = ollamaStatus?.models.includes(m.id) ?? false
+                      const isCurrent = (settings.internal_llm_model || ollamaStatus?.default_model) === m.id
+                      return (
+                        <div
+                          key={m.id}
+                          className={cn(
+                            "rounded-lg border p-2.5 transition-colors",
+                            isCurrent
+                              ? "border-brand bg-brand/5"
+                              : m.compatible
+                                ? "border-border"
+                                : "border-border opacity-40",
+                          )}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-medium">{m.name}</span>
+                              <span className="text-[10px] text-muted-foreground">{m.size_gb}GB · {m.origin}</span>
+                              {m.recommended && (
+                                <Badge variant="default" className="text-[9px] h-4 bg-brand/20 text-brand border-brand/30">
+                                  Recommended
+                                </Badge>
+                              )}
+                              {isCurrent && (
+                                <Badge variant="default" className="text-[9px] h-4 bg-green-500/20 text-green-600 dark:text-green-400 border-green-500/30">
+                                  Active
+                                </Badge>
+                              )}
+                              {isInstalled && !isCurrent && (
+                                <Badge variant="secondary" className="text-[9px] h-4">
+                                  Installed
+                                </Badge>
+                              )}
+                            </div>
+                            {m.compatible && !isCurrent && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-6 text-[10px]"
+                                disabled={switching || !!wizardPhase}
+                                onClick={() => switchModel(m.id)}
+                              >
+                                {isInstalled ? "Use" : "Install & Use"}
+                              </Button>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-muted-foreground mt-1 leading-relaxed">{m.strengths}</p>
+                          {!m.compatible && (
+                            <p className="text-[10px] text-red-500 mt-0.5">Requires {m.min_ram_gb}GB+ RAM</p>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <span>Loading model options...</span>
+                  </div>
+                )}
+                {/* Installed models not in catalog */}
+                {ollamaStatus && modelRecs && (() => {
+                  const catalogIds = new Set(modelRecs.models.map((m) => m.id))
+                  const extra = ollamaStatus.models.filter((m) => !catalogIds.has(m))
+                  if (extra.length === 0) return null
+                  return (
+                    <div className="space-y-1">
+                      <p className="text-[10px] text-muted-foreground font-medium">Other installed models</p>
+                      {extra.map((m) => {
+                        const isCurrent = (settings.internal_llm_model || ollamaStatus.default_model) === m
+                        return (
+                          <div key={m} className={cn("flex items-center justify-between rounded-md border px-2.5 py-1.5", isCurrent ? "border-brand bg-brand/5" : "border-border")}>
+                            <div className="flex items-center gap-2">
+                              <code className="text-[11px] font-mono">{m}</code>
+                              {isCurrent && (
+                                <Badge variant="default" className="text-[9px] h-4 bg-green-500/20 text-green-600 dark:text-green-400 border-green-500/30">
+                                  Active
+                                </Badge>
+                              )}
+                            </div>
+                            {!isCurrent && (
+                              <Button size="sm" variant="outline" className="h-6 text-[10px]" disabled={switching} onClick={() => switchModel(m)}>
+                                Use
+                              </Button>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })()}
+                {wizardError && <p className="text-xs text-red-600 dark:text-red-400">{wizardError}</p>}
               </div>
             )}
+
             <Row label="Endpoint" value={hwLabel} mono info="Ollama server URL (Docker container or native)" />
             <Row label="Active provider" value={isActive ? "Ollama (local, $0)" : "OpenRouter (cloud)"} info="Which LLM handles internal pipeline operations" />
           </>
@@ -670,6 +900,164 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
   )
 }
 
+/* ---- Watched Folders sub-component ---- */
+
+function WatchedFoldersSection() {
+  const { data, refetch } = useQuery({
+    queryKey: ["watched-folders"],
+    queryFn: fetchWatchedFolders,
+    staleTime: 30_000,
+  })
+  const [addingPath, setAddingPath] = useState("")
+  const [addingLabel, setAddingLabel] = useState("")
+  const [showAdd, setShowAdd] = useState(false)
+  const [actionId, setActionId] = useState<string | null>(null)
+  const [folderError, setFolderError] = useState<string | null>(null)
+
+  const handleAdd = async () => {
+    if (!addingPath.trim()) return
+    setActionId("adding")
+    setFolderError(null)
+    try {
+      await addWatchedFolder({ path: addingPath.trim(), label: addingLabel.trim() || undefined })
+      setAddingPath("")
+      setAddingLabel("")
+      setShowAdd(false)
+      await refetch()
+    } catch (e) {
+      setFolderError(e instanceof Error ? e.message : "Failed to add folder")
+    } finally {
+      setActionId(null)
+    }
+  }
+
+  const handleRemove = async (id: string) => {
+    setActionId(id)
+    try {
+      await removeWatchedFolder(id)
+      await refetch()
+    } catch { /* non-critical */ }
+    setActionId(null)
+  }
+
+  const handleToggle = async (folder: WatchedFolder, field: "enabled" | "search_enabled") => {
+    setActionId(folder.id)
+    try {
+      await updateWatchedFolder(folder.id, { [field]: !folder[field] })
+      await refetch()
+    } catch { /* non-critical */ }
+    setActionId(null)
+  }
+
+  const handleScan = async (id: string) => {
+    setActionId(id)
+    try {
+      await scanWatchedFolder(id)
+    } catch { /* non-critical */ }
+    setActionId(null)
+  }
+
+  const folders = data?.folders ?? []
+
+  return (
+    <Card className="mb-4">
+      <CardContent className="space-y-2 pt-4">
+        <p className="text-[11px] text-muted-foreground">
+          Directories monitored for automatic ingestion. Each folder can be scanned independently with domain overrides.
+        </p>
+
+        {folders.length === 0 && !showAdd && (
+          <p className="text-xs text-muted-foreground/60 py-2">No watched folders configured.</p>
+        )}
+
+        {folders.map((folder) => (
+          <div key={folder.id} className="rounded-lg border p-2.5 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 min-w-0">
+                <FolderOpen className={cn("h-3.5 w-3.5 shrink-0", folder.enabled ? "text-brand" : "text-muted-foreground")} />
+                <div className="min-w-0">
+                  <p className="text-xs font-medium truncate">{folder.label}</p>
+                  <p className="text-[10px] text-muted-foreground truncate font-mono">{folder.path}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => handleScan(folder.id)} disabled={actionId === folder.id}>
+                      <Play className="h-3 w-3" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">Scan now</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive" onClick={() => handleRemove(folder.id)} disabled={actionId === folder.id}>
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">Remove</TooltipContent>
+                </Tooltip>
+              </div>
+            </div>
+            <div className="flex items-center gap-4 text-[10px] text-muted-foreground">
+              <label className="flex items-center gap-1.5">
+                <Switch checked={folder.enabled} onCheckedChange={() => handleToggle(folder, "enabled")} disabled={actionId === folder.id} className="scale-[0.6]" />
+                <span>Active</span>
+              </label>
+              <label className="flex items-center gap-1.5">
+                <Switch checked={folder.search_enabled} onCheckedChange={() => handleToggle(folder, "search_enabled")} disabled={actionId === folder.id} className="scale-[0.6]" />
+                <span>Searchable</span>
+              </label>
+              {folder.domain_override && (
+                <Badge variant="secondary" className="text-[9px]">{folder.domain_override}</Badge>
+              )}
+            </div>
+            {folder.last_scanned_at && (
+              <div className="flex gap-3 text-[10px] text-muted-foreground">
+                <span>{folder.stats.ingested} ingested</span>
+                <span>{folder.stats.skipped} skipped</span>
+                {folder.stats.errored > 0 && <span className="text-red-500">{folder.stats.errored} errors</span>}
+                <span>Last: {new Date(folder.last_scanned_at).toLocaleDateString()}</span>
+              </div>
+            )}
+          </div>
+        ))}
+
+        {showAdd ? (
+          <div className="rounded-lg border border-dashed border-muted-foreground/30 p-2.5 space-y-2">
+            <input
+              className="w-full rounded border bg-background px-2 py-1.5 text-xs font-mono"
+              placeholder="/path/to/directory"
+              value={addingPath}
+              onChange={(e) => setAddingPath(e.target.value)}
+            />
+            <input
+              className="w-full rounded border bg-background px-2 py-1.5 text-xs"
+              placeholder="Label (optional)"
+              value={addingLabel}
+              onChange={(e) => setAddingLabel(e.target.value)}
+            />
+            <div className="flex gap-2">
+              <Button size="sm" variant="default" className="h-7 text-xs" onClick={handleAdd} disabled={!addingPath.trim() || actionId === "adding"}>
+                Add Folder
+              </Button>
+              <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { setShowAdd(false); setAddingPath(""); setAddingLabel(""); setFolderError(null) }}>
+                Cancel
+              </Button>
+            </div>
+            {folderError && <p className="text-xs text-destructive">{folderError}</p>}
+          </div>
+        ) : (
+          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setShowAdd(true)}>
+            <FolderOpen className="mr-1 h-3 w-3" />
+            Add Folder
+          </Button>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 /* ---- Data Sources sub-component ---- */
 
 function DataSourcesSection({
@@ -679,7 +1067,7 @@ function DataSourcesSection({
   sections: Record<SectionKey, boolean>
   toggleSection: (key: SectionKey) => void
 }) {
-  const { data: dataSources } = useQuery({
+  const { data: dataSources, refetch: refetchDS } = useQuery({
     queryKey: ["data-sources"],
     queryFn: fetchDataSources,
     staleTime: 30_000,
@@ -708,11 +1096,10 @@ function DataSourcesSection({
                     checked={source.enabled && source.configured}
                     disabled={!source.configured}
                     onCheckedChange={(checked) => {
-                      if (checked) {
-                        enableDataSource(source.name).catch(() => {})
-                      } else {
-                        disableDataSource(source.name).catch(() => {})
-                      }
+                      const op = checked ? enableDataSource : disableDataSource
+                      op(source.name)
+                        .then(() => refetchDS())
+                        .catch((e) => console.warn("Data source toggle failed:", e))
                     }}
                   />
                 </div>

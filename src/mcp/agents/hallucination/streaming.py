@@ -281,7 +281,7 @@ async def verify_response_streaming(
     # must still yield a summary instead of dying with an unhandled exception.
     # On timeout/error, fall back to heuristic extraction so claims are still
     # produced even when the LLM is unreachable.
-    EXTRACTION_TIMEOUT = 15  # seconds — gpt-4o-mini JSON mode needs 3-12s typical
+    EXTRACTION_TIMEOUT = 30  # seconds — local Ollama needs 5-15s, cloud APIs 3-12s
     try:
         claims, method = await asyncio.wait_for(
             extract_claims(response_text, user_query=user_query),

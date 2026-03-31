@@ -217,9 +217,19 @@ export async function fetchOllamaStatus(): Promise<import("../types").OllamaStat
   return res.json()
 }
 
-export async function enableOllama(): Promise<{ status: string; provider: string; model: string; url: string }> {
-  const res = await fetch(`${MCP_BASE}/providers/ollama/enable`, { method: "POST", headers: mcpHeaders() })
+export async function enableOllama(model?: string): Promise<{ status: string; provider: string; model: string; url: string }> {
+  const res = await fetch(`${MCP_BASE}/providers/ollama/enable`, {
+    method: "POST",
+    headers: { ...mcpHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(model ? { model } : {}),
+  })
   if (!res.ok) throw new Error(await extractError(res, `Enable Ollama failed: ${res.status}`))
+  return res.json()
+}
+
+export async function fetchOllamaRecommendations(): Promise<import("../types").OllamaRecommendations> {
+  const res = await fetch(`${MCP_BASE}/providers/ollama/recommendations`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(`Recommendations fetch failed: ${res.status}`)
   return res.json()
 }
 
@@ -234,6 +244,59 @@ export async function pullOllamaModel(model: string): Promise<Response> {
 export async function disableOllama(): Promise<{ status: string; provider: string }> {
   const res = await fetch(`${MCP_BASE}/providers/ollama/disable`, { method: "POST", headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, `Disable Ollama failed: ${res.status}`))
+  return res.json()
+}
+
+// ---------------------------------------------------------------------------
+// Watched Folders
+
+export interface WatchedFolder {
+  id: string
+  path: string
+  label: string
+  enabled: boolean
+  domain_override: string | null
+  exclude_patterns: string[]
+  search_enabled: boolean
+  last_scanned_at: string | null
+  stats: { ingested: number; skipped: number; errored: number }
+  created_at: string
+}
+
+export async function fetchWatchedFolders(): Promise<{ folders: WatchedFolder[]; total: number }> {
+  const res = await fetch(`${MCP_BASE}/watched-folders`, { headers: mcpHeaders() })
+  if (!res.ok) return { folders: [], total: 0 }
+  return res.json()
+}
+
+export async function addWatchedFolder(data: { path: string; label?: string; domain_override?: string; search_enabled?: boolean }): Promise<WatchedFolder> {
+  const res = await fetch(`${MCP_BASE}/watched-folders`, {
+    method: "POST",
+    headers: { ...mcpHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Add folder failed: ${res.status}`))
+  return res.json()
+}
+
+export async function updateWatchedFolder(id: string, data: { enabled?: boolean; label?: string; search_enabled?: boolean; domain_override?: string }): Promise<WatchedFolder> {
+  const res = await fetch(`${MCP_BASE}/watched-folders/${id}`, {
+    method: "PATCH",
+    headers: { ...mcpHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Update folder failed: ${res.status}`))
+  return res.json()
+}
+
+export async function removeWatchedFolder(id: string): Promise<void> {
+  const res = await fetch(`${MCP_BASE}/watched-folders/${id}`, { method: "DELETE", headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Remove folder failed: ${res.status}`))
+}
+
+export async function scanWatchedFolder(id: string): Promise<{ status: string }> {
+  const res = await fetch(`${MCP_BASE}/watched-folders/${id}/scan`, { method: "POST", headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Scan failed: ${res.status}`))
   return res.json()
 }
 

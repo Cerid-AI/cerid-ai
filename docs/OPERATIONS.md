@@ -25,23 +25,42 @@ The startup script still provides value for LAN IP detection, pre-flight validat
 
 ## Local LLM via Ollama (Phase 48)
 
-Ollama enables air-gapped deployment by routing model assignments to a local LLM server.
+Ollama enables air-gapped deployment by routing pipeline intelligence tasks to a local LLM server.
 
 ### Setup
 
+**Option A — GUI Setup Wizard (recommended):**
+1. Navigate to Settings → System → Ollama → Set Up Ollama
+2. Follow install instructions (macOS/Linux)
+3. Click "Continue" — Cerid auto-detects Ollama and shows model selection
+4. The wizard recommends a model based on your hardware (RAM/CPU/GPU):
+   - **8GB+ RAM**: Llama 3.2 3B (2GB, lightweight)
+   - **16GB+ RAM**: Llama 3.1 8B (4.7GB, balanced — recommended for most)
+   - **32GB+ RAM**: Phi-4 14B (9.1GB, performance)
+5. Select model → wizard pulls and enables automatically
+
+**Option B — Manual:**
 ```bash
 # Install Ollama (macOS)
-brew install ollama
-ollama serve
+brew install ollama && open -a Ollama
 
 # Pull a model
-ollama pull llama3.1
+ollama pull llama3.1:8b
 
-# Enable in cerid-ai
-# In .env:
+# Enable in .env:
 OLLAMA_ENABLED=true
-OLLAMA_URL=http://localhost:11434
+OLLAMA_URL=http://host.docker.internal:11434  # Docker-to-host bridge
+OLLAMA_DEFAULT_MODEL=llama3.1:8b
+INTERNAL_LLM_PROVIDER=ollama
+INTERNAL_LLM_MODEL=llama3.1:8b
 ```
+
+### Post-Setup Model Management
+
+Change the active model at any time from Settings → System → Ollama → Change button. The model management panel shows:
+- All 3 catalog models with compatibility status based on your hardware
+- Any additional models you've pulled manually
+- One-click "Use" for installed models, "Install & Use" for new models
 
 ### Endpoints
 
@@ -49,13 +68,28 @@ OLLAMA_URL=http://localhost:11434
 |----------|--------|-------------|
 | `/ollama/chat` | POST | Streaming chat completion via local model |
 | `/ollama/models` | GET | List available local models |
-| `/ollama/pull` | POST | Pull a new model from Ollama registry |
+| `/ollama/pull` | POST | Pull a new model from Ollama registry (streaming NDJSON) |
+| `/providers/ollama/status` | GET | Ollama status, models, reachability |
+| `/providers/ollama/recommendations` | GET | Hardware-aware model recommendations |
+| `/providers/ollama/enable` | POST | Enable Ollama (optional `{"model": "..."}` body) |
+| `/providers/ollama/disable` | POST | Disable Ollama, fall back to cloud |
 
-Ollama proxy includes a circuit breaker (5 failures → 60s open). When `OLLAMA_ENABLED=false` (default), all endpoints return 503.
+Ollama proxy includes a circuit breaker (5 failures → 60s open). When `OLLAMA_ENABLED=false` (default), proxy endpoints return 503.
 
-**Internal LLM configuration:**
-- `INTERNAL_LLM_PROVIDER` — `ollama` or `openrouter` (default: `openrouter`)
-- `INTERNAL_LLM_MODEL` — Model ID for pipeline tasks (default: `qwen2.5:1.5b` for Ollama)
+### Verification Timeouts
+
+Tuned for local inference speed (Ollama is slower than cloud APIs):
+- `STREAMING_PER_CLAIM_TIMEOUT` — 10s per claim (default)
+- Extraction timeout — 30s (internal, not env-configurable)
+- `STREAMING_TOTAL_TIMEOUT` — 90s total verification deadline (default)
+
+### Configuration
+
+- `OLLAMA_ENABLED` — Enable/disable Ollama integration (default: `false`)
+- `OLLAMA_URL` — Ollama server URL (default: `http://localhost:11434`; use `http://host.docker.internal:11434` for Docker)
+- `OLLAMA_DEFAULT_MODEL` — Default model (auto-recommended if not set; fallback: `llama3.2:3b`)
+- `INTERNAL_LLM_PROVIDER` — `ollama` or `bifrost` (default: `bifrost`)
+- `INTERNAL_LLM_MODEL` — Model override (empty = use `OLLAMA_DEFAULT_MODEL`)
 
 ---
 

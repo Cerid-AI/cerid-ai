@@ -139,13 +139,13 @@ export function StatusBar() {
                 <TooltipTrigger asChild>
                   <span className="flex items-center gap-1 text-[10px] text-green-600 dark:text-green-400">
                     <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                    Ollama: {health.internal_llm_model ?? "llama3.2:3b"} ({localCount}/{totalStages} local)
+                    Ollama: {health.internal_llm_model || "active"} ({localCount}/{totalStages} local)
                   </span>
                 </TooltipTrigger>
                 <TooltipContent side="top" className="space-y-1">
                   <p className="font-medium">Ollama — Local LLM</p>
                   <p className="text-muted-foreground">{localCount} of {totalStages} pipeline stages running locally ($0)</p>
-                  <p className="text-muted-foreground">Model: {health.internal_llm_model ?? "llama3.2:3b"}</p>
+                  <p className="text-muted-foreground">Model: {health.internal_llm_model || "configured"}</p>
                 </TooltipContent>
               </Tooltip>
             )

@@ -70,19 +70,34 @@ async def orchestrated_query(
         return result
 
     # --- Smart / Custom Smart: parallel KB + memory recall ---
-    kb_task = agent_query(
-        query=query,
-        domains=domains,
-        top_k=top_k,
-        use_reranking=use_reranking,
-        conversation_messages=conversation_messages,
-        chroma_client=chroma_client,
-        redis_client=redis_client,
-        neo4j_driver=neo4j_driver,
-        **kwargs,
-    )
+    import time as _time
 
-    memory_task = _recall_with_timeout(
+    source_status: dict[str, str] = {"kb": "ok", "memory": "ok", "external": "ok"}
+    timings: dict[str, float] = {}
+
+    # KB query with timing and error handling
+    kb_start = _time.monotonic()
+    try:
+        kb_result = await agent_query(
+            query=query,
+            domains=domains,
+            top_k=top_k,
+            use_reranking=use_reranking,
+            conversation_messages=conversation_messages,
+            chroma_client=chroma_client,
+            redis_client=redis_client,
+            neo4j_driver=neo4j_driver,
+            **kwargs,
+        )
+    except Exception as kb_exc:
+        logger.error("KB query failed: %s", kb_exc)
+        kb_result = {"results": [], "context": "", "strategy": "error"}
+        source_status["kb"] = "error"
+    timings["kb_ms"] = round((_time.monotonic() - kb_start) * 1000, 1)
+
+    # Memory recall with timing (already has timeout/error handling internally)
+    mem_start = _time.monotonic()
+    memory_results = await _recall_with_timeout(
         query=query,
         chroma_client=chroma_client,
         neo4j_driver=neo4j_driver,
@@ -90,10 +105,14 @@ async def orchestrated_query(
         min_score=memory_min_score,
         timeout_ms=MEMORY_RECALL_TIMEOUT_MS,
     )
-
-    kb_result, memory_results = await asyncio.gather(kb_task, memory_task)
+    timings["memory_ms"] = round((_time.monotonic() - mem_start) * 1000, 1)
+    if not memory_results and source_status["memory"] == "ok":
+        # Check if it was a timeout vs just no results
+        if timings["memory_ms"] >= MEMORY_RECALL_TIMEOUT_MS * 0.95:
+            source_status["memory"] = "timeout"
 
     # Separate external results from KB results
+    ext_start = _time.monotonic()
     kb_sources = []
     external_sources = []
     for r in kb_result.get("results", []):
@@ -101,6 +120,9 @@ async def orchestrated_query(
             external_sources.append(r)
         else:
             kb_sources.append(r)
+    timings["external_ms"] = round((_time.monotonic() - ext_start) * 1000, 1)
+    if not external_sources:
+        source_status["external"] = "no_results"
 
     # Format memory results for source_breakdown
     memory_sources = [
@@ -135,6 +157,8 @@ async def orchestrated_query(
     # Enrich the base result with orchestrator data
     kb_result["source_breakdown"] = source_breakdown
     kb_result["rag_mode"] = rag_mode
+    kb_result["source_status"] = source_status
+    kb_result["_timings"] = timings
 
     # Append memory context to the assembled context string
     if memory_sources:

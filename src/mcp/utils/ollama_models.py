@@ -22,15 +22,35 @@ logger = logging.getLogger("ai-companion.ollama.models")
 # Recommended models per pipeline stage
 # ---------------------------------------------------------------------------
 
-RECOMMENDED_MODELS: dict[str, str] = {
-    "claim_extraction": "llama3.2:3b",       # fast, 2GB, good at classification
-    "query_decomposition": "llama3.2:3b",    # fast, structured output
-    "topic_extraction": "llama3.2:3b",        # keyword extraction
-    "memory_resolution": "llama3.2:3b",       # pattern matching
-    "verification_simple": "llama3.3:8b",       # needs reasoning for factual claims
-    "reranking": "llama3.2:3b",               # cross-encoder style
-    "embedding": "nomic-embed-text",            # zero API cost embedding
-}
+def _default_model() -> str:
+    """Return configured Ollama model — never hardcoded."""
+    return os.getenv("OLLAMA_DEFAULT_MODEL", "llama3.2:3b")
+
+
+def get_recommended_models() -> dict[str, str]:
+    """Recommended models per pipeline stage, using configured default."""
+    model = _default_model()
+    return {
+        "claim_extraction": model,
+        "query_decomposition": model,
+        "topic_extraction": model,
+        "memory_resolution": model,
+        "verification_simple": model,
+        "reranking": model,
+        "embedding": "nomic-embed-text",  # dedicated embedding model
+    }
+
+
+# Backward-compat alias — lazy so it reads current env at call time
+RECOMMENDED_MODELS: dict[str, str] = {}
+
+
+def _init_recommended() -> None:
+    """Initialize RECOMMENDED_MODELS from env. Called at module load."""
+    RECOMMENDED_MODELS.update(get_recommended_models())
+
+
+_init_recommended()
 
 
 def _ollama_url() -> str:
@@ -64,20 +84,21 @@ async def detect_available_models() -> list[dict]:
 
 
 def check_model_availability(available: list[dict]) -> dict:
-    """Compare available models against RECOMMENDED_MODELS.
+    """Compare available models against recommended pipeline models.
 
+    Always reads current config (not stale module-level dict).
     Returns ``{"available": [...], "missing": [...], "warnings": [...]}``.
     """
     available_names = {m["name"] for m in available}
-    # Also match without tag (e.g. "llama3.2:3b" matches "llama3.2:3b")
-    # and base name (e.g. "nomic-embed-text" matches "nomic-embed-text:latest")
+    # Also match without tag and base name
     available_bases = {n.split(":")[0] for n in available_names}
 
     present: list[str] = []
     missing: list[str] = []
     warnings: list[str] = []
 
-    for stage, model in RECOMMENDED_MODELS.items():
+    recommended = get_recommended_models()
+    for stage, model in recommended.items():
         model_base = model.split(":")[0]
         if model in available_names or model_base in available_bases:
             present.append(model)

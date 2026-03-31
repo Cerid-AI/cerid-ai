@@ -10,7 +10,7 @@ import { ChevronDown, ChevronRight, Info } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 
-export type SectionKey = "connection" | "knowledge_ingestion" | "features" | "retrieval" | "search" | "taxonomy" | "infra_sync" | "ollama" | "kb_admin" | "credits" | "data_sources" | "rag_config"
+export type SectionKey = "connection" | "knowledge_ingestion" | "features" | "retrieval" | "search" | "taxonomy" | "infra_sync" | "ollama" | "kb_admin" | "credits" | "data_sources" | "rag_config" | "watched_folders"
 
 /**
  * Wraps children with a disabled overlay + Pro badge when the current tier

@@ -78,6 +78,7 @@ from routers import (
     query,
     scanner,
     sdk,
+    watched_folders,
     settings,
     setup,
     sync,
@@ -431,6 +432,7 @@ _api_routers = [
     user_state.router,
     plugins.router,
     scanner.router,
+    watched_folders.router,
     workflows.router,
 ]
 for r in _api_routers:

@@ -10,6 +10,8 @@ import os
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from errors import CeridError
+
 import config
 from config.model_providers import (
     PROVIDER_CONFIGS,
@@ -122,7 +124,7 @@ async def set_internal_provider(body: dict):
     intelligence_model = body.get("intelligence_model", "")
 
     if provider not in ("bifrost", "ollama"):
-        raise HTTPException(status_code=400, detail="Provider must be 'bifrost' or 'ollama'")
+        raise CeridError("Provider must be 'bifrost' or 'ollama'", status_code=400)
 
     config.INTERNAL_LLM_PROVIDER = provider
     config.INTERNAL_LLM_MODEL = model
@@ -181,13 +183,135 @@ async def get_ollama_status():
     return result
 
 
+@router.get("/ollama/recommendations")
+async def get_ollama_recommendations():
+    """Return model options with hardware-aware recommendation.
+
+    Detects system RAM and suggests the best model for pipeline tasks.
+    Models are USG-compliant (US/allied-origin only).
+    """
+    import asyncio
+    import functools
+    import platform
+    import subprocess
+
+    # Detect system RAM — offload blocking calls to thread pool
+    ram_gb = 0
+    cpu_info = ""
+    gpu_info = ""
+    system = platform.system()
+    try:
+        if system == "Darwin":
+            raw = await asyncio.to_thread(
+                functools.partial(subprocess.check_output, ["sysctl", "-n", "hw.memsize"], text=True),
+            )
+            ram_gb = int(raw.strip()) / (1024 ** 3)
+            raw_cpu = await asyncio.to_thread(
+                functools.partial(subprocess.check_output, ["sysctl", "-n", "machdep.cpu.brand_string"], text=True),
+            )
+            cpu_info = raw_cpu.strip()
+            arch = platform.machine()
+            gpu_info = "Apple Metal (unified)" if arch == "arm64" else "Intel (CPU only)"
+        elif system == "Linux":
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    if line.startswith("MemTotal:"):
+                        ram_gb = int(line.split()[1]) / (1024 ** 2)
+                        break
+            raw_cpu = await asyncio.to_thread(
+                functools.partial(subprocess.check_output, ["lscpu"], text=True, stderr=subprocess.DEVNULL),
+            )
+            for line in raw_cpu.splitlines():
+                if "Model name" in line:
+                    cpu_info = line.split(":", 1)[1].strip()
+                    break
+            # Check for NVIDIA GPU
+            try:
+                nv = await asyncio.to_thread(
+                    functools.partial(
+                        subprocess.check_output,
+                        ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                        text=True,
+                    ),
+                )
+                gpu_info = f"NVIDIA {nv.strip()}" if nv.strip() else "CPU only"
+            except Exception:
+                gpu_info = "CPU only"
+    except Exception as exc:
+        logger.warning("Hardware detection failed: %s", exc)
+
+    ram_gb = round(ram_gb, 1)
+
+    # Model catalog — USG-compliant models only
+    models = [
+        {
+            "id": "llama3.2:3b",
+            "name": "Llama 3.2 3B",
+            "origin": "Meta (US)",
+            "size_gb": 2.0,
+            "min_ram_gb": 8,
+            "description": "Lightweight model for resource-constrained machines. Good at classification and extraction but slower on complex reasoning.",
+            "strengths": "Smallest footprint, runs on any machine",
+            "tier": "lightweight",
+        },
+        {
+            "id": "llama3.1:8b",
+            "name": "Llama 3.1 8B",
+            "origin": "Meta (US)",
+            "size_gb": 4.7,
+            "min_ram_gb": 16,
+            "description": "Balanced performance for pipeline tasks. Strong structured output, faster inference than 3B on capable hardware.",
+            "strengths": "Best balance of speed, quality, and resource usage",
+            "tier": "balanced",
+        },
+        {
+            "id": "phi4:14b",
+            "name": "Phi-4 14B",
+            "origin": "Microsoft (US)",
+            "size_gb": 9.1,
+            "min_ram_gb": 32,
+            "description": "High-quality reasoning and extraction. Excels at structured JSON output and claim analysis.",
+            "strengths": "Best quality for complex extraction and reasoning tasks",
+            "tier": "performance",
+        },
+    ]
+
+    # Determine recommendation based on RAM (aligned with min_ram_gb tiers)
+    if ram_gb >= 32:
+        recommended = "phi4:14b"
+    elif ram_gb >= 16:
+        recommended = "llama3.1:8b"
+    else:
+        recommended = "llama3.2:3b"
+
+    # Mark which models are compatible with this machine
+    for m in models:
+        m["compatible"] = ram_gb >= m["min_ram_gb"]
+        m["recommended"] = m["id"] == recommended
+
+    return {
+        "hardware": {
+            "ram_gb": ram_gb,
+            "cpu": cpu_info,
+            "gpu": gpu_info,
+            "platform": system,
+        },
+        "models": models,
+        "recommended": recommended,
+    }
+
+
+class OllamaEnableRequest(BaseModel):
+    model: str | None = Field(None, description="Override the default Ollama model")
+
+
 @router.post("/ollama/enable")
-async def enable_ollama():
+async def enable_ollama(body: OllamaEnableRequest | None = None):
     """Enable Ollama as the internal LLM provider.
 
     Checks connectivity, updates runtime config to route pipeline
-    intelligence calls to Ollama. Does NOT persist to .env (that's done
-    by start-cerid.sh or manually by the user).
+    intelligence calls to Ollama. Accepts optional model override.
+    Does NOT persist to .env (that's done by start-cerid.sh or manually).
     """
     import httpx
 
@@ -213,15 +337,18 @@ async def enable_ollama():
                 continue
 
     if not connected:
-        raise HTTPException(
+        raise CeridError(
+            "Cannot connect to Ollama. Start with: open -a Ollama (macOS) or ollama serve (Linux)",
             status_code=503,
-            detail="Cannot connect to Ollama. "
-                   "Start with: open -a Ollama (macOS) or ollama serve (Linux)",
         )
+
+    # Apply model override if provided
+    selected_model = (body.model if body and body.model else None) or config.OLLAMA_DEFAULT_MODEL
 
     # Update runtime config
     config.INTERNAL_LLM_PROVIDER = "ollama"
-    config.INTERNAL_LLM_MODEL = config.OLLAMA_DEFAULT_MODEL
+    config.INTERNAL_LLM_MODEL = selected_model
+    config.OLLAMA_DEFAULT_MODEL = selected_model
 
     # Update pipeline routing — route eligible stages to Ollama
     locked_stages = {"verification_complex", "chat_generation"}

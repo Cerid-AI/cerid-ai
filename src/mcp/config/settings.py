@@ -262,7 +262,7 @@ STREAMING_PER_CLAIM_TIMEOUT = float(os.getenv("STREAMING_PER_CLAIM_TIMEOUT", "10
 STREAMING_EXPERT_CLAIM_TIMEOUT = float(os.getenv("STREAMING_EXPERT_CLAIM_TIMEOUT", "30"))
 # Total deadline for the entire streaming verification loop (all claims).
 # With fast-path for no-KB claims + 10s per-claim timeout, 60s is sufficient.
-STREAMING_TOTAL_TIMEOUT = float(os.getenv("STREAMING_TOTAL_TIMEOUT", "60"))
+STREAMING_TOTAL_TIMEOUT = float(os.getenv("STREAMING_TOTAL_TIMEOUT", "90"))
 # Fewer LLM retries on 429 during streaming to avoid compounding delays
 STREAMING_RETRY_ATTEMPTS = int(os.getenv("STREAMING_RETRY_ATTEMPTS", "1"))
 

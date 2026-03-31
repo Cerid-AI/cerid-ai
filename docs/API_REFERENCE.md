@@ -436,8 +436,9 @@ curl -X POST http://localhost:8888/recategorize \
 - `CATEGORIZE_MODE=smart` — Default tier (manual/smart/pro)
 - `BIFROST_URL=http://bifrost:8080/v1`
 - `ARCHIVE_PATH=/archive` — Container-side mount point
-- `INTERNAL_LLM_PROVIDER` — Internal LLM provider for pipeline tasks (`ollama` or `openrouter`, default: `openrouter`)
-- `INTERNAL_LLM_MODEL` — Internal LLM model ID (default: `qwen2.5:1.5b` for Ollama, auto-selected for OpenRouter)
+- `INTERNAL_LLM_PROVIDER` — Internal LLM provider for pipeline tasks (`ollama` or `bifrost`, default: `bifrost`)
+- `INTERNAL_LLM_MODEL` — Internal LLM model ID (empty = auto-selected; set during Ollama setup wizard or via `OLLAMA_DEFAULT_MODEL`)
+- `OLLAMA_DEFAULT_MODEL` — Default Ollama model (auto-recommended based on hardware if not set; fallback: `llama3.2:3b`)
 
 ---
 
@@ -632,14 +633,23 @@ make deps-check
 **Proxy endpoints** (require `OLLAMA_ENABLED=true`):
 - `GET /ollama/models` — List installed Ollama models
 - `POST /ollama/chat` — Chat with local model (streaming + non-streaming)
-- `POST /ollama/pull` — Pull/download a model (streaming progress)
+- `POST /ollama/pull` — Pull/download a model (streaming progress via NDJSON)
 
-**Configuration & management (under `/providers/` router — see Providers section above):**
+**Configuration & management (under `/providers/` router):**
 - `GET /providers/ollama/status` — Ollama status: `{ enabled, url, reachable, models[], default_model, default_model_installed }`
-- `POST /providers/ollama/enable` — Enable Ollama as internal LLM provider (checks connectivity, updates runtime config)
+- `GET /providers/ollama/recommendations` — Hardware-aware model recommendations: `{ hardware: { ram_gb, cpu, gpu, platform }, models: [{ id, name, origin, size_gb, min_ram_gb, description, strengths, tier, compatible, recommended }], recommended }`
+- `POST /providers/ollama/enable` — Enable Ollama as internal LLM provider. Optional body: `{ "model": "llama3.1:8b" }` to override the default model. Checks connectivity, updates runtime config.
 - `POST /providers/ollama/disable` — Disable Ollama, fall back to OpenRouter
 
-**Default model:** `llama3.2:3b` (3B params, ~2GB, runs on CPU or GPU)
+**Model selection:** Configurable via `OLLAMA_DEFAULT_MODEL` env var or the setup wizard UI. The setup wizard detects system RAM/CPU/GPU and recommends from 3 tiers:
+
+| Tier | Model | Size | Min RAM | Origin |
+|------|-------|------|---------|--------|
+| Lightweight | Llama 3.2 3B | 2.0GB | 8GB | Meta (US) |
+| Balanced | Llama 3.1 8B | 4.7GB | 16GB | Meta (US) |
+| Performance | Phi-4 14B | 9.1GB | 32GB | Microsoft (US) |
+
+Model can be changed post-setup via Settings UI → Ollama → Change button.
 
 **Pipeline tasks routed to internal LLM:**
 - Claim extraction (verification)
@@ -650,7 +660,7 @@ make deps-check
 
 **Limitations:** The local model handles classification, extraction, and routing. It does NOT handle: user-facing chat, verification fact-checking, synopsis generation, or web search — those always use OpenRouter.
 
-**Hardware detection:** `scripts/detect-gpu.sh` auto-detects NVIDIA GPU, AMD ROCm, macOS Metal, or CPU fallback. Docker Compose profile `ollama` starts the container with GPU passthrough when available. macOS Apple Silicon: Ollama runs natively for Metal acceleration.
+**Hardware detection:** `scripts/detect-gpu.sh` auto-detects NVIDIA GPU, AMD ROCm, macOS Metal, or CPU fallback. The `/providers/ollama/recommendations` endpoint detects RAM, CPU, and GPU at runtime for model recommendations. Docker Compose profile `ollama` starts the container with GPU passthrough when available. macOS Apple Silicon: runs natively for Metal acceleration.
 
 **Cost:** $0 for all internal LLM calls when using Ollama. Falls back to OpenRouter (paid) when Ollama is unavailable.
 

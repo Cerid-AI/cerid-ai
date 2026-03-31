@@ -32,7 +32,7 @@ import { useVerificationOrchestrator } from "@/hooks/use-verification-orchestrat
 import { useUIMode } from "@/contexts/ui-mode-context"
 import { UploadDialog } from "@/components/kb/upload-dialog"
 import { useQuery } from "@tanstack/react-query"
-import { uploadFile, enableOllama, fetchOllamaStatus, pullOllamaModel, fetchHealthStatus } from "@/lib/api"
+import { uploadFile, enableOllama, fetchOllamaStatus, fetchOllamaRecommendations, pullOllamaModel, fetchHealthStatus } from "@/lib/api"
 import type { ChatMessage } from "@/lib/types"
 import { MODELS } from "@/lib/types"
 import { uuid } from "@/lib/utils"
@@ -129,7 +129,7 @@ export function ChatPanel() {
     setOllamaSetupActive(true)
     const steps: Array<{ label: string; status: "done" | "active" | "pending" }> = [
       { label: "Checking Ollama...", status: "active" },
-      { label: "Pulling llama3.2:3b (2GB)...", status: "pending" },
+      { label: "Detecting hardware...", status: "pending" },
       { label: "Enabling local pipeline", status: "pending" },
       { label: "Setup complete", status: "pending" },
     ]
@@ -145,20 +145,31 @@ export function ChatPanel() {
         steps[2] = { label: "Click \u201cRetry\u201d below after starting Ollama", status: "done" }
         steps[3] = { label: "Waiting for Ollama...", status: "pending" }
         setSetupSteps([...steps])
-        // Keep setup panel visible — don't hide it
         return
       }
 
       steps[0] = { label: "Ollama detected", status: "done" }
 
-      // Step 2: Pull model if missing
+      // Step 2: Get hardware-aware recommendation and pull model
       steps[1] = { ...steps[1], status: "active" }
       setSetupSteps([...steps])
 
-      if (!status.default_model_installed) {
-        const pullRes = await pullOllamaModel(status.default_model || "llama3.2:3b")
+      let modelToPull = status.default_model || "llama3.2:3b"
+      try {
+        const recs = await fetchOllamaRecommendations()
+        modelToPull = recs.recommended
+        steps[1] = { label: `${recs.hardware.ram_gb}GB RAM detected \u2014 using ${recs.models.find(m => m.id === recs.recommended)?.name ?? recs.recommended}`, status: "done" }
+      } catch {
+        steps[1] = { label: `Using ${modelToPull}`, status: "done" }
+      }
+      setSetupSteps([...steps])
+
+      // Pull if not already installed
+      if (!status.models.includes(modelToPull)) {
+        steps[2] = { label: `Pulling ${modelToPull}...`, status: "active" }
+        setSetupSteps([...steps])
+        const pullRes = await pullOllamaModel(modelToPull)
         if (!pullRes.ok) throw new Error("Model pull failed")
-        // Consume the streaming response to wait for completion
         const reader = pullRes.body?.getReader()
         if (reader) {
           while (true) {
@@ -167,19 +178,17 @@ export function ChatPanel() {
           }
         }
       }
-      steps[1] = { label: "\u2713 " + (status.default_model || "llama3.2:3b") + " ready", status: "done" }
 
-      // Step 3: Enable
-      steps[2] = { ...steps[2], status: "active" }
+      // Step 3: Enable with selected model
+      steps[2] = { label: "Enabling local pipeline...", status: "active" }
       setSetupSteps([...steps])
-      await enableOllama()
+      await enableOllama(modelToPull)
       steps[2] = { label: "\u2713 Local pipeline enabled", status: "done" }
 
       // Step 4: Done
-      steps[3] = { label: "\u2713 Setup complete \u2014 verification now 10\u00d7 faster", status: "done" }
+      steps[3] = { label: "\u2713 Setup complete \u2014 pipeline tasks now run locally for $0", status: "done" }
       setSetupSteps([...steps])
 
-      // Dismiss after 3 seconds
       setTimeout(() => {
         setOllamaSetupActive(false)
         setOllamaDismissed(true)

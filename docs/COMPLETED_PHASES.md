@@ -1,7 +1,7 @@
 # Cerid AI — Completed Phases
 
 > Full history of completed development phases. For current status and next steps, see [CLAUDE.md](../CLAUDE.md).
-> **Last updated:** 2026-03-29
+> **Last updated:** 2026-03-30
 
 ---
 
@@ -218,3 +218,14 @@
   - Centralized React Query key registry (query-keys.ts)
   - 1805 Python tests, 506 frontend tests, 9-job CI green.
 - **Verification Crash Debugging (Complete, 2026-03-22):** Deep debugging session fixing production crashes in the verification panel. Docker build silent failure identified (exit code 2 reuses cached image). React infinite render loop fixed (3 root causes: object ref comparisons in useEffect, context callback instability, synchronous state updates during render). Circuit breaker name mismatches fixed across 4 call sites. Claim extraction hardened (pleasantry filtering, JSON wrapper unwrapping). 58 lines dead code removed. Smart router, BYOK provider config, OpenRouter credit tracking, RAG features, folder scanner, and PDF chunked parsing all polished. Key files: `tasks/lessons.md` (patterns captured), `src/web/src/hooks/use-verification-orchestrator.ts`, `src/mcp/utils/circuit_breaker.py`, `src/mcp/agents/hallucination/extraction.py`.
+- **Session 2026-03-30: Branding Alignment + Ollama Model Management**
+  - Marketing site: OG image + Twitter cards + JSON-LD structured data, light-mode brand color harmonization, CTA/subtitle/copyright updates, branded 404 + loading pages
+  - React GUI: Geist Sans/Mono variable fonts, brand-aligned code blocks (--code-block-bg CSS var), sidebar wordmark +40%
+  - Ollama model management: `/providers/ollama/recommendations` endpoint with hardware detection (RAM/CPU/GPU), 3-tier model catalog (Lightweight/Balanced/Performance, USG-compliant), model selection wizard in setup flow, post-setup model switching in Settings UI
+  - `/providers/ollama/enable` accepts optional `model` parameter, `ollama_models.py` uses configurable `OLLAMA_DEFAULT_MODEL` (removed all hardcoded references)
+  - Verification tuning: extraction timeout 15→30s, total deadline 60→90s (accommodates local Ollama inference)
+  - Source deduplication: `SourceAttribution` deduplicates at artifact level (same file shows once with highest relevance)
+  - Ollama detection bug fixed: `OLLAMA_ENABLED=true`, `OLLAMA_URL=http://host.docker.internal:11434`, `INTERNAL_LLM_PROVIDER=ollama`
+  - Benchmarked llama3.2:3b vs llama3.1:8b — 8B recommended for 16GB+ machines (better structured output quality)
+  - New files: `source-attribution.test.tsx` (dedup test)
+  - 1805 Python tests, 507 frontend tests.

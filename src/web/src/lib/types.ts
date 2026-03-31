@@ -655,6 +655,31 @@ export interface OllamaStatus {
   default_model_installed: boolean
 }
 
+/** Model recommendation from GET /providers/ollama/recommendations */
+export interface OllamaModelOption {
+  id: string
+  name: string
+  origin: string
+  size_gb: number
+  min_ram_gb: number
+  description: string
+  strengths: string
+  tier: "lightweight" | "balanced" | "performance"
+  compatible: boolean
+  recommended: boolean
+}
+
+export interface OllamaRecommendations {
+  hardware: {
+    ram_gb: number
+    cpu: string
+    gpu: string
+    platform: string
+  }
+  models: OllamaModelOption[]
+  recommended: string
+}
+
 export interface SettingsUpdate {
   categorize_mode?: string
   enable_feedback_loop?: boolean

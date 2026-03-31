@@ -31,7 +31,7 @@ function readSectionState(): Record<SectionKey, boolean> {
     connection: true, knowledge_ingestion: true, features: true,
     retrieval: true, search: true, taxonomy: true, infra_sync: true,
     ollama: true, kb_admin: true, credits: true, data_sources: false,
-    rag_config: true,
+    rag_config: true, watched_folders: false,
   }
   try {
     const ver = localStorage.getItem("cerid-settings-sections-v")

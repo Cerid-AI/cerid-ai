@@ -11,7 +11,10 @@ Error types: none (source failures are silent -- never blocks retrieval)
 """
 
 from .base import DataSource, DataSourceRegistry, DataSourceResult, registry
+from .duckduckgo import DuckDuckGoSource
 from .finance import ExchangeRatesSource
+from .openlibrary import OpenLibrarySource
+from .pubchem import PubChemSource
 from .wikipedia import WikipediaSource
 from .wolfram import WolframAlphaSource
 
@@ -19,5 +22,8 @@ from .wolfram import WolframAlphaSource
 registry.register(WikipediaSource())
 registry.register(WolframAlphaSource())
 registry.register(ExchangeRatesSource())
+registry.register(DuckDuckGoSource())
+registry.register(OpenLibrarySource())
+registry.register(PubChemSource())
 
 __all__ = ["DataSource", "DataSourceResult", "DataSourceRegistry", "registry"]

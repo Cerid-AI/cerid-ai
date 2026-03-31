@@ -317,7 +317,7 @@ Deep debugging session fixing production crashes and polishing features built in
 - [x] Per-stage routing (`PIPELINE_PROVIDERS` — 8 stages, env var overrides, backward compat)
 - [x] `get_stage_provider()` helper function
 - [ ] Independent circuit breakers per stage — future sprint (config ready)
-- [ ] Auto-detect models + GUI — future sprint
+- [x] Auto-detect models + GUI ✅ 2026-03-30
 
 ### Track 6: Code Quality ✅
 - [x] God file decomposition: verification.py 1590→1208 lines (verdict_parsing.py + confidence.py extracted)
@@ -357,6 +357,39 @@ Deep debugging session fixing production crashes and polishing features built in
 - [x] Fix `calculate_memory_score` docstring retention figure ("71%" → "~94.9%")
 - [x] Remove dead code `MEMORY_TYPE_REINFORCEMENT_BOOST` from settings.py
 - [x] Harden migration script idempotency guard (`meta.get()` → `"key" in meta`)
+
+### Session 2026-03-30: Branding Alignment + Ollama Model Management + Verification Fixes
+
+**Marketing site (packages/marketing/):**
+- [x] OG image, Twitter card, apple-touch-icon, JSON-LD structured data (layout.tsx)
+- [x] Light-mode brand color harmonized with GUI (oklch 0.55→0.46)
+- [x] CTA: "Download" → "View on GitHub", subtitle: "Smart. Extensible. Private."
+- [x] Copyright: "Justin Michaels" → "Cerid AI"
+- [x] Branded 404 page (not-found.tsx) + loading spinner (loading.tsx)
+
+**React GUI branding (src/web/):**
+- [x] Geist Sans/Mono variable fonts integrated (public/fonts/)
+- [x] Brand-aligned code blocks via --code-block-bg CSS variable + brandOneDark theme
+- [x] Sidebar wordmark increased 40% (h-7→h-10, text-[15px]→text-[21px])
+
+**Ollama model management:**
+- [x] New `/providers/ollama/recommendations` endpoint — hardware-aware model catalog (3 tiers: Lightweight/Balanced/Performance)
+- [x] `/providers/ollama/enable` accepts optional `model` body parameter
+- [x] Setup wizard: model selection step with hardware profile, model cards, compatibility flags
+- [x] Post-setup model management: Settings → Ollama → Change button (switch/install models)
+- [x] Removed all hardcoded `llama3.2:3b` references from frontend
+- [x] `ollama_models.py`: RECOMMENDED_MODELS uses configured `OLLAMA_DEFAULT_MODEL` instead of hardcoded values
+- [x] Pulled `llama3.1:8b` (4.9GB) for this machine, benchmarked vs 3B (8B wins on quality, 3B on throughput)
+
+**Verification & sources:**
+- [x] Extraction timeout: 15s → 30s (Ollama needs more time than cloud APIs)
+- [x] Total verification deadline: 60s → 90s
+- [x] Source deduplication: SourceAttribution now deduplicates at artifact level (same file shows once, highest relevance kept)
+
+**Bug fixes:**
+- [x] Ollama detection: OLLAMA_ENABLED=false → true, added OLLAMA_URL for Docker-to-host bridge, set INTERNAL_LLM_PROVIDER=ollama
+
+---
 
 ### Unified RAG Modes — All Sprints Complete ✅ 2026-03-29
 > **Plan:** [`docs/plans/PLAN_MEMORY_SALIENCE.md`](../docs/plans/PLAN_MEMORY_SALIENCE.md) + [RAG Modes plan](../.claude/plans/)

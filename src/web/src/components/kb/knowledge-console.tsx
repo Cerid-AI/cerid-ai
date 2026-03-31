@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
+import { Switch } from "@/components/ui/switch"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -20,6 +22,7 @@ import {
   AlertCircle,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { fetchDataSources, enableDataSource, disableDataSource } from "@/lib/api"
 import type { UseOrchestratedQueryReturn } from "@/hooks/use-orchestrated-query"
 import type { KBQueryResult, MemoryRecallResult, ExternalSourceResult, RagMode } from "@/lib/types"
 
@@ -158,6 +161,61 @@ function ExternalSourceCard({ result }: { result: ExternalSourceResult }) {
   )
 }
 
+/** Compact data source status list — shows enabled APIs with inline toggles. */
+function DataSourceIndicator() {
+  const { data, refetch } = useQuery({
+    queryKey: ["data-sources"],
+    queryFn: fetchDataSources,
+    staleTime: 60_000,
+  })
+  const [toggling, setToggling] = useState<string | null>(null)
+
+  if (!data?.sources?.length) return null
+
+  const handleToggle = async (name: string, currentlyEnabled: boolean) => {
+    setToggling(name)
+    try {
+      if (currentlyEnabled) {
+        await disableDataSource(name)
+      } else {
+        await enableDataSource(name)
+      }
+      await refetch()
+    } catch (e) {
+      console.warn("Data source toggle failed:", e)
+    } finally {
+      setToggling(null)
+    }
+  }
+
+  const enabledCount = data.sources.filter((s) => s.enabled && s.configured).length
+
+  return (
+    <div className="mt-1.5 space-y-1">
+      <p className="text-[10px] text-muted-foreground font-medium">
+        APIs ({enabledCount}/{data.sources.length} active)
+      </p>
+      {data.sources.map((src) => (
+        <div key={src.name} className="flex items-center justify-between rounded-md bg-muted/30 px-2 py-1">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", src.enabled && src.configured ? "bg-green-500" : "bg-muted-foreground/40")} />
+            <span className="text-[10px] truncate">{src.name}</span>
+            {src.requires_api_key && !src.configured && (
+              <Badge variant="outline" className="text-[8px] px-1 py-0 text-amber-600 dark:text-yellow-400 border-yellow-500/30">key needed</Badge>
+            )}
+          </div>
+          <Switch
+            checked={src.enabled}
+            onCheckedChange={() => handleToggle(src.name, src.enabled)}
+            disabled={toggling === src.name || (src.requires_api_key && !src.configured)}
+            className="scale-[0.6]"
+          />
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export function KnowledgeConsole({
   ragMode,
   confidence,
@@ -262,6 +320,7 @@ export function KnowledgeConsole({
                 ) : (
                   externalSources.map((r, i) => <ExternalSourceCard key={`ext-${i}`} result={r} />)
                 )}
+                <DataSourceIndicator />
               </SourceSection>
             </>
           )}
