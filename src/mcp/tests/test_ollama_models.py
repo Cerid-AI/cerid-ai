@@ -94,9 +94,15 @@ class TestCheckAvailability:
         assert len(report["warnings"]) == 0
 
     def test_check_availability_partial(self):
-        """Partial availability correctly splits present vs missing."""
-        available = [{"name": "llama3.2:3b", "size_gb": 2.0, "modified_at": ""}]
+        """Partial availability correctly splits present vs missing.
+
+        The default model (from OLLAMA_DEFAULT_MODEL env or 'llama3.2:3b')
+        is used for all pipeline stages. When only that model is available,
+        nomic-embed-text (dedicated embedding model) should be missing.
+        """
+        from utils.ollama_models import get_recommended_models
+        default_model = get_recommended_models()["claim_extraction"]
+        available = [{"name": default_model, "size_gb": 2.0, "modified_at": ""}]
         report = check_model_availability(available)
-        assert "llama3.2:3b" in report["available"]
-        assert "llama3.3:8b" in report["missing"]
+        assert default_model in report["available"]
         assert "nomic-embed-text" in report["missing"]

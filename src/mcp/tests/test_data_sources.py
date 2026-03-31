@@ -15,13 +15,16 @@ from utils.data_sources.wolfram import WolframAlphaSource
 
 
 def test_registry_has_preloaded_sources():
-    """Registry should have exactly 3 preloaded sources."""
+    """Registry should have all 6 preloaded sources."""
     sources = registry.list_sources()
     names = {s["name"] for s in sources}
     assert "wikipedia" in names
     assert "wolfram_alpha" in names
     assert "exchange_rates" in names
-    assert len(sources) == 3
+    assert "duckduckgo" in names
+    assert "openlibrary" in names
+    assert "pubchem" in names
+    assert len(sources) == 6
 
 
 def test_wikipedia_source_configured():
