@@ -10,8 +10,6 @@ import os
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from errors import CeridError
-
 import config
 from config.model_providers import (
     PROVIDER_CONFIGS,
@@ -124,7 +122,7 @@ async def set_internal_provider(body: dict):
     intelligence_model = body.get("intelligence_model", "")
 
     if provider not in ("bifrost", "ollama"):
-        raise CeridError("Provider must be 'bifrost' or 'ollama'", status_code=400)
+        raise HTTPException(status_code=400, detail="Provider must be 'bifrost' or 'ollama'")
 
     config.INTERNAL_LLM_PROVIDER = provider
     config.INTERNAL_LLM_MODEL = model
@@ -196,7 +194,7 @@ async def get_ollama_recommendations():
     import subprocess
 
     # Detect system RAM — offload blocking calls to thread pool
-    ram_gb = 0
+    ram_gb: float = 0.0
     cpu_info = ""
     gpu_info = ""
     system = platform.system()
@@ -337,9 +335,9 @@ async def enable_ollama(body: OllamaEnableRequest | None = None):
                 continue
 
     if not connected:
-        raise CeridError(
-            "Cannot connect to Ollama. Start with: open -a Ollama (macOS) or ollama serve (Linux)",
+        raise HTTPException(
             status_code=503,
+            detail="Cannot connect to Ollama. Start with: open -a Ollama (macOS) or ollama serve (Linux)",
         )
 
     # Apply model override if provided

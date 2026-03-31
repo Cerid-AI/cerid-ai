@@ -78,13 +78,13 @@ from routers import (
     query,
     scanner,
     sdk,
-    watched_folders,
     settings,
     setup,
     sync,
     taxonomy,
     upload,
     user_state,
+    watched_folders,
     workflows,
 )
 from scheduler import start_scheduler, stop_scheduler

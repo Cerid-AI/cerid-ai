@@ -18,10 +18,8 @@ import pathlib
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
-
-from errors import CeridError
 
 # Allowed root directories for watched folders (prevents path traversal)
 _ALLOWED_ROOTS = [
@@ -118,11 +116,11 @@ async def create_watched_folder(body: WatchedFolderCreate):
     # Validate path exists and is within allowed roots
     resolved = pathlib.Path(body.path).resolve()
     if not resolved.is_dir():
-        raise CeridError(f"Directory not found: {body.path}", status_code=400)
+        raise HTTPException(status_code=400, detail=f"Directory not found: {body.path}")
     if not any(resolved == root or root in resolved.parents for root in _ALLOWED_ROOTS):
-        raise CeridError(
-            f"Path must be within an allowed directory ({', '.join(str(r) for r in _ALLOWED_ROOTS)})",
+        raise HTTPException(
             status_code=400,
+            detail=f"Path must be within an allowed directory ({', '.join(str(r) for r in _ALLOWED_ROOTS)})",
         )
 
     redis = _get_redis()
@@ -172,7 +170,7 @@ async def get_watched_folder(folder_id: str):
     redis = _get_redis()
     data = _load_folder(redis, folder_id)
     if not data:
-        raise CeridError(f"Watched folder not found: {folder_id}", status_code=404)
+        raise HTTPException(status_code=404, detail=f"Watched folder not found: {folder_id}")
     return data
 
 
@@ -182,7 +180,7 @@ async def update_watched_folder(folder_id: str, body: WatchedFolderUpdate):
     redis = _get_redis()
     data = _load_folder(redis, folder_id)
     if not data:
-        raise CeridError(f"Watched folder not found: {folder_id}", status_code=404)
+        raise HTTPException(status_code=404, detail=f"Watched folder not found: {folder_id}")
 
     if body.label is not None:
         data["label"] = body.label
@@ -206,7 +204,7 @@ async def delete_watched_folder(folder_id: str):
     redis = _get_redis()
     data = _load_folder(redis, folder_id)
     if not data:
-        raise CeridError(f"Watched folder not found: {folder_id}", status_code=404)
+        raise HTTPException(status_code=404, detail=f"Watched folder not found: {folder_id}")
 
     redis.delete(_folder_key(folder_id))
     _remove_from_index(redis, folder_id)
@@ -221,10 +219,10 @@ async def scan_watched_folder(folder_id: str, background_tasks: BackgroundTasks)
     redis = _get_redis()
     data = _load_folder(redis, folder_id)
     if not data:
-        raise CeridError(f"Watched folder not found: {folder_id}", status_code=404)
+        raise HTTPException(status_code=404, detail=f"Watched folder not found: {folder_id}")
 
     if not os.path.isdir(data["path"]):
-        raise CeridError(f"Directory not accessible: {data['path']}", status_code=400)
+        raise HTTPException(status_code=400, detail=f"Directory not accessible: {data['path']}")
 
     async def _run_scan():
         from services.folder_scanner import scan_folder
@@ -271,7 +269,7 @@ async def get_folder_status(folder_id: str):
     redis = _get_redis()
     data = _load_folder(redis, folder_id)
     if not data:
-        raise CeridError(f"Watched folder not found: {folder_id}", status_code=404)
+        raise HTTPException(status_code=404, detail=f"Watched folder not found: {folder_id}")
 
     return {
         "id": folder_id,
