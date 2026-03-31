@@ -2,9 +2,28 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+/* --- Geist Sans (variable weight) — matches marketing site typography --- */
+@font-face {
+  font-family: "Geist Sans";
+  src: url("/fonts/Geist-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+/* --- Geist Mono (variable weight) --- */
+@font-face {
+  font-family: "Geist Mono";
+  src: url("/fonts/GeistMono-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+    --font-sans: "Geist Sans", system-ui, -apple-system, sans-serif;
+    --font-mono: "Geist Mono", ui-monospace, "SFMono-Regular", monospace;
     --radius-sm: calc(var(--radius) - 4px);
     --radius-md: calc(var(--radius) - 2px);
     --radius-lg: var(--radius);
@@ -146,7 +165,7 @@
     @apply border-border outline-ring/50;
     }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans;
     }
   /* Global pointer cursor for all interactive elements */
   button, [role="button"], a, [role="link"], [role="tab"],
@@ -176,6 +195,14 @@
   --claim-unverified-border: rgba(234, 179, 8, 0.4);
   --claim-evasion-bg: rgba(249, 115, 22, 0.12);
   --claim-citation-bg: rgba(168, 85, 247, 0.12);
+}
+
+/* --- Code block background (brand-navy-derived) --- */
+:root {
+  --code-block-bg: oklch(0.18 0.01 240);   /* cool dark slate for light mode */
+}
+.dark {
+  --code-block-bg: oklch(0.14 0.03 240);   /* deeper navy, sits below card bg */
 }
 
 /* --- Brand gradient utility --- */

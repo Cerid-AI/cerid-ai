@@ -39,7 +39,7 @@ export function Navbar() {
               CERID
             </span>
             <span className="hidden text-[10px] font-medium tracking-[0.25em] uppercase text-muted-foreground md:block mt-0.5">
-              Private AI Companion
+              Smart. Extensible. Private.
             </span>
           </div>
         </Link>
@@ -62,7 +62,7 @@ export function Navbar() {
             className="inline-flex items-center gap-2 rounded-lg bg-brand px-5 py-2 text-sm font-semibold text-brand-foreground transition-all hover:bg-brand/90 hover:shadow-lg hover:shadow-brand/20"
           >
             <Github className="h-4 w-4" />
-            Download
+            View on GitHub
           </Link>
         </div>
 
@@ -98,7 +98,7 @@ export function Navbar() {
               className="mt-1 inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-sm font-semibold text-brand-foreground hover:bg-brand/90"
             >
               <Github className="h-4 w-4" />
-              Download
+              View on GitHub
             </Link>
           </div>
         </div>

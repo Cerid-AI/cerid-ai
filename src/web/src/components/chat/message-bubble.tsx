@@ -41,7 +41,7 @@ const MARKUP_STYLES: Record<ClaimDisplayStatus, React.CSSProperties> = {
 
 /** Code block fallback while SyntaxHighlighter loads */
 function CodeFallback({ code }: { code: string }) {
-  return <pre className="rounded-lg bg-[#282c34] p-4 text-sm text-gray-300 overflow-x-auto !my-0"><code>{code}</code></pre>
+  return <pre className="rounded-lg bg-[var(--code-block-bg)] p-4 text-sm text-muted-foreground overflow-x-auto !my-0"><code>{code}</code></pre>
 }
 
 const COPY_FEEDBACK_MS = 2000
@@ -69,7 +69,7 @@ function CollapsibleCodeBlock({ language, code }: { language: string; code: stri
         </LazySyntaxHighlighter>
       </Suspense>
       {!expanded && (
-        <div className="absolute bottom-0 left-0 right-0 flex items-end justify-center rounded-b-lg bg-gradient-to-t from-[#282c34] pb-2 pt-8">
+        <div className="absolute bottom-0 left-0 right-0 flex items-end justify-center rounded-b-lg bg-gradient-to-t from-[var(--code-block-bg)] pb-2 pt-8">
           <button
             className="rounded-md bg-muted/80 px-3 py-1 text-xs text-muted-foreground hover:bg-muted"
             onClick={() => setExpanded(true)}

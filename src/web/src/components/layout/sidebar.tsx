@@ -94,18 +94,18 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
         )}
       >
         {/* Logo area — tier-reactive */}
-        <div className="flex h-14 items-center border-b px-3">
+        <div className="flex h-[4.75rem] items-center border-b px-3">
           {(() => {
             const tier = TIER_CONFIG[featureTier ?? "community"] ?? TIER_CONFIG.community
             return collapsed ? (
-              <img src={tier.icon} alt={`Cerid ${tier.label}`} className="h-7 w-7 shrink-0" />
+              <img src={tier.icon} alt={`Cerid ${tier.label}`} className="h-10 w-10 shrink-0" />
             ) : (
-              <div className="flex items-center gap-2">
-                <img src={tier.icon} alt={`Cerid ${tier.label}`} className="h-7 w-7 shrink-0" />
-                <span className="text-[15px] font-bold tracking-tight leading-none">
+              <div className="flex items-center gap-2.5">
+                <img src={tier.icon} alt={`Cerid ${tier.label}`} className="h-10 w-10 shrink-0" />
+                <span className="text-[21px] font-bold tracking-tight leading-none">
                   <span className="bg-gradient-to-r from-brand to-[oklch(0.90_0.14_178)] bg-clip-text text-transparent">{tier.wordmark}</span>
                   {" "}
-                  <span className={cn("font-semibold text-sm", tier.tierClass)}>{tier.tierWord}</span>
+                  <span className={cn("font-semibold text-[20px]", tier.tierClass)}>{tier.tierWord}</span>
                 </span>
               </div>
             )

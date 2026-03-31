@@ -80,4 +80,21 @@ PrismLight.registerLanguage("swift", swift)
 PrismLight.registerLanguage("kotlin", kotlin)
 PrismLight.registerLanguage("kt", kotlin)
 
-export { PrismLight, oneDark }
+/**
+ * Brand-aligned One Dark — overrides the background to use the
+ * CSS variable --code-block-bg (navy-derived) so code blocks
+ * match the app theme in both light and dark mode.
+ */
+const brandOneDark: typeof oneDark = {
+  ...oneDark,
+  'pre[class*="language-"]': {
+    ...(oneDark['pre[class*="language-"]'] ?? {}),
+    background: "var(--code-block-bg)",
+  },
+  'code[class*="language-"]': {
+    ...(oneDark['code[class*="language-"]'] ?? {}),
+    background: "var(--code-block-bg)",
+  },
+}
+
+export { PrismLight, brandOneDark as oneDark }

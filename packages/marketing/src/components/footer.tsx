@@ -53,7 +53,7 @@ export function Footer() {
         </div>
 
         <div className="mt-8 border-t border-border pt-6 text-center text-xs text-muted-foreground">
-          &copy; {new Date().getFullYear()} Justin Michaels. All rights reserved.
+          &copy; {new Date().getFullYear()} Cerid AI. All rights reserved.
         </div>
       </div>
     </footer>

@@ -50,7 +50,7 @@
 }
 
 :root {
-  --brand: oklch(0.55 0.15 185);
+  --brand: oklch(0.46 0.14 185);
   --brand-foreground: oklch(0.985 0 0);
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
@@ -69,7 +69,7 @@
   --destructive: oklch(0.58 0.22 27);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
-  --ring: oklch(0.55 0.10 185);
+  --ring: oklch(0.46 0.12 185);
   --chart-1: oklch(0.809 0.105 251.813);
   --chart-2: oklch(0.623 0.214 259.815);
   --chart-3: oklch(0.546 0.245 262.881);
