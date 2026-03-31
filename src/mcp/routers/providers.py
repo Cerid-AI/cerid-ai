@@ -241,7 +241,7 @@ async def get_ollama_recommendations():
     ram_gb = round(ram_gb, 1)
 
     # Model catalog — USG-compliant models only
-    models = [
+    models: list[dict] = [
         {
             "id": "llama3.2:3b",
             "name": "Llama 3.2 3B",
@@ -284,7 +284,8 @@ async def get_ollama_recommendations():
 
     # Mark which models are compatible with this machine
     for m in models:
-        m["compatible"] = ram_gb >= float(m["min_ram_gb"])
+        min_ram: int = m["min_ram_gb"]  # type: ignore[assignment]
+        m["compatible"] = ram_gb >= min_ram
         m["recommended"] = m["id"] == recommended
 
     return {
