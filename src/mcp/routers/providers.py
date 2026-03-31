@@ -284,7 +284,7 @@ async def get_ollama_recommendations():
 
     # Mark which models are compatible with this machine
     for m in models:
-        m["compatible"] = ram_gb >= m["min_ram_gb"]
+        m["compatible"] = ram_gb >= float(m["min_ram_gb"])
         m["recommended"] = m["id"] == recommended
 
     return {
