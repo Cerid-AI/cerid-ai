@@ -8,11 +8,15 @@ import logging
 import os
 import re
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 import config
 import config.features as features_mod
+from config.features import require_feature
+from deps import get_redis
+from errors import ConfigError
+from utils.error_handler import handle_errors
 from utils.features import set_toggle
 
 router = APIRouter()
@@ -379,7 +383,7 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
         if getattr(config, "SYNC_DIR", ""):
             from sync.user_state import write_settings
             write_settings(config.SYNC_DIR, updated)
-    except Exception as exc:
+    except (ConfigError, ValueError, OSError, RuntimeError) as exc:
         logger.warning("Failed to persist settings to sync dir: %s", exc)
 
     logger.info(f"Settings updated: {updated}")
@@ -391,12 +395,24 @@ class TierOverrideRequest(BaseModel):
 
 
 @router.post("/settings/tier")
-async def set_tier_endpoint(req: TierOverrideRequest):
+async def set_tier_endpoint(req: TierOverrideRequest, request: Request):
     """Runtime tier override — recomputes feature flags in memory.
 
+    Requires CERID_API_KEY to be configured and a valid X-API-Key header.
     Transient only (lost on restart). For persistent changes, set
     ``CERID_TIER`` in ``.env``.
     """
+    # --- Auth gate: tier override is a privileged operation ---
+    api_key = os.getenv("CERID_API_KEY", "")
+    if not api_key:
+        raise HTTPException(
+            status_code=403,
+            detail="Tier override requires CERID_API_KEY to be configured",
+        )
+    request_key = request.headers.get("X-API-Key", "")
+    if request_key != api_key:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
     valid_tiers = ("community", "pro", "enterprise")
     if req.tier not in valid_tiers:
         raise HTTPException(
@@ -410,3 +426,82 @@ async def set_tier_endpoint(req: TierOverrideRequest):
     config.FEATURE_FLAGS = features_mod.FEATURE_FLAGS  # noqa
     logger.info("Runtime tier override: %s", new_tier)
     return {"status": "success", "tier": new_tier, "feature_flags": features_mod.FEATURE_FLAGS}
+
+
+# ── Private mode (ephemeral sessions) ──────────────────────────────────────
+#
+# Level 1: no history saves, no memory extraction
+# Level 2: also skip KB context injection (pure LLM)
+# Level 3: also force local-only models (Ollama)
+# Level 4: also clear Redis query cache on session end
+
+
+@router.post("/settings/private-mode")
+@require_feature("private_mode")
+@handle_errors()
+async def enable_private_mode(request: Request):
+    """Enable private mode with specified security level (1-4).
+
+    Stores the level in Redis per client session. Guards throughout the
+    pipeline read this key to enforce the appropriate restrictions.
+    """
+    body = await request.json()
+    level = body.get("level", 1)
+    level = max(1, min(4, int(level)))
+
+    client_id = request.headers.get("X-Client-ID", "unknown")
+    redis = get_redis()
+    redis.set(f"cerid:private_mode:{client_id}", str(level), ex=86400)
+
+    logger.info("Private mode enabled: client=%s level=%d", client_id, level)
+    return {"status": "enabled", "level": level}
+
+
+@router.delete("/settings/private-mode")
+@require_feature("private_mode")
+@handle_errors()
+async def disable_private_mode(request: Request):
+    """Disable private mode, wiping session data.
+
+    When the prior level was 4 (or ``clear_cache=true``), all
+    ``cerid:query_cache:*`` keys are purged from Redis.
+    """
+    body = await request.json() if request.headers.get("content-length", "0") != "0" else {}
+    clear_cache = body.get("clear_cache", False)
+
+    client_id = request.headers.get("X-Client-ID", "unknown")
+    redis = get_redis()
+
+    # Check prior level — Level 4 auto-clears cache on disable
+    prior_raw = redis.get(f"cerid:private_mode:{client_id}")
+    prior_level = int(prior_raw) if prior_raw is not None else 0
+
+    redis.delete(f"cerid:private_mode:{client_id}")
+
+    cleared_keys = 0
+    if clear_cache or prior_level >= 4:
+        # Clear ALL query cache keys (Level 4 guarantees full wipe)
+        for key in redis.scan_iter("cerid:query_cache:*"):
+            redis.delete(key)
+            cleared_keys += 1
+        logger.info(
+            "Private mode disabled: client=%s prior_level=%d cleared_cache_keys=%d",
+            client_id, prior_level, cleared_keys,
+        )
+    else:
+        logger.info("Private mode disabled: client=%s prior_level=%d", client_id, prior_level)
+
+    return {"status": "disabled", "cache_cleared": cleared_keys}
+
+
+@router.get("/settings/private-mode")
+@require_feature("private_mode")
+@handle_errors()
+async def get_private_mode(request: Request):
+    """Get current private mode status for this client session."""
+    client_id = request.headers.get("X-Client-ID", "unknown")
+    redis = get_redis()
+    level = redis.get(f"cerid:private_mode:{client_id}")
+    if level is not None:
+        return {"enabled": True, "level": int(level)}
+    return {"enabled": False, "level": 0}

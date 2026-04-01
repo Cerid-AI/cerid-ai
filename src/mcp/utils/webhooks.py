@@ -16,6 +16,7 @@ from typing import Any
 import httpx
 
 import config
+from errors import CeridError
 from utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.webhooks")
@@ -66,7 +67,7 @@ async def fire_event(
                     logger.debug(f"Webhook delivered: {event_type} -> {url} ({resp.status_code})")
                 else:
                     logger.warning(f"Webhook failed: {event_type} -> {url} ({resp.status_code})")
-            except Exception as e:
+            except (CeridError, ValueError, OSError, RuntimeError) as e:
                 logger.warning(f"Webhook error: {event_type} -> {url}: {e}")
 
     return delivered

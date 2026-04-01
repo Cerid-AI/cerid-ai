@@ -22,14 +22,13 @@ from __future__ import annotations
 import importlib.util
 import json
 import logging
-
-from errors import ConfigError
 import sys
 from pathlib import Path
 from typing import Any
 
 import config
 from config.features import is_tier_met
+from errors import ConfigError
 
 logger = logging.getLogger("ai-companion.plugins")
 

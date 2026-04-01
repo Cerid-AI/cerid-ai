@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import config
+from errors import SyncError
 
 logger = logging.getLogger("ai-companion.sync.user_state")
 
@@ -30,7 +31,7 @@ def _encrypt_value(value: str) -> str:
         from utils.encryption import encrypt_field
 
         return encrypt_field(value) if value else value
-    except Exception as exc:
+    except (SyncError, ValueError, OSError, RuntimeError) as exc:
         logger.debug("Encryption unavailable, returning plaintext: %s", exc)
         return value
 
@@ -41,7 +42,7 @@ def _decrypt_value(value: str) -> str:
         from utils.encryption import decrypt_field
 
         return decrypt_field(value) if value else value
-    except Exception as exc:
+    except (SyncError, ValueError, OSError, RuntimeError) as exc:
         logger.debug("Decryption unavailable, returning raw value: %s", exc)
         return value
 

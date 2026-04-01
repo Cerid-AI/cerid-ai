@@ -1,6 +1,6 @@
 # Privacy Hardening Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Harden Cerid AI's privacy posture to accurately underpin the "privacy-first" claim, tighten insecure defaults, and add subtle transparency so users understand what data flows where — without adding friction.
 

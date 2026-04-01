@@ -106,7 +106,7 @@ Key changes from original:
 - [ ] **Step 3: Verify Dockerfile builds locally**
 
 ```bash
-cd /Users/sunrunner/Develop/cerid-ai && docker build -t cerid-mcp-test src/mcp/
+docker build -t cerid-mcp-test src/mcp/
 ```
 
 Expected: Successful build. Note the image size for comparison.
@@ -128,8 +128,7 @@ git commit -m "build: convert MCP Dockerfile to multi-stage (K7)
 Three stages: builder (deps + build tools), models (ONNX pre-download),
 runtime (slim image). Eliminates gcc/build-essential from final image.
 Adds Snowflake Arctic Embed M v1.5 ONNX model pre-download for M1.
-
-Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+"
 ```
 
 ---
@@ -260,8 +259,7 @@ git commit -m "feat(M1): activate semantic cache with Arctic Embed M v1.5
 - Add EMBEDDING_MODEL + SEMANTIC_CACHE_DIM env vars to docker-compose.yml
 - Raise MCP container memory limit from 3G to 4G (J1 partial fix)
 - Add 3 tests verifying dimension config propagation
-
-Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+"
 ```
 
 ---
@@ -456,8 +454,7 @@ setting (default 512MB). Combined with the 3G→4G container limit bump in
 the previous commit, this prevents OOM with 10+ concurrent claim verifications.
 
 5 new tests covering cgroup parsing, unlimited detection, and async guard behavior.
-
-Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+"
 ```
 
 ---
@@ -467,7 +464,7 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 - [ ] **Step 1: Rebuild and start the stack**
 
 ```bash
-cd /Users/sunrunner/Develop/cerid-ai && ./scripts/start-cerid.sh --build
+./scripts/start-cerid.sh --build
 ```
 
 Expected: All services start. MCP container now has 4G memory limit.
@@ -552,7 +549,7 @@ In `.github/workflows/ci.yml`, after line 106 (end of pip-audit step), add:
 - [ ] **Step 4: Run a local syntax check on the workflow**
 
 ```bash
-cd /Users/sunrunner/Develop/cerid-ai && python -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))" && echo "YAML valid"
+python -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))" && echo "YAML valid"
 ```
 
 Expected: "YAML valid"
@@ -566,8 +563,7 @@ git commit -m "ci: add Codecov upload, license scanning, ReDoS audit (K1/K2/K3)
 K1: Upload coverage.xml to Codecov after test job (if: success())
 K2: pip-licenses in test job, license-checker in frontend job
 K3: dlint DUO138 ReDoS regex audit in security job
-
-Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+"
 ```
 
 ---
@@ -634,8 +630,7 @@ git commit -m "docs: mark M1, J1, K1-K3, K7 resolved in Phase 40
 Update ISSUES.md: open count → 1 open (K4 remains), 94 resolved.
 Update tasks/todo.md with Phase 40 completion section and
 post-deploy operational checklist for KB re-ingest.
-
-Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+"
 ```
 
 ---

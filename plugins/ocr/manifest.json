@@ -2,7 +2,7 @@
   "name": "cerid-ocr",
   "version": "0.1.0",
   "type": "parser",
-  "tier": "pro",
+  "tier": "community",
   "description": "OCR text extraction from images and scanned PDFs",
   "license": "BSL-1.1",
   "requires": ["pytesseract", "PIL"],

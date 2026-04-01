@@ -15,6 +15,7 @@ import re
 from typing import Any
 
 from config.features import QUERY_DECOMPOSITION_MAX_SUBQUERIES
+from errors import RetrievalError
 
 logger = logging.getLogger("ai-companion.query_decomposer")
 
@@ -109,6 +110,8 @@ async def decompose_query(
 
     sub_queries = decompose_heuristic(query)
     if len(sub_queries) > 1:
+        from utils.agent_events import emit_agent_event
+        emit_agent_event("decomposer", f"Breaking this down into {len(sub_queries)} sub-questions...")
         logger.info("Decomposed query into %d sub-queries (heuristic)", len(sub_queries))
         return sub_queries
 
@@ -136,7 +139,7 @@ async def decompose_query(
                     if result:
                         logger.info("Decomposed query into %d sub-queries (LLM)", len(result))
                         return result
-        except Exception as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
             logger.warning("LLM decomposition failed: %s", e)
 
     return [query]

@@ -16,6 +16,7 @@ from pydantic import BaseModel
 import config
 from db import neo4j as graph
 from deps import get_neo4j
+from errors import RetrievalError
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion.taxonomy")
@@ -54,7 +55,7 @@ async def get_taxonomy_endpoint():
     try:
         driver = get_neo4j()
         return graph.get_taxonomy(driver)
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Get taxonomy error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -86,7 +87,7 @@ async def create_domain_endpoint(req: CreateDomainRequest):
             }
             config.DOMAINS = list(config.TAXONOMY.keys())
         return result
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Create domain error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -114,7 +115,7 @@ async def create_subcategory_endpoint(req: CreateSubCategoryRequest):
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Create sub-category error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -127,7 +128,7 @@ async def list_tags_endpoint(
     try:
         driver = get_neo4j()
         return graph.list_tags(driver, limit=limit)
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"List tags error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -146,7 +147,7 @@ async def update_artifact_taxonomy_endpoint(req: UpdateArtifactTaxonomyRequest):
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Update artifact taxonomy error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -183,7 +184,7 @@ async def suggest_tags_endpoint(
     try:
         driver = get_neo4j()
         existing_tags = graph.list_tags(driver, limit=200)
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Tag suggest error: {e}")
         existing_tags = []
 
@@ -269,6 +270,6 @@ async def merge_tags_endpoint(req: MergeTagsRequest):
 
         logger.info(f"Merged tag '{source}' → '{target}' ({updated} artifacts updated)")
         return {"status": "success", "source": source, "target": target, "artifacts_updated": updated}
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Merge tags error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

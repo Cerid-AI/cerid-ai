@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from deps import get_redis
+from errors import CeridError
 from utils.time import utcnow_iso
 
 _logger = logging.getLogger("ai-companion.automations")
@@ -178,7 +179,7 @@ def _get_run_history(automation_id: str, limit: int = 20) -> list[AutomationRun]
         if raw is not None:
             try:
                 runs.append(AutomationRun(**json.loads(raw)))
-            except Exception as e:
+            except (CeridError, ValueError, OSError, RuntimeError) as e:
                 _logger.warning("Failed to parse run history entry %s for automation %s: %s", rid_str, automation_id, e)
     return runs
 
@@ -377,7 +378,7 @@ def register_all_automations() -> int:
             try:
                 _register_job(auto)
                 registered += 1
-            except Exception as e:
+            except (CeridError, ValueError, OSError, RuntimeError) as e:
                 _logger.warning("Failed to register automation %s: %s", auto.id, e)
     if registered:
         _logger.info("Registered %d user automations with scheduler", registered)

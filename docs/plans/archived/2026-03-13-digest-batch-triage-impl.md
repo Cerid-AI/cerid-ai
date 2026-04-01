@@ -1,6 +1,6 @@
 # K5 Digest View + K6 Batch Triage UI — Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Add a Knowledge Digest card to the Monitoring pane and enhance the Upload Dialog with batch mode (per-file status, domain overrides) for 3+ file uploads.
 

@@ -29,6 +29,7 @@ from config.features import (
     SEMANTIC_CACHE_THRESHOLD,
     SEMANTIC_CACHE_TTL,
 )
+from errors import RetrievalError
 
 logger = logging.getLogger("ai-companion.semantic_cache")
 
@@ -97,7 +98,7 @@ class _HNSWIndex:
             finally:
                 os.unlink(tmp_path)
 
-        except Exception as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
             logger.warning("Failed to load HNSW index from Redis: %s", e)
             return False
 
@@ -114,7 +115,7 @@ class _HNSWIndex:
                 redis_client.set(_HNSW_KEY, data)
             finally:
                 os.unlink(tmp_path)
-        except Exception as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
             logger.warning("Failed to save HNSW index to Redis: %s", e)
 
     def add(self, embedding: np.ndarray, entry_id: str, redis_client: Any) -> int:
@@ -265,7 +266,7 @@ def cache_lookup(
             )
             return json.loads(result_raw)
 
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.warning("Semantic cache lookup failed: %s", e)
 
     return None
@@ -298,7 +299,7 @@ def cache_store(
 
         logger.debug("Semantic cache stored: %s (ttl=%ds)", entry_id[:12], cache_ttl)
 
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.warning("Semantic cache store failed: %s", e)
 
 
@@ -335,6 +336,6 @@ def invalidate_cache(redis_client: Any) -> int:
         if count:
             logger.info("Semantic cache invalidated: %d keys", count)
         return count
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.warning("Semantic cache invalidation failed: %s", e)
         return 0

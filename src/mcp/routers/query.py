@@ -6,11 +6,12 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 import config
 from deps import get_chroma
+from errors import RetrievalError
 from utils.time import utcnow_iso
 
 router = APIRouter()
@@ -44,7 +45,7 @@ def query_knowledge(query: str, domain: str = "general", top_k: int = 3) -> dict
             bm25_hits = bm25_mod.search_bm25(domain, query, top_k=top_k)
             if bm25_hits:
                 bm25_scores = dict(bm25_hits)
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.debug(f"BM25 hybrid scoring unavailable: {e}")
 
     sources = []
@@ -102,10 +103,23 @@ class QueryRequest(BaseModel):
 
 
 @router.post("/query")
-async def query_endpoint(req: QueryRequest):
+async def query_endpoint(req: QueryRequest, request: Request):
     import asyncio
 
     from utils.query_cache import get_cached, set_cached
+
+    # Private mode: level >= 2 skips KB context injection (return empty context)
+    client_id = request.headers.get("X-Client-ID", "unknown")
+    try:
+        from utils.private_mode import get_private_mode_level
+        private_level = get_private_mode_level(client_id)
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+        logger.warning("Private mode check failed (defaulting to disabled): %s", e)
+        private_level = 0
+
+    if private_level >= 2:
+        logger.info("Private mode level %d: skipping KB context for client %s", private_level, client_id)
+        return {"context": "", "sources": [], "confidence": 0.0, "timestamp": utcnow_iso()}
 
     cached = get_cached(req.query, req.domain, req.top_k)
     if cached:

@@ -16,6 +16,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from errors import CeridError
+
 logger = logging.getLogger("ai-companion.metrics")
 
 # Redis key prefix for all observability metrics
@@ -128,7 +130,7 @@ class MetricsCollector:
         try:
             self._redis.zadd(key, {member: ts})
             self._redis.expire(key, _METRIC_TTL_SECONDS)
-        except Exception as exc:
+        except (CeridError, ValueError, OSError, RuntimeError) as exc:
             logger.warning("Failed to record metric %s: %s", name, exc)
 
     def get_metrics(
@@ -150,7 +152,7 @@ class MetricsCollector:
         key = self._key(name)
         try:
             raw_entries = self._redis.zrangebyscore(key, min_ts, now)
-        except Exception as exc:
+        except (CeridError, ValueError, OSError, RuntimeError) as exc:
             logger.warning("Failed to get metrics %s: %s", name, exc)
             return []
 
@@ -206,7 +208,7 @@ class MetricsCollector:
         key = self._key(name)
         try:
             return self._redis.zremrangebyscore(key, 0, cutoff) or 0
-        except Exception as exc:
+        except (CeridError, ValueError, OSError, RuntimeError) as exc:
             logger.warning("Failed to cleanup metric %s: %s", name, exc)
             return 0
 

@@ -30,6 +30,8 @@ from collections.abc import Callable, Coroutine
 from enum import Enum
 from typing import Any, TypeVar
 
+from errors import CeridError
+
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
@@ -118,7 +120,7 @@ class AsyncCircuitBreaker:
 
         try:
             result = await fn(*args, **kwargs)
-        except Exception as exc:
+        except (CeridError, ValueError, OSError, RuntimeError) as exc:
             if isinstance(exc, self.excluded_exceptions):
                 raise
             # Don't count HTTP 4xx client errors as failures — they indicate
@@ -178,7 +180,7 @@ class AsyncCircuitBreaker:
 
         try:
             result = fn(*args, **kwargs)
-        except Exception as exc:
+        except (CeridError, ValueError, OSError, RuntimeError) as exc:
             if isinstance(exc, self.excluded_exceptions):
                 raise
             self._on_failure_sync(exc)
@@ -256,6 +258,10 @@ _tavily = AsyncCircuitBreaker("tavily", failure_threshold=3, recovery_timeout=30
 _searxng = AsyncCircuitBreaker("searxng", failure_threshold=3, recovery_timeout=30)
 _ragas_eval = AsyncCircuitBreaker("ragas_eval", failure_threshold=3, recovery_timeout=60)
 _trading_agent = AsyncCircuitBreaker("trading-agent", failure_threshold=3, recovery_timeout=120)
+_email_imap = AsyncCircuitBreaker("email-imap", failure_threshold=3, recovery_timeout=60)
+_rss_feed = AsyncCircuitBreaker("rss-feed", failure_threshold=3, recovery_timeout=60)
+_gmail = AsyncCircuitBreaker("gmail", failure_threshold=3, recovery_timeout=60)
+_outlook = AsyncCircuitBreaker("outlook", failure_threshold=3, recovery_timeout=60)
 
 # Dynamic per-stage Ollama breakers — lazily created for "ollama-{stage}" names.
 _dynamic_ollama_breakers: dict[str, AsyncCircuitBreaker] = {}
@@ -279,6 +285,10 @@ def get_breaker(name: str) -> AsyncCircuitBreaker:
         "neo4j": _neo4j,
         "ollama": _ollama,
         "trading-agent": _trading_agent,
+        "email-imap": _email_imap,
+        "rss-feed": _rss_feed,
+        "gmail": _gmail,
+        "outlook": _outlook,
     }
     breaker = _breakers.get(name)
     if breaker is not None:

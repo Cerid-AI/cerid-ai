@@ -20,6 +20,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 import config
 from deps import get_chroma, get_neo4j, get_redis
+from errors import CeridError
 from utils.cache import log_event
 from utils.time import utcnow_iso
 
@@ -46,7 +47,7 @@ def _log_execution(job_name: str, status: str, duration: float, detail: str = ""
                 "timestamp": utcnow_iso(),
             },
         )
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         logger.warning(f"Failed to log scheduled job {job_name}: {e}")
 
 
@@ -70,7 +71,7 @@ async def _run_rectify() -> None:
         if findings > 0:
             from utils.webhooks import notify_rectify_findings
             await notify_rectify_findings(findings)
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         duration = time.time() - start
         _log_execution("rectify", "error", duration, str(e))
         logger.error(f"Scheduled rectify failed: {e}")
@@ -89,7 +90,7 @@ async def _run_health_check() -> None:
         if status not in ("healthy", "ok"):
             from utils.webhooks import notify_health_warning
             await notify_health_warning(status)
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         duration = time.time() - start
         _log_execution("health_check", "error", duration, str(e))
         logger.error(f"Scheduled health check failed: {e}")
@@ -114,7 +115,7 @@ async def _run_stale_detection() -> None:
         duration = time.time() - start
         _log_execution("stale_detection", "success", duration, f"{stale_count} stale")
         logger.info(f"Scheduled stale detection: {stale_count} stale in {duration:.1f}s")
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         duration = time.time() - start
         _log_execution("stale_detection", "error", duration, str(e))
         logger.error(f"Scheduled stale detection failed: {e}")
@@ -147,7 +148,7 @@ async def _run_sync_export() -> None:
         duration = time.time() - start
         _log_execution("sync_export", "success", duration, f"{neo4j_count} artifacts")
         logger.info("Scheduled sync export: %d artifacts in %.1fs", neo4j_count, duration)
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         duration = time.time() - start
         _log_execution("sync_export", "error", duration, str(e))
         logger.error("Scheduled sync export failed: %s", e)
@@ -163,68 +164,10 @@ async def _run_tombstone_purge() -> None:
         duration = time.time() - start
         _log_execution("tombstone_purge", "success", duration, f"{purged} purged")
         logger.info("Scheduled tombstone purge: %d expired in %.1fs", purged, duration)
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         duration = time.time() - start
         _log_execution("tombstone_purge", "error", duration, str(e))
         logger.error("Scheduled tombstone purge failed: %s", e)
-
-
-async def _run_trading_autoresearch() -> None:
-    """Pull performance summary from trading agent and store in KB."""
-    start = time.time()
-    try:
-        from agents.trading_scheduler_jobs import run_trading_autoresearch
-        result = await run_trading_autoresearch(
-            trading_agent_url=config.TRADING_AGENT_URL,
-            neo4j=get_neo4j(),
-        )
-        status = result.get("status", "unknown")
-        duration = time.time() - start
-        _log_execution("trading_autoresearch", status, duration)
-        logger.info(f"Scheduled trading autoresearch: {status} in {duration:.1f}s")
-    except Exception as e:
-        duration = time.time() - start
-        _log_execution("trading_autoresearch", "error", duration, str(e))
-        logger.error(f"Scheduled trading autoresearch failed: {e}")
-
-
-async def _run_platt_scaling_mirror() -> None:
-    """Mirror Platt calibration params from trading agent to Neo4j."""
-    start = time.time()
-    try:
-        from agents.trading_scheduler_jobs import run_platt_scaling_mirror
-        result = await run_platt_scaling_mirror(
-            trading_agent_url=config.TRADING_AGENT_URL,
-            neo4j=get_neo4j(),
-        )
-        mirrored = result.get("mirrored", 0)
-        duration = time.time() - start
-        _log_execution("platt_scaling_mirror", result.get("status", "unknown"), duration, f"{mirrored} mirrored")
-        logger.info(f"Scheduled Platt mirror: {mirrored} mirrored in {duration:.1f}s")
-    except Exception as e:
-        duration = time.time() - start
-        _log_execution("platt_scaling_mirror", "error", duration, str(e))
-        logger.error(f"Scheduled Platt mirror failed: {e}")
-
-
-async def _run_longshot_surface_rebuild() -> None:
-    """Rebuild calibration surface from trading agent data."""
-    start = time.time()
-    try:
-        from agents.trading_scheduler_jobs import run_longshot_surface_rebuild
-        result = await run_longshot_surface_rebuild(
-            trading_agent_url=config.TRADING_AGENT_URL,
-            neo4j=get_neo4j(),
-        )
-        status = result.get("status", "unknown")
-        points = result.get("points_stored", 0)
-        duration = time.time() - start
-        _log_execution("longshot_surface_rebuild", status, duration, f"{points} points")
-        logger.info(f"Scheduled longshot surface rebuild: {status} ({points} points) in {duration:.1f}s")
-    except Exception as e:
-        duration = time.time() - start
-        _log_execution("longshot_surface_rebuild", "error", duration, str(e))
-        logger.error(f"Scheduled longshot surface rebuild failed: {e}")
 
 
 async def _run_folder_scan() -> None:
@@ -258,9 +201,86 @@ async def _run_folder_scan() -> None:
         detail = f"ingested={total_ingested} skipped={total_skipped} errored={total_errored}"
         _log_execution("folder_scan", "success", duration, detail)
         logger.info(f"Folder scan complete: {detail} ({duration:.1f}s)")
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         _log_execution("folder_scan", "error", time.time() - start, str(e))
         logger.error(f"Folder scan failed: {e}")
+
+
+async def _run_watched_folders_rescan() -> None:
+    """Re-scan all watched folders from Redis, skipping recently scanned ones."""
+    start = time.time()
+    try:
+        from deps import get_redis
+
+        redis = get_redis()
+        folder_ids_raw = redis.smembers("cerid:watched_folders:index") or set()
+
+        total_scanned = 0
+        total_skipped = 0
+        cooldown_seconds = 3600  # 1 hour cooldown
+
+        for fid in folder_ids_raw:
+            fid_str = fid.decode("utf-8") if isinstance(fid, bytes) else str(fid)
+            folder_data = redis.get(f"cerid:watched_folders:{fid_str}")
+            if not folder_data:
+                continue
+
+            import json as _json
+            folder = _json.loads(folder_data)
+            if not folder.get("enabled", True):
+                total_skipped += 1
+                continue
+
+            # Check cooldown — skip if scanned recently
+            last_scanned = folder.get("last_scanned_at", 0)
+            if time.time() - last_scanned < cooldown_seconds:
+                total_skipped += 1
+                continue
+
+            folder_path = folder.get("path", "")
+            if not folder_path or not Path(folder_path).is_dir():
+                total_skipped += 1
+                continue
+
+            # Trigger scan for this folder
+            try:
+                from services.folder_scanner import scan_folder
+                async for _ in scan_folder(
+                    folder_path,
+                    min_quality=getattr(config, "SCAN_MIN_QUALITY", 0.4),
+                    max_file_size_mb=getattr(config, "SCAN_MAX_FILE_SIZE_MB", 50),
+                ):
+                    pass  # exhaust generator
+                total_scanned += 1
+
+                # Update last_scanned_at
+                folder["last_scanned_at"] = time.time()
+                redis.set(f"cerid:watched_folders:{fid_str}", _json.dumps(folder))
+            except (CeridError, ValueError, OSError, RuntimeError) as e:
+                logger.warning("Watched folder scan failed for %s: %s", folder_path, e)
+
+        duration = time.time() - start
+        detail = f"scanned={total_scanned} skipped={total_skipped}"
+        _log_execution("watched_folders_rescan", "success", duration, detail)
+        logger.info(f"Watched folders re-scan complete: {detail} ({duration:.1f}s)")
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
+        _log_execution("watched_folders_rescan", "error", time.time() - start, str(e))
+        logger.error(f"Watched folders re-scan failed: {e}")
+
+
+async def _run_model_catalog_update() -> None:
+    """Poll OpenRouter for new/deprecated models and cache in Redis."""
+    start = time.time()
+    try:
+        from utils.model_registry import fetch_and_compare_models
+        result = await fetch_and_compare_models()
+        duration = time.time() - start
+        detail = f"new={len(result.get('new', []))} deprecated={len(result.get('deprecated', []))}"
+        _log_execution("model_catalog_update", "success", duration, detail)
+        logger.info(f"Model catalog update: {detail} ({duration:.1f}s)")
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
+        _log_execution("model_catalog_update", "error", time.time() - start, str(e))
+        logger.error(f"Model catalog update failed: {e}")
 
 
 def start_scheduler() -> AsyncIOScheduler:
@@ -312,31 +332,6 @@ def start_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
-    # Trading jobs (gated by CERID_TRADING_ENABLED)
-    if getattr(config, "CERID_TRADING_ENABLED", False):
-        _scheduler.add_job(
-            _run_trading_autoresearch,
-            CronTrigger.from_crontab(config.SCHEDULE_TRADING_AUTORESEARCH),
-            id="trading_autoresearch",
-            name="Trading auto-research",
-            replace_existing=True,
-        )
-        _scheduler.add_job(
-            _run_platt_scaling_mirror,
-            CronTrigger.from_crontab(config.SCHEDULE_PLATT_MIRROR),
-            id="platt_scaling_mirror",
-            name="Platt scaling mirror",
-            replace_existing=True,
-        )
-        _scheduler.add_job(
-            _run_longshot_surface_rebuild,
-            CronTrigger.from_crontab(config.SCHEDULE_LONGSHOT_SURFACE),
-            id="longshot_surface_rebuild",
-            name="Longshot surface rebuild",
-            replace_existing=True,
-        )
-        logger.info("Trading scheduler jobs registered (CERID_TRADING_ENABLED=true)")
-
     # Folder scan (opt-in — empty SCHEDULE_FOLDER_SCAN disables)
     scan_cron = getattr(config, "SCHEDULE_FOLDER_SCAN", "")
     if scan_cron:
@@ -348,6 +343,30 @@ def start_scheduler() -> AsyncIOScheduler:
             replace_existing=True,
         )
         logger.info(f"Folder scan scheduled: {scan_cron}")
+
+    # Watched folders re-scan (opt-in — empty SCHEDULE_WATCHED_RESCAN disables)
+    rescan_cron = getattr(config, "SCHEDULE_WATCHED_RESCAN", "")
+    if rescan_cron:
+        _scheduler.add_job(
+            _run_watched_folders_rescan,
+            CronTrigger.from_crontab(rescan_cron),
+            id="watched_folders_rescan",
+            name="Watched folders re-scan",
+            replace_existing=True,
+        )
+        logger.info(f"Watched folders re-scan scheduled: {rescan_cron}")
+
+    # Model catalog update (opt-in — empty SCHEDULE_MODEL_CATALOG disables)
+    model_catalog_cron = getattr(config, "SCHEDULE_MODEL_CATALOG", "")
+    if model_catalog_cron:
+        _scheduler.add_job(
+            _run_model_catalog_update,
+            CronTrigger.from_crontab(model_catalog_cron),
+            id="model_catalog_update",
+            name="Model catalog update",
+            replace_existing=True,
+        )
+        logger.info(f"Model catalog update scheduled: {model_catalog_cron}")
 
     _scheduler.start()
     logger.info("Scheduler started with %d jobs", len(_scheduler.get_jobs()))

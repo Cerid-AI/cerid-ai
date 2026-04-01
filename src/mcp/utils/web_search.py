@@ -24,6 +24,7 @@ from typing import Any
 import httpx
 
 import config.settings as config
+from errors import RetrievalError
 from utils.circuit_breaker import get_breaker
 from utils.llm_client import call_llm
 
@@ -256,7 +257,7 @@ class OpenRouterSearchProvider(WebSearchProvider):
                 max_tokens=1500,
                 timeout=25.0,
             )
-        except Exception:
+        except (RetrievalError, ValueError, OSError, RuntimeError):
             _logger.warning("OpenRouter online search failed", exc_info=True)
             return []
 
@@ -337,7 +338,7 @@ async def search_and_verify(
 
     try:
         raw_results = await provider.search(query, max_results=effective_max)
-    except Exception:
+    except (RetrievalError, ValueError, OSError, RuntimeError):
         _logger.exception("Web search failed (provider=%s)", provider.name)
         return {
             "query": query,
@@ -393,7 +394,7 @@ async def search_and_verify(
                 redis_client=redis_client,
             )
             verified_results = enhanced.get("results", results_dicts)
-        except Exception:
+        except (RetrievalError, ValueError, OSError, RuntimeError):
             _logger.warning("Self-RAG verification failed", exc_info=True)
 
     # ── Optional auto-ingest ──────────────────────────────────────────────
@@ -411,7 +412,7 @@ async def search_and_verify(
                 if result.get("status") == "ok":
                     ingested_count += 1
             _logger.info("Auto-ingested %d web search results", ingested_count)
-        except Exception:
+        except (RetrievalError, ValueError, OSError, RuntimeError):
             _logger.warning("Auto-ingest of web results failed", exc_info=True)
 
     return {

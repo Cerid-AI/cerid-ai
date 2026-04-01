@@ -24,6 +24,7 @@ import logging
 from collections import defaultdict
 
 from config.constants import HYDE_TRIGGER_THRESHOLD
+from errors import RetrievalError
 
 logger = logging.getLogger("ai-companion.hyde")
 
@@ -66,7 +67,7 @@ async def generate_hypothetical_document(
             logger.debug("HyDE generated hypothetical doc (%d chars)", len(result))
             return result.strip()
         return None
-    except Exception:
+    except (RetrievalError, ValueError, OSError, RuntimeError):
         logger.debug("HyDE generation failed, falling back to original results", exc_info=True)
         return None
 
@@ -107,7 +108,7 @@ def reciprocal_rank_fusion(
             len(original_results), len(hyde_results), len(merged),
         )
         return merged
-    except Exception:
+    except (RetrievalError, ValueError, OSError, RuntimeError):
         logger.debug("RRF merge failed, returning original results", exc_info=True)
         return list(original_results)
 

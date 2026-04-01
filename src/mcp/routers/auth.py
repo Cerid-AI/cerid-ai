@@ -30,6 +30,7 @@ from db.neo4j.users import (
     update_last_login,
 )
 from deps import get_neo4j, get_redis
+from errors import ConfigError
 from middleware.jwt_auth import create_access_token, decode_access_token
 from models.user import UserPublic
 from utils.encryption import encrypt_field
@@ -123,18 +124,18 @@ def _build_refresh_token(user_id: str) -> str:
 
 def _store_refresh_token(redis_client, jti: str, user_id: str) -> None:
     """Store a refresh token JTI in Redis with TTL for revocation tracking."""
-    key = f"refresh_token:{jti}"
+    key = f"cerid:auth:refresh:{jti}"
     redis_client.setex(key, CERID_JWT_REFRESH_TTL, user_id)
 
 
 def _revoke_refresh_token(redis_client, jti: str) -> None:
     """Revoke a refresh token by deleting its JTI from Redis."""
-    redis_client.delete(f"refresh_token:{jti}")
+    redis_client.delete(f"cerid:auth:refresh:{jti}")
 
 
 def _is_refresh_valid(redis_client, jti: str) -> bool:
     """Check if a refresh token JTI is still valid (not revoked)."""
-    return redis_client.exists(f"refresh_token:{jti}") == 1
+    return redis_client.exists(f"cerid:auth:refresh:{jti}") == 1
 
 
 def _get_authenticated_user(request: Request) -> dict:
@@ -254,7 +255,7 @@ def refresh(body: RefreshRequest):
     """Exchange a valid refresh token for a new access token."""
     try:
         payload = decode_access_token(body.refresh_token)
-    except Exception:
+    except (ConfigError, ValueError, OSError, RuntimeError):
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
     if payload.get("type") != "refresh":
@@ -281,7 +282,7 @@ def logout(body: RefreshRequest):
         jti = payload.get("jti")
         if jti:
             _revoke_refresh_token(get_redis(), jti)
-    except Exception:
+    except (ConfigError, ValueError, OSError, RuntimeError):
         pass  # Token already invalid — logout is idempotent
 
     return {"detail": "Logged out"}

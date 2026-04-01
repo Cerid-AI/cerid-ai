@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 import config
 from config.features import check_tier, is_tier_met
 from deps import get_redis
+from errors import ConfigError
 
 router = APIRouter(tags=["plugins"])
 logger = logging.getLogger("ai-companion.plugins")
@@ -96,7 +97,7 @@ def _is_plugin_enabled_redis(name: str) -> bool | None:
         if val is None:
             return None
         return val.decode() == "1" if isinstance(val, bytes) else str(val) == "1"
-    except Exception:
+    except (ConfigError, ValueError, OSError, RuntimeError):
         return None
 
 
@@ -114,7 +115,7 @@ def _get_plugin_config_redis(name: str) -> dict[str, Any]:
         if raw is None:
             return {}
         return json.loads(raw.decode() if isinstance(raw, bytes) else str(raw))
-    except Exception:
+    except (ConfigError, ValueError, OSError, RuntimeError):
         return {}
 
 

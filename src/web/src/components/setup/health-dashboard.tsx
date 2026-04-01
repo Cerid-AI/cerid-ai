@@ -19,6 +19,7 @@ const SERVICE_META: Record<string, { label: string; port: number }> = {
   redis: { label: "Redis (Cache)", port: 6379 },
   bifrost: { label: "Bifrost (LLM Gateway)", port: 8080 },
   mcp: { label: "MCP Server (API)", port: 8888 },
+  verification_pipeline: { label: "Verification Pipeline", port: 0 },
 }
 
 function statusBadge(status: string) {

@@ -23,6 +23,7 @@ from neo4j import GraphDatabase
 
 import config
 from db.neo4j.migrations import migrate_memory_salience
+from errors import CeridError
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger("migrate-salience")
@@ -33,7 +34,7 @@ def migrate_chromadb(chroma_client: chromadb.ClientAPI, *, dry_run: bool = False
     coll_name = config.collection_name("conversations")
     try:
         collection = chroma_client.get_collection(name=coll_name)
-    except Exception:
+    except (CeridError, ValueError, OSError, RuntimeError):
         logger.warning("Collection %s not found — nothing to migrate", coll_name)
         return 0
 

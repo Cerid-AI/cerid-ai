@@ -21,6 +21,8 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
 
+from errors import IngestionError
+
 # Allowed root directories for watched folders (prevents path traversal)
 _ALLOWED_ROOTS = [
     pathlib.Path(os.getenv("ARCHIVE_PATH", "/archive")).resolve(),
@@ -242,7 +244,7 @@ async def scan_watched_folder(folder_id: str, background_tasks: BackgroundTasks)
                     skipped += 1
                 elif result.status == "error":
                     errored += 1
-        except Exception as exc:
+        except (IngestionError, ValueError, OSError, RuntimeError) as exc:
             logger.error("Scan failed for folder %s: %s", folder_id, exc)
             errored += 1
 

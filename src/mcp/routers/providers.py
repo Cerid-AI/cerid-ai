@@ -23,6 +23,7 @@ from config.providers import (
     get_configured_providers,
     validate_provider_key,
 )
+from errors import ProviderError
 
 router = APIRouter(prefix="/providers", tags=["providers"])
 logger = logging.getLogger("ai-companion.providers")
@@ -103,7 +104,7 @@ async def get_internal_provider():
         ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
         resp = httpx.get(f"{ollama_url}/api/tags", timeout=3)
         ollama_available = resp.status_code == 200
-    except Exception as exc:
+    except (ProviderError, ValueError, OSError, RuntimeError) as exc:
         logger.warning("Ollama availability check failed: %s", exc)
 
     return {
@@ -173,9 +174,9 @@ async def get_ollama_status():
                             os.environ["OLLAMA_URL"] = url
                             logger.info("Ollama found at %s (auto-detected)", url)
                         break
-                except Exception:
+                except (ProviderError, ValueError, OSError, RuntimeError):
                     continue
-    except Exception as exc:
+    except (ProviderError, ValueError, OSError, RuntimeError) as exc:
         logger.warning("Ollama status check failed: %s", exc)
 
     return result
@@ -233,9 +234,9 @@ async def get_ollama_recommendations():
                     ),
                 )
                 gpu_info = f"NVIDIA {nv.strip()}" if nv.strip() else "CPU only"
-            except Exception:
+            except (ProviderError, ValueError, OSError, RuntimeError):
                 gpu_info = "CPU only"
-    except Exception as exc:
+    except (ProviderError, ValueError, OSError, RuntimeError) as exc:
         logger.warning("Hardware detection failed: %s", exc)
 
     ram_gb = round(ram_gb, 1)
@@ -332,7 +333,7 @@ async def enable_ollama(body: OllamaEnableRequest | None = None):
                         os.environ["OLLAMA_URL"] = url
                     connected = True
                     break
-            except Exception:
+            except (ProviderError, ValueError, OSError, RuntimeError):
                 continue
 
     if not connected:
@@ -355,8 +356,8 @@ async def enable_ollama(body: OllamaEnableRequest | None = None):
         for stage in config.PIPELINE_PROVIDERS:
             if stage not in locked_stages:
                 config.PIPELINE_PROVIDERS[stage] = "ollama"
-    except Exception:
-        pass
+    except (ProviderError, ValueError, OSError, RuntimeError) as e:
+        logger.warning("Failed to update pipeline routing to Ollama: %s", e)
 
     return {
         "status": "enabled",
@@ -374,8 +375,8 @@ async def disable_ollama():
     try:
         for stage in config.PIPELINE_PROVIDERS:
             config.PIPELINE_PROVIDERS[stage] = "bifrost"
-    except Exception:
-        pass
+    except (ProviderError, ValueError, OSError, RuntimeError) as e:
+        logger.warning("Failed to revert pipeline routing to Bifrost: %s", e)
     return {"status": "disabled", "provider": "bifrost"}
 
 
@@ -433,7 +434,7 @@ async def get_provider_credits():
                     result["warning"] = f"Low credits (${balance:.2f} remaining)"
                 else:
                     result["status"] = "ok"
-    except Exception as e:
+    except (ProviderError, ValueError, OSError, RuntimeError) as e:
         logger.warning("OpenRouter credit check failed: %s", e)
         result["error"] = str(e)
         result["status"] = "error"

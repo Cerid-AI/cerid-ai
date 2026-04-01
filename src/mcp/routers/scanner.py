@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 import config
 from config.constants import MIN_QUALITY_SCORE
 from deps import get_redis
+from errors import IngestionError
 from services.folder_scanner import (
     clear_scan_state,
     get_scan_state,
@@ -143,7 +144,7 @@ async def _run_scan(scan_id: str, req: ScanRequest) -> None:
             f"{progress.files_skipped} skipped, {progress.files_errored} errored "
             f"({progress.elapsed_s:.1f}s)"
         )
-    except Exception as e:
+    except (IngestionError, ValueError, OSError, RuntimeError) as e:
         progress.status = "error"
         progress.elapsed_s = round(time.time() - _scan_start_times[scan_id], 2)
         logger.error(f"Scan {scan_id} failed: {e}")

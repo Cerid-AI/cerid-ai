@@ -15,6 +15,7 @@ from typing import Any
 import httpx
 
 import config
+from errors import SyncError
 from sync._helpers import (
     ARTIFACTS_JSONL,
     AUDIT_LOG_JSONL,
@@ -122,7 +123,7 @@ def export_neo4j(
             for record in result:
                 relationships.append(dict(record))
 
-    except Exception as exc:
+    except (SyncError, ValueError, OSError, RuntimeError) as exc:
         logger.error("Neo4j export failed: %s", exc)
         return {"error": str(exc), "artifacts": 0, "domains": 0, "relationships": 0}
 
@@ -231,7 +232,7 @@ def export_chroma(
             logger.error("ChromaDB HTTP error for %s: %s", coll_name, exc)
             domain_counts[domain] = chunk_count
             continue
-        except Exception as exc:
+        except (SyncError, ValueError, OSError, RuntimeError) as exc:
             logger.error("ChromaDB export failed for %s: %s", coll_name, exc)
             domain_counts[domain] = chunk_count
             continue
@@ -289,7 +290,7 @@ def export_redis(redis_client, sync_dir: str | None = None) -> dict[str, Any]:
 
     try:
         raw_entries: list[str] = redis_client.lrange(config.REDIS_INGEST_LOG, 0, -1)
-    except Exception as exc:
+    except (SyncError, ValueError, OSError, RuntimeError) as exc:
         logger.error("Redis LRANGE failed: %s", exc)
         return {"error": str(exc), "entries_exported": 0, "output_dir": str(out_dir)}
 
@@ -358,7 +359,7 @@ def export_all(
     try:
         from sync.tombstones import export_tombstones
         tombstone_result = export_tombstones(sync_dir=sync_dir)
-    except Exception as exc:
+    except (SyncError, ValueError, OSError, RuntimeError) as exc:
         logger.warning("Tombstone export failed (non-blocking): %s", exc)
 
     manifest = write_manifest(

@@ -1,6 +1,6 @@
 # Model Router Resilience — Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Fix three bugs: weak temporal routing in chat model router, no error retry with model fallback on chat stream, and verification stream cancellation on component unmount.
 

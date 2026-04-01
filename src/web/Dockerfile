@@ -23,5 +23,10 @@ COPY docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 # Inject env-config.js before other scripts so window.__ENV__ is available at runtime
 RUN sed -i 's|<head>|<head><script src="/env-config.js"></script>|' /usr/share/nginx/html/index.html
+# Ensure nginx can write to required dirs when running as non-root
+RUN chown -R nginx:nginx /var/cache/nginx /var/log/nginx /etc/nginx/conf.d \
+    /usr/share/nginx/html \
+    && touch /var/run/nginx.pid && chown nginx:nginx /var/run/nginx.pid
 EXPOSE 80
+USER nginx
 ENTRYPOINT ["/docker-entrypoint.sh"]

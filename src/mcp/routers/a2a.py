@@ -23,6 +23,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from deps import get_chroma, get_neo4j, get_redis
+from errors import ProviderError
 
 logger = logging.getLogger("ai-companion.a2a")
 
@@ -312,7 +313,7 @@ async def create_task(request: A2ATaskRequest):
         executor = SKILL_MAP[request.skill_id]
         result = await executor(request.input)
         _transition(task, "completed", output=result)
-    except Exception as exc:
+    except (ProviderError, ValueError, OSError, RuntimeError) as exc:
         logger.exception("A2A task %s failed: %s", task_id, exc)
         _transition(task, "failed", error=str(exc))
 

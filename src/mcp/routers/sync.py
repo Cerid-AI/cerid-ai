@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 import config
 from deps import get_neo4j, get_redis
+from errors import SyncError
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion.sync")
@@ -69,7 +70,7 @@ async def sync_export_endpoint(req: ExportRequest):
                 domains=req.domains,
             )
         return result
-    except Exception as exc:
+    except (SyncError, ValueError, OSError, RuntimeError) as exc:
         logger.error("Sync export failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -90,7 +91,7 @@ async def sync_import_endpoint(req: ImportRequest):
                 conflict_strategy=req.conflict_strategy,
             )
         return result
-    except Exception as exc:
+    except (SyncError, ValueError, OSError, RuntimeError) as exc:
         logger.error("Sync import failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -108,6 +109,6 @@ async def sync_status_endpoint(sync_dir: str | None = Query(default=None)):
             sync_dir=sync_dir or config.SYNC_DIR,
         )
         return result
-    except Exception as exc:
+    except (SyncError, ValueError, OSError, RuntimeError) as exc:
         logger.error("Sync status failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))

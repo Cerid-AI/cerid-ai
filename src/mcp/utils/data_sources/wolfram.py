@@ -8,6 +8,8 @@ import os
 
 import httpx
 
+from errors import RetrievalError
+
 from .base import DataSource, DataSourceResult, logger
 
 
@@ -37,6 +39,6 @@ class WolframAlphaSource(DataSource):
                         confidence=0.95,
                     )]
                 return []
-        except Exception as exc:
+        except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
             logger.debug("Wolfram Alpha query failed: %s", exc)
             return []

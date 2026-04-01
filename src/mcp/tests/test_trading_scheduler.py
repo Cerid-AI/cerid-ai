@@ -11,7 +11,6 @@ class TestTradingAutoresearch:
     async def test_stores_performance_in_neo4j(self) -> None:
         import httpx
         import respx
-
         from agents.trading_scheduler_jobs import run_trading_autoresearch
 
         with respx.mock:
@@ -27,7 +26,6 @@ class TestTradingAutoresearch:
     async def test_handles_api_failure(self) -> None:
         import httpx
         import respx
-
         from agents.trading_scheduler_jobs import run_trading_autoresearch
 
         with respx.mock:
@@ -44,7 +42,6 @@ class TestPlattScalingMirror:
     async def test_mirrors_platt_params(self) -> None:
         import httpx
         import respx
-
         from agents.trading_scheduler_jobs import run_platt_scaling_mirror
 
         with respx.mock:
@@ -65,7 +62,6 @@ class TestLongshotSurfaceRebuild:
     async def test_stores_calibration_points(self) -> None:
         import httpx
         import respx
-
         from agents.trading_scheduler_jobs import run_longshot_surface_rebuild
 
         with respx.mock:

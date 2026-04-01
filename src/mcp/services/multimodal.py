@@ -18,6 +18,7 @@ from typing import Any
 
 import config
 from config.features import check_tier
+from errors import IngestionError
 from services.ingestion import ingest_content
 
 logger = logging.getLogger("ai-companion.multimodal")
@@ -166,7 +167,7 @@ async def ingest_multimodal(
 
     try:
         text, plugin_used = await _extract_text(file_path, plugin_name)
-    except Exception as e:
+    except (IngestionError, ValueError, OSError, RuntimeError) as e:
         logger.error("Plugin extraction failed for %s: %s", path.name, e)
         return {"status": "error", "error": f"Plugin '{plugin_name}' failed: {e}"}
 

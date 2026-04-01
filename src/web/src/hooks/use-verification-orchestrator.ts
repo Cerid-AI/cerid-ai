@@ -30,6 +30,7 @@ import type { MessageVerificationStatus } from "@/components/chat/message-bubble
 
 /** Module-level report cache — survives hook unmount/remount across pane switches.
  *  Keyed by composite "convId:msgId" for per-message granularity. */
+const MAX_REPORT_CACHE = 100
 const reportCache = new Map<string, HallucinationReport>()
 
 function cacheKey(convId: string, msgId: string): string {
@@ -231,6 +232,10 @@ export function useVerificationOrchestrator({
     savedForKey.current = key
 
     // Cache in module-level map (instant, no re-render)
+    if (reportCache.size >= MAX_REPORT_CACHE) {
+      const firstKey = reportCache.keys().next().value
+      if (firstKey !== undefined) reportCache.delete(firstKey)
+    }
     reportCache.set(key, verification.report)
 
     // Defer context saves to next event loop tick.
@@ -279,6 +284,10 @@ export function useVerificationOrchestrator({
     // 2. Check localStorage (persisted across page reloads)
     const localReport = getVerification(activeId, effectiveMsgId)
     if (localReport) {
+      if (reportCache.size >= MAX_REPORT_CACHE) {
+        const firstKey = reportCache.keys().next().value
+        if (firstKey !== undefined) reportCache.delete(firstKey)
+      }
       reportCache.set(key, localReport)
       setSavedReport(localReport)
       return

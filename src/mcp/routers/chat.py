@@ -23,6 +23,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 import config
+from errors import ProviderError
 
 logger = logging.getLogger("ai-companion.chat")
 
@@ -131,7 +132,7 @@ def _resolve_api_key(request: Request) -> str:
                 decrypted = decrypt_field(user["openrouter_api_key_encrypted"])
                 if decrypted:
                     return decrypted
-        except Exception:
+        except (ProviderError, ValueError, OSError, RuntimeError):
             logger.debug("Failed to resolve per-user API key, falling back to global")
     return OPENROUTER_API_KEY
 
@@ -267,7 +268,7 @@ async def _attempt_stream(
                                 "Chat cost: model=%s prompt=%d completion=%d cost=$%.6f",
                                 bare_model, prompt_tokens, completion_tokens, cost,
                             )
-                    except Exception as exc:
+                    except (ProviderError, ValueError, OSError, RuntimeError) as exc:
                         logger.debug("Failed to record chat cost metrics: %s", exc)
 
         return _success_gen()
@@ -304,7 +305,7 @@ async def _proxy_stream(req: ChatRequest, request_id: str, api_key: str = "") ->
                 "Smart-routed to %s (%s, cost_sensitivity=%s)",
                 decision.model, decision.reason, req.cost_sensitivity,
             )
-        except Exception as exc:
+        except (ProviderError, ValueError, OSError, RuntimeError) as exc:
             logger.warning("Smart routing failed (%s), using fallback", exc)
             req.model = "openai/gpt-4o-mini"
 
@@ -362,9 +363,23 @@ async def _proxy_stream(req: ChatRequest, request_id: str, api_key: str = "") ->
 @router.post("/chat/stream")
 async def chat_stream(req: ChatRequest, request: Request):
     """Stream chat completion directly via OpenRouter."""
+    # Private mode: level >= 3 forces Ollama (local inference only)
+    client_id = request.headers.get("X-Client-ID", "unknown")
+    private_level = 0
+    try:
+        from utils.private_mode import get_private_mode_level
+        private_level = get_private_mode_level(client_id)
+    except (ProviderError, ValueError, OSError, RuntimeError) as e:
+        logger.warning("Private mode check failed (defaulting to disabled): %s", e)
+
+    if private_level >= 3:
+        ollama_model = config.INTERNAL_LLM_MODEL or config.OLLAMA_DEFAULT_MODEL or "llama3.2:3b"
+        logger.info("Private mode level %d: forcing model to Ollama (%s)", private_level, ollama_model)
+        req.model = f"ollama/{ollama_model}"
+
     api_key = _resolve_api_key(request)
 
-    if not api_key:
+    if not api_key and private_level < 3:
         return StreamingResponse(
             iter([
                 b'data: {"error":{"message":"OPENROUTER_API_KEY not configured","type":"config_error"}}\n\n'
@@ -377,14 +392,18 @@ async def chat_stream(req: ChatRequest, request: Request):
     request_id = request.headers.get("X-Request-ID", "")
     logger.info("Chat proxy: model=%s request_id=%s", req.model, request_id)
 
+    extra_headers: dict[str, str] = {
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",  # disable nginx buffering
+    }
+    if private_level > 0:
+        extra_headers["X-Private-Mode"] = str(private_level)
+
     return StreamingResponse(
         _proxy_stream(req, request_id, api_key=api_key),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # disable nginx buffering
-        },
+        headers=extra_headers,
     )
 
 

@@ -84,6 +84,62 @@ class AvailableModelsResponse(BaseModel):
     total: int
 
 
+class ModelUpdateItem(BaseModel):
+    update_id: str
+    model_id: str
+    update_type: str = Field(description="'new', 'deprecated', or 'price_change'")
+    details: dict = Field(default_factory=dict)
+    detected_at: str
+
+
+class ModelUpdatesFullResponse(BaseModel):
+    updates: list[ModelUpdateItem]
+    last_checked: str | None
+    catalog_size: int
+
+
+class ModelComparisonResponse(BaseModel):
+    current: dict
+    candidate: dict
+    recommendation: str
+
+
+# ── Deprecation metadata ────────────────────────────────────────────────────
+
+DEPRECATED_MODELS: dict[str, dict[str, str]] = {
+    "openai/gpt-4-turbo": {
+        "successor": "openai/gpt-4o",
+        "reason": "Superseded by GPT-4o",
+        "deprecated_date": "2025-06",
+    },
+    "openai/gpt-4-turbo-preview": {
+        "successor": "openai/gpt-4o",
+        "reason": "Preview model retired",
+        "deprecated_date": "2025-03",
+    },
+    "anthropic/claude-3-opus": {
+        "successor": "anthropic/claude-opus-4",
+        "reason": "Superseded by Claude Opus 4",
+        "deprecated_date": "2025-09",
+    },
+    "anthropic/claude-3-sonnet": {
+        "successor": "anthropic/claude-sonnet-4",
+        "reason": "Superseded by Claude Sonnet 4",
+        "deprecated_date": "2025-06",
+    },
+    "anthropic/claude-3-haiku": {
+        "successor": "anthropic/claude-sonnet-4",
+        "reason": "Superseded by Claude Sonnet 4",
+        "deprecated_date": "2025-06",
+    },
+    "google/gemini-pro": {
+        "successor": "google/gemini-2.5-flash",
+        "reason": "Superseded by Gemini 2.5 series",
+        "deprecated_date": "2025-04",
+    },
+}
+
+
 # ── Persistence helpers ──────────────────────────────────────────────────────
 
 
@@ -277,3 +333,189 @@ async def list_available_models():
             )
 
     return AvailableModelsResponse(models=models, total=len(models))
+
+
+@router.get("/updates", response_model=ModelUpdatesFullResponse)
+async def get_model_updates():
+    """Return pending model updates (new, deprecated, price changes)."""
+    from deps import get_redis
+
+    redis = get_redis()
+    dismissed_raw = redis.get("cerid:model_updates:dismissed")
+    dismissed: set[str] = set()
+    if dismissed_raw:
+        try:
+            dismissed = set(json.loads(dismissed_raw))
+        except (ValueError, TypeError):
+            pass
+
+    updates: list[ModelUpdateItem] = []
+    last_checked: str | None = None
+    catalog_size = 0
+
+    raw = redis.get("cerid:models:updates")
+    if raw:
+        data = json.loads(raw)
+        last_checked = data.get("last_checked")
+        catalog_size = data.get("catalog_size", 0)
+
+        for m in data.get("new", []):
+            uid = f"new:{m['id']}"
+            if uid in dismissed:
+                continue
+            pricing = m.get("pricing", {})
+            updates.append(ModelUpdateItem(
+                update_id=uid,
+                model_id=m["id"],
+                update_type="new",
+                details={
+                    "name": m.get("name", m["id"]),
+                    "context_length": m.get("context_length"),
+                    "input_cost": float(pricing.get("prompt", 0)) * 1e6,
+                    "output_cost": float(pricing.get("completion", 0)) * 1e6,
+                },
+                detected_at=last_checked or "",
+            ))
+
+        for m in data.get("deprecated", []):
+            uid = f"deprecated:{m['id']}"
+            if uid in dismissed:
+                continue
+            dep_info = DEPRECATED_MODELS.get(m["id"], {})
+            updates.append(ModelUpdateItem(
+                update_id=uid,
+                model_id=m["id"],
+                update_type="deprecated",
+                details={
+                    "successor": dep_info.get("successor"),
+                    "reason": dep_info.get("reason", "Removed from catalog"),
+                    "deprecated_date": dep_info.get("deprecated_date"),
+                },
+                detected_at=last_checked or "",
+            ))
+
+    # Add deprecation warnings for models currently in use
+    config = _load_config()
+    assignments = config.get("assignments", {})
+    for _role, model_id in assignments.items():
+        stripped = model_id.split(":")[0]
+        if stripped in DEPRECATED_MODELS:
+            uid = f"in_use_deprecated:{stripped}"
+            if uid in dismissed:
+                continue
+            dep = DEPRECATED_MODELS[stripped]
+            if not any(u.update_id == uid for u in updates):
+                updates.append(ModelUpdateItem(
+                    update_id=uid,
+                    model_id=stripped,
+                    update_type="deprecated",
+                    details={
+                        "successor": dep.get("successor"),
+                        "reason": dep.get("reason"),
+                        "deprecated_date": dep.get("deprecated_date"),
+                        "in_use": True,
+                    },
+                    detected_at=last_checked or "",
+                ))
+
+    return ModelUpdatesFullResponse(
+        updates=updates, last_checked=last_checked, catalog_size=catalog_size,
+    )
+
+
+@router.post("/updates/check")
+async def trigger_model_update_check():
+    """Trigger a manual check for model updates against OpenRouter catalog."""
+    from utils.model_registry import fetch_and_compare_models
+
+    try:
+        result = await fetch_and_compare_models()
+        return {
+            "success": True,
+            "new_count": len(result.get("new", [])),
+            "deprecated_count": len(result.get("deprecated", [])),
+            "catalog_size": result.get("catalog_size", 0),
+            "last_checked": result.get("last_checked"),
+        }
+    except (OSError, RuntimeError, ValueError) as exc:
+        _logger.warning("Model update check failed: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Update check failed: {exc}")
+
+
+@router.post("/updates/dismiss/{update_id:path}")
+async def dismiss_model_update(update_id: str):
+    """Dismiss a model update notification."""
+    from deps import get_redis
+
+    redis = get_redis()
+    dismissed_raw = redis.get("cerid:model_updates:dismissed")
+    dismissed: list[str] = []
+    if dismissed_raw:
+        try:
+            dismissed = json.loads(dismissed_raw)
+        except (ValueError, TypeError):
+            pass
+
+    if update_id not in dismissed:
+        dismissed.append(update_id)
+
+    redis.set("cerid:model_updates:dismissed", json.dumps(dismissed))
+    return {"success": True, "dismissed": update_id}
+
+
+@router.get("/compare", response_model=ModelComparisonResponse)
+async def compare_models(current_model: str, candidate_model: str):
+    """Compare two models on capability and cost."""
+    import httpx as _httpx
+
+    from utils.model_registry import get_pricing
+
+    async with _httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get("https://openrouter.ai/api/v1/models")
+        resp.raise_for_status()
+        catalog = {m["id"]: m for m in resp.json().get("data", [])}
+
+    def _build_info(model_id: str) -> dict:
+        stripped = model_id.removeprefix("openrouter/").split(":")[0]
+        entry = catalog.get(stripped, {})
+        pricing = get_pricing(f"openrouter/{stripped}")
+        raw_pricing = entry.get("pricing", {})
+        return {
+            "model_id": model_id,
+            "name": entry.get("name", model_id),
+            "context_length": entry.get("context_length"),
+            "input_cost_per_1m": pricing[0] if pricing[0] else float(raw_pricing.get("prompt", 0)) * 1e6,
+            "output_cost_per_1m": pricing[1] if pricing[1] else float(raw_pricing.get("completion", 0)) * 1e6,
+            "top_provider": entry.get("top_provider", {}),
+            "architecture": entry.get("architecture", {}),
+            "deprecated": stripped in DEPRECATED_MODELS,
+            "deprecation_info": DEPRECATED_MODELS.get(stripped),
+        }
+
+    current_info = _build_info(current_model)
+    candidate_info = _build_info(candidate_model)
+
+    # Simple recommendation logic
+    rec_parts: list[str] = []
+    c_cost = current_info["input_cost_per_1m"] + current_info["output_cost_per_1m"]
+    n_cost = candidate_info["input_cost_per_1m"] + candidate_info["output_cost_per_1m"]
+
+    if current_info["deprecated"]:
+        rec_parts.append(f"{current_model} is deprecated")
+    if n_cost < c_cost:
+        savings = ((c_cost - n_cost) / c_cost * 100) if c_cost > 0 else 0
+        rec_parts.append(f"Candidate is {savings:.0f}% cheaper")
+    elif n_cost > c_cost:
+        increase = ((n_cost - c_cost) / c_cost * 100) if c_cost > 0 else 0
+        rec_parts.append(f"Candidate is {increase:.0f}% more expensive")
+
+    c_ctx = current_info.get("context_length") or 0
+    n_ctx = candidate_info.get("context_length") or 0
+    if n_ctx > c_ctx:
+        rec_parts.append(f"Candidate has {n_ctx // 1000}K context (vs {c_ctx // 1000}K)")
+
+    recommendation = ". ".join(rec_parts) + "." if rec_parts else "Models are comparable."
+
+    return ModelComparisonResponse(
+        current=current_info, candidate=candidate_info, recommendation=recommendation,
+    )

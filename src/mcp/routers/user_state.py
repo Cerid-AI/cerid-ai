@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 import config
 from sync.user_state import (
@@ -68,8 +68,20 @@ def get_conversation(conv_id: str):
 
 
 @router.post("/conversations")
-def save_conversation(body: dict[str, Any]):
-    """Save a single conversation. Body must contain an 'id' field."""
+def save_conversation(body: dict[str, Any], request: Request):
+    """Save a single conversation. Body must contain an 'id' field.
+
+    Private mode (level >= 1): rejects the save to prevent history persistence.
+    """
+    # Private mode guard: skip conversation persistence
+    client_id = request.headers.get("X-Client-ID", "unknown")
+    try:
+        from utils.private_mode import get_private_mode_level
+        if get_private_mode_level(client_id) >= 1:
+            return {"saved": body.get("id", ""), "private_mode": True, "skipped": True}
+    except (ValueError, OSError, RuntimeError):
+        pass
+
     sd = _sync_dir()
     if not sd:
         raise HTTPException(status_code=503, detail="Sync directory not configured")
@@ -80,8 +92,20 @@ def save_conversation(body: dict[str, Any]):
 
 
 @router.post("/conversations/bulk")
-def save_conversations_bulk(body: list[dict[str, Any]]):
-    """Save multiple conversations. Each dict must contain an 'id' field."""
+def save_conversations_bulk(body: list[dict[str, Any]], request: Request):
+    """Save multiple conversations. Each dict must contain an 'id' field.
+
+    Private mode (level >= 1): rejects the save to prevent history persistence.
+    """
+    # Private mode guard: skip conversation persistence
+    client_id = request.headers.get("X-Client-ID", "unknown")
+    try:
+        from utils.private_mode import get_private_mode_level
+        if get_private_mode_level(client_id) >= 1:
+            return {"saved": 0, "private_mode": True, "skipped": True}
+    except (ValueError, OSError, RuntimeError):
+        pass
+
     sd = _sync_dir()
     if not sd:
         raise HTTPException(status_code=503, detail="Sync directory not configured")

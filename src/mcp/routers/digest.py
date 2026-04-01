@@ -10,6 +10,7 @@ from datetime import timedelta
 from fastapi import APIRouter, Query
 
 from deps import get_neo4j, get_redis
+from errors import RetrievalError
 from routers.health import health_check
 from utils.cache import get_log
 from utils.time import utcnow, utcnow_iso
@@ -59,7 +60,7 @@ async def digest_endpoint(hours: int = Query(24, ge=1, le=168)):
             rec = rel_result.single()
             if rec:
                 new_relationships = rec["cnt"]
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.warning(f"Digest Neo4j query failed: {e}")
 
     # Domain distribution of recent artifacts
@@ -70,7 +71,7 @@ async def digest_endpoint(hours: int = Query(24, ge=1, le=168)):
     # System health
     try:
         system_health = health_check()
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.debug(f"Health check failed during digest: {e}")
         system_health = {"status": "unknown"}
 
@@ -80,7 +81,7 @@ async def digest_endpoint(hours: int = Query(24, ge=1, le=168)):
         log = get_log(get_redis(), limit=20)
         if isinstance(log, list):
             recent_events = log
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.debug(f"Redis activity log unavailable for digest: {e}")
 
     return {

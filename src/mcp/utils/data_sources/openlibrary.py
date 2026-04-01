@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import httpx
 
+from errors import RetrievalError
+
 from .base import DataSource, DataSourceResult, logger
 
 
@@ -54,6 +56,6 @@ class OpenLibrarySource(DataSource):
                     ))
 
                 return results
-        except Exception as exc:
+        except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
             logger.debug("Open Library query failed: %s", exc)
             return []

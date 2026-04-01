@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 import config
 from deps import get_chroma, get_neo4j, get_redis
+from errors import CeridError
 from models.trading import (
     CascadeConfirmRequest,
     HerdDetectRequest,
@@ -112,6 +113,44 @@ class CompressRequest(BaseModel):
     target_tokens: int = Field(ge=100, le=1_000_000)
 
 
+@router.get("/agents/activity/stream")
+async def stream_agent_activity(request: Request):
+    """SSE stream of agent activity events."""
+
+    async def event_generator():
+        from deps import get_redis
+        redis = get_redis()
+        pubsub = redis.pubsub()
+        pubsub.subscribe("cerid:agent:activity")
+
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                message = await asyncio.to_thread(pubsub.get_message, ignore_subscribe_messages=True, timeout=1.0)
+                if message and message["type"] == "message":
+                    data = message["data"]
+                    if isinstance(data, bytes):
+                        data = data.decode("utf-8")
+                    yield f"data: {data}\n\n"
+                else:
+                    yield ": keepalive\n\n"
+                await asyncio.sleep(0.1)
+        finally:
+            pubsub.unsubscribe("cerid:agent:activity")
+            pubsub.close()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.post("/chat/compress")
 async def compress_history_endpoint(req: CompressRequest):
     """Compress conversation history to fit a target token budget.
@@ -139,7 +178,7 @@ async def compress_history_endpoint(req: CompressRequest):
 
         try:
             compressed = await compress_history(messages, req.target_tokens)
-        except Exception as exc:
+        except (CeridError, ValueError, OSError, RuntimeError) as exc:
             logger.warning("compress_history LLM failed, falling back to sliding window: %s", exc)
             compressed = sliding_window_prune(messages)
 
@@ -149,13 +188,24 @@ async def compress_history_endpoint(req: CompressRequest):
             "original_tokens": original_tokens,
             "compressed_tokens": compressed_tokens,
         }
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         logger.error("Compress history error: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/agent/query")
 async def agent_query_endpoint(req: AgentQueryRequest, request: Request):
+    # Private mode: level >= 2 skips KB context injection (return empty context)
+    client_id = request.headers.get("X-Client-ID", "unknown")
+    try:
+        from utils.private_mode import get_private_mode_level
+        pm_level = get_private_mode_level(client_id)
+    except (CeridError, ValueError, OSError, RuntimeError):
+        pm_level = 0
+
+    if pm_level >= 2:
+        return {"answer": "", "sources": [], "context": "", "private_mode": True}
+
     try:
         from utils.query_cache import get_cached, set_cached
 
@@ -181,10 +231,14 @@ async def agent_query_endpoint(req: AgentQueryRequest, request: Request):
         from config.settings import RAG_ORCHESTRATION_MODE
         rag_mode = req.rag_mode or RAG_ORCHESTRATION_MODE
 
-        # Gate custom_smart behind Pro tier
+        # Gate custom_smart behind Pro tier and plugin availability
         if rag_mode == "custom_smart":
+            from agents.retrieval_orchestrator import _custom_rag_fn
             from config.features import is_feature_enabled
-            if not is_feature_enabled("custom_smart_rag"):
+            if not is_feature_enabled("custom_smart_rag") or _custom_rag_fn is None:
+                logger.info(
+                    "custom_smart RAG mode requires Pro tier plugin — downgrading to smart mode"
+                )
                 rag_mode = "smart"  # Graceful downgrade
 
         if rag_mode in ("smart", "custom_smart"):
@@ -240,7 +294,7 @@ async def agent_query_endpoint(req: AgentQueryRequest, request: Request):
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Agent query error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -274,7 +328,7 @@ async def triage_file_endpoint(req: TriageFileRequest):
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Triage error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -305,7 +359,7 @@ async def triage_batch_endpoint(req: TriageBatchRequest):
                 result["filename"] = triage_result["filename"]
                 result["triage_status"] = triage_result["status"]
                 final_results.append(result)
-            except Exception as e:
+            except (CeridError, ValueError, OSError, RuntimeError) as e:
                 final_results.append({
                     "filename": triage_result.get("filename", ""),
                     "status": "error",
@@ -321,7 +375,7 @@ async def triage_batch_endpoint(req: TriageBatchRequest):
             "duplicates": duplicates,
             "results": final_results,
         }
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Batch triage error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -339,7 +393,7 @@ async def hallucination_check_endpoint(req: HallucinationCheckRequest):
             threshold=req.threshold,
             model=req.model,
         )
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Hallucination check error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -354,7 +408,7 @@ async def hallucination_report_endpoint(conversation_id: str):
         return report
     except HTTPException:
         raise
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Hallucination report error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -395,7 +449,7 @@ async def claim_feedback_endpoint(req: ClaimFeedbackRequest):
         return {"status": "ok"}
     except HTTPException:
         raise
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Claim feedback error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -437,7 +491,7 @@ async def memory_recall_endpoint(req: MemoryRecallRequest):
             "total_recalled": len(results),
             "timestamp": utcnow_iso(),
         }
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Memory recall error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -454,7 +508,7 @@ async def memory_extract_endpoint(req: MemoryExtractionRequest):
             neo4j_driver=get_neo4j(),
             redis_client=get_redis(),
         )
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Memory extraction error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -467,7 +521,7 @@ async def memory_archive_endpoint(req: MemoryArchiveRequest):
             neo4j_driver=get_neo4j(),
             retention_days=req.retention_days,
         )
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Memory archive error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -586,7 +640,7 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
                     anext_task.cancel()
                     try:
                         await anext_task
-                    except (asyncio.CancelledError, Exception) as exc:
+                    except (asyncio.CancelledError, CeridError, ValueError, OSError, RuntimeError) as exc:
                         logger.debug("Agent anext task cleanup: %s", exc)
                 # Now the generator is idle — safe to close
                 try:
@@ -615,7 +669,7 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
                 "Verify stream cancelled for conversation=%s",
                 req.conversation_id,
             )
-        except Exception as e:
+        except (CeridError, ValueError, OSError, RuntimeError) as e:
             logger.error(
                 "Verify stream error for conversation=%s: %s",
                 req.conversation_id,
@@ -666,7 +720,7 @@ async def save_verification_report(req: SaveVerificationRequest):
             total=req.total,
         )
         return {"status": "saved", "report_id": report_id}
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         logger.error("Failed to save verification report: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -683,7 +737,7 @@ async def get_verification_report(conversation_id: str):
         return report
     except HTTPException:
         raise
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         logger.error("Failed to get verification report: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -700,7 +754,7 @@ async def rectify_endpoint(req: RectifyRequest):
             auto_fix=req.auto_fix,
             stale_days=req.stale_days,
         )
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Rectify error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -714,7 +768,7 @@ async def audit_endpoint(req: AuditRequest):
             reports=req.reports,
             hours=req.hours,
         )
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Audit error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -731,7 +785,7 @@ async def maintain_endpoint(req: MaintenanceRequest):
             stale_days=req.stale_days,
             auto_purge=req.auto_purge,
         )
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Maintenance error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -749,7 +803,7 @@ async def curate_endpoint(req: CurateRequest):
             generate_synopses=req.generate_synopses,
             synopsis_model=req.synopsis_model,
         )
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Curate error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -765,7 +819,7 @@ async def curate_estimate_endpoint(req: CurateEstimateRequest):
             domains=req.domains,
             max_artifacts=req.max_artifacts,
         )
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Curate estimate error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -787,7 +841,7 @@ async def trading_signal_endpoint(req: TradingSignalRequest):
             neo4j=get_neo4j(),
             top_k=req.top_k,
         )
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Trading signal enrich error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -802,7 +856,7 @@ async def trading_herd_detect_endpoint(req: HerdDetectRequest):
             sentiment_data=req.sentiment_data,
             neo4j=get_neo4j(),
         )
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Herd detect error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -818,7 +872,7 @@ async def trading_kelly_size_endpoint(req: KellySizeRequest):
             win_loss_ratio=req.win_loss_ratio,
             neo4j=get_neo4j(),
         )
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Kelly size error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -833,7 +887,7 @@ async def trading_cascade_confirm_endpoint(req: CascadeConfirmRequest):
             liquidation_events=req.liquidation_events,
             neo4j=get_neo4j(),
         )
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Cascade confirm error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -848,6 +902,6 @@ async def trading_longshot_surface_endpoint(req: LongshotSurfaceRequest):
             date_range=req.date_range,
             neo4j=get_neo4j(),
         )
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Longshot surface error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

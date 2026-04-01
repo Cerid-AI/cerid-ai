@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 import config
+from errors import RoutingError
 
 logger = logging.getLogger("ai-companion.smart_router")
 
@@ -117,7 +118,7 @@ async def _check_ollama() -> bool:
             _ollama_available = len(_ollama_models) > 0
         else:
             _ollama_available = False
-    except Exception:
+    except (RoutingError, ValueError, OSError, RuntimeError):
         _ollama_available = False
 
     _ollama_checked_at = now
@@ -280,7 +281,7 @@ async def _classify_with_best_available(query: str) -> Complexity:
                 )
                 return level
 
-    except Exception as e:
+    except (RoutingError, ValueError, OSError, RuntimeError) as e:
         logger.debug("Ollama classification failed (%s), using heuristic", e)
 
     return heuristic_result

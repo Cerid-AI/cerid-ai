@@ -15,6 +15,7 @@ from typing import Any
 import httpx
 
 import config
+from errors import SyncError
 from sync._helpers import (
     ARTIFACTS_JSONL,
     AUDIT_LOG_JSONL,
@@ -114,7 +115,7 @@ def import_neo4j(
             try:
                 session.run("MERGE (:Domain {name: $name})", name=name)
                 domains_merged += 1
-            except Exception as exc:
+            except (SyncError, ValueError, OSError, RuntimeError) as exc:
                 logger.warning("Failed to merge Domain '%s': %s", name, exc)
 
     # --- Artifacts ---
@@ -226,7 +227,7 @@ def import_neo4j(
                 else:
                     artifacts_skipped += 1
 
-            except Exception as exc:
+            except (SyncError, ValueError, OSError, RuntimeError) as exc:
                 logger.warning("Failed to import artifact %s: %s", artifact_id[:8], exc)
 
     # --- Relationships ---
@@ -259,7 +260,7 @@ def import_neo4j(
                 )
                 session.run(cypher, source_id=source_id, target_id=target_id, props=props)
                 relationships_merged += 1
-            except Exception as exc:
+            except (SyncError, ValueError, OSError, RuntimeError) as exc:
                 logger.warning(
                     "Failed to merge relationship %s→%s (%s): %s",
                     source_id[:8], target_id[:8], rel_type, exc,
@@ -350,7 +351,7 @@ def import_chroma(
                     n = len(batch_ids)
                     added += n
                     return n
-                except Exception as exc:
+                except (SyncError, ValueError, OSError, RuntimeError) as exc:
                     logger.error("ChromaDB batch add failed for %s: %s", coll_name, exc)
                     return 0
                 finally:
@@ -384,7 +385,7 @@ def import_chroma(
 
             _flush_batch()
 
-        except Exception as exc:
+        except (SyncError, ValueError, OSError, RuntimeError) as exc:
             logger.error("ChromaDB import failed for domain '%s': %s", domain, exc)
             domain_stats[domain] = {"added": added, "skipped": skipped, "error": str(exc)}
             continue
@@ -421,7 +422,7 @@ def _chroma_ensure_collection(chroma_url: str, collection_name: str) -> None:
                 timeout=15.0,
             ).raise_for_status()
             logger.info("Created ChromaDB collection: %s", collection_name)
-    except Exception as exc:
+    except (SyncError, ValueError, OSError, RuntimeError) as exc:
         logger.warning("Could not ensure collection %s: %s", collection_name, exc)
 
 
@@ -434,7 +435,7 @@ def _chroma_get_collection_id(chroma_url: str, collection_name: str) -> str | No
         )
         resp.raise_for_status()
         return resp.json().get("id")
-    except Exception as exc:
+    except (SyncError, ValueError, OSError, RuntimeError) as exc:
         logger.warning("Cannot get ID for collection %s: %s", collection_name, exc)
         return None
 
@@ -458,7 +459,7 @@ def _chroma_get_all_ids(chroma_url: str, collection_id: str) -> set:
             offset += len(batch_ids)
             if len(batch_ids) < CHROMA_BATCH_SIZE:
                 break
-        except Exception as exc:
+        except (SyncError, ValueError, OSError, RuntimeError) as exc:
             logger.warning("Error fetching existing IDs at offset %d: %s", offset, exc)
             break
     return ids
@@ -520,7 +521,7 @@ def import_bm25(sync_dir: str | None = None) -> dict[str, Any]:
 
             files_processed += 1
 
-        except Exception as exc:
+        except (SyncError, ValueError, OSError, RuntimeError) as exc:
             logger.warning("BM25 merge failed for %s: %s", src_file.name, exc)
 
     logger.info(
@@ -559,7 +560,7 @@ def import_redis(
                 existing_keys.add(key)
             except json.JSONDecodeError as e:
                 logger.debug("Skipping malformed Redis log entry during dedup: %s", e)
-    except Exception as exc:
+    except (SyncError, ValueError, OSError, RuntimeError) as exc:
         logger.error("Cannot read existing Redis log for dedup: %s", exc)
         return {"error": str(exc), "entries_added": 0, "entries_skipped": 0}
 
@@ -577,7 +578,7 @@ def import_redis(
             for entry_str in reversed(new_entries):
                 redis_client.lpush(config.REDIS_INGEST_LOG, entry_str)
             redis_client.ltrim(config.REDIS_INGEST_LOG, 0, config.REDIS_LOG_MAX - 1)
-        except Exception as exc:
+        except (SyncError, ValueError, OSError, RuntimeError) as exc:
             logger.error("Redis LPUSH failed during import: %s", exc)
             return {"error": str(exc), "entries_added": entries_added, "entries_skipped": entries_skipped}
 
@@ -615,7 +616,7 @@ def import_all(
     try:
         from sync.tombstones import apply_tombstones
         tombstone_result = apply_tombstones(driver, chroma_url, sync_dir=sync_dir)
-    except Exception as exc:
+    except (SyncError, ValueError, OSError, RuntimeError) as exc:
         logger.warning("Tombstone application failed (non-blocking): %s", exc)
 
     neo4j_result = import_neo4j(
@@ -654,7 +655,7 @@ def import_all(
 
         for warning in consistency_warnings:
             logger.warning("Consistency check: %s", warning)
-    except Exception as exc:
+    except (SyncError, ValueError, OSError, RuntimeError) as exc:
         logger.warning("Post-import consistency check failed: %s", exc)
 
     # Rebuild BM25 in-memory indexes after importing new corpus files
@@ -664,7 +665,7 @@ def import_all(
             from utils.bm25 import rebuild_all as bm25_rebuild_all
             rebuilt = bm25_rebuild_all()
             logger.info("BM25 indexes rebuilt for %d domains after import", rebuilt)
-        except Exception as exc:
+        except (SyncError, ValueError, OSError, RuntimeError) as exc:
             logger.warning("BM25 index rebuild failed after import: %s", exc)
 
     logger.info("Full import complete from %s", sync_dir)

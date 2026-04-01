@@ -23,6 +23,7 @@ from typing import Any, AsyncIterator
 import config
 from config.taxonomy import SUPPORTED_EXTENSIONS
 from deps import get_redis
+from errors import IngestionError
 from parsers import parse_file as _parse_file
 from services.ingestion import ingest_content, ingest_file
 from utils.time import utcnow_iso
@@ -270,10 +271,10 @@ async def _extract_and_scan_archive(
                                 quality_score=quality, domain=domain,
                                 artifact_id=result.get("artifact_id", ""), file_size_bytes=fsize,
                             )
-                    except Exception as e:
+                    except (IngestionError, ValueError, OSError, RuntimeError) as e:
                         _record_file_scanned(redis, content_hash, fpath, "error")
                         yield ScanResult(path=f"{archive_path}:{fname}", status="error", error_msg=str(e), file_size_bytes=fsize)
-    except Exception as e:
+    except (IngestionError, ValueError, OSError, RuntimeError) as e:
         yield ScanResult(path=archive_path, status="error", error_msg=f"archive extraction failed: {e}")
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -451,7 +452,7 @@ async def scan_folder(
                             artifact_id=artifact_id,
                             file_size_bytes=file_size,
                         )
-                except Exception as e:
+                except (IngestionError, ValueError, OSError, RuntimeError) as e:
                     _record_file_scanned(redis, content_hash, file_path, "error")
                     logger.error(f"Scan ingest failed for {file_path}: {e}")
                     yield ScanResult(

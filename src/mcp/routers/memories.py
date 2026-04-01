@@ -7,10 +7,11 @@ from __future__ import annotations
 import json
 import logging
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from deps import get_chroma, get_neo4j, get_redis
+from errors import RetrievalError
 from utils import cache
 
 router = APIRouter()
@@ -133,7 +134,7 @@ async def list_memories(
 
     except HTTPException:
         raise
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"List memories error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -184,7 +185,7 @@ async def update_memory(memory_id: str, req: MemoryUpdateRequest):
 
     except HTTPException:
         raise
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Update memory error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -238,14 +239,14 @@ async def delete_memory(memory_id: str):
                 domain="conversations",
                 filename=record["filename"] or "",
             )
-        except Exception as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
             logger.warning(f"Redis audit log failed for memory deletion: {e}")
 
         return {"status": "deleted", "memory_id": memory_id}
 
     except HTTPException:
         raise
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Delete memory error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -255,8 +256,27 @@ async def delete_memory(memory_id: str):
 # ---------------------------------------------------------------------------
 
 @router.post("/memories/extract")
-async def extract_memories_endpoint(req: MemoryExtractRequest):
-    """Trigger memory extraction from conversation messages."""
+async def extract_memories_endpoint(req: MemoryExtractRequest, request: Request):
+    """Trigger memory extraction from conversation messages.
+
+    Private mode (level >= 1): skips extraction entirely to prevent memory persistence.
+    """
+    # Private mode guard: skip memory extraction
+    client_id = request.headers.get("X-Client-ID", "unknown")
+    try:
+        from utils.private_mode import get_private_mode_level
+        if get_private_mode_level(client_id) >= 1:
+            return {
+                "conversation_id": req.conversation_id,
+                "memories_extracted": 0,
+                "memories_stored": 0,
+                "results": [],
+                "note": "Private mode active — memory extraction skipped",
+                "private_mode": True,
+            }
+    except (ValueError, OSError, RuntimeError):
+        pass
+
     try:
         # Build the response text from messages (assistant messages are the
         # primary source for memory extraction)
@@ -288,6 +308,6 @@ async def extract_memories_endpoint(req: MemoryExtractRequest):
             redis_client=get_redis(),
         )
 
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Memory extraction error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

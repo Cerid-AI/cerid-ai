@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 
 import config
+from errors import SyncError
 from sync._helpers import (
     ARTIFACTS_JSONL,
     AUDIT_LOG_JSONL,
@@ -59,7 +60,7 @@ def compare_status(
             local["neo4j_relationships"] = session.run(
                 f"MATCH ()-[r:{rel_types}]->() RETURN count(r) AS n"
             ).single()["n"]
-    except Exception as exc:
+    except (SyncError, ValueError, OSError, RuntimeError) as exc:
         logger.warning("Neo4j local count failed: %s", exc)
 
     for domain in config.DOMAINS:
@@ -79,14 +80,14 @@ def compare_status(
                     local["chroma_chunks"][domain] = 0
             else:
                 local["chroma_chunks"][domain] = 0
-        except Exception as exc:
+        except (SyncError, ValueError, OSError, RuntimeError) as exc:
             logger.warning("ChromaDB local count failed for %s: %s", domain, exc)
             local["chroma_chunks"][domain] = 0
 
     if redis_client is not None:
         try:
             local["redis_entries"] = redis_client.llen(config.REDIS_INGEST_LOG)
-        except Exception as exc:
+        except (SyncError, ValueError, OSError, RuntimeError) as exc:
             logger.warning("Redis local count failed: %s", exc)
 
     # --- Sync counts (from manifest + JSONL line counts) ---

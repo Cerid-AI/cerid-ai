@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from errors import IngestionError
 from parsers.registry import _MAX_TEXT_CHARS, logger, register_parser
 
 
@@ -18,7 +19,7 @@ def parse_docx(file_path: str) -> dict[str, Any]:
 
     try:
         doc = docx.Document(file_path)
-    except Exception as e:
+    except (IngestionError, ValueError, OSError, RuntimeError) as e:
         raise ValueError(
             f"Failed to read DOCX '{Path(file_path).name}': {e}. "
             f"File may be corrupted or not a valid .docx file."
@@ -56,7 +57,7 @@ def parse_xlsx(file_path: str) -> dict[str, Any]:
 
     try:
         wb = load_workbook(file_path, read_only=True, data_only=True)
-    except Exception as e:
+    except (IngestionError, ValueError, OSError, RuntimeError) as e:
         raise ValueError(
             f"Failed to read XLSX '{Path(file_path).name}': {e}. "
             f"File may be corrupted or not a valid .xlsx file."

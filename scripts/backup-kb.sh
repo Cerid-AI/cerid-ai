@@ -26,6 +26,14 @@ done
 
 mkdir -p "$BACKUP_DIR"
 
+# Verify containers are running for a consistent backup
+for c in ai-companion-neo4j ai-companion-chroma ai-companion-redis; do
+    status=$(docker inspect --format '{{.State.Status}}' "$c" 2>/dev/null || echo "missing")
+    if [ "$status" != "running" ]; then
+        echo "WARNING: $c is not running (status: $status). Backup may be inconsistent."
+    fi
+done
+
 # --- Neo4j ---
 echo "[1/3] Backing up Neo4j..."
 docker pause ai-companion-neo4j 2>/dev/null || echo "  (neo4j not running — copying as-is)"

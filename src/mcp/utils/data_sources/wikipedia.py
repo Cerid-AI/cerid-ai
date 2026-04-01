@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import httpx
 
+from errors import RetrievalError
+
 from .base import DataSource, DataSourceResult, logger
 
 
@@ -42,6 +44,6 @@ class WikipediaSource(DataSource):
                             confidence=0.85,
                         ))
                 return results
-        except Exception as exc:
+        except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
             logger.debug("Wikipedia query failed: %s", exc)
             return []

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useCallback, useEffect, useRef } from "react"
-import { fetchSettings, updateSettings, syncPreferences, fetchUserState } from "@/lib/api"
+import { fetchSettings, updateSettings, syncPreferences, fetchUserState, fetchPrivateMode, enablePrivateMode, disablePrivateMode } from "@/lib/api"
 import type { RagMode, RoutingMode, SettingsUpdate } from "@/lib/types"
 
 function readBool(key: string): boolean {
@@ -120,6 +120,16 @@ export function useSettings() {
     } catch { return "medium" }
   })
 
+  // Private Mode state
+  const [privateModeEnabled, setPrivateModeEnabled] = useState(() => readBool("cerid-private-mode"))
+  const [privateModeLevel, setPrivateModeLevel] = useState(() => {
+    try {
+      const v = localStorage.getItem("cerid-private-mode-level")
+      if (v !== null) { const n = parseInt(v, 10); if (!isNaN(n) && n >= 0 && n <= 4) return n }
+    } catch { /* noop */ }
+    return 0
+  })
+
   // Hydrate from server on mount (non-blocking, localStorage is immediate fallback)
   const hydratedRef = useRef(false)
   useEffect(() => {
@@ -176,6 +186,20 @@ export function useSettings() {
         check("cerid-memory-extraction", s.enable_memory_extraction, (r, v) => { r.enable_memory_extraction = v })
         if (Object.keys(reconcile).length > 0) {
           updateSettings(reconcile).catch(() => { /* best-effort */ })
+        }
+      })
+      .catch(() => { /* Server unavailable — use localStorage values */ })
+
+    // Hydrate private mode from server
+    fetchPrivateMode()
+      .then((pm) => {
+        if (localStorage.getItem("cerid-private-mode") === null) {
+          setPrivateModeEnabled(pm.enabled)
+          persist("cerid-private-mode", String(pm.enabled))
+        }
+        if (localStorage.getItem("cerid-private-mode-level") === null) {
+          setPrivateModeLevel(pm.level)
+          persist("cerid-private-mode-level", String(pm.level))
         }
       })
       .catch(() => { /* Server unavailable — use localStorage values */ })
@@ -249,6 +273,37 @@ export function useSettings() {
     updateSettings({ cost_sensitivity: value }).catch(() => { /* noop */ })
   }, [])
 
+  const togglePrivateMode = useCallback(() => {
+    setPrivateModeEnabled((prev) => {
+      const next = !prev
+      if (next) {
+        const level = 1
+        setPrivateModeLevel(level)
+        persist("cerid-private-mode", "true")
+        persist("cerid-private-mode-level", String(level))
+        enablePrivateMode(level).catch(() => { /* noop */ })
+      } else {
+        setPrivateModeLevel(0)
+        persist("cerid-private-mode", "false")
+        persist("cerid-private-mode-level", "0")
+        disablePrivateMode(false).catch(() => { /* noop */ })
+      }
+      return next
+    })
+  }, [])
+
+  const changePrivateModeLevel = useCallback((level: number) => {
+    setPrivateModeLevel(level)
+    setPrivateModeEnabled(level > 0)
+    persist("cerid-private-mode", String(level > 0))
+    persist("cerid-private-mode-level", String(level))
+    if (level > 0) {
+      enablePrivateMode(level).catch(() => { /* noop */ })
+    } else {
+      disablePrivateMode(false).catch(() => { /* noop */ })
+    }
+  }, [])
+
   return {
     feedbackLoop, toggleFeedbackLoop,
     showDashboard, toggleDashboard,
@@ -261,5 +316,6 @@ export function useSettings() {
     memoryExtraction, toggleMemoryExtraction,
     inlineMarkups, toggleInlineMarkups,
     expertVerification, toggleExpertVerification,
+    privateModeEnabled, privateModeLevel, togglePrivateMode, changePrivateModeLevel,
   }
 }

@@ -19,6 +19,7 @@ from typing import Any, Literal
 import httpx
 
 import config
+from errors import RetrievalError
 from utils.circuit_breaker import CircuitOpenError
 from utils.internal_llm import call_internal_llm
 from utils.llm_parsing import parse_llm_json
@@ -63,7 +64,7 @@ async def classify_memory(
             include=["documents", "metadatas", "distances"],
             where={"memory_type": memory_type} if memory_type else None,
         )
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.debug("Consolidation similarity search failed: %s", e)
         return MemoryAction(action="ADD", reason=f"similarity search failed: {e}")
 
@@ -170,7 +171,7 @@ def mark_superseded(
         logger.info(
             "Memory %s superseded by %s", old_artifact_id, new_artifact_id,
         )
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.warning(
             "Failed to mark superseded: %s -> %s: %s",
             old_artifact_id, new_artifact_id, e,

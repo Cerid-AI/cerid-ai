@@ -14,7 +14,7 @@ report_init() {
   REPORT_FILE="${REPORT_DIR}/beta-report-${ts}.md"
 
   local git_rev os_ver docker_ver
-  git_rev=$(cd /Users/sunrunner/Develop/cerid-ai && git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+  git_rev=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
   os_ver=$(sw_vers -productVersion 2>/dev/null || uname -r)
   docker_ver=$(docker --version 2>/dev/null | head -1 || echo "unknown")
 

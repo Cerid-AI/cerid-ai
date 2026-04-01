@@ -930,7 +930,7 @@ git commit -m "feat(eval): integrate eval suite into run.sh (--eval and --full f
 - [ ] **Step 1: Execute eval suite against live stack**
 
 ```bash
-cd /Users/sunrunner/Develop/cerid-ai
+cd .
 ./tests/beta/run.sh --eval
 ```
 

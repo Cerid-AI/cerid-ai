@@ -11,14 +11,18 @@ line-length = 120
 src = ["src/mcp"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I"]
+select = ["E", "F", "W", "I", "BLE001"]
 ignore = ["E501"]  # line length handled by formatter
 # Progressive quality rules (tracked, not CI-gating until sweep complete):
-# BLE001 (blind except): ruff check src/mcp/ --select BLE -q | wc -l
 # ERA001 (commented-out code): ruff check src/mcp/ --select ERA -q | wc -l
 
 [tool.ruff.lint.per-file-ignores]
-"main.py" = ["E402"]  # sentry_sdk.init() must run before all other imports
+"main.py" = ["E402", "BLE001"]  # sentry_sdk.init() must run before all other imports; top-level exception handler
+"**/main.py" = ["E402", "BLE001"]
+"**/error_handler.py" = ["BLE001"]  # error handler must catch all exceptions
+"**/degradation.py" = ["BLE001"]  # degradation probes must catch all exceptions
+"**/agent_events.py" = ["BLE001"]  # fire-and-forget SSE events must not crash caller
+"**/tests/**" = ["BLE001"]  # test files can use broad except for test isolation
 
 [tool.mypy]
 python_version = "3.11"

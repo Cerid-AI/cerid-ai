@@ -1,6 +1,6 @@
 # Multi-Session Cloud Sync Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Enable seamless multi-session, multi-computer state synchronization (conversations, settings, UI preferences) via Dropbox, with frameworks for future multi-user support.
 

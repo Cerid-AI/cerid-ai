@@ -66,7 +66,7 @@ Endpoints:
 ```python
 {
     "id": "uuid",
-    "path": "/Users/justin/Dropbox",
+    "path": "~/Dropbox",
     "label": "Dropbox",  # user-friendly name
     "enabled": true,
     "domain_override": null,  # or "finance" to force domain

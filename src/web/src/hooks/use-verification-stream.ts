@@ -201,7 +201,10 @@ export function useVerificationStream(
     /** Append an activity log entry with elapsed time from stream start. */
     const logEntry = (message: string, type: ActivityLogEntry["type"]) => {
       const elapsed = Date.now() - streamStartRef.current
-      setActivityLog((prev) => [...prev, { time: formatElapsed(elapsed), message, type }])
+      setActivityLog((prev) => {
+        const next = [...prev, { time: formatElapsed(elapsed), message, type }]
+        return next.length > 200 ? next.slice(-200) : next
+      })
     }
 
     // Timeout: abort verification if it takes too long.

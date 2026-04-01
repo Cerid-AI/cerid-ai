@@ -12,6 +12,7 @@ import logging
 from typing import Any
 
 import config
+from errors import CeridError
 from middleware.request_id import get_request_id
 from utils.time import utcnow_iso
 
@@ -58,7 +59,7 @@ def log_event(
         pipe.ltrim(config.REDIS_INGEST_LOG, 0, config.REDIS_LOG_MAX - 1)
         pipe.expire(config.REDIS_INGEST_LOG, 86400 * 30)  # 30-day TTL
         pipe.execute()
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Failed to log event to Redis: {e}")
 
 
@@ -67,7 +68,7 @@ def get_log(redis_client, limit: int = 50) -> list[dict[str, Any]]:
     try:
         entries = redis_client.lrange(config.REDIS_INGEST_LOG, 0, limit - 1)
         return [json.loads(e) for e in entries]
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Failed to read ingest log: {e}")
         return []
 
@@ -76,7 +77,7 @@ def get_log(redis_client, limit: int = 50) -> list[dict[str, Any]]:
 # Conversation metrics storage
 # ---------------------------------------------------------------------------
 
-REDIS_CONV_METRICS_PREFIX = "conv:"
+REDIS_CONV_METRICS_PREFIX = "cerid:conv:"
 REDIS_CONV_METRICS_TTL = 86400 * 30  # 30 days
 
 
@@ -100,7 +101,7 @@ def log_conversation_metrics(
     try:
         redis_client.rpush(key, entry)
         redis_client.expire(key, REDIS_CONV_METRICS_TTL)
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         logger.warning(f"Failed to log conversation metrics: {e}")
 
 
@@ -108,9 +109,9 @@ def log_conversation_metrics(
 # Verification metrics storage
 # ---------------------------------------------------------------------------
 
-REDIS_VERIFICATION_METRICS_KEY = "verify:metrics"
-REDIS_VERIFICATION_FEEDBACK_KEY = "verify:feedback"
-REDIS_VERIFICATION_ERRORS_KEY = "verify:errors"
+REDIS_VERIFICATION_METRICS_KEY = "cerid:verify:metrics"
+REDIS_VERIFICATION_FEEDBACK_KEY = "cerid:verify:feedback"
+REDIS_VERIFICATION_ERRORS_KEY = "cerid:verify:errors"
 REDIS_VERIFICATION_METRICS_TTL = 86400 * 30  # 30 days
 REDIS_VERIFICATION_ERRORS_MAX = 200  # Keep last 200 errors
 
@@ -149,7 +150,7 @@ def log_verification_metrics(
     try:
         redis_client.rpush(REDIS_VERIFICATION_METRICS_KEY, entry)
         redis_client.expire(REDIS_VERIFICATION_METRICS_KEY, REDIS_VERIFICATION_METRICS_TTL)
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         logger.warning(f"Failed to log verification metrics: {e}")
 
 
@@ -171,7 +172,7 @@ def log_claim_feedback(
     try:
         redis_client.rpush(REDIS_VERIFICATION_FEEDBACK_KEY, entry)
         redis_client.expire(REDIS_VERIFICATION_FEEDBACK_KEY, REDIS_VERIFICATION_METRICS_TTL)
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         logger.warning(f"Failed to log claim feedback: {e}")
 
 
@@ -210,5 +211,5 @@ def log_verification_error(
         # Trim to keep only the most recent errors
         redis_client.ltrim(REDIS_VERIFICATION_ERRORS_KEY, -REDIS_VERIFICATION_ERRORS_MAX, -1)
         redis_client.expire(REDIS_VERIFICATION_ERRORS_KEY, REDIS_VERIFICATION_METRICS_TTL)
-    except Exception as e:
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
         logger.warning(f"Failed to log verification error: {e}")

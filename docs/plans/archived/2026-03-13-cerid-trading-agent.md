@@ -1,6 +1,6 @@
 # cerid-trading-agent Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Build a production-grade, isolated DeFi/prediction-market trading agent that generates income via non-speed meta-strategies (liquidity provision, herd-fading, niche arb) while reusing Cerid AI's intelligence layer.
 

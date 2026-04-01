@@ -17,6 +17,7 @@ from typing import Any
 import numpy as np
 
 from config.features import LATE_INTERACTION_BLEND_WEIGHT, LATE_INTERACTION_TOP_N
+from errors import RetrievalError
 
 logger = logging.getLogger("ai-companion.late_interaction")
 
@@ -102,7 +103,7 @@ def late_interaction_rerank(
 
     try:
         query_embeddings = embed_fn(query_windows)
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.warning("Failed to embed query windows: %s", e)
         return results
 
@@ -115,7 +116,7 @@ def late_interaction_rerank(
 
         try:
             doc_embeddings = embed_fn(doc_windows[:20])  # Cap windows for performance
-        except Exception:
+        except (RetrievalError, ValueError, OSError, RuntimeError):
             continue
 
         maxsim = compute_maxsim(query_embeddings, doc_embeddings)

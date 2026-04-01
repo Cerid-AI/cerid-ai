@@ -1,6 +1,6 @@
 # Phase 6A: Foundation + Chat — Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Scaffold a React app with working chat interface that streams responses from Bifrost, with sidebar navigation, health status bar, and dark/light theme.
 
@@ -82,7 +82,7 @@ All services on `llm-network` bridge. The React app container joins the same net
 **Step 1: Create the Vite project**
 
 ```bash
-cd /Users/sunrunner/cerid-ai
+
 npm create vite@latest src/web -- --template react-ts
 ```
 
@@ -212,7 +212,7 @@ Expected: Vite dev server running at `http://localhost:5173`, default React page
 **Step 12: Commit**
 
 ```bash
-cd /Users/sunrunner/cerid-ai
+
 git add src/web/
 git commit -m "feat(6A): scaffold React + Vite + Tailwind + shadcn/ui project"
 ```
@@ -360,7 +360,7 @@ Expected: No errors.
 **Step 4: Commit**
 
 ```bash
-cd /Users/sunrunner/cerid-ai
+
 git add src/web/src/lib/
 git commit -m "feat(6A): add TypeScript types and API client (health + streaming chat)"
 ```
@@ -680,7 +680,7 @@ Open `http://localhost:5173`. Expected:
 **Step 10: Commit**
 
 ```bash
-cd /Users/sunrunner/cerid-ai
+
 git add src/web/
 git commit -m "feat(6A): layout shell — sidebar, status bar, theme toggle, pane switching"
 ```
@@ -1240,7 +1240,7 @@ Test:
 **Step 9: Commit**
 
 ```bash
-cd /Users/sunrunner/cerid-ai
+
 git add src/web/
 git commit -m "feat(6A): chat interface — streaming SSE, model select, markdown rendering, localStorage persistence"
 ```
@@ -1387,7 +1387,7 @@ Test:
 **Step 4: Commit**
 
 ```bash
-cd /Users/sunrunner/cerid-ai
+
 git add src/web/
 git commit -m "feat(6A): conversation history sidebar with switching and deletion"
 ```
@@ -1500,7 +1500,7 @@ Modify `src/mcp/docker-compose.yml` to add the web GUI service. Add after the da
 **Step 5: Verify Docker build**
 
 ```bash
-cd /Users/sunrunner/cerid-ai/src/web
+cd src/web
 docker build -t cerid-web .
 ```
 
@@ -1524,7 +1524,7 @@ docker stop cerid-web-test
 **Step 7: Commit**
 
 ```bash
-cd /Users/sunrunner/cerid-ai
+
 git add src/web/Dockerfile src/web/nginx.conf src/web/.dockerignore src/mcp/docker-compose.yml
 git commit -m "feat(6A): Docker + nginx production build, add web service to compose"
 ```
@@ -1612,7 +1612,7 @@ Test at different viewport sizes:
 **Step 6: Commit**
 
 ```bash
-cd /Users/sunrunner/cerid-ai
+
 git add src/web/
 git commit -m "feat(6A): responsive design, mobile sidebar, viewport meta, favicon"
 ```
@@ -1624,7 +1624,7 @@ git commit -m "feat(6A): responsive design, mobile sidebar, viewport meta, favic
 **Step 1: Full build check**
 
 ```bash
-cd /Users/sunrunner/cerid-ai/src/web
+cd src/web
 npm run build
 ```
 
@@ -1641,7 +1641,7 @@ Expected: No errors.
 **Step 3: Docker build from compose**
 
 ```bash
-cd /Users/sunrunner/cerid-ai/src/mcp
+cd src/mcp
 docker compose build cerid-web
 ```
 
@@ -1651,7 +1651,7 @@ Expected: Builds successfully.
 
 If all services are running:
 ```bash
-cd /Users/sunrunner/cerid-ai
+
 ./scripts/start-cerid.sh
 ```
 

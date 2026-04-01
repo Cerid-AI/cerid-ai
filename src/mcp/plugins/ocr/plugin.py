@@ -30,6 +30,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from errors import IngestionError
+
 logger = logging.getLogger("ai-companion.plugins.ocr")
 
 # Minimum chars per page before OCR triggers
@@ -52,7 +54,7 @@ def _ocr_with_docling(file_path: str) -> str:
         raise ImportError(
             "Docling is not installed. Install with: pip install docling>=2.0"
         )
-    except Exception as e:
+    except (IngestionError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Docling OCR failed for {file_path}: {e}")
         raise
 
@@ -76,7 +78,7 @@ def _ocr_with_tesseract(file_path: str) -> str:
             if text.strip():
                 pages_text.append(text.strip())
         return "\n\n".join(pages_text)
-    except Exception as e:
+    except (IngestionError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Tesseract OCR failed for {file_path}: {e}")
         raise
 
@@ -97,7 +99,7 @@ def parse_pdf_with_ocr(file_path: str) -> dict[str, Any]:
     # Step 1: Try pdfplumber first
     try:
         pdf = pdfplumber.open(file_path)
-    except Exception as e:
+    except (IngestionError, ValueError, OSError, RuntimeError) as e:
         raise ValueError(
             f"Failed to read PDF '{path.name}': {e}. "
             f"File may be corrupted, password-protected, or not a valid PDF."
@@ -113,7 +115,7 @@ def parse_pdf_with_ocr(file_path: str) -> dict[str, Any]:
                 text = page.extract_text() or ""
                 pages_text.append(text)
                 total_chars += len(text)
-            except Exception:
+            except (IngestionError, ValueError, OSError, RuntimeError):
                 pages_text.append("")
     finally:
         pdf.close()
@@ -147,7 +149,7 @@ def parse_pdf_with_ocr(file_path: str) -> dict[str, Any]:
             except ImportError:
                 logger.warning("Docling not available, falling back to Tesseract")
                 ocr_text = _ocr_with_tesseract(file_path)
-    except Exception as e:
+    except (IngestionError, ValueError, OSError, RuntimeError) as e:
         # If OCR fails, return whatever pdfplumber got (even if sparse)
         logger.warning(f"OCR failed for '{path.name}': {e}. Using pdfplumber output.")
         text = "\n\n".join(p for p in pages_text if p.strip())

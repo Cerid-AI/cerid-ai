@@ -12,6 +12,7 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Any
 
+from errors import SyncError
 from sync._helpers import NEO4J_SUBDIR, _default_sync_dir, _ensure_dir
 
 logger = logging.getLogger("ai-companion.sync")
@@ -99,7 +100,7 @@ def detect_conflicts(
                         local_content_hash=local_hash,
                         remote_content_hash=remote_hash,
                     ))
-    except Exception as exc:
+    except (SyncError, ValueError, OSError, RuntimeError) as exc:
         logger.error("Conflict detection failed: %s", exc)
 
     if conflicts:

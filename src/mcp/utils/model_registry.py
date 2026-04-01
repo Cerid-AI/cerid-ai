@@ -13,6 +13,8 @@ from typing import Any
 
 import httpx
 
+from errors import RoutingError
+
 logger = logging.getLogger("ai-companion.model_registry")
 
 ACTIVE_MODELS: dict[str, dict[str, Any]] = {
@@ -123,7 +125,7 @@ async def validate_models() -> dict[str, Any]:
             "pricing_updated": pricing_updated,
             "catalog_size": len(catalog),
         }
-    except Exception as exc:
+    except (RoutingError, ValueError, OSError, RuntimeError) as exc:
         logger.warning("Model validation failed: %s", exc)
         return {"valid": [], "invalid": [], "pricing_updated": [], "error": str(exc)}
 
@@ -146,9 +148,68 @@ def get_pricing(model_id: str) -> tuple[float, float]:
     return _FALLBACK_PRICING.get(model_id, (0.0, 0.0))
 
 
+async def fetch_and_compare_models() -> dict[str, Any]:
+    """Fetch current OpenRouter catalog, compare with cached version, store updates in Redis."""
+    import json as _json
+
+    from deps import get_redis
+    from utils.time import utcnow_iso
+
+    redis = get_redis()
+    catalog_key = "cerid:models:catalog"
+    updates_key = "cerid:models:updates"
+
+    # Fetch current catalog from OpenRouter
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get("https://openrouter.ai/api/v1/models")
+        resp.raise_for_status()
+        current_models = {m["id"]: m for m in resp.json().get("data", [])}
+
+    # Load previous catalog from Redis
+    previous_ids: set[str] = set()
+    raw_prev = redis.get(catalog_key)
+    if raw_prev:
+        try:
+            previous_ids = set(_json.loads(raw_prev))
+        except (ValueError, TypeError):
+            pass
+
+    current_ids = set(current_models.keys())
+    new_ids = current_ids - previous_ids
+    deprecated_ids = previous_ids - current_ids
+
+    # Build detailed lists
+    new_models = []
+    for mid in sorted(new_ids):
+        m = current_models[mid]
+        new_models.append({
+            "id": mid,
+            "name": m.get("name", mid),
+            "context_length": m.get("context_length"),
+            "pricing": m.get("pricing", {}),
+        })
+
+    deprecated_models = [{"id": mid} for mid in sorted(deprecated_ids)]
+
+    # Store updated catalog (just the ID list — lightweight)
+    redis.set(catalog_key, _json.dumps(sorted(current_ids)))
+
+    # Store the diff
+    updates = {
+        "new": new_models,
+        "deprecated": deprecated_models,
+        "last_checked": utcnow_iso(),
+        "catalog_size": len(current_ids),
+    }
+    redis.set(updates_key, _json.dumps(updates))
+
+    return updates
+
+
 __all__ = [
     "ACTIVE_MODELS",
     "get_model",
     "get_pricing",
     "validate_models",
+    "fetch_and_compare_models",
 ]

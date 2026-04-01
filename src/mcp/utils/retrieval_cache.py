@@ -19,6 +19,7 @@ import logging
 import numpy as np
 
 from config.constants import RETRIEVAL_CACHE_TTL
+from errors import RetrievalError
 
 logger = logging.getLogger("ai-companion.retrieval_cache")
 
@@ -48,7 +49,7 @@ class RetrievalCache:
         try:
             val = self._redis().get(self.GENERATION_KEY)
             return int(val) if val else 0
-        except Exception:
+        except (RetrievalError, ValueError, OSError, RuntimeError):
             return 0
 
     @staticmethod
@@ -75,7 +76,7 @@ class RetrievalCache:
                 self._hits += 1
                 logger.debug("Retrieval cache hit (top_k=%d)", top_k)
                 return json.loads(raw)
-        except Exception as exc:
+        except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
             logger.debug("Retrieval cache get error: %s", exc)
 
         self._misses += 1
@@ -92,7 +93,7 @@ class RetrievalCache:
             key = self._cache_key(query_embedding, top_k)
             self._redis().setex(key, self._ttl, json.dumps(results, default=str))
             logger.debug("Retrieval cache set (top_k=%d, ttl=%ds)", top_k, self._ttl)
-        except Exception as exc:
+        except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
             logger.debug("Retrieval cache set error: %s", exc)
 
     def invalidate_all(self) -> None:
@@ -100,7 +101,7 @@ class RetrievalCache:
         try:
             new_gen = self._redis().incr(self.GENERATION_KEY)
             logger.info("Retrieval cache invalidated (generation=%d)", new_gen)
-        except Exception as exc:
+        except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
             logger.debug("Retrieval cache invalidate error: %s", exc)
 
     def hit_rate(self) -> dict:

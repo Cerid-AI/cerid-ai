@@ -8,6 +8,8 @@ Called from main.py lifespan after graph.init_schema().
 import logging
 import os
 
+from errors import SyncError
+
 logger = logging.getLogger("ai-companion.sync")
 
 
@@ -25,11 +27,14 @@ def auto_import_if_empty():
     # Check if Neo4j has any artifacts
     from deps import get_neo4j
     driver = get_neo4j()
+    if driver is None:
+        logger.info("Lightweight mode — skipping sync auto-import (Neo4j unavailable)")
+        return
     try:
         with driver.session() as session:
             result = session.run("MATCH (a:Artifact) RETURN count(a) AS cnt")
             count = result.single()["cnt"]
-    except Exception as e:
+    except (SyncError, ValueError, OSError, RuntimeError) as e:
         logger.warning(f"Could not check Neo4j artifact count: {e}")
         return
 
@@ -71,5 +76,5 @@ def auto_import_if_empty():
         logger.info(f"Redis import: {redis_result}")
 
         logger.info("Auto-import complete")
-    except Exception as e:
+    except (SyncError, ValueError, OSError, RuntimeError) as e:
         logger.warning(f"Auto-import failed: {e}")

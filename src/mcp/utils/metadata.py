@@ -19,6 +19,7 @@ import httpx
 import tiktoken
 
 import config
+from errors import IngestionError
 from utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.metadata")
@@ -244,15 +245,8 @@ async def ai_categorize(
             data = resp.json()
 
         content = data["choices"][0]["message"]["content"]
-        # Strip markdown code fences if present
-        content = content.strip()
-        if content.startswith("```"):
-            content = content.split("\n", 1)[-1]
-        if content.endswith("```"):
-            content = content.rsplit("```", 1)[0]
-        content = content.strip()
-
-        result = json.loads(content)
+        from utils.llm_parsing import parse_llm_json
+        result = parse_llm_json(content)
         suggested = result.get("domain", "").lower().strip()
         if suggested not in config.DOMAINS:
             logger.warning(f"AI suggested unknown domain '{suggested}', using default")
@@ -281,7 +275,7 @@ async def ai_categorize(
             "summary": result.get("summary", ""),
         }
 
-    except Exception as e:
+    except (IngestionError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"AI categorization failed: {e}")
         return {}
 

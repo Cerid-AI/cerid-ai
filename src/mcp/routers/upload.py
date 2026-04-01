@@ -13,6 +13,7 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 
 import config
+from errors import IngestionError
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion.upload")
@@ -112,7 +113,7 @@ async def upload_file_endpoint(
         raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:
         raise
-    except Exception as e:
+    except (IngestionError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Upload ingest error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:

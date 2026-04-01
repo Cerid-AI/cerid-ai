@@ -1,6 +1,6 @@
 # Phase 4A: Modular Refactor Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Split `src/mcp/main.py` (1,321 lines) into FastAPI `APIRouter` modules with zero behavior change.
 
@@ -1415,7 +1415,7 @@ Expected: `OK`
 **Step 1: Verify all router files exist**
 
 ```bash
-ls /Users/sunrunner/Develop/cerid-ai/src/mcp/routers/
+ls src/mcp/routers/
 ```
 Expected: `__init__.py  agents.py  artifacts.py  health.py  ingestion.py  mcp_sse.py  query.py`
 
@@ -1502,7 +1502,7 @@ Expected: `OK`
 **Step 1: Rebuild and restart**
 
 ```bash
-cd /Users/sunrunner/Develop/cerid-ai/src/mcp && docker compose up -d --build
+cd src/mcp && docker compose up -d --build
 ```
 
 Wait ~30 seconds for startup. Then:
@@ -1629,7 +1629,6 @@ to:
 **Step 2: Commit**
 
 ```bash
-cd /Users/sunrunner/Develop/cerid-ai
 git add src/mcp/deps.py src/mcp/routers/ src/mcp/main.py docs/PHASE4_PLAN.md docs/plans/
 git commit -m "Phase 4A: split main.py into FastAPI routers
 

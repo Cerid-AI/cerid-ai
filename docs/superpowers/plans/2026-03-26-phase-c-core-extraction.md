@@ -1829,7 +1829,7 @@ ALL must pass. If any fail, fix before committing.
 
 - [ ] **Step 11: Verify Docker build**
 
-Run: `cd /Users/sunrunner/Develop/cerid-ai && docker build -t cerid-mcp-test src/mcp/`
+Run: `cd . && docker build -t cerid-mcp-test src/mcp/`
 Expected: Build succeeds
 
 - [ ] **Step 12: Commit (single atomic commit for entire Phase 8)**
@@ -1886,7 +1886,7 @@ git commit -m "docs(phase-c): add Apache-2.0 license to core/ and licensing tabl
 - [ ] **Step 1: Run complete CI-equivalent check locally**
 
 ```bash
-cd /Users/sunrunner/Develop/cerid-ai
+cd .
 # Lint
 cd src/mcp && python -m ruff check .
 # Typecheck

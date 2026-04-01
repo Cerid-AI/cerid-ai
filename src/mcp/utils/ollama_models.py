@@ -16,6 +16,8 @@ import os
 
 import httpx
 
+from errors import RoutingError
+
 logger = logging.getLogger("ai-companion.ollama.models")
 
 # ---------------------------------------------------------------------------
@@ -68,7 +70,7 @@ async def detect_available_models() -> list[dict]:
             resp = await client.get(f"{_ollama_url()}/api/tags")
             resp.raise_for_status()
             data = resp.json()
-    except Exception as exc:
+    except (RoutingError, ValueError, OSError, RuntimeError) as exc:
         logger.warning("Ollama model detection failed: %s", exc)
         return []
 

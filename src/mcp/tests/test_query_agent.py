@@ -13,20 +13,22 @@ import pytest
 # test_hallucination.py may inject a stub agents.query_agent with only
 # `agent_query` — clear it so the real module loads.
 _existing = sys.modules.get("agents.query_agent")
-if _existing is not None and not hasattr(_existing, "_get_adjacent_domains"):
+if _existing is not None and not hasattr(_existing, "StepTimer"):
     del sys.modules["agents.query_agent"]
 
-from agents.query_agent import (  # noqa: E402
-    _enrich_query,
-    _get_adjacent_domains,
-    agent_query,
+from agents.assembler import (  # noqa: E402
     apply_metadata_boost,
     apply_quality_boost,
     assemble_context,
     deduplicate_results,
-    multi_domain_query,
     rerank_results,
 )
+from agents.decomposer import (  # noqa: E402
+    _enrich_query,
+    _get_adjacent_domains,
+    multi_domain_query,
+)
+from agents.query_agent import agent_query  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers

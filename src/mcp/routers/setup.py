@@ -19,6 +19,8 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from errors import ConfigError
+
 _logger = logging.getLogger("ai-companion.setup")
 
 router = APIRouter(prefix="/setup", tags=["setup"])
@@ -128,7 +130,7 @@ async def _service_statuses() -> dict[str, str]:
         with driver.session() as session:
             session.run("RETURN 1").consume()
         neo4j_status = "healthy"
-    except Exception:
+    except (ConfigError, ValueError, OSError, RuntimeError):
         neo4j_status = "unavailable"
 
     redis_status = "unknown"
@@ -137,7 +139,7 @@ async def _service_statuses() -> dict[str, str]:
 
         get_redis()
         redis_status = "healthy"
-    except Exception:
+    except (ConfigError, ValueError, OSError, RuntimeError):
         redis_status = "unavailable"
 
     chroma_status = await _check_service(
@@ -265,7 +267,20 @@ async def setup_health() -> dict:
         },
     ]
 
+    # Add verification pipeline status from Redis self-test result
+    try:
+        from agents.hallucination.startup_self_test import get_self_test_status_sync
+        from deps import get_redis
+        _redis = get_redis()
+        vp_result = get_self_test_status_sync(_redis)
+        vp_status = "healthy" if vp_result and vp_result.get("status") == "pass" else "unavailable"
+        services.append({"name": "verification_pipeline", "status": vp_status, "port": 0})
+    except (ConfigError, ValueError, OSError, RuntimeError):
+        services.append({"name": "verification_pipeline", "status": "unavailable", "port": 0})
+
+    all_healthy = all(s["status"] in ("healthy", "connected") for s in services)
     return {
+        "all_healthy": all_healthy,
         "services": services,
         "docker": {
             "compose_version": "v2.x.x",
@@ -326,7 +341,7 @@ async def _fallback_validate(provider: str, api_key: str) -> KeyValidationRespon
         )
     except httpx.TimeoutException:
         return KeyValidationResponse(valid=False, error="Request timed out")
-    except Exception as exc:
+    except (ConfigError, ValueError, OSError, RuntimeError) as exc:
         return KeyValidationResponse(valid=False, error=str(exc))
 
 

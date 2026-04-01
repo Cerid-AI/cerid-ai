@@ -25,7 +25,8 @@ if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
 fi
 
 echo ""
-echo "[1/4] Stopping infrastructure containers..."
+echo "[1/4] Stopping all services (MCP, Web, Infrastructure)..."
+docker compose -f "$CERID_ROOT/docker-compose.yml" down 2>/dev/null || true
 docker compose -f "$CERID_ROOT/stacks/infrastructure/docker-compose.yml" down 2>/dev/null || true
 
 echo "[2/4] Restoring Neo4j..."

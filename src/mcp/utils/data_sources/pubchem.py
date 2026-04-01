@@ -8,6 +8,8 @@ from urllib.parse import quote
 
 import httpx
 
+from errors import RetrievalError
+
 from .base import DataSource, DataSourceResult, logger
 
 
@@ -46,6 +48,6 @@ class PubChemSource(DataSource):
                         ))
 
                 return results
-        except Exception as exc:
+        except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
             logger.debug("PubChem query failed: %s", exc)
             return []

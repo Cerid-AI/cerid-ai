@@ -2,7 +2,7 @@
   "name": "web",
   "private": true,
   "version": "0.0.0",
-  "author": "Justin Michaels <cashmoneymail@me.com>",
+  "author": "Justin Michaels",
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {

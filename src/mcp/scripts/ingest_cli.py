@@ -28,6 +28,8 @@ from threading import Lock
 
 import requests
 
+from errors import CeridError
+
 # Add parent dir so we can import config
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config
@@ -139,7 +141,7 @@ def _ingest_one(
             result["status"] = "failed"
             try:
                 detail = resp.json().get("detail", resp.text[:200])
-            except Exception:
+            except (CeridError, ValueError, OSError, RuntimeError):
                 detail = resp.text[:200]
             result["error"] = f"HTTP {resp.status_code}: {detail}"
             result["error_type"] = f"HTTP {resp.status_code}"

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import config as _config
+from errors import IngestionError
 from parsers._utils import _strip_html_tags
 from parsers.registry import _MAX_TEXT_CHARS, register_parser
 
@@ -39,7 +40,7 @@ def parse_eml(file_path: str) -> dict[str, Any]:
 
     try:
         msg = message_from_bytes(raw, policy=email.policy.default)
-    except Exception as e:
+    except (IngestionError, ValueError, OSError, RuntimeError) as e:
         raise ValueError(
             f"Failed to parse email '{path.name}': {e}. "
             f"File may not be a valid .eml file."
@@ -111,7 +112,7 @@ def parse_mbox(file_path: str) -> dict[str, Any]:
     path = Path(file_path)
     try:
         mbox = mailbox.mbox(file_path)
-    except Exception as e:
+    except (IngestionError, ValueError, OSError, RuntimeError) as e:
         raise ValueError(
             f"Failed to parse mbox '{path.name}': {e}. "
             f"File may not be a valid .mbox file."

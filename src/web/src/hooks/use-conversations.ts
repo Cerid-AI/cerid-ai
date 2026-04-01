@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Justin Michaels. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useCallback, useRef, useEffect } from "react"
+import { useState, useCallback, useRef, useEffect, useMemo } from "react"
 import type { Conversation, ChatMessage, HallucinationReport } from "@/lib/types"
 import { MODELS } from "@/lib/types"
 import { uuid } from "@/lib/utils"
@@ -15,10 +15,16 @@ const STORAGE_KEY = "cerid-conversations"
 const MAX_CONVERSATIONS = 50
 const SAVE_DEBOUNCE_MS = 500
 
+/** Read private mode flag from localStorage (avoids cross-hook coupling). */
+function isPrivateModeActive(): boolean {
+  try { return localStorage.getItem("cerid-private-mode") === "true" } catch { return false }
+}
+
 const VALID_MODEL_IDS = new Set(MODELS.map((m) => m.id))
 
 /** Migrate old model IDs (missing openrouter/ prefix), validate against current MODELS list,
- *  and migrate singular verificationReport → plural verificationReports. */
+ *  migrate singular verificationReport → plural verificationReports,
+ *  and add archived default. */
 function migrateConversations(convos: Conversation[]): Conversation[] {
   let changed = false
   const migrated = convos.map((c) => {
@@ -40,6 +46,11 @@ function migrateConversations(convos: Conversation[]): Conversation[] {
         c.verificationReports = { [lastAssistant.id]: legacy.verificationReport as HallucinationReport }
       }
       delete legacy.verificationReport
+      changed = true
+    }
+    // Add archived default for pre-existing conversations
+    if (c.archived === undefined) {
+      c.archived = false
       changed = true
     }
     return model !== c.model ? { ...c, model } : c
@@ -117,6 +128,8 @@ export function useConversations() {
   const pendingServerSyncRef = useRef<Conversation | null>(null)
 
   const syncToServer = useCallback((convo: Conversation) => {
+    // Skip server sync in private mode — conversations stay local only
+    if (isPrivateModeActive()) return
     pendingServerSyncRef.current = convo
     if (!serverSyncTimerRef.current) {
       serverSyncTimerRef.current = setTimeout(() => {
@@ -154,7 +167,9 @@ export function useConversations() {
     setConversations((prev) => {
       const next = [convo, ...prev]
       saveConversations(next)
-      syncConversation(convo).catch(() => { /* fire-and-forget */ })
+      if (!isPrivateModeActive()) {
+        syncConversation(convo).catch(() => { /* fire-and-forget */ })
+      }
       return next
     })
     setActiveId(convo.id)
@@ -287,6 +302,85 @@ export function useConversations() {
     return convo?.verificationReports ?? {}
   }, [conversations])
 
+  // Archive / unarchive
+  const [showArchived, setShowArchived] = useState(false)
+
+  const toggleShowArchived = useCallback(() => {
+    setShowArchived((prev) => !prev)
+  }, [])
+
+  const archive = useCallback((convoId: string) => {
+    setConversations((prev) => {
+      const next = prev.map((c) =>
+        c.id === convoId ? { ...c, archived: true, updatedAt: Date.now() } : c
+      )
+      saveConversations(next)
+      setActiveId((currentId) => {
+        if (currentId !== convoId) return currentId
+        const firstActive = next.find((c) => !c.archived)
+        return firstActive?.id ?? null
+      })
+      return next
+    })
+  }, [])
+
+  const unarchive = useCallback((convoId: string) => {
+    setConversations((prev) => {
+      const next = prev.map((c) =>
+        c.id === convoId ? { ...c, archived: false, updatedAt: Date.now() } : c
+      )
+      saveConversations(next)
+      return next
+    })
+  }, [])
+
+  const archivedCount = useMemo(
+    () => conversations.filter((c) => c.archived).length,
+    [conversations],
+  )
+
+  const visibleConversations = useMemo(
+    () => showArchived
+      ? conversations.filter((c) => c.archived)
+      : conversations.filter((c) => !c.archived),
+    [conversations, showArchived],
+  )
+
+  // Bulk operations
+  const bulkDelete = useCallback((ids: string[]) => {
+    if (ids.length === 0) return
+    const idSet = new Set(ids)
+    setConversations((prev) => {
+      const next = prev.filter((c) => !idSet.has(c.id))
+      saveConversations(next)
+      for (const id of ids) {
+        deleteConversationSync(id).catch(() => {})
+      }
+      setActiveId((currentId) => {
+        if (!currentId || !idSet.has(currentId)) return currentId
+        return next[0]?.id ?? null
+      })
+      return next
+    })
+  }, [])
+
+  const bulkArchive = useCallback((ids: string[]) => {
+    if (ids.length === 0) return
+    const idSet = new Set(ids)
+    setConversations((prev) => {
+      const next = prev.map((c) =>
+        idSet.has(c.id) ? { ...c, archived: true, updatedAt: Date.now() } : c
+      )
+      saveConversations(next)
+      setActiveId((currentId) => {
+        if (!currentId || !idSet.has(currentId)) return currentId
+        const firstActive = next.find((c) => !c.archived)
+        return firstActive?.id ?? null
+      })
+      return next
+    })
+  }, [])
+
   // Hydrate from server on mount — merge server conversations with localStorage
   const serverHydratedRef = useRef(false)
   useEffect(() => {
@@ -310,10 +404,12 @@ export function useConversations() {
   }, [])
 
   return {
-    conversations, active, activeId, setActiveId,
+    conversations, visibleConversations, active, activeId, setActiveId,
     create, addMessage, updateLastMessage, updateLastMessageModel, updateModel, remove,
     replaceMessages, clearMessages,
     verifiedConversations, markVerified, clearVerified,
     saveVerification, getVerification, getAllVerificationReports,
+    archive, unarchive, showArchived, toggleShowArchived, archivedCount,
+    bulkDelete, bulkArchive,
   }
 }

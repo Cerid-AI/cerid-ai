@@ -8,6 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from errors import IngestionError
 from parsers._utils import _strip_html_tags, _strip_rtf
 from parsers.registry import _MAX_TEXT_CHARS, logger, register_parser
 
@@ -22,7 +23,7 @@ def parse_epub(file_path: str) -> dict[str, Any]:
 
     try:
         zf = zipfile.ZipFile(file_path, "r")
-    except Exception as e:
+    except (IngestionError, ValueError, OSError, RuntimeError) as e:
         raise ValueError(
             f"Failed to read EPUB '{path.name}': {e}. "
             f"File may be corrupted or not a valid .epub file."
@@ -39,7 +40,7 @@ def parse_epub(file_path: str) -> dict[str, Any]:
             ns = {"c": "urn:oasis:names:tc:opendocument:xmlns:container"}
             rootfile = container_root.find(".//c:rootfile", ns)
             opf_path = rootfile.get("full-path", "") if rootfile is not None else ""
-        except Exception:
+        except (IngestionError, ValueError, OSError, RuntimeError):
             opf_path = ""
             for name in zf.namelist():
                 if name.endswith(".opf"):
@@ -94,7 +95,7 @@ def parse_epub(file_path: str) -> dict[str, Any]:
                 chapter_text = _strip_html_tags(content)
                 if chapter_text.strip():
                     chapters.append(chapter_text.strip())
-            except (KeyError, Exception) as e:
+            except (KeyError, IngestionError, ValueError, OSError, RuntimeError) as e:
                 logger.debug(f"EPUB: skipping {href}: {e}")
 
     finally:
@@ -125,7 +126,7 @@ def parse_rtf(file_path: str) -> dict[str, Any]:
 
     try:
         text = _strip_rtf(raw)
-    except Exception as e:
+    except (IngestionError, ValueError, OSError, RuntimeError) as e:
         raise ValueError(
             f"Failed to parse RTF '{path.name}': {e}. "
             f"File may be corrupted or not a valid .rtf file."

@@ -21,7 +21,7 @@ const MonitoringPane = lazy(() => import("@/components/monitoring/monitoring-pan
 const AuditPane = lazy(() => import("@/components/audit/audit-pane"))
 const MemoriesPane = lazy(() => import("@/components/memories/memories-pane"))
 const SettingsPane = lazy(() => import("@/components/settings/settings-pane"))
-const TradingPane = lazy(() => import("@/components/trading/trading-pane"))
+const AgentConsole = lazy(() => import("@/components/agents/agent-console"))
 
 function PaneLoader() {
   return (
@@ -34,7 +34,6 @@ function PaneLoader() {
 
 export default function App() {
   const [multiUser, setMultiUser] = useState(false)
-  const [tradingEnabled, setTradingEnabled] = useState(false)
   const [featureTier, setFeatureTier] = useState("community")
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null)
   const tierCycling = useRef(false)
@@ -87,7 +86,6 @@ export default function App() {
     fetchSettings()
       .then((s) => {
         setMultiUser(!!s.multi_user)
-        setTradingEnabled(!!s.trading_enabled)
         setFeatureTier(s.feature_tier ?? "community")
       })
       .catch((err) => { if (import.meta.env.DEV) console.warn("Settings fetch failed:", err) })
@@ -116,7 +114,7 @@ export default function App() {
     {showOnboarding && <OnboardingDialog open={showOnboarding} onComplete={handleOnboardingComplete} />}
     <ConversationsProvider>
     <KBInjectionProvider>
-    <AppLayout tradingEnabled={tradingEnabled} featureTier={featureTier} onCycleTier={cycleTier}>
+    <AppLayout featureTier={featureTier} onCycleTier={cycleTier}>
       {(activePane) => {
         switch (activePane) {
           case "chat":
@@ -129,17 +127,19 @@ export default function App() {
           case "monitoring":
           case "audit":
           case "memories":
-          case "trading":
+          case "agents":
           case "settings":
             return (
-              <Suspense fallback={<PaneLoader />}>
-                {activePane === "knowledge" && <KnowledgePane />}
-                {activePane === "monitoring" && <MonitoringPane />}
-                {activePane === "audit" && <AuditPane />}
-                {activePane === "memories" && <MemoriesPane />}
-                {activePane === "trading" && <TradingPane />}
-                {activePane === "settings" && <SettingsPane />}
-              </Suspense>
+              <PaneErrorBoundary label={activePane}>
+                <Suspense fallback={<PaneLoader />}>
+                  {activePane === "knowledge" && <KnowledgePane />}
+                  {activePane === "monitoring" && <MonitoringPane />}
+                  {activePane === "audit" && <AuditPane />}
+                  {activePane === "memories" && <MemoriesPane />}
+                  {activePane === "agents" && <AgentConsole />}
+                  {activePane === "settings" && <SettingsPane />}
+                </Suspense>
+              </PaneErrorBoundary>
             )
         }
       }}

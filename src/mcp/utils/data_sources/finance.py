@@ -8,6 +8,8 @@ import re
 
 import httpx
 
+from errors import RetrievalError
+
 from .base import DataSource, DataSourceResult, logger
 
 _CURRENCY_RE = re.compile(
@@ -42,6 +44,6 @@ class ExchangeRatesSource(DataSource):
                     source_name="Open Exchange Rates",
                     confidence=0.9,
                 )]
-        except Exception as exc:
+        except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
             logger.debug("Exchange rates query failed: %s", exc)
             return []

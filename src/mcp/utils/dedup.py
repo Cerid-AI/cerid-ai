@@ -10,6 +10,7 @@ import os
 from typing import Any
 
 import config
+from errors import IngestionError
 
 logger = logging.getLogger("ai-companion.dedup")
 
@@ -76,7 +77,7 @@ def check_semantic_duplicate(
             )
             return match
 
-    except Exception as e:
+    except (IngestionError, ValueError, OSError, RuntimeError) as e:
         logger.warning(f"Semantic dedup check failed (non-blocking): {e}")
 
     return None

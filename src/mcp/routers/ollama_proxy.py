@@ -19,6 +19,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from config.constants import OLLAMA_CONNECT_TIMEOUT, OLLAMA_READ_TIMEOUT
+from errors import RoutingError
 from utils.circuit_breaker import CircuitOpenError, get_breaker
 
 router = APIRouter(prefix="/ollama", tags=["ollama"])
@@ -45,14 +46,14 @@ def _ollama_base_url() -> str:
         try:
             _hx.get(f"{url}/api/tags", timeout=2)
             return url
-        except Exception:
+        except (RoutingError, ValueError, OSError, RuntimeError):
             fallback = "http://host.docker.internal:11434"
             try:
                 _hx.get(f"{fallback}/api/tags", timeout=2)
                 os.environ["OLLAMA_URL"] = fallback
                 return fallback
-            except Exception:
-                pass
+            except (RoutingError, ValueError, OSError, RuntimeError) as exc:
+                logger.debug("Suppressed error: %s", exc)
     return url
 
 
@@ -155,7 +156,7 @@ async def list_ollama_models():
             status_code=504,
             detail=f"Ollama request timed out ({_CONNECT_TIMEOUT}s connect).",
         )
-    except Exception as exc:
+    except (RoutingError, ValueError, OSError, RuntimeError) as exc:
         logger.error("Ollama model list failed: %s", exc)
         raise HTTPException(status_code=502, detail=f"Ollama error: {exc}")
 
@@ -237,7 +238,7 @@ async def _sync_chat(
             status_code=exc.response.status_code,
             detail=f"Ollama returned error: {exc.response.text[:500]}",
         )
-    except Exception as exc:
+    except (RoutingError, ValueError, OSError, RuntimeError) as exc:
         logger.error("Ollama chat failed: %s", exc)
         raise HTTPException(status_code=502, detail=f"Ollama error: {exc}")
 
@@ -269,7 +270,7 @@ async def _stream_chat(
         except httpx.TimeoutException:
             error_payload = json.dumps({"error": "Ollama stream timed out"})
             yield f"data: {error_payload}\n\n"
-        except Exception as exc:
+        except (RoutingError, ValueError, OSError, RuntimeError) as exc:
             logger.error("Ollama stream error: %s", exc)
             error_payload = json.dumps({"error": f"Ollama stream error: {exc}"})
             yield f"data: {error_payload}\n\n"
@@ -325,7 +326,7 @@ async def pull_model(req: PullRequest):
                 {"error": f"Cannot connect to Ollama at {base_url}"}
             )
             yield f"data: {error_payload}\n\n"
-        except Exception as exc:
+        except (RoutingError, ValueError, OSError, RuntimeError) as exc:
             logger.error("Ollama pull failed: %s", exc)
             error_payload = json.dumps({"error": f"Ollama pull error: {exc}"})
             yield f"data: {error_payload}\n\n"

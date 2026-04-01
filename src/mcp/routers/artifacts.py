@@ -13,6 +13,7 @@ from pydantic import BaseModel
 import config
 from db import neo4j as graph
 from deps import get_chroma, get_neo4j, get_redis
+from errors import RetrievalError
 from utils import cache
 from utils.time import utcnow_iso
 
@@ -101,7 +102,7 @@ def recategorize(
             filename=artifact.get("filename", ""),
             extra={"old_domain": old_domain, "sub_category": sub_category},
         )
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Redis log failed: {e}")
 
     return {
@@ -133,7 +134,7 @@ async def related_artifacts_endpoint(
         return graph.find_related_artifacts(
             driver, artifact_ids=[artifact_id], depth=depth, max_results=max_results
         )
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Related artifacts error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -191,7 +192,7 @@ async def artifact_detail_endpoint(artifact_id: str):
         }
     except HTTPException:
         raise
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Artifact detail error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -220,7 +221,7 @@ async def list_artifacts_endpoint(
             offset=offset,
             limit=limit,
         )
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"List artifacts error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -231,7 +232,7 @@ async def recategorize_endpoint(req: RecategorizeRequest):
         return recategorize(req.artifact_id, req.new_domain, req.sub_category, req.tags)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Recategorize error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -297,7 +298,7 @@ async def artifact_feedback_endpoint(artifact_id: str, req: FeedbackRequest):
                     "new_score": round(new_score, 4),
                 },
             )
-        except Exception as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
             logger.debug(f"Feedback Redis log failed: {e}")
 
         return {
@@ -309,6 +310,6 @@ async def artifact_feedback_endpoint(artifact_id: str, req: FeedbackRequest):
         }
     except HTTPException:
         raise
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Artifact feedback error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

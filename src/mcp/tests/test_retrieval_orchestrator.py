@@ -5,15 +5,24 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from agents.retrieval_orchestrator import (
-    _apply_source_config,
     _format_memory_context,
     orchestrated_query,
 )
+
+# _apply_source_config was extracted to the BSL-1.1 custom-rag plugin.
+# Import it directly for unit testing.
+_plugin_path = Path(__file__).resolve().parents[3] / "plugins" / "custom-rag" / "plugin.py"
+_spec = importlib.util.spec_from_file_location("cerid_plugin_custom_rag_test", str(_plugin_path))
+_mod = importlib.util.module_from_spec(_spec)  # type: ignore[arg-type]
+_spec.loader.exec_module(_mod)  # type: ignore[union-attr]
+_apply_source_config = _mod.apply_source_config
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -316,7 +325,7 @@ class TestMemoryRecallTimeout:
 # ---------------------------------------------------------------------------
 
 class TestHelpers:
-    """Tests for _format_memory_context and _apply_source_config."""
+    """Tests for _format_memory_context and custom-rag plugin's apply_source_config."""
 
     def test_format_memory_context(self):
         """Memory context should have header and formatted entries."""

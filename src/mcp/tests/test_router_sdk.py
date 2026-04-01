@@ -152,15 +152,29 @@ class TestSDKHealth:
 # ---------------------------------------------------------------------------
 
 
+def _trading_routes_available() -> bool:
+    """Check if trading routes are registered (import-time flag)."""
+    try:
+        from config.settings import CERID_TRADING_ENABLED
+        return CERID_TRADING_ENABLED
+    except Exception:
+        return False
+
+
+_skip_no_trading = pytest.mark.skipif(
+    not _trading_routes_available(),
+    reason="CERID_TRADING_ENABLED=false — trading routes not registered",
+)
+
+
+@_skip_no_trading
 class TestSDKTradingGate:
     def test_trading_endpoints_absent_when_disabled(self) -> None:
-        """When CERID_TRADING_ENABLED=false, /sdk/v1/trading/* routes should not exist."""
-        with patch("routers.sdk.CERID_TRADING_ENABLED", False):
-            # The routes are registered at import time based on CERID_TRADING_ENABLED.
-            # If trading is enabled in current module state, the routes exist regardless.
-            # This test verifies the concept — in production, the module-level if block
-            # prevents route registration when the flag is false at import time.
-            pass
+        """When CERID_TRADING_ENABLED=false, /sdk/v1/trading/* routes return 404."""
+        app = _make_app(trading_enabled=False)
+        client = TestClient(app)
+        resp = client.post("/sdk/v1/trading/signal", json={"query": "test"})
+        assert resp.status_code == 404
 
     @pytest.mark.asyncio
     async def test_trading_signal_when_enabled(self) -> None:
@@ -172,99 +186,74 @@ class TestSDKTradingGate:
             "historical_trades": [],
             "domains_searched": ["trading", "finance"],
         }
-        try:
-            with patch("routers.sdk.trading_signal_endpoint", new_callable=AsyncMock, return_value=mock_result):
-                app = _make_app(trading_enabled=True)
-                client = TestClient(app)
-                resp = client.post("/sdk/v1/trading/signal", json={
-                    "query": "ETH long signal",
-                    "signal_data": {"asset": "ETH", "direction": "long"},
-                })
-                if resp.status_code == 200:
-                    data = resp.json()
-                    assert "answer" in data
-                    assert "confidence" in data
-                elif resp.status_code == 404:
-                    pytest.skip("Trading routes not registered (CERID_TRADING_ENABLED=false at import)")
-        except Exception:
-            pytest.skip("Trading endpoints not available")
+        with patch("routers.sdk.trading_signal_endpoint", new_callable=AsyncMock, return_value=mock_result):
+            app = _make_app(trading_enabled=True)
+            client = TestClient(app)
+            resp = client.post("/sdk/v1/trading/signal", json={
+                "query": "ETH long signal",
+                "signal_data": {"asset": "ETH", "direction": "long"},
+            })
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "answer" in data
+            assert "confidence" in data
 
     @pytest.mark.asyncio
     async def test_trading_herd_detect(self) -> None:
         mock_result = {"violations": [], "historical_matches": [], "sentiment_extreme": False}
-        try:
-            with patch("routers.sdk.trading_herd_detect_endpoint", new_callable=AsyncMock, return_value=mock_result):
-                app = _make_app(trading_enabled=True)
-                client = TestClient(app)
-                resp = client.post("/sdk/v1/trading/herd-detect", json={
-                    "asset": "ETH",
-                    "sentiment_data": {"finbert_score": 0.5},
-                })
-                if resp.status_code == 200:
-                    data = resp.json()
-                    assert "violations" in data
-                elif resp.status_code == 404:
-                    pytest.skip("Trading routes not registered")
-        except Exception:
-            pytest.skip("Trading endpoints not available")
+        with patch("routers.sdk.trading_herd_detect_endpoint", new_callable=AsyncMock, return_value=mock_result):
+            app = _make_app(trading_enabled=True)
+            client = TestClient(app)
+            resp = client.post("/sdk/v1/trading/herd-detect", json={
+                "asset": "ETH",
+                "sentiment_data": {"finbert_score": 0.5},
+            })
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "violations" in data
 
     @pytest.mark.asyncio
     async def test_trading_kelly_size(self) -> None:
         mock_result = {"kelly_fraction": 0.15, "cv_edge": 0.08, "kelly_raw": 0.22, "strategy": "herd-fade"}
-        try:
-            with patch("routers.sdk.trading_kelly_size_endpoint", new_callable=AsyncMock, return_value=mock_result):
-                app = _make_app(trading_enabled=True)
-                client = TestClient(app)
-                resp = client.post("/sdk/v1/trading/kelly-size", json={
-                    "strategy": "herd-fade",
-                    "confidence": 0.75,
-                    "win_loss_ratio": 1.5,
-                })
-                if resp.status_code == 200:
-                    data = resp.json()
-                    assert data["kelly_fraction"] <= 0.25
-                elif resp.status_code == 404:
-                    pytest.skip("Trading routes not registered")
-        except Exception:
-            pytest.skip("Trading endpoints not available")
+        with patch("routers.sdk.trading_kelly_size_endpoint", new_callable=AsyncMock, return_value=mock_result):
+            app = _make_app(trading_enabled=True)
+            client = TestClient(app)
+            resp = client.post("/sdk/v1/trading/kelly-size", json={
+                "strategy": "herd-fade",
+                "confidence": 0.75,
+                "win_loss_ratio": 1.5,
+            })
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["kelly_fraction"] <= 0.25
 
     @pytest.mark.asyncio
     async def test_trading_cascade_confirm(self) -> None:
         mock_result = {"confirmation_score": 0.7, "historical_cascades": 3, "match_quality": "good"}
-        try:
-            with patch("routers.sdk.trading_cascade_confirm_endpoint", new_callable=AsyncMock, return_value=mock_result):
-                app = _make_app(trading_enabled=True)
-                client = TestClient(app)
-                resp = client.post("/sdk/v1/trading/cascade-confirm", json={
-                    "asset": "ETH",
-                    "liquidation_events": [{"exchange": "binance", "usd_value": 5000000}],
-                })
-                if resp.status_code == 200:
-                    data = resp.json()
-                    assert "confirmation_score" in data
-                elif resp.status_code == 404:
-                    pytest.skip("Trading routes not registered")
-        except Exception:
-            pytest.skip("Trading endpoints not available")
+        with patch("routers.sdk.trading_cascade_confirm_endpoint", new_callable=AsyncMock, return_value=mock_result):
+            app = _make_app(trading_enabled=True)
+            client = TestClient(app)
+            resp = client.post("/sdk/v1/trading/cascade-confirm", json={
+                "asset": "ETH",
+                "liquidation_events": [{"exchange": "binance", "usd_value": 5000000}],
+            })
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "confirmation_score" in data
 
     @pytest.mark.asyncio
     async def test_trading_longshot_surface(self) -> None:
         mock_result = {"calibration_points": [], "count": 0, "asset": "ETH", "date_range": "2026-03-01/2026-03-15"}
-        try:
-            with patch("routers.sdk.trading_longshot_surface_endpoint", new_callable=AsyncMock, return_value=mock_result):
-                app = _make_app(trading_enabled=True)
-                client = TestClient(app)
-                resp = client.post("/sdk/v1/trading/longshot-surface", json={
-                    "asset": "ETH",
-                    "date_range": "2026-03-01/2026-03-15",
-                })
-                if resp.status_code == 200:
-                    data = resp.json()
-                    assert data["asset"] == "ETH"
-                elif resp.status_code == 404:
-                    pytest.skip("Trading routes not registered")
-        except Exception:
-            pytest.skip("Trading endpoints not available")
+        with patch("routers.sdk.trading_longshot_surface_endpoint", new_callable=AsyncMock, return_value=mock_result):
+            app = _make_app(trading_enabled=True)
+            client = TestClient(app)
+            resp = client.post("/sdk/v1/trading/longshot-surface", json={
+                "asset": "ETH",
+                "date_range": "2026-03-01/2026-03-15",
+            })
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["asset"] == "ETH"
 
 
 # ---------------------------------------------------------------------------
