@@ -206,7 +206,7 @@ def parse_image_ocr(file_path: str) -> dict[str, Any]:
         )
 
     logger.info("OCR parsing image: %s (type: %s)", path.name, ext)
-    img = Image.open(file_path)
+    img: Image.Image = Image.open(file_path)  # type: ignore[assignment]
     if img.mode not in ("L", "RGB"):
         img = img.convert("RGB")
     text = pytesseract.image_to_string(img).strip()

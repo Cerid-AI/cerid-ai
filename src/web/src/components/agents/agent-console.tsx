@@ -31,6 +31,7 @@ export default function AgentConsole() {
   const [connected, setConnected] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const esRef = useRef<EventSource | null>(null)
+  const connectRef = useRef<() => void>(() => {})
 
   const connect = useCallback(() => {
     if (esRef.current) {
@@ -59,9 +60,11 @@ export default function AgentConsole() {
       setConnected(false)
       es.close()
       // Reconnect after 3s
-      setTimeout(connect, 3000)
+      setTimeout(() => connectRef.current(), 3000)
     }
   }, [])
+
+  connectRef.current = connect
 
   useEffect(() => {
     connect()
