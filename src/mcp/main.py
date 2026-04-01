@@ -49,7 +49,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from config.features import CERID_MULTI_USER
-from config.settings import CERID_TRADING_ENABLED
 from db import neo4j as graph
 from deps import close_chroma, close_neo4j, close_redis, get_neo4j
 from errors import CeridError, error_response
@@ -59,12 +58,15 @@ from middleware.request_id import RequestIDMiddleware
 from middleware.tenant_context import TenantContextMiddleware
 from routers import (
     a2a,
+    agent_console,
     agents,
     artifacts,
     automations,
+    billing,
     chat,
     data_sources,
     digest,
+    dlq,
     health,
     ingestion,
     kb_admin,
@@ -81,6 +83,7 @@ from routers import (
     settings,
     setup,
     sync,
+    system_monitor,
     taxonomy,
     upload,
     user_state,
@@ -205,28 +208,33 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         )
 
     # Startup: initialize Neo4j schema + run migrations
-    try:
-        driver = get_neo4j()
-        graph.init_schema(driver)
-        from db.neo4j.migrations import backfill_updated_at
-        backfill_updated_at(driver)
-    except Exception as e:
-        logger.warning(f"Neo4j schema init failed (will retry on first use): {e}")
+    import config as _cfg
+    if _cfg.CERID_LIGHTWEIGHT:
+        logger.info("Lightweight mode enabled — skipping Neo4j schema init (graph features disabled)")
+    else:
+        try:
+            driver = get_neo4j()
+            graph.init_schema(driver)
+            from db.neo4j.migrations import backfill_updated_at
+            backfill_updated_at(driver)
+        except Exception as e:
+            logger.warning(f"Neo4j schema init failed (will retry on first use): {e}")
 
     # Ensure default tenant exists (for multi-user mode migration safety)
-    try:
-        import config as _cfg
-        if _cfg.CERID_MULTI_USER:
-            from db.neo4j.users import ensure_default_tenant
-            ensure_default_tenant(driver, _cfg.DEFAULT_TENANT_ID)
-            logger.info("Multi-user mode enabled — default tenant ensured")
-            if not _cfg.CERID_JWT_SECRET:
-                raise RuntimeError(
-                    "CERID_JWT_SECRET is required when CERID_MULTI_USER=true. "
-                    "Generate with: python -c \"import secrets; print(secrets.token_urlsafe(64))\""
-                )
-    except Exception as e:
-        logger.warning(f"Multi-user startup check failed: {e}")
+    if not _cfg.CERID_LIGHTWEIGHT:
+        try:
+            if _cfg.CERID_MULTI_USER:
+                driver = get_neo4j()
+                from db.neo4j.users import ensure_default_tenant
+                ensure_default_tenant(driver, _cfg.DEFAULT_TENANT_ID)
+                logger.info("Multi-user mode enabled — default tenant ensured")
+                if not _cfg.CERID_JWT_SECRET:
+                    raise RuntimeError(
+                        "CERID_JWT_SECRET is required when CERID_MULTI_USER=true. "
+                        "Generate with: python -c \"import secrets; print(secrets.token_urlsafe(64))\""
+                    )
+        except Exception as e:
+            logger.warning(f"Multi-user startup check failed: {e}")
 
     # Auto-import from sync directory if DB is empty
     try:
@@ -318,6 +326,36 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     except Exception as e:
         logger.debug("Model validation skipped: %s", e)
 
+    # Check Redis for persisted license from Stripe/manual activation
+    try:
+        from deps import get_redis
+        _redis = get_redis()
+        tier_val = _redis.get("cerid:license:tier")
+        if tier_val:
+            tier_str = tier_val.decode("utf-8") if isinstance(tier_val, bytes) else str(tier_val)
+            if tier_str in ("pro", "enterprise"):
+                from config.features import set_tier
+                set_tier(tier_str)
+                logger.info("License tier restored from Redis: %s", tier_str)
+    except Exception as e:
+        logger.debug("License check skipped: %s", e)
+
+    # Verification pipeline self-test (lightweight, non-blocking)
+    try:
+        from agents.hallucination.startup_self_test import run_verification_self_test
+        from deps import get_redis
+        _redis = get_redis()
+        _self_test = await run_verification_self_test(_redis)
+        logger.info(
+            "Verification self-test: %s (%d claims via %s, %.0fms)",
+            _self_test["status"],
+            _self_test["claims_found"],
+            _self_test["extraction_method"],
+            _self_test["duration_ms"],
+        )
+    except Exception as e:
+        logger.warning("Verification self-test failed (non-blocking): %s", e)
+
     yield
 
     # Shutdown: stop scheduler, flush caches, close connections, clear MCP sessions
@@ -342,13 +380,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         await close_ollama_client()
     except Exception as exc:
         logger.warning("Ollama client shutdown failed: %s", exc)
-    # Close trading proxy connection pool
-    if CERID_TRADING_ENABLED:
-        try:
-            from routers.trading_proxy import close_trading_proxy_client
-            await close_trading_proxy_client()
-        except Exception as exc:
-            logger.warning("Trading proxy shutdown failed: %s", exc)
     # Flush semantic cache HNSW index to Redis before closing Redis
     try:
         from deps import get_redis
@@ -429,11 +460,14 @@ _api_routers = [
     memories.router,
     sync.router,
     kb_admin.router,
+    dlq.router,
     user_state.router,
     plugins.router,
     scanner.router,
     watched_folders.router,
     workflows.router,
+    agent_console.router,
+    system_monitor.router,
 ]
 for r in _api_routers:
     app.include_router(r)
@@ -446,6 +480,10 @@ app.include_router(providers.router)
 app.include_router(providers.router, prefix="/api/v1")
 app.include_router(models.router)
 app.include_router(models.router, prefix="/api/v1")
+
+# Billing API (Stripe integration, license management)
+app.include_router(billing.router)
+app.include_router(billing.router, prefix="/api/v1")
 
 # Observability dashboard API (real-time metrics, health score, cost, quality)
 app.include_router(observability.router)
@@ -469,11 +507,6 @@ if CERID_MULTI_USER:
     from routers import auth as auth_router
     app.include_router(auth_router.router)
     app.include_router(auth_router.router, prefix="/api/v1")
-
-# Trading proxy (only when trading agent integration is enabled)
-if CERID_TRADING_ENABLED:
-    from routers import trading_proxy
-    app.include_router(trading_proxy.router)
 
 # Eval harness API (only when explicitly enabled)
 if os.getenv("CERID_EVAL_ENABLED", "").lower() in ("1", "true", "yes"):

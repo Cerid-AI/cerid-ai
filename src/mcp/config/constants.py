@@ -35,6 +35,12 @@ CHUNK_OVERLAP_RATIO = 0.2
 PARENT_CHILD_RATIO_MIN = 4  # min child:parent token ratio
 PARENT_CHILD_RATIO_MAX = 8
 
+# ── Graph RAG ─────────────────────────────────────────────────────
+GRAPH_RAG_DEFAULT_WEIGHT = 0.3
+GRAPH_RAG_DEFAULT_MAX_HOPS = 2
+GRAPH_RAG_DEFAULT_MAX_RESULTS = 10
+GRAPH_RAG_FUZZY_THRESHOLD = 0.8  # min fuzzy match score for entity matching
+
 # ── Quality scoring ────────────────────────────────────────────────
 QUALITY_TIER_EXCELLENT = 0.8
 QUALITY_TIER_GOOD = 0.6

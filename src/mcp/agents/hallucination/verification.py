@@ -41,6 +41,7 @@ from agents.hallucination.verdict_parsing import (
     _invert_ignorance_verdict,
     _parse_verification_verdict,
 )
+from errors import VerificationError
 from utils.circuit_breaker import CircuitOpenError, NonTransientError
 from utils.claim_cache import cache_verdict, get_cached_verdict
 from utils.llm_parsing import parse_llm_json
@@ -275,7 +276,7 @@ async def _query_memories(
                     "memory_source": True,
                 })
         return formatted
-    except Exception as e:
+    except (VerificationError, ValueError, OSError, RuntimeError) as e:
         logger.debug("Memory query failed (non-blocking): %s", e)
         return []
 
@@ -668,7 +669,7 @@ async def _verify_claim_externally(
                 "verification_method": "circuit_open",
                 "source_urls": [],
             }
-        except Exception as e:
+        except (VerificationError, ValueError, OSError, RuntimeError) as e:
             logger.warning("External verification failed for '%s...': %s", claim[:50], e)
             return {
                 "status": "uncertain",
@@ -814,7 +815,7 @@ async def verify_claims_batch_external(
             "Batch verification: %d/%d claims resolved via %s",
             len(results), len(claims), model,
         )
-    except Exception as exc:
+    except (VerificationError, ValueError, OSError, RuntimeError) as exc:
         logger.warning("Batch verification failed (%s), claims will fall back to individual", exc)
 
     return results
@@ -901,7 +902,7 @@ async def verify_claim(
     When ``expert_mode`` is True, all external verification calls use the
     expert-tier model (Grok 4) instead of the default model pool.
     """
-    from agents.query_agent import lightweight_kb_query
+    from agents.decomposer import lightweight_kb_query
 
     if threshold is None:
         threshold = config.HALLUCINATION_THRESHOLD
@@ -998,7 +999,7 @@ async def verify_claim(
                             "domain": "external",
                             "source_url": fact.get("source_url", ""),
                         })
-            except Exception as exc:
+            except (VerificationError, ValueError, OSError, RuntimeError) as exc:
                 logger.debug("Data source enrichment for verification skipped: %s", exc)
 
         # --- Anti-circularity: penalise KB results that were injected into
@@ -1203,7 +1204,7 @@ async def verify_claim(
                 **_kb_source_fields(top_result),
             }
 
-    except Exception as e:
+    except (VerificationError, ValueError, OSError, RuntimeError) as e:
         logger.warning("Claim verification failed for '%s...': %s", claim[:50], e)
         return {
             "claim": claim,
@@ -1298,6 +1299,6 @@ async def _check_history_consistency(
             return issues
         return []
 
-    except (CircuitOpenError, Exception) as e:
+    except (CircuitOpenError, VerificationError, ValueError, OSError, RuntimeError) as e:
         logger.warning("Consistency check failed: %s", e)
         return []

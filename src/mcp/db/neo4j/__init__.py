@@ -21,6 +21,8 @@ __all__ = [
     "ensure_memory_schema", "create_memory_node", "update_memory_access",
     "archive_memory", "link_memory_to_artifact", "supersede_memory",
     "merge_memory", "get_memory_graph",
+    # graph RAG (Phase 52)
+    "graph_retrieve",
 ]
 
 from db.neo4j.artifacts import (  # noqa: F401,E402
@@ -37,6 +39,7 @@ from db.neo4j.artifacts import (  # noqa: F401,E402
     update_artifact,
     update_artifact_summary,
 )
+from db.neo4j.graph_rag import graph_retrieve  # noqa: F401,E402
 from db.neo4j.memory import (  # noqa: F401,E402
     archive_memory,
     create_memory_node,

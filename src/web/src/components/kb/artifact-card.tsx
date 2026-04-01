@@ -8,6 +8,8 @@ import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { PlusCircle, GitBranch, Globe, ArrowRightLeft, Loader2, X, Eye, Trash2, Tags, Check, RefreshCw, Layers } from "lucide-react"
 import { DomainBadge } from "@/components/ui/domain-badge"
+import { SourceTypeBadge } from "./source-type-badge"
+import { QualityDot } from "./quality-dot"
 import type { KBQueryResult } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -94,6 +96,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
   const metadata = (result as unknown as Record<string, unknown>)
   const chunkCount = typeof metadata.chunk_count === "number" ? metadata.chunk_count : undefined
   const clientSource = typeof metadata.client_source === "string" ? metadata.client_source : undefined
+  const sourceType = typeof metadata.source_type === "string" ? metadata.source_type : undefined
 
   return (
     <Card
@@ -163,6 +166,10 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
                   {result.sub_category}
                 </Badge>
               )}
+              {/* Source type badge — shows how the artifact was ingested */}
+              {sourceType && sourceType !== "upload" && (
+                <SourceTypeBadge sourceType={sourceType} />
+              )}
               {/* Client source badge — shown when showSource is true and source is non-gui */}
               {showSource && clientSource && clientSource !== "gui" && (
                 <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-teal-500/40 text-teal-600 dark:text-teal-400">
@@ -209,7 +216,10 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
               {result.quality_score != null && (
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <span><QualityBadge score={result.quality_score} /></span>
+                    <span className="flex items-center gap-1">
+                      <QualityDot score={result.quality_score} />
+                      <QualityBadge score={result.quality_score} />
+                    </span>
                   </TooltipTrigger>
                   <TooltipContent side="left">Quality: Q{Math.round(result.quality_score * 100)} — higher is better</TooltipContent>
                 </Tooltip>

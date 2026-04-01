@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery } from "@tanstack/react-query"
+import { Terminal } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { fetchHealthStatus, fetchProviderCredits } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -12,7 +13,13 @@ const SERVICE_INFO: Record<string, { purpose: string; tech: string }> = {
   neo4j: { purpose: "Knowledge graph & relationships", tech: "Neo4j" },
 }
 
-export function StatusBar() {
+interface StatusBarProps {
+  consoleOpen?: boolean
+  onToggleConsole?: () => void
+  consoleUnreadCount?: number
+}
+
+export function StatusBar({ consoleOpen, onToggleConsole, consoleUnreadCount = 0 }: StatusBarProps) {
   const { data: health, isError, isLoading, dataUpdatedAt } = useQuery({
     queryKey: ["health"],
     queryFn: fetchHealthStatus,
@@ -161,6 +168,34 @@ export function StatusBar() {
             </Tooltip>
           )
         })()}
+
+        {/* Agent Console toggle */}
+        {onToggleConsole && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={onToggleConsole}
+                className={cn(
+                  "relative flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-colors",
+                  consoleOpen
+                    ? "bg-teal-500/20 text-teal-400"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Terminal className="h-3 w-3" />
+                <span className="hidden sm:inline">Console</span>
+                {!consoleOpen && consoleUnreadCount > 0 && (
+                  <span className="absolute -right-1 -top-1 flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-teal-500 px-1 text-[9px] font-bold text-white">
+                    {consoleUnreadCount > 99 ? "99+" : consoleUnreadCount}
+                  </span>
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {consoleOpen ? "Close agent console" : "Open agent console"}
+            </TooltipContent>
+          </Tooltip>
+        )}
 
         {/* Credits indicator — pushed to the right */}
         {credits?.configured && credits.balance != null && (

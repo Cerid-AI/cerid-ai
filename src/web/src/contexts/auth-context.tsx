@@ -73,7 +73,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     authMe()
-      .then(setUser)
+      .then((user) => { setUser(user); setIsLoading(false) })
       .catch(() => {
         // Token may be expired — try refresh
         const rt = getRefreshToken()
@@ -85,11 +85,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             })
             .then(setUser)
             .catch(() => clearTokens())
+            .finally(() => setIsLoading(false))
         } else {
           clearTokens()
+          setIsLoading(false)
         }
       })
-      .finally(() => setIsLoading(false))
   }, [])
 
   const login = useCallback(async (email: string, password: string) => {

@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from errors import IngestionError
 from parsers.registry import _MAX_TEXT_CHARS, logger, register_parser
 
 
@@ -31,15 +32,15 @@ def parse_csv(file_path: str) -> dict[str, Any]:
             delimiter = dialect.delimiter
         except csv_module.Error:
             pass  # keep default
-    except Exception:
-        pass
+    except (IngestionError, ValueError, OSError, RuntimeError) as exc:
+        logger.debug("Suppressed error: %s", exc)
 
     try:
         try:
             df = pd.read_csv(file_path, encoding="utf-8", sep=delimiter)
         except UnicodeDecodeError:
             df = pd.read_csv(file_path, encoding="latin-1", sep=delimiter)
-    except Exception as e:
+    except (IngestionError, ValueError, OSError, RuntimeError) as e:
         raise ValueError(
             f"Failed to read CSV '{fname}': {e}. "
             f"File may be corrupted or not a valid CSV."
@@ -127,7 +128,7 @@ def parse_html(file_path: str) -> dict[str, Any]:
         extractor = _TextExtractor()
         extractor.feed(raw)
         text = "\n".join(extractor._parts)
-    except Exception:
+    except (IngestionError, ValueError, OSError, RuntimeError):
         # Fallback: return raw if parsing fails
         text = raw
 
@@ -138,8 +139,40 @@ def parse_html(file_path: str) -> dict[str, Any]:
     }
 
 
+@register_parser([".md", ".markdown"])
+def parse_markdown(file_path: str) -> dict[str, Any]:
+    """Parse Markdown files with optional YAML frontmatter extraction."""
+    path = Path(file_path)
+    raw = path.read_text(encoding="utf-8", errors="replace")
+    text = raw
+    frontmatter: dict[str, Any] = {}
+
+    # Extract YAML frontmatter (--- delimited)
+    if raw.startswith("---"):
+        end_idx = raw.find("---", 3)
+        if end_idx != -1:
+            fm_text = raw[3:end_idx].strip()
+            try:
+                import yaml
+                parsed_fm = yaml.safe_load(fm_text)
+                if isinstance(parsed_fm, dict):
+                    frontmatter = parsed_fm
+            except (IngestionError, ValueError, OSError, RuntimeError):
+                pass  # Invalid YAML — ignore
+            text = raw[end_idx + 3:].lstrip()
+
+    result: dict[str, Any] = {
+        "text": text[:_MAX_TEXT_CHARS],
+        "file_type": "md",
+        "page_count": None,
+    }
+    if frontmatter:
+        result["frontmatter"] = json.dumps(frontmatter)
+    return result
+
+
 @register_parser([
-    ".txt", ".md", ".rst", ".log",
+    ".txt", ".rst", ".log",
     ".py", ".js", ".ts", ".jsx", ".tsx",
     ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg",
     ".sh", ".bash",
@@ -160,7 +193,7 @@ def parse_text(file_path: str) -> dict[str, Any]:
             )
     except ValueError:
         raise
-    except Exception:
+    except (IngestionError, ValueError, OSError, RuntimeError):
         pass  # proceed with text read if binary check fails
 
     text = path.read_text(encoding="utf-8", errors="replace")

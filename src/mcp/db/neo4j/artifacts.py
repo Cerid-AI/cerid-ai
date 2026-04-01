@@ -10,6 +10,7 @@ import logging
 from typing import Any
 
 import config
+from errors import RetrievalError
 from utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.graph")
@@ -547,7 +548,7 @@ def save_verification_report(
                     cid=conversation_id,
                     aid=aid,
                 )
-            except Exception as e:
+            except (RetrievalError, ValueError, OSError, RuntimeError) as e:
                 logger.debug("Failed to create VERIFIED relationship: %s", e)
 
     logger.info("Saved verification report %s for conversation %s", report_id[:8], conversation_id[:8])

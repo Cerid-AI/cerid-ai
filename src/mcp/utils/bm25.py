@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import config
+from errors import RetrievalError
 
 logger = logging.getLogger("ai-companion.bm25")
 
@@ -180,19 +181,64 @@ class BM25Index:
                     f"BM25 corpus for {self.domain} uses old token format. "
                     "Consider re-ingesting for improved tokenization."
                 )
-        except Exception as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
             logger.error(f"Failed to load BM25 index for {self.domain}: {e}")
             self._texts = []
             self._doc_ids = []
             self._doc_id_set = set()
             self._retriever = None
 
+    def remove_documents(self, chunk_ids: list[str]) -> int:
+        """Remove documents by chunk ID. Returns count removed.
+
+        Rebuilds the in-memory index and rewrites the corpus file.
+        Used as a compensating transaction when Neo4j write fails.
+        """
+        if not _bm25s_available:
+            return 0
+
+        ids_to_remove = set(chunk_ids) & self._doc_id_set
+        if not ids_to_remove:
+            return 0
+
+        # Rebuild in-memory lists without removed IDs
+        new_texts: list[str] = []
+        new_ids: list[str] = []
+        for doc_id, text in zip(self._doc_ids, self._texts):
+            if doc_id not in ids_to_remove:
+                new_texts.append(text)
+                new_ids.append(doc_id)
+
+        self._texts = new_texts
+        self._doc_ids = new_ids
+        self._doc_id_set -= ids_to_remove
+        self._rebuild()
+
+        # Rewrite corpus file
+        self._rewrite_corpus()
+
+        removed = len(ids_to_remove)
+        logger.info(
+            "BM25 rollback: removed %d docs from %s (%d remaining)",
+            removed, self.domain, len(self._doc_ids),
+        )
+        return removed
+
+    def _rewrite_corpus(self) -> None:
+        """Rewrite the entire corpus file from in-memory state."""
+        try:
+            with open(self._corpus_file, "w") as f:
+                for doc_id, text in zip(self._doc_ids, self._texts):
+                    f.write(json.dumps({"id": doc_id, "text": text}) + "\n")
+        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+            logger.error(f"Failed to rewrite BM25 corpus for {self.domain}: {e}")
+
     def _append_to_disk(self, entries: list[dict]) -> None:
         try:
             with open(self._corpus_file, "a") as f:
                 for entry in entries:
                     f.write(json.dumps(entry) + "\n")
-        except Exception as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
             logger.error(f"Failed to persist BM25 entries for {self.domain}: {e}")
 
 
@@ -202,6 +248,7 @@ class BM25Index:
 
 _indexes: dict[str, BM25Index] = {}
 _access_order: list[str] = []  # LRU tracking (most recent at end)
+_index_lock = __import__("threading").Lock()
 
 
 def get_index(domain: str) -> BM25Index:
@@ -212,29 +259,36 @@ def get_index(domain: str) -> BM25Index:
     """
     from config.constants import BM25_MAX_LOADED_DOMAINS
 
-    if domain in _indexes:
-        # Move to end (most recently used)
-        if domain in _access_order:
-            _access_order.remove(domain)
+    with _index_lock:
+        if domain in _indexes:
+            # Move to end (most recently used)
+            if domain in _access_order:
+                _access_order.remove(domain)
+            _access_order.append(domain)
+            return _indexes[domain]
+
+        # Evict LRU indexes if at capacity
+        while len(_indexes) >= BM25_MAX_LOADED_DOMAINS and _access_order:
+            evict = _access_order.pop(0)
+            evicted = _indexes.pop(evict, None)
+            if evicted:
+                logger.debug("BM25 LRU evict: %s (%d docs)", evict, evicted.size)
+
+        _indexes[domain] = BM25Index(domain, config.BM25_DATA_DIR)
         _access_order.append(domain)
         return _indexes[domain]
-
-    # Evict LRU indexes if at capacity
-    while len(_indexes) >= BM25_MAX_LOADED_DOMAINS and _access_order:
-        evict = _access_order.pop(0)
-        evicted = _indexes.pop(evict, None)
-        if evicted:
-            logger.debug("BM25 LRU evict: %s (%d docs)", evict, evicted.size)
-
-    _indexes[domain] = BM25Index(domain, config.BM25_DATA_DIR)
-    _access_order.append(domain)
-    return _indexes[domain]
 
 
 def index_chunks(domain: str, chunk_ids: list[str], texts: list[str]) -> int:
     """Index chunks for BM25 search. Called during ingestion."""
     idx = get_index(domain)
     return idx.add_documents(chunk_ids, texts)
+
+
+def remove_chunks(domain: str, chunk_ids: list[str]) -> int:
+    """Remove chunks from a domain's BM25 index. Used for saga rollback."""
+    idx = get_index(domain)
+    return idx.remove_documents(chunk_ids)
 
 
 def search_bm25(

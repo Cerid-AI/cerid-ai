@@ -12,31 +12,22 @@ from typing import Any
 import numpy as np
 
 import config
-from agents.assembler import (  # noqa: F401
+from agents.assembler import (
     _apply_quality_and_summaries,
-    _enrich_summaries,
-    _rerank_cross_encoder,
-    _rerank_llm,
     apply_context_alignment_boost,
     apply_metadata_boost,
-    apply_quality_boost,
     assemble_context,
     deduplicate_results,
     rerank_results,
 )
-
-# ---------------------------------------------------------------------------
-# Re-export bridges -- backward compatibility for existing importers
-# ---------------------------------------------------------------------------
-from agents.decomposer import (  # noqa: F401
+from agents.decomposer import (
     _enrich_query,
-    _format_chroma_result,
     _get_adjacent_domains,
     graph_expand_results,
-    lightweight_kb_query,
     multi_domain_query,
 )
 from config import DOMAINS
+from errors import RetrievalError
 from utils.cache import log_event
 
 logger = logging.getLogger("ai-companion.query_agent")
@@ -112,14 +103,16 @@ async def agent_query(
                         "total_results": 0, "token_budget_used": 0,
                         "graph_results": 0, "results": [],
                         "degradation_tier": "offline"}
-    except Exception as exc:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
         logger.debug("Degradation check skipped: %s", exc)
 
     from config.features import (
         ENABLE_ADAPTIVE_RETRIEVAL,
+        ENABLE_GRAPH_RAG,
         ENABLE_INTELLIGENT_ASSEMBLY,
         ENABLE_LATE_INTERACTION,
         ENABLE_MMR_DIVERSITY,
+        ENABLE_PARENT_CHILD_RETRIEVAL,
         ENABLE_QUERY_DECOMPOSITION,
         ENABLE_SEMANTIC_CACHE,
     )
@@ -136,8 +129,8 @@ async def agent_query(
         elif _tier == DegradationTier.DIRECT:
             _degradation_skip_retrieval = True
             logger.info("Degradation tier: DIRECT — skipping retrieval")
-    except Exception:
-        pass
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+        logger.warning("Degradation tier check failed: %s", e)
 
     # Semantic cache early-return — check before any retrieval work
     _query_embedding: np.ndarray | None = None
@@ -153,7 +146,7 @@ async def agent_query(
                     if cached is not None:
                         cached["semantic_cache_hit"] = True
                         return cached
-            except Exception as e:
+            except (RetrievalError, ValueError, OSError, RuntimeError) as e:
                 logger.debug("Semantic cache lookup skipped: %s", e)
 
     # Degradation: CACHED tier — if semantic cache missed, return empty
@@ -195,10 +188,13 @@ async def agent_query(
                     "total_results": 0, "token_budget_used": 0,
                     "graph_results": 0, "results": [],
                     "intent": _query_intent, "rag_skipped": True}
-    except Exception as exc:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
         logger.debug("Smart Auto-RAG classification skipped: %s", exc)
         _query_intent = "factual"
         _rag_config = {"inject": True, "top_k": 10, "decompose": True, "rerank": True}
+
+    from utils.agent_events import emit_agent_event
+    emit_agent_event("query", f"On it \u2014 searching {len(domains or DOMAINS)} domains for you...")
 
     search_query = query
     if conversation_messages:
@@ -278,7 +274,7 @@ async def agent_query(
                     logger.debug("Retrieval cache hit (top_k=%d)", effective_top_k)
                 else:
                     logger.debug("Retrieval cache miss")
-            except Exception as exc:
+            except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
                 logger.debug("Retrieval cache lookup failed: %s", exc)
 
         if not _skip_normal_retrieval and ENABLE_QUERY_DECOMPOSITION:
@@ -312,7 +308,7 @@ async def agent_query(
                 retrieval_cache.set(
                     _query_embedding.tolist(), effective_top_k, results,
                 )
-            except Exception as exc:
+            except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
                 logger.debug("Retrieval cache store failed: %s", exc)
 
     # Search adjacent domains at reduced weight when specific domains are requested.
@@ -353,10 +349,18 @@ async def agent_query(
                     if _hyde_results:
                         results = reciprocal_rank_fusion(results, _hyde_results)
                         logger.debug("HyDE fallback activated, merged %d results", len(results))
-        except Exception as exc:
+        except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
             logger.debug("HyDE fallback skipped: %s", exc)
 
     results = deduplicate_results(results)
+
+    # Step 3.5: Parent-child retrieval — swap child chunks for their richer parents
+    with timer.step("parent_child_lookup"):
+        if ENABLE_PARENT_CHILD_RETRIEVAL and chroma_client and results:
+            try:
+                results = _resolve_parent_chunks(results, chroma_client)
+            except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
+                logger.warning("Parent-child lookup failed: %s", exc)
 
     with timer.step("graph_expansion"):
         graph_count_before = len(results)
@@ -377,6 +381,25 @@ async def agent_query(
             )
         graph_results_added = len(results) - graph_count_before
 
+    # Step 3.7: Graph RAG — entity-aware retrieval via knowledge graph
+    _graph_rag_count = 0
+    with timer.step("graph_rag"):
+        if ENABLE_GRAPH_RAG and neo4j_driver:
+            try:
+                _graph_rag_results = await _graph_rag_retrieve(
+                    query=query,
+                    neo4j_driver=neo4j_driver,
+                    chroma_client=chroma_client,
+                    existing_results=results,
+                )
+                _graph_rag_count = len(_graph_rag_results)
+                if _graph_rag_results:
+                    results.extend(_graph_rag_results)
+                    results = deduplicate_results(results)
+                    logger.debug("Graph RAG added %d results", _graph_rag_count)
+            except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
+                logger.warning("Graph RAG retrieval failed: %s", exc)
+
     # Enrich with external data sources for factual/analytical queries
     try:
         from utils.data_sources import registry as data_source_registry
@@ -395,7 +418,7 @@ async def agent_query(
                         "source_url": er.get("source_url", ""),
                     })
                 logger.debug("Added %d external data source results", len(_ext_results[:3]))
-    except Exception as exc:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
         logger.debug("External data source enrichment skipped: %s", exc)
 
     from utils.temporal import is_within_window, parse_temporal_intent, recency_score
@@ -441,7 +464,7 @@ async def agent_query(
                     results = late_interaction_rerank(
                         results=results, query=query, embed_fn=_ef,
                     )
-            except Exception as e:
+            except (RetrievalError, ValueError, OSError, RuntimeError) as e:
                 logger.warning("Late interaction scoring failed: %s", e)
 
     # Step 5.5: Quality boost + summary enrichment — single Neo4j round-trip
@@ -455,7 +478,7 @@ async def agent_query(
             try:
                 from utils.diversity import mmr_reorder
                 results = mmr_reorder(results=results, query=query)
-            except Exception as e:
+            except (RetrievalError, ValueError, OSError, RuntimeError) as e:
                 logger.warning("MMR diversity reordering failed: %s", e)
 
     # Step 5.7: Filter low-relevance results below minimum threshold
@@ -477,7 +500,7 @@ async def agent_query(
                     results=results, query=query, max_chars=ctx_budget,
                 )
                 char_count = len(context)
-            except Exception as e:
+            except (RetrievalError, ValueError, OSError, RuntimeError) as e:
                 logger.warning("Intelligent assembly failed, falling back: %s", e)
                 context, sources, char_count = assemble_context(results, max_chars=ctx_budget)
         else:
@@ -503,8 +526,14 @@ async def agent_query(
                     "graph_results": graph_results_added,
                 },
             )
-        except Exception as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
             logger.warning(f"Failed to log query: {e}")
+
+    emit_agent_event(
+        "query",
+        f"Found {len(results)} results across {len(sources)} sources (confidence {confidence:.2f})",
+        level="success",
+    )
 
     result_dict: dict[str, Any] = {
         "context": context,
@@ -514,6 +543,7 @@ async def agent_query(
         "total_results": len(results),
         "token_budget_used": char_count,
         "graph_results": graph_results_added,
+        "graph_rag_results": _graph_rag_count,
         "results": results,
     }
 
@@ -526,7 +556,199 @@ async def agent_query(
         try:
             from utils.semantic_cache import cache_store
             cache_store(query, _query_embedding, result_dict, redis_client)
-        except Exception as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
             logger.debug("Semantic cache store failed: %s", e)
 
     return result_dict
+
+
+# ---------------------------------------------------------------------------
+# Parent-child retrieval helpers
+# ---------------------------------------------------------------------------
+
+def _resolve_parent_chunks(
+    results: list[dict[str, Any]],
+    chroma_client: Any,
+) -> list[dict[str, Any]]:
+    """Swap child chunks for their parent chunks to provide richer context.
+
+    When a child chunk matches during retrieval, fetch the parent chunk
+    from ChromaDB (using the ``parent_chunk_id`` stored in metadata) and
+    return the parent's broader text instead. Deduplicates so that
+    multiple children from the same parent yield only one parent entry.
+    """
+    if not results:
+        return results
+
+    # Collect child results that have a parent_chunk_id
+    child_results: list[dict[str, Any]] = []
+    non_child_results: list[dict[str, Any]] = []
+
+    for r in results:
+        chunk_level = r.get("chunk_level", "")
+        parent_id = r.get("parent_chunk_id", "")
+        if chunk_level == "child" and parent_id:
+            child_results.append(r)
+        else:
+            non_child_results.append(r)
+
+    if not child_results:
+        return results
+
+    # Group children by parent_chunk_id, keeping best relevance per parent
+    parent_map: dict[str, dict[str, Any]] = {}
+    for child in child_results:
+        pid = child["parent_chunk_id"]
+        if pid not in parent_map or child.get("relevance", 0) > parent_map[pid].get("relevance", 0):
+            parent_map[pid] = child
+
+    # Fetch parent chunks from ChromaDB
+    resolved_parents: list[dict[str, Any]] = []
+
+    # Determine which collections to search — group by domain
+    domain_parents: dict[str, list[str]] = {}
+    for pid, child_data in parent_map.items():
+        domain = child_data.get("domain", "general")
+        domain_parents.setdefault(domain, []).append(pid)
+
+    for domain, pids in domain_parents.items():
+        try:
+            coll_name = config.collection_name(domain)
+            collection = chroma_client.get_or_create_collection(name=coll_name)
+            fetched = collection.get(ids=pids, include=["documents", "metadatas"])
+            if fetched and fetched.get("ids"):
+                for i, fid in enumerate(fetched["ids"]):
+                    doc = fetched["documents"][i] if fetched.get("documents") else ""
+                    # Use the best child's relevance score for the parent
+                    child_data = parent_map.get(fid, {})
+                    resolved_parents.append({
+                        **child_data,
+                        "content": doc,
+                        "chunk_level": "parent",
+                        "parent_chunk_id": fid,
+                        "parent_resolved": True,
+                    })
+        except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
+            logger.debug("Parent chunk fetch failed for domain %s: %s", domain, exc)
+            # Fall back to original child results for this domain
+            for pid in pids:
+                if pid in parent_map:
+                    resolved_parents.append(parent_map[pid])
+
+    # Combine: non-child results + resolved parents
+    seen_ids: set[str] = set()
+    combined: list[dict[str, Any]] = []
+    for r in non_child_results:
+        aid = r.get("artifact_id", "")
+        cid = r.get("chunk_id", "") or r.get("parent_chunk_id", "")
+        key = f"{aid}:{cid}"
+        if key not in seen_ids:
+            seen_ids.add(key)
+            combined.append(r)
+
+    for r in resolved_parents:
+        aid = r.get("artifact_id", "")
+        cid = r.get("parent_chunk_id", "")
+        key = f"{aid}:{cid}"
+        if key not in seen_ids:
+            seen_ids.add(key)
+            combined.append(r)
+
+    logger.debug(
+        "Parent-child resolution: %d children → %d parents (from %d total results)",
+        len(child_results), len(resolved_parents), len(results),
+    )
+    return combined
+
+
+# ---------------------------------------------------------------------------
+# Graph RAG retrieval helper
+# ---------------------------------------------------------------------------
+
+async def _graph_rag_retrieve(
+    query: str,
+    neo4j_driver: Any,
+    chroma_client: Any,
+    existing_results: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Run entity-aware graph retrieval and return blended results.
+
+    1. Extract entities from the query.
+    2. Traverse Neo4j graph to find related artifacts.
+    3. Fetch chunk content from ChromaDB for matched artifacts.
+    4. Score with blended graph_score.
+    5. Exclude artifacts already in existing_results.
+    """
+    from db.neo4j.graph_rag import graph_retrieve
+    from utils.entity_extraction import extract_entities
+
+    entities = extract_entities(query)
+    if not entities:
+        return []
+
+    graph_results = await graph_retrieve(neo4j_driver, entities)
+    if not graph_results:
+        return []
+
+    # Filter out artifacts already present in existing results
+    existing_aids = {r.get("artifact_id", "") for r in existing_results}
+    novel_graph = [g for g in graph_results if g["artifact_id"] not in existing_aids]
+    if not novel_graph:
+        return []
+
+    # Fetch representative chunks from ChromaDB for the graph-sourced artifacts
+    graph_weight = getattr(config, "GRAPH_RAG_WEIGHT", 0.3)
+    enriched: list[dict[str, Any]] = []
+
+    # Group by domain for efficient ChromaDB lookups
+    domain_aids: dict[str, list[dict[str, Any]]] = {}
+    for gr in novel_graph:
+        domain_aids.setdefault(gr["domain"], []).append(gr)
+
+    for domain, items in domain_aids.items():
+        if not domain:
+            continue
+        try:
+            coll_name = config.collection_name(domain)
+            collection = chroma_client.get_or_create_collection(name=coll_name)
+            for item in items:
+                # Fetch first chunk of the artifact for content
+                chunk_id_prefix = f"{item['artifact_id']}_chunk_0"
+                try:
+                    fetched = collection.get(
+                        ids=[chunk_id_prefix],
+                        include=["documents", "metadatas"],
+                    )
+                    if fetched and fetched.get("ids"):
+                        doc = fetched["documents"][0] if fetched.get("documents") else ""
+                        meta = fetched["metadatas"][0] if fetched.get("metadatas") else {}
+                        enriched.append({
+                            "content": doc,
+                            "relevance": round(item["graph_score"] * graph_weight, 4),
+                            "artifact_id": item["artifact_id"],
+                            "filename": item["filename"],
+                            "domain": domain,
+                            "chunk_index": 0,
+                            "graph_sourced": True,
+                            "graph_score": item["graph_score"],
+                            "hop_distance": item.get("hop_distance", 0),
+                            **{k: v for k, v in meta.items()
+                               if k in ("ingested_at", "sub_category", "tags_json")},
+                        })
+                except (RetrievalError, ValueError, OSError, RuntimeError):
+                    # Chunk not found — use summary as fallback content
+                    if item.get("summary"):
+                        enriched.append({
+                            "content": item["summary"],
+                            "relevance": round(item["graph_score"] * graph_weight * 0.8, 4),
+                            "artifact_id": item["artifact_id"],
+                            "filename": item["filename"],
+                            "domain": domain,
+                            "chunk_index": 0,
+                            "graph_sourced": True,
+                            "graph_score": item["graph_score"],
+                        })
+        except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
+            logger.debug("Graph RAG ChromaDB lookup failed for domain %s: %s", domain, exc)
+
+    return enriched

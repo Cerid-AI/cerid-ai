@@ -15,6 +15,7 @@ from typing import Any
 import httpx
 
 import config
+from errors import RetrievalError
 from utils.circuit_breaker import CircuitOpenError
 from utils.llm_parsing import parse_llm_json
 from utils.text import STOPWORDS as _STOPWORDS
@@ -30,7 +31,6 @@ __all__ = [
     "apply_metadata_boost",
     "apply_context_alignment_boost",
     "apply_quality_boost",
-    "_enrich_summaries",
     "_apply_quality_and_summaries",
     "assemble_context",
 ]
@@ -105,7 +105,7 @@ async def _rerank_cross_encoder(
 
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, ce_rerank, query, results)
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.warning("Cross-encoder reranking failed, falling back to LLM: %s", e)
         return await _rerank_llm(results, query)
 
@@ -308,7 +308,7 @@ def apply_quality_boost(
     try:
         from db.neo4j.artifacts import get_quality_scores
         scores = get_quality_scores(neo4j_driver, artifact_ids)
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.warning(f"Quality score lookup failed (skipping boost): {e}")
         return results
 
@@ -336,7 +336,7 @@ def _enrich_summaries(
     try:
         from db.neo4j.artifacts import get_artifact_summaries
         summaries = get_artifact_summaries(neo4j_driver, artifact_ids)
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.warning(f"Summary lookup failed (skipping): {e}")
         return results
 
@@ -367,7 +367,7 @@ def _apply_quality_and_summaries(
     try:
         from db.neo4j.artifacts import get_quality_and_summaries
         scores, summaries = get_quality_and_summaries(neo4j_driver, artifact_ids)
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.warning(f"Quality/summary lookup failed (skipping): {e}")
         return results
 
@@ -434,4 +434,12 @@ def assemble_context(
         artifact_counts[artifact_id] += 1
 
     context = "\n\n".join(context_parts)
+
+    from utils.agent_events import emit_agent_event
+    emit_agent_event(
+        "assembler",
+        f"Weaving {len(included_sources)} sources into a coherent answer ({char_count} chars)",
+        level="success",
+    )
+
     return context, included_sources, char_count

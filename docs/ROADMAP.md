@@ -1,6 +1,6 @@
 # Cerid AI — Development Roadmap
 
-> **Last updated:** 2026-03-30
+> **Last updated:** 2026-03-31
 > **Source of truth:** This file consolidates ALL planned work from `tasks/todo.md`, phase plans, and market analysis.
 > **For completed work:** See `docs/COMPLETED_PHASES.md`
 
@@ -17,20 +17,7 @@
 
 ## P0 — Blockers
 
-### Startup Wizard & Setup Streamlining
-- Web-based first-run wizard (runs before main app if no config detected)
-- Docker detection and auto-install guidance
-- API key setup with provider validation
-- Ollama install option integrated into wizard
-- Remove age encryption requirement for first-time setup
-- Pre-built Docker images on GitHub Container Registry (skip local build)
-- **Goal:** Actual quick setup for Docker-ready users
-
-### Verification Health Check
-- Add verification pipeline self-test at startup (fire a test claim)
-- Show verification status in health dashboard
-- Alert on consecutive extraction failures
-- Prevents the silent model routing failure from recurring
+_All P0 items completed. See `docs/COMPLETED_PHASES.md`._
 
 ---
 
@@ -45,8 +32,8 @@
   4. Also clear Redis query cache on session end
 - Visual lock indicator, session data wiped on close
 
-### Conversation Management UX
-- Hover-reveal action buttons on sidebar conversations (delete, archive)
+### Conversation Management UX (Remaining)
+- ~~Hover-reveal delete button~~ (done)
 - Archived conversations view toggle
 - Bulk select/delete for history cleanup
 - Search within conversation history
@@ -57,72 +44,63 @@
 - Color-coded by agent, filterable, collapsible/dockable
 - Transparency into the intelligence pipeline
 
-### Model Management & Auto-Update Detection
-- Dedicated model management pane in Settings
-- All available models with: provider, cost, context window, capabilities
+### Model Management & Auto-Update Detection (Remaining)
+- ~~Ollama model management with hardware-aware recommendations~~ (done)
 - Auto-detection of new model releases via OpenRouter API polling
 - Notification badge when new models available
-- One-click model swap with capability comparison
 - Deprecation warnings for outdated models
-- Prevents casual users from being stuck on previous-generation models
-
-### Direct Provider SDKs
-- Direct API key support for Anthropic, OpenAI, Google (bypass OpenRouter)
-- Provider selection in settings: OpenRouter (default) vs direct API
-- Key validation per provider, preserves OpenRouter as fallback
+- Cost comparison view: current model vs alternatives
 
 ### Pro Tier Purchase Path
 - Stripe integration for Pro tier licensing
 - License key validation endpoint
 - Self-serve upgrade flow Core → Pro in Settings
 - Waitlist/early access program as interim
+- **Pro anchor feature:** Audio transcription (meeting notes, interviews, lectures) — the primary differentiator that justifies Pro over Core
 
-### Pro Mode Configuration & Feature Access
+### Pro Mode Configuration & Feature Access (Remaining)
+- ~~Feature flag system + tier gating decorators~~ (done)
+- ~~Runtime tier cycle button in sidebar~~ (done)
 - Clear Pro settings pane showing all Pro-gated features with status
 - Feature discovery: show what Pro unlocks with preview
 - License key entry and validation
-- Visual distinction between Core and Pro UI elements
 
 ---
 
 ## P2 — Medium Priority
 
-### External APIs in Knowledge Console
-- Show enabled APIs with status in Knowledge Console external section
-- Inline enable/disable toggles per API
-- Add free public APIs: DuckDuckGo Instant Answers, Open Library, PubChem
-- Move data sources to more prominent Essentials location
-
-### Watched Folders Management
-- CRUD API for watched folders with Redis storage
-- Per-folder: enable/disable, domain override, exclude patterns, search_enabled toggle
-- Per-folder scan isolation (namespaced Redis state keys)
-- Settings UI: folder list with toggles, scan button, stats
-
-### RAG Orchestration Resilience
-- Source availability awareness before querying
-- Folder-aware domain routing in decomposer
-- Graceful degradation: partial source_breakdown on failure
-- Per-source timing and status in response
-
-### Expanded File Type Handling
-- Specialized parsers for code (AST extraction for Python, JS/TS, Go, Rust)
-- Table-aware Excel parsing (preserve sheet structure)
+### Expanded File Type Handling (Remaining)
+- ~~Table-aware Excel parsing~~ (done)
+- ~~PDF table extraction~~ (done)
+- Specialized parsers for code (AST extraction for Python, JS/TS)
 - Image OCR for scanned PDFs (Pro tier)
 - Audio transcription for meeting notes (Pro tier)
 - Markdown frontmatter extraction (YAML/TOML headers → metadata)
 
-### Separate Trading Tools
-- Move 5 trading MCP tools to cerid-trading-agent repo
-- Core Cerid ships 21 MCP tools (no trading dependency)
-- Trading agent connects via A2A protocol or SDK endpoints
-
 ### Bulk Import Remaining Features
 - Ollama content triage (score 1-5 for value assessment)
-- Persistent import queue (Redis-backed, survives restarts)
-- File type error recovery (magic byte sniffing, fallback parsing)
-- Import progress in Knowledge Console UI
 - Scheduled folder re-scan (cron-based watch)
+
+---
+
+## Ingestion Pipeline Evolution (Phases 53-57)
+
+> Full plan: [`docs/plans/PLAN_INGESTION_PIPELINE_EVOLUTION.md`](plans/PLAN_INGESTION_PIPELINE_EVOLUTION.md)
+
+### P1 — Pipeline Hardening (Phase 53)
+- Dead-letter queue, BM25 rollback, triage→ingest bridge, per-file status
+
+### P1 — Core Data Sources (Phase 54)
+- IMAP email, RSS feeds, browser bookmarks, inbound webhooks, clipboard, macOS Quick Actions
+
+### P1 — Pro Data Sources (Phase 55)
+- Gmail OAuth, Outlook Graph, Apple Notes, Calendar sync, Docling parser
+
+### P2 — Storage Dashboard (Phase 56)
+- Storage metrics, usage bars, persistent history, activity feed
+
+### P2 — KB Interface Refresh (Phase 57)
+- Live progress, source badges, previews, near-duplicate merge, quality visualizations
 
 ---
 
@@ -141,10 +119,11 @@
   tenant management UI, compliance reporting, dedicated support portal
 - Actual implementation deferred to enterprise development phase
 
+### Repo Maintenance
+- Marketing site separated to `Cerid-AI/cerid-ai-marketing` (migration script at `scripts/separate-marketing.sh`)
+
 ### Code Quality Improvements
-- File decomposition: split files >500 lines into focused modules
 - Type hints on all public APIs, mypy strict mode
-- Module documentation (MODULE.md per module)
 - Parent-child hierarchical RAG (currently feature-flagged off)
 - Graph RAG with entity extraction and query rewriting
 

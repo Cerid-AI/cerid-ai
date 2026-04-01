@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 import httpx
 
 import config
+from errors import ProviderError
 from middleware.request_id import tracing_headers
 from utils.circuit_breaker import CircuitOpenError, get_breaker
 
@@ -331,7 +332,7 @@ async def _call_ollama_direct(
             )
             resp.raise_for_status()
             return resp.json().get("message", {}).get("content", "")
-    except Exception as e:
+    except (ProviderError, ValueError, OSError, RuntimeError) as e:
         _logger.warning("Ollama call failed (%s), falling back to OpenRouter", e)
         return await call_llm(messages, temperature=temperature, max_tokens=max_tokens)
 

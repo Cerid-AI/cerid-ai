@@ -31,6 +31,7 @@ export interface Conversation {
   model: string
   createdAt: number
   updatedAt: number
+  archived?: boolean
   /** Per-message verification reports — keyed by assistant message ID. */
   verificationReports?: Record<string, HallucinationReport>
 }
@@ -218,6 +219,15 @@ export interface TagSuggestion {
   usage_count: number
 }
 
+export type ArtifactSourceType =
+  | "upload"
+  | "watcher"
+  | "webhook"
+  | "email"
+  | "rss"
+  | "bookmark"
+  | "clipboard"
+
 export interface Artifact {
   id: string
   filename: string
@@ -230,6 +240,51 @@ export interface Artifact {
   chunk_ids: string // JSON string array
   ingested_at: string
   recategorized_at: string | null
+  quality_score?: number
+  source_type?: ArtifactSourceType
+  client_source?: string
+  total_tokens?: number
+}
+
+// --- Ingestion progress ---
+
+export type IngestionStep = "parsing" | "chunking" | "embedding" | "indexing"
+
+export interface IngestionFileProgress {
+  filename: string
+  step: IngestionStep
+  progress: number // 0-100
+  status: "pending" | "processing" | "done" | "error"
+  error?: string
+}
+
+export interface IngestionProgress {
+  files: IngestionFileProgress[]
+  total_files: number
+  completed_files: number
+}
+
+// --- Near-duplicate detection ---
+
+export interface DuplicateArtifact {
+  id: string
+  filename: string
+  domain: string
+  summary: string
+  quality_score?: number
+  ingested_at: string
+  chunk_count: number
+}
+
+export interface DuplicateGroup {
+  content_hash_prefix: string
+  similarity: number
+  artifacts: DuplicateArtifact[]
+}
+
+export interface DuplicatesResponse {
+  groups: DuplicateGroup[]
+  total_groups: number
 }
 
 export interface KBQueryResult {
@@ -1099,5 +1154,119 @@ export interface ArtifactFilterParams {
   min_quality?: number
   limit?: number
   offset?: number
+}
+
+// ---------------------------------------------------------------------------
+// Storage Monitoring (Phase 56)
+// ---------------------------------------------------------------------------
+
+export interface ServiceStorageMetrics {
+  disk_mb: number
+  error?: string
+}
+
+export interface ChromaDBStorage extends ServiceStorageMetrics {
+  collections: number
+  chunks: number
+}
+
+export interface Neo4jStorage extends ServiceStorageMetrics {
+  nodes: number
+  relationships: number
+  status?: string
+}
+
+export interface RedisStorage {
+  memory_mb: number
+  peak_mb: number
+  keys: number
+  error?: string
+}
+
+export interface BM25Storage {
+  disk_mb: number
+  index_count: number
+}
+
+export interface StorageMetrics {
+  chromadb: ChromaDBStorage
+  neo4j: Neo4jStorage
+  redis: RedisStorage
+  bm25: BM25Storage
+  total_mb: number
+  limit_mb: number
+  usage_pct: number
+  warn_pct: number
+  critical_pct: number
+  status: "healthy" | "warning" | "critical"
+  timestamp: number
+}
+
+export interface IngestHistoryEntry {
+  id: string
+  filename: string
+  source_type: string
+  domain: string
+  status: "success" | "failed" | "skipped"
+  timestamp: string
+  chunks: number
+  error: string
+}
+
+export interface IngestHistoryResponse {
+  items: IngestHistoryEntry[]
+  total: number
+  next_cursor: string | null
+}
+
+// === Agent Communication Console ===
+
+export interface AgentConsoleEvent {
+  id: string
+  agent: string
+  message: string
+  level: "info" | "success" | "warning" | "error"
+  timestamp: number
+  metadata: Record<string, unknown>
+}
+
+// === Dead Letter Queue ===
+
+export interface DLQEntry {
+  id: string
+  payload: Record<string, unknown>
+  error: string
+  attempt: number
+  next_retry_at: string
+  created_at: string
+}
+
+// === Storage Dashboard ===
+
+export interface StorageServiceUsage {
+  disk_mb: number
+  collections?: number
+  chunks?: number
+  nodes?: number
+  relationships?: number
+  memory_mb?: number
+  peak_mb?: number
+  keys?: number
+  index_count?: number
+}
+
+export interface StorageUsage {
+  chromadb: StorageServiceUsage
+  neo4j: StorageServiceUsage
+  redis: StorageServiceUsage
+  bm25: StorageServiceUsage
+  total_mb: number
+}
+
+// === Private Mode ===
+
+export interface PrivateModeStatus {
+  enabled: boolean
+  level: 1 | 2 | 3 | 4
 }
 

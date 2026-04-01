@@ -23,6 +23,7 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { fetchDataSources, enableDataSource, disableDataSource } from "@/lib/api"
+import { IngestionProgress } from "./ingestion-progress"
 import type { UseOrchestratedQueryReturn } from "@/hooks/use-orchestrated-query"
 import type { KBQueryResult, MemoryRecallResult, ExternalSourceResult, RagMode } from "@/lib/types"
 
@@ -250,6 +251,9 @@ export function KnowledgeConsole({
           <X className="h-4 w-4" />
         </Button>
       </div>
+
+      {/* Live ingestion progress — appears when files are being ingested */}
+      <IngestionProgress />
 
       {/* Loading / error state */}
       {isLoading && (

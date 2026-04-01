@@ -257,9 +257,12 @@ const MD_COMPONENTS: Record<string, React.ComponentType<Record<string, unknown>>
   },
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   img({ src, alt }: any) {
+    const safeSrc =
+      typeof src === "string" && /^(https?:|data:image\/)/.test(src) ? src : undefined
+    if (!safeSrc) return null
     return (
       <img
-        src={src}
+        src={safeSrc}
         alt={alt ?? ""}
         className="my-2 max-w-full rounded-lg border"
         loading="lazy"

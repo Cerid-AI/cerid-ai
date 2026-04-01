@@ -24,6 +24,8 @@ import type {
   ArtifactFilterParams,
   RagMode,
   MemoryRecallResult,
+  IngestionProgress,
+  DuplicatesResponse,
 } from "../types"
 
 // --- Knowledge Base ---
@@ -553,19 +555,48 @@ export async function getScanProgress(scanId: string): Promise<Record<string, un
 }
 
 // ---------------------------------------------------------------------------
-// Trading proxy (routed through MCP server's /api/trading/* proxy)
+// Ingestion progress polling
 // ---------------------------------------------------------------------------
 
-export async function fetchTradingAggregate(): Promise<Record<string, unknown>> {
-  const res = await fetch(`${MCP_BASE}/api/trading/aggregate/portfolio`, {
-    headers: mcpHeaders(),
-  })
-  return res.ok ? res.json() : {}
+export async function fetchIngestionProgress(): Promise<IngestionProgress> {
+  const res = await fetch(`${MCP_BASE}/ingestion/progress`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Ingestion progress failed: ${res.status}`))
+  return res.json()
 }
 
-export async function fetchTradingSessions(): Promise<unknown[]> {
-  const res = await fetch(`${MCP_BASE}/api/trading/sessions`, {
-    headers: mcpHeaders(),
-  })
-  return res.ok ? res.json() : []
+// ---------------------------------------------------------------------------
+// Near-duplicate detection
+// ---------------------------------------------------------------------------
+
+export async function fetchDuplicates(minSimilarity = 0.85): Promise<DuplicatesResponse> {
+  const params = new URLSearchParams({ min_similarity: String(minSimilarity) })
+  const res = await fetch(`${MCP_BASE}/admin/kb/duplicates?${params}`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Duplicates fetch failed: ${res.status}`))
+  return res.json()
 }
+
+export async function mergeDuplicates(
+  keepArtifactId: string,
+  removeArtifactIds: string[],
+): Promise<{ status: string; merged: number }> {
+  const res = await fetch(`${MCP_BASE}/admin/kb/duplicates/merge`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ keep_id: keepArtifactId, remove_ids: removeArtifactIds }),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Merge duplicates failed: ${res.status}`))
+  return res.json()
+}
+
+export async function dismissDuplicate(
+  artifactIds: string[],
+): Promise<{ status: string }> {
+  const res = await fetch(`${MCP_BASE}/admin/kb/duplicates/dismiss`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ artifact_ids: artifactIds }),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Dismiss duplicate failed: ${res.status}`))
+  return res.json()
+}
+

@@ -16,7 +16,7 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
   const memoized = useMemo(
     () => value,
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable callbacks omitted intentionally
-    [value.conversations, value.active, value.activeId, value.verifiedConversations],
+    [value.conversations, value.visibleConversations, value.active, value.activeId, value.verifiedConversations, value.showArchived, value.archivedCount],
   )
   return (
     <ConversationsContext value={memoized}>

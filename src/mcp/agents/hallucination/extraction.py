@@ -34,6 +34,7 @@ from agents.hallucination.patterns import (
     STRONG_FACTUAL_PATTERNS,
     _is_ignorance_admission,
 )
+from errors import VerificationError
 from utils.circuit_breaker import CircuitOpenError
 from utils.internal_llm import call_internal_llm
 from utils.llm_client import call_llm
@@ -417,7 +418,7 @@ async def _extract_claims_llm(
             if claims_internal:
                 logger.info("Internal LLM claim extraction succeeded (%d claims)", len(claims_internal))
                 return claims_internal
-    except Exception as e:
+    except (VerificationError, ValueError, OSError, RuntimeError) as e:
         logger.debug("Internal LLM claim extraction failed (%s), trying external models", e)
 
     for model in models:
@@ -499,7 +500,7 @@ async def extract_claims(
                     len(response_text), len(heuristic_claims),
                 )
                 return heuristic_claims[:max_claims], "heuristic"
-        except Exception as exc:
+        except (VerificationError, ValueError, OSError, RuntimeError) as exc:
             logger.debug("Fast-path heuristic failed (%s), continuing to LLM", exc)
 
     # Pre-extraction: surface ignorance admissions and recency limitations

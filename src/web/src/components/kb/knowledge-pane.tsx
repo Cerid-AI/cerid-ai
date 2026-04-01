@@ -16,15 +16,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Search, X, Loader2, AlertCircle, RefreshCcw, Upload, CheckCircle, Tag, Settings2, ArrowUpDown, ArrowDownAZ, CalendarArrowDown, Star, FileUp, Clock, CircleHelp, LayoutGrid, List, Eye, ArrowRightLeft, Trash2, FolderOpen } from "lucide-react"
+import { Search, X, Loader2, AlertCircle, RefreshCcw, Upload, CheckCircle, Tag, Settings2, ArrowUpDown, ArrowDownAZ, CalendarArrowDown, Star, FileUp, Clock, CircleHelp, LayoutGrid, List, Eye, ArrowRightLeft, Trash2, FolderOpen, Copy } from "lucide-react"
 import { DomainBadge } from "@/components/ui/domain-badge"
 import { cn } from "@/lib/utils"
 import { ArtifactCard } from "./artifact-card"
 import { TaxonomyTree } from "./taxonomy-tree"
 import { GraphPreview } from "./graph-preview"
-import { UploadDialog } from "./upload-dialog"
+import { UploadDialog, type FileUploadStatus } from "./upload-dialog"
 import { ImportDialog } from "./import-dialog"
+import { ActivityFeed } from "./ActivityFeed"
 import { TagManager } from "./tag-manager"
+import { DuplicateDetector } from "./duplicate-detector"
 import { fetchArtifacts, queryKB, uploadFile, recategorizeArtifact, adminDeleteArtifact, updateArtifactTags, reIngestArtifact } from "@/lib/api"
 import { useKBInjection } from "@/contexts/kb-injection-context"
 import { useDragDrop } from "@/hooks/use-drag-drop"
@@ -57,7 +59,7 @@ function parseJsonArray(json: string | undefined): string[] {
   } catch { return [] }
 }
 
-function artifactToResult(a: Artifact): KBQueryResult {
+function artifactToResult(a: Artifact): KBQueryResult & { chunk_count?: number; source_type?: string; client_source?: string } {
   // Parse keywords to use as tags when the artifact has no tags
   const tags = a.tags && a.tags.length > 0
     ? a.tags
@@ -74,6 +76,10 @@ function artifactToResult(a: Artifact): KBQueryResult {
     chunk_index: 0,
     collection: `domain_${a.domain}`,
     ingested_at: a.ingested_at,
+    quality_score: a.quality_score,
+    chunk_count: a.chunk_count,
+    source_type: a.source_type,
+    client_source: a.client_source,
   }
 }
 
@@ -114,7 +120,10 @@ export function KnowledgePane() {
   const [uploadMessage, setUploadMessage] = useState("")
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [showImportDialog, setShowImportDialog] = useState(false)
+  const [showDuplicates, setShowDuplicates] = useState(false)
   const [ingestionLog, setIngestionLog] = useState<Array<{ name: string; time: number; status: "success" | "error" }>>([])
+  const [fileStatuses, setFileStatuses] = useState<FileUploadStatus[]>([])
+  const [uploadingFiles, setUploadingFiles] = useState(false)
   const [clientSource, setClientSource] = useState("gui")
   const [dateFilter, setDateFilter] = useState("all")
   const [displayLimit, setDisplayLimit] = useState(PAGE_SIZE)
@@ -180,18 +189,34 @@ export function KnowledgePane() {
   const handleUploadConfirm = useCallback(async (
     options: { domain?: string; categorize_mode?: string },
   ) => {
-    const files = pendingFiles
-    setPendingFiles([])
+    const files = [...pendingFiles]
+    // Keep dialog open — don't clear pendingFiles until all uploads finish
+    setUploadingFiles(true)
     setUploadStatus("uploading")
     setUploadMessage(`Uploaded 0 of ${files.length}…`)
+    // Initialize per-file statuses to "uploading"
+    setFileStatuses(files.map(() => "uploading" as FileUploadStatus))
     let completed = 0
     try {
       const results = await Promise.allSettled(
-        files.map(async (file) => {
+        files.map(async (file, idx) => {
           const domain = options.domain ?? activeDomain ?? undefined
           const categorize_mode = options.categorize_mode
           try {
-            return await uploadFile(file, { domain, categorizeMode: categorize_mode })
+            const result = await uploadFile(file, { domain, categorizeMode: categorize_mode })
+            setFileStatuses((prev) => {
+              const next = [...prev]
+              next[idx] = "success"
+              return next
+            })
+            return result
+          } catch (err) {
+            setFileStatuses((prev) => {
+              const next = [...prev]
+              next[idx] = "error"
+              return next
+            })
+            throw err
           } finally {
             completed++
             if (completed < files.length) {
@@ -214,11 +239,22 @@ export function KnowledgePane() {
         setUploadMessage(`${succeeded} succeeded, ${failed} failed`)
       }
       queryClient.invalidateQueries({ queryKey: ["artifacts"] })
-      setTimeout(() => setUploadStatus("idle"), UPLOAD_STATUS_RESET_MS)
+      // Keep dialog visible briefly so user sees final statuses, then dismiss
+      setTimeout(() => {
+        setPendingFiles([])
+        setFileStatuses([])
+        setUploadingFiles(false)
+        setUploadStatus("idle")
+      }, UPLOAD_STATUS_RESET_MS)
     } catch (err) {
       setUploadStatus("error")
       setUploadMessage(err instanceof Error ? err.message : "Upload failed")
-      setTimeout(() => setUploadStatus("idle"), UPLOAD_STATUS_RESET_MS)
+      setTimeout(() => {
+        setPendingFiles([])
+        setFileStatuses([])
+        setUploadingFiles(false)
+        setUploadStatus("idle")
+      }, UPLOAD_STATUS_RESET_MS)
     }
   }, [pendingFiles, activeDomain, queryClient, addToIngestionLog])
 
@@ -416,6 +452,16 @@ export function KnowledgePane() {
           >
             <FolderOpen className="mr-1 h-3 w-3" />
             Import
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={() => setShowDuplicates(true)}
+            title="Find duplicate artifacts"
+          >
+            <Copy className="mr-1 h-3 w-3" />
+            Duplicates
           </Button>
           <input
             ref={fileInputRef}
@@ -710,6 +756,10 @@ export function KnowledgePane() {
               }}
             />
           </div>
+          <Separator />
+          <div className="p-2">
+            <ActivityFeed maxHeight="260px" />
+          </div>
         </div>
 
         {/* Cards/list area */}
@@ -842,10 +892,13 @@ export function KnowledgePane() {
         files={pendingFiles}
         defaultDomain={activeDomain}
         onConfirm={handleUploadConfirm}
-        onCancel={() => setPendingFiles([])}
+        onCancel={() => { if (!uploadingFiles) setPendingFiles([]) }}
+        fileStatuses={fileStatuses}
+        uploading={uploadingFiles}
       />
 
       <TagManager open={tagManagerOpen} onOpenChange={setTagManagerOpen} localTags={availableTags} />
+      <DuplicateDetector open={showDuplicates} onClose={() => setShowDuplicates(false)} />
     </div>
   )
 }

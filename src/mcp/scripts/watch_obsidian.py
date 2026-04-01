@@ -26,7 +26,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import re
 import sys
 import time
 from datetime import datetime
@@ -34,9 +36,12 @@ from pathlib import Path
 
 import requests
 
+from errors import CeridError
+
 # Add parent dir so we can import config
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import config
+from parsers.structured import parse_markdown
 
 MCP_URL = os.getenv("MCP_URL", "http://localhost:8888")
 
@@ -136,8 +141,67 @@ def _process_retries():
         ingest_note(file_path, domain, mode)
 
 
+# Obsidian-specific fields to ignore when mapping frontmatter
+_OBSIDIAN_IGNORE_KEYS = {"cssclass", "cssclasses", "publish", "permalink"}
+
+# Wikilink pattern: [[page|display]] or [[page]]
+_WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]")
+
+
+def _convert_wikilinks(text: str) -> str:
+    """Convert Obsidian wikilinks ``[[page|display]]`` to plain text references."""
+    def _replace(m: re.Match) -> str:
+        display = m.group(2) or m.group(1)
+        return display
+    return _WIKILINK_RE.sub(_replace, text)
+
+
+def _map_frontmatter(frontmatter: dict, domain: str) -> tuple[str, dict]:
+    """Map Obsidian frontmatter fields to ingestion metadata.
+
+    Returns (domain_hint, metadata_dict).
+    """
+    metadata: dict = {}
+
+    # tags → artifact tags
+    fm_tags = frontmatter.get("tags", [])
+    if isinstance(fm_tags, str):
+        fm_tags = [t.strip().lower() for t in fm_tags.split(",") if t.strip()]
+    elif isinstance(fm_tags, list):
+        fm_tags = [str(t).strip().lower() for t in fm_tags if t]
+    if fm_tags:
+        metadata["tags_json"] = json.dumps(fm_tags)
+
+    # aliases → alternate_titles
+    aliases = frontmatter.get("aliases", [])
+    if isinstance(aliases, str):
+        aliases = [a.strip() for a in aliases.split(",") if a.strip()]
+    elif isinstance(aliases, list):
+        aliases = [str(a).strip() for a in aliases if a]
+    if aliases:
+        metadata["alternate_titles"] = json.dumps(aliases)
+
+    # category → domain hint
+    domain_hint = domain
+    category = frontmatter.get("category", "")
+    if isinstance(category, str) and category.strip():
+        cat_lower = category.strip().lower()
+        # Map to a known domain if it matches
+        if cat_lower in config.DOMAINS:
+            domain_hint = cat_lower
+
+    # date/created → source_date
+    for date_key in ("date", "created"):
+        raw_date = frontmatter.get(date_key)
+        if raw_date:
+            metadata["source_date"] = str(raw_date)
+            break
+
+    return domain_hint, metadata
+
+
 def ingest_note(file_path: str, domain: str, mode: str):
-    """Send a markdown file to the MCP /ingest_file endpoint."""
+    """Send a markdown file to the MCP /ingest endpoint with frontmatter metadata."""
     if not _should_process(file_path):
         return
 
@@ -148,21 +212,45 @@ def ingest_note(file_path: str, domain: str, mode: str):
     filename = Path(file_path).name
     _log("INFO", f"Ingesting: {filename} → domain={domain}")
 
-    # For Obsidian, we read the file and send content directly
-    # (vault isn't mounted in Docker like cerid-archive is)
+    # Use the structured parser to extract frontmatter and content
     try:
-        text = Path(file_path).read_text(encoding="utf-8", errors="replace")
-    except Exception as e:
-        _log("ERROR", f"  Failed to read: {filename}: {e}")
+        parsed = parse_markdown(file_path)
+    except (CeridError, ValueError, OSError, RuntimeError) as e:
+        _log("ERROR", f"  Failed to parse: {filename}: {e}")
         return
+
+    text = parsed.get("text", "")
+
+    # Convert Obsidian wikilinks to plain text
+    text = _convert_wikilinks(text)
+
+    # Extract and map frontmatter
+    effective_domain = domain
+    extra_metadata: dict = {}
+    fm_json = parsed.get("frontmatter", "")
+    if fm_json:
+        try:
+            frontmatter = json.loads(fm_json)
+            if isinstance(frontmatter, dict):
+                # Filter out Obsidian-specific keys
+                frontmatter = {
+                    k: v for k, v in frontmatter.items()
+                    if k not in _OBSIDIAN_IGNORE_KEYS
+                }
+                effective_domain, extra_metadata = _map_frontmatter(frontmatter, domain)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # Build request payload — send as content with metadata
+    payload: dict = {
+        "content": text,
+        "domain": effective_domain,
+    }
 
     try:
         resp = requests.post(
             f"{MCP_URL}/ingest",
-            json={
-                "content": text,
-                "domain": domain,
-            },
+            json=payload,
             timeout=60,
         )
         if resp.status_code == 200:
@@ -172,7 +260,10 @@ def ingest_note(file_path: str, domain: str, mode: str):
                 _log("INFO", f"  = {filename}: unchanged (duplicate)")
             else:
                 chunks = data.get("chunks", 0)
-                _log("INFO", f"  + {filename} → {domain} ({chunks} chunks)")
+                dm = effective_domain if effective_domain != domain else domain
+                _log("INFO", f"  + {filename} → {dm} ({chunks} chunks)")
+                if extra_metadata:
+                    _log("INFO", f"    frontmatter: {list(extra_metadata.keys())}")
         else:
             _log("ERROR", f"  ! {filename}: HTTP {resp.status_code} - {resp.text[:200]}")
             _schedule_retry(file_path, domain, mode)

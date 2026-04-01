@@ -22,6 +22,8 @@ from __future__ import annotations
 import importlib.util
 import json
 import logging
+
+from errors import ConfigError
 import sys
 from pathlib import Path
 from typing import Any
@@ -140,7 +142,7 @@ def _load_single_plugin(plugin_dir: Path) -> dict[str, Any] | None:
         spec.loader.exec_module(module)
     except PluginLoadError:
         raise
-    except Exception as e:
+    except (ConfigError, ValueError, OSError, RuntimeError) as e:
         raise PluginLoadError(f"Plugin '{name}': failed to import: {e}") from e
 
     # Call register()
@@ -152,7 +154,7 @@ def _load_single_plugin(plugin_dir: Path) -> dict[str, Any] | None:
 
     try:
         register_fn()
-    except Exception as e:
+    except (ConfigError, ValueError, OSError, RuntimeError) as e:
         raise PluginLoadError(
             f"Plugin '{name}': register() failed: {e}"
         ) from e
@@ -187,7 +189,7 @@ def _scan_directory(base_dir: Path, loaded: list[str]) -> None:
                 loaded.append(info["name"])
         except PluginLoadError as e:
             logger.error(str(e))
-        except Exception as e:
+        except (ConfigError, ValueError, OSError, RuntimeError) as e:
             logger.error(f"Unexpected error loading plugin from {entry}: {e}")
 
 

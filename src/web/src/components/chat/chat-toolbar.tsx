@@ -19,7 +19,7 @@ import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { useState, useCallback } from "react"
-import { Plus, Database, Rss, LayoutDashboard, Zap, Shield, ShieldCheck, MoreVertical, Brain, Check, Layers, ChevronDown } from "lucide-react"
+import { Plus, Database, Rss, LayoutDashboard, Zap, Shield, ShieldCheck, MoreVertical, Brain, Check, Layers, ChevronDown, Lock, LockOpen } from "lucide-react"
 import type { RagMode } from "@/lib/types"
 import { ModelSelect } from "./model-select"
 import { cn } from "@/lib/utils"
@@ -191,6 +191,11 @@ interface ChatToolbarProps {
   // Model
   selectedModel: string
   onModelChange: (model: string) => void
+  // Private Mode
+  privateModeEnabled: boolean
+  privateModeLevel: number
+  togglePrivateMode: () => void
+  changePrivateModeLevel: (level: number) => void
   // Actions
   onNewChat: () => void
 }
@@ -208,6 +213,7 @@ export function ChatToolbar({
   ragMode, setRagMode,
   routingMode, setRoutingMode, cycleRoutingMode,
   selectedModel, onModelChange,
+  privateModeEnabled, privateModeLevel, togglePrivateMode, changePrivateModeLevel,
   onNewChat,
 }: ChatToolbarProps) {
   const cycleRagMode = useCallback(() => {
@@ -220,6 +226,49 @@ export function ChatToolbar({
         <Plus className="mr-1 h-4 w-4" />
         {!isNarrow && "New chat"}
       </Button>
+
+      {/* Private Mode toggle */}
+      <TooltipProvider delayDuration={0}>
+        <ToolbarButtonWithMenu
+          icon={privateModeEnabled ? <Lock className="h-4 w-4" /> : <LockOpen className="h-4 w-4" />}
+          active={privateModeEnabled}
+          onClick={togglePrivateMode}
+          ariaLabel={privateModeEnabled ? "Disable private mode" : "Enable private mode"}
+          title="Private Mode"
+          tooltip={
+            privateModeEnabled
+              ? `Private mode: ON (Level ${privateModeLevel})`
+              : "Private mode: OFF"
+          }
+          className={privateModeEnabled ? "text-amber-500 hover:text-amber-500 bg-amber-500/10" : ""}
+          menuContent={
+            <>
+              <MenuLabel>Privacy Level</MenuLabel>
+              <MenuRadioItem checked={privateModeLevel === 0} onClick={() => changePrivateModeLevel(0)}>
+                Off — normal operation
+              </MenuRadioItem>
+              <MenuRadioItem checked={privateModeLevel === 1} onClick={() => changePrivateModeLevel(1)}>
+                L1 — skip saves &amp; sync
+              </MenuRadioItem>
+              <MenuRadioItem checked={privateModeLevel === 2} onClick={() => changePrivateModeLevel(2)}>
+                L2 — plus skip KB injection
+              </MenuRadioItem>
+              <MenuRadioItem checked={privateModeLevel === 3} onClick={() => changePrivateModeLevel(3)}>
+                L3 — plus no logging
+              </MenuRadioItem>
+              <MenuRadioItem checked={privateModeLevel === 4} onClick={() => changePrivateModeLevel(4)}>
+                L4 — full ephemeral
+              </MenuRadioItem>
+            </>
+          }
+        />
+      </TooltipProvider>
+      {privateModeEnabled && !isNarrow && (
+        <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-amber-500/40 text-amber-500">
+          Private
+        </Badge>
+      )}
+
       <div className="flex-1" />
       <TooltipProvider delayDuration={0}>
         {/* Advanced-only toggles */}
@@ -427,6 +476,13 @@ export function ChatToolbar({
               >
                 <Zap className="h-4 w-4" />
                 {routingMode === "manual" ? "Routing: Off" : routingMode === "recommend" ? "Routing: Suggest" : "Routing: Auto"}
+              </button>
+              <button
+                className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent", privateModeEnabled && "text-amber-500 bg-amber-500/10")}
+                onClick={togglePrivateMode}
+              >
+                {privateModeEnabled ? <Lock className="h-4 w-4" /> : <LockOpen className="h-4 w-4" />}
+                {privateModeEnabled ? `Private: L${privateModeLevel}` : "Private: Off"}
               </button>
             </PopoverContent>
           </Popover>

@@ -664,6 +664,29 @@ Model can be changed post-setup via Settings UI → Ollama → Change button.
 
 **Cost:** $0 for all internal LLM calls when using Ollama. Falls back to OpenRouter (paid) when Ollama is unavailable.
 
+### Billing & Licensing
+- `POST /billing/create-checkout` — Create Stripe Checkout session for Pro tier upgrade
+- `POST /billing/webhook` — Stripe webhook handler (checkout.session.completed, invoice.payment_succeeded, customer.subscription.deleted)
+- `GET /billing/status` — Current license/subscription status
+- `POST /billing/validate-key` — Validate a manually-entered license key for offline Pro activation
+
+### Model Updates
+- `GET /models/updates` — New and deprecated models since last catalog check (populated by scheduled job)
+
+### Agent Activity
+- `GET /agents/activity/stream` — SSE stream of real-time agent activity events (exempted from API key auth)
+
+### Private Mode
+- `POST /settings/private-mode` — Enable private mode with security level (1-4)
+- `DELETE /settings/private-mode` — Disable private mode, optionally clear Redis cache
+- `GET /settings/private-mode` — Get current private mode status
+
+### Watched Folders
+- `POST /watched-folders` — Create watched folder config
+- `GET /watched-folders` — List watched folders
+- `PATCH /watched-folders/{id}` — Update folder config
+- `DELETE /watched-folders/{id}` — Remove watched folder
+
 #### Boardroom Endpoints
 
 Stable endpoints for the cerid-boardroom agent (`X-Client-ID: boardroom-agent`):

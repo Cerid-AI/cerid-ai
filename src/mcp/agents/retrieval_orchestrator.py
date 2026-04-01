@@ -22,8 +22,18 @@ from config.settings import (
     MEMORY_RECALL_TIMEOUT_MS,
     MEMORY_RECALL_TOP_K,
 )
+from errors import RetrievalError
 
 logger = logging.getLogger("ai-companion.retrieval")
+
+# Plugin hook for custom_smart source weighting (BSL-1.1 plugin injects this).
+_custom_rag_fn = None
+
+
+def set_custom_rag_handler(fn):
+    """Called by the custom-rag plugin's register() to inject the implementation."""
+    global _custom_rag_fn
+    _custom_rag_fn = fn
 
 
 async def orchestrated_query(
@@ -89,7 +99,7 @@ async def orchestrated_query(
             neo4j_driver=neo4j_driver,
             **kwargs,
         )
-    except Exception as kb_exc:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as kb_exc:
         logger.error("KB query failed: %s", kb_exc)
         kb_result = {"results": [], "context": "", "strategy": "error"}
         source_status["kb"] = "error"
@@ -141,9 +151,9 @@ async def orchestrated_query(
         for m in memory_results
     ]
 
-    # Apply custom_smart source config (weights/toggles)
-    if rag_mode == "custom_smart" and source_config:
-        kb_sources, memory_sources, external_sources = _apply_source_config(
+    # Apply custom_smart source config (weights/toggles) via Pro plugin
+    if rag_mode == "custom_smart" and source_config and _custom_rag_fn is not None:
+        kb_sources, memory_sources, external_sources = _custom_rag_fn(
             kb_sources, memory_sources, external_sources, source_config,
         )
 
@@ -197,7 +207,7 @@ async def _recall_with_timeout(
     except asyncio.TimeoutError:
         logger.warning("Memory recall timed out after %dms", timeout_ms)
         return []
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.warning("Memory recall failed: %s", e)
         return []
 
@@ -213,52 +223,6 @@ def _format_memory_context(memory_sources: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _apply_source_config(
-    kb_sources: list[dict],
-    memory_sources: list[dict],
-    external_sources: list[dict],
-    source_config: dict,
-) -> tuple[list[dict], list[dict], list[dict]]:
-    """Apply custom_smart source weights and toggles.
-
-    source_config shape:
-        {
-            "kb_enabled": True,
-            "memory_enabled": True,
-            "external_enabled": True,
-            "kb_weight": 1.0,
-            "memory_weight": 1.0,
-            "external_weight": 1.0,
-            "memory_types": ["empirical", "decision", ...],  # optional filter
-        }
-    """
-    if not source_config.get("kb_enabled", True):
-        kb_sources = []
-    if not source_config.get("memory_enabled", True):
-        memory_sources = []
-    if not source_config.get("external_enabled", True):
-        external_sources = []
-
-    # Apply weight scaling to relevance scores
-    kb_weight = source_config.get("kb_weight", 1.0)
-    memory_weight = source_config.get("memory_weight", 1.0)
-    external_weight = source_config.get("external_weight", 1.0)
-
-    for s in kb_sources:
-        if "relevance" in s:
-            s["relevance"] = s["relevance"] * kb_weight
-    for s in memory_sources:
-        if "relevance" in s:
-            s["relevance"] = s["relevance"] * memory_weight
-    for s in external_sources:
-        if "relevance" in s:
-            s["relevance"] = s["relevance"] * external_weight
-
-    # Optional per-memory-type filter
-    allowed_types = source_config.get("memory_types")
-    if allowed_types:
-        memory_sources = [
-            m for m in memory_sources if m.get("memory_type") in allowed_types
-        ]
-
-    return kb_sources, memory_sources, external_sources
+    # NOTE: _apply_source_config() has been extracted to the custom-rag plugin
+    # (plugins/custom-rag/plugin.py, BSL-1.1). The plugin's register() injects
+    # the weighting function via set_custom_rag_handler().

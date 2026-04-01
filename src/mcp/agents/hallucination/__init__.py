@@ -60,6 +60,13 @@ from agents.hallucination.persistence import (  # noqa: F401
 # ---------------------------------------------------------------------------
 # Re-exports from streaming.py
 # ---------------------------------------------------------------------------
+from agents.hallucination.startup_self_test import (  # noqa: F401
+    get_failure_counts_sync,
+    get_self_test_status_sync,
+    record_verification_failure,
+    reset_verification_failures,
+    run_verification_self_test,
+)
 from agents.hallucination.streaming import (  # noqa: F401
     check_hallucinations,
     verify_response_streaming,

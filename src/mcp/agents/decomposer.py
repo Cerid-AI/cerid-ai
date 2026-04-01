@@ -14,13 +14,13 @@ from typing import Any
 import config
 from config import DOMAINS
 from deps import get_chroma
+from errors import RetrievalError
 from utils.text import STOPWORDS as _STOPWORDS
 from utils.text import WORD_RE as _WORD_RE
 
 logger = logging.getLogger("ai-companion.query_agent")
 
 __all__ = [
-    "_format_chroma_result",
     "_get_adjacent_domains",
     "_enrich_query",
     "multi_domain_query",
@@ -185,7 +185,7 @@ async def multi_domain_query(
     # Pre-check which collections actually exist to skip missing domains fast
     try:
         existing_collections = {c.name for c in chroma_client.list_collections()}
-    except Exception:
+    except (RetrievalError, ValueError, OSError, RuntimeError):
         existing_collections = set()
 
     async def query_domain(domain: str) -> list[dict[str, Any]]:
@@ -260,12 +260,12 @@ async def multi_domain_query(
                                     metadata=meta,
                                 ))
                                 seen_ids.add(cid)
-                        except Exception as e:
+                        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
                             logger.debug(f"BM25-only fetch failed for {domain}: {e}")
 
             return formatted
 
-        except Exception as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
             logger.warning(f"Error querying domain {domain}: {e}")
             return []
 
@@ -273,6 +273,9 @@ async def multi_domain_query(
     domain_results = await asyncio.gather(*tasks)
 
     all_results = [r for results in domain_results for r in results]
+
+    from utils.agent_events import emit_agent_event
+    emit_agent_event("decomposer", f"Retrieved {len(all_results)} chunks across {len(domains)} domains")
 
     return all_results
 
@@ -332,7 +335,7 @@ async def graph_expand_results(
             depth=config.GRAPH_TRAVERSAL_DEPTH,
             max_results=config.GRAPH_MAX_RELATED,
         )
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.warning(f"Graph traversal failed (continuing without): {e}")
         return results
 

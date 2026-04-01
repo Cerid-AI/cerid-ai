@@ -23,8 +23,8 @@ from config.features import DEFAULT_TENANT_ID
 
 logger = logging.getLogger("ai-companion.auth")
 
-EXEMPT_PATHS = {"/health", "/api/v1/health", "/", "/docs", "/openapi.json", "/redoc"}
-EXEMPT_PREFIXES = ("/mcp/", "/auth/")
+EXEMPT_PATHS = {"/health", "/api/v1/health", "/", "/docs", "/openapi.json", "/redoc", "/agents/activity/stream"}
+EXEMPT_PREFIXES = ("/mcp/", "/auth/", "/ingest/webhook")
 
 
 def _redact_ip(ip: str) -> str:

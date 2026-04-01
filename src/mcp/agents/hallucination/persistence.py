@@ -12,6 +12,8 @@ import json
 import logging
 from typing import Any
 
+from errors import VerificationError
+
 logger = logging.getLogger("ai-companion.hallucination")
 
 # Redis key prefix and TTL for hallucination reports
@@ -29,6 +31,6 @@ def get_hallucination_report(
         data = redis_client.get(key)
         if data:
             return json.loads(data)
-    except Exception as e:
+    except (VerificationError, ValueError, OSError, RuntimeError) as e:
         logger.warning("Failed to retrieve hallucination report: %s", e)
     return None

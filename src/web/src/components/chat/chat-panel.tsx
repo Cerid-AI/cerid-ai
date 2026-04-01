@@ -92,6 +92,7 @@ export function ChatPanel() {
     memoryExtraction, toggleMemoryExtraction,
     inlineMarkups, toggleInlineMarkups,
     expertVerification, toggleExpertVerification,
+    privateModeEnabled, privateModeLevel, togglePrivateMode, changePrivateModeLevel,
   } = useSettings()
 
   const { send, stop, isStreaming } = useChat({
@@ -99,6 +100,7 @@ export function ChatPanel() {
     onMessageUpdate: (convoId, content) => updateLastMessage(convoId, content),
     onModelResolved: (convoId, model) => updateLastMessageModel(convoId, model),
     feedbackEnabled: feedbackLoop,
+    privateModeLevel,
   })
 
   const [selectedModel, setSelectedModel] = useState(MODELS[0].id)
@@ -458,6 +460,10 @@ export function ChatPanel() {
         cycleRoutingMode={cycleRoutingMode}
         selectedModel={selectedModel}
         onModelChange={handleModelChange}
+        privateModeEnabled={privateModeEnabled}
+        privateModeLevel={privateModeLevel}
+        togglePrivateMode={togglePrivateMode}
+        changePrivateModeLevel={changePrivateModeLevel}
         onNewChat={() => create(selectedModel)}
       />
 

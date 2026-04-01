@@ -550,3 +550,145 @@ export async function fetchWorkflowTemplates(): Promise<WorkflowTemplate[]> {
   if (!res.ok) throw new Error(await extractError(res, `Fetch workflow templates failed: ${res.status}`))
   return res.json()
 }
+
+// -- Model Updates -----------------------------------------------------------
+
+export interface ModelUpdateEntry {
+  id: string
+  name?: string
+  context_length?: number | null
+  pricing?: { prompt?: string; completion?: string }
+}
+
+export interface ModelUpdatesResponse {
+  new: ModelUpdateEntry[]
+  deprecated: ModelUpdateEntry[]
+  last_checked: string | null
+  catalog_size?: number
+}
+
+export interface ModelUpdateItem {
+  update_id: string
+  model_id: string
+  update_type: "new" | "deprecated" | "price_change"
+  details: Record<string, unknown>
+  detected_at: string
+}
+
+export interface ModelUpdatesFullResponse {
+  updates: ModelUpdateItem[]
+  last_checked: string | null
+  catalog_size: number
+}
+
+export interface ModelComparisonInfo {
+  model_id: string
+  name: string
+  context_length: number | null
+  input_cost_per_1m: number
+  output_cost_per_1m: number
+  deprecated: boolean
+  deprecation_info?: { successor?: string; reason?: string; deprecated_date?: string } | null
+  top_provider?: Record<string, unknown>
+  architecture?: Record<string, unknown>
+}
+
+export interface ModelComparisonResponse {
+  current: ModelComparisonInfo
+  candidate: ModelComparisonInfo
+  recommendation: string
+}
+
+export async function fetchModelUpdates(): Promise<ModelUpdatesResponse> {
+  const res = await fetch(`${MCP_BASE}/models/updates`, { headers: mcpHeaders() })
+  if (!res.ok) return { new: [], deprecated: [], last_checked: null }
+  return res.json()
+}
+
+export async function fetchModelUpdatesFull(): Promise<ModelUpdatesFullResponse> {
+  const res = await fetch(`${MCP_BASE}/models/updates`, { headers: mcpHeaders() })
+  if (!res.ok) return { updates: [], last_checked: null, catalog_size: 0 }
+  return res.json()
+}
+
+export async function triggerModelUpdateCheck(): Promise<{
+  success: boolean
+  new_count: number
+  deprecated_count: number
+  last_checked: string
+}> {
+  const res = await fetch(`${MCP_BASE}/models/updates/check`, {
+    method: "POST",
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Model update check failed: ${res.status}`))
+  return res.json()
+}
+
+export async function dismissModelUpdate(updateId: string): Promise<void> {
+  const res = await fetch(`${MCP_BASE}/models/updates/dismiss/${encodeURIComponent(updateId)}`, {
+    method: "POST",
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Dismiss failed: ${res.status}`))
+}
+
+export async function fetchModelComparison(
+  currentModel: string,
+  candidateModel: string,
+): Promise<ModelComparisonResponse> {
+  const params = new URLSearchParams({
+    current_model: currentModel,
+    candidate_model: candidateModel,
+  })
+  const res = await fetch(`${MCP_BASE}/models/compare?${params}`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Model comparison failed: ${res.status}`))
+  return res.json()
+}
+
+// ---------------------------------------------------------------------------
+// Private Mode
+// ---------------------------------------------------------------------------
+
+export async function fetchPrivateMode(): Promise<{ enabled: boolean; level: number }> {
+  const res = await fetch(`${MCP_BASE}/settings/private-mode`, { headers: mcpHeaders() })
+  if (!res.ok) return { enabled: false, level: 0 }
+  return res.json()
+}
+
+export async function enablePrivateMode(level: number = 1): Promise<void> {
+  await fetch(`${MCP_BASE}/settings/private-mode`, {
+    method: "POST",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ level }),
+  })
+}
+
+export async function disablePrivateMode(clearCache: boolean = false): Promise<void> {
+  await fetch(`${MCP_BASE}/settings/private-mode`, {
+    method: "DELETE",
+    headers: mcpHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ clear_cache: clearCache }),
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Storage Monitoring (Phase 56)
+// ---------------------------------------------------------------------------
+
+export async function fetchStorageMetrics(): Promise<import("../types").StorageMetrics> {
+  const res = await fetch(`${MCP_BASE}/system/storage`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(`Storage metrics fetch failed: ${res.status}`)
+  return res.json()
+}
+
+export async function fetchIngestHistory(
+  limit = 50,
+  cursor?: string,
+): Promise<import("../types").IngestHistoryResponse> {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (cursor) params.set("offset", cursor)
+  const res = await fetch(`${MCP_BASE}/admin/ingest-history?${params}`, { headers: mcpHeaders() })
+  if (!res.ok) return { items: [], total: 0, next_cursor: null }
+  return res.json()
+}

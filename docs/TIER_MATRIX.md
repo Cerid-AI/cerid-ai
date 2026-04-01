@@ -29,13 +29,14 @@
 | Hallucination detection | ✓ | ✓ | ✓ | — |
 | Streaming verification | ✓ | ✓ | ✓ | — |
 | Metamorphic verification | — | ✓ | ✓ | `metamorphic_verification` |
+| Semantic deduplication | ✓ | ✓ | ✓ | — |
 | **Knowledge Management** | | | | |
 | Memory layer | ✓ | ✓ | ✓ | — |
 | Web search fallback | ✓ | ✓ | ✓ | — |
 | External data sources | ✓ | ✓ | ✓ | — |
 | **Multi-Modal** | | | | |
-| OCR (scanned PDFs) | — | ✓ | ✓ | `ocr_parsing` |
 | Audio transcription | — | ✓ | ✓ | `audio_transcription` |
+| OCR (scanned PDFs) | ✓ | ✓ | ✓ | — |
 | Vision (image analysis) | — | ✓ | ✓ | `image_understanding` |
 | **Tools & Workflow** | | | | |
 | Visual workflow builder | — | ✓ | ✓ | plugin tier |
@@ -44,9 +45,9 @@
 | Ollama local LLM | ✓ | ✓ | ✓ | — |
 | **Infrastructure** | | | | |
 | Multi-user JWT auth | — | — | ✓ | `multi_user` |
-| SSO/SAML (planned) | — | — | ✓ | `sso_saml` |
-| Audit logging | — | — | ✓ | `audit_logging` |
-| SLA & priority support | — | — | ✓ | contractual |
+| SSO/SAML | — | — | planned | `sso_saml` (scaffolded) |
+| Audit logging | — | — | planned | `audit_logging` (scaffolded) |
+| SLA & priority support | — | — | planned | contractual |
 
 ## Tier Configuration
 

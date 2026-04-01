@@ -22,6 +22,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from errors import CeridError
+
 logger = logging.getLogger("ai-companion")
 
 # Phase 34 toggles relevant for ablation studies
@@ -131,7 +133,7 @@ async def _run_single(
 
                 metrics = await evaluate_all(query, answer, contexts)
                 ragas_scores = {k: v.score for k, v in metrics.items()}
-            except Exception as e:
+            except (CeridError, ValueError, OSError, RuntimeError) as e:
                 logger.warning("RAGAS eval failed for %s/%s: %s", config.name, query[:30], e)
 
         return AblationResult(
@@ -190,7 +192,7 @@ async def run_ablation(
                     run_ragas=run_ragas,
                 )
                 results.append(result)
-            except Exception as e:
+            except (CeridError, ValueError, OSError, RuntimeError) as e:
                 logger.error("Ablation failed for %s/%s: %s", config.name, query[:30], e)
                 results.append(AblationResult(
                     config_name=config.name,

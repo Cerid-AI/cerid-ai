@@ -25,6 +25,7 @@ import httpx
 import config
 from config.constants import QUALITY_TIER_EXCELLENT, QUALITY_TIER_FAIR, QUALITY_TIER_GOOD
 from db.neo4j.artifacts import list_artifacts, update_artifact_summary
+from errors import RetrievalError
 from utils.circuit_breaker import CircuitOpenError
 from utils.llm_client import call_llm
 from utils.time import utcnow, utcnow_iso
@@ -299,7 +300,7 @@ def estimate_synopsis_run(
     for domain in target_domains:
         try:
             artifacts = list_artifacts(neo4j_driver, domain=domain, limit=max_artifacts)
-        except Exception:
+        except (RetrievalError, ValueError, OSError, RuntimeError):
             continue
         candidates = [
             a for a in artifacts
@@ -364,7 +365,10 @@ async def curate(
         generate_synopses: If True, generate AI synopses for truncated summaries.
         force_synopses: If True, regenerate ALL synopses (not just truncated ones).
     """
+    from utils.agent_events import emit_agent_event
+
     target_domains = domains or config.DOMAINS
+    emit_agent_event("curator", f"Scoring artifact quality across {len(target_domains)} domains...")
 
     all_scores: list[dict[str, Any]] = []
     # Collect artifacts by domain for synopsis pass
@@ -373,7 +377,7 @@ async def curate(
     for domain in target_domains:
         try:
             artifacts = list_artifacts(neo4j_driver, domain=domain, limit=max_artifacts)
-        except Exception as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
             logger.warning(f"Failed to list artifacts for {domain}: {e}")
             continue
 
@@ -396,7 +400,7 @@ async def curate(
     if all_scores:
         try:
             updated = _store_quality_scores(neo4j_driver, all_scores)
-        except Exception as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
             logger.error(f"Failed to store quality scores: {e}")
 
     # Synopsis generation pass
@@ -420,7 +424,7 @@ async def curate(
                 collection = chroma_client.get_collection(
                     name=config.collection_name(domain)
                 )
-            except Exception as e:
+            except (RetrievalError, ValueError, OSError, RuntimeError) as e:
                 logger.warning(f"Cannot access collection for {domain}: {e}")
                 continue
 
@@ -432,7 +436,7 @@ async def curate(
                     if not docs or not docs[0]:
                         continue
                     text = docs[0]
-                except Exception:
+                except (RetrievalError, ValueError, OSError, RuntimeError):
                     continue
 
                 synopsis = await _generate_synopsis(
@@ -447,7 +451,7 @@ async def curate(
                     try:
                         update_artifact_summary(neo4j_driver, artifact["id"], synopsis)
                         synopses_generated += 1
-                    except Exception as e:
+                    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
                         logger.warning(f"Failed to store synopsis for {artifact['id'][:8]}: {e}")
                 # Adaptive throttle based on model rate limits
                 await asyncio.sleep(float(throttle_delay))
@@ -473,6 +477,13 @@ async def curate(
             else "poor"
         )
         score_dist[tier] += 1
+
+    emit_agent_event(
+        "curator",
+        f"Artifact quality: avg {avg_score:.2f} \u2014 {score_dist['excellent']} excellent, "
+        f"{score_dist['good']} good, {score_dist['poor']} poor",
+        level="success",
+    )
 
     return {
         "timestamp": utcnow_iso(),

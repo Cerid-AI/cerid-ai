@@ -9,6 +9,8 @@ import os
 
 import httpx
 
+from errors import ConfigError
+
 logger = logging.getLogger("ai-companion.providers")
 
 # ---------------------------------------------------------------------------
@@ -145,7 +147,7 @@ async def validate_provider_key(provider: str, api_key: str) -> tuple[bool, str]
             try:
                 body = resp.json()
                 detail = body.get("error", {}).get("message", "") or body.get("detail", "")
-            except Exception:
+            except (ConfigError, ValueError, OSError, RuntimeError):
                 detail = resp.text[:200]
 
             msg = f"HTTP {resp.status_code}: {detail}" if detail else f"HTTP {resp.status_code}"
@@ -162,7 +164,7 @@ async def validate_provider_key(provider: str, api_key: str) -> tuple[bool, str]
         msg = f"Request timed out after {_VALIDATION_TIMEOUT}s"
         logger.warning("Provider %s validation timeout", provider)
         return False, msg
-    except Exception as exc:
+    except (ConfigError, ValueError, OSError, RuntimeError) as exc:
         logger.error("Provider %s validation unexpected error: %s", provider, exc)
         return False, f"Unexpected error: {exc}"
 

@@ -229,3 +229,17 @@
   - Benchmarked llama3.2:3b vs llama3.1:8b — 8B recommended for 16GB+ machines (better structured output quality)
   - New files: `source-attribution.test.tsx` (dedup test)
   - 1805 Python tests, 507 frontend tests.
+
+---
+
+### Phase 52: Roadmap Audit — Confirmed Completions (2026-03-31)
+
+Codebase audit confirmed 6 roadmap items were fully implemented but not yet reflected in documentation:
+
+- [x] **Startup Wizard & Setup Streamlining (P0)** — 4-step React wizard (`setup-wizard.tsx`), backend `/setup/*` API with first-run detection, API key validation with provider credit checking, health dashboard polling. Documented in Phase A.
+- [x] **Direct Provider SDKs (P1)** — `config/providers.py` provider registry with OpenRouter, OpenAI, Anthropic, xAI (Grok), Ollama. Async key validation per provider, env var mapping, test endpoints. Provider selection in Settings UI.
+- [x] **External APIs in Knowledge Console (P2)** — `utils/data_sources/` framework with 6 sources: DuckDuckGo, Open Library, PubChem, Wikipedia, Wolfram Alpha, Finance. `routers/data_sources.py` provides CRUD + status management.
+- [x] **Watched Folders Management (P2)** — `routers/watched_folders.py` with full CRUD, Redis-backed storage, per-folder config (enable/disable, domain override, exclude patterns, scan isolation). Settings UI integration.
+- [x] **RAG Orchestration Resilience (P2)** — `DegradationManager` (5 tiers: FULL→OFFLINE), circuit breaker registry on all external calls, middleware integration. Graceful degradation on Neo4j/ChromaDB/Redis failures.
+- [x] **Separate Trading Tools (P2)** — Trading agent is a separate repo (`cerid-trading-agent`), connected via A2A protocol + 5 SDK endpoints, gated by `CERID_TRADING_ENABLED`. Domain segregation with 0.3 affinity weight.
+- [x] **Verification Health Check (P0)** — `agents/hallucination/startup_self_test.py` runs claim extraction self-test at startup, records result in Redis. `/health/status` exposes verification pipeline status + consecutive failure counters. Health dashboard shows verification_pipeline service. All 3 actionable items complete.

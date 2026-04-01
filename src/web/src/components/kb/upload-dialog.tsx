@@ -99,7 +99,7 @@ export function UploadDialog({ files, defaultDomain, onConfirm, onCancel, tier, 
   const totalSize = files.reduce((sum, f) => sum + f.size, 0)
 
   return (
-    <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onCancel() }}>
+    <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen && !uploading) onCancel() }}>
       <DialogContent className={isBatch ? "sm:max-w-lg" : "sm:max-w-md"}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -127,13 +127,27 @@ export function UploadDialog({ files, defaultDomain, onConfirm, onCancel, tier, 
           {files.map((file, i) => {
             const status = fileStatuses?.[i]
             return (
-              <div key={i} className="flex items-center justify-between gap-1.5 text-xs">
+              <div
+                key={i}
+                className={cn(
+                  "flex items-center justify-between gap-1.5 rounded px-1 py-0.5 text-xs transition-colors duration-300",
+                  status === "success" && "bg-green-500/5",
+                  status === "error" && "bg-destructive/5",
+                )}
+              >
                 <div className="flex min-w-0 items-center gap-1.5">
                   {/* File status indicator */}
-                  {status === "uploading" && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" />}
-                  {status === "success" && <CheckCircle className="h-3 w-3 shrink-0 text-green-500" />}
-                  {status === "error" && <AlertCircle className="h-3 w-3 shrink-0 text-destructive" />}
-                  <span className="min-w-0 truncate text-muted-foreground">{file.name}</span>
+                  <div className="flex h-3 w-3 shrink-0 items-center justify-center transition-opacity duration-200">
+                    {status === "uploading" && <Loader2 className="h-3 w-3 animate-spin text-primary" />}
+                    {status === "success" && <CheckCircle className="h-3 w-3 text-green-500" />}
+                    {status === "error" && <AlertCircle className="h-3 w-3 text-destructive" />}
+                    {!status && <div className="h-3 w-3" />}
+                  </div>
+                  <span className={cn(
+                    "min-w-0 truncate transition-colors duration-200",
+                    status === "success" ? "text-foreground" : "text-muted-foreground",
+                    status === "error" && "text-destructive",
+                  )}>{file.name}</span>
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
                   <Badge

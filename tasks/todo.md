@@ -1,7 +1,7 @@
 # Cerid AI — Task Tracker
 
-> **Last updated:** 2026-03-29
-> **Current status:** Phase 51 hardening complete. 1673+ Python tests, 496+ frontend tests. 9-job CI green. Session 2026-03-29: verification pipeline fixes, Smart Auto-RAG, external data sources, dynamic model registry, 3-tier system, USG compliance.
+> **Last updated:** 2026-03-31
+> **Current status:** Phases 53-57 + Waves 1-4 complete. Pipeline hardening, Private Mode, Agent Console, webhook ingestion, 5 data source connectors (email, RSS, bookmarks, clipboard, macOS Quick Actions), model management auto-update, Pro purchase path, 5 Pro plugins (Gmail, Outlook, Apple Notes, Calendar, Docling), storage dashboard, KB interface refresh, parent-child retrieval, Graph RAG. 486+ frontend tests, TypeScript clean, ruff clean.
 > **Open issues:** [docs/ISSUES.md](../docs/ISSUES.md) — 0 open
 > **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE42-50.md](../docs/plans/DEVELOPMENT_PLAN_PHASE42-50.md) (Phases A-D + 42-50)
 > **Completed phases:** [docs/COMPLETED_PHASES.md](../docs/COMPLETED_PHASES.md)
@@ -81,28 +81,15 @@ Roadmap covers two tracks: **Infrastructure** (deployment, BYOK, packaging, repo
 
 ### Future Development — Open Items
 
-- [ ] **External APIs in Knowledge Console**
-  - Show enabled APIs with status in Knowledge Console external section
-  - Inline enable/disable toggles per API
-  - Add 3+ free public APIs: DuckDuckGo Instant Answers, Open Library, PubChem
-  - Move data sources from System tab to more prominent Essentials location
-  - Each follows `DataSource` ABC pattern in `utils/data_sources/`
+- [x] **External APIs in Knowledge Console** ✅ 2026-03-31 (confirmed)
+  - 6 data sources implemented: DuckDuckGo, Open Library, PubChem, Wikipedia, Wolfram Alpha, Finance
+  - `routers/data_sources.py` provides CRUD + status management
 
-- [ ] **Watched Folders Management**
-  - CRUD API: `POST/GET/PATCH/DELETE /watched-folders` with Redis storage
-  - Per-folder: enable/disable, domain override, exclude patterns, search_enabled toggle
-  - Per-folder scan isolation (namespaced Redis state keys)
-  - Tag ingested artifacts with `watched_folder_id` in ChromaDB metadata
-  - `search_enabled: false` excludes folder's chunks from RAG queries
-  - Settings UI: folder list with toggles, scan button, stats, add/remove
-  - Optional per-folder external DB binding (architecture hook, Pro tier)
+- [x] **Watched Folders Management** ✅ 2026-03-31 (confirmed)
+  - Full CRUD API with Redis-backed storage, per-folder config, scan isolation
 
-- [ ] **RAG Orchestration Resilience**
-  - Source availability awareness (check enabled + configured before querying)
-  - Folder-aware domain routing (`exclude_folder_ids` filter in decomposer)
-  - Graceful degradation: partial source_breakdown on failure, circuit breaker awareness
-  - Per-source timing (`_timings: {kb_ms, memory_ms, external_ms}`)
-  - `source_status` in response: `{kb: "ok", memory: "timeout", external: "ok"}`
+- [x] **RAG Orchestration Resilience** ✅ 2026-03-31 (confirmed)
+  - DegradationManager (5 tiers), circuit breakers on all external calls, middleware integration
 
 - [ ] **Ollama Content Triage (Bulk Import)**
   - When Ollama enabled, use it for content value assessment during folder scan
@@ -110,34 +97,22 @@ Roadmap covers two tracks: **Infrastructure** (deployment, BYOK, packaging, repo
   - Async, non-blocking, falls back to heuristic scoring
   - `ENABLE_AI_TRIAGE` env var (default: true when Ollama enabled)
 
-- [ ] **Direct Provider SDKs**
-  - Add direct API key support for Anthropic, OpenAI, Google (bypass OpenRouter)
-  - Provider selection in settings: OpenRouter (default) vs direct API
-  - Key validation per provider
-  - Preserves OpenRouter as fallback aggregator
+- [x] **Direct Provider SDKs** ✅ 2026-03-31 (confirmed)
+  - `config/providers.py` with OpenRouter, OpenAI, Anthropic, xAI, Ollama
+  - Async key validation per provider, Settings UI integration
 
-- [ ] **Expanded File Type Handling**
-  - Specialized parsers for code files (AST extraction for Python, JS/TS, Go, Rust)
-  - Table-aware Excel parsing (preserve sheet structure, formulas as metadata)
-  - Image OCR for scanned PDFs (Pro tier, requires Tesseract or LLM vision)
-  - Audio transcription for meeting notes (Pro tier, requires Whisper)
-  - Markdown frontmatter extraction (YAML/TOML headers → metadata)
+- [x] **Expanded File Type Handling** ✅ 2026-03-31
+  - Code AST parser (`parsers/code_ast.py`), Markdown frontmatter (Obsidian watcher)
+  - Docling advanced parser plugin (Pro tier, `plugins/docling-parser/`)
+  - Remaining: Image OCR for scanned PDFs, audio transcription
 
-- [ ] **Pro Tier Purchase Path**
-  - Stripe integration for Pro tier licensing
-  - License key validation endpoint
-  - Self-serve upgrade flow from Core → Pro in Settings
-  - Usage-based or per-seat pricing model
-  - Waitlist/early access program as interim
+- [x] **Pro Tier Purchase Path** ✅ 2026-03-31
+  - Stripe integration (`routers/billing.py`, `models/billing.py`)
+  - License key validation (`utils/license.py`)
+  - Self-serve upgrade flow in Settings (`components/settings/pro-section.tsx`)
 
-- [ ] **Startup Wizard & Setup Streamlining**
-  - Web-based first-run wizard (runs before main app if no config detected)
-  - Docker detection and auto-install guidance
-  - API key setup with provider validation
-  - Ollama install option integrated into wizard
-  - Remove age encryption requirement for first-time setup
-  - Pre-built Docker images on GitHub Container Registry (skip local build)
-  - Target: actual 5-minute setup for Docker-ready users
+- [x] **Startup Wizard & Setup Streamlining** ✅ 2026-03-31 (confirmed)
+  - 4-step React wizard, `/setup/*` API, first-run detection, health dashboard. See Phase A.
 
 - [ ] **SSO / SAML Implementation (Enterprise)**
   - SAML 2.0 SP implementation with IdP metadata import
@@ -145,11 +120,8 @@ Roadmap covers two tracks: **Infrastructure** (deployment, BYOK, packaging, repo
   - Tenant-scoped SSO configuration
   - Currently scaffolded as feature flag only — needs full implementation
 
-- [ ] **Separate Trading Tools**
-  - Move 5 trading MCP tools to cerid-trading-agent repo
-  - Trading tools become an external integration via SDK
-  - Core Cerid repo ships 21 MCP tools (no trading dependency)
-  - Trading agent connects via A2A protocol or SDK endpoints
+- [x] **Separate Trading Tools** ✅ 2026-03-31 (confirmed)
+  - Trading agent is separate repo, connected via A2A + 5 SDK endpoints, gated by `CERID_TRADING_ENABLED`
 
 - [ ] **Bulk Import Remaining Features**
   - Ollama content triage (score 1-5 for value assessment)
@@ -158,62 +130,34 @@ Roadmap covers two tracks: **Infrastructure** (deployment, BYOK, packaging, repo
   - Import progress in Knowledge Console UI
   - Scheduled folder re-scan (cron-based watch)
 
-- [ ] **Private Mode (Ephemeral Sessions)**
-  - Toggle in toolbar or settings: "Private Mode" — nothing remembered, nothing saved
-  - Conversation not added to history, memories not extracted, feedback loop disabled
-  - Configurable security levels:
-    - Level 1 (default): no history, no memory extraction
-    - Level 2: also disable KB context injection (pure LLM, no local data exposure)
-    - Level 3: also force local-only models (Ollama), no external API calls
-    - Level 4: also clear Redis query cache on session end
-  - Visual indicator in chat panel (lock icon, muted toolbar) so user knows mode is active
-  - Session data wiped on conversation close (not just hidden)
+- [x] **Private Mode (Ephemeral Sessions)** ✅ 2026-03-31
+  - 4-level security toggle, visual lock indicator, session data wipe
+  - Backend guards in chat, agents, query, user_state, memories routers
+  - `utils/private_mode.py` + frontend toggle in toolbar
 
-- [ ] **Conversation Management UX**
-  - Hover-reveal action buttons on each conversation in sidebar history:
-    - Delete (trash icon) — removes from history with confirmation
-    - Archive (box icon) — moves to archived state (saved but hidden from main list)
-  - Archived conversations accessible via "View archived" toggle at bottom of history
-  - Bulk select/delete for history cleanup
-  - Search within conversation history
+- [x] **Conversation Management UX** ✅ 2026-03-31
+  - Archive/unarchive, bulk select/delete with AlertDialog confirmation
+  - Search within conversation history (debounced, 300ms)
+  - `conversation-list.tsx` updated
 
-- [ ] **Pro Mode Configuration & Feature Access**
-  - Clear Pro settings pane showing all Pro-gated features with status
-  - Feature discovery: show what Pro unlocks with preview/demo for each
-  - Pro feature toggle dashboard (enable/disable individual Pro features)
-  - License key entry and validation in settings
-  - Visual distinction between Core and Pro UI elements throughout
+- [x] **Pro Mode Configuration & Feature Access** ✅ 2026-03-31
+  - Pro settings pane (`pro-section.tsx`) with feature discovery
+  - License key validation, tier display, feature toggle dashboard
+  - ProGate component for upsell throughout UI
 
-- [ ] **Agent Communication Console**
-  - Optional console-style panel (toggle from toolbar or settings)
-  - Real-time ticker-scroll showing agent activity:
-    - "Query Agent → decomposing into 3 sub-queries..."
-    - "Decomposer → searching finance domain..."
-    - "Verification Agent → checking claim 2/4 against KB..."
-  - Color-coded by agent (brand teal for retrieval, gold for verification, etc.)
-  - Collapsible/dockable panel (bottom or side position)
-  - Filterable by agent type
-  - Useful for debugging, transparency, and "seeing the intelligence work"
+- [x] **Agent Communication Console** ✅ 2026-03-31
+  - Real-time SSE ticker panel (`AgentConsole.tsx`, `use-agent-console.ts`)
+  - `agent_events.py` emitter + `routers/agent_console.py` SSE endpoint
+  - Color-coded agents, filterable, collapsible, Geist Mono font
 
-- [ ] **Model Management & Auto-Update Detection**
-  - Dedicated model management pane in Settings (separate from pipeline settings)
-  - Shows all available models with: provider, cost, context window, capabilities
-  - Auto-detection of new model releases via OpenRouter API polling
-  - Notification badge when new models are available ("3 new models available")
-  - One-click model update: swap to newer version with capability comparison
-  - Model deprecation warnings (e.g., "GPT-4o is superseded by GPT-5.4")
-  - Cost comparison view: current model vs alternatives
-  - Prevent casual users from being stuck on outdated models
+- [x] **Model Management & Auto-Update Detection** ✅ 2026-03-31
+  - OpenRouter model polling, deprecation warnings, cost comparison
+  - `model-management.tsx` in Settings
+  - Notification badge for new models
 
 - [ ] **Enterprise Feature Scaffolding**
-  - All Enterprise/Vault features should have:
-    - Feature flag in `config/features.py` (already done for most)
-    - Router endpoint stubs returning 403 with upgrade message
-    - UI placeholders in Settings showing "Available in Cerid Vault"
-    - Documentation in TIER_MATRIX.md (already done)
-  - Actual implementation deferred to future enterprise development phase
-  - Scaffolded features: SSO/SAML, advanced audit logging, SIEM export,
-    tenant management UI, compliance reporting, dedicated support portal
+  - All Enterprise/Vault features should have endpoint stubs + UI placeholders
+  - Actual implementation deferred to enterprise development phase
 
 ### Execution Dependencies
 
@@ -1375,3 +1319,48 @@ returns `None`, so no query embedding is ever computed and the HNSW index is nev
 - [x] Phase 9B: Wire 5 structural gaps — hallucination auto-fetch, smart suggestions, memory trigger, settings sync, live metrics
 - [x] Phase 9C: 3 feature enhancements — file upload, sub-category/tag display, tag browsing
 - [x] Phase 9D: Neo4j auth hardening — docker-compose env var fix, Cypher auth validation, error detail
+
+---
+
+## Ingestion Pipeline Evolution — Phases 53-57
+
+> **Plan:** [`docs/plans/PLAN_INGESTION_PIPELINE_EVOLUTION.md`](../docs/plans/PLAN_INGESTION_PIPELINE_EVOLUTION.md)
+> **Driven by:** Ingestion pipeline audit (2026-03-31) — 10 gaps identified, 5 phases planned
+> **Scope:** Multi-source KB with OS integration, storage dashboard, KB UI refresh
+
+### Phase 53: Pipeline Hardening
+- [ ] Wire per-file upload status (UploadDialog ← KnowledgePane)
+- [ ] Redis dead-letter queue for failed ingestions
+- [ ] BM25 rollback on Neo4j failure
+- [ ] Connect triage graph to ingest writes
+- [ ] Obsidian watcher uses frontmatter-aware parser
+
+### Phase 54: Core Data Source Connectors
+- [ ] IMAP email poller + Apple Mail .emlx reader
+- [ ] RSS/Atom feed poller (fastfeedparser + trafilatura)
+- [ ] Browser bookmark importer (Chrome + Firefox + Safari)
+- [ ] Inbound webhook endpoint (POST /ingest/webhook)
+- [ ] Clipboard capture daemon
+- [ ] macOS Quick Actions installer
+
+### Phase 55: Pro Data Source Connectors (BSL-1.1)
+- [ ] Gmail OAuth connector
+- [ ] Outlook/Microsoft Graph connector
+- [ ] Apple Notes reader
+- [ ] Calendar sync (CalDAV + ICS)
+- [ ] Advanced document parsing (Docling + Marker)
+
+### Phase 56: Storage & Monitoring Dashboard
+- [ ] Storage metrics endpoint (GET /system/storage)
+- [ ] Storage usage bar in Settings
+- [ ] Persistent ingestion history (Redis-backed)
+- [ ] Per-source activity feed in KB pane
+- [ ] Storage prediction before bulk imports
+
+### Phase 57: KB Interface Refresh
+- [ ] Live scan progress panel (SSE)
+- [ ] Source provenance badges
+- [ ] Inline content preview
+- [ ] Near-duplicate review and merge UI
+- [ ] Visual quality score indicators
+- [ ] KB layout refresh (animations, masonry, responsive)

@@ -20,6 +20,7 @@ from typing import Any
 import config
 from db import neo4j as graph
 from deps import get_chroma, get_neo4j, get_redis
+from errors import CeridError, IngestionError
 from parsers import parse_file
 from utils import cache
 from utils.chunker import PARENT_CHILD_ENABLED, chunk_text, make_context_header
@@ -27,6 +28,30 @@ from utils.metadata import ai_categorize, extract_metadata
 from utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion")
+
+
+def _record_ingest_history(
+    filename: str,
+    source_type: str,
+    domain: str,
+    status: str,
+    chunks: int = 0,
+    error: str = "",
+) -> None:
+    """Push an ingestion event to the persistent Redis stream (Phase 56)."""
+    try:
+        from routers.system_monitor import record_ingest_event
+
+        record_ingest_event(
+            filename=filename,
+            source_type=source_type or "upload",
+            domain=domain,
+            status=status,
+            chunks=chunks,
+            error=error,
+        )
+    except (CeridError, ValueError, OSError, RuntimeError, ImportError) as e:
+        logger.debug("Ingest history recording failed (non-blocking): %s", e)
 
 
 def validate_file_path(file_path: str) -> Path:
@@ -55,16 +80,82 @@ def _rollback_chromadb(collection, chunk_ids: list[str]) -> None:
         logger.warning(
             "Rolled back %d ChromaDB chunks after graph failure", len(chunk_ids),
         )
-    except Exception as e:
+    except (IngestionError, ValueError, OSError, RuntimeError) as e:
         logger.error(
             "CRITICAL: ChromaDB rollback failed for %d chunks — orphaned data: %s",
             len(chunk_ids), e,
         )
 
 
+def _rollback_bm25(domain: str, chunk_ids: list[str]) -> None:
+    """Compensating transaction: remove BM25 entries when Neo4j write fails."""
+    try:
+        from utils.bm25 import remove_chunks
+
+        removed = remove_chunks(domain, chunk_ids)
+        if removed:
+            logger.warning(
+                "Rolled back %d BM25 entries for domain '%s' after graph failure",
+                removed,
+                domain,
+            )
+    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+        logger.error(
+            "CRITICAL: BM25 rollback failed for %d chunks in '%s' — orphaned index entries: %s",
+            len(chunk_ids),
+            domain,
+            e,
+        )
+
+
+def _push_to_dlq_sync(payload: dict, error: str, attempt: int = 1) -> None:
+    """Synchronously push a failed ingestion to the DLQ (fire-and-forget)."""
+    try:
+        redis_client = get_redis()
+        if redis_client is None:
+            logger.error("DLQ push skipped — Redis unavailable")
+            return
+        from datetime import datetime, timedelta, timezone
+
+        from utils.dlq import STREAM_KEY, _backoff_seconds
+
+        now = datetime.now(timezone.utc)
+        next_retry_at = now + timedelta(seconds=_backoff_seconds(attempt))
+        entry = {
+            "payload": json.dumps(payload),
+            "error": str(error),
+            "attempt": str(attempt),
+            "next_retry_at": next_retry_at.isoformat(),
+            "created_at": utcnow_iso(),
+        }
+        redis_client.xadd(STREAM_KEY, entry)
+        logger.warning(
+            "DLQ push (sync): attempt=%d error=%s", attempt, str(error)[:120]
+        )
+    except (IngestionError, ValueError, OSError, RuntimeError) as dlq_err:
+        logger.error("Failed to push to DLQ: %s", dlq_err)
+
+
 def _check_duplicate(content_hash: str, domain: str) -> dict | None:
     try:
         driver = get_neo4j()
+        if driver is None:
+            # Lightweight mode — fall back to ChromaDB metadata dedup
+            try:
+                chroma = get_chroma()
+                coll_name = config.collection_name(domain)
+                collection = chroma.get_or_create_collection(name=coll_name)
+                results = collection.get(where={"content_hash": content_hash}, limit=1)
+                if results and results.get("ids"):
+                    meta = results["metadatas"][0] if results.get("metadatas") else {}
+                    return {
+                        "id": meta.get("artifact_id", results["ids"][0]),
+                        "filename": meta.get("filename", "unknown"),
+                        "domain": meta.get("domain", domain),
+                    }
+            except (IngestionError, ValueError, OSError, RuntimeError) as e:
+                logger.debug(f"ChromaDB dedup fallback failed: {e}")
+            return None
         with driver.session() as session:
             result = session.run(
                 "MATCH (a:Artifact {content_hash: $hash})-[:BELONGS_TO]->(d:Domain) "
@@ -78,7 +169,7 @@ def _check_duplicate(content_hash: str, domain: str) -> dict | None:
                     "filename": record["filename"],
                     "domain": record["domain"],
                 }
-    except Exception as e:
+    except (IngestionError, ValueError, OSError, RuntimeError) as e:
         logger.warning(f"Dedup check failed (proceeding with ingest): {e}")
     return None
 
@@ -97,7 +188,7 @@ def _reingest_artifact(
     if old_chunk_ids:
         try:
             collection.delete(ids=old_chunk_ids)
-        except Exception as e:
+        except (IngestionError, ValueError, OSError, RuntimeError) as e:
             logger.warning(f"Failed to delete old chunks during re-ingest: {e}")
 
     # Create new chunks with contextual header
@@ -105,22 +196,24 @@ def _reingest_artifact(
     sub_cat = metadata.get("sub_category", "") if metadata else ""
     ctx_header = make_context_header(filename=filename, domain=domain, sub_category=sub_cat)
     # Parent-child chunking (feature-flagged via ENABLE_PARENT_CHILD_RETRIEVAL)
+    _pc_chunks_reingest: list[dict] | None = None
     try:
         if PARENT_CHILD_ENABLED:
             from utils.chunker import chunk_with_parents
-            pc_chunks = chunk_with_parents(
+            _pc_chunks_reingest = chunk_with_parents(
                 content, artifact_id=artifact_id,
                 max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP,
                 context_header=ctx_header,
             )
-            chunks = [c["text"] for c in pc_chunks]
+            chunks = [c["text"] for c in _pc_chunks_reingest]
         else:
             chunks = chunk_text(
                 content, max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP,
                 context_header=ctx_header,
             )
-    except Exception as e:
+    except (IngestionError, ValueError, OSError, RuntimeError) as e:
         logger.warning("Parent-child chunking failed (re-ingest), falling back: %s", e)
+        _pc_chunks_reingest = None
         chunks = chunk_text(
             content, max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP,
             context_header=ctx_header,
@@ -131,22 +224,31 @@ def _reingest_artifact(
         try:
             from utils.contextual import contextualize_chunks
             chunks = contextualize_chunks(chunks, content, metadata)
-        except Exception as e:
+        except (IngestionError, ValueError, OSError, RuntimeError) as e:
             logger.warning("Contextual enrichment skipped (re-ingest): %s", e)
 
     base_meta = {"domain": domain, "artifact_id": artifact_id, "ingested_at": utcnow_iso()}
     if metadata:
         base_meta.update(metadata)
 
-    chunk_ids = [f"{artifact_id}_chunk_{i}" for i in range(len(chunks))]
-    chunk_metadatas = [{**base_meta, "chunk_index": i} for i in range(len(chunks))]
+    if _pc_chunks_reingest is not None:
+        chunk_ids = [c["chunk_id"] for c in _pc_chunks_reingest]
+        chunk_metadatas = [
+            {**base_meta, "chunk_index": i,
+             "chunk_level": pc["chunk_level"],
+             "parent_chunk_id": pc.get("parent_chunk_id") or ""}
+            for i, pc in enumerate(_pc_chunks_reingest)
+        ]
+    else:
+        chunk_ids = [f"{artifact_id}_chunk_{i}" for i in range(len(chunks))]
+        chunk_metadatas = [{**base_meta, "chunk_index": i} for i in range(len(chunks))]
     collection.add(ids=chunk_ids, documents=chunks, metadatas=chunk_metadatas)
 
     # BM25 index
     try:
         from utils.bm25 import index_chunks
         index_chunks(domain, chunk_ids, chunks)
-    except Exception as e:
+    except (IngestionError, ValueError, OSError, RuntimeError) as e:
         logger.debug(f"BM25 indexing failed during re-ingest (non-blocking): {e}")
 
     # Compute quality_score for re-ingested content
@@ -175,17 +277,21 @@ def _reingest_artifact(
 
     # Update Neo4j artifact (preserves relationships)
     try:
-        graph.update_artifact(
-            get_neo4j(),
-            artifact_id=artifact_id,
-            keywords_json=base_meta.get("keywords_json", "[]"),
-            summary=base_meta.get("summary", content[:200]),
-            chunk_count=len(chunks),
-            chunk_ids_json=json.dumps(chunk_ids),
-            content_hash=content_hash,
-            quality_score=quality_score,
-        )
-    except Exception as e:
+        driver = get_neo4j()
+        if driver is not None:
+            graph.update_artifact(
+                driver,
+                artifact_id=artifact_id,
+                keywords_json=base_meta.get("keywords_json", "[]"),
+                summary=base_meta.get("summary", content[:200]),
+                chunk_count=len(chunks),
+                chunk_ids_json=json.dumps(chunk_ids),
+                content_hash=content_hash,
+                quality_score=quality_score,
+            )
+        else:
+            logger.debug("Lightweight mode — skipping Neo4j artifact update for re-ingest")
+    except (IngestionError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Failed to update artifact in Neo4j during re-ingest: {e}")
 
     logger.info(f"Re-ingested artifact {artifact_id[:8]} ({base_meta.get('filename', '?')})")
@@ -204,8 +310,54 @@ def ingest_content(
     content: str,
     domain: str = "general",
     metadata: dict[str, Any] | None = None,
+    triage_result: Any | None = None,
 ) -> dict:
-    """Core ingest path. Called by REST endpoints, agents, and MCP tool dispatcher."""
+    """Core ingest path. Called by REST endpoints, agents, and MCP tool dispatcher.
+
+    Args:
+        triage_result: Optional ``TriageResult`` from ``agents.triage``.
+            When provided, gates ingestion (``should_ingest``), seeds
+            ``quality_score``, applies ``recommended_domain`` as fallback,
+            and merges ``suggested_tags``.
+    """
+    # --- Triage gate ---
+    if triage_result is not None:
+        if not getattr(triage_result, "should_ingest", True):
+            reason = getattr(triage_result, "skip_reason", None) or "Triage rejected"
+            logger.info(
+                "Skipping ingestion (triage gate): %s — %s",
+                (metadata or {}).get("filename", "?"), reason,
+            )
+            _record_ingest_history(
+                filename=(metadata or {}).get("filename", "?"),
+                source_type=(metadata or {}).get("client_source", "upload"),
+                domain=domain, status="skipped",
+            )
+            return {
+                "status": "skipped",
+                "reason": reason,
+                "domain": domain,
+                "chunks": 0,
+                "timestamp": utcnow_iso(),
+            }
+
+        # Use triage domain as fallback when caller didn't specify
+        rec_domain = getattr(triage_result, "recommended_domain", "")
+        if rec_domain and (not domain or domain == "general"):
+            domain = rec_domain
+
+        # Seed suggested tags into metadata
+        suggested_tags = getattr(triage_result, "suggested_tags", [])
+        if suggested_tags:
+            metadata = dict(metadata) if metadata else {}
+            existing_tags: list[str] = []
+            if metadata.get("tags_json"):
+                try:
+                    existing_tags = json.loads(metadata["tags_json"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            merged_tags = list(dict.fromkeys(existing_tags + suggested_tags))
+            metadata["tags_json"] = json.dumps(merged_tags)
     chroma = get_chroma()
     coll_name = config.collection_name(domain)
     collection = chroma.get_or_create_collection(name=coll_name)
@@ -220,6 +372,11 @@ def ingest_content(
             f"Duplicate detected: '{fname}' matches "
             f"existing artifact {existing['id']} ('{existing['filename']}' in {existing['domain']})"
         )
+        _record_ingest_history(
+            filename=fname,
+            source_type=(metadata or {}).get("client_source", "upload"),
+            domain=domain, status="skipped",
+        )
         return {
             "status": "duplicate",
             "artifact_id": existing["id"],
@@ -229,30 +386,29 @@ def ingest_content(
             "duplicate_of": existing["filename"],
         }
 
-    # Semantic deduplication (Pro feature)
+    # Semantic deduplication (community feature — KB quality for all tiers)
     near_dup = None
     try:
-        from utils.features import is_feature_enabled
+        from utils.dedup import check_semantic_duplicate
 
-        if is_feature_enabled("semantic_dedup"):
-            from utils.dedup import check_semantic_duplicate
-
-            near_dup = check_semantic_duplicate(
-                text=content,
-                domain=domain,
-                chroma_client=get_chroma(),
-            )
-    except Exception as e:
+        near_dup = check_semantic_duplicate(
+            text=content,
+            domain=domain,
+            chroma_client=get_chroma(),
+        )
+    except (IngestionError, ValueError, OSError, RuntimeError) as e:
         logger.debug(f"Semantic dedup check skipped: {e}")
 
     # Re-ingestion check: same filename, different content
     fname = (metadata or {}).get("filename", "text_input")
     if fname != "text_input":
         try:
-            prev = graph.find_artifact_by_filename(get_neo4j(), fname, domain)
-            if prev and prev["content_hash"] != content_hash:
-                return _reingest_artifact(prev, content, domain, metadata, content_hash)
-        except Exception as e:
+            _neo4j_driver = get_neo4j()
+            if _neo4j_driver is not None:
+                prev = graph.find_artifact_by_filename(_neo4j_driver, fname, domain)
+                if prev and prev["content_hash"] != content_hash:
+                    return _reingest_artifact(prev, content, domain, metadata, content_hash)
+        except (IngestionError, ValueError, OSError, RuntimeError) as e:
             logger.warning(f"Re-ingest check failed (proceeding as new): {e}")
 
     fname_for_header = (metadata or {}).get("filename", "")
@@ -261,22 +417,24 @@ def ingest_content(
         filename=fname_for_header, domain=domain, sub_category=sub_cat_for_header,
     )
     # Parent-child chunking (feature-flagged via ENABLE_PARENT_CHILD_RETRIEVAL)
+    _pc_chunks: list[dict] | None = None
     try:
         if PARENT_CHILD_ENABLED:
             from utils.chunker import chunk_with_parents
-            pc_chunks = chunk_with_parents(
+            _pc_chunks = chunk_with_parents(
                 content, artifact_id=artifact_id,
                 max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP,
                 context_header=ctx_header,
             )
-            chunks = [c["text"] for c in pc_chunks]
+            chunks = [c["text"] for c in _pc_chunks]
         else:
             chunks = chunk_text(
                 content, max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP,
                 context_header=ctx_header,
             )
-    except Exception as e:
+    except (IngestionError, ValueError, OSError, RuntimeError) as e:
         logger.warning("Parent-child chunking failed, falling back to standard: %s", e)
+        _pc_chunks = None
         chunks = chunk_text(
             content, max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP,
             context_header=ctx_header,
@@ -287,7 +445,7 @@ def ingest_content(
         try:
             from utils.contextual import contextualize_chunks
             chunks = contextualize_chunks(chunks, content, metadata)
-        except Exception as e:
+        except (IngestionError, ValueError, OSError, RuntimeError) as e:
             logger.warning("Contextual enrichment skipped: %s", e)
 
     ingested_at = utcnow_iso()
@@ -304,7 +462,11 @@ def ingest_content(
         base_meta["near_duplicate_of"] = near_dup["artifact_id"]
         base_meta["near_duplicate_similarity"] = str(near_dup["similarity"])
 
-    chunk_ids = [f"{artifact_id}_chunk_{i}" for i in range(len(chunks))]
+    # Build chunk IDs and metadata — parent-child aware when enabled
+    if _pc_chunks is not None:
+        chunk_ids = [c["chunk_id"] for c in _pc_chunks]
+    else:
+        chunk_ids = [f"{artifact_id}_chunk_{i}" for i in range(len(chunks))]
 
     # Compute per-chunk retrieval profile for scoring strategy selection
     from utils.retrieval_profile import compute_retrieval_profile, serialize_profile
@@ -317,10 +479,23 @@ def ingest_content(
     )
     _profile_json = serialize_profile(_artifact_profile)
 
-    chunk_metadatas = [
-        {**base_meta, "chunk_index": i, "retrieval_profile": _profile_json}
-        for i in range(len(chunks))
-    ]
+    if _pc_chunks is not None:
+        # Store parent-child hierarchy metadata in ChromaDB for retrieval-time lookup
+        chunk_metadatas = []
+        for i, pc in enumerate(_pc_chunks):
+            meta = {
+                **base_meta,
+                "chunk_index": i,
+                "retrieval_profile": _profile_json,
+                "chunk_level": pc["chunk_level"],
+                "parent_chunk_id": pc.get("parent_chunk_id") or "",
+            }
+            chunk_metadatas.append(meta)
+    else:
+        chunk_metadatas = [
+            {**base_meta, "chunk_index": i, "retrieval_profile": _profile_json}
+            for i in range(len(chunks))
+        ]
     # Batch ChromaDB writes for large documents (>5000 chunks)
     from config.constants import CHROMA_MAX_BATCH_SIZE
 
@@ -339,7 +514,7 @@ def ingest_content(
     try:
         from utils.bm25 import index_chunks
         index_chunks(domain, chunk_ids, chunks)
-    except Exception as e:
+    except (IngestionError, ValueError, OSError, RuntimeError) as e:
         logger.warning(f"BM25 indexing failed (non-blocking): {e}")
 
     # Compute quality_score using weighted 4-dimension formula
@@ -354,48 +529,80 @@ def ingest_content(
         ingested_at=base_meta.get("ingested_at"),
     )
 
+    # If triage provided an AI-derived quality_score, use the higher of the two
+    if triage_result is not None:
+        triage_qs = getattr(triage_result, "quality_score", 0.0)
+        if triage_qs > quality_score:
+            quality_score = round(triage_qs, 2)
+
     artifact_created = False
-    try:
-        driver = get_neo4j()
-        graph.create_artifact(
-            driver,
-            artifact_id=artifact_id,
-            filename=base_meta.get("filename", "text_input"),
-            domain=domain,
-            keywords_json=base_meta.get("keywords_json", "[]"),
-            summary=base_meta.get("summary", content[:200]),
-            chunk_count=len(chunks),
-            chunk_ids_json=json.dumps(chunk_ids),
-            content_hash=content_hash,
-            sub_category=base_meta.get("sub_category", config.DEFAULT_SUB_CATEGORY),
-            tags_json=base_meta.get("tags_json", "[]"),
-            quality_score=quality_score,
-            client_source=base_meta.get("client_source", ""),
-        )
-        artifact_created = True
-    except Exception as e:
-        err_msg = str(e).lower()
-        if "constraint" in err_msg and "content_hash" in err_msg:
-            logger.info(f"Concurrent duplicate detected via constraint: {base_meta.get('filename', '?')}")
+    driver = get_neo4j()
+    if driver is not None:
+        try:
+            graph.create_artifact(
+                driver,
+                artifact_id=artifact_id,
+                filename=base_meta.get("filename", "text_input"),
+                domain=domain,
+                keywords_json=base_meta.get("keywords_json", "[]"),
+                summary=base_meta.get("summary", content[:200]),
+                chunk_count=len(chunks),
+                chunk_ids_json=json.dumps(chunk_ids),
+                content_hash=content_hash,
+                sub_category=base_meta.get("sub_category", config.DEFAULT_SUB_CATEGORY),
+                tags_json=base_meta.get("tags_json", "[]"),
+                quality_score=quality_score,
+                client_source=base_meta.get("client_source", ""),
+            )
+            artifact_created = True
+        except (IngestionError, ValueError, OSError, RuntimeError) as e:
+            err_msg = str(e).lower()
+            if "constraint" in err_msg and "content_hash" in err_msg:
+                logger.info(f"Concurrent duplicate detected via constraint: {base_meta.get('filename', '?')}")
+                _rollback_chromadb(collection, chunk_ids)
+                _rollback_bm25(domain, chunk_ids)
+                return {
+                    "status": "duplicate",
+                    "artifact_id": artifact_id,
+                    "domain": domain,
+                    "chunks": 0,
+                    "timestamp": utcnow_iso(),
+                    "duplicate_of": "(concurrent)",
+                }
+            logger.error(f"Neo4j artifact creation failed: {e}")
             _rollback_chromadb(collection, chunk_ids)
+            _rollback_bm25(domain, chunk_ids)
+            # Push to DLQ if not already a DLQ retry
+            dlq_attempt = (metadata or {}).get("_dlq_attempt")
+            if not dlq_attempt:
+                _push_to_dlq_sync(
+                    {"content": content[:5000], "domain": domain, "metadata": metadata},
+                    error=str(e),
+                )
+            _record_ingest_history(
+                filename=base_meta.get("filename", "text_input"),
+                source_type=base_meta.get("client_source", "upload"),
+                domain=domain, status="failed", error=str(e),
+            )
             return {
-                "status": "duplicate",
+                "status": "error",
                 "artifact_id": artifact_id,
                 "domain": domain,
                 "chunks": 0,
                 "timestamp": utcnow_iso(),
-                "duplicate_of": "(concurrent)",
+                "error": f"Graph storage failed: {e}",
             }
-        logger.error(f"Neo4j artifact creation failed: {e}")
-        _rollback_chromadb(collection, chunk_ids)
-        return {
-            "status": "error",
-            "artifact_id": artifact_id,
-            "domain": domain,
-            "chunks": 0,
-            "timestamp": utcnow_iso(),
-            "error": f"Graph storage failed: {e}",
-        }
+    else:
+        # Lightweight mode — store content_hash in ChromaDB metadata for dedup
+        logger.debug("Lightweight mode — skipping Neo4j artifact creation")
+        # Add content_hash to existing chunk metadatas for dedup fallback
+        try:
+            collection.update(
+                ids=chunk_ids[:1],
+                metadatas=[{**chunk_metadatas[0], "content_hash": content_hash}],
+            )
+        except (IngestionError, ValueError, OSError, RuntimeError) as e:
+            logger.debug(f"Content hash metadata update failed: {e}")
 
     try:
         cache.log_event(
@@ -405,22 +612,22 @@ def ingest_content(
             domain=domain,
             filename=base_meta.get("filename", "text_input"),
         )
-    except Exception as e:
+    except (IngestionError, ValueError, OSError, RuntimeError) as e:
         logger.error(f"Redis log failed: {e}")
 
     # Discover and create relationships with existing artifacts
     relationships_created = 0
-    if artifact_created:
+    if artifact_created and driver is not None:
         try:
             relationships_created = graph.discover_relationships(
-                driver=get_neo4j(),
+                driver=driver,
                 artifact_id=artifact_id,
                 filename=base_meta.get("filename", "text_input"),
                 domain=domain,
                 keywords_json=base_meta.get("keywords_json", "[]"),
                 content=content[:5000],  # limit content scan for performance
             )
-        except Exception as e:
+        except (IngestionError, ValueError, OSError, RuntimeError) as e:
             logger.warning(f"Relationship discovery failed (non-blocking): {e}")
 
     # Fire webhook notification
@@ -431,22 +638,22 @@ def ingest_content(
         )
     except RuntimeError:
         pass  # no running loop (e.g. sync context) — webhook skipped
-    except Exception as e:
+    except (IngestionError, ValueError, OSError, RuntimeError) as e:
         logger.debug(f"Webhook notification failed (non-blocking): {e}")
 
     # Surface related artifacts in response
     related = []
-    if relationships_created > 0:
+    if relationships_created > 0 and driver is not None:
         try:
             found = graph.find_related_artifacts(
-                get_neo4j(), artifact_ids=[artifact_id], depth=1, max_results=5,
+                driver, artifact_ids=[artifact_id], depth=1, max_results=5,
             )
             related = [
                 {"id": r["id"], "filename": r["filename"], "domain": r["domain"],
                  "relationship_type": r.get("relationship_type", "")}
                 for r in found
             ]
-        except Exception as e:
+        except (IngestionError, ValueError, OSError, RuntimeError) as e:
             logger.debug(f"Related artifacts lookup failed (non-blocking): {e}")
 
     result = {
@@ -467,6 +674,15 @@ def ingest_content(
             "similarity": near_dup["similarity"],
         }
 
+    # Record to ingestion history stream (Phase 56)
+    _record_ingest_history(
+        filename=base_meta.get("filename", "text_input"),
+        source_type=base_meta.get("client_source", "upload"),
+        domain=domain,
+        status="success",
+        chunks=len(chunks),
+    )
+
     return result
 
 
@@ -477,6 +693,7 @@ async def ingest_file(
     tags: str = "",
     categorize_mode: str = "",
     client_source: str = "",
+    triage_result: Any | None = None,
 ) -> dict:
     """Parse a file, extract metadata, optionally AI-categorize, chunk, and store."""
     validate_file_path(file_path)
@@ -523,7 +740,7 @@ async def ingest_file(
         meta["client_source"] = client_source
     # Run sync ingest_content in thread pool to avoid blocking the event loop
     # (I/O-bound: Neo4j, ChromaDB, Redis writes + CPU-bound tiktoken chunking)
-    result = await asyncio.to_thread(ingest_content, text, domain, meta)
+    result = await asyncio.to_thread(ingest_content, text, domain, meta, triage_result)
     result["filename"] = filename
     result["categorize_mode"] = mode
     result["metadata"] = {
@@ -577,7 +794,7 @@ async def ingest_batch(
                     )
                 else:
                     return {"status": "error", "error": "Item must have 'file_path' or 'content'"}
-            except Exception as e:
+            except (IngestionError, ValueError, OSError, RuntimeError) as e:
                 logger.error("Batch ingest item failed: %s", e)
                 return {
                     "status": "error",

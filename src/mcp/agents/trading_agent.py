@@ -11,6 +11,7 @@ from typing import Any
 import structlog
 
 from config.taxonomy import collection_name
+from errors import ProviderError
 
 logger = structlog.get_logger(__name__)
 
@@ -21,7 +22,7 @@ def _neo4j_query(driver: Any, cypher: str, **params: Any) -> list[dict[str, Any]
         with driver.session() as session:
             result = session.run(cypher, params)
             return [dict(record) for record in result]
-    except Exception:
+    except (ProviderError, ValueError, OSError, RuntimeError):
         logger.debug("neo4j_query_failed", exc_info=True)
         return []
 
@@ -46,7 +47,7 @@ async def trading_signal_enrich(
                 metas = results.get("metadatas", [[]])[0]
                 documents.extend(docs)
                 sources.extend(m.get("source", "unknown") for m in metas)
-            except Exception:
+            except (ProviderError, ValueError, OSError, RuntimeError):
                 # Collection may not exist yet — skip
                 continue
 
@@ -69,7 +70,7 @@ async def trading_signal_enrich(
             "historical_trades": historical,
             "domains_searched": domains,
         }
-    except Exception:
+    except (ProviderError, ValueError, OSError, RuntimeError):
         logger.warning("trading_signal_enrich_failed", exc_info=True)
         return {
             "answer": "", "confidence": 0.0,
@@ -113,7 +114,7 @@ async def herd_detect(
             "historical_matches": historical,
             "sentiment_extreme": abs(fgi - 50) > 30,
         }
-    except Exception:
+    except (ProviderError, ValueError, OSError, RuntimeError):
         logger.warning("herd_detect_failed", exc_info=True)
         return {
             "violations": [], "historical_matches": [],
@@ -146,7 +147,7 @@ async def kelly_size(
             "kelly_raw": kelly_raw,
             "strategy": strategy,
         }
-    except Exception:
+    except (ProviderError, ValueError, OSError, RuntimeError):
         logger.warning("kelly_size_failed", exc_info=True)
         return {
             "kelly_fraction": 0.0, "cv_edge": 0.2,
@@ -199,7 +200,7 @@ async def cascade_confirm(
             "venue_match_rate": venue_match,
             "match_quality": "good" if len(historical) > 5 else "limited",
         }
-    except Exception:
+    except (ProviderError, ValueError, OSError, RuntimeError):
         logger.warning("cascade_confirm_failed", exc_info=True)
         return {
             "confirmation_score": 0.5,
@@ -250,7 +251,7 @@ async def longshot_surface_query(
             "asset": asset,
             "date_range": date_range,
         }
-    except Exception:
+    except (ProviderError, ValueError, OSError, RuntimeError):
         logger.warning("longshot_surface_query_failed", exc_info=True)
         return {
             "calibration_points": [], "count": 0,

@@ -42,14 +42,19 @@ CERID_JWT_ACCESS_TTL = int(os.getenv("CERID_JWT_ACCESS_TTL", "900"))   # 15 min
 CERID_JWT_REFRESH_TTL = int(os.getenv("CERID_JWT_REFRESH_TTL", "604800"))  # 7 days
 DEFAULT_TENANT_ID = os.getenv("CERID_DEFAULT_TENANT", "default")
 
+# ---------------------------------------------------------------------------
+# Webhook Ingest Auth
+# ---------------------------------------------------------------------------
+CERID_WEBHOOK_SECRET = os.getenv("CERID_WEBHOOK_SECRET", "")
+
 # Feature flags: controls what's available per tier
 # Community features are always enabled; pro features require CERID_TIER=pro or enterprise
 FEATURE_FLAGS = {
     # Pro-only features (requires pro or enterprise tier)
-    "ocr_parsing":         _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
+    "ocr_parsing":         True,  # Community feature — scanned PDF/image text extraction for all users
     "audio_transcription": _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
     "image_understanding": _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
-    "semantic_dedup":      _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
+    "semantic_dedup":      True,  # Community feature — KB quality for all users
     "advanced_analytics":  _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
     "metamorphic_verification": _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
     # Enterprise-only features
@@ -59,13 +64,43 @@ FEATURE_FLAGS = {
     "priority_support":    _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["enterprise"],
     # Pro-only: custom smart RAG mode with per-source weights
     "custom_smart_rag": _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
+    # Pro-only: advanced RAG retrieval strategies (Phase 52)
+    "parent_child_retrieval": _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
+    "graph_rag": _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
+    # Pro-only: email connectors (Phase 55)
+    "gmail_connector":   _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
+    "outlook_connector": _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
+    # Pro-only: Apple Notes, Calendar, Docling parser (Phase 55.3-55.5)
+    "apple_notes_reader": _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
+    "calendar_sync":      _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
+    "docling_parser":     _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
     # Community features (always enabled)
     "hierarchical_taxonomy": True,
     "file_upload_gui":       True,
     "encryption_at_rest":    True,
     "truth_audit":           True,
     "live_metrics":          True,
+    # Private mode: Level 1 available on all tiers; higher levels require pro
+    "private_mode":          True,
 }
+
+
+def _refresh_flags() -> None:
+    """Recalculate feature flags after a runtime tier change (e.g., license activation)."""
+    global FEATURE_FLAGS
+    tier_level = _TIER_LEVELS.get(FEATURE_TIER, 0)
+    for key in ("audio_transcription", "image_understanding",
+                "advanced_analytics", "metamorphic_verification",
+                "custom_smart_rag",
+                "gmail_connector", "outlook_connector",
+                "parent_child_retrieval", "graph_rag",
+                "apple_notes_reader", "calendar_sync", "docling_parser"):
+        FEATURE_FLAGS[key] = tier_level >= _TIER_LEVELS["pro"]
+    # ocr_parsing and semantic_dedup are always True (community features) — not tier-gated
+    for key in ("sso_saml", "audit_logging", "priority_support"):
+        FEATURE_FLAGS[key] = tier_level >= _TIER_LEVELS["enterprise"]
+    FEATURE_FLAGS["multi_user"] = CERID_MULTI_USER or tier_level >= _TIER_LEVELS["enterprise"]
+
 
 # ---------------------------------------------------------------------------
 # Feature toggles
@@ -108,6 +143,9 @@ SEMANTIC_CACHE_HNSW_EF = int(os.getenv("SEMANTIC_CACHE_HNSW_EF", "50"))
 # Parent-child chunking retrieval (Phase 51)
 ENABLE_PARENT_CHILD_RETRIEVAL = os.getenv("ENABLE_PARENT_CHILD_RETRIEVAL", "false").lower() in ("true", "1")
 
+# Graph RAG: entity-aware retrieval using Neo4j knowledge graph (Phase 52)
+ENABLE_GRAPH_RAG = os.getenv("ENABLE_GRAPH_RAG", "false").lower() in ("true", "1")
+
 # Degradation tiers: circuit-breaker-aware graceful degradation (Phase 51)
 ENABLE_DEGRADATION_TIERS = os.getenv("ENABLE_DEGRADATION_TIERS", "false").lower() == "true"
 
@@ -149,6 +187,7 @@ FEATURE_TOGGLES: dict[str, bool] = {
     "enable_memory_consolidation": ENABLE_MEMORY_CONSOLIDATION,
     "enable_context_compression": ENABLE_CONTEXT_COMPRESSION,
     "enable_parent_child_retrieval": ENABLE_PARENT_CHILD_RETRIEVAL,
+    "enable_graph_rag": ENABLE_GRAPH_RAG,
 }
 
 # ---------------------------------------------------------------------------
@@ -276,13 +315,20 @@ def set_tier(new_tier: str) -> str:
     pro_level = _TIER_LEVELS["pro"]
     ent_level = _TIER_LEVELS["enterprise"]
     FEATURE_FLAGS.update({
-        "ocr_parsing": level >= pro_level,
+        # ocr_parsing is always True (community feature) — not tier-gated
         "audio_transcription": level >= pro_level,
         "image_understanding": level >= pro_level,
-        "semantic_dedup": level >= pro_level,
+        # semantic_dedup is always True (community feature) — not tier-gated
         "advanced_analytics": level >= pro_level,
         "metamorphic_verification": level >= pro_level,
         "custom_smart_rag": level >= pro_level,
+        "gmail_connector": level >= pro_level,
+        "outlook_connector": level >= pro_level,
+        "parent_child_retrieval": level >= pro_level,
+        "graph_rag": level >= pro_level,
+        "apple_notes_reader": level >= pro_level,
+        "calendar_sync": level >= pro_level,
+        "docling_parser": level >= pro_level,
         "multi_user": CERID_MULTI_USER or level >= ent_level,
         "sso_saml": level >= ent_level,
         "audit_logging": level >= ent_level,
@@ -301,7 +347,8 @@ def _get_feature_tier(feature_name: str) -> str:
         return "enterprise"  # multi_user is enterprise (env override available)
     # Community features (always enabled)
     if feature_name in ("hierarchical_taxonomy", "file_upload_gui",
-                        "encryption_at_rest", "truth_audit", "live_metrics"):
+                        "encryption_at_rest", "truth_audit", "live_metrics",
+                        "ocr_parsing", "semantic_dedup"):
         return "community"
     # Everything else is pro
     return "pro"

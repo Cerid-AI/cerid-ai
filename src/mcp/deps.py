@@ -17,6 +17,7 @@ from neo4j import GraphDatabase
 
 import config
 from config.constants import MAX_RETRIES, RETRY_BASE_DELAY, RETRY_MAX_DELAY
+from errors import ConfigError
 
 logger = logging.getLogger("ai-companion")
 
@@ -41,7 +42,7 @@ def _retry(
         try:
             fn()
             return
-        except Exception as exc:
+        except (ConfigError, ValueError, OSError, RuntimeError) as exc:
             if attempt == attempts:
                 raise
             delay = min(max_delay, base_delay * (2 ** (attempt - 1)))
@@ -131,8 +132,16 @@ def get_redis() -> redis.Redis:
     return _redis
 
 
+_lightweight_logged = False
+
+
 def get_neo4j():
-    global _neo4j
+    global _neo4j, _lightweight_logged
+    if config.CERID_LIGHTWEIGHT:
+        if not _lightweight_logged:
+            logger.info("Lightweight mode — Neo4j disabled (graph features unavailable)")
+            _lightweight_logged = True
+        return None
     if _neo4j is None:
         with _neo4j_lock:
             if _neo4j is None:
@@ -153,7 +162,7 @@ def get_neo4j():
                         with driver.session() as s:
                             s.run("RETURN 1").consume()
                     _retry(_verify_neo4j_auth, "Neo4j")
-                except Exception:
+                except (ConfigError, ValueError, OSError, RuntimeError):
                     driver.close()
                     raise
                 _neo4j = driver
@@ -185,7 +194,7 @@ def close_redis():
     if _redis:
         try:
             _redis.close()
-        except Exception as e:
+        except (ConfigError, ValueError, OSError, RuntimeError) as e:
             logger.debug(f"Redis close error (ignored): {e}")
         _redis = None
         logger.info("Redis connection closed")

@@ -21,7 +21,8 @@ function _resolveBaseUrl(raw: string): string {
 }
 
 export const MCP_BASE = _resolveBaseUrl(_rawMcpUrl)
-const API_KEY = _env?.VITE_CERID_API_KEY || import.meta.env.VITE_CERID_API_KEY || ""
+// API key read from runtime injection ONLY — never from build-time env (would be baked into bundle)
+const API_KEY = _env?.VITE_CERID_API_KEY || ""
 
 import { uuid } from "@/lib/utils"
 

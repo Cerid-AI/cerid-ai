@@ -10,6 +10,11 @@ import os
 from utils.model_registry import get_model
 
 # ---------------------------------------------------------------------------
+# Sentry (opt-in error monitoring)
+# ---------------------------------------------------------------------------
+ENABLE_SENTRY = os.getenv("ENABLE_SENTRY", "false").lower() in ("true", "1", "yes")
+
+# ---------------------------------------------------------------------------
 # PDF Parsing (memory-safe chunked extraction)
 # ---------------------------------------------------------------------------
 PDF_MAX_PAGES = int(os.getenv("PDF_MAX_PAGES", "200"))
@@ -19,7 +24,7 @@ PDF_LITE_THRESHOLD_PAGES = int(os.getenv("PDF_LITE_THRESHOLD_PAGES", "50"))
 # ---------------------------------------------------------------------------
 # Chunking
 # ---------------------------------------------------------------------------
-CHUNK_MAX_TOKENS = 512
+
 CHUNK_OVERLAP = 0.2  # 20% overlap between chunks
 CHUNKING_MODE = os.getenv("CHUNKING_MODE", "semantic")  # "token" or "semantic"
 
@@ -67,6 +72,11 @@ ARCHIVE_PATH = os.getenv("ARCHIVE_PATH", "/archive")       # container-side moun
 WATCH_FOLDER = os.getenv("WATCH_FOLDER", os.path.expanduser("~/cerid-archive"))  # host-side
 
 # ---------------------------------------------------------------------------
+# Lightweight Mode (8GB machines — skips Neo4j, graph features degrade)
+# ---------------------------------------------------------------------------
+CERID_LIGHTWEIGHT = os.getenv("CERID_LIGHTWEIGHT", "false").lower() in ("true", "1", "yes")
+
+# ---------------------------------------------------------------------------
 # Database URLs
 # ---------------------------------------------------------------------------
 CHROMA_URL = os.getenv("CHROMA_URL", "http://ai-companion-chroma:8000")
@@ -93,6 +103,15 @@ TEMPORAL_RECENCY_WEIGHT = 0.1        # max boost from recency (added to relevanc
 HYBRID_VECTOR_WEIGHT = float(os.getenv("HYBRID_VECTOR_WEIGHT", "0.5"))
 HYBRID_KEYWORD_WEIGHT = float(os.getenv("HYBRID_KEYWORD_WEIGHT", "0.5"))
 BM25_DATA_DIR = os.path.join(os.getenv("DATA_DIR", "data"), "bm25")
+
+# ---------------------------------------------------------------------------
+# Storage Monitoring (Phase 56)
+# ---------------------------------------------------------------------------
+STORAGE_WARN_PCT = int(os.getenv("CERID_STORAGE_WARN_PCT", "60"))
+STORAGE_CRITICAL_PCT = int(os.getenv("CERID_STORAGE_CRITICAL_PCT", "80"))
+STORAGE_LIMIT_MB = int(os.getenv("CERID_STORAGE_LIMIT_MB", "2048"))
+INGEST_HISTORY_RETENTION_DAYS = int(os.getenv("CERID_INGEST_HISTORY_DAYS", "7"))
+
 QUERY_CONTEXT_MAX_CHARS = 40_000    # default max chars assembled for LLM context
 
 # Model-aware context char budgets — use larger budgets for large-context models.
@@ -156,6 +175,13 @@ GRAPH_TRAVERSAL_DEPTH = 2                     # max hops when traversing relatio
 GRAPH_MAX_RELATED = 5                         # max related artifacts returned per query
 GRAPH_RELATED_SCORE_FACTOR = 0.6              # score multiplier for graph-sourced results (vs direct hits)
 GRAPH_MIN_KEYWORD_OVERLAP = 2                 # min shared keywords to create RELATES_TO
+
+# ---------------------------------------------------------------------------
+# Graph RAG — entity-aware retrieval using Neo4j (Phase 52)
+# ---------------------------------------------------------------------------
+GRAPH_RAG_WEIGHT = float(os.getenv("GRAPH_RAG_WEIGHT", "0.3"))   # blend weight (0.0–1.0)
+GRAPH_RAG_MAX_HOPS = int(os.getenv("GRAPH_RAG_MAX_HOPS", "2"))   # traversal depth
+GRAPH_RAG_MAX_RESULTS = int(os.getenv("GRAPH_RAG_MAX_RESULTS", "10"))  # max graph results
 GRAPH_RELATIONSHIP_TYPES = [
     "RELATES_TO",       # shared metadata / same directory
     "DEPENDS_ON",       # import / reference detected in content
@@ -430,6 +456,14 @@ SCAN_MIN_QUALITY = float(os.getenv("SCAN_MIN_QUALITY", "0.4"))  # min quality sc
 SCAN_MAX_FILE_SIZE_MB = int(os.getenv("SCAN_MAX_FILE_SIZE_MB", "50"))
 SCAN_EXCLUDE_PATTERNS = [p for p in os.getenv("SCAN_EXCLUDE_PATTERNS", "").split(",") if p]
 SCHEDULE_FOLDER_SCAN = os.getenv("SCHEDULE_FOLDER_SCAN", "")  # cron expr, empty=disabled
+SCHEDULE_WATCHED_RESCAN = os.getenv("SCHEDULE_WATCHED_RESCAN", "")  # cron expr, e.g. "0 */6 * * *"=every 6h, empty=disabled
+SCHEDULE_MODEL_CATALOG = os.getenv("SCHEDULE_MODEL_CATALOG", "")  # cron expr, e.g. "0 6 * * *"=daily 6 AM, empty=disabled
+ENABLE_AI_TRIAGE = os.getenv("ENABLE_AI_TRIAGE", "").lower() in ("true", "1", "yes")  # Ollama content triage scoring
+
+# ---------------------------------------------------------------------------
+# RSS/Atom Feed Polling
+# ---------------------------------------------------------------------------
+CERID_RSS_POLL_INTERVAL = int(os.getenv("CERID_RSS_POLL_INTERVAL", "1800"))  # seconds, default 30 min
 
 # ---------------------------------------------------------------------------
 # Pipeline Tuning — latency vs quality trade-offs
@@ -496,9 +530,21 @@ def get_stage_provider(stage: str) -> str:
 # ---------------------------------------------------------------------------
 CERID_TRADING_ENABLED = os.getenv("CERID_TRADING_ENABLED", "false").lower() in ("true", "1")
 TRADING_AGENT_URL = os.getenv("TRADING_AGENT_URL", "http://localhost:8090")
-SCHEDULE_TRADING_AUTORESEARCH = os.getenv("SCHEDULE_TRADING_AUTORESEARCH", "0 1 * * *")
-SCHEDULE_PLATT_MIRROR = os.getenv("SCHEDULE_PLATT_MIRROR", "0 2 * * *")
-SCHEDULE_LONGSHOT_SURFACE = os.getenv("SCHEDULE_LONGSHOT_SURFACE", "30 2 * * *")
+
+# ---------------------------------------------------------------------------
+# Email IMAP Poller (Phase 54.1)
+# ---------------------------------------------------------------------------
+CERID_EMAIL_IMAP_HOST = os.getenv("CERID_EMAIL_IMAP_HOST", "")
+CERID_EMAIL_IMAP_PORT = int(os.getenv("CERID_EMAIL_IMAP_PORT", "993"))
+CERID_EMAIL_IMAP_USER = os.getenv("CERID_EMAIL_IMAP_USER", "")
+CERID_EMAIL_IMAP_PASSWORD = os.getenv("CERID_EMAIL_IMAP_PASSWORD", "")
+CERID_EMAIL_FOLDER = os.getenv("CERID_EMAIL_FOLDER", "INBOX")
+CERID_EMAIL_POLL_INTERVAL = int(os.getenv("CERID_EMAIL_POLL_INTERVAL", "15"))  # minutes
+
+# ---------------------------------------------------------------------------
+# RSS/Atom Feed Poller (Phase 54.2)
+# ---------------------------------------------------------------------------
+CERID_RSS_POLL_INTERVAL = int(os.getenv("CERID_RSS_POLL_INTERVAL", "30"))  # minutes
 
 # ---------------------------------------------------------------------------
 # Boardroom Integration
@@ -522,6 +568,16 @@ WEBHOOK_ENDPOINTS = [
 # ---------------------------------------------------------------------------
 REDIS_INGEST_LOG = "ingest:log"
 REDIS_LOG_MAX = 10_000
+
+# ---------------------------------------------------------------------------
+# Private Mode (Ephemeral Sessions)
+#   Level 1: no history saves, no memory extraction
+#   Level 2: also skip KB context injection (pure LLM)
+#   Level 3: also force local-only models (Ollama)
+#   Level 4: also clear Redis query cache on session end
+# ---------------------------------------------------------------------------
+PRIVATE_MODE_ENABLED: bool = os.getenv("CERID_PRIVATE_MODE", "false").lower() == "true"
+PRIVATE_MODE_LEVEL: int = int(os.getenv("CERID_PRIVATE_MODE_LEVEL", "1"))
 
 # ---------------------------------------------------------------------------
 # Privacy — Email Header Anonymization
@@ -646,6 +702,13 @@ CONSUMER_REGISTRY: dict[str, dict] = {
             "/admin/": (30, 60),
         },
         "allowed_domains": None,     # Scanner can write to all domains
+        "strict_domains": False,
+    },
+    "webhook": {
+        "rate_limits": {
+            "/ingest": (60, 60),     # 60 req/min — external webhook sources
+        },
+        "allowed_domains": None,     # Webhooks can target any domain
         "strict_domains": False,
     },
     "_default": {

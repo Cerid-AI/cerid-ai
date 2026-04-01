@@ -21,6 +21,7 @@ import logging
 from typing import Any
 
 import config
+from errors import RetrievalError
 
 logger = logging.getLogger("ai-companion.self_rag")
 
@@ -118,7 +119,7 @@ async def self_rag_enhance(
 
     # Reassemble context if we found additional results
     if total_additional > 0:
-        from agents.query_agent import assemble_context
+        from agents.assembler import assemble_context
 
         # Sort by relevance before assembly
         merged_results.sort(key=lambda x: x.get("relevance", 0.0), reverse=True)
@@ -170,7 +171,7 @@ async def _assess_claims(
     threshold: float,
 ) -> list[dict[str, Any]]:
     """Check how well each claim is covered by the KB (lightweight, no reranking)."""
-    from agents.query_agent import multi_domain_query
+    from agents.decomposer import multi_domain_query
 
     verification_domains = [d for d in config.DOMAINS if d != "conversations"]
     assessments: list[dict[str, Any]] = []
@@ -190,7 +191,7 @@ async def _assess_claims(
                 "covered": max_sim >= threshold,
                 "top_source": results[0].get("filename", "") if results else "",
             })
-        except Exception as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
             logger.warning("Self-RAG: claim assessment failed for %r: %s", claim[:50], e)
             assessments.append({
                 "claim": claim,
@@ -226,7 +227,7 @@ async def _retrieve_for_claims(
                 neo4j_driver=neo4j_driver,
             )
             additional.extend(result.get("results", []))
-        except Exception as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
             logger.warning("Self-RAG: refined query failed for %r: %s", query[:50], e)
 
     return additional

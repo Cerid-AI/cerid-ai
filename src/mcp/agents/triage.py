@@ -7,17 +7,34 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from langgraph.graph import END, StateGraph
 
 import config
+from errors import RoutingError
 from parsers import PARSER_REGISTRY, parse_file
 from utils.chunker import chunk_text, make_context_header
 from utils.metadata import ai_categorize, extract_metadata
 
 logger = logging.getLogger("ai-companion.triage")
+
+
+# ---------------------------------------------------------------------------
+# Structured triage result (bridge to ingestion service)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class TriageResult:
+    """Structured output from triage pipeline, consumed by ingestion service."""
+
+    quality_score: float = 0.6  # 0.0-1.0, mapped from 1-5 triage_score
+    recommended_domain: str = ""
+    should_ingest: bool = True
+    skip_reason: str | None = None
+    suggested_tags: list[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -51,21 +68,31 @@ def validate_node(state: TriageStateDict) -> TriageStateDict:
 
 def parse_node(state: TriageStateDict) -> TriageStateDict:
     """Parse file content using the appropriate parser."""
+    from utils.agent_events import emit_agent_event
+
+    filename = state.get("filename", Path(state["file_path"]).name)
+    file_type = state.get("file_type", Path(state["file_path"]).suffix.lstrip(".")).upper()
+    emit_agent_event("triage", f"{file_type} detected \u2014 {filename}, running extraction.")
+
     try:
         parsed = parse_file(state["file_path"])
         is_structured = parsed.get("table_count", 0) > 0 or state.get("file_type") in ("xlsx", "csv")
+        page_count = parsed.get("page_count")
+
+        if page_count:
+            emit_agent_event("triage", f"{filename}: {page_count} pages extracted.")
 
         return {
             **state,
             "parsed_text": parsed["text"],
             "file_type": parsed.get("file_type", state.get("file_type", "")),
-            "page_count": parsed.get("page_count"),
+            "page_count": page_count,
             "is_structured": is_structured,
             "status": "parsed",
         }
     except (FileNotFoundError, ValueError) as e:
         return {**state, "status": "error", "error": str(e)}
-    except Exception as e:
+    except (RoutingError, ValueError, OSError, RuntimeError) as e:
         return {**state, "status": "error", "error": f"Parse failed: {e}"}
 
 
@@ -182,6 +209,68 @@ def chunk_node(state: TriageStateDict) -> TriageStateDict:
 
 
 # ---------------------------------------------------------------------------
+# AI Triage Scoring (Ollama, optional)
+# ---------------------------------------------------------------------------
+
+_TRIAGE_SCORE_PROMPT = (
+    "Rate the following text content on a scale of 1-5 for knowledge value.\n"
+    "1 = junk/spam/empty, 2 = low value (boilerplate, logs), "
+    "3 = moderate (general info), 4 = good (useful reference), "
+    "5 = excellent (high-quality knowledge).\n\n"
+    "Respond with ONLY a single digit (1-5).\n\n"
+    "Filename: {filename}\n"
+    "Content (first 500 chars):\n{content}"
+)
+
+
+async def score_content_node(state: TriageStateDict) -> TriageStateDict:
+    """Score content value using Ollama (1-5). Skips if disabled or unavailable."""
+    if not getattr(config, "ENABLE_AI_TRIAGE", False):
+        return {**state, "triage_score": 3}  # neutral default
+
+    text = state.get("parsed_text", "")
+    filename = state.get("filename", "")
+
+    # Only score if we have meaningful text
+    if len(text.strip()) < 50:
+        return {**state, "triage_score": 2}
+
+    try:
+        from utils.llm_client import llm_call
+
+        prompt = _TRIAGE_SCORE_PROMPT.format(
+            filename=filename,
+            content=text[:500],
+        )
+        response = await llm_call(
+            prompt,
+            provider="ollama",
+            max_tokens=5,
+            temperature=0.0,
+        )
+        # Parse the score from response
+        score_text = response.strip()
+        score = int(score_text[0]) if score_text and score_text[0].isdigit() else 3
+        score = max(1, min(5, score))
+
+        if score < 2:
+            logger.info("AI triage: '%s' scored %d — skipping ingestion", filename, score)
+            return {**state, "triage_score": score, "status": "error", "error": f"AI triage score {score}/5 — content too low value"}
+
+        return {**state, "triage_score": score}
+    except (RoutingError, ValueError, OSError, RuntimeError) as e:
+        logger.debug("AI triage scoring failed (falling back to default): %s", e)
+        return {**state, "triage_score": 3}  # fallback: ingest everything
+
+
+def should_continue_after_triage(state: TriageStateDict) -> str:
+    """Route after triage scoring: skip if score too low, else continue."""
+    if state.get("status") == "error":
+        return "error_end"
+    return "route_categorization"
+
+
+# ---------------------------------------------------------------------------
 # Routing functions
 # ---------------------------------------------------------------------------
 
@@ -193,10 +282,10 @@ def should_continue_after_validate(state: TriageStateDict) -> str:
 
 
 def should_continue_after_parse(state: TriageStateDict) -> str:
-    """Route after parsing: error or categorization routing."""
+    """Route after parsing: error or AI triage scoring."""
     if state.get("status") == "error":
         return "error_end"
-    return "route_categorization"
+    return "score_content"
 
 
 def should_categorize(state: TriageStateDict) -> str:
@@ -224,6 +313,7 @@ def build_triage_graph() -> StateGraph:
     # Add nodes
     graph.add_node("validate", validate_node)  # type: ignore[type-var]
     graph.add_node("parse", parse_node)  # type: ignore[type-var]
+    graph.add_node("score_content", score_content_node)  # type: ignore[type-var]
     graph.add_node("route_categorization", route_categorization)  # type: ignore[type-var]
     graph.add_node("categorize", categorize_node)  # type: ignore[type-var]
     graph.add_node("extract_metadata", extract_metadata_node)  # type: ignore[type-var]
@@ -239,6 +329,10 @@ def build_triage_graph() -> StateGraph:
         "parse": "parse",
     })
     graph.add_conditional_edges("parse", should_continue_after_parse, {
+        "error_end": "error_end",
+        "score_content": "score_content",
+    })
+    graph.add_conditional_edges("score_content", should_continue_after_triage, {
         "error_end": "error_end",
         "route_categorization": "route_categorization",
     })
@@ -270,13 +364,56 @@ def get_triage_graph():
 # Public API
 # ---------------------------------------------------------------------------
 
+def _state_to_triage_result(state: dict[str, Any]) -> TriageResult:
+    """Convert final graph state dict into a structured TriageResult."""
+    # Map 1-5 triage_score to 0.0-1.0 quality_score
+    raw_score = state.get("triage_score", 3)
+    quality_score = round(max(0.0, min(1.0, (raw_score - 1) / 4)), 2)
+
+    is_error = state.get("status") == "error"
+    skip_reason = state.get("error") if is_error else None
+
+    # Extract tags from metadata
+    tags_list: list[str] = []
+    meta = state.get("metadata", {})
+    tags_json = meta.get("tags_json", "")
+    if tags_json:
+        try:
+            parsed_tags = json.loads(tags_json)
+            if isinstance(parsed_tags, list):
+                tags_list = [str(t) for t in parsed_tags]
+        except (json.JSONDecodeError, TypeError):
+            pass
+    # Also pick up keywords as supplementary tags
+    kw_json = meta.get("keywords_json", "")
+    if kw_json:
+        try:
+            kws = json.loads(kw_json)
+            if isinstance(kws, list):
+                tags_list.extend(str(k) for k in kws if str(k) not in tags_list)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    return TriageResult(
+        quality_score=quality_score,
+        recommended_domain=state.get("domain", ""),
+        should_ingest=not is_error,
+        skip_reason=skip_reason,
+        suggested_tags=tags_list,
+    )
+
+
 async def triage_file(
     file_path: str,
     domain: str = "",
     categorize_mode: str = "",
     tags: str = "",
 ) -> dict[str, Any]:
-    """Run a single file through the triage pipeline, returning prepared state."""
+    """Run a single file through the triage pipeline, returning prepared state.
+
+    The returned dict includes a ``triage_result`` key containing a
+    :class:`TriageResult` dataclass for consumption by the ingestion service.
+    """
     initial_state: dict[str, Any] = {
         "file_path": file_path,
         "filename": Path(file_path).name,
@@ -300,6 +437,9 @@ async def triage_file(
     graph = get_triage_graph()
     final_state = await graph.ainvoke(initial_state)
 
+    # Attach structured triage result for downstream consumers
+    final_state["triage_result"] = _state_to_triage_result(final_state)
+
     return final_state
 
 
@@ -318,7 +458,7 @@ async def triage_batch(
                 tags=file_spec.get("tags", ""),
             )
             results.append(result)
-        except Exception as e:
+        except (RoutingError, ValueError, OSError, RuntimeError) as e:
             logger.error(f"Triage failed for {file_spec.get('file_path', '?')}: {e}")
             results.append({
                 "file_path": file_spec.get("file_path", ""),

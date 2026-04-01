@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button"
 import { Settings, Loader2, AlertCircle, RefreshCw, Crown } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { PluginsSection } from "./plugins-section"
+import { ProSection } from "./pro-section"
 import { PaneErrorBoundary } from "@/components/ui/pane-error-boundary"
 import { EssentialsSection } from "./essentials-section"
 import { PipelineSection } from "./pipeline-section"
@@ -246,6 +247,9 @@ export default function SettingsPane() {
                 <TabsTrigger value="pipeline" className="flex-1">Pipeline</TabsTrigger>
                 <TabsTrigger value="system" className="flex-1">System</TabsTrigger>
                 <TabsTrigger value="plugins" className="flex-1">Plugins</TabsTrigger>
+                <TabsTrigger value="pro" className="flex-1">
+                  <Crown className="mr-1 h-3 w-3" />Pro
+                </TabsTrigger>
               </TabsList>
 
               <TabsContent value="essentials" className="space-y-1 pt-2">
@@ -284,6 +288,16 @@ export default function SettingsPane() {
               <TabsContent value="plugins" className="space-y-1 pt-2">
                 <PaneErrorBoundary label="Plugins">
                   <PluginsSection />
+                </PaneErrorBoundary>
+              </TabsContent>
+
+              <TabsContent value="pro" className="space-y-1 pt-2">
+                <PaneErrorBoundary label="Pro">
+                  <ProSection
+                    featureTier={settings?.feature_tier ?? "community"}
+                    featureFlags={settings?.feature_flags ?? {}}
+                    onRefresh={load}
+                  />
                 </PaneErrorBoundary>
               </TabsContent>
             </Tabs>

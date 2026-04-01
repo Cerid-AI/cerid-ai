@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card"
 import { ChevronDown, ChevronRight, Cpu, SearchIcon, Layers, Crown } from "lucide-react"
 import { SectionHeading, Row, SliderRow, PipelineToggle, ProGate } from "./settings-primitives"
+import { ModelManagement } from "./model-management"
 
 interface PipelineSectionProps {
   settings: ServerSettings
@@ -23,6 +24,13 @@ export function PipelineSection({ settings, sections, toggleSection, patch }: Pi
 
   return (
     <>
+      {/* -- Model Management -- */}
+      <Card className="mb-4">
+        <CardContent className="px-4 pb-4 pt-4">
+          <ModelManagement />
+        </CardContent>
+      </Card>
+
       {/* -- Retrieval Pipeline -- */}
       <SectionHeading icon={Cpu} label="Retrieval Pipeline" open={sections.retrieval} onToggle={() => toggleSection("retrieval")} />
       {sections.retrieval && (

@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import {
   MessageSquare, Database, HeartPulse, BarChart3, Brain, Settings,
   Sun, Moon, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Plus, History,
-  TrendingUp, Shield,
+  Shield, Activity,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -16,8 +17,9 @@ import { useConversationsContext } from "@/contexts/conversations-context"
 import { useUIMode } from "@/contexts/ui-mode-context"
 import { MODELS } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { fetchModelUpdatesFull } from "@/lib/api"
 
-export type Pane = "chat" | "knowledge" | "monitoring" | "audit" | "memories" | "trading" | "settings"
+export type Pane = "chat" | "knowledge" | "monitoring" | "audit" | "memories" | "agents" | "settings"
 
 interface SidebarProps {
   activePane: Pane
@@ -26,7 +28,6 @@ interface SidebarProps {
   onToggleCollapse: () => void
   theme: "dark" | "light"
   onToggleTheme: () => void
-  tradingEnabled?: boolean
   featureTier?: string
   onCycleTier?: () => void
 }
@@ -37,6 +38,7 @@ const NAV_ITEMS: { pane: Pane; icon: typeof MessageSquare; label: string }[] = [
   { pane: "monitoring", icon: HeartPulse, label: "Health" },
   { pane: "audit", icon: BarChart3, label: "Analytics" },
   { pane: "memories", icon: Brain, label: "Memories" },
+  { pane: "agents", icon: Activity, label: "Agents" },
   { pane: "settings", icon: Settings, label: "Settings" },
 ]
 
@@ -57,15 +59,23 @@ const TIER_CONFIG: Record<string, { label: string; wordmark: string; tierWord: s
 const TIER_LABELS: Record<string, string> = { community: "Core", pro: "Pro", enterprise: "Vault" }
 const TIER_COLORS: Record<string, string> = { community: "text-muted-foreground", pro: "text-brand", enterprise: "text-gold" }
 
-export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse, theme, onToggleTheme, tradingEnabled, featureTier, onCycleTier }: SidebarProps) {
-  const { conversations, activeId, setActiveId, create, remove } = useConversationsContext()
+export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse, theme, onToggleTheme, featureTier, onCycleTier }: SidebarProps) {
+  const {
+    visibleConversations, activeId, setActiveId, create, remove,
+    archive, unarchive, showArchived, toggleShowArchived, archivedCount,
+    bulkDelete, bulkArchive,
+  } = useConversationsContext()
   const { toggle: toggleMode, isSimple } = useUIMode()
   const [historyExpanded, setHistoryExpanded] = useState(() => readBool("cerid-sidebar-history", true))
+  const { data: modelUpdates } = useQuery({
+    queryKey: ["model-updates"],
+    queryFn: fetchModelUpdatesFull,
+    refetchInterval: 300_000,
+    staleTime: 120_000,
+  })
+  const updateCount = modelUpdates?.updates?.length ?? 0
 
-  const allNav = tradingEnabled
-    ? [...NAV_ITEMS.slice(0, -1), { pane: "trading" as Pane, icon: TrendingUp, label: "Trading" }, NAV_ITEMS[NAV_ITEMS.length - 1]]
-    : NAV_ITEMS
-  const visibleNav = isSimple ? allNav.filter((n) => SIMPLE_PANES.has(n.pane)) : allNav
+  const visibleNav = isSimple ? NAV_ITEMS.filter((n) => SIMPLE_PANES.has(n.pane)) : NAV_ITEMS
 
   const toggleHistory = () => {
     setHistoryExpanded((prev) => {
@@ -117,25 +127,44 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
 
         {/* Nav items */}
         <nav className="space-y-1 p-2">
-          {visibleNav.map(({ pane, icon: Icon, label }) => (
-            <Tooltip key={pane}>
-              <TooltipTrigger asChild>
-                <Button
-                  variant={activePane === pane ? "secondary" : "ghost"}
-                  className={cn(
-                    "w-full justify-start gap-3",
-                    collapsed && "justify-center px-0",
-                    activePane === pane && "border-l-2 border-brand bg-brand/5"
-                  )}
-                  onClick={() => onPaneChange(pane)}
-                >
-                  <Icon className={cn("h-4 w-4 shrink-0", activePane === pane && "text-brand")} />
-                  {!collapsed && <span>{label}</span>}
-                </Button>
-              </TooltipTrigger>
-              {collapsed && <TooltipContent side="right">{label}</TooltipContent>}
-            </Tooltip>
-          ))}
+          {visibleNav.map(({ pane, icon: Icon, label }) => {
+            const showBadge = pane === "settings" && updateCount > 0
+            return (
+              <Tooltip key={pane}>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={activePane === pane ? "secondary" : "ghost"}
+                    className={cn(
+                      "w-full justify-start gap-3",
+                      collapsed && "justify-center px-0",
+                      activePane === pane && "border-l-2 border-brand bg-brand/5"
+                    )}
+                    onClick={() => onPaneChange(pane)}
+                  >
+                    <span className="relative shrink-0">
+                      <Icon className={cn("h-4 w-4", activePane === pane && "text-brand")} />
+                      {showBadge && (
+                        <span className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-teal-500 text-[8px] font-bold text-white">
+                          {updateCount > 9 ? "9+" : updateCount}
+                        </span>
+                      )}
+                    </span>
+                    {!collapsed && (
+                      <span className="flex items-center gap-1.5">
+                        {label}
+                        {showBadge && !collapsed && (
+                          <span className="rounded-full bg-teal-500/10 px-1.5 py-0 text-[9px] font-medium text-teal-600 dark:text-teal-400">
+                            {updateCount}
+                          </span>
+                        )}
+                      </span>
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                {collapsed && <TooltipContent side="right">{label}</TooltipContent>}
+              </Tooltip>
+            )
+          })}
 
           {/* New Chat — always visible at top of sidebar nav */}
           <Tooltip>
@@ -174,10 +203,17 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
             {historyExpanded && (
               <div className="min-h-0 flex-1">
                 <ConversationList
-                  conversations={conversations}
+                  conversations={visibleConversations}
                   activeId={activeId}
                   onSelect={handleSelectConversation}
                   onDelete={remove}
+                  onArchive={archive}
+                  onUnarchive={unarchive}
+                  showArchived={showArchived}
+                  archivedCount={archivedCount}
+                  onToggleShowArchived={toggleShowArchived}
+                  onBulkDelete={bulkDelete}
+                  onBulkArchive={bulkArchive}
                 />
               </div>
             )}

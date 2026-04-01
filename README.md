@@ -17,6 +17,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 
 - **React GUI** at port 3000 — streaming chat, knowledge browser, monitoring & audit dashboards
 - **Multi-Provider LLM Access** via Bifrost gateway (Claude, GPT, Grok, Gemini, Llama, Mistral)
+- **Streaming Verification** — real-time claim extraction + KB verification with inline source attribution, per-message truth audit, and metamorphic verification (Pro tier)
 - **10 Intelligent Agents** — Query (LLM reranking), Triage (LangGraph), Rectification, Audit, Maintenance, Hallucination Detection, Memory Extraction, Curation, Self-RAG, Decomposer
 - **Trading Agent Integration** — 5 MCP tools + SDK endpoints for signal enrichment, herd detection, Kelly sizing, cascade confirmation, and longshot calibration (opt-in via `CERID_TRADING_ENABLED`)
 - **26 MCP Tools** for knowledge base, trading, web search, memory, and multi-modal operations via MCP protocol
@@ -26,7 +27,6 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 - **Local LLM via Ollama** — Air-gapped deployment with local model routing
 - **Visual Workflow Builder** — DAG-based workflow engine with drag-and-drop SVG canvas
 - **Electron Desktop App** — Native macOS + Windows app with Docker lifecycle management
-- **Hallucination Detection** — claim extraction + KB verification with per-message truth audit + metamorphic verification (Pro tier)
 - **Graceful Degradation** — 5-tier automatic service degradation (FULL → REDUCED → MINIMAL → CACHE_ONLY → OFFLINE)
 - **Exception Hierarchy** — typed `CeridError` subclasses with `@handle_errors` decorator, zero silent failures
 - **Per-Stage Ollama Routing** — 8 pipeline stages independently routable to local or cloud LLM

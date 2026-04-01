@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from errors import CeridError
 from eval.metrics import average_precision, mrr, ndcg_at_k, precision_at_k, recall_at_k
 
 logger = logging.getLogger("ai-companion.eval")
@@ -119,7 +120,7 @@ async def evaluate(
                 redis_client=redis_client,
                 neo4j_driver=neo4j_driver,
             )
-        except Exception as e:
+        except (CeridError, ValueError, OSError, RuntimeError) as e:
             logger.error(f"Eval query failed: {eq.query!r} — {e}")
             results.append(EvalResult(query=eq.query, pipeline=pipeline, domain=eq.domain))
             continue

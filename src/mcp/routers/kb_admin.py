@@ -8,7 +8,7 @@ import logging
 import traceback
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 import config
@@ -16,6 +16,7 @@ from agents.curator import _is_truncated_summary, curate
 from config.features import CERID_MULTI_USER, is_tier_met
 from db.neo4j.artifacts import delete_artifact, list_artifacts
 from deps import get_chroma, get_neo4j
+from errors import RetrievalError
 from utils.bm25 import rebuild_all as rebuild_bm25_all
 from utils.query_cache import invalidate_cache_non_blocking
 
@@ -206,7 +207,7 @@ async def reingest_artifact(artifact_id: str):
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.error("Failed to reingest artifact %s: %s", artifact_id[:8], e)
         raise HTTPException(status_code=500, detail=f"Failed to reingest: {e}")
 
@@ -221,7 +222,7 @@ async def rebuild_indexes():
             domains_rebuilt=rebuilt,
             message=f"Rebuilt BM25 indexes for {rebuilt} domains",
         )
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.error("Failed to rebuild indexes: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to rebuild indexes: {e}")
 
@@ -245,7 +246,7 @@ async def rescore_artifacts(req: RescoreRequest | None = None):
             avg_quality_score=result["avg_quality_score"],
             message=f"Rescored {result['artifacts_scored']} artifacts (avg: {result['avg_quality_score']:.2f})",
         )
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.error("Failed to rescore: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to rescore: {e}")
 
@@ -279,7 +280,7 @@ async def regenerate_summaries(req: RegenerateSummariesRequest | None = None):
             "artifacts_scored": result["artifacts_scored"],
             "message": f"Generated {result['synopses_generated']} synopses, scored {result['artifacts_scored']} artifacts",
         }
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.error("Failed to regenerate summaries: %s\n%s", e, traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Failed to regenerate summaries: {e}")
 
@@ -309,7 +310,7 @@ async def clear_domain(domain: str, req: ClearDomainRequest):
                 if result.get("deleted"):
                     deleted_count += 1
                     chunks_removed += len(result.get("chunk_ids", []))
-            except Exception as e:
+            except (RetrievalError, ValueError, OSError, RuntimeError) as e:
                 logger.warning("Failed to delete artifact %s: %s", artifact["id"][:8], e)
 
         # Delete ChromaDB collection for the domain
@@ -317,7 +318,7 @@ async def clear_domain(domain: str, req: ClearDomainRequest):
         try:
             chroma.delete_collection(name=coll_name)
             logger.info("Deleted ChromaDB collection: %s", coll_name)
-        except Exception as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
             logger.warning("Failed to delete collection %s: %s", coll_name, e)
 
         await invalidate_cache_non_blocking()
@@ -330,7 +331,7 @@ async def clear_domain(domain: str, req: ClearDomainRequest):
         }
     except HTTPException:
         raise
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.error("Failed to clear domain %s: %s", domain, e)
         raise HTTPException(status_code=500, detail=f"Failed to clear domain: {e}")
 
@@ -356,7 +357,7 @@ async def delete_single_artifact(artifact_id: str):
                 collection = chroma.get_collection(name=coll_name)
                 collection.delete(ids=chunk_ids)
                 chunks_removed = len(chunk_ids)
-            except Exception as e:
+            except (RetrievalError, ValueError, OSError, RuntimeError) as e:
                 logger.warning("Failed to clean ChromaDB chunks: %s", e)
 
         await invalidate_cache_non_blocking()
@@ -370,7 +371,7 @@ async def delete_single_artifact(artifact_id: str):
         )
     except HTTPException:
         raise
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.error("Failed to delete artifact %s: %s", artifact_id[:8], e)
         raise HTTPException(status_code=500, detail=f"Failed to delete artifact: {e}")
 
@@ -396,7 +397,7 @@ async def kb_stats():
             try:
                 collection = chroma.get_collection(name=coll_name)
                 chunk_count = collection.count()
-            except Exception as exc:
+            except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
                 logger.warning("Failed to get chunk count for collection %s: %s", coll_name, exc)
             total_chunks += chunk_count
 
@@ -421,6 +422,132 @@ async def kb_stats():
             total_chunks=total_chunks,
             domains=domain_stats,
         )
-    except Exception as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
         logger.error("Failed to get KB stats: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to get KB stats: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Near-Duplicate Detection (Phase 57)
+# ---------------------------------------------------------------------------
+
+
+class DuplicateArtifactModel(BaseModel):
+    id: str
+    filename: str
+    domain: str
+    summary: str = ""
+    quality_score: float | None = None
+    ingested_at: str = ""
+    chunk_count: int = 0
+
+
+class DuplicateGroupModel(BaseModel):
+    content_hash_prefix: str
+    similarity: float
+    artifacts: list[DuplicateArtifactModel]
+
+
+class DuplicatesResponse(BaseModel):
+    groups: list[DuplicateGroupModel]
+    total_groups: int
+
+
+class MergeDuplicatesRequest(BaseModel):
+    keep_id: str
+    remove_ids: list[str]
+
+
+class DismissDuplicatesRequest(BaseModel):
+    artifact_ids: list[str]
+
+
+@router.get("/admin/kb/duplicates", response_model=DuplicatesResponse)
+async def find_duplicates(min_similarity: float = Query(0.85, ge=0.5, le=1.0)):
+    """Find near-duplicate artifacts using content_hash prefix matching."""
+    try:
+        neo4j = get_neo4j()
+        all_artifacts = list_artifacts(neo4j, limit=10000)
+
+        # Group by content_hash prefix (first 16 chars) for near-duplicate detection
+        hash_groups: dict[str, list[dict[str, Any]]] = {}
+        for a in all_artifacts:
+            content_hash = a.get("content_hash", "")
+            if not content_hash:
+                continue
+            prefix = content_hash[:16]
+            hash_groups.setdefault(prefix, []).append(a)
+
+        # Filter to groups with 2+ artifacts (actual duplicates)
+        groups: list[DuplicateGroupModel] = []
+        for prefix, artifacts in hash_groups.items():
+            if len(artifacts) < 2:
+                continue
+            dup_artifacts = [
+                DuplicateArtifactModel(
+                    id=a["id"],
+                    filename=a.get("filename", ""),
+                    domain=a.get("domain", ""),
+                    summary=a.get("summary", ""),
+                    quality_score=a.get("quality_score"),
+                    ingested_at=a.get("ingested_at", ""),
+                    chunk_count=a.get("chunk_count", 0),
+                )
+                for a in artifacts
+            ]
+            groups.append(DuplicateGroupModel(
+                content_hash_prefix=prefix,
+                similarity=1.0,  # Exact hash prefix match
+                artifacts=dup_artifacts,
+            ))
+
+        # Sort: most duplicates first
+        groups.sort(key=lambda g: len(g.artifacts), reverse=True)
+
+        return DuplicatesResponse(groups=groups, total_groups=len(groups))
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+        logger.error("Failed to find duplicates: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to find duplicates: {e}")
+
+
+@router.post("/admin/kb/duplicates/merge")
+async def merge_duplicates(req: MergeDuplicatesRequest):
+    """Merge duplicate artifacts: keep best, delete others."""
+    try:
+        neo4j = get_neo4j()
+        chroma = get_chroma()
+
+        deleted_count = 0
+        for remove_id in req.remove_ids:
+            if remove_id == req.keep_id:
+                continue
+            try:
+                result = delete_artifact(neo4j, remove_id)
+                if result.get("deleted"):
+                    deleted_count += 1
+                    # Clean ChromaDB chunks
+                    chunk_ids = result.get("chunk_ids", [])
+                    domain = result.get("domain", "")
+                    if chunk_ids and domain:
+                        coll_name = config.collection_name(domain)
+                        try:
+                            collection = chroma.get_collection(name=coll_name)
+                            collection.delete(ids=chunk_ids)
+                        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+                            logger.warning("Failed to clean chunks for %s: %s", remove_id[:8], e)
+            except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+                logger.warning("Failed to delete duplicate %s: %s", remove_id[:8], e)
+
+        await invalidate_cache_non_blocking()
+        return {"status": "ok", "merged": deleted_count}
+    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+        logger.error("Failed to merge duplicates: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to merge duplicates: {e}")
+
+
+@router.post("/admin/kb/duplicates/dismiss")
+async def dismiss_duplicates(req: DismissDuplicatesRequest):
+    """Dismiss a set of artifacts as not-duplicate (no-op placeholder for future tagging)."""
+    # In a future phase, this could add a "not_duplicate" relationship in Neo4j
+    # to suppress these from future duplicate detection runs.
+    return {"status": "dismissed", "artifact_ids": req.artifact_ids}
