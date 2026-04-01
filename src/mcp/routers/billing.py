@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Billing endpoints — Stripe integration for Pro tier licensing."""
@@ -209,12 +209,12 @@ async def validate_license_key_endpoint(req: LicenseKeyRequest):
     redis = get_redis()
     key = req.key.strip()
 
-    # Phase 1: format validation
+    # Step 1: format validation
     fmt_result = validate_key_format(key)
     if not fmt_result["valid"]:
         raise HTTPException(status_code=400, detail=fmt_result.get("error", "Invalid license key format."))
 
-    # Phase 2: HMAC validation (skipped if LICENSE_SECRET is not configured)
+    # Step 2: HMAC validation (skipped if LICENSE_SECRET is not configured)
     if LICENSE_SECRET:
         if not _validate_license_key(key):
             raise HTTPException(status_code=400, detail="Invalid or expired license key.")

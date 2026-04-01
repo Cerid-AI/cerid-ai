@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useEffect, useCallback } from "react"
@@ -34,7 +34,7 @@ const MEMORY_TYPES = [
   { key: "conversational", label: "Conversational", icon: MessageSquare, bg: "bg-cyan-500/10", text: "text-cyan-500" },
 ] as const
 
-// Legacy type mapping for memories created before Phase 51
+// Legacy type mapping for memories created before the 6-type classification
 const LEGACY_TYPE_MAP: Record<string, string> = {
   fact: "empirical",
   action_item: "project_context",

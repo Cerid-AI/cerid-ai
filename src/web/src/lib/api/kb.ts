@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 import { MCP_BASE, mcpHeaders, extractError } from "./common"
@@ -359,7 +359,7 @@ export async function uploadFile(
   return res.json()
 }
 
-// -- Sync API (Phase 21B) ----------------------------------------------------
+// -- Sync API ----------------------------------------------------------------
 
 export async function fetchSyncStatus(): Promise<import("../types").SyncStatus> {
   const res = await fetch(`${MCP_BASE}/sync/status`, { headers: mcpHeaders() })
@@ -393,7 +393,7 @@ export async function triggerSyncImport(options?: {
   return res.json()
 }
 
-// -- Archive API (Phase 21D) — @internal: no UI consumer, tested in api.test.ts
+// -- Archive API — @internal: no UI consumer, tested in api.test.ts
 
 /** @internal — no frontend consumer. Retained for test coverage. */
 export interface ArchiveFile {

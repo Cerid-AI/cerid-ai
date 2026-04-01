@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Browser Bookmark Importer — reads bookmarks from Chrome, Firefox, Safari on macOS.
@@ -413,7 +413,7 @@ async def import_bookmarks(browser: str = "all") -> dict[str, Any]:
 
                 imported += 1
 
-            except (ValueError, OSError, RuntimeError) as exc:
+            except (ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
                 logger.warning("Failed to ingest bookmark %s: %s", bm.url[:80], exc)
                 errors += 1
 

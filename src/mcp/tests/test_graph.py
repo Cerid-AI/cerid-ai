@@ -1,7 +1,7 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for graph utilities (Phase 4B.2)."""
+"""Tests for graph utilities."""
 
 
 from db.neo4j import _extract_references, _parse_keywords

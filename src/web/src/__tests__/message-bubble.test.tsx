@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "vitest"
@@ -123,7 +123,7 @@ describe("MessageBubble", () => {
     expect(container.querySelectorAll(".flex-row-reverse")).toHaveLength(1)
   })
 
-  // --- Sprint 1: Markdown rendering improvements ---
+  // --- Markdown rendering improvements ---
 
   it("renders external links with target=_blank and ExternalLink icon", () => {
     const { container } = render(
@@ -209,7 +209,7 @@ describe("MessageBubble", () => {
     expect(screen.queryByText(/Show all/)).not.toBeInTheDocument()
   })
 
-  // --- Sprint 3: TOC ---
+  // --- TOC ---
 
   it("shows TOC for message with 3+ headings", () => {
     const md = "# Introduction\n\nText\n\n## Background\n\nMore text\n\n## Methods\n\nDetails\n\n## Results\n\nFindings"

@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: BSL-1.1
 
 """Custom Smart RAG plugin — per-source weight tuning for retrieval orchestration.

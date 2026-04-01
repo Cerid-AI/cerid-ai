@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Field-level Fernet encryption for sensitive metadata (opt-in via CERID_ENCRYPTION_KEY)."""
@@ -45,7 +45,7 @@ class FieldEncryptor:
 
         try:
             self._fernet = Fernet(key.encode() if isinstance(key, str) else key)
-        except (ConfigError, ValueError, OSError, RuntimeError) as e:
+        except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             raise ValueError(
                 f"Invalid encryption key: {e}. "
                 f"Generate a valid key with: "
@@ -81,7 +81,7 @@ class FieldEncryptor:
         token = ciphertext[len(ENCRYPTED_PREFIX):]
         try:
             return self._fernet.decrypt(token.encode("ascii")).decode("utf-8")
-        except (ConfigError, ValueError, OSError, RuntimeError) as e:
+        except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.error(f"Decryption failed: {e}")
             return ciphertext  # return raw value for key rotation debugging
 

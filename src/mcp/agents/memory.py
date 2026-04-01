@@ -1,14 +1,14 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Memory Extraction Agent — extracts facts, decisions, and preferences from conversations.
 
-Phase 44 additions: conflict detection, LLM conflict resolution, decay/reinforcement
+Includes conflict detection, LLM conflict resolution, decay/reinforcement
 scoring, and context-aware recall with access-count reinforcement.
 
-Phase 51 additions: salience-aware scoring with per-type decay (power-law for
-long-lived facts, exponential for transient context), recency-weighted access
-counts, source authority weighting, and 6-type classification.
+Salience-aware scoring with per-type decay (power-law for long-lived facts,
+exponential for transient context), recency-weighted access counts, source
+authority weighting, and 6-type classification.
 """
 
 from __future__ import annotations
@@ -89,7 +89,7 @@ async def extract_memories(
             if not isinstance(m, dict):
                 continue
             mem_type = m.get("memory_type", "empirical")
-            # Accept legacy Phase 44 types and migrate them
+            # Accept legacy types and migrate them
             if mem_type in config.MEMORY_TYPE_MIGRATION:
                 mem_type = config.MEMORY_TYPE_MIGRATION[mem_type]
             if mem_type not in config.MEMORY_TYPES:
@@ -196,7 +196,7 @@ async def extract_and_store_memories(
                 if action_label == "UPDATE":
                     supersede_target = action.target_id
 
-            # Phase 44: Conflict detection and resolution
+            # Conflict detection and resolution
             conflict_resolutions: list[dict] = []
             effective_content = mem["content"]
             if action_label in ("ADD", "UPDATE") and chroma_client:
@@ -219,7 +219,7 @@ async def extract_and_store_memories(
                         elif resolution["action"] == "merge" and resolution.get("merged_text"):
                             effective_content = resolution["merged_text"]
                 except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
-                    logger.debug("Phase 44 conflict detection failed: %s", e)
+                    logger.debug("Conflict detection failed: %s", e)
 
             convo_prefix = conversation_id[:8] if conversation_id else "unknown"
             timestamp = utcnow().strftime("%Y%m%d_%H%M%S")
@@ -320,7 +320,7 @@ async def extract_and_store_memories(
 
 
 # ---------------------------------------------------------------------------
-# Memory Conflict Detection (Phase 44)
+# Memory Conflict Detection
 # ---------------------------------------------------------------------------
 
 
@@ -376,7 +376,7 @@ async def detect_memory_conflict(
 
 
 # ---------------------------------------------------------------------------
-# LLM Conflict Resolution (Phase 44)
+# LLM Conflict Resolution
 # ---------------------------------------------------------------------------
 
 
@@ -443,7 +443,7 @@ async def resolve_memory_conflict(
 
 
 # ---------------------------------------------------------------------------
-# Decay / Reinforcement Scoring (Phase 44)
+# Decay / Reinforcement Scoring
 # ---------------------------------------------------------------------------
 
 
@@ -458,7 +458,7 @@ def calculate_memory_score(
 ) -> float:
     """Calculate memory relevance score with salience-aware decay and reinforcement.
 
-    Phase 51 formula — different decay models per memory type:
+    Different decay models per memory type:
     - empirical: no decay (permanent facts)
     - decision/preference: power-law decay (long tail for important but aging info)
     - project_context/conversational: exponential decay (fast fade for transient info)
@@ -508,7 +508,7 @@ def calculate_memory_score(
 
 
 # ---------------------------------------------------------------------------
-# Context-Aware Memory Recall (Phase 44)
+# Context-Aware Memory Recall
 # ---------------------------------------------------------------------------
 
 
@@ -521,7 +521,7 @@ async def recall_memories(
 ) -> list[dict]:
     """Context-aware memory retrieval with salience-aware decay scoring.
 
-    Phase 51 enhancements:
+    Enhancements:
     - Per-type decay (power-law for decisions/preferences, exponential for transient)
     - Recency-weighted access counts from Neo4j access_log
     - Source authority weighting

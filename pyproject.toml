@@ -1,6 +1,6 @@
 [project]
 name = "cerid-ai"
-version = "1.0.0"
+version = "0.80.0"
 description = "Privacy-first Personal AI Knowledge Companion"
 requires-python = ">=3.11"
 license = "Apache-2.0"

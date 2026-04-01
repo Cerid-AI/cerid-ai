@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Authentication router for multi-user mode.
@@ -255,7 +255,7 @@ def refresh(body: RefreshRequest):
     """Exchange a valid refresh token for a new access token."""
     try:
         payload = decode_access_token(body.refresh_token)
-    except (ConfigError, ValueError, OSError, RuntimeError):
+    except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
     if payload.get("type") != "refresh":
@@ -282,7 +282,7 @@ def logout(body: RefreshRequest):
         jti = payload.get("jti")
         if jti:
             _revoke_refresh_token(get_redis(), jti)
-    except (ConfigError, ValueError, OSError, RuntimeError):
+    except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         pass  # Token already invalid — logout is idempotent
 
     return {"detail": "Logged out"}

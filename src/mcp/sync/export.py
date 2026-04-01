@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Sync export — Neo4j, ChromaDB, BM25, Redis to JSONL files."""
@@ -123,7 +123,7 @@ def export_neo4j(
             for record in result:
                 relationships.append(dict(record))
 
-    except (SyncError, ValueError, OSError, RuntimeError) as exc:
+    except (SyncError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.error("Neo4j export failed: %s", exc)
         return {"error": str(exc), "artifacts": 0, "domains": 0, "relationships": 0}
 
@@ -232,7 +232,7 @@ def export_chroma(
             logger.error("ChromaDB HTTP error for %s: %s", coll_name, exc)
             domain_counts[domain] = chunk_count
             continue
-        except (SyncError, ValueError, OSError, RuntimeError) as exc:
+        except (SyncError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
             logger.error("ChromaDB export failed for %s: %s", coll_name, exc)
             domain_counts[domain] = chunk_count
             continue
@@ -290,7 +290,7 @@ def export_redis(redis_client, sync_dir: str | None = None) -> dict[str, Any]:
 
     try:
         raw_entries: list[str] = redis_client.lrange(config.REDIS_INGEST_LOG, 0, -1)
-    except (SyncError, ValueError, OSError, RuntimeError) as exc:
+    except (SyncError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.error("Redis LRANGE failed: %s", exc)
         return {"error": str(exc), "entries_exported": 0, "output_dir": str(out_dir)}
 
@@ -359,7 +359,7 @@ def export_all(
     try:
         from sync.tombstones import export_tombstones
         tombstone_result = export_tombstones(sync_dir=sync_dir)
-    except (SyncError, ValueError, OSError, RuntimeError) as exc:
+    except (SyncError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.warning("Tombstone export failed (non-blocking): %s", exc)
 
     manifest = write_manifest(

@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Tombstone support for propagating artifact deletions across machines."""
@@ -139,7 +139,7 @@ def apply_tombstones(
                     # Already deleted or never existed locally
                     skipped_absent += 1
                     continue
-        except (SyncError, ValueError, OSError, RuntimeError) as exc:
+        except (SyncError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
             logger.warning("Tombstone Neo4j delete failed for %s: %s", artifact_id[:8], exc)
             errors += 1
             continue
@@ -214,7 +214,7 @@ def _delete_chroma_chunks(chroma_url: str, domain: str, chunk_ids: list[str]) ->
             timeout=30.0,
         )
         del_resp.raise_for_status()
-    except (SyncError, ValueError, OSError, RuntimeError) as exc:
+    except (SyncError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.warning(
             "Tombstone ChromaDB delete failed for %s/%s: %s",
             domain, chunk_ids[0][:8] if chunk_ids else "?", exc,

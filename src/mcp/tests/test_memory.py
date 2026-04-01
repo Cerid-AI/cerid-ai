@@ -1,7 +1,7 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for memory extraction agent (Phase 7C)."""
+"""Tests for memory extraction agent."""
 
 import sys
 from types import ModuleType
@@ -45,7 +45,7 @@ class TestExtractMemories:
 
         result = await extract_memories("x" * 200, "conv-123")
         assert len(result) == 1
-        # Phase 51: legacy "fact" is migrated to "empirical" at extraction time
+        # Legacy "fact" is migrated to "empirical" at extraction time
         assert result[0]["memory_type"] == "empirical"
         assert "GIL" in result[0]["content"]
 

@@ -1,7 +1,7 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for the audio transcription plugin (Phase 46)."""
+"""Tests for the audio transcription plugin."""
 
 from __future__ import annotations
 

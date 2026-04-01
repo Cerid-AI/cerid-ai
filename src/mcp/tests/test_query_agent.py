@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Tests for agents/query_agent.py — multi-domain search with reranking."""
@@ -664,7 +664,7 @@ class TestEnrichQuery:
 
 
 # ---------------------------------------------------------------------------
-# Tests: assemble_context — artifact chunk limiting (Phase 13C)
+# Tests: assemble_context — artifact chunk limiting
 # ---------------------------------------------------------------------------
 
 class TestAssembleContextArtifactLimiting:
@@ -730,7 +730,7 @@ class TestAssembleContextArtifactLimiting:
 
 
 # ---------------------------------------------------------------------------
-# Tests: apply_metadata_boost (Phase 14C)
+# Tests: apply_metadata_boost
 # ---------------------------------------------------------------------------
 
 class TestApplyMetadataBoost:
@@ -831,7 +831,7 @@ class TestApplyMetadataBoost:
 
 
 # ---------------------------------------------------------------------------
-# Tests: apply_quality_boost (Phase 14B)
+# Tests: apply_quality_boost
 # ---------------------------------------------------------------------------
 
 class TestApplyQualityBoost:

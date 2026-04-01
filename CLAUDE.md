@@ -1,28 +1,17 @@
 # CLAUDE.md - Cerid AI
 
-> **Extends:** `sunrunnerfire/dotfiles` — all global workflow orchestration, core principles,
+> **Extends:** Your dotfiles repo -- all global workflow orchestration, core principles,
 > commit policy, and task management rules apply here. This file adds only project-specific context.
-
-## Session Start (Required)
-
-Before beginning any development work in this repo, if not already done in this session:
-
-1. Read global framework context from the dotfiles repo using the GitHub MCP tool:
-   - `sunrunnerfire/dotfiles` → `CLAUDE.md` (workflow principles, commit policy)
-   - `sunrunnerfire/dotfiles` → `CLAUDE_CODE_SETUP.md` (plugins, MCP servers)
-2. Never add AI attribution to commits — see dotfiles `CLAUDE.md` commit policy.
-
----
 
 ## Project Overview
 
 Cerid AI is a self-hosted, privacy-first Personal AI Knowledge Companion. It unifies multi-domain knowledge bases (code, finance, projects, artifacts) into a context-aware LLM interface with RAG-powered retrieval and intelligent agents. Knowledge base stays local; LLM API calls send query context to the configured provider. Optional cloud sync (Dropbox) for cross-machine settings/conversations, encrypted when CERID_ENCRYPTION_KEY is set.
 
-**Status:** Phase 51 hardening complete. 1805+ Python tests, 511+ frontend tests, ruff BLE001 tracked, 8-job CI green. 10 agents, 26 MCP tools (18 core + 5 trading + pkb_web_search + pkb_memory_recall + pkb_ingest_multimodal), 31 FastAPI routers, hybrid BM25s+vector search with semantic chunking, cross-encoder reranking (ONNX, three modes), switchable client-side embeddings (Matryoshka, zero-migration), contextual chunking (LLM-generated situational summaries), advanced RAG pipeline (adaptive retrieval gate, query decomposition with parallel sub-retrieval, MMR diversity reordering, intelligent context assembly with facet coverage, ColBERT-inspired late interaction scoring, semantic query cache with quantized int8 embeddings, per-chunk retrieval profiles with adaptive scoring strategy), unified RAG modes (manual/smart/custom_smart with retrieval orchestrator, parallel KB+memory+external recall, session-level injection dedup, prior-context awareness), circuit breakers on all Bifrost + Neo4j calls, shared Bifrost call utility with singleton httpx connection pool, distributed request tracing, adaptive quality feedback, per-domain tag vocabulary with typeahead UI, improved synopsis generation, streaming verification with 4 claim types (evasion/citation/recency/ignorance) + interactive inline verification (ClaimOverlay popovers, footnote markers, source navigation) + expert verification mode (Grok 4) + per-message verification selection, Self-RAG validation loop, smart routing (direct-to-OpenRouter chat proxy, capability-based model scoring, three-way routing mode, proactive model switch on ignorance detection), context-aware chat (corrections, token-budget KB injection, semantic dedup, 60fps streaming, 500ms KB query timeout), advanced response formatting (15 MD component overrides, collapsible code blocks, TOC for long responses), split-button toolbar with chevron menus, drag-drop ingestion on KB pane + chat input + artifact drag-to-chat, infrastructure settings + search tuning sliders + Pro-gated presets with ProGate component, KB admin endpoints (rebuild/rescore/clear/delete/stats) + Settings GUI with runtime tier toggle, incremental knowledge sync with tombstones and conflict resolution, sync GUI with export/import/status dashboard, archive storage mode, mypy type checking in CI, React GUI with iPad/tablet responsive touch UX, LAN access with robust multi-interface IP detection and stale-IP auto-fix, pre-flight validation (port conflicts, env vars, disk space), post-startup reachability checks, guided `setup.sh` installer, configurable port overrides (`CERID_PORT_*`), optional Caddy HTTPS gateway and Cloudflare Tunnel for demos, multi-user auth foundations (opt-in JWT, tenant context, per-user API keys, usage metering), marketing website at cerid.ai (Next.js 16 + Vercel), brand identity (teal accent color system), Simple/Advanced mode (progressive disclosure), settings rationalization (3-tab layout with user experience presets, Pro-gated Maximum preset, credits in Essentials tab), first-run onboarding dialog, Ollama install wizard with copy-to-clipboard + auto-detect polling, bulk folder import with preview/confirmation/progress/archive extraction, multi-KB namespace foundation, BM25 LRU eviction, marketing site refreshed (changelog, SEO, animations), MCP server performance optimization (lightweight verification retrieval, connection pooling, parallel graph expansion, deferred cache persistence, startup pre-warming). Infrastructure security hardened (Redis auth, port binding, resource limits, security headers, nginx hardening). CI/CD 9-job pipeline with timeouts. See [`docs/COMPLETED_PHASES.md`](docs/COMPLETED_PHASES.md) for history.
+**Status:** Version 0.80. See [`docs/COMPLETED_PHASES.md`](docs/COMPLETED_PHASES.md) for history.
 
-**Next:** See [`tasks/todo.md`](tasks/todo.md).
+**Next:** See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
-**Open issues:** [`docs/ISSUES.md`](docs/ISSUES.md) (0 open — 160+ resolved).
+**Open issues:** [`docs/ISSUES.md`](docs/ISSUES.md).
 
 ## Architecture
 
@@ -86,7 +75,7 @@ React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly
 │   ├── src/hooks/               # use-chat, use-kb-context, use-settings, use-verification-stream, use-drag-drop, use-verification-orchestrator, etc.
 │   ├── src/contexts/            # SettingsContext, KBInjectionContext, ConversationsContext, AuthContext
 │   ├── src/components/          # layout/, chat/, kb/, monitoring/, audit/, memories/, settings/, workflows/, setup/, ui/
-│   └── src/__tests__/           # 511+ vitest tests
+│   └── src/__tests__/           # vitest tests
 ├── packages/marketing/          # Next.js 16 marketing site (being separated to Cerid-AI/cerid-ai-marketing)
 ├── packages/desktop/            # Electron desktop app (macOS + Windows)
 ├── stacks/                      # infrastructure/ (Neo4j, ChromaDB, Redis), bifrost/
@@ -133,18 +122,6 @@ Startup order: `[1/4]` Infrastructure (Neo4j, ChromaDB, Redis) → `[2/4]` Bifro
 ./scripts/validate-env.sh --fix    # auto-start missing infrastructure
 ```
 
-### Second-Machine Bootstrap
-
-```bash
-git clone git@github.com:sunrunnerfire/dotfiles.git ~/dotfiles && cd ~/dotfiles && bash install.sh
-brew install age
-git clone git@github.com:sunrunnerfire/cerid-ai.git ~/cerid-ai && cd ~/cerid-ai
-./scripts/env-unlock.sh
-ln -s ~/Dropbox/cerid-archive ~/cerid-archive
-./scripts/start-cerid.sh          # auto-imports KB from Dropbox sync if Neo4j empty
-./scripts/validate-env.sh
-```
-
 ### Dependency Management
 
 ```bash
@@ -157,7 +134,7 @@ Cross-service version constraints: see `docs/DEPENDENCY_COUPLING.md`.
 
 ### Configuration
 
-- `.env` (repo root) — All secrets. Encrypted as `.env.age`. Never committed in plaintext.
+- `.env` (repo root) — All secrets. Encrypted as `.env.age` via `age`. Key at `~/.config/cerid/age-key.txt`
 - `src/mcp/config/settings.py` — Domains, tiers, URLs, sync, model IDs
 - `stacks/bifrost/config.yaml` — Intent classification, model routing, budget
 
@@ -169,59 +146,21 @@ curl http://localhost:8888/collections
 curl http://localhost:8888/artifacts
 ```
 
-## Claude Code Setup (New Machine)
+### Running Tests
 
-> **Global setup applies first** — see `sunrunnerfire/dotfiles` → `CLAUDE_CODE_SETUP.md` for global plugins and MCP servers shared across all projects.
-
-### Project Setup
-
-1. **Verify prerequisites:** Docker running, `.env` decrypted, `age` installed, archive directory exists
-2. **Install global plugins + MCP servers** — follow `sunrunnerfire/dotfiles` → `CLAUDE_CODE_SETUP.md`
-3. **Run `./scripts/validate-env.sh`** to check all 14 environment validations
-4. **If containers are down:** `./scripts/start-cerid.sh` (or `--build` after a `git pull`)
-
-### Project-Level Config (committed, auto-applied)
-
-| File | Purpose |
-|------|---------|
-| `.mcp.json` | Cerid KB MCP at `http://localhost:8888/mcp/sse` (26 `pkb_*` tools) — Claude Code runs on the host so `localhost` is correct here |
-| `.claude/settings.json` | Hooks config (session-start, safety-check, typecheck, pythonlint) |
-| `.claude/hooks/session-start.sh` | SessionStart — Docker + MCP + GUI health check |
-| `.claude/hooks/safety-check.sh` | PreToolUse/Bash — blocks destructive commands |
-| `.claude/hooks/typecheck.sh` | PostToolUse/Edit\|Write — `npx tsc --noEmit` for `.ts`/`.tsx` in `src/web/` |
-| `.claude/hooks/pythonlint.sh` | PostToolUse/Edit\|Write — `ruff check` for `.py` in `src/mcp/` |
-| `.claude/commands/` | Custom commands: stack, test, sync, lock |
-| `.claude/launch.json` | Dev server configs (cerid-web, react-gui, marketing) |
-| `.claude/agents/kb-curator.md` | Opus subagent for KB schema-aware curation, dedup, and cross-store consistency checks |
-| `.claudeignore` | Excludes node_modules, dist, runtime data, binaries, lock files |
-
-### Per-Machine Config (gitignored)
-
-| File | Purpose |
-|------|---------|
-| `.claude/settings.local.json` | Bash permission allowlists (auto-populated as you approve commands) |
-
-### Global Plugins Required
-
-See `sunrunnerfire/dotfiles` → `CLAUDE_CODE_SETUP.md` for full list. Key plugins for this project:
-
-- `superpowers` — plan execution, TDD, code review, debugging workflows
-- `pyright-lsp` — Python type checking
-- `frontend-design` — React GUI development
-- `claude-md-management` — CLAUDE.md maintenance
-
-### Global MCP Servers Required
-
-See `sunrunnerfire/dotfiles` → `CLAUDE_CODE_SETUP.md` for install commands:
-
-- **context7** — live docs for React, FastAPI, pydantic, ChromaDB, Neo4j
-- **github-mcp** — GitHub issues, PRs, actions
-
-**Tests:** Run Python tests in Docker (`host macOS lacks chromadb`):
+**Python tests** (run in Docker since host macOS lacks chromadb):
 ```bash
 docker run --rm -v "$(pwd)/src/mcp:/work" -w /work python:3.11-slim bash -c "pip install -q -r requirements.txt -r requirements-dev.txt && python -m pytest tests/ -v"
 ```
-Frontend tests: `cd src/web && npx vitest run`
+
+**Frontend tests:**
+```bash
+cd src/web && npx vitest run
+```
+
+## Claude Code Setup
+
+See [`.claude/SETUP.md`](.claude/SETUP.md) for detailed Claude Code configuration, plugins, MCP servers, and new machine bootstrap.
 
 ## Cross-Cutting Patterns (THE ONE way to do each concern)
 
@@ -255,7 +194,7 @@ Frontend tests: `cd src/web && npx vitest run`
 | Module | Responsibility | Key Classes/Functions |
 |--------|---------------|---------------------|
 | `agents/query_agent.py` | RAG retrieval pipeline (8 strategies, decomposed: decomposer.py + assembler.py) | `QueryAgent.query()` |
-| `agents/hallucination/` | Claim extraction + verification (7 modules: patterns, extraction, verification, streaming, persistence, verdict_parsing, confidence + metamorphic) | `verify_response_streaming()` |
+| `agents/hallucination/` | Claim extraction + verification (7 modules) | `verify_response_streaming()` |
 | `agents/memory.py` | Memory extraction, decay, conflict resolution | `MemoryAgent` |
 | `agents/curator.py` | KB quality scoring + recommendations | `CuratorAgent` |
 | `services/ingestion.py` | File parsing → chunking → ChromaDB + Neo4j | `ingest_file()`, `ingest_content()` |
@@ -267,8 +206,8 @@ Frontend tests: `cd src/web && npx vitest run`
 | `config/features.py` | Feature flags + `@require_feature` | `FEATURE_FLAGS`, `@require_feature()` |
 | `errors.py` | Exception hierarchy | `CeridError` and subclasses |
 | `tools.py` | MCP tool registry (26 tools) | `@mcp_tool()` decorator |
-| `agents/decomposer.py` | Query decomposition (extracted from query_agent) | `decompose_query()` |
-| `agents/assembler.py` | Result assembly (extracted from query_agent) | `assemble_results()` |
+| `agents/decomposer.py` | Query decomposition | `decompose_query()` |
+| `agents/assembler.py` | Result assembly | `assemble_results()` |
 | `utils/error_handler.py` | Centralized error handling decorator | `@handle_errors()` |
 | `utils/degradation.py` | 5-tier graceful degradation manager | `DegradationManager` |
 | `utils/retrieval_cache.py` | Redis retrieval cache with generation-counter invalidation | `retrieval_cache_get/set()` |
@@ -277,8 +216,8 @@ Frontend tests: `cd src/web && npx vitest run`
 | `routers/sdk.py` | Stable external API (`/sdk/v1/`) | Versioned contract |
 | `routers/data_sources.py` | External data source management endpoints | `/data-sources` CRUD |
 | `utils/model_registry.py` | Dynamic model registry with OpenRouter validation | `ModelRegistry`, `validate_models()` |
-| `utils/query_classifier.py` | Query intent classification (factual/code/analytical/creative/conversational) | `classify_query()` |
-| `utils/data_sources/` | Pluggable external data source framework (Wikipedia, Wolfram Alpha, Exchange Rates) | `DataSourceManager` |
+| `utils/query_classifier.py` | Query intent classification | `classify_query()` |
+| `utils/data_sources/` | Pluggable external data source framework | `DataSourceManager` |
 
 ## Product Tiers
 
@@ -296,7 +235,7 @@ Frontend tests: `cd src/web && npx vitest run`
 
 ## Compliance — USG Technology Restrictions
 
-**No Chinese-origin AI models or technology.** As of 2026-03-29, the codebase has been purged of all Chinese-origin model references (DeepSeek, Qwen/Alibaba, Baichuan, Yi, GLM/Zhipu, MiniMax, Moonshot, 01.AI) for USG alignment.
+**No Chinese-origin AI models or technology.** The codebase has been purged of all Chinese-origin model references (DeepSeek, Qwen/Alibaba, Baichuan, Yi, GLM/Zhipu, MiniMax, Moonshot, 01.AI) for USG alignment.
 
 **Rules:**
 - Do NOT add model entries for DeepSeek, Qwen, Alibaba, or any Chinese-origin LLM provider
@@ -307,11 +246,10 @@ Frontend tests: `cd src/web && npx vitest run`
 
 ## Conventions
 
-- **Session start:** Run `./scripts/validate-env.sh --quick` at the beginning of every session. If the session-start hook reports missing plugins or MCP servers, run `bash ~/dotfiles/install.sh` before proceeding with any other work
 - Docker services use container-name-based discovery on `llm-network`
 - MCP protocol uses SSE transport with session-based message queuing
 - Secrets go in root `.env`, encrypted as `.env.age` via `age`. Key at `~/.config/cerid/age-key.txt`
-- User files (`~/cerid-archive/`) mounted read-only, never in git repo. Symlinked to `~/Dropbox/cerid-archive` for multi-machine sync
+- User files (`~/cerid-archive/`) mounted read-only, never in git repo
 - Symlinks used for `artifacts/` and `data/` — don't break them
 - Infrastructure DB data at `stacks/infrastructure/data/` (.gitignored)
 - ChromaDB metadata values are strings/ints only (lists stored as JSON strings)
@@ -321,25 +259,24 @@ Frontend tests: `cd src/web && npx vitest run`
 - Deduplication: SHA-256 of parsed text, atomic via Neo4j UNIQUE CONSTRAINT on `content_hash`
 - Batch ChromaDB writes: single `collection.add()` call per ingest, not per-chunk
 - PDF parsing: pdfplumber extracts tables as Markdown, non-table text extracted separately to avoid duplication
-- Host: Mac Pro (16-Core Xeon W, 160GB RAM), macOS
 - **React GUI (`src/web/`):** Tailwind CSS v4 (uses `@tailwindcss/vite` plugin — no `tailwind.config.ts`); shadcn/ui New York style, Zinc base color; path alias `@/*` → `./src/*`; Bifrost CORS handled via Vite dev proxy (`/api/bifrost` → `localhost:8080`) and nginx proxy in Docker; `VITE_MCP_URL` and `VITE_BIFROST_URL` are `ENV` defaults baked into Dockerfile (not runtime-configurable without rebuild); `VITE_CERID_API_KEY` is a build `ARG`; bundle splitting via React.lazy + Vite manualChunks (75% main chunk reduction); iPad/tablet responsive: sidebar auto-collapses at 1024px, KB pane becomes bottom Sheet drawer on narrow viewports, toolbar overflow menu, `@media (hover: none)` touch visibility overrides, `@media (pointer: coarse)` 44px touch targets, iOS safe area insets, zoom prevention
-- **Backend Hardening (`src/mcp/middleware/`):** API key auth is opt-in — set `CERID_API_KEY` env var to enable (header: `X-API-Key`). Multi-user JWT auth is opt-in — set `CERID_MULTI_USER=true` + `CERID_JWT_SECRET` to enable (adds 9 `/auth/*` endpoints, JWT Bearer middleware, tenant context propagation, per-user API keys with Fernet encryption, Redis usage metering). Rate limiting uses in-memory sliding window with per-client isolation via `X-Client-ID` header (`config/settings.py:CLIENT_RATE_LIMITS`); GUI 20 req/min on `/agent/`, trading-agent 80 req/min (raised from 30 to cover 5-session worst-case burst of 67.5/min), unknown clients 10 req/min. Stable external API at `/sdk/v1/` (`routers/sdk.py`) for cerid-series consumers. `CONSUMER_REGISTRY` in `config/settings.py` defines per-consumer `allowed_domains`, `strict_domains`, and rate limits — see `docs/INTEGRATION_GUIDE.md` for the full 13-step checklist for adding new agent integrations. Redis query cache with 5-min TTL (`utils/query_cache.py`) — caches `/query` and `/agent/query` results. LLM feedback loop toggled via `ENABLE_FEEDBACK_LOOP` env var. CORS origins configurable via `CORS_ORIGINS` (defaults to `*`)
-- **API Architecture (dual-path, intentional):** The React GUI calls internal `/agent/*` and service endpoints directly (via `api.ts` with `X-Client-ID: gui`). External cerid-series consumers use the stable `/sdk/v1/*` contract with typed response models and consumer domain isolation. This separation is deliberate: the GUI needs full domain access and internal-only endpoints (settings, taxonomy, admin, chat streaming) that have no SDK equivalent. The SDK layer provides versioned contracts, OpenAPI schemas, and consumer scoping for external agents. Both paths share the same middleware stack (rate limiting, auth, request tracing). All frontend API calls route through `src/web/src/lib/api.ts` which sets `X-Client-ID: gui`, `X-Request-ID`, and optional auth headers on every request.
-- **Trading Agent Integration (`CERID_TRADING_ENABLED`):** When enabled, cerid-ai provides KB enrichment for cerid-trading-agent via 5 SDK endpoints (`/sdk/v1/trading/signal`, `herd-detect`, `kelly-size`, `cascade-confirm`, `longshot-surface`), 5 MCP tools (`pkb_trading_signal`, etc.), and the `trading` KB domain with dedicated taxonomy. Config: `CERID_TRADING_ENABLED=true` + `TRADING_AGENT_URL=http://localhost:8090` (or `http://trading-agent:8090` in Docker). The trading agent calls INTO cerid-ai's SDK — cerid-ai does not proxy or poll the trading agent. Trading UI, scheduler jobs, and dashboard live in the `Cerid-AI/cerid-trading-agent` repo. All trading features are backward-compatible and default to disabled. See `docs/DEPENDENCY_COUPLING.md` for the full contract.
-- **Docker build verification:** After `docker compose build`, always verify success with `docker compose build --progress=plain cerid-web 2>&1 | grep error`. TypeScript strict mode in `npm run build` catches errors that `npx tsc --noEmit` misses. Docker may silently reuse a cached image when the build stage fails with exit code 2.
-- **Circuit breaker naming:** All LLM call sites must use breaker names registered in `circuit_breaker.py`. Update the registry when adding new call sites. Avoid `f"bifrost-{breaker_name}"` in fallback paths — it can double-prefix names that already start with `bifrost-`.
-- **Docker env var pattern:** `src/mcp/docker-compose.yml` uses `env_file: ../../.env` to load secrets into the MCP container. Do NOT add `${VAR}` interpolation in the `environment:` section for passthrough vars (e.g., `NEO4J_PASSWORD`) — it fails when running without `--env-file` and the empty value overrides the env_file entry. Container-specific overrides (service URLs, paths) are fine in `environment:` since they're literal values. Always rebuild MCP via `docker compose -f src/mcp/docker-compose.yml --env-file .env up -d --build` or use `scripts/start-cerid.sh`.
-- **Neo4j auth validation:** `deps.py` `get_neo4j()` validates credentials by running `RETURN 1` (not just `verify_connectivity()` which only checks transport). `/health` endpoint also runs a Cypher query on every call. Empty `NEO4J_PASSWORD` raises `RuntimeError` immediately.
-- **Trading domain segregation:** KB has a dedicated `trading` domain (`config/taxonomy.py`) with sub-categories: signals, market-analysis, execution, post-analysis, strategy-research, risk-analysis. Trading agent queries are scoped to `domains=["trading"]` — personal finance data (tax returns, budgets) stays in `domain_finance`. Domain affinity: trading↔finance at 0.3 weight.
-- **Embedding function returns `list[np.ndarray]`** for ChromaDB 0.5.x compatibility. The `OnnxEmbeddingFunction.__call__()` returns individual numpy array slices, NOT `.tolist()` (which would produce `list[list[float]]` that fails ChromaDB's `validate_embeddings` check).
-- **JWT startup validation:** When `CERID_MULTI_USER=true`, missing `CERID_JWT_SECRET` raises `RuntimeError` at startup (not just a warning). Prevents running with empty secret.
-- **Rate limit middleware reads X-Client-ID from headers directly**, not from `request.state` — eliminates middleware ordering dependency. Per-client isolation verified: trading-agent=80/min, gui=20/min.
-- **Keywords metadata uses `keywords_json`** (JSON-encoded string) consistently across ingest_file, ingest_content, reingest, and Neo4j artifact creation. Previous inconsistency (`keywords` vs `keywords_json`) caused silent data loss.
-- **Plugin development (`plugins/`):** Each plugin has a `manifest.json` (name, version, tier, description, entry point). BSL-1.1 licensed (converts to Apache-2.0 after 3 years). Plugins are loaded via dual-directory scanning (`src/mcp/plugins/` for built-in, `plugins/` for external). Tier gating enforced at load time (`CERID_TIER`). Plugin management via `routers/plugins.py` (7 endpoints: list, enable/disable, config CRUD, scan).
-- **Workflow engine (`routers/workflows.py`):** DAG validation via Kahn's algorithm (rejects cycles). Topological execution order. 4 built-in templates (research, ingest, verify, custom). Nodes are typed (query, ingest, verify, transform, notify). SVG canvas for visual editing. BSL-1.1 pro-tier via `plugins/workflow/`.
-- **Observability (`routers/observability.py`):** `MetricsCollector` writes 8 Redis time-series metrics (latency, cost, NDCG, cache hit rate, verification accuracy, error rate, throughput, memory usage). Health score computed as weighted A-F grade. Dashboard endpoint returns sparkline data for configurable time windows.
-- **A2A Protocol (`routers/a2a.py`):** Agent Card served at `/.well-known/agent.json`. Task lifecycle: create → status → cancel with Redis-backed storage. A2A client (`utils/a2a_client.py`) discovers remote agents and invokes tasks. Cerid is the first personal KB with dual MCP + A2A protocol support.
-- **Ollama Add-On (optional):** Local LLM for pipeline intelligence (claim extraction, query decomposition, memory resolution, topic extraction, LLM reranking). Model is configurable via `OLLAMA_DEFAULT_MODEL` env var or the setup wizard which auto-recommends based on detected hardware (3 tiers: Llama 3.2 3B for 8GB+, Llama 3.1 8B for 16GB+, Phi-4 14B for 32GB+). Enable via `OLLAMA_ENABLED=true` + `INTERNAL_LLM_PROVIDER=ollama`. Docker profile: `--profile ollama`. macOS Apple Silicon: runs natively for Metal acceleration. Circuit breaker: `"ollama"` in `circuit_breaker.py`. Fallback: automatic to OpenRouter when Ollama unavailable. Cost: $0 (local inference). Hardware detection: `/providers/ollama/recommendations` endpoint detects RAM/CPU/GPU at runtime; `scripts/detect-gpu.sh` for GPU passthrough. Model management: post-setup model switching via Settings UI → Ollama → Change button (install new models or switch between installed). Status: `/health` reports Ollama reachability when enabled. Verification timeouts tuned for local inference (extraction: 30s, total: 90s). Config: `/providers/ollama/status`, `/providers/ollama/recommendations`, `/providers/ollama/enable` (accepts optional `model` body param), `/providers/ollama/disable`.
+- **Backend Hardening (`src/mcp/middleware/`):** API key auth is opt-in — set `CERID_API_KEY` env var to enable (header: `X-API-Key`). Multi-user JWT auth is opt-in — set `CERID_MULTI_USER=true` + `CERID_JWT_SECRET` to enable. Rate limiting uses in-memory sliding window with per-client isolation via `X-Client-ID` header. Stable external API at `/sdk/v1/` (`routers/sdk.py`) for cerid-series consumers. Redis query cache with 5-min TTL (`utils/query_cache.py`). CORS origins configurable via `CORS_ORIGINS` (defaults to `*`)
+- **API Architecture (dual-path, intentional):** The React GUI calls internal `/agent/*` and service endpoints directly (via `api.ts` with `X-Client-ID: gui`). External cerid-series consumers use the stable `/sdk/v1/*` contract with typed response models and consumer domain isolation. Both paths share the same middleware stack.
+- **Trading Agent Integration (`CERID_TRADING_ENABLED`):** When enabled, cerid-ai provides KB enrichment for cerid-trading-agent via 5 SDK endpoints and 5 MCP tools. Config: `CERID_TRADING_ENABLED=true` + `TRADING_AGENT_URL`. The trading agent calls INTO cerid-ai's SDK. All trading features are backward-compatible and default to disabled. See `docs/DEPENDENCY_COUPLING.md` for the full contract.
+- **Docker build verification:** After `docker compose build`, verify with `docker compose build --progress=plain cerid-web 2>&1 | grep error`. TypeScript strict mode in `npm run build` catches errors that `npx tsc --noEmit` misses.
+- **Circuit breaker naming:** All LLM call sites must use breaker names registered in `circuit_breaker.py`. Avoid `f"bifrost-{breaker_name}"` in fallback paths — it can double-prefix names.
+- **Docker env var pattern:** `src/mcp/docker-compose.yml` uses `env_file: ../../.env` to load secrets. Do NOT add `${VAR}` interpolation in the `environment:` section for passthrough vars — it fails without `--env-file`. Always rebuild MCP via `docker compose -f src/mcp/docker-compose.yml --env-file .env up -d --build` or use `scripts/start-cerid.sh`.
+- **Neo4j auth validation:** `deps.py` `get_neo4j()` validates credentials by running `RETURN 1` (not just `verify_connectivity()`). Empty `NEO4J_PASSWORD` raises `RuntimeError` immediately.
+- **Trading domain segregation:** KB has a dedicated `trading` domain (`config/taxonomy.py`). Trading agent queries scoped to `domains=["trading"]`. Domain affinity: trading↔finance at 0.3 weight.
+- **Embedding function returns `list[np.ndarray]`** for ChromaDB 0.5.x compatibility.
+- **JWT startup validation:** When `CERID_MULTI_USER=true`, missing `CERID_JWT_SECRET` raises `RuntimeError` at startup.
+- **Rate limit middleware reads X-Client-ID from headers directly**, not from `request.state`.
+- **Keywords metadata uses `keywords_json`** (JSON-encoded string) consistently across ingest and Neo4j artifact creation.
+- **Plugin development (`plugins/`):** Each plugin has a `manifest.json`. BSL-1.1 licensed. Plugins loaded via dual-directory scanning. Tier gating enforced at load time.
+- **Workflow engine (`routers/workflows.py`):** DAG validation via Kahn's algorithm. Topological execution order. 4 built-in templates. BSL-1.1 pro-tier.
+- **Observability (`routers/observability.py`):** `MetricsCollector` writes 8 Redis time-series metrics. Health score computed as weighted A-F grade.
+- **A2A Protocol (`routers/a2a.py`):** Agent Card at `/.well-known/agent.json`. Task lifecycle: create → status → cancel with Redis-backed storage.
+- **Ollama Add-On (optional):** Local LLM for pipeline intelligence. Enable via `OLLAMA_ENABLED=true` + `INTERNAL_LLM_PROVIDER=ollama`. Default model: `llama3.2:3b`. Circuit breaker: `"ollama"`. Fallback: automatic to OpenRouter when unavailable.
 
 ## Dependency Sync Guide
 
@@ -363,30 +300,19 @@ See [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) for the full developer refere
 | lint | `ruff check src/mcp/` |
 | typecheck | `mypy src/mcp/` |
 | test | pytest (70% coverage floor) + Codecov upload + license audit |
-| security | detect-secrets + bandit + pip-audit (CVE-ignores documented inline) + dlint ReDoS |
+| security | detect-secrets + bandit + pip-audit + dlint ReDoS |
 | lock-sync | pip-compile lock file freshness check |
 | frontend | tsc + ESLint + Vitest + Vite build + bundle size check (800KB limit) + npm audit + license audit |
-| docker | hadolint (mcp + web Dockerfiles) + `docker build` + Trivy CRITICAL/HIGH scan |
-| ~~frontend-marketing~~ | Moved to `Cerid-AI/cerid-ai-marketing` repo |
+| docker | hadolint + `docker build` + Trivy CRITICAL/HIGH scan |
 | frontend-desktop | npm ci + `npm run typecheck` |
 
 Docker gates on all 8 prior jobs. Trivy CVE ignore list is in `.github/workflows/ci.yml` with inline rationale for each ignored CVE.
 
 ## Sentry
 
-Error monitoring via Sentry org `cerid-ai`. **MCP server Sentry is opt-in** — requires `ENABLE_SENTRY=true` in addition to `SENTRY_DSN`. When disabled (default), no telemetry data leaves the machine. Two projects in this repo:
+Error monitoring via Sentry org `cerid-ai`. **MCP server Sentry is opt-in** — requires `ENABLE_SENTRY=true` in addition to `SENTRY_DSN`. When disabled (default), no telemetry data leaves the machine.
 
 | Project | SDK | Where initialized |
 |---------|-----|-------------------|
 | `cerid-ai-mcp` | `sentry-sdk[fastapi]` | `src/mcp/main.py` — before `app = FastAPI()` |
 | `cerid-ai-marketing` | `@sentry/nextjs` | Moved to `Cerid-AI/cerid-ai-marketing` repo |
-
-**GitHub secrets required:**
-
-| Secret | Used by |
-|--------|---------|
-| `SENTRY_AUTH_TOKEN` | Source map uploads during `next build` (CI `frontend-marketing` job) |
-| `SENTRY_DSN_MCP` | Python FastAPI error reporting |
-| `SENTRY_DSN_MARKETING` | Next.js error reporting + Vercel env var `NEXT_PUBLIC_SENTRY_DSN` |
-
-**`withSentryConfig`** for the marketing site is configured in the separate `Cerid-AI/cerid-ai-marketing` repo.

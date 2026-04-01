@@ -1,7 +1,6 @@
 # Cerid AI — Integration Guide for New Cerid-Series Agents
 
 > **Last updated:** 2026-03-28
-> **Applies to:** Phase 51+
 > **Reference implementation:** cerid-trading-agent (`docs/DEPENDENCY_COUPLING.md`)
 
 ---

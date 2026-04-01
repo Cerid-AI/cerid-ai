@@ -23,8 +23,8 @@ These exist for historical reasons and should **not** be renamed (would break ex
 | `CHUNKING_MODE` | Bare | Should be `CERID_CHUNKING_MODE` | Predates `CERID_` convention |
 | `TOMBSTONE_TTL_DAYS` | Bare | Should be `CERID_TOMBSTONE_TTL_DAYS` | Added with sync feature |
 | `ENABLE_*` flags | `ENABLE_` | Could be `CERID_ENABLE_*` | Matches common convention without prefix |
-| `CERID_STORAGE_MODE` | `CERID_` | Consistent | Correct, added in Phase 21 |
-| `CERID_CONFLICT_STRATEGY` | `CERID_` | Consistent | Correct, added in Phase 21 |
+| `CERID_STORAGE_MODE` | `CERID_` | Consistent | Correct |
+| `CERID_CONFLICT_STRATEGY` | `CERID_` | Consistent | Correct |
 
 **Rule:** Do not rename existing variables. For new variables, follow the patterns above.
 

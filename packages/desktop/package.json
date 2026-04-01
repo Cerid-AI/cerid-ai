@@ -1,6 +1,6 @@
 {
   "name": "cerid-desktop",
-  "version": "0.1.0",
+  "version": "0.80.0",
   "description": "Cerid AI Desktop — Personal AI Knowledge Companion",
   "main": "out/main/main.js",
   "scripts": {

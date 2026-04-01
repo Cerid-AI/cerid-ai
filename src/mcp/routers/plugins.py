@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Plugin management endpoints — discover, enable, configure, and disable plugins."""
@@ -97,7 +97,7 @@ def _is_plugin_enabled_redis(name: str) -> bool | None:
         if val is None:
             return None
         return val.decode() == "1" if isinstance(val, bytes) else str(val) == "1"
-    except (ConfigError, ValueError, OSError, RuntimeError):
+    except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         return None
 
 
@@ -115,7 +115,7 @@ def _get_plugin_config_redis(name: str) -> dict[str, Any]:
         if raw is None:
             return {}
         return json.loads(raw.decode() if isinstance(raw, bytes) else str(raw))
-    except (ConfigError, ValueError, OSError, RuntimeError):
+    except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         return {}
 
 

@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Core ingestion service functions.
@@ -38,7 +38,7 @@ def _record_ingest_history(
     chunks: int = 0,
     error: str = "",
 ) -> None:
-    """Push an ingestion event to the persistent Redis stream (Phase 56)."""
+    """Push an ingestion event to the persistent Redis stream."""
     try:
         from routers.system_monitor import record_ingest_event
 
@@ -50,7 +50,7 @@ def _record_ingest_history(
             chunks=chunks,
             error=error,
         )
-    except (CeridError, ValueError, OSError, RuntimeError, ImportError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, ImportError, AttributeError, TypeError, KeyError) as e:
         logger.debug("Ingest history recording failed (non-blocking): %s", e)
 
 
@@ -674,7 +674,7 @@ def ingest_content(
             "similarity": near_dup["similarity"],
         }
 
-    # Record to ingestion history stream (Phase 56)
+    # Record to ingestion history stream
     _record_ingest_history(
         filename=base_meta.get("filename", "text_input"),
         source_type=base_meta.get("client_source", "upload"),

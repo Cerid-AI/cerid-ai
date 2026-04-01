@@ -1,7 +1,7 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for hierarchical taxonomy system (Phase 8C)."""
+"""Tests for hierarchical taxonomy system."""
 from __future__ import annotations
 
 import json
@@ -146,7 +146,7 @@ class TestTaxonomyConfig:
 
 
 class TestTagVocabulary:
-    """Test per-domain tag vocabulary (Phase 20A)."""
+    """Test per-domain tag vocabulary."""
 
     def test_tag_vocabulary_has_all_domains(self):
         """TAG_VOCABULARY covers all TAXONOMY domains."""
@@ -182,7 +182,7 @@ class TestTagVocabulary:
 
 
 class TestTagScoring:
-    """Test tag quality scoring (Phase 20A)."""
+    """Test tag quality scoring."""
 
     def test_score_empty_tags(self):
         """Empty tag list scores 0.0."""
@@ -242,7 +242,7 @@ class TestAICategorization:
         assert "finance" in result
         assert "tax" in result
         assert "sub-categories" in result
-        # Phase 20A: vocabulary tags included
+        # vocabulary tags included
         assert "preferred tags" in result
 
     @pytest.mark.asyncio
@@ -459,7 +459,7 @@ class TestTaxonomyRouter:
 
 
 class TestSuggestTagsEndpoint:
-    """Test tag suggestion endpoint (Phase 20A)."""
+    """Test tag suggestion endpoint."""
 
     @pytest.mark.asyncio
     async def test_suggest_tags_with_domain(self):

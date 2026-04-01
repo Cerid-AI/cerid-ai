@@ -1,8 +1,8 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """
-Ablation study scaffold for Phase 34 RAG features.
+Ablation study scaffold for RAG features.
 
 Runs query sets against different feature toggle configurations to measure
 the impact of each RAG enhancement (adaptive retrieval, MMR diversity,
@@ -26,7 +26,7 @@ from errors import CeridError
 
 logger = logging.getLogger("ai-companion")
 
-# Phase 34 toggles relevant for ablation studies
+# RAG toggles relevant for ablation studies
 _RAG_TOGGLES = [
     "enable_adaptive_retrieval",
     "enable_query_decomposition",

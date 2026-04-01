@@ -1,7 +1,7 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for memory consolidation (Phase 35 Sprint 2)."""
+"""Tests for memory consolidation."""
 
 from __future__ import annotations
 

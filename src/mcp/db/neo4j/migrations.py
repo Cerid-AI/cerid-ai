@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Neo4j schema migrations — one-time, idempotent transformations."""
@@ -41,7 +41,7 @@ def backfill_updated_at(driver) -> dict[str, Any]:
 
 
 def migrate_memory_salience(driver) -> dict[str, Any]:
-    """Phase 51: Backfill memory salience fields on conversation Artifact nodes.
+    """Backfill memory salience fields on conversation Artifact nodes.
 
     Idempotent — guarded by ``WHERE a.source_authority IS NULL``.
 
@@ -93,5 +93,5 @@ def migrate_memory_salience(driver) -> dict[str, Any]:
         migrated += 1
 
     if migrated:
-        logger.info("Phase 51 migration: updated %d memory artifacts", migrated)
+        logger.info("Memory salience migration: updated %d memory artifacts", migrated)
     return {"migrated": migrated}

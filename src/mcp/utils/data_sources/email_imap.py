@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """IMAP email poller data source — polls a mailbox for new messages and ingests them.
@@ -373,7 +373,7 @@ async def poll_email() -> dict[str, Any]:
             await _mark_uid_processed(uid)
             ingested += 1
 
-        except (ValueError, OSError, RuntimeError) as exc:
+        except (ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
             errors.append(f"UID {msg_data.get('uid', '?')}: {exc}")
             logger.error("Failed to ingest email UID %s: %s", msg_data.get("uid"), exc)
 

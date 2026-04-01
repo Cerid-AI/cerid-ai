@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Sync REST endpoints — trigger export/import/status via HTTP.
@@ -70,7 +70,7 @@ async def sync_export_endpoint(req: ExportRequest):
                 domains=req.domains,
             )
         return result
-    except (SyncError, ValueError, OSError, RuntimeError) as exc:
+    except (SyncError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.error("Sync export failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -91,7 +91,7 @@ async def sync_import_endpoint(req: ImportRequest):
                 conflict_strategy=req.conflict_strategy,
             )
         return result
-    except (SyncError, ValueError, OSError, RuntimeError) as exc:
+    except (SyncError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.error("Sync import failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -109,6 +109,6 @@ async def sync_status_endpoint(sync_dir: str | None = Query(default=None)):
             sync_dir=sync_dir or config.SYNC_DIR,
         )
         return result
-    except (SyncError, ValueError, OSError, RuntimeError) as exc:
+    except (SyncError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.error("Sync status failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))

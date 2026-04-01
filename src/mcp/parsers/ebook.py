@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """E-book and rich text parsers — EPUB and RTF."""
@@ -95,7 +95,7 @@ def parse_epub(file_path: str) -> dict[str, Any]:
                 chapter_text = _strip_html_tags(content)
                 if chapter_text.strip():
                     chapters.append(chapter_text.strip())
-            except (KeyError, IngestionError, ValueError, OSError, RuntimeError) as e:
+            except (KeyError, IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError) as e:
                 logger.debug(f"EPUB: skipping {href}: {e}")
 
     finally:

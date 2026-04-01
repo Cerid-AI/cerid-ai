@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """
@@ -34,7 +34,7 @@ def auto_import_if_empty():
         with driver.session() as session:
             result = session.run("MATCH (a:Artifact) RETURN count(a) AS cnt")
             count = result.single()["cnt"]
-    except (SyncError, ValueError, OSError, RuntimeError) as e:
+    except (SyncError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning(f"Could not check Neo4j artifact count: {e}")
         return
 
@@ -76,5 +76,5 @@ def auto_import_if_empty():
         logger.info(f"Redis import: {redis_result}")
 
         logger.info("Auto-import complete")
-    except (SyncError, ValueError, OSError, RuntimeError) as e:
+    except (SyncError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning(f"Auto-import failed: {e}")

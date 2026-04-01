@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Core settings — chunking, categorization, service URLs, scheduling, and search tuning."""
@@ -106,7 +106,7 @@ HYBRID_KEYWORD_WEIGHT = float(os.getenv("HYBRID_KEYWORD_WEIGHT", "0.5"))
 BM25_DATA_DIR = os.path.join(os.getenv("DATA_DIR", "data"), "bm25")
 
 # ---------------------------------------------------------------------------
-# Storage Monitoring (Phase 56)
+# Storage Monitoring
 # ---------------------------------------------------------------------------
 STORAGE_WARN_PCT = int(os.getenv("CERID_STORAGE_WARN_PCT", "60"))
 STORAGE_CRITICAL_PCT = int(os.getenv("CERID_STORAGE_CRITICAL_PCT", "80"))
@@ -178,7 +178,7 @@ GRAPH_RELATED_SCORE_FACTOR = 0.6              # score multiplier for graph-sourc
 GRAPH_MIN_KEYWORD_OVERLAP = 2                 # min shared keywords to create RELATES_TO
 
 # ---------------------------------------------------------------------------
-# Graph RAG — entity-aware retrieval using Neo4j (Phase 52)
+# Graph RAG — entity-aware retrieval using Neo4j
 # ---------------------------------------------------------------------------
 GRAPH_RAG_WEIGHT = float(os.getenv("GRAPH_RAG_WEIGHT", "0.3"))   # blend weight (0.0–1.0)
 GRAPH_RAG_MAX_HOPS = int(os.getenv("GRAPH_RAG_MAX_HOPS", "2"))   # traversal depth
@@ -294,7 +294,7 @@ STREAMING_TOTAL_TIMEOUT = float(os.getenv("STREAMING_TOTAL_TIMEOUT", "90"))
 STREAMING_RETRY_ATTEMPTS = int(os.getenv("STREAMING_RETRY_ATTEMPTS", "1"))
 
 # ---------------------------------------------------------------------------
-# Web Search (Phase 42 — agentic web search fallback)
+# Web Search — agentic web search fallback
 # ---------------------------------------------------------------------------
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
 SEARXNG_URL = os.getenv("SEARXNG_URL", "")  # e.g. http://localhost:8080
@@ -389,12 +389,12 @@ SYNOPSIS_MODEL_OPTIONS = {
 # ---------------------------------------------------------------------------
 MEMORY_RETENTION_DAYS = int(os.getenv("MEMORY_RETENTION_DAYS", "180"))
 
-# Memory Conflict Detection & Decay (Phase 44)
+# Memory Conflict Detection & Decay
 MEMORY_CONFLICT_THRESHOLD = float(os.getenv("MEMORY_CONFLICT_THRESHOLD", "0.85"))
 MEMORY_HALF_LIFE_DAYS = float(os.getenv("MEMORY_HALF_LIFE_DAYS", "30.0"))  # legacy fallback
 MEMORY_MIN_RECALL_SCORE = float(os.getenv("MEMORY_MIN_RECALL_SCORE", "0.3"))
 
-# Memory Salience — per-type stability and scoring (Phase 51)
+# Memory Salience — per-type stability and scoring
 # Stability = base half-life in days for decay. Higher = slower fade.
 # "empirical" uses float("inf") — permanent facts never decay.
 MEMORY_TYPE_STABILITY: dict[str, float] = {
@@ -420,10 +420,10 @@ SOURCE_AUTHORITY_WEIGHTS: dict[str, float] = {
 # Default source authority for memories without an explicit source type.
 DEFAULT_SOURCE_AUTHORITY = 0.7
 
-# All valid memory types (Phase 51 expansion from Phase 44's 4 types to 6).
+# All valid memory types (6 types).
 MEMORY_TYPES = {"empirical", "decision", "preference", "project_context", "temporal", "conversational"}
 
-# Mapping from legacy Phase 44 types to Phase 51 types (for migration).
+# Mapping from legacy types to current types (for migration).
 MEMORY_TYPE_MIGRATION: dict[str, str] = {
     "fact": "empirical",
     "action_item": "project_context",
@@ -533,7 +533,7 @@ CERID_TRADING_ENABLED = os.getenv("CERID_TRADING_ENABLED", "false").lower() in (
 TRADING_AGENT_URL = os.getenv("TRADING_AGENT_URL", "http://localhost:8090")
 
 # ---------------------------------------------------------------------------
-# Email IMAP Poller (Phase 54.1)
+# Email IMAP Poller
 # ---------------------------------------------------------------------------
 CERID_EMAIL_IMAP_HOST = os.getenv("CERID_EMAIL_IMAP_HOST", "")
 CERID_EMAIL_IMAP_PORT = int(os.getenv("CERID_EMAIL_IMAP_PORT", "993"))
@@ -543,7 +543,7 @@ CERID_EMAIL_FOLDER = os.getenv("CERID_EMAIL_FOLDER", "INBOX")
 CERID_EMAIL_POLL_INTERVAL = int(os.getenv("CERID_EMAIL_POLL_INTERVAL", "15"))  # minutes
 
 # ---------------------------------------------------------------------------
-# RSS/Atom Feed Poller (Phase 54.2)
+# RSS/Atom Feed Poller
 # ---------------------------------------------------------------------------
 CERID_RSS_POLL_INTERVAL = int(os.getenv("CERID_RSS_POLL_INTERVAL", "30"))  # minutes
 

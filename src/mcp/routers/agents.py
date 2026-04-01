@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Agent endpoints — thin wrappers over agent modules."""
@@ -640,7 +640,7 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
                     anext_task.cancel()
                     try:
                         await anext_task
-                    except (asyncio.CancelledError, CeridError, ValueError, OSError, RuntimeError) as exc:
+                    except (asyncio.CancelledError, CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
                         logger.debug("Agent anext task cleanup: %s", exc)
                 # Now the generator is idle — safe to close
                 try:

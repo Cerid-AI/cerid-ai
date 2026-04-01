@@ -24,7 +24,7 @@ The current default `CORS_ORIGINS=*` allows any website to query the local MCP A
 Create `src/mcp/tests/test_cors_default.py`:
 
 ```python
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Tests for CORS default configuration."""
@@ -195,7 +195,7 @@ Add a configurable option to strip or hash PII from email headers (From/To/Cc) d
 Create `src/mcp/tests/test_email_anonymization.py`:
 
 ```python
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Tests for email header anonymization during ingestion."""
@@ -318,7 +318,7 @@ The ingest audit log uses LTRIM for size limiting but no TTL. Conversation metri
 Create `src/mcp/tests/test_audit_log_ttl.py`:
 
 ```python
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Tests for Redis audit log TTL."""
@@ -381,7 +381,7 @@ When `CERID_ENCRYPTION_KEY` is set, encrypt conversation content and settings va
 Create `src/mcp/tests/test_sync_encryption.py`:
 
 ```python
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Tests for sync directory encryption."""
@@ -594,7 +594,7 @@ describe("KBContextIndicator", () => {
 Create `src/web/src/components/chat/kb-context-indicator.tsx`:
 
 ```tsx
-// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 import { Shield } from "lucide-react"

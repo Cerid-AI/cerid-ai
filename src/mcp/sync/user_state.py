@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Read/write user state files (settings, conversations, preferences) to the sync directory."""
@@ -31,7 +31,7 @@ def _encrypt_value(value: str) -> str:
         from utils.encryption import encrypt_field
 
         return encrypt_field(value) if value else value
-    except (SyncError, ValueError, OSError, RuntimeError) as exc:
+    except (SyncError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.debug("Encryption unavailable, returning plaintext: %s", exc)
         return value
 
@@ -42,7 +42,7 @@ def _decrypt_value(value: str) -> str:
         from utils.encryption import decrypt_field
 
         return decrypt_field(value) if value else value
-    except (SyncError, ValueError, OSError, RuntimeError) as exc:
+    except (SyncError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.debug("Decryption unavailable, returning raw value: %s", exc)
         return value
 

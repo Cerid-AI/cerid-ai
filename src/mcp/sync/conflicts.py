@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Conflict detection and resolution for cross-machine sync."""
@@ -100,7 +100,7 @@ def detect_conflicts(
                         local_content_hash=local_hash,
                         remote_content_hash=remote_hash,
                     ))
-    except (SyncError, ValueError, OSError, RuntimeError) as exc:
+    except (SyncError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.error("Conflict detection failed: %s", exc)
 
     if conflicts:

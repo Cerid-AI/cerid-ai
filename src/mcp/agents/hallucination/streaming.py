@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Hallucination detection — streaming orchestration and batch verification.
@@ -444,7 +444,7 @@ async def verify_response_streaming(
                     "Batch verified %d/%d current-event claims via %s",
                     len(batch_verdicts), len(current_event_claims), batch_model,
                 )
-            except (TimeoutError, VerificationError, ValueError, OSError, RuntimeError) as exc:
+            except (TimeoutError, VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
                 logger.warning("Batch verification failed (%s), falling back to individual", exc)
 
         batch_task = asyncio.create_task(_run_batch())
@@ -472,7 +472,7 @@ async def verify_response_streaming(
         if idx in batch_candidate_indices and batch_task is not None:
             try:
                 await asyncio.wait_for(asyncio.shield(batch_task), timeout=3.0)
-            except (TimeoutError, VerificationError, ValueError, OSError, RuntimeError):
+            except (TimeoutError, VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
                 pass  # batch not done yet or failed — proceed individually
         # Skip if already resolved by batch verification or cache
         if collected_results[idx] is not None:

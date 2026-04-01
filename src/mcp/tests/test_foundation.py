@@ -1,6 +1,6 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Tests for Phase 51 foundation modules.
+"""Tests for foundation modules.
 
 Covers: errors.py, utils/error_handler.py, utils/degradation.py, config/constants.py.
 These modules form the error handling, degradation, and configuration foundation.

@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Private mode utilities — check ephemeral session state."""
@@ -15,5 +15,5 @@ def get_private_mode_level(client_id: str) -> int:
         redis = get_redis()
         level = redis.get(f"cerid:private_mode:{client_id}")
         return int(level) if level is not None else 0
-    except (ConfigError, ValueError, OSError, RuntimeError):
+    except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         return 0

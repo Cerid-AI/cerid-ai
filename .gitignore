@@ -85,5 +85,6 @@ packages/desktop/release/
 
 # AI assistant artifacts
 .superpowers/
+.internal/
 tests/beta/reports/
 tests/beta/eval/reports/

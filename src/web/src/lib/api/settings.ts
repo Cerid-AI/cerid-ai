@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 import { MCP_BASE, mcpHeaders, extractError } from "./common"
@@ -72,7 +72,7 @@ export async function setTierOverride(tier: string): Promise<{ status: string; t
   return res.json()
 }
 
-// -- Auth API (Phase 31 — multi-user) ----------------------------------------
+// -- Auth API (multi-user) ----------------------------------------------------
 
 export async function authRegister(
   email: string,
@@ -451,7 +451,7 @@ export async function scanPlugins(): Promise<PluginListResponse> {
 }
 
 // ---------------------------------------------------------------------------
-// Observability (Phase 47)
+// Observability
 // ---------------------------------------------------------------------------
 
 export async function fetchObservabilityMetrics(windowMinutes = 60): Promise<AggregatedMetricsResponse> {
@@ -485,7 +485,7 @@ export async function fetchObservabilityQuality(windowMinutes = 60): Promise<Qua
 }
 
 // ---------------------------------------------------------------------------
-// Workflows (Phase 50)
+// Workflows
 // ---------------------------------------------------------------------------
 
 export async function fetchWorkflows(): Promise<WorkflowListResponse> {
@@ -673,7 +673,7 @@ export async function disablePrivateMode(clearCache: boolean = false): Promise<v
 }
 
 // ---------------------------------------------------------------------------
-// Storage Monitoring (Phase 56)
+// Storage Monitoring
 // ---------------------------------------------------------------------------
 
 export async function fetchStorageMetrics(): Promise<import("../types").StorageMetrics> {

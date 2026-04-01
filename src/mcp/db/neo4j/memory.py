@@ -1,9 +1,9 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Neo4j Memory node operations — create, update, archive, link, and query Memory nodes.
 
-Phase 44 Part 2: Dedicated :Memory node schema for decay/reinforcement scoring,
+Dedicated :Memory node schema for decay/reinforcement scoring,
 conflict resolution chains, and context-aware recall.
 """
 

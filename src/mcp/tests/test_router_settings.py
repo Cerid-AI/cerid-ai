@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Integration tests for GET /settings and PATCH /settings endpoints."""
@@ -130,7 +130,7 @@ class TestPatchSettings:
 
 
 class TestRAGPipelineSettings:
-    """Tests for Advanced RAG pipeline settings (Phase 35)."""
+    """Tests for Advanced RAG pipeline settings."""
 
     def test_get_includes_rag_pipeline_fields(self):
         client = TestClient(_make_app())

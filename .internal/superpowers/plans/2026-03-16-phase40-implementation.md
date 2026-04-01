@@ -50,7 +50,7 @@ Expected: 31-line single-stage Dockerfile with `python:3.11.14-slim` base, gcc i
 Replace the entire `src/mcp/Dockerfile` with:
 
 ```dockerfile
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 # Stage 1: Builder — install Python deps with build tools

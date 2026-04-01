@@ -106,13 +106,13 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'core'`
 
 ```python
 # src/mcp/core/__init__.py
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 ```
 
 ```python
 # src/mcp/core/contracts/__init__.py
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Contract interfaces — abstract boundaries between core and app layers."""
@@ -141,7 +141,7 @@ __all__ = [
 
 ```python
 # src/mcp/core/contracts/stores.py
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Abstract store contracts — VectorStore and GraphStore."""
@@ -234,7 +234,7 @@ class GraphStore(ABC):
 
 ```python
 # src/mcp/core/contracts/llm.py
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Abstract LLM client contract."""
@@ -274,7 +274,7 @@ class LLMClient(ABC):
 
 ```python
 # src/mcp/core/contracts/cache.py
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Abstract cache store contract."""
@@ -317,7 +317,7 @@ class CacheStore(ABC):
 
 ```python
 # src/mcp/core/contracts/embedding.py
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Abstract embedding function contract."""
@@ -341,7 +341,7 @@ class EmbeddingFunction(ABC):
 
 ```python
 # src/mcp/core/contracts/audit.py
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Abstract audit log contract."""
@@ -479,7 +479,7 @@ These 6 utility files depend only on stdlib/config — no middleware or app impo
 
 ```python
 # src/mcp/core/utils/__init__.py
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 ```
 
@@ -617,7 +617,7 @@ Extract lines 19-46 from `middleware/request_id.py` into a new file:
 
 ```python
 # src/mcp/core/utils/tracing.py
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Request tracing context — pure contextvars accessors with zero HTTP dependency.
@@ -799,7 +799,7 @@ Move 7 RAG pipeline components. All depend only on `config/` and `utils/` (now i
 
 ```python
 # src/mcp/core/retrieval/__init__.py
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 ```
 
@@ -869,7 +869,7 @@ git commit -m "refactor(phase-c): extract 7 retrieval pipeline components to cor
 
 ```python
 # src/mcp/core/routing/__init__.py
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 ```
 
@@ -1110,13 +1110,13 @@ Each store wraps existing operations. For example, `chroma_store.py` wraps the C
 
 ```python
 # src/mcp/stores/__init__.py
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 ```
 
 ```python
 # src/mcp/stores/chroma_store.py
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """ChromaDB implementation of VectorStore contract."""
@@ -1198,7 +1198,7 @@ Create the remaining 4 store implementations:
 
 ```python
 # src/mcp/stores/neo4j_store.py
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Neo4j implementation of GraphStore contract."""
@@ -1269,7 +1269,7 @@ class Neo4jGraphStore(GraphStore):
 
 ```python
 # src/mcp/stores/redis_cache.py
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Redis implementation of CacheStore contract."""
@@ -1308,7 +1308,7 @@ class RedisCacheStore(CacheStore):
 
 ```python
 # src/mcp/stores/redis_audit.py
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Redis implementation of AuditLog contract."""
@@ -1369,7 +1369,7 @@ class RedisAuditLog(AuditLog):
 
 ```python
 # src/mcp/stores/llm_clients.py
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """OpenRouter/Bifrost implementation of LLMClient contract."""
@@ -1724,7 +1724,7 @@ mv agents/trading_scheduler_jobs.py app/agents/trading_scheduler_jobs.py
 Create `app/__init__.py`:
 ```python
 # src/mcp/app/__init__.py
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 ```
 

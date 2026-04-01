@@ -1,6 +1,6 @@
 # Embedding Model Evaluation
 
-> Phase 12D — evaluation of embedding models for Cerid AI's RAG pipeline.
+> Evaluation of embedding models for Cerid AI's RAG pipeline.
 
 ## Current Model
 

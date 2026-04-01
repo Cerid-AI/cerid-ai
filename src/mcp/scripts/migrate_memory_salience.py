@@ -1,7 +1,7 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Phase 51 one-time migration: backfill memory salience fields.
+"""One-time migration: backfill memory salience fields.
 
 Updates both Neo4j and ChromaDB for existing conversation-domain memories:
 - memory_type: maps legacy ``fact`` → ``empirical``, ``action_item`` → ``project_context``
@@ -77,7 +77,7 @@ def migrate_chromadb(chroma_client: chromadb.ClientAPI, *, dry_run: bool = False
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Phase 51 memory salience migration")
+    parser = argparse.ArgumentParser(description="Memory salience migration")
     parser.add_argument("--dry-run", action="store_true", help="Preview without writing")
     args = parser.parse_args()
 

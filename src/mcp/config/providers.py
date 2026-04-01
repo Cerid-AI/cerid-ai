@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """BYOK provider registry — supported LLM providers, key validation, and status."""
@@ -147,7 +147,7 @@ async def validate_provider_key(provider: str, api_key: str) -> tuple[bool, str]
             try:
                 body = resp.json()
                 detail = body.get("error", {}).get("message", "") or body.get("detail", "")
-            except (ConfigError, ValueError, OSError, RuntimeError):
+            except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
                 detail = resp.text[:200]
 
             msg = f"HTTP {resp.status_code}: {detail}" if detail else f"HTTP {resp.status_code}"
@@ -164,7 +164,7 @@ async def validate_provider_key(provider: str, api_key: str) -> tuple[bool, str]
         msg = f"Request timed out after {_VALIDATION_TIMEOUT}s"
         logger.warning("Provider %s validation timeout", provider)
         return False, msg
-    except (ConfigError, ValueError, OSError, RuntimeError) as exc:
+    except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.error("Provider %s validation unexpected error: %s", provider, exc)
         return False, f"Unexpected error: {exc}"
 

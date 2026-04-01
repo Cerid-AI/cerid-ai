@@ -1,7 +1,7 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Storage metrics and ingestion history endpoints (Phase 56).
+"""Storage metrics and ingestion history endpoints.
 
 Endpoints:
   /system/storage         — Aggregated storage usage across all data stores

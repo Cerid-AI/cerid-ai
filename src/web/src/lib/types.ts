@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 export interface ChatMessage {
@@ -115,7 +115,7 @@ export interface HealthResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 51: Degradation tiers, pipeline routing, structured errors
+// Degradation tiers, pipeline routing, structured errors
 // ---------------------------------------------------------------------------
 
 export type DegradationTier = "full" | "lite" | "direct" | "cached" | "offline"
@@ -818,7 +818,7 @@ export interface LiveMetrics {
   messagesCount: number
 }
 
-// -- Sync types (Phase 21B) --------------------------------------------------
+// -- Sync types --------------------------------------------------------------
 
 export interface SyncManifest {
   machine_id: string
@@ -875,7 +875,7 @@ export interface SyncImportResult {
   consistency_warnings: string[]
 }
 
-// -- Auth types (Phase 31) ---------------------------------------------------
+// -- Auth types --------------------------------------------------------------
 
 export interface AuthUser {
   id: string
@@ -991,7 +991,7 @@ export interface AutomationRun {
   error: string | null
 }
 
-// ── Observability (Phase 47) ─────────────────────────────────────────────────
+// ── Observability ────────────────────────────────────────────────────────────
 
 export interface MetricAggregation {
   avg: number | null
@@ -1071,7 +1071,7 @@ export interface PluginListResponse {
   total: number
 }
 
-// ── Workflows (Phase 50) ────────────────────────────────────────────────────
+// ── Workflows ───────────────────────────────────────────────────────────────
 
 export type WorkflowNodeType = "agent" | "parser" | "tool" | "condition"
 export type WorkflowRunStatus = "pending" | "running" | "completed" | "failed"
@@ -1157,7 +1157,7 @@ export interface ArtifactFilterParams {
 }
 
 // ---------------------------------------------------------------------------
-// Storage Monitoring (Phase 56)
+// Storage Monitoring
 // ---------------------------------------------------------------------------
 
 export interface ServiceStorageMetrics {

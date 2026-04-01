@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Feature flags, toggles, and plugin configuration.
@@ -64,13 +64,13 @@ FEATURE_FLAGS = {
     "priority_support":    _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["enterprise"],
     # Pro-only: custom smart RAG mode with per-source weights
     "custom_smart_rag": _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
-    # Pro-only: advanced RAG retrieval strategies (Phase 52)
+    # Pro-only: advanced RAG retrieval strategies
     "parent_child_retrieval": _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
     "graph_rag": _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
-    # Pro-only: email connectors (Phase 55)
+    # Pro-only: email connectors
     "gmail_connector":   _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
     "outlook_connector": _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
-    # Pro-only: Apple Notes, Calendar, Docling parser (Phase 55.3-55.5)
+    # Pro-only: Apple Notes, Calendar, Docling parser
     "apple_notes_reader": _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
     "calendar_sync":      _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
     "docling_parser":     _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
@@ -117,7 +117,7 @@ ENABLE_MEMORY_RECALL = os.getenv("ENABLE_MEMORY_RECALL", "true").lower() == "tru
 # Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 
 # ---------------------------------------------------------------------------
-# Advanced RAG Pipeline (Phase 34)
+# Advanced RAG Pipeline
 # ---------------------------------------------------------------------------
 ENABLE_ADAPTIVE_RETRIEVAL = os.getenv("ENABLE_ADAPTIVE_RETRIEVAL", "true").lower() == "true"
 ADAPTIVE_RETRIEVAL_LIGHT_TOP_K = int(os.getenv("ADAPTIVE_RETRIEVAL_LIGHT_TOP_K", "3"))
@@ -140,13 +140,13 @@ SEMANTIC_CACHE_TTL = int(os.getenv("SEMANTIC_CACHE_TTL", "600"))
 SEMANTIC_CACHE_MAX_ENTRIES = int(os.getenv("SEMANTIC_CACHE_MAX_ENTRIES", "500"))
 SEMANTIC_CACHE_HNSW_EF = int(os.getenv("SEMANTIC_CACHE_HNSW_EF", "50"))
 
-# Parent-child chunking retrieval (Phase 51)
+# Parent-child chunking retrieval
 ENABLE_PARENT_CHILD_RETRIEVAL = os.getenv("ENABLE_PARENT_CHILD_RETRIEVAL", "false").lower() in ("true", "1")
 
-# Graph RAG: entity-aware retrieval using Neo4j knowledge graph (Phase 52)
+# Graph RAG: entity-aware retrieval using Neo4j knowledge graph
 ENABLE_GRAPH_RAG = os.getenv("ENABLE_GRAPH_RAG", "false").lower() in ("true", "1")
 
-# Degradation tiers: circuit-breaker-aware graceful degradation (Phase 51)
+# Degradation tiers: circuit-breaker-aware graceful degradation
 ENABLE_DEGRADATION_TIERS = os.getenv("ENABLE_DEGRADATION_TIERS", "false").lower() == "true"
 
 # ---------------------------------------------------------------------------
@@ -158,7 +158,7 @@ ENABLE_MODEL_ROUTER = os.getenv("ENABLE_MODEL_ROUTER", "false").lower() == "true
 COST_SENSITIVITY = os.getenv("COST_SENSITIVITY", "medium")  # low/medium/high
 
 # ---------------------------------------------------------------------------
-# Memory Consolidation (Phase 35)
+# Memory Consolidation
 # ---------------------------------------------------------------------------
 ENABLE_MEMORY_CONSOLIDATION = os.getenv("ENABLE_MEMORY_CONSOLIDATION", "true").lower() == "true"
 ENABLE_CONTEXT_COMPRESSION = os.getenv("ENABLE_CONTEXT_COMPRESSION", "true").lower() == "true"

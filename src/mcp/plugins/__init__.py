@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """
@@ -141,7 +141,7 @@ def _load_single_plugin(plugin_dir: Path) -> dict[str, Any] | None:
         spec.loader.exec_module(module)
     except PluginLoadError:
         raise
-    except (ConfigError, ValueError, OSError, RuntimeError) as e:
+    except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         raise PluginLoadError(f"Plugin '{name}': failed to import: {e}") from e
 
     # Call register()
@@ -153,7 +153,7 @@ def _load_single_plugin(plugin_dir: Path) -> dict[str, Any] | None:
 
     try:
         register_fn()
-    except (ConfigError, ValueError, OSError, RuntimeError) as e:
+    except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         raise PluginLoadError(
             f"Plugin '{name}': register() failed: {e}"
         ) from e
@@ -188,7 +188,7 @@ def _scan_directory(base_dir: Path, loaded: list[str]) -> None:
                 loaded.append(info["name"])
         except PluginLoadError as e:
             logger.error(str(e))
-        except (ConfigError, ValueError, OSError, RuntimeError) as e:
+        except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.error(f"Unexpected error loading plugin from {entry}: {e}")
 
 

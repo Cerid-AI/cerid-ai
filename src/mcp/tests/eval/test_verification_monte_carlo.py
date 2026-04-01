@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Monte Carlo evaluation harness for the Cerid verification pipeline.
@@ -7,9 +7,9 @@ Tests claim classification, routing, verdict interpretation, and confidence
 calibration across a large synthetic corpus of diverse claim types. Each
 category covers realistic edge cases to evaluate algorithm efficacy.
 
-Baseline: 84% classification accuracy (2026-03-28, 54 scenarios).
-Expanded: 150 scenarios (2026-03-28, +96 new across 5 categories).
-Target: 90% classification accuracy (Phase 51 Sprint 2A).
+Baseline: 84% classification accuracy (54 scenarios).
+Expanded: 150 scenarios (+96 new across 5 categories).
+Target: 90% classification accuracy.
 
 Run: python -m pytest tests/eval/test_verification_monte_carlo.py -v --tb=short
      make test-eval

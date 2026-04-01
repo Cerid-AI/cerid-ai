@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Neo4j schema initialization — constraints, indexes, seed data."""
@@ -128,7 +128,7 @@ def init_schema(driver) -> None:
         if fixed or linked:
             logger.info(f"Backfilled {fixed} sub_category props, {linked} CATEGORIZED_AS rels")
 
-    # --- Memory node schema (Phase 44 Part 2) ---
+    # --- Memory node schema ---
     from db.neo4j.memory import ensure_memory_schema
     ensure_memory_schema(driver)
 

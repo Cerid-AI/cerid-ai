@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Hallucination detection — claim verification against KB and cross-model LLM.
@@ -1299,6 +1299,6 @@ async def _check_history_consistency(
             return issues
         return []
 
-    except (CircuitOpenError, VerificationError, ValueError, OSError, RuntimeError) as e:
+    except (CircuitOpenError, VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning("Consistency check failed: %s", e)
         return []

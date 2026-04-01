@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """User state API — settings, conversations, and UI preferences via sync directory."""
@@ -79,7 +79,7 @@ def save_conversation(body: dict[str, Any], request: Request):
         from utils.private_mode import get_private_mode_level
         if get_private_mode_level(client_id) >= 1:
             return {"saved": body.get("id", ""), "private_mode": True, "skipped": True}
-    except (ValueError, OSError, RuntimeError):
+    except (ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         pass  # Private mode check: proceed normally on failure
 
     sd = _sync_dir()
@@ -103,7 +103,7 @@ def save_conversations_bulk(body: list[dict[str, Any]], request: Request):
         from utils.private_mode import get_private_mode_level
         if get_private_mode_level(client_id) >= 1:
             return {"saved": 0, "private_mode": True, "skipped": True}
-    except (ValueError, OSError, RuntimeError):
+    except (ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         pass  # Private mode check: proceed normally on failure
 
     sd = _sync_dir()

@@ -2,10 +2,9 @@
 
 > **Created:** 2026-02-25
 > **Last updated:** 2026-03-22
-> **Status:** All phases through 50 complete + Production Readiness Audit + Verification Crash Debugging. 160+ resolved, 0 open. 1376+ Python tests, 545+ frontend tests.
-> **Development plan:** [docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md](plans/DEVELOPMENT_PLAN_PHASE16-18.md) (Phases 17-21 roadmap)
-> **Completed phases:** [docs/COMPLETED_PHASES.md](COMPLETED_PHASES.md)
-> **Purpose:** Track known bugs, feature gaps, structural issues, and architecture evaluations for upcoming phases.
+> **Status:** 160+ resolved, 0 open. 1800+ Python tests, 500+ frontend tests.
+> **Completed work:** [docs/COMPLETED_PHASES.md](COMPLETED_PHASES.md)
+> **Purpose:** Track known bugs, feature gaps, and structural issues.
 
 ---
 
@@ -14,7 +13,7 @@
 ### A1. Chat Input & Metrics Dashboard Viewport Overflow
 
 **Severity:** Medium
-**Status:** Resolved (Phase 10A, 2026-02-26)
+**Status:** Resolved (Resolved)
 
 **Resolution:** Added `min-h-0` at every flex container level in the chat layout chain (`split-pane.tsx` fallback div + Panel, `chat-panel.tsx` chatArea div + ScrollArea). Pure CSS fix — no JS changes. Verified at mobile viewport (375x812): textarea bottom at 764px, fully visible with 48px to spare.
 
@@ -27,7 +26,7 @@
 ### B1. No Interactive Audit Agent in GUI
 
 **Severity:** Medium
-**Status:** ✅ Resolved (Phase 11A, 2026-02-28)
+**Status:** ✅ Resolved (Resolved)
 
 The audit pane (`audit-pane.tsx`) auto-fetches reports every 60 seconds via `useQuery`, but there's no way for users to manually trigger the audit agent, choose which reports to run, change the time window, or force a refresh.
 
@@ -43,7 +42,7 @@ The audit pane (`audit-pane.tsx`) auto-fetches reports every 60 seconds via `use
 ### B2. Source Attribution Missing in Chat
 
 **Severity:** High
-**Status:** Resolved (Phase 10A, 2026-02-26)
+**Status:** Resolved (Resolved)
 
 **Resolution:** Added `SourceRef` type to `types.ts` (lightweight subset of `KBQueryResult`), `sourcesUsed?: SourceRef[]` field on `ChatMessage`. At send time, injected KB context is captured as `SourceRef[]` before `clearInjected()`, threaded through `useChat.send()`, and attached to the assistant message. New `SourceAttribution` component renders a collapsible list below each response (Radix Collapsible, domain badges, relevance percentages). Persists in localStorage via existing conversation serialization.
 
@@ -52,11 +51,11 @@ The audit pane (`audit-pane.tsx`) auto-fetches reports every 60 seconds via `use
 ### B3. No Model Context Break Indicator
 
 **Severity:** Medium
-**Status:** Resolved (Phase 10B, 2026-02-26)
+**Status:** Resolved (Resolved)
 
 **Resolution:** Model switch dividers computed at render time — when consecutive assistant messages use different models, a "Switched from [Model A] to [Model B]" divider appears between them. Per-message model badges are now always visible with provider-colored pills (amber for Anthropic, emerald for OpenAI, blue for Google, etc.). Added `PROVIDER_COLORS` map, `findModel()` helper, `ModelBadge` component, and `ModelSwitchDivider` component. No storage format changes — dividers are derived from existing `message.model` field.
 
-**Remaining:** "Start fresh context" option on model switch (deferred to Phase 10C with token cost awareness).
+**Remaining:** "Start fresh context" option on model switch (deferred to Resolved with token cost awareness).
 
 **Files changed:** `types.ts`, `message-bubble.tsx`, `model-switch-divider.tsx` (new), `chat-panel.tsx`
 
@@ -67,9 +66,9 @@ The audit pane (`audit-pane.tsx`) auto-fetches reports every 60 seconds via `use
 ### C1. Knowledge Context & Tagging Needs Taxonomy Update
 
 **Severity:** Medium
-**Status:** ✅ Resolved (Phase 11B, 2026-02-28)
+**Status:** ✅ Resolved (Resolved)
 
-The GUI has basic tag pills and sub-category badges (added in Phase 9C) but doesn't fully leverage the hierarchical taxonomy system (TAXONOMY dict in `config.py` with domains, sub-categories, and tags). Missing:
+The GUI has basic tag pills and sub-category badges (added in Resolved) but doesn't fully leverage the hierarchical taxonomy system (TAXONOMY dict in `config.py` with domains, sub-categories, and tags). Missing:
 - Taxonomy-aware hierarchical browsing (domain > sub-category > tags)
 - Tag management UI (add/remove/rename tags on artifacts)
 - Bulk re-tagging across artifacts
@@ -89,7 +88,7 @@ The GUI has basic tag pills and sub-category badges (added in Phase 9C) but does
 ### C2. Knowledge Curation Agent Needed
 
 **Severity:** High
-**Status:** ✅ Design complete (Phase 11C, 2026-02-28) — implementation deferred to post-Phase 12
+**Status:** ✅ Design complete (Resolved) — implementation deferred to post-Resolved
 
 No agent exists for improving artifact quality. Current artifact cards show raw metadata (auto-extracted summaries, AI-generated keywords). Missing:
 - Content optimization (improve summaries, refine keywords, fix OCR artifacts)
@@ -116,7 +115,7 @@ No agent exists for improving artifact quality. Current artifact cards show raw 
 ### D1. Smart Routing Needs Context/Token Cost Evaluation
 
 **Severity:** High
-**Status:** Resolved (Phase 10E, 2026-02-28)
+**Status:** Resolved (Resolved)
 
 **Resolution:** Added `calculateSwitchCost()` and `buildSwitchOptions()` to `model-router.ts` for context replay cost estimation. Color-coded context usage gauge (green/yellow/red) in chat dashboard. `summarizeConversation()` API for compressing history before model switch. `useModelSwitch` hook orchestrates 3 strategies: continue (full replay), summarize (compress then switch), and fresh (clear history). Model switch dialog shows per-strategy cost estimates, a "Recommended" badge, and context overflow warnings. 26 new frontend tests covering cost calculation and dialog component.
 
@@ -125,13 +124,13 @@ No agent exists for improving artifact quality. Current artifact cards show raw 
 ### D2. Chat Model Switch UX
 
 **Severity:** Medium
-**Status:** ✅ Resolved (Phase 10E + dropped remaining, 2026-03-08)
+**Status:** ✅ Resolved (Resolved + dropped remaining, 2026-03-08)
 
 **Resolved items:**
-- ✅ Per-message model badge with provider colors (always visible) — Phase 10B
-- ✅ "Switched from X to Y" divider between model switches — Phase 10B
-- ✅ Context summary on switch (summarize-and-switch strategy) — Phase 10E
-- ✅ "Start fresh" option (clear history and switch) — Phase 10E
+- ✅ Per-message model badge with provider colors (always visible)
+- ✅ "Switched from X to Y" divider between model switches
+- ✅ Context summary on switch (summarize-and-switch strategy)
+- ✅ "Start fresh" option (clear history and switch)
 
 **Remaining:**
 - ~~Conversation fork/branch UI~~ — **Dropped** (2026-03-08). Exploratory 40-60 hr effort with unclear ROI. All core model-switch UX (badges, dividers, summarize-and-switch, start fresh) already shipped.
@@ -189,7 +188,7 @@ No agent exists for improving artifact quality. Current artifact cards show raw 
 ### E1. Artifact Preview
 
 **Severity:** Low (exploratory)
-**Status:** ✅ Resolved (Phase 16G, 2026-03-02)
+**Status:** ✅ Resolved (Resolved)
 
 **Resolution:** Added artifact content preview dialog to the Knowledge pane. Backend `GET /artifacts/{artifact_id}` endpoint fetches Neo4j metadata + reassembled ChromaDB chunks (sorted by index). Frontend: `ArtifactPreview` dialog (lazy-loaded) with conditional rendering — code files use PrismLight syntax highlighting, markdown/table/text use formatted `<pre>` blocks. Eye icon button on every artifact card. File type detection utilities (`getFileRenderMode`, `getLanguageFromFilename`). shadcn/ui Dialog primitive. 6 backend tests, 19 new frontend tests (130 total).
 
@@ -198,7 +197,7 @@ No agent exists for improving artifact quality. Current artifact cards show raw 
 ### E2. RAG Integration & Vectorization Strategy
 
 **Severity:** High (foundational)
-**Status:** ✅ Resolved (Phase 12, 2026-02-28)
+**Status:** ✅ Resolved (Resolved)
 
 **Resolution:**
 - **BM25 replaced:** `rank_bm25` → `bm25s` + PyStemmer (stemming, stopwords, 500x faster)
@@ -215,7 +214,7 @@ Issues identified by the modularity assessment (2026-02-26). These are mechanica
 ### F1. Service Layer Extraction — `routers/ingestion.py`
 
 **Severity:** High (causes circular import)
-**Status:** Resolved (Phase 10C-S1, 2026-02-26)
+**Status:** Resolved (Resolved, 2026-02-26)
 
 **Resolution:** Extracted `ingest_content()`, `ingest_file()`, `validate_file_path()`, and all private helpers (`_content_hash`, `_check_duplicate`, `_reingest_artifact`) into `services/ingestion.py`. `routers/ingestion.py` is now a thin router (Pydantic models + endpoint handlers). Updated 4 importers: `agents/memory.py`, `routers/mcp_sse.py`, `routers/upload.py`, `routers/agents.py`. Circular import eliminated.
 
@@ -224,7 +223,7 @@ Issues identified by the modularity assessment (2026-02-26). These are mechanica
 ### F2. MCP Tool Registry Extraction — `routers/mcp_sse.py`
 
 **Severity:** Medium
-**Status:** Resolved (Phase 10C-S2, 2026-02-26)
+**Status:** Resolved (Resolved, 2026-02-26)
 
 **Resolution:** Extracted `MCP_TOOLS` list (17 tool schemas) and `execute_tool()` dispatcher into `tools.py`. `routers/mcp_sse.py` reduced from 593 to ~170 lines — now a thin SSE transport + JSON-RPC framing layer.
 
@@ -233,7 +232,7 @@ Issues identified by the modularity assessment (2026-02-26). These are mechanica
 ### F3. Neo4j Data Layer — `utils/graph.py`
 
 **Severity:** Medium
-**Status:** Resolved (Phase 10C-S3, 2026-02-27)
+**Status:** Resolved (Resolved, 2026-02-27)
 
 **Resolution:** Split `utils/graph.py` (827 lines, 18 functions) into `db/neo4j/` package with 4 sub-modules: `schema.py` (init_schema), `artifacts.py` (6 CRUD functions), `relationships.py` (5 functions incl. discovery), `taxonomy.py` (5 functions). Re-export shim in `utils/graph.py` preserves all 7 importers unchanged. All 156 tests pass.
 
@@ -244,7 +243,7 @@ Issues identified by the modularity assessment (2026-02-26). These are mechanica
 ### F4. Sync Library — `cerid_sync_lib.py`
 
 **Severity:** Medium
-**Status:** Resolved (Phase 10C-S3, 2026-02-27)
+**Status:** Resolved (Resolved, 2026-02-27)
 
 **Resolution:** Split `cerid_sync_lib.py` (1346 lines) into `sync/` package with 5 sub-modules: `export.py` (5 export functions), `import_.py` (5 import functions + 3 ChromaDB helpers), `manifest.py` (write/read), `status.py` (compare_status), `_helpers.py` (constants + 6 utility functions). Fixed 3 latent `collection_name` → `coll_name` bugs in error logging paths. Replaced duplicated `_utcnow_iso()` with canonical `utils.time.utcnow_iso()`. Re-export shim in `cerid_sync_lib.py` preserves all 3 importers unchanged. All 156 tests pass.
 
@@ -255,7 +254,7 @@ Issues identified by the modularity assessment (2026-02-26). These are mechanica
 ### F5. Test Coverage Gaps
 
 **Severity:** High (quality risk)
-**Status:** Resolved (Phase 10D, 2026-02-28)
+**Status:** Resolved (Resolved)
 
 **Resolution:** 564 backend tests across 27 test files achieving 75% code coverage. All previously-untested modules now covered:
 - Middleware: auth (21 tests), rate_limit (19 tests), request_id (9 tests)
@@ -263,30 +262,30 @@ Issues identified by the modularity assessment (2026-02-26). These are mechanica
 - All 5 agents: query_agent (27), triage (23), rectify (19), audit (27), maintenance (24)
 - Sync package (41 tests), parsers package (108 tests), MCP tools (24 tests), Neo4j data layer (63 tests)
 
-Frontend: 130+ vitest tests across 9+ test files. ~40 frontend components remain untested (nice-to-have, not gating any release — tracked in Phase 13).
+Frontend: 130+ vitest tests across 9+ test files. ~40 frontend components remain untested (nice-to-have, not gating any release — tracked in Resolved).
 
 **Current coverage:** 564 pytest functions (27 test files), 130+ vitest tests (9+ test files).
 
 ### F6. Secondary Structural Issues (Informational)
 
 **Severity:** Low
-**Status:** ✅ Resolved (Phase 16G-H, 2026-03-02)
+**Status:** ✅ Resolved (Resolved)
 
 Resolved items:
 - ✅ **`config.py` split:** Split into `config/taxonomy.py`, `config/settings.py`, `config/features.py` with `config/__init__.py` star re-exports (33 importers unchanged).
 - ✅ **Duplicate `find_stale_artifacts`:** Enhanced `rectify.py` version (added `limit` param, `chunk_ids` in return). Removed duplicate from `maintenance.py`, which now imports from `rectify`.
 - ✅ **`audit.log_conversation_metrics()`:** Moved to `utils/cache.py`. Import in `routers/ingestion.py` updated to canonical location.
-- ✅ **`utils/parsers.py`:** Split into `parsers/` package (registry, pdf, office, structured, email, ebook, _utils). Phase 10C-S3, 2026-02-27.
+- ✅ **`utils/parsers.py`:** Split into `parsers/` package (registry, pdf, office, structured, email, ebook, _utils). Resolved, 2026-02-27.
 
 Remaining (non-blocking):
 - **`use-chat.ts` post-send effects:** Not urgent at 83 lines total.
-- ✅ **`cerid-web` compose separation:** Moved to `src/web/docker-compose.yml`. Startup script updated to 5-step (Phase 16G-H, 2026-03-02).
+- ✅ **`cerid-web` compose separation:** Moved to `src/web/docker-compose.yml`. Startup script updated to 5-step (Resolved).
 
 ---
 
 ## G. Audit Hardening
 
-Items identified by the full-stack audit (2026-02-26). Items G1–G7 resolved immediately; G8–G16 integrated into upcoming phases.
+Items identified by the full-stack audit. Items G1-G7 resolved immediately; G8-G16 tracked for follow-up.
 
 ### G1. `cryptography` Not Declared in requirements.txt
 
@@ -340,7 +339,7 @@ Items identified by the full-stack audit (2026-02-26). Items G1–G7 resolved im
 ### G8. Rate Limiter Lacks X-Forwarded-For Support
 
 **Severity:** High
-**Status:** Resolved (Phase 10C-S1, 2026-02-26)
+**Status:** Resolved (Resolved, 2026-02-26)
 
 **Resolution:** Added `TRUSTED_PROXIES` env var (comma-separated CIDRs). `get_client_ip()` walks X-Forwarded-For right-to-left, returning first untrusted IP. Secure by default: no trusted proxies configured means direct peer IP used.
 
@@ -349,7 +348,7 @@ Items identified by the full-stack audit (2026-02-26). Items G1–G7 resolved im
 ### G9. No Rate Limit Response Headers
 
 **Severity:** High
-**Status:** Resolved (Phase 10C-S1, 2026-02-26)
+**Status:** Resolved (Resolved, 2026-02-26)
 
 **Resolution:** Added `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset` headers on all rate-limited paths. 429 responses also include `Retry-After` header.
 
@@ -358,7 +357,7 @@ Items identified by the full-stack audit (2026-02-26). Items G1–G7 resolved im
 ### G10. Client IP in Auth Failure Logs
 
 **Severity:** Medium
-**Status:** Resolved (Phase 10C-S1, 2026-02-26)
+**Status:** Resolved (Resolved, 2026-02-26)
 
 **Resolution:** Auth failure logs now show SHA-256 hash prefix (12 chars) via `_redact_ip()` instead of raw IP.
 
@@ -367,7 +366,7 @@ Items identified by the full-stack audit (2026-02-26). Items G1–G7 resolved im
 ### G11. No Request ID Tracing
 
 **Severity:** Low
-**Status:** Resolved (Phase 10C-S1, 2026-02-26)
+**Status:** Resolved (Resolved, 2026-02-26)
 
 **Resolution:** New `RequestIDMiddleware` generates UUID per request or propagates incoming `X-Request-ID`. Stored in `request.state.request_id` and returned in response header. Added as outermost middleware (runs first).
 
@@ -376,35 +375,35 @@ Items identified by the full-stack audit (2026-02-26). Items G1–G7 resolved im
 ### G12. pip-audit Misses Transitive Dependencies
 
 **Severity:** High
-**Status:** ✅ Resolved — Phase 10D
+**Status:** ✅ Resolved
 
 CI's `pip-audit` now scans the full installed environment including transitive deps (added `--desc` flag). Fixed in `.github/workflows/ci.yml`.
 
 ### G13. No CodeQL SAST Workflow
 
 **Severity:** Medium
-**Status:** ✅ Resolved — Phase 10D
+**Status:** ✅ Resolved
 
 Added `.github/workflows/codeql.yml` — CodeQL SAST for Python + JavaScript on push to main, pull requests, and weekly schedule.
 
 ### G14. Coverage Threshold Only 35%
 
 **Severity:** Medium
-**Status:** ✅ Resolved — Phase 10D
+**Status:** ✅ Resolved
 
 Raised `--cov-fail-under` from 35% to 55%. Actual coverage is 75% after 400+ new tests across all backend modules.
 
 ### G15. No Bundle Size Monitoring
 
 **Severity:** Medium
-**Status:** ✅ Resolved — Phase 10D
+**Status:** ✅ Resolved
 
 Added bundle size check step in frontend CI job — fails if any JS chunk exceeds 800KB after vite build.
 
 ### G16. rank_bm25 Unmaintained
 
 **Severity:** Medium
-**Status:** ✅ Resolved (Phase 12A, 2026-02-28)
+**Status:** ✅ Resolved (Resolved)
 
 **Resolution:** Replaced `rank_bm25` with `bm25s>=0.3` + `PyStemmer>=2.2`. New implementation includes English stemming, stopword removal, and backward-compatible JSONL corpus migration. Old token-format corpus files are auto-migrated on load.
 
@@ -413,7 +412,7 @@ Added bundle size check step in frontend CI job — fails if any JS chunk exceed
 ### G17–G22. Documentation Gaps
 
 **Severity:** Low
-**Status:** ✅ Resolved — Phase 11D (2026-02-28)
+**Status:** ✅ Resolved (2026-02-28)
 
 **Resolution:** Created `docs/OPERATIONS.md` covering API key rotation (G17), secrets rotation policy (G18), rate limiter limitations (G22), and branch protection rules (G21). Updated `docs/DEPENDENCY_COUPLING.md` with pip-compile version (G19) and Bifrost version (G20). Added OPERATIONS.md link to README.
 
@@ -559,14 +558,14 @@ The `verify_claim()` docstring now documents all 4 fallback levels. Only KB-veri
 
 ---
 
-## I. Phase 26 — User Review: Verification Logic, UX Fixes, and Backlog
+## I. User Review: Verification Logic, UX Fixes, and Backlog
 
-Post-Phase 25 + production audit user review surfaced **22 items** spanning verification logic flaws, UX gaps, missing tooltips, tab persistence issues, and deferred features. Items are categorized by sprint priority. See `tasks/todo.md` for sprint grouping.
+Post-Resolved + production audit user review surfaced **22 items** spanning verification logic flaws, UX gaps, missing tooltips, tab persistence issues, and deferred features. Items are categorized by sprint priority. See `tasks/todo.md` for sprint grouping.
 
 ### I1. V1a — Surface Found Data in Ignorance Verification
 
 **Severity:** High
-**Status:** ✅ Resolved (Phase 26)
+**Status:** ✅ Resolved (Resolved)
 
 When model says "I don't have access to real-time data", verification confirms the limitation as accurate instead of showing the actual answer. Backend sends to Grok for web search and inverts the verdict (`hallucination.py` lines 1509-1519), but the `verification_answer` (raw Grok response with actual data) is NOT included in the SSE `claim_verified` event — only truncated `reason` is sent.
 
@@ -577,7 +576,7 @@ When model says "I don't have access to real-time data", verification confirms t
 ### I2. V1b — Proactive Model Switch for Real-Time Queries
 
 **Severity:** Medium
-**Status:** ✅ Resolved (Phase 28 Sprint 3)
+**Status:** ✅ Resolved (Resolved Sprint 3)
 
 Smart routing gives +10 bonus for `webSearch` models when `CURRENT_INFO_RE` matches (`model-router.ts` line 130), but doesn't proactively trigger when verification finds the model deflected. After verification detects ignorance on a real-time query, should surface recommendation to switch to Grok.
 
@@ -588,7 +587,7 @@ Smart routing gives +10 bonus for `webSearch` models when `CURRENT_INFO_RE` matc
 ### I3. V2 — Verification Source URLs Not Clickable
 
 **Severity:** Medium
-**Status:** ✅ Resolved (Phase 26)
+**Status:** ✅ Resolved (Resolved)
 
 Backend sends `source_urls` and `source_domain` in `claim_verified` events. Frontend renders `ExternalLink` icons when URLs exist, but KB-verified claims have no URLs and no click-through to the artifact.
 
@@ -599,14 +598,14 @@ Backend sends `source_urls` and `source_domain` in `claim_verified` events. Fron
 ### I4. V3 — Quick-Access Toggles for Memory Extraction
 
 **Severity:** Low
-**Status:** ✅ Resolved (Phase 28 Sprint 1)
+**Status:** ✅ Resolved (Resolved Sprint 1)
 
 Memory extraction toggle only accessible via Settings. Should be in a right-click context menu or overflow popover on toolbar icon.
 
 ### I5. V4 — Settings Pane Scroll Issue
 
 **Severity:** Medium
-**Status:** ✅ Resolved (Phase 28 Sprint 1 — investigated, structure correct, no fix needed)
+**Status:** ✅ Resolved (Resolved Sprint 1 — investigated, structure correct, no fix needed)
 
 Settings pane may not scroll properly. Code uses `<ScrollArea className="flex-1">` inside `<div className="flex h-full min-h-0 flex-col">` which looks correct. Needs browser DevTools inspection — may be ancestor missing `overflow: hidden` or `h-full`.
 
@@ -615,18 +614,18 @@ Settings pane may not scroll properly. Code uses `<ScrollArea className="flex-1"
 ### I6. V5 — Trash Icon Invisible on Touch Devices
 
 **Severity:** Medium
-**Status:** ✅ Resolved (Phase 26)
+**Status:** ✅ Resolved (Resolved)
 
 `conversation-list.tsx` line 46: `opacity-0 group-hover:opacity-100`. iPad/touch has no hover state.
 
-**Fix:** Add `[@media(pointer:coarse)]:opacity-60` matching existing touch-visibility pattern from Phase 17.
+**Fix:** Add `[@media(pointer:coarse)]:opacity-60` matching existing touch-visibility pattern from Resolved.
 
 **Files:** `src/web/src/components/chat/conversation-list.tsx`
 
 ### I7. V6 — Right-Click Context Menus on Toolbar Icons
 
 **Severity:** Low
-**Status:** ✅ Resolved (Phase 28 Sprint 1)
+**Status:** ✅ Resolved (Resolved Sprint 1)
 
 No context menu infrastructure exists. User wants right-click on model router icon → routing mode switch, right-click on KB icon → auto-inject toggle, etc.
 
@@ -637,7 +636,7 @@ No context menu infrastructure exists. User wants right-click on model router ic
 ### I8. V7 — KB Auto-Inject Toggle in KB Context Pane
 
 **Severity:** Medium
-**Status:** ✅ Resolved (Phase 26)
+**Status:** ✅ Resolved (Resolved)
 
 Auto-inject toggle only in Settings > Knowledge. Users want it in the KB context pane for quick access.
 
@@ -648,7 +647,7 @@ Auto-inject toggle only in Settings > Knowledge. Users want it in the KB context
 ### I9. V8 — Monitoring/Audit Tab Overlap
 
 **Severity:** Low
-**Status:** ✅ Resolved (Phase 26)
+**Status:** ✅ Resolved (Resolved)
 
 Both `monitoring-pane.tsx` (line 61) and `audit-pane.tsx` (line 92) render `<KBOperations />`. Monitoring = operations + real-time health. Audit = analytics + historical reports.
 
@@ -659,7 +658,7 @@ Both `monitoring-pane.tsx` (line 61) and `audit-pane.tsx` (line 92) render `<KBO
 ### I10. V9 — Stale Verification Status Between Responses
 
 **Severity:** High
-**Status:** ✅ Resolved (Phase 26)
+**Status:** ✅ Resolved (Resolved)
 
 When a new assistant response streams in, the previous "x/x verified" status bar persists until the new verification starts. Should clear immediately.
 
@@ -672,7 +671,7 @@ When a new assistant response streams in, the previous "x/x verified" status bar
 ### I11. V10 — Model Switch Cost Comparison Logic
 
 **Severity:** Low
-**Status:** ✅ Resolved (Phase 26)
+**Status:** ✅ Resolved (Resolved)
 
 In `model-router.ts`, switching FROM expensive TO cheap can show `replayCost < summarizeCost`. This may be correct behavior (cheap target processes full history cheaper than expensive current model produces a summary). Needs unit tests to confirm.
 
@@ -683,7 +682,7 @@ In `model-router.ts`, switching FROM expensive TO cheap can show `replayCost < s
 ### I12. V11 — All Knowledge Cards Show Q50
 
 **Severity:** High
-**Status:** ✅ Resolved (Phase 26)
+**Status:** ✅ Resolved (Resolved)
 
 Quality badges uniformly show Q50 because `quality_score` is never set during ingestion. `get_quality_scores()` defaults unscored artifacts to 0.5. Curator agent computes real scores but only runs on-demand.
 
@@ -694,7 +693,7 @@ Quality badges uniformly show Q50 because `quality_score` is never set during in
 ### I13. V12 — Missing Tooltips on Confidence Bars and Quality Badges
 
 **Severity:** Medium
-**Status:** ✅ Resolved (Phase 26)
+**Status:** ✅ Resolved (Resolved)
 
 Relevance bar, quality badge, and confidence bar have no hover explanation.
 
@@ -705,14 +704,14 @@ Relevance bar, quality badge, and confidence bar have no hover explanation.
 ### I14. V13 — Feature Tier Not Configurable
 
 **Severity:** Low
-**Status:** ✅ Resolved (Phase 28 Sprint 2 — descriptive tooltip added)
+**Status:** ✅ Resolved (Resolved Sprint 2 — descriptive tooltip added)
 
 Feature tier is server-determined (`config/settings.py`), displayed read-only. Descriptive tooltip now explains Community vs Pro tier capabilities and how to set via CERID_TIER env var.
 
 ### I15. V14 — Infrastructure/Account Settings in UI
 
 **Severity:** Medium
-**Status:** ✅ Resolved (Phase 28 Sprint 2)
+**Status:** ✅ Resolved (Resolved Sprint 2)
 
 Added Infrastructure section (read-only: Bifrost, ChromaDB, Neo4j, Redis, Archive, Chunking) and Search Tuning section (sliders: vector/keyword weights, rerank weights) to Settings pane. Backend exposes config values via GET /settings and accepts search tuning PATCH.
 
@@ -723,7 +722,7 @@ Added Infrastructure section (read-only: Bifrost, ChromaDB, Neo4j, Redis, Archiv
 ### I16. V15 — Verification State Lost on Tab Switch
 
 **Severity:** High
-**Status:** ✅ Resolved (Phase 26)
+**Status:** ✅ Resolved (Resolved)
 
 Switching to monitoring/audit tab and back causes `conversationId` to reset → stream aborted → state cleared. Redis fallback fetches saved report but with visible loading flash.
 
@@ -734,7 +733,7 @@ Switching to monitoring/audit tab and back causes `conversationId` to reset → 
 ### I17. V16 — Knowledge Card Summaries Show Raw Data
 
 **Severity:** Medium
-**Status:** ✅ Resolved (Phase 26)
+**Status:** ✅ Resolved (Resolved)
 
 `artifact-card.tsx` shows `result.content` (raw ChromaDB chunk text), not the generated summary. The `summary` field exists on Neo4j Artifact nodes but isn't returned in query results.
 
@@ -745,7 +744,7 @@ Switching to monitoring/audit tab and back causes `conversationId` to reset → 
 ### I18. V17 — KB Injection Badge Shows Count but No Detail
 
 **Severity:** Medium
-**Status:** ✅ Resolved (Phase 26)
+**Status:** ✅ Resolved (Resolved)
 
 `chat-input.tsx` shows `<Badge>{N} source(s)</Badge>` with no information about what was injected.
 
@@ -756,7 +755,7 @@ Switching to monitoring/audit tab and back causes `conversationId` to reset → 
 ### I19. V18 — Model Doesn't Appear to Receive Injected Data
 
 **Severity:** Medium
-**Status:** ✅ Resolved (Phase 26)
+**Status:** ✅ Resolved (Resolved)
 
 Code confirms KB IS injected as system message (`chat-panel.tsx` lines 309-325). Likely perception issue — model receives context but doesn't explicitly reference it. Improving V17 (injection detail popover) will help verify what was sent.
 
@@ -767,7 +766,7 @@ Code confirms KB IS injected as system message (`chat-panel.tsx` lines 309-325).
 ### I20. V19 — Drag-Drop to KB Context Pane
 
 **Severity:** Low
-**Status:** ✅ Resolved (Phase 28 Sprint 4)
+**Status:** ✅ Resolved (Resolved Sprint 4)
 
 KB context split-pane doesn't accept file drops. Knowledge-pane has drag-drop for ingestion but the context pane doesn't.
 
@@ -778,7 +777,7 @@ KB context split-pane doesn't accept file drops. Knowledge-pane has drag-drop fo
 ### I21. V20 — Drag-Drop to Chat Input
 
 **Severity:** Low
-**Status:** ✅ Resolved (Phase 28 Sprint 4)
+**Status:** ✅ Resolved (Resolved Sprint 4)
 
 No drag-drop on chat input. Want: drop file → ingest + add to context, or drop artifact → inject.
 
@@ -787,7 +786,7 @@ No drag-drop on chat input. Want: drop file → ingest + add to context, or drop
 ### I22. V21 — Advanced Response Re-Formatting & Inline Verification
 
 **Severity:** Low
-**Status:** ✅ Resolved (Phase 29, 2026-03-07)
+**Status:** ✅ Resolved (Resolved)
 
 **Resolution:** Three-sprint enhancement of the chat response rendering pipeline:
 
@@ -809,7 +808,7 @@ No drag-drop on chat input. Want: drop file → ingest + add to context, or drop
 ### I23. V22 — Inline Verification Markups in Chat Response
 
 **Severity:** Medium
-**Status:** ✅ Resolved (Phase 28 Sprint 5)
+**Status:** ✅ Resolved (Resolved Sprint 5)
 
 Verification results only appear in the status bar and hallucination panel sidebar. Claims are not visually linked to specific text in the response.
 
@@ -819,12 +818,12 @@ Verification results only appear in the status bar and hallucination panel sideb
 
 ---
 
-## J. Phase 35 — Verification & Infrastructure
+## J. Verification & Infrastructure
 
 ### J1. Verification Stream OOM — Memory Optimization Needed
 
 **Severity:** Medium
-**Status:** ✅ Resolved (Phase 40, 2026-03-16)
+**Status:** ✅ Resolved (Resolved)
 
 **Problem:** Verification of LLM responses with 10+ factual claims causes the MCP container to OOM-kill under the 2 GB memory limit. Each claim verification loads a BM25 index (bm25s library), runs ONNX cross-encoder reranking (ms-marco-MiniLM-L-6-v2), and issues ChromaDB vector queries — all memory-intensive. When 10+ claims run in parallel via `asyncio.gather()`, peak memory exceeds 2 GB and the Linux OOM killer sends SIGKILL (uncatchable, exit code 137).
 
@@ -850,26 +849,26 @@ Verification results only appear in the status bar and hallucination panel sideb
 
 ---
 
-## K. Deferred Backlog (from Phase 16–18 Plan)
+## K. Deferred Backlog (from Resolved–18 Plan)
 
-> Originally deferred post-Phase 21. Archived 2026-03-13. See [`docs/plans/DEVELOPMENT_PLAN_PHASE16-18.md`](plans/DEVELOPMENT_PLAN_PHASE16-18.md) for context.
+> Deferred backlog items. See development plans for context.
 
 ### K1. Codecov XML Reports
 
 **Severity:** Low | **Effort:** ~1 hr
-**Status:** ✅ Resolved (Phase 40, 2026-03-16)
+**Status:** ✅ Resolved (Resolved)
 **Notes:** CI already produces XML coverage output. Needs Codecov integration for PR coverage gates. **Resolution:** Added `codecov/codecov-action@v5` to CI test job.
 
 ### K2. Dependency License Scanning
 
 **Severity:** Low | **Effort:** ~1–2 hrs
-**Status:** ✅ Resolved (Phase 40, 2026-03-16)
+**Status:** ✅ Resolved (Resolved)
 **Notes:** Add `pip-licenses` (Python) and `license-report` (Node) to CI. Catch GPL-incompatible deps. **Resolution:** Added `pip-licenses` + `license-checker` to CI.
 
 ### K3. ReDoS Regex Audit
 
 **Severity:** Low | **Effort:** ~2–3 hrs
-**Status:** ✅ Resolved (Phase 40, 2026-03-16)
+**Status:** ✅ Resolved (Resolved)
 **Notes:** Low risk given current regex patterns. Audit with `rxxr2` or `safe-regex` for completeness. **Resolution:** Added `dlint DUO138` ReDoS audit to CI security job.
 
 ### K4. Plugin Management UI
@@ -895,17 +894,17 @@ Verification results only appear in the status bar and hallucination panel sideb
 ### K7. Multi-Stage MCP Dockerfile
 
 **Severity:** Low | **Effort:** ~2–3 hrs
-**Status:** ✅ Resolved (Phase 40, 2026-03-16)
+**Status:** ✅ Resolved (Resolved)
 **Notes:** Minor image size savings. Current single-stage image works but is larger than necessary. **Resolution:** Converted to 3-stage Dockerfile (builder, models, runtime). ~200MB image reduction.
 
 ---
 
-## L. Phase 39 — Privacy Hardening
+## L. Privacy Hardening
 
 ### L1. CORS Wildcard Default
 
 **Severity:** Medium (security)
-**Status:** ✅ Resolved (Phase 39, 2026-03-14)
+**Status:** ✅ Resolved (Resolved)
 
 **Problem:** `CORS_ORIGINS` defaulted to `*`, allowing any origin to make credentialed requests to the MCP API. While acceptable for local-only use, this was inconsistent with the project's privacy-first posture and risky if the API was exposed on a LAN.
 
@@ -916,7 +915,7 @@ Verification results only appear in the status bar and hallucination panel sideb
 ### L2. Service Ports Bound to 0.0.0.0
 
 **Severity:** Medium (security)
-**Status:** ✅ Resolved (Phase 39, 2026-03-14)
+**Status:** ✅ Resolved (Resolved)
 
 **Problem:** All Docker Compose port mappings used `0.0.0.0` (implicit default), exposing services (MCP 8888, Neo4j 7474/7687, ChromaDB 8001, Redis 6379) to the entire LAN. Any device on the network could connect directly to databases.
 
@@ -927,7 +926,7 @@ Verification results only appear in the status bar and hallucination panel sideb
 ### L3. Email Header PII Exposure
 
 **Severity:** Medium (privacy)
-**Status:** ✅ Resolved (Phase 39, 2026-03-14)
+**Status:** ✅ Resolved (Resolved)
 
 **Problem:** The email parser stored full sender/recipient email addresses and display names in ChromaDB metadata and Neo4j. Ingesting personal email archives exposed PII in the knowledge base that could surface in RAG context injections.
 
@@ -938,7 +937,7 @@ Verification results only appear in the status bar and hallucination panel sideb
 ### L4. Redis Audit Log No TTL
 
 **Severity:** Low (privacy)
-**Status:** ✅ Resolved (Phase 39, 2026-03-14)
+**Status:** ✅ Resolved (Resolved)
 
 **Problem:** The Redis ingest audit log (`ingest:audit:*` keys) accumulated indefinitely with no expiration. Over time, this created an unbounded record of every file ingested, including filenames and paths — a privacy concern for users who expect data minimization.
 
@@ -949,7 +948,7 @@ Verification results only appear in the status bar and hallucination panel sideb
 ### L5. Sync Directory Unencrypted
 
 **Severity:** Medium (privacy)
-**Status:** ✅ Resolved (Phase 39, 2026-03-14)
+**Status:** ✅ Resolved (Resolved)
 
 **Problem:** The cloud sync directory (`~/cerid-archive/sync/`) stored user state files (conversations, settings, preferences) in plaintext JSON. When synced via Dropbox, this meant sensitive data was readable by the cloud provider and anyone with Dropbox access.
 
@@ -960,7 +959,7 @@ Verification results only appear in the status bar and hallucination panel sideb
 ### L6. KB Injection Not Transparent to User
 
 **Severity:** Low (UX)
-**Status:** ✅ Resolved (Phase 39, 2026-03-14)
+**Status:** ✅ Resolved (Resolved)
 
 **Problem:** When the KB context injection system added knowledge base content to a chat prompt, the user had no indication that their query was being augmented. This made it difficult to understand why the model's response referenced specific documents.
 
@@ -971,9 +970,9 @@ Verification results only appear in the status bar and hallucination panel sideb
 ### L7. Marketing Privacy Claims Inaccurate
 
 **Severity:** Medium (docs)
-**Status:** ✅ Resolved (Phase 39, 2026-03-14)
+**Status:** ✅ Resolved (Resolved)
 
-**Problem:** The marketing site (cerid.ai) and CLAUDE.md claimed "all data stays local" and "never leaves your machine," but Phase 38D added cloud sync via Dropbox, which uploads user state to a third-party service. The privacy claims had drifted from the actual data flow.
+**Problem:** The marketing site (cerid.ai) and CLAUDE.md claimed "all data stays local" and "never leaves your machine," but Resolved added cloud sync via Dropbox, which uploads user state to a third-party service. The privacy claims had drifted from the actual data flow.
 
 **Resolution:** Updated marketing copy and CLAUDE.md to accurately describe the data flow: local-first with optional encrypted cloud sync. Added nuance about what goes where — LLM API calls are external, sync is opt-in and encrypted, raw knowledge base stays local.
 
@@ -981,12 +980,12 @@ Verification results only appear in the status bar and hallucination panel sideb
 
 ---
 
-## M. Phase 39B — Rate Limiting & Performance
+## M. Rate Limiting & Performance
 
 ### M1. Semantic Cache Silently Inactive
 
 **Severity:** Low (performance)
-**Status:** ✅ Resolved (Phase 40, 2026-03-16)
+**Status:** ✅ Resolved (Resolved)
 
 **Problem:** `ENABLE_SEMANTIC_CACHE=true` is set in `src/mcp/docker-compose.yml` but the semantic cache never activates. The cache (`utils/semantic_cache.py`) requires a client-side embedding function to compute query embeddings for HNSW similarity matching. The default embedding model (`all-MiniLM-L6-v2`) runs server-side inside ChromaDB — `get_embedding_function()` in `deps.py` returns `None` when the server-side default is in use, so no query embedding is ever computed and the HNSW index is never populated or consulted.
 
@@ -1008,12 +1007,12 @@ Verification results only appear in the status bar and hallucination panel sideb
 
 ---
 
-## N. Phase 41 — SDK Hardening & Multi-Agent Extensibility
+## N. SDK Hardening & Multi-Agent Extensibility
 
 ### N1. SDK Typed Response Models
 
 **Severity:** Medium
-**Status:** Resolved (Phase 41, 2026-03-21)
+**Status:** Resolved (Resolved)
 
 **Resolution:** SDK endpoints now have typed Pydantic response models in `models/sdk.py`. All `/sdk/v1/` endpoints return structured, validated responses instead of raw dicts.
 
@@ -1022,7 +1021,7 @@ Verification results only appear in the status bar and hallucination panel sideb
 ### N2. Consumer Domain Access Control
 
 **Severity:** Medium
-**Status:** Resolved (Phase 41, 2026-03-21)
+**Status:** Resolved (Resolved)
 
 **Resolution:** Added `CONSUMER_REGISTRY` to `config/settings.py` with per-consumer `allowed_domains` and `strict_domains` fields. Consumers can only query KB domains explicitly listed in their `allowed_domains`. When `strict_domains: True`, cross-domain affinity bleed is disabled for that consumer. Personal data (personal, conversations) is never accessible to non-GUI consumers unless explicitly configured.
 
@@ -1031,7 +1030,7 @@ Verification results only appear in the status bar and hallucination panel sideb
 ### N3. Trading SDK Feature Flag Gating
 
 **Severity:** Medium
-**Status:** Resolved (Phase 41, 2026-03-21)
+**Status:** Resolved (Resolved)
 
 **Resolution:** All 5 trading SDK endpoints (`/sdk/v1/trading/*`) and 5 MCP tools (`pkb_trading_*`) are gated by `CERID_TRADING_ENABLED` feature flag. Endpoints return 404 when disabled. Default is `false` (backward-compatible).
 
@@ -1040,7 +1039,7 @@ Verification results only appear in the status bar and hallucination panel sideb
 ### N4. MCP Tools outputSchema
 
 **Severity:** Low
-**Status:** Resolved (Phase 41, 2026-03-21)
+**Status:** Resolved (Resolved)
 
 **Resolution:** All 23 MCP tools now include `outputSchema` definitions alongside existing `inputSchema`. Enables better client-side validation and documentation generation.
 
@@ -1049,7 +1048,7 @@ Verification results only appear in the status bar and hallucination panel sideb
 ### N5. SDK Test Suite
 
 **Severity:** Medium
-**Status:** Resolved (Phase 41, 2026-03-21)
+**Status:** Resolved (Resolved)
 
 **Resolution:** Created `tests/test_router_sdk.py` with tests covering all SDK endpoints, feature flag gating, domain access control, and rate limiting per consumer.
 
@@ -1058,7 +1057,7 @@ Verification results only appear in the status bar and hallucination panel sideb
 ### N6. Integration Guide
 
 **Severity:** Low (docs)
-**Status:** Resolved (Phase 41, 2026-03-21)
+**Status:** Resolved (Resolved)
 
 **Resolution:** Created `docs/INTEGRATION_GUIDE.md` with a canonical 13-step checklist for adding new cerid-series agent integrations. Covers feature flags, domain setup, consumer registration, endpoints, MCP tools, proxy routes, scheduler jobs, tests, and documentation. Includes domain segregation rules, client authentication, and the trading-agent reference implementation.
 
@@ -1073,7 +1072,7 @@ Verification results only appear in the status bar and hallucination panel sideb
 **Severity:** Medium
 **Status:** ✅ Resolved (Production Readiness Audit, 2026-03-21)
 
-**Resolution:** Removed 28,000 lines of dead code from `app/` and `core/` directories that were left behind after Phase C repo architecture separation. These directories contained re-export bridges that were no longer needed once all imports had been updated.
+**Resolution:** Removed 28,000 lines of dead code from `app/` and `core/` directories that were left behind after the repo architecture separation. These directories contained re-export bridges that were no longer needed once all imports had been updated.
 
 ### O2. Docker Healthcheck Inconsistencies
 
@@ -1162,15 +1161,15 @@ No open items. All issues resolved.
 
 ### Resolved (160+ items)
 
-**Phase 40** (6 items): M1 (semantic cache), J1 (verification OOM), K1 (Codecov), K2 (license scanning), K3 (ReDoS audit), K7 (multi-stage Dockerfile)
-**Phase 39** (7 items): L1 (CORS wildcard), L2 (port binding), L3 (email PII), L4 (audit TTL), L5 (sync encryption), L6 (KB injection transparency), L7 (marketing claims)
-**Phase 38D+** (3 items): D4 (temporal claims uncertain), D5 (auto router real-time queries), D6 (Llama fallback retry)
-**Phase 38D** (3 items): D3 (model router auto mode), K5 (digest view), K6 (batch triage UI)
+**Resolved** (6 items): M1 (semantic cache), J1 (verification OOM), K1 (Codecov), K2 (license scanning), K3 (ReDoS audit), K7 (multi-stage Dockerfile)
+**Resolved** (7 items): L1 (CORS wildcard), L2 (port binding), L3 (email PII), L4 (audit TTL), L5 (sync encryption), L6 (KB injection transparency), L7 (marketing claims)
+**Resolved+** (3 items): D4 (temporal claims uncertain), D5 (auto router real-time queries), D6 (Llama fallback retry)
+**Resolved** (3 items): D3 (model router auto mode), K5 (digest view), K6 (batch triage UI)
 **Production Readiness Audit** (7 items): O1 (dead code removal, 28K lines), O2 (Docker healthchecks), O3 (trading proxy pooling), O4 (exception handling, 19 instances), O5-O7 (pass 2 cleanup)
 **Verification Crash Debugging** (5 items): P1 (Docker build silent failure), P2 (React verification crash), P3 (circuit breaker mismatches), P4 (pleasantry filtering), P5 (JSON wrapper unwrapping)
-**Phase 41** (6 items resolved): SDK hardening & multi-agent extensibility — typed response models (`models/sdk.py`), consumer domain access control (`CONSUMER_REGISTRY` with `allowed_domains`/`strict_domains`), trading endpoints gated by `CERID_TRADING_ENABLED`, MCP `outputSchema` on all 23 tools, SDK test suite (`test_router_sdk.py`), integration guide (`docs/INTEGRATION_GUIDE.md`)
-**Phase 30** (0 new issues): Codebase audit & cleanup — no new issues filed; structural debt reduced
-**Phase 29** (1 item): V21 (advanced response formatting + inline verification)
-**Phase 26** (14 items): V1a, V2, V4, V5, V7, V8, V9, V10, V11, V12, V15, V16, V17, V18
-**Phase 28** (9 items): V1b, V3, V4, V6, V13, V14, V19, V20, V22
-**Phases 10A–25**: All items from sections A–H. See [COMPLETED_PHASES.md](COMPLETED_PHASES.md) for full history.
+**Resolved** (6 items resolved): SDK hardening & multi-agent extensibility — typed response models (`models/sdk.py`), consumer domain access control (`CONSUMER_REGISTRY` with `allowed_domains`/`strict_domains`), trading endpoints gated by `CERID_TRADING_ENABLED`, MCP `outputSchema` on all 23 tools, SDK test suite (`test_router_sdk.py`), integration guide (`docs/INTEGRATION_GUIDE.md`)
+**Resolved** (0 new issues): Codebase audit & cleanup — no new issues filed; structural debt reduced
+**Resolved** (1 item): V21 (advanced response formatting + inline verification)
+**Resolved** (14 items): V1a, V2, V4, V5, V7, V8, V9, V10, V11, V12, V15, V16, V17, V18
+**Resolved** (9 items): V1b, V3, V4, V6, V13, V14, V19, V20, V22
+**Earlier items**: All items from sections A-H. See [COMPLETED_PHASES.md](COMPLETED_PHASES.md) for full history.

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -128,7 +128,7 @@ export function SystemSection({
         </div>
       )}
 
-      {/* -- Storage Usage (Phase 56) -- */}
+      {/* -- Storage Usage -- */}
       <StorageBar />
 
       {/* -- Infrastructure & Sync -- */}

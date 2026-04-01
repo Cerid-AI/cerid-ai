@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Settings endpoints — expose server configuration to the GUI."""
@@ -383,7 +383,7 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
         if getattr(config, "SYNC_DIR", ""):
             from sync.user_state import write_settings
             write_settings(config.SYNC_DIR, updated)
-    except (ConfigError, ValueError, OSError, RuntimeError) as exc:
+    except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.warning("Failed to persist settings to sync dir: %s", exc)
 
     logger.info(f"Settings updated: {updated}")

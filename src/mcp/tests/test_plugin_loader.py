@@ -1,7 +1,7 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for plugin discovery, manifest validation, and tier gating (Phase 46)."""
+"""Tests for plugin discovery, manifest validation, and tier gating."""
 
 from __future__ import annotations
 

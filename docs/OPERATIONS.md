@@ -5,9 +5,9 @@
 
 ---
 
-## Unified Docker Compose (Phase A)
+## Unified Docker Compose
 
-As of Phase A, a single root `docker-compose.yml` replaces the previous 4-step startup sequence. All services (Infrastructure, Bifrost, MCP, React GUI) are defined in one file with `depends_on` healthchecks ensuring correct startup order.
+A single root `docker-compose.yml` replaces the previous multi-step startup sequence. All services (Infrastructure, Bifrost, MCP, React GUI) are defined in one file with `depends_on` healthchecks ensuring correct startup order.
 
 > **Note:** Bifrost is now optional. Use `--profile bifrost` to enable it, controlled by the `CERID_USE_BIFROST` env var. When disabled, chat routes directly to OpenRouter.
 
@@ -23,7 +23,7 @@ The startup script still provides value for LAN IP detection, pre-flight validat
 
 ---
 
-## Local LLM via Ollama (Phase 48)
+## Local LLM via Ollama
 
 Ollama enables air-gapped deployment by routing pipeline intelligence tasks to a local LLM server.
 
@@ -102,11 +102,11 @@ maxmemory 1gb
 maxmemory-policy allkeys-lru
 ```
 
-Container memory limit: 2GB (raised from 512MB in Phase 38). Socket timeout: 10s. Authentication via `REDIS_PASSWORD` env var.
+Container memory limit: 2GB. Socket timeout: 10s. Authentication via `REDIS_PASSWORD` env var.
 
 ---
 
-## Observability Dashboard (Phase 47)
+## Observability Dashboard
 
 The observability system collects 8 Redis time-series metrics and exposes them via API.
 
@@ -129,7 +129,7 @@ Pro features (audio transcription, OCR, vision, metamorphic verification, visual
 
 ---
 
-## Plugin Management (Phase 49)
+## Plugin Management
 
 Plugins extend cerid-ai functionality without modifying core code.
 
@@ -214,7 +214,7 @@ All secrets live in `.env` (git-ignored) and are encrypted as `.env.age` (commit
 
 ---
 
-## Multi-User Authentication (Phase 33)
+## Multi-User Authentication
 
 Multi-user JWT auth is **opt-in**. When enabled, all non-exempt endpoints require a Bearer token. Users register, login, and manage per-user API keys.
 
@@ -497,13 +497,13 @@ Some features only appear under specific conditions:
 - **MessageTOC**: Only shown for responses with 3+ markdown headings.
 - **CollapsibleCodeBlock**: Only triggers for code blocks with 15+ lines.
 - **Model router banner**: Only shown when `ENABLE_MODEL_ROUTER=true` and routing mode is "recommend".
-- **Verification re-runs**: Fixed in Phase 34 — cached results persist across tab switches.
+- **Verification re-runs**: Cached results persist across tab switches.
 
 ---
 
 ### Known CVE Ignores
 
-**pip-audit ignores (Phase 11 migration planned):**
+**pip-audit ignores (migration planned):**
 - CVE-2026-26013 — SSRF in ChatOpenAI
 - CVE-2025-64439 — RCE in JsonPlusSerializer
 - CVE-2026-27794 — RCE via pickle fallback

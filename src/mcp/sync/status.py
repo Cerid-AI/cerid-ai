@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Sync status comparison — local DB counts vs sync manifest."""
@@ -60,7 +60,7 @@ def compare_status(
             local["neo4j_relationships"] = session.run(
                 f"MATCH ()-[r:{rel_types}]->() RETURN count(r) AS n"
             ).single()["n"]
-    except (SyncError, ValueError, OSError, RuntimeError) as exc:
+    except (SyncError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.warning("Neo4j local count failed: %s", exc)
 
     for domain in config.DOMAINS:
@@ -80,14 +80,14 @@ def compare_status(
                     local["chroma_chunks"][domain] = 0
             else:
                 local["chroma_chunks"][domain] = 0
-        except (SyncError, ValueError, OSError, RuntimeError) as exc:
+        except (SyncError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
             logger.warning("ChromaDB local count failed for %s: %s", domain, exc)
             local["chroma_chunks"][domain] = 0
 
     if redis_client is not None:
         try:
             local["redis_entries"] = redis_client.llen(config.REDIS_INGEST_LOG)
-        except (SyncError, ValueError, OSError, RuntimeError) as exc:
+        except (SyncError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
             logger.warning("Redis local count failed: %s", exc)
 
     # --- Sync counts (from manifest + JSONL line counts) ---

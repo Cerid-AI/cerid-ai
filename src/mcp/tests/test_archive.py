@@ -1,7 +1,7 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for archive file listing and storage mode features (Phase 21D)."""
+"""Tests for archive file listing and storage mode features."""
 
 import asyncio
 import os

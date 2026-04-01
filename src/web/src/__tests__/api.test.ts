@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
@@ -191,7 +191,7 @@ describe("fetchSettings", () => {
 })
 
 // ---------------------------------------------------------------------------
-// Sync API (Phase 21B)
+// Sync API
 // ---------------------------------------------------------------------------
 
 describe("fetchSyncStatus", () => {
@@ -257,7 +257,7 @@ describe("triggerSyncImport", () => {
 })
 
 // ---------------------------------------------------------------------------
-// Archive API (Phase 21D)
+// Archive API
 // ---------------------------------------------------------------------------
 
 describe("fetchArchiveFiles", () => {

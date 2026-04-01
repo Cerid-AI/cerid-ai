@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Memories API — browse, edit, and delete extracted conversation memories."""
@@ -274,7 +274,7 @@ async def extract_memories_endpoint(req: MemoryExtractRequest, request: Request)
                 "note": "Private mode active — memory extraction skipped",
                 "private_mode": True,
             }
-    except (ValueError, OSError, RuntimeError):
+    except (ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         pass
 
     try:

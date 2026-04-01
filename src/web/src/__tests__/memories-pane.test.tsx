@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
@@ -90,7 +90,7 @@ describe("MemoriesPane", () => {
     vi.stubGlobal("fetch", mockFetch({ memories: mockMemories, total: mockMemories.length }))
     render(<MemoriesPane />)
     await screen.findByText(/FastAPI/)
-    // Phase 51: 6 memory types — filter button labels
+    // 6 memory types — filter button labels
     // Some labels appear in both filter buttons and card badges, so use getAllByText
     const labels = ["Empirical", "Decisions", "Preferences", "Project", "Temporal", "Conversational"]
     for (const label of labels) {

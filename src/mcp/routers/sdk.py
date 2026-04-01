@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Stable SDK endpoints for external cerid-series consumers.
@@ -48,7 +48,7 @@ from routers.health import health_check
 
 router = APIRouter(prefix="/sdk/v1", tags=["SDK"])
 
-_VERSION = "1.1.0"  # Phase 41: typed response models, consumer domain isolation
+_VERSION = "1.1.0"  # typed response models, consumer domain isolation
 
 _503 = {"description": "One or more backend services unavailable"}
 _422 = {"description": "Invalid request parameters"}

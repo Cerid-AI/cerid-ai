@@ -17,7 +17,7 @@
 - `POST /query` — Query knowledge base (domain, top_k)
 - `POST /ingest` — Ingest text content
 
-**Ingestion endpoints (Phase 1+):**
+**Ingestion endpoints:**
 - `POST /ingest_file` — Ingest a file with parsing, metadata, optional AI categorization
 - `POST /ingest_batch` — Batch ingest multiple text items
 - `POST /ingest/feedback` — Submit ingestion quality feedback
@@ -29,7 +29,7 @@
 - `GET /ingest_log` — View audit trail from Redis
 - `GET /digest` — Summary of recent KB activity, connections, and health status
 
-**Agent endpoints (Phase 2+):**
+**Agent endpoints:**
 - `POST /agent/query` — Multi-domain query with LLM reranking, context assembly, optional Self-RAG validation, and unified RAG modes (manual/smart/custom_smart)
 - `POST /agent/memory/recall` — Direct memory recall endpoint for manual mode browsing
 - `POST /agent/triage` — LangGraph-powered file triage (validate → parse → categorize → chunk)
@@ -38,7 +38,7 @@
 - `POST /agent/audit` — Audit reports (activity, ingestion stats, costs, query patterns, conversations)
 - `POST /agent/maintain` — Maintenance routines (health, stale detection, collection analysis, orphan cleanup)
 
-**Verification & hallucination endpoints (Phase 7+):**
+**Verification & hallucination endpoints:**
 - `POST /agent/hallucination` — Check LLM response for hallucinations against KB with 4-level verification fallback (KB-only → external cross-model/web-search for unverified/uncertain claims)
 - `GET /agent/hallucination/{conversation_id}` — Retrieve stored hallucination report
 - `POST /agent/hallucination/feedback` — Record user feedback on a verification claim (correct/incorrect)
@@ -47,8 +47,7 @@
 - `GET /verification/{conversation_id}` — Retrieve saved verification report
 - `POST /agent/memory/extract` — Extract and store memories from conversation
 - `POST /agent/memory/archive` — Archive old conversation memories
-- `POST /agent/curate` — Score artifact quality across the KB (Phase 14)
-- `POST /agent/curate/estimate` — Estimate synopsis generation cost before running
+- `POST /agent/curate` — Score artifact quality across the KB- `POST /agent/curate/estimate` — Estimate synopsis generation cost before running
 
 **Trading agent KB enrichment endpoints (gated by `CERID_TRADING_ENABLED`):**
 - `POST /agent/trading/signal` — Enrich a trading signal with KB context
@@ -57,7 +56,7 @@
 - `POST /agent/trading/cascade-confirm` — Confirm cascade liquidation pattern against historical data
 - `POST /agent/trading/longshot-surface` — Query stored calibration surface for longshot probability estimates
 
-**Auth endpoints (Phase 33, conditional on `CERID_MULTI_USER=true`):**
+**Auth endpoints (conditional on `CERID_MULTI_USER=true`):**
 - `POST /auth/register` — Create new user account (returns JWT tokens)
 - `POST /auth/login` — Authenticate with email/password (returns JWT tokens)
 - `POST /auth/refresh` — Refresh access token using refresh token
@@ -72,7 +71,7 @@
 - `POST /chat/stream` — Stream chat completion directly via OpenRouter proxy (SSE)
 - `POST /chat/compress` — Compress conversation history to fit target token budget
 
-**Sync endpoints (Phase 21A):**
+**Sync endpoints:**
 - `POST /sync/export` — Trigger incremental or full export to sync directory
 - `POST /sync/import` — Trigger merge import from sync directory
 - `GET /sync/status` — Compare local DB counts against sync directory manifest
@@ -159,14 +158,9 @@
 - `pkb_rectify` — Knowledge base health checks and auto-fix
 - `pkb_audit` — Audit reports (activity, ingestion, costs, queries, conversations)
 - `pkb_maintain` — Maintenance routines (health, stale, collections, orphans)
-- `pkb_curate` — Score artifact quality across the knowledge base (Phase 14)
-- `pkb_digest` — Summary of recent KB activity, connections, and health status
+- `pkb_curate` — Score artifact quality across the knowledge base- `pkb_digest` — Summary of recent KB activity, connections, and health status
 - `pkb_scheduler_status` — Get status of scheduled maintenance jobs
-- `pkb_check_hallucinations` — Verify LLM claims against KB (Phase 7A)
-- `pkb_memory_extract` — Extract memories from conversations (Phase 7C)
-- `pkb_memory_archive` — Archive old conversation memories (Phase 7C)
-- `pkb_ingest_multimodal` — Multi-modal ingestion (OCR, audio, vision) (Phase 46)
-
+- `pkb_check_hallucinations` — Verify LLM claims against KB- `pkb_memory_extract` — Extract memories from conversations- `pkb_memory_archive` — Archive old conversation memories- `pkb_ingest_multimodal` — Multi-modal ingestion (OCR, audio, vision)
 **Trading tools (5, gated by `CERID_TRADING_ENABLED`):**
 - `pkb_trading_signal` — Trading signal enrichment via KB
 - `pkb_herd_detect` — Herd behavior detection
@@ -175,9 +169,7 @@
 - `pkb_longshot_surface` — Longshot opportunity surfacing
 
 **Additional tools:**
-- `pkb_web_search` — Agentic web search with verification (Phase 42)
-- `pkb_memory_recall` — Context-aware memory retrieval with decay scoring (Phase 44)
-
+- `pkb_web_search` — Agentic web search with verification- `pkb_memory_recall` — Context-aware memory retrieval with decay scoring
 ### SDK Router (`/sdk/v1/`) — Stable External API
 
 Versioned facade for cerid-series consumers (trading-agent, future projects). Delegates to existing agent endpoints but provides a stable contract that survives internal refactoring.
@@ -481,7 +473,7 @@ python3 scripts/cerid-sync.py status
 
 **Auto-import on startup:** When MCP starts with an empty Neo4j database and a valid `manifest.json` in the sync directory, it automatically imports all data. This enables zero-config bootstrap on a new machine.
 
-**REST API (Phase 21A):**
+**REST API:**
 ```bash
 # Trigger incremental export (auto-reads last_exported_at from manifest)
 curl -X POST http://localhost:8888/sync/export \
@@ -550,7 +542,7 @@ make deps-check
 
 ---
 
-## Phase 42-50 Endpoints
+## Additional Endpoints
 
 ### Setup & Configuration
 - `GET /setup/status` — Check if system is configured

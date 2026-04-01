@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Database connection dependencies — lazy singletons shared across routers."""
@@ -42,7 +42,7 @@ def _retry(
         try:
             fn()
             return
-        except (ConfigError, ValueError, OSError, RuntimeError) as exc:
+        except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
             if attempt == attempts:
                 raise
             delay = min(max_delay, base_delay * (2 ** (attempt - 1)))
@@ -162,7 +162,7 @@ def get_neo4j():
                         with driver.session() as s:
                             s.run("RETURN 1").consume()
                     _retry(_verify_neo4j_auth, "Neo4j")
-                except (ConfigError, ValueError, OSError, RuntimeError):
+                except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
                     driver.close()
                     raise
                 _neo4j = driver
@@ -194,7 +194,7 @@ def close_redis():
     if _redis:
         try:
             _redis.close()
-        except (ConfigError, ValueError, OSError, RuntimeError) as e:
+        except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.debug(f"Redis close error (ignored): {e}")
         _redis = None
         logger.info("Redis connection closed")

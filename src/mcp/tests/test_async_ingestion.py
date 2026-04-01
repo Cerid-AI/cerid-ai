@@ -1,12 +1,12 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for Sprint 4: async ingestion and batch support.
+"""Tests for async ingestion and batch support.
 
 Covers:
-- 4A: asyncio.to_thread() wrapping of parse_file / ingest_content
-- 4B: ingest_batch() service function and POST /ingest_batch endpoint
-- 4C: Watcher batch queue integration
+- asyncio.to_thread() wrapping of parse_file / ingest_content
+- ingest_batch() service function and POST /ingest_batch endpoint
+- Watcher batch queue integration
 """
 
 import asyncio

@@ -1,7 +1,7 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A2A (Agent-to-Agent) Protocol — Phase 45.
+"""A2A (Agent-to-Agent) Protocol.
 
 Implements the Google A2A spec so cerid is discoverable and invokable by
 other AI agents.  The Agent Card lives at ``/.well-known/agent.json`` and

@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """First-run configuration wizard endpoints.
@@ -130,7 +130,7 @@ async def _service_statuses() -> dict[str, str]:
         with driver.session() as session:
             session.run("RETURN 1").consume()
         neo4j_status = "healthy"
-    except (ConfigError, ValueError, OSError, RuntimeError):
+    except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         neo4j_status = "unavailable"
 
     redis_status = "unknown"
@@ -139,7 +139,7 @@ async def _service_statuses() -> dict[str, str]:
 
         get_redis()
         redis_status = "healthy"
-    except (ConfigError, ValueError, OSError, RuntimeError):
+    except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         redis_status = "unavailable"
 
     chroma_status = await _check_service(
@@ -275,7 +275,7 @@ async def setup_health() -> dict:
         vp_result = get_self_test_status_sync(_redis)
         vp_status = "healthy" if vp_result and vp_result.get("status") == "pass" else "unavailable"
         services.append({"name": "verification_pipeline", "status": vp_status, "port": 0})
-    except (ConfigError, ValueError, OSError, RuntimeError):
+    except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         services.append({"name": "verification_pipeline", "status": "unavailable", "port": 0})
 
     all_healthy = all(s["status"] in ("healthy", "connected") for s in services)
@@ -341,7 +341,7 @@ async def _fallback_validate(provider: str, api_key: str) -> KeyValidationRespon
         )
     except httpx.TimeoutException:
         return KeyValidationResponse(valid=False, error="Request timed out")
-    except (ConfigError, ValueError, OSError, RuntimeError) as exc:
+    except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         return KeyValidationResponse(valid=False, error=str(exc))
 
 

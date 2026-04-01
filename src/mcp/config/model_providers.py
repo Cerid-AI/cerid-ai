@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Model provider configuration — manages API keys, failover, and routing.
@@ -129,7 +129,7 @@ def load_config(redis_client) -> ModelProviderConfig:  # noqa: ANN001
             if raw:
                 config = ModelProviderConfig.from_dict(json.loads(raw))
                 return config
-        except (ConfigError, ValueError, OSError, RuntimeError):
+        except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
             logger.debug("Failed to load model provider config from Redis", exc_info=True)
 
     # Fall back to env vars (backward compatibility)

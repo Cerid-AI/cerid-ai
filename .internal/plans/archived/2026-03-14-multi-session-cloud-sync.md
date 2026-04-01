@@ -25,7 +25,7 @@
 File: `src/mcp/tests/test_sync_user_state.py`
 
 ```python
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Tests for sync/user_state.py — user state file I/O."""
@@ -216,7 +216,7 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'sync.user_state'`
 File: `src/mcp/sync/user_state.py`
 
 ```python
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Read/write user state files (settings, conversations, preferences) to the sync directory.
@@ -457,7 +457,7 @@ git commit -m "feat: add user state file I/O module for cloud sync"
 File: `src/mcp/tests/test_router_user_state.py`
 
 ```python
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Tests for routers/user_state.py — user state CRUD endpoints."""
@@ -591,7 +591,7 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'routers.user_state'`
 File: `src/mcp/routers/user_state.py`
 
 ```python
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """User state endpoints — sync conversations, settings, and preferences to the cloud.
@@ -772,7 +772,7 @@ git commit -m "feat: add user state API router for cloud sync"
 File: `src/mcp/tests/test_settings_persistence.py`
 
 ```python
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Tests for settings persistence to sync directory."""
@@ -888,7 +888,7 @@ git commit -m "feat: persist settings to sync directory on PATCH"
 File: `src/mcp/tests/test_startup_hydration.py`
 
 ```python
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Tests for startup settings hydration from sync directory."""
@@ -1124,7 +1124,7 @@ git commit -m "feat: make sync dir writable in Docker for user state persistence
 File: `src/web/src/__tests__/api-user-state.test.ts`
 
 ```typescript
-// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
@@ -1343,7 +1343,7 @@ git commit -m "feat: add user state sync API client functions"
 File: `src/web/src/__tests__/use-conversations-sync.test.ts`
 
 ```typescript
-// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
@@ -1577,7 +1577,7 @@ git commit -m "feat: add cloud sync to useConversations hook"
 File: `src/web/src/__tests__/ui-mode-sync.test.ts`
 
 ```typescript
-// Copyright (c) 2026 Justin Michaels. All rights reserved.
+// Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
