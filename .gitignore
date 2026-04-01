@@ -2,7 +2,6 @@
 .env
 .env.local
 .env*.local
-!.env.age
 !.env.example
 *.key
 OPENROUTER_API_KEY*
