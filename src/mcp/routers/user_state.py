@@ -80,7 +80,7 @@ def save_conversation(body: dict[str, Any], request: Request):
         if get_private_mode_level(client_id) >= 1:
             return {"saved": body.get("id", ""), "private_mode": True, "skipped": True}
     except (ValueError, OSError, RuntimeError):
-        pass
+        pass  # Private mode check: proceed normally on failure
 
     sd = _sync_dir()
     if not sd:
@@ -104,7 +104,7 @@ def save_conversations_bulk(body: list[dict[str, Any]], request: Request):
         if get_private_mode_level(client_id) >= 1:
             return {"saved": 0, "private_mode": True, "skipped": True}
     except (ValueError, OSError, RuntimeError):
-        pass
+        pass  # Private mode check: proceed normally on failure
 
     sd = _sync_dir()
     if not sd:

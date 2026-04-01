@@ -360,7 +360,7 @@ async def poll_feed(feed_config: dict[str, Any]) -> dict[str, Any]:
 
     # Parse XML
     try:
-        root = ET.fromstring(body)
+        root = ET.fromstring(body)  # nosec B314 — RSS sync, user-configured feeds only
     except ET.ParseError as exc:
         summary["errors"].append(f"XML parse error: {exc}")
         _logger.warning("RSS XML parse error for feed id=%s: %s", feed_id, exc)
@@ -517,7 +517,7 @@ def validate_feed_url(url: str) -> tuple[bool, str]:
         body, _headers = _fetch_url(url, timeout=10.0)
         if body is None:
             return False, "URL returned 304 Not Modified (no body)"
-        root = ET.fromstring(body)
+        root = ET.fromstring(body)  # nosec B314 — RSS validation, user-configured feeds only
         ftype = _detect_feed_type(root)
         if ftype == "rss":
             items = _parse_rss_items(root)

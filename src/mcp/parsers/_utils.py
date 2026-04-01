@@ -100,7 +100,7 @@ def _strip_rtf(raw: bytes) -> str:
                     try:
                         output.append(chr(int(hex_val, 16)))
                     except ValueError:
-                        pass
+                        pass  # Date parsing: graceful fallback
                     i += 3
                     continue
                 i += 1
@@ -115,7 +115,7 @@ def _strip_rtf(raw: bytes) -> str:
                     try:
                         output.append(chr(code))
                     except ValueError:
-                        pass
+                        pass  # Date parsing: graceful fallback
                     i += 1 + len(m.group(1))
                     if i < length and text[i] == " ":
                         i += 1

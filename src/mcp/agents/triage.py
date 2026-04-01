@@ -382,7 +382,7 @@ def _state_to_triage_result(state: dict[str, Any]) -> TriageResult:
             if isinstance(parsed_tags, list):
                 tags_list = [str(t) for t in parsed_tags]
         except (json.JSONDecodeError, TypeError):
-            pass
+            pass  # JSON parsing: graceful fallback
     # Also pick up keywords as supplementary tags
     kw_json = meta.get("keywords_json", "")
     if kw_json:
@@ -391,7 +391,7 @@ def _state_to_triage_result(state: dict[str, Any]) -> TriageResult:
             if isinstance(kws, list):
                 tags_list.extend(str(k) for k in kws if str(k) not in tags_list)
         except (json.JSONDecodeError, TypeError):
-            pass
+            pass  # JSON parsing: graceful fallback
 
     return TriageResult(
         quality_score=quality_score,

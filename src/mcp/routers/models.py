@@ -347,7 +347,7 @@ async def get_model_updates():
         try:
             dismissed = set(json.loads(dismissed_raw))
         except (ValueError, TypeError):
-            pass
+            pass  # JSON decode: use empty set
 
     updates: list[ModelUpdateItem] = []
     last_checked: str | None = None
@@ -454,7 +454,7 @@ async def dismiss_model_update(update_id: str):
         try:
             dismissed = json.loads(dismissed_raw)
         except (ValueError, TypeError):
-            pass
+            pass  # JSON decode: use empty list
 
     if update_id not in dismissed:
         dismissed.append(update_id)

@@ -52,7 +52,7 @@ def _dir_size_mb(path: str) -> float:
             try:
                 total += os.path.getsize(os.path.join(dirpath, f))
             except OSError:
-                pass
+                pass  # File stat: skip inaccessible files
     return round(total / (1024 * 1024), 2)
 
 
@@ -66,7 +66,7 @@ def _chromadb_metrics() -> dict:
             try:
                 total_chunks += coll.count()
             except (CeridError, ValueError, OSError, RuntimeError):
-                pass
+                pass  # Collection count: skip unavailable collections
         # Disk size: ChromaDB persist directory inside the container
         chroma_dir = os.getenv("CHROMA_PERSIST_DIR", "/chroma/chroma")
         disk_mb = _dir_size_mb(chroma_dir)
@@ -134,7 +134,7 @@ def get_storage_metrics():
         if cached:
             return json.loads(cached)
     except (CeridError, ValueError, OSError, RuntimeError):
-        pass
+        pass  # Storage cache: compute fresh on miss
 
     chromadb = _chromadb_metrics()
     neo4j = _neo4j_metrics()
@@ -173,7 +173,7 @@ def get_storage_metrics():
         r = get_redis()
         r.setex(_STORAGE_CACHE_KEY, _STORAGE_CACHE_TTL, json.dumps(result))
     except (CeridError, ValueError, OSError, RuntimeError):
-        pass
+        pass  # Storage cache: best-effort write
 
     return result
 

@@ -575,7 +575,7 @@ def get_verification_report(driver, conversation_id: str) -> dict | None:
         try:
             claims = json.loads(record["claims"])
         except (json.JSONDecodeError, TypeError):
-            pass
+            pass  # JSON decode: use raw value
 
         return {
             "report_id": record["id"],

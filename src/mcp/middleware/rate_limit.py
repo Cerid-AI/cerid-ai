@@ -34,7 +34,7 @@ for _cidr in _trusted_raw.split(","):
         try:
             TRUSTED_PROXIES.append(ipaddress.ip_network(_cidr, strict=False))
         except ValueError:
-            pass
+            pass  # Rate limit parsing: use defaults
 
 
 def get_client_ip(request: Request) -> str:
@@ -59,7 +59,7 @@ def get_client_ip(request: Request) -> str:
                 # All IPs in chain are trusted — use leftmost as best guess
                 return forwarded.split(",")[0].strip()
     except ValueError:
-        pass
+        pass  # Rate limit parsing: use defaults
     return direct
 
 

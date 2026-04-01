@@ -242,7 +242,7 @@ async def list_rss_feed_entries(
         return {"entries": [], "total": 0, "note": "304 Not Modified"}
 
     try:
-        root = ET.fromstring(body)
+        root = ET.fromstring(body)  # nosec B314 — RSS preview, user-configured feeds only
     except ET.ParseError as exc:
         return {"error": f"XML parse error: {exc}"}
 

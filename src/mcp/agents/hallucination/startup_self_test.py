@@ -103,7 +103,7 @@ async def reset_verification_failures(redis_client, failure_type: str) -> None:
     try:
         redis_client.delete(key)
     except (VerificationError, ValueError, OSError, RuntimeError):
-        pass
+        pass  # Self-test: graceful failure expected
 
 
 def get_failure_counts_sync(redis_client) -> dict[str, int]:
@@ -117,7 +117,7 @@ def get_failure_counts_sync(redis_client) -> dict[str, int]:
             if val is not None:
                 counts[ft] = int(val)
         except (VerificationError, ValueError, OSError, RuntimeError):
-            pass
+            pass  # Self-test: graceful failure expected
     return counts
 
 
@@ -128,5 +128,5 @@ def get_self_test_status_sync(redis_client) -> dict | None:
         if raw is not None:
             return json.loads(raw)
     except (VerificationError, ValueError, OSError, RuntimeError):
-        pass
+        pass  # Self-test: graceful failure expected
     return None

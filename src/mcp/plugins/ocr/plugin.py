@@ -175,6 +175,44 @@ def parse_pdf_with_ocr(file_path: str) -> dict[str, Any]:
     }
 
 
+def parse_image_ocr(file_path: str) -> dict[str, Any]:
+    """Extract text from an image file using OCR (Docling or Tesseract fallback).
+
+    Args:
+        file_path: Path to image or scanned PDF file.
+
+    Returns:
+        {"text": str, "file_type": str, "page_count": int | None}
+    """
+    path = Path(file_path)
+    ext = path.suffix.lower()
+
+    if ext == ".pdf":
+        result = parse_pdf_with_ocr(file_path)
+        return {
+            "text": result.get("text", ""),
+            "file_type": "pdf",
+            "page_count": result.get("page_count"),
+        }
+
+    # Image file: use Tesseract directly
+    try:
+        import pytesseract
+        from PIL import Image
+    except ImportError:
+        raise ImportError(
+            "pytesseract and Pillow are required for image OCR. "
+            "Install with: pip install pytesseract Pillow"
+        )
+
+    logger.info("OCR parsing image: %s (type: %s)", path.name, ext)
+    img = Image.open(file_path)
+    if img.mode not in ("L", "RGB"):
+        img = img.convert("RGB")
+    text = pytesseract.image_to_string(img).strip()
+    return {"text": text, "file_type": ext, "page_count": None}
+
+
 def register():
     """Register the OCR PDF parser, overriding the default pdfplumber parser."""
     from parsers import PARSER_REGISTRY
