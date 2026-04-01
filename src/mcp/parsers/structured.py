@@ -153,7 +153,7 @@ def parse_markdown(file_path: str) -> dict[str, Any]:
         if end_idx != -1:
             fm_text = raw[3:end_idx].strip()
             try:
-                import yaml
+                import yaml  # type: ignore[import-untyped]
                 parsed_fm = yaml.safe_load(fm_text)
                 if isinstance(parsed_fm, dict):
                     frontmatter = parsed_fm

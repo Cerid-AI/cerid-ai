@@ -112,12 +112,12 @@ def _extract_body(msg: email.message.Message) -> str:
             ct = part.get_content_type()
             if ct == "text/plain" and plain is None:
                 payload = part.get_payload(decode=True)
-                if payload:
+                if isinstance(payload, bytes):
                     charset = part.get_content_charset() or "utf-8"
                     plain = payload.decode(charset, errors="replace")
             elif ct == "text/html" and html is None:
                 payload = part.get_payload(decode=True)
-                if payload:
+                if isinstance(payload, bytes):
                     charset = part.get_content_charset() or "utf-8"
                     html = payload.decode(charset, errors="replace")
         if plain:
@@ -128,7 +128,7 @@ def _extract_body(msg: email.message.Message) -> str:
     # Not multipart
     ct = msg.get_content_type()
     payload = msg.get_payload(decode=True)
-    if not payload:
+    if not isinstance(payload, bytes):
         return ""
     charset = msg.get_content_charset() or "utf-8"
     text = payload.decode(charset, errors="replace")
@@ -210,7 +210,7 @@ def _imap_fetch_unseen(
             criteria = f"(UNSEEN UID {int(last_uid) + 1}:*)"
 
         # Use UID SEARCH
-        status, msg_nums = conn.uid("search", None, criteria)
+        status, msg_nums = conn.uid("search", None, criteria)  # type: ignore[arg-type]
         if status != "OK" or not msg_nums or not msg_nums[0]:
             return []
 

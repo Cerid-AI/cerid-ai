@@ -78,7 +78,7 @@ function artifactToResult(a: Artifact): KBQueryResult & { chunk_count?: number; 
     ingested_at: a.ingested_at,
     quality_score: a.quality_score,
     chunk_count: a.chunk_count,
-    source_type: a.source_type,
+    source_type: a.source_type as "kb" | "memory" | "external" | undefined,
     client_source: a.client_source,
   }
 }

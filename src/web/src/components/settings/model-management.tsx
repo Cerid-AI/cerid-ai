@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Justin Michaels. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react"
+import React, { useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   fetchModelUpdatesFull,
@@ -13,7 +13,13 @@ import {
 import { Card, CardContent, CardHeader, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Alert, AlertDescription } from "@/components/ui/alert"
+// Inline Alert primitives (shadcn Alert component not installed in this project)
+function Alert({ children, className, ...props }: React.HTMLAttributes<HTMLDivElement> & { variant?: string }) {
+  return <div role="alert" className={`relative w-full rounded-lg border px-4 py-3 text-sm grid has-[>svg]:grid-cols-[calc(var(--spacing)*4)_1fr] grid-cols-[0_1fr] has-[>svg]:gap-x-3 gap-y-0.5 items-start [&>svg]:size-4 [&>svg]:translate-y-0.5 [&>svg]:text-current ${className ?? ""}`} {...props}>{children}</div>
+}
+function AlertDescription({ children, className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  return <div className={`text-muted-foreground col-start-2 text-sm [&_p]:leading-relaxed ${className ?? ""}`} {...props}>{children}</div>
+}
 import {
   Sparkles,
   RefreshCw,

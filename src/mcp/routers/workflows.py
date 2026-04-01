@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from deps import get_redis
+from errors import CeridError
 from utils.time import utcnow_iso
 
 _logger = logging.getLogger("ai-companion.workflows")
@@ -256,7 +257,7 @@ async def _execute_agent_node(name: str, input_data: dict[str, Any]) -> dict[str
     query_text = input_data.get("query", input_data.get("text", ""))
 
     if name == "query":
-        from agents.query_agent import lightweight_kb_query
+        from agents.decomposer import lightweight_kb_query
         results = await lightweight_kb_query(query_text, top_k=input_data.get("top_k", 5))
         return {"results": results, "query": query_text}
 
@@ -360,7 +361,7 @@ async def _evaluate_condition(expression: str, input_data: dict[str, Any]) -> bo
                ">": lambda a, b: a > b, "<": lambda a, b: a < b,
                ">=": lambda a, b: a >= b, "<=": lambda a, b: a <= b}
         return ops[op](actual, val)
-    except Exception:
+    except (CeridError, ValueError, OSError, RuntimeError):
         return True
 
 

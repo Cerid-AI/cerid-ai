@@ -140,7 +140,7 @@ export function ArtifactPreview({ artifactId, open, onClose }: ArtifactPreviewPr
                     <p className="text-muted-foreground mb-0.5">Domain</p>
                     <p className="font-medium capitalize">{detail.domain}</p>
                   </div>
-                  {detail.metadata?.sub_category && (
+                  {detail.metadata?.sub_category != null && (
                     <div>
                       <p className="text-muted-foreground mb-0.5">Sub-category</p>
                       <p className="font-medium">{String(detail.metadata.sub_category)}</p>
@@ -174,7 +174,7 @@ export function ArtifactPreview({ artifactId, open, onClose }: ArtifactPreviewPr
                       <SourceTypeBadge sourceType={sourceType} />
                     </div>
                   )}
-                  {detail.metadata?.ingested_at && (
+                  {detail.metadata?.ingested_at != null && (
                     <div>
                       <p className="text-muted-foreground mb-0.5">Ingested</p>
                       <p className="flex items-center gap-1 font-medium">

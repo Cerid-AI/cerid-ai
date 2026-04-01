@@ -236,15 +236,14 @@ async def score_content_node(state: TriageStateDict) -> TriageStateDict:
         return {**state, "triage_score": 2}
 
     try:
-        from utils.llm_client import llm_call
+        from utils.llm_client import call_llm
 
         prompt = _TRIAGE_SCORE_PROMPT.format(
             filename=filename,
             content=text[:500],
         )
-        response = await llm_call(
-            prompt,
-            provider="ollama",
+        response = await call_llm(
+            [{"role": "user", "content": prompt}],
             max_tokens=5,
             temperature=0.0,
         )

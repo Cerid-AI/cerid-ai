@@ -161,7 +161,6 @@ export function ProSection({ featureTier, featureFlags, onRefresh }: ProSectionP
   }, [waitlistEmail])
 
   const isPro = featureTier === "pro" || featureTier === "enterprise"
-  const isEnterprise = featureTier === "enterprise"
 
   return (
     <div className="space-y-6">

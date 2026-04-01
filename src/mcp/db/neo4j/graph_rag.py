@@ -169,13 +169,14 @@ async def graph_retrieve(
     if not driver or not entities:
         return []
 
-    from utils.circuit_breaker import circuit_breaker
+    from utils.circuit_breaker import get_breaker
 
+    breaker = get_breaker("neo4j")
     try:
-        with circuit_breaker("neo4j"):
-            return await asyncio.to_thread(
-                _graph_retrieve_sync, driver, entities, max_hops, max_results,
-            )
+        return await breaker.call(
+            asyncio.to_thread,
+            _graph_retrieve_sync, driver, entities, max_hops, max_results,
+        )
     except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
         logger.warning("Graph RAG retrieval failed (circuit breaker): %s", exc)
         return []

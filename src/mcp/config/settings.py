@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging as _logging
 import os
 
+from config.constants import CHUNK_MAX_TOKENS  # noqa: F401  # re-exported
 from utils.model_registry import get_model
 
 # ---------------------------------------------------------------------------
