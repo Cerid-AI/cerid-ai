@@ -1,8 +1,5 @@
 # CLAUDE.md - Cerid AI
 
-> **Extends:** Your dotfiles repo -- all global workflow orchestration, core principles,
-> commit policy, and task management rules apply here. This file adds only project-specific context.
-
 ## Project Overview
 
 Cerid AI is a self-hosted, privacy-first Personal AI Knowledge Companion. It unifies multi-domain knowledge bases (code, finance, projects, artifacts) into a context-aware LLM interface with RAG-powered retrieval and intelligent agents. Knowledge base stays local; LLM API calls send query context to the configured provider. Optional cloud sync (Dropbox) for cross-machine settings/conversations, encrypted when CERID_ENCRYPTION_KEY is set.

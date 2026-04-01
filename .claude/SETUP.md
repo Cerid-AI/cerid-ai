@@ -9,16 +9,10 @@
 - `age` installed (`brew install age`)
 - Archive directory exists (`~/cerid-archive/`)
 
-## Global Setup
-
-Global workflow orchestration, core principles, commit policy, and task management rules are defined in your dotfiles repo's `CLAUDE.md`. Global plugins and MCP servers are defined in your dotfiles repo's `CLAUDE_CODE_SETUP.md`.
-
-Install global plugins + MCP servers from your dotfiles repo before proceeding.
-
 ## Project Setup
 
 1. **Verify prerequisites:** Docker running, `.env` decrypted, `age` installed, archive directory exists
-2. **Install global plugins + MCP servers** from your dotfiles repo
+2. **Install recommended plugins** (see Global Plugins Required below)
 3. **Run `./scripts/validate-env.sh`** to check all 14 environment validations
 4. **If containers are down:** `./scripts/start-cerid.sh` (or `--build` after a `git pull`)
 
@@ -73,7 +67,6 @@ cd src/web && npx vitest run
 
 Before beginning any development work, if not already done in this session:
 
-1. Read global framework context from your dotfiles repo (workflow principles, commit policy, plugins, MCP servers)
-2. Never add AI attribution to commits -- see dotfiles commit policy
-3. Run `./scripts/validate-env.sh --quick` at the beginning of every session
+1. Run `./scripts/validate-env.sh --quick` at the beginning of every session
+2. Never add AI attribution to commits
 4. If the session-start hook reports missing plugins or MCP servers, install them before proceeding
