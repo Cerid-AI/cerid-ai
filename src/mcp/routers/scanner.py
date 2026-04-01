@@ -144,7 +144,7 @@ async def _run_scan(scan_id: str, req: ScanRequest) -> None:
             f"{progress.files_skipped} skipped, {progress.files_errored} errored "
             f"({progress.elapsed_s:.1f}s)"
         )
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         progress.status = "error"
         progress.elapsed_s = round(time.time() - _scan_start_times[scan_id], 2)
         logger.error(f"Scan {scan_id} failed: {e}")

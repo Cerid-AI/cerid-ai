@@ -105,7 +105,7 @@ async def _rerank_cross_encoder(
 
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, ce_rerank, query, results)
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning("Cross-encoder reranking failed, falling back to LLM: %s", e)
         return await _rerank_llm(results, query)
 
@@ -308,7 +308,7 @@ def apply_quality_boost(
     try:
         from db.neo4j.artifacts import get_quality_scores
         scores = get_quality_scores(neo4j_driver, artifact_ids)
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning(f"Quality score lookup failed (skipping boost): {e}")
         return results
 
@@ -336,7 +336,7 @@ def _enrich_summaries(
     try:
         from db.neo4j.artifacts import get_artifact_summaries
         summaries = get_artifact_summaries(neo4j_driver, artifact_ids)
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning(f"Summary lookup failed (skipping): {e}")
         return results
 
@@ -367,7 +367,7 @@ def _apply_quality_and_summaries(
     try:
         from db.neo4j.artifacts import get_quality_and_summaries
         scores, summaries = get_quality_and_summaries(neo4j_driver, artifact_ids)
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning(f"Quality/summary lookup failed (skipping): {e}")
         return results
 

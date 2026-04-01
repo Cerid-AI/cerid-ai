@@ -56,6 +56,6 @@ class OpenLibrarySource(DataSource):
                     ))
 
                 return results
-        except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
             logger.debug("Open Library query failed: %s", exc)
             return []

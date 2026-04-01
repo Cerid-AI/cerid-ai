@@ -115,7 +115,7 @@ def _set_credits_exhausted() -> None:
         from deps import get_redis
 
         get_redis().set(_CREDITS_KEY, "1", ex=300)  # 5-min TTL
-    except (RoutingError, ValueError, OSError, RuntimeError) as e:
+    except (RoutingError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.debug("Failed to set credit exhaustion flag: %s", e)
 
 
@@ -127,7 +127,7 @@ def _clear_credits_exhausted() -> None:
         r = get_redis()
         if r.exists(_CREDITS_KEY):
             r.delete(_CREDITS_KEY)
-    except (RoutingError, ValueError, OSError, RuntimeError) as e:
+    except (RoutingError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.debug("Failed to clear credit exhaustion flag: %s", e)
 
 

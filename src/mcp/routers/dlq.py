@@ -90,7 +90,7 @@ async def retry_dlq_entry(entry_id: str) -> dict[str, Any]:
 
     try:
         result = await asyncio.to_thread(ingest_content, content, domain, metadata)
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         # Re-queue if under max attempts
         new_attempt = attempt + 1
         if new_attempt <= MAX_ATTEMPTS:

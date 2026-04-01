@@ -130,7 +130,7 @@ class MetricsCollector:
         try:
             self._redis.zadd(key, {member: ts})
             self._redis.expire(key, _METRIC_TTL_SECONDS)
-        except (CeridError, ValueError, OSError, RuntimeError) as exc:
+        except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
             logger.warning("Failed to record metric %s: %s", name, exc)
 
     def get_metrics(
@@ -152,7 +152,7 @@ class MetricsCollector:
         key = self._key(name)
         try:
             raw_entries = self._redis.zrangebyscore(key, min_ts, now)
-        except (CeridError, ValueError, OSError, RuntimeError) as exc:
+        except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
             logger.warning("Failed to get metrics %s: %s", name, exc)
             return []
 
@@ -208,7 +208,7 @@ class MetricsCollector:
         key = self._key(name)
         try:
             return self._redis.zremrangebyscore(key, 0, cutoff) or 0
-        except (CeridError, ValueError, OSError, RuntimeError) as exc:
+        except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
             logger.warning("Failed to cleanup metric %s: %s", name, exc)
             return 0
 

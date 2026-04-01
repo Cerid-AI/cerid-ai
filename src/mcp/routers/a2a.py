@@ -313,7 +313,7 @@ async def create_task(request: A2ATaskRequest):
         executor = SKILL_MAP[request.skill_id]
         result = await executor(request.input)
         _transition(task, "completed", output=result)
-    except (ProviderError, ValueError, OSError, RuntimeError) as exc:
+    except (ProviderError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.exception("A2A task %s failed: %s", task_id, exc)
         _transition(task, "failed", error=str(exc))
 

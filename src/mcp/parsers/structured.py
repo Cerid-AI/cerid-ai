@@ -32,7 +32,7 @@ def parse_csv(file_path: str) -> dict[str, Any]:
             delimiter = dialect.delimiter
         except csv_module.Error:
             pass  # keep default
-    except (IngestionError, ValueError, OSError, RuntimeError) as exc:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.debug("Suppressed error: %s", exc)
 
     try:
@@ -40,7 +40,7 @@ def parse_csv(file_path: str) -> dict[str, Any]:
             df = pd.read_csv(file_path, encoding="utf-8", sep=delimiter)
         except UnicodeDecodeError:
             df = pd.read_csv(file_path, encoding="latin-1", sep=delimiter)
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         raise ValueError(
             f"Failed to read CSV '{fname}': {e}. "
             f"File may be corrupted or not a valid CSV."
@@ -128,7 +128,7 @@ def parse_html(file_path: str) -> dict[str, Any]:
         extractor = _TextExtractor()
         extractor.feed(raw)
         text = "\n".join(extractor._parts)
-    except (IngestionError, ValueError, OSError, RuntimeError):
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         # Fallback: return raw if parsing fails
         text = raw
 
@@ -157,7 +157,7 @@ def parse_markdown(file_path: str) -> dict[str, Any]:
                 parsed_fm = yaml.safe_load(fm_text)
                 if isinstance(parsed_fm, dict):
                     frontmatter = parsed_fm
-            except (IngestionError, ValueError, OSError, RuntimeError):
+            except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
                 pass  # Invalid YAML — ignore
             text = raw[end_idx + 3:].lstrip()
 
@@ -193,7 +193,7 @@ def parse_text(file_path: str) -> dict[str, Any]:
             )
     except ValueError:
         raise
-    except (IngestionError, ValueError, OSError, RuntimeError):
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         pass  # proceed with text read if binary check fails
 
     text = path.read_text(encoding="utf-8", errors="replace")

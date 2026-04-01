@@ -548,7 +548,7 @@ def save_verification_report(
                     cid=conversation_id,
                     aid=aid,
                 )
-            except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+            except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
                 logger.debug("Failed to create VERIFIED relationship: %s", e)
 
     logger.info("Saved verification report %s for conversation %s", report_id[:8], conversation_id[:8])

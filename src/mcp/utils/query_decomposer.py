@@ -139,7 +139,7 @@ async def decompose_query(
                     if result:
                         logger.info("Decomposed query into %d sub-queries (LLM)", len(result))
                         return result
-        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.warning("LLM decomposition failed: %s", e)
 
     return [query]

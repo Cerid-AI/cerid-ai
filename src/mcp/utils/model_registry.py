@@ -125,7 +125,7 @@ async def validate_models() -> dict[str, Any]:
             "pricing_updated": pricing_updated,
             "catalog_size": len(catalog),
         }
-    except (RoutingError, ValueError, OSError, RuntimeError) as exc:
+    except (RoutingError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.warning("Model validation failed: %s", exc)
         return {"valid": [], "invalid": [], "pricing_updated": [], "error": str(exc)}
 

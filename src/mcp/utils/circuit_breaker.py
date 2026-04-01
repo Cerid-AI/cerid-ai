@@ -120,7 +120,7 @@ class AsyncCircuitBreaker:
 
         try:
             result = await fn(*args, **kwargs)
-        except (CeridError, ValueError, OSError, RuntimeError) as exc:
+        except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
             if isinstance(exc, self.excluded_exceptions):
                 raise
             # Don't count HTTP 4xx client errors as failures — they indicate
@@ -180,7 +180,7 @@ class AsyncCircuitBreaker:
 
         try:
             result = fn(*args, **kwargs)
-        except (CeridError, ValueError, OSError, RuntimeError) as exc:
+        except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
             if isinstance(exc, self.excluded_exceptions):
                 raise
             self._on_failure_sync(exc)

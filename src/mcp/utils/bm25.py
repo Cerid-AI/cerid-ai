@@ -181,7 +181,7 @@ class BM25Index:
                     f"BM25 corpus for {self.domain} uses old token format. "
                     "Consider re-ingesting for improved tokenization."
                 )
-        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.error(f"Failed to load BM25 index for {self.domain}: {e}")
             self._texts = []
             self._doc_ids = []
@@ -230,7 +230,7 @@ class BM25Index:
             with open(self._corpus_file, "w") as f:
                 for doc_id, text in zip(self._doc_ids, self._texts):
                     f.write(json.dumps({"id": doc_id, "text": text}) + "\n")
-        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.error(f"Failed to rewrite BM25 corpus for {self.domain}: {e}")
 
     def _append_to_disk(self, entries: list[dict]) -> None:
@@ -238,7 +238,7 @@ class BM25Index:
             with open(self._corpus_file, "a") as f:
                 for entry in entries:
                     f.write(json.dumps(entry) + "\n")
-        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.error(f"Failed to persist BM25 entries for {self.domain}: {e}")
 
 

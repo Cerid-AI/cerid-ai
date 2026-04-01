@@ -120,7 +120,7 @@ async def evaluate(
                 redis_client=redis_client,
                 neo4j_driver=neo4j_driver,
             )
-        except (CeridError, ValueError, OSError, RuntimeError) as e:
+        except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.error(f"Eval query failed: {eq.query!r} — {e}")
             results.append(EvalResult(query=eq.query, pipeline=pipeline, domain=eq.domain))
             continue

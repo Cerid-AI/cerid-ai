@@ -23,7 +23,7 @@ def parse_epub(file_path: str) -> dict[str, Any]:
 
     try:
         zf = zipfile.ZipFile(file_path, "r")
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         raise ValueError(
             f"Failed to read EPUB '{path.name}': {e}. "
             f"File may be corrupted or not a valid .epub file."
@@ -40,7 +40,7 @@ def parse_epub(file_path: str) -> dict[str, Any]:
             ns = {"c": "urn:oasis:names:tc:opendocument:xmlns:container"}
             rootfile = container_root.find(".//c:rootfile", ns)
             opf_path = rootfile.get("full-path", "") if rootfile is not None else ""
-        except (IngestionError, ValueError, OSError, RuntimeError):
+        except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
             opf_path = ""
             for name in zf.namelist():
                 if name.endswith(".opf"):
@@ -126,7 +126,7 @@ def parse_rtf(file_path: str) -> dict[str, Any]:
 
     try:
         text = _strip_rtf(raw)
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         raise ValueError(
             f"Failed to parse RTF '{path.name}': {e}. "
             f"File may be corrupted or not a valid .rtf file."

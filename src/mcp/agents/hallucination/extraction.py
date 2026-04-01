@@ -418,7 +418,7 @@ async def _extract_claims_llm(
             if claims_internal:
                 logger.info("Internal LLM claim extraction succeeded (%d claims)", len(claims_internal))
                 return claims_internal
-    except (VerificationError, ValueError, OSError, RuntimeError) as e:
+    except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.debug("Internal LLM claim extraction failed (%s), trying external models", e)
 
     for model in models:
@@ -500,7 +500,7 @@ async def extract_claims(
                     len(response_text), len(heuristic_claims),
                 )
                 return heuristic_claims[:max_claims], "heuristic"
-        except (VerificationError, ValueError, OSError, RuntimeError) as exc:
+        except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
             logger.debug("Fast-path heuristic failed (%s), continuing to LLM", exc)
 
     # Pre-extraction: surface ignorance admissions and recency limitations

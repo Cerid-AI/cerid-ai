@@ -90,7 +90,7 @@ async def create_checkout(req: CheckoutRequest):
             cancel_url=req.cancel_url or STRIPE_CANCEL_URL,
         )
         return {"checkout_url": session.url, "session_id": session.id}
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error("Failed to create Stripe Checkout session: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -108,7 +108,7 @@ async def stripe_webhook(request: Request):
 
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning("Stripe webhook verification failed: %s", e)
         raise HTTPException(status_code=400, detail="Invalid webhook signature.")
 
@@ -246,7 +246,7 @@ def _activate_pro_license(redis, source: str = "unknown", reference: str = "") -
         features_mod.FEATURE_TIER = "pro"
         features_mod._refresh_flags()
         logger.info("Feature tier elevated to 'pro' at runtime")
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning("Failed to update feature tier: %s", e)
 
 
@@ -257,7 +257,7 @@ def _deactivate_license(redis) -> None:
         import config.features as features_mod
         features_mod.FEATURE_TIER = "community"
         features_mod._refresh_flags()
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning("Failed to reset feature tier on license deactivation: %s", e)
 
 

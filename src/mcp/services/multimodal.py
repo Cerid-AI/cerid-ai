@@ -167,7 +167,7 @@ async def ingest_multimodal(
 
     try:
         text, plugin_used = await _extract_text(file_path, plugin_name)
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error("Plugin extraction failed for %s: %s", path.name, e)
         return {"status": "error", "error": f"Plugin '{plugin_name}' failed: {e}"}
 

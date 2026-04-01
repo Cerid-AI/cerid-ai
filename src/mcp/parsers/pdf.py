@@ -35,7 +35,7 @@ def _get_memory_mb() -> float:
         # macOS returns bytes, Linux returns KB
         if hasattr(ru, "ru_maxrss"):
             return ru.ru_maxrss / (1024 * 1024) if os.uname().sysname == "Darwin" else ru.ru_maxrss / 1024
-    except (IngestionError, ValueError, OSError, RuntimeError) as exc:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.debug("Suppressed error: %s", exc)
     return 0.0
 
@@ -45,7 +45,7 @@ def _extract_page_lite(page: Any) -> str:
     try:
         text = page.extract_text()
         return text.strip() if text else ""
-    except (IngestionError, ValueError, OSError, RuntimeError):
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         return ""
 
 
@@ -56,7 +56,7 @@ def _extract_page_full(page: Any, page_num: int, page_count: int) -> tuple[str, 
 
     try:
         tables = page.find_tables()
-    except (IngestionError, ValueError, OSError, RuntimeError):
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         # Table detection can fail on complex pages — fall back to text only
         return _extract_page_lite(page), 0
 
@@ -67,7 +67,7 @@ def _extract_page_full(page: Any, page_num: int, page_count: int) -> tuple[str, 
             table_count += 1
             try:
                 rows = table.extract()
-            except (IngestionError, ValueError, OSError, RuntimeError):
+            except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
                 continue
             if not rows:
                 continue
@@ -90,7 +90,7 @@ def _extract_page_full(page: Any, page_num: int, page_count: int) -> tuple[str, 
             for bbox in table_bboxes:
                 filtered = filtered.outside_bounding_box(bbox)  # type: ignore[attr-defined]
             plain_text = filtered.extract_text()
-        except (IngestionError, ValueError, OSError, RuntimeError):
+        except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
             plain_text = page.extract_text()
 
         if plain_text and plain_text.strip():
@@ -117,7 +117,7 @@ def parse_pdf(file_path: str) -> dict[str, Any]:
 
     try:
         pdf = pdfplumber.open(file_path)
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         raise ValueError(
             f"Failed to read PDF '{Path(file_path).name}': {e}. "
             f"File may be corrupted, password-protected, or not a valid PDF."
@@ -160,7 +160,7 @@ def parse_pdf(file_path: str) -> dict[str, Any]:
                 else:
                     try:
                         page_text, page_tables = _extract_page_full(page, i, effective_pages)
-                    except (IngestionError, ValueError, OSError, RuntimeError):
+                    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
                         # Full extraction failed — try lite
                         page_text = _extract_page_lite(page)
                         page_tables = 0
@@ -182,10 +182,10 @@ def parse_pdf(file_path: str) -> dict[str, Any]:
                                     f"{field_name}: {field_value}" if field_name
                                     else str(field_value)
                                 )
-                except (IngestionError, ValueError, OSError, RuntimeError):
+                except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
                     pass  # form field extraction is best-effort
 
-            except (IngestionError, ValueError, OSError, RuntimeError) as e:
+            except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
                 pages_with_errors += 1
                 logger.warning(f"PDF page {i+1}/{effective_pages} failed: {e}")
             finally:
@@ -223,7 +223,7 @@ def parse_pdf(file_path: str) -> dict[str, Any]:
                 ocr_result = parse_image_ocr(file_path)
                 if ocr_result.get("text", "").strip():
                     text = ocr_result["text"]
-        except (IngestionError, ValueError, OSError, RuntimeError) as ocr_exc:
+        except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as ocr_exc:
             logger.debug("OCR fallback failed for PDF: %s", ocr_exc)
 
         if not text.strip():

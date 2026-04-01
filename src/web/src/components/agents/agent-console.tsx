@@ -64,9 +64,8 @@ export default function AgentConsole() {
     }
   }, [])
 
-  connectRef.current = connect
-
   useEffect(() => {
+    connectRef.current = connect
     connect()
     return () => {
       esRef.current?.close()

@@ -191,7 +191,7 @@ async def _assess_claims(
                 "covered": max_sim >= threshold,
                 "top_source": results[0].get("filename", "") if results else "",
             })
-        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.warning("Self-RAG: claim assessment failed for %r: %s", claim[:50], e)
             assessments.append({
                 "claim": claim,
@@ -227,7 +227,7 @@ async def _retrieve_for_claims(
                 neo4j_driver=neo4j_driver,
             )
             additional.extend(result.get("results", []))
-        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.warning("Self-RAG: refined query failed for %r: %s", query[:50], e)
 
     return additional

@@ -64,7 +64,7 @@ async def classify_memory(
             include=["documents", "metadatas", "distances"],
             where={"memory_type": memory_type} if memory_type else None,
         )
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.debug("Consolidation similarity search failed: %s", e)
         return MemoryAction(action="ADD", reason=f"similarity search failed: {e}")
 
@@ -171,7 +171,7 @@ def mark_superseded(
         logger.info(
             "Memory %s superseded by %s", old_artifact_id, new_artifact_id,
         )
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning(
             "Failed to mark superseded: %s -> %s: %s",
             old_artifact_id, new_artifact_id, e,

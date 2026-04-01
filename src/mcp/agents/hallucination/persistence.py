@@ -31,6 +31,6 @@ def get_hallucination_report(
         data = redis_client.get(key)
         if data:
             return json.loads(data)
-    except (VerificationError, ValueError, OSError, RuntimeError) as e:
+    except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning("Failed to retrieve hallucination report: %s", e)
     return None

@@ -54,6 +54,6 @@ class DuckDuckGoSource(DataSource):
                         ))
 
                 return results
-        except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
             logger.debug("DuckDuckGo query failed: %s", exc)
             return []

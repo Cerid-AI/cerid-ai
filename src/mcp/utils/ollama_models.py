@@ -70,7 +70,7 @@ async def detect_available_models() -> list[dict]:
             resp = await client.get(f"{_ollama_url()}/api/tags")
             resp.raise_for_status()
             data = resp.json()
-    except (RoutingError, ValueError, OSError, RuntimeError) as exc:
+    except (RoutingError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.warning("Ollama model detection failed: %s", exc)
         return []
 

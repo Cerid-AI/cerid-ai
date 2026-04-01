@@ -44,6 +44,6 @@ class ExchangeRatesSource(DataSource):
                     source_name="Open Exchange Rates",
                     confidence=0.9,
                 )]
-        except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
             logger.debug("Exchange rates query failed: %s", exc)
             return []

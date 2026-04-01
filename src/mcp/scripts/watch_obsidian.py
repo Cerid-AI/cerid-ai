@@ -215,7 +215,7 @@ def ingest_note(file_path: str, domain: str, mode: str):
     # Use the structured parser to extract frontmatter and content
     try:
         parsed = parse_markdown(file_path)
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         _log("ERROR", f"  Failed to parse: {filename}: {e}")
         return
 

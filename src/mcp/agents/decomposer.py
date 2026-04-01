@@ -185,7 +185,7 @@ async def multi_domain_query(
     # Pre-check which collections actually exist to skip missing domains fast
     try:
         existing_collections = {c.name for c in chroma_client.list_collections()}
-    except (RetrievalError, ValueError, OSError, RuntimeError):
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         existing_collections = set()
 
     async def query_domain(domain: str) -> list[dict[str, Any]]:
@@ -260,12 +260,12 @@ async def multi_domain_query(
                                     metadata=meta,
                                 ))
                                 seen_ids.add(cid)
-                        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+                        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
                             logger.debug(f"BM25-only fetch failed for {domain}: {e}")
 
             return formatted
 
-        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.warning(f"Error querying domain {domain}: {e}")
             return []
 
@@ -335,7 +335,7 @@ async def graph_expand_results(
             depth=config.GRAPH_TRAVERSAL_DEPTH,
             max_results=config.GRAPH_MAX_RELATED,
         )
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning(f"Graph traversal failed (continuing without): {e}")
         return results
 

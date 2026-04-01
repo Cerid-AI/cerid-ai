@@ -276,7 +276,7 @@ async def _query_memories(
                     "memory_source": True,
                 })
         return formatted
-    except (VerificationError, ValueError, OSError, RuntimeError) as e:
+    except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.debug("Memory query failed (non-blocking): %s", e)
         return []
 
@@ -669,7 +669,7 @@ async def _verify_claim_externally(
                 "verification_method": "circuit_open",
                 "source_urls": [],
             }
-        except (VerificationError, ValueError, OSError, RuntimeError) as e:
+        except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.warning("External verification failed for '%s...': %s", claim[:50], e)
             return {
                 "status": "uncertain",
@@ -815,7 +815,7 @@ async def verify_claims_batch_external(
             "Batch verification: %d/%d claims resolved via %s",
             len(results), len(claims), model,
         )
-    except (VerificationError, ValueError, OSError, RuntimeError) as exc:
+    except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.warning("Batch verification failed (%s), claims will fall back to individual", exc)
 
     return results
@@ -999,7 +999,7 @@ async def verify_claim(
                             "domain": "external",
                             "source_url": fact.get("source_url", ""),
                         })
-            except (VerificationError, ValueError, OSError, RuntimeError) as exc:
+            except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
                 logger.debug("Data source enrichment for verification skipped: %s", exc)
 
         # --- Anti-circularity: penalise KB results that were injected into
@@ -1204,7 +1204,7 @@ async def verify_claim(
                 **_kb_source_fields(top_result),
             }
 
-    except (VerificationError, ValueError, OSError, RuntimeError) as e:
+    except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning("Claim verification failed for '%s...': %s", claim[:50], e)
         return {
             "claim": claim,

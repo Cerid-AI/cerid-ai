@@ -118,7 +118,7 @@ async def _check_ollama() -> bool:
             _ollama_available = len(_ollama_models) > 0
         else:
             _ollama_available = False
-    except (RoutingError, ValueError, OSError, RuntimeError):
+    except (RoutingError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         _ollama_available = False
 
     _ollama_checked_at = now
@@ -281,7 +281,7 @@ async def _classify_with_best_available(query: str) -> Complexity:
                 )
                 return level
 
-    except (RoutingError, ValueError, OSError, RuntimeError) as e:
+    except (RoutingError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.debug("Ollama classification failed (%s), using heuristic", e)
 
     return heuristic_result

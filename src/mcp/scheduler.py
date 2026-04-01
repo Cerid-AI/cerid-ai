@@ -47,7 +47,7 @@ def _log_execution(job_name: str, status: str, duration: float, detail: str = ""
                 "timestamp": utcnow_iso(),
             },
         )
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning(f"Failed to log scheduled job {job_name}: {e}")
 
 
@@ -71,7 +71,7 @@ async def _run_rectify() -> None:
         if findings > 0:
             from utils.webhooks import notify_rectify_findings
             await notify_rectify_findings(findings)
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         duration = time.time() - start
         _log_execution("rectify", "error", duration, str(e))
         logger.error(f"Scheduled rectify failed: {e}")
@@ -90,7 +90,7 @@ async def _run_health_check() -> None:
         if status not in ("healthy", "ok"):
             from utils.webhooks import notify_health_warning
             await notify_health_warning(status)
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         duration = time.time() - start
         _log_execution("health_check", "error", duration, str(e))
         logger.error(f"Scheduled health check failed: {e}")
@@ -115,7 +115,7 @@ async def _run_stale_detection() -> None:
         duration = time.time() - start
         _log_execution("stale_detection", "success", duration, f"{stale_count} stale")
         logger.info(f"Scheduled stale detection: {stale_count} stale in {duration:.1f}s")
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         duration = time.time() - start
         _log_execution("stale_detection", "error", duration, str(e))
         logger.error(f"Scheduled stale detection failed: {e}")
@@ -148,7 +148,7 @@ async def _run_sync_export() -> None:
         duration = time.time() - start
         _log_execution("sync_export", "success", duration, f"{neo4j_count} artifacts")
         logger.info("Scheduled sync export: %d artifacts in %.1fs", neo4j_count, duration)
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         duration = time.time() - start
         _log_execution("sync_export", "error", duration, str(e))
         logger.error("Scheduled sync export failed: %s", e)
@@ -164,7 +164,7 @@ async def _run_tombstone_purge() -> None:
         duration = time.time() - start
         _log_execution("tombstone_purge", "success", duration, f"{purged} purged")
         logger.info("Scheduled tombstone purge: %d expired in %.1fs", purged, duration)
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         duration = time.time() - start
         _log_execution("tombstone_purge", "error", duration, str(e))
         logger.error("Scheduled tombstone purge failed: %s", e)
@@ -201,7 +201,7 @@ async def _run_folder_scan() -> None:
         detail = f"ingested={total_ingested} skipped={total_skipped} errored={total_errored}"
         _log_execution("folder_scan", "success", duration, detail)
         logger.info(f"Folder scan complete: {detail} ({duration:.1f}s)")
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         _log_execution("folder_scan", "error", time.time() - start, str(e))
         logger.error(f"Folder scan failed: {e}")
 
@@ -256,14 +256,14 @@ async def _run_watched_folders_rescan() -> None:
                 # Update last_scanned_at
                 folder["last_scanned_at"] = time.time()
                 redis.set(f"cerid:watched_folders:{fid_str}", _json.dumps(folder))
-            except (CeridError, ValueError, OSError, RuntimeError) as e:
+            except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
                 logger.warning("Watched folder scan failed for %s: %s", folder_path, e)
 
         duration = time.time() - start
         detail = f"scanned={total_scanned} skipped={total_skipped}"
         _log_execution("watched_folders_rescan", "success", duration, detail)
         logger.info(f"Watched folders re-scan complete: {detail} ({duration:.1f}s)")
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         _log_execution("watched_folders_rescan", "error", time.time() - start, str(e))
         logger.error(f"Watched folders re-scan failed: {e}")
 
@@ -278,7 +278,7 @@ async def _run_model_catalog_update() -> None:
         detail = f"new={len(result.get('new', []))} deprecated={len(result.get('deprecated', []))}"
         _log_execution("model_catalog_update", "success", duration, detail)
         logger.info(f"Model catalog update: {detail} ({duration:.1f}s)")
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         _log_execution("model_catalog_update", "error", time.time() - start, str(e))
         logger.error(f"Model catalog update failed: {e}")
 

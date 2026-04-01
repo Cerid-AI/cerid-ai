@@ -29,7 +29,7 @@ def init_schema(driver) -> None:
         # Drop the old index if it exists (being replaced by unique constraint)
         try:
             session.run("DROP INDEX artifact_content_hash IF EXISTS")
-        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.debug(f"Old index drop skipped: {e}")
         session.run(
             "CREATE CONSTRAINT artifact_content_hash_unique IF NOT EXISTS "

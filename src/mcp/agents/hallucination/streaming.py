@@ -99,7 +99,7 @@ async def _extract_response_context(response_text: str, user_query: str | None) 
         if topic and 3 < len(topic) < 150:
             logger.debug("LLM topic extraction: '%s'", topic)
             return topic
-    except (VerificationError, ValueError, OSError, RuntimeError) as exc:
+    except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.debug("LLM topic extraction failed (%s), using heuristic", exc)
 
     return heuristic
@@ -206,7 +206,7 @@ async def check_hallucinations(
     try:
         key = f"{REDIS_HALLUCINATION_PREFIX}{conversation_id}"
         redis_client.setex(key, REDIS_HALLUCINATION_TTL, json.dumps(report))
-    except (VerificationError, ValueError, OSError, RuntimeError) as e:
+    except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning("Failed to store hallucination report in Redis: %s", e)
 
     # Log verification metrics for analytics
@@ -226,7 +226,7 @@ async def check_hallucinations(
             total=len(results),
             verification_models=used_models or None,
         )
-    except (VerificationError, ValueError, OSError, RuntimeError) as e:
+    except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.debug("Failed to log verification metrics (non-blocking): %s", e)
 
     return report
@@ -295,7 +295,7 @@ async def verify_response_streaming(
             EXTRACTION_TIMEOUT, conversation_id,
         )
         claims, method = [], "timeout"
-    except (VerificationError, ValueError, OSError, RuntimeError) as extraction_exc:
+    except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as extraction_exc:
         logger.error(
             "Claim extraction failed for conversation %s: %s — "
             "falling back to heuristic",
@@ -317,7 +317,7 @@ async def verify_response_streaming(
                     "Heuristic fallback produced %d claims after %s",
                     len(claims), method,
                 )
-        except (VerificationError, ValueError, OSError, RuntimeError) as heuristic_exc:
+        except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as heuristic_exc:
             logger.warning("Heuristic extraction also failed: %s", heuristic_exc)
 
     if not claims:
@@ -377,7 +377,7 @@ async def verify_response_streaming(
         batch_kb_context = await lightweight_kb_query(
             batch_query, chroma_client=chroma_client, top_k=15,
         )
-    except (VerificationError, ValueError, OSError, RuntimeError) as kb_exc:
+    except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as kb_exc:
         logger.debug("Batch KB pre-fetch failed (non-blocking): %s", kb_exc)
 
     # Build a set of claim indices where KB confidence is very high (>0.85),
@@ -553,7 +553,7 @@ async def verify_response_streaming(
                 completed = verified_count + unverified_count + uncertain_count
                 uncertain_count += len(claims) - completed
                 break
-            except (VerificationError, ValueError, OSError, RuntimeError) as task_exc:
+            except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as task_exc:
                 logger.warning("Verification task failed: %s", task_exc)
                 try:
                     from utils.cache import log_verification_error
@@ -563,7 +563,7 @@ async def verify_response_streaming(
                         error_message=str(task_exc),
                         model=model, phase="verification",
                     )
-                except (VerificationError, ValueError, OSError, RuntimeError) as exc:
+                except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
                     logger.debug("Suppressed error: %s", exc)
                 continue
 
@@ -614,7 +614,7 @@ async def verify_response_streaming(
                 meta_result = await metamorphic_score(claims[i], response_context or "")
                 if meta_result and not meta_result.get("skipped"):
                     claim_event["metamorphic_score"] = meta_result
-            except (VerificationError, ValueError, OSError, RuntimeError) as exc:
+            except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
                 logger.debug("Metamorphic scoring skipped: %s", exc)
 
             yield claim_event
@@ -627,7 +627,7 @@ async def verify_response_streaming(
                     "message": "OpenRouter credits exhausted. Add credits at https://openrouter.ai/settings/credits",
                     "provider": "openrouter",
                 }
-    except (VerificationError, ValueError, OSError, RuntimeError) as loop_exc:
+    except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as loop_exc:
         logger.error(
             "Verification loop interrupted after %d/%d claims: %s",
             verified_count + unverified_count + uncertain_count,
@@ -643,7 +643,7 @@ async def verify_response_streaming(
                 error_message=str(loop_exc),
                 model=model, phase="verification",
             )
-        except (VerificationError, ValueError, OSError, RuntimeError) as exc:
+        except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
             logger.debug("Suppressed error: %s", exc)
 
     # --- Consistency checking (cross-turn + internal contradictions) ---
@@ -700,9 +700,10 @@ async def verify_response_streaming(
         },
     }
     try:
-        key = f"{REDIS_HALLUCINATION_PREFIX}{conversation_id}"
-        redis_client.setex(key, REDIS_HALLUCINATION_TTL, json.dumps(report))
-    except (VerificationError, ValueError, OSError, RuntimeError) as e:
+        if redis_client is not None:
+            key = f"{REDIS_HALLUCINATION_PREFIX}{conversation_id}"
+            redis_client.setex(key, REDIS_HALLUCINATION_TTL, json.dumps(report))
+    except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning("Failed to persist streaming report to Redis: %s", e)
 
     try:
@@ -722,7 +723,7 @@ async def verify_response_streaming(
             total=len(claims),
             verification_models=used_models or None,
         )
-    except (VerificationError, ValueError, OSError, RuntimeError) as e:
+    except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.debug("Failed to log streaming verification metrics: %s", e)
 
     # --- Await consistency result (launched earlier as background task) ---
@@ -746,7 +747,7 @@ async def verify_response_streaming(
                 )
         except TimeoutError:
             logger.warning("Consistency check timed out for conversation %s", conversation_id)
-        except (VerificationError, ValueError, OSError, RuntimeError) as e:
+        except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.warning("Consistency check failed: %s", e)
             try:
                 from utils.cache import log_verification_error
@@ -756,5 +757,5 @@ async def verify_response_streaming(
                     error_message=str(e),
                     model=model, phase="consistency",
                 )
-            except (VerificationError, ValueError, OSError, RuntimeError) as exc:
+            except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
                 logger.debug("Suppressed error: %s", exc)

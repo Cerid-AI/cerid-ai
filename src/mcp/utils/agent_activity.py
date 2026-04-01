@@ -29,5 +29,5 @@ def emit_activity(agent_name: str, message: str, level: str = "info") -> None:
             "timestamp": time.time(),
         })
         redis.publish(_CHANNEL, event)
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.debug("Failed to emit agent activity: %s", e)

@@ -92,7 +92,7 @@ def parse_node(state: TriageStateDict) -> TriageStateDict:
         }
     except (FileNotFoundError, ValueError) as e:
         return {**state, "status": "error", "error": str(e)}
-    except (RoutingError, ValueError, OSError, RuntimeError) as e:
+    except (RoutingError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         return {**state, "status": "error", "error": f"Parse failed: {e}"}
 
 
@@ -257,7 +257,7 @@ async def score_content_node(state: TriageStateDict) -> TriageStateDict:
             return {**state, "triage_score": score, "status": "error", "error": f"AI triage score {score}/5 — content too low value"}
 
         return {**state, "triage_score": score}
-    except (RoutingError, ValueError, OSError, RuntimeError) as e:
+    except (RoutingError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.debug("AI triage scoring failed (falling back to default): %s", e)
         return {**state, "triage_score": 3}  # fallback: ingest everything
 
@@ -457,7 +457,7 @@ async def triage_batch(
                 tags=file_spec.get("tags", ""),
             )
             results.append(result)
-        except (RoutingError, ValueError, OSError, RuntimeError) as e:
+        except (RoutingError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.error(f"Triage failed for {file_spec.get('file_path', '?')}: {e}")
             results.append({
                 "file_path": file_spec.get("file_path", ""),

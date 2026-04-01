@@ -207,7 +207,7 @@ async def reingest_artifact(artifact_id: str):
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error("Failed to reingest artifact %s: %s", artifact_id[:8], e)
         raise HTTPException(status_code=500, detail=f"Failed to reingest: {e}")
 
@@ -222,7 +222,7 @@ async def rebuild_indexes():
             domains_rebuilt=rebuilt,
             message=f"Rebuilt BM25 indexes for {rebuilt} domains",
         )
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error("Failed to rebuild indexes: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to rebuild indexes: {e}")
 
@@ -246,7 +246,7 @@ async def rescore_artifacts(req: RescoreRequest | None = None):
             avg_quality_score=result["avg_quality_score"],
             message=f"Rescored {result['artifacts_scored']} artifacts (avg: {result['avg_quality_score']:.2f})",
         )
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error("Failed to rescore: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to rescore: {e}")
 
@@ -280,7 +280,7 @@ async def regenerate_summaries(req: RegenerateSummariesRequest | None = None):
             "artifacts_scored": result["artifacts_scored"],
             "message": f"Generated {result['synopses_generated']} synopses, scored {result['artifacts_scored']} artifacts",
         }
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error("Failed to regenerate summaries: %s\n%s", e, traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Failed to regenerate summaries: {e}")
 
@@ -310,7 +310,7 @@ async def clear_domain(domain: str, req: ClearDomainRequest):
                 if result.get("deleted"):
                     deleted_count += 1
                     chunks_removed += len(result.get("chunk_ids", []))
-            except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+            except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
                 logger.warning("Failed to delete artifact %s: %s", artifact["id"][:8], e)
 
         # Delete ChromaDB collection for the domain
@@ -318,7 +318,7 @@ async def clear_domain(domain: str, req: ClearDomainRequest):
         try:
             chroma.delete_collection(name=coll_name)
             logger.info("Deleted ChromaDB collection: %s", coll_name)
-        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.warning("Failed to delete collection %s: %s", coll_name, e)
 
         await invalidate_cache_non_blocking()
@@ -331,7 +331,7 @@ async def clear_domain(domain: str, req: ClearDomainRequest):
         }
     except HTTPException:
         raise
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error("Failed to clear domain %s: %s", domain, e)
         raise HTTPException(status_code=500, detail=f"Failed to clear domain: {e}")
 
@@ -357,7 +357,7 @@ async def delete_single_artifact(artifact_id: str):
                 collection = chroma.get_collection(name=coll_name)
                 collection.delete(ids=chunk_ids)
                 chunks_removed = len(chunk_ids)
-            except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+            except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
                 logger.warning("Failed to clean ChromaDB chunks: %s", e)
 
         await invalidate_cache_non_blocking()
@@ -371,7 +371,7 @@ async def delete_single_artifact(artifact_id: str):
         )
     except HTTPException:
         raise
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error("Failed to delete artifact %s: %s", artifact_id[:8], e)
         raise HTTPException(status_code=500, detail=f"Failed to delete artifact: {e}")
 
@@ -397,7 +397,7 @@ async def kb_stats():
             try:
                 collection = chroma.get_collection(name=coll_name)
                 chunk_count = collection.count()
-            except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
+            except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
                 logger.warning("Failed to get chunk count for collection %s: %s", coll_name, exc)
             total_chunks += chunk_count
 
@@ -422,7 +422,7 @@ async def kb_stats():
             total_chunks=total_chunks,
             domains=domain_stats,
         )
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error("Failed to get KB stats: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to get KB stats: {e}")
 
@@ -505,7 +505,7 @@ async def find_duplicates(min_similarity: float = Query(0.85, ge=0.5, le=1.0)):
         groups.sort(key=lambda g: len(g.artifacts), reverse=True)
 
         return DuplicatesResponse(groups=groups, total_groups=len(groups))
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error("Failed to find duplicates: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to find duplicates: {e}")
 
@@ -533,14 +533,14 @@ async def merge_duplicates(req: MergeDuplicatesRequest):
                         try:
                             collection = chroma.get_collection(name=coll_name)
                             collection.delete(ids=chunk_ids)
-                        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+                        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
                             logger.warning("Failed to clean chunks for %s: %s", remove_id[:8], e)
-            except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+            except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
                 logger.warning("Failed to delete duplicate %s: %s", remove_id[:8], e)
 
         await invalidate_cache_non_blocking()
         return {"status": "ok", "merged": deleted_count}
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error("Failed to merge duplicates: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to merge duplicates: {e}")
 

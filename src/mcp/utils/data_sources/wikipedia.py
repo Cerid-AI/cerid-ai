@@ -44,6 +44,6 @@ class WikipediaSource(DataSource):
                             confidence=0.85,
                         ))
                 return results
-        except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
             logger.debug("Wikipedia query failed: %s", exc)
             return []

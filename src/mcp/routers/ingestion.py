@@ -92,7 +92,7 @@ async def ingest_endpoint(req: IngestRequest, request: Request):
     try:
         from utils.query_cache import invalidate_cache_non_blocking
         asyncio.get_running_loop().create_task(invalidate_cache_non_blocking())
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.debug(f"Cache invalidation failed (non-blocking): {e}")
     return result
 
@@ -113,7 +113,7 @@ async def ingest_file_endpoint(req: IngestFileRequest, request: Request):
                     tags=req.tags,
                 )
                 triage_result = triage_state.get("triage_result")
-            except (IngestionError, ValueError, OSError, RuntimeError) as e:
+            except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
                 logger.warning("AI triage failed (proceeding without): %s", e)
 
         async with _ingest_semaphore:
@@ -129,14 +129,14 @@ async def ingest_file_endpoint(req: IngestFileRequest, request: Request):
         try:
             from utils.query_cache import invalidate_all
             invalidate_all()
-        except (IngestionError, ValueError, OSError, RuntimeError) as e:
+        except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.debug(f"Cache invalidation failed (non-blocking): {e}")
         return result
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(f"Ingest file error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -164,7 +164,7 @@ async def ingest_batch_endpoint(req: BatchIngestRequest):
         try:
             from utils.query_cache import invalidate_all
             invalidate_all()
-        except (IngestionError, ValueError, OSError, RuntimeError) as e:
+        except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.debug(f"Cache invalidation failed (non-blocking): {e}")
 
         return result
@@ -172,7 +172,7 @@ async def ingest_batch_endpoint(req: BatchIngestRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:
         raise
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(f"Batch ingest error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -210,13 +210,13 @@ async def ingest_feedback_endpoint(req: FeedbackIngestRequest):
                 filename=filename,
                 conversation_id=req.conversation_id,
             )
-        except (IngestionError, ValueError, OSError, RuntimeError) as e:
+        except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.debug(f"Feedback audit log failed (non-blocking): {e}")
 
         try:
             from utils.query_cache import invalidate_all
             invalidate_all()
-        except (IngestionError, ValueError, OSError, RuntimeError) as e:
+        except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.debug(f"Cache invalidation failed (non-blocking): {e}")
 
         # Trigger hallucination check if enabled (async, non-blocking)
@@ -248,11 +248,11 @@ async def ingest_feedback_endpoint(req: FeedbackIngestRequest):
                     output_tokens=req.output_tokens,
                     latency_ms=req.latency_ms,
                 )
-            except (IngestionError, ValueError, OSError, RuntimeError) as e:
+            except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
                 logger.debug(f"Conversation metrics logging failed (non-blocking): {e}")
 
         return result
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(f"Feedback ingest error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -261,7 +261,7 @@ async def ingest_feedback_endpoint(req: FeedbackIngestRequest):
 async def ingest_log_endpoint(limit: int = Query(50, ge=1, le=500)):
     try:
         return cache.get_log(get_redis(), limit=limit)
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(f"Ingest log error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -322,7 +322,7 @@ async def ingest_webhook(payload: WebhookIngestPayload, request: Request):
         try:
             from utils.query_cache import invalidate_cache_non_blocking
             asyncio.get_running_loop().create_task(invalidate_cache_non_blocking())
-        except (IngestionError, ValueError, OSError, RuntimeError) as e:
+        except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.debug(f"Cache invalidation failed (non-blocking): {e}")
 
         return {
@@ -331,7 +331,7 @@ async def ingest_webhook(payload: WebhookIngestPayload, request: Request):
             "domain": result.get("domain", domain),
             "chunks": result.get("chunks", 0),
         }
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(f"Webhook ingest error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -384,7 +384,7 @@ async def ingest_clipboard():
         try:
             from utils.query_cache import invalidate_cache_non_blocking
             asyncio.get_running_loop().create_task(invalidate_cache_non_blocking())
-        except (IngestionError, ValueError, OSError, RuntimeError) as e:
+        except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.debug(f"Cache invalidation failed (non-blocking): {e}")
 
         return {
@@ -395,7 +395,7 @@ async def ingest_clipboard():
             "source": "clipboard",
             "length": len(text),
         }
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(f"Clipboard ingest error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -424,7 +424,7 @@ async def clipboard_status():
             "last_heartbeat": None,
             "enabled": clipboard_enabled,
         }
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(f"Clipboard status error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 

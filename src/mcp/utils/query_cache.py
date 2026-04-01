@@ -36,7 +36,7 @@ def get_cached(query: str, domain: str, top_k: int, context_hint: str = "") -> d
         if raw:
             logger.debug(f"Cache hit: {key[:20]}")
             return json.loads(raw)
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning(f"Cache read failed: {e}")
     return None
 
@@ -48,7 +48,7 @@ def set_cached(
     try:
         key = _cache_key(query, domain, top_k, context_hint)
         get_redis().setex(key, ttl, json.dumps(result, default=str))
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning(f"Cache write failed: {e}")
 
 
@@ -70,7 +70,7 @@ def invalidate_all() -> None:
                 break
         if count:
             logger.info(f"Invalidated {count} cached queries")
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning(f"Cache invalidation failed: {e}")
 
 

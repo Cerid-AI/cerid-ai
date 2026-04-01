@@ -109,7 +109,7 @@ def _graph_retrieve_sync(
                     "hop_distance": hop_dist,
                     "graph_score": graph_score,
                 })
-    except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.warning("Graph RAG query failed: %s", exc)
         return []
 
@@ -151,7 +151,7 @@ def _graph_retrieve_sync(
                     "hop_distance": 0,
                     "graph_score": round(quality, 4),
                 })
-    except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.warning("Graph RAG seed query failed: %s", exc)
 
     # Sort by graph_score descending
@@ -177,6 +177,6 @@ async def graph_retrieve(
             asyncio.to_thread,
             _graph_retrieve_sync, driver, entities, max_hops, max_results,
         )
-    except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.warning("Graph RAG retrieval failed (circuit breaker): %s", exc)
         return []

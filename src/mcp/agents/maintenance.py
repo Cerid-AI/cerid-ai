@@ -49,7 +49,7 @@ def check_system_health(
         health["data"]["collections"] = len(collections)
         health["data"]["total_chunks"] = total_chunks
         health["data"]["collection_sizes"] = collection_sizes
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         health["services"]["chromadb"] = f"error: {e}"
 
     try:
@@ -69,7 +69,7 @@ def check_system_health(
         health["services"]["neo4j"] = "connected"
         health["data"]["artifacts"] = artifact_count
         health["data"]["domains"] = domain_count
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         health["services"]["neo4j"] = f"error: {e}"
 
     try:
@@ -77,7 +77,7 @@ def check_system_health(
         log_size = redis_client.llen(config.REDIS_INGEST_LOG)
         health["services"]["redis"] = "connected"
         health["data"]["audit_log_entries"] = log_size
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         health["services"]["redis"] = f"error: {e}"
 
     # Bifrost check is async-only; callers in async context (maintain())
@@ -104,7 +104,7 @@ def _check_bifrost_sync() -> str:
             if resp.status == 200:
                 return "connected"
             return f"status {resp.status}"
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         return f"unreachable: {e}"
 
 
@@ -117,7 +117,7 @@ async def check_bifrost_health() -> str:
             if resp.status_code == 200:
                 return "connected"
             return f"status {resp.status_code}"
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         return f"unreachable: {e}"
 
 
@@ -159,7 +159,7 @@ def purge_artifacts(
                 try:
                     collection = chroma_client.get_collection(name=config.collection_name(domain))
                     collection.delete(ids=chunk_ids)
-                except (CeridError, ValueError, OSError, RuntimeError) as e:
+                except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
                     logger.warning(f"Failed to delete chunks for {artifact_id}: {e}")
 
             with neo4j_driver.session() as session:
@@ -184,10 +184,10 @@ def purge_artifacts(
                         domain=domain,
                         filename=filename,
                     )
-                except (CeridError, ValueError, OSError, RuntimeError) as e:
+                except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
                     logger.debug(f"Failed to log maintenance purge event: {e}")
 
-        except (CeridError, ValueError, OSError, RuntimeError) as e:
+        except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             errors.append({"id": artifact_id, "error": str(e)})
 
     return {
@@ -323,7 +323,7 @@ async def maintain(
                 "auto_purge": auto_purge,
             },
         )
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.debug(f"Failed to log maintenance event: {e}")
 
     return report

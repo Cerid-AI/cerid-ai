@@ -38,7 +38,7 @@ async def _record_metric_async(name: str, value: float, tags: dict[str, str] | N
         from utils.metrics import get_metrics_collector
         collector = get_metrics_collector()
         collector.record_metric(name, value, tags)
-    except (CeridError, ValueError, OSError, RuntimeError) as exc:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.debug("Metrics recording failed (non-critical): %s", exc)
 
 

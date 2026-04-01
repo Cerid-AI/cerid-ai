@@ -113,7 +113,7 @@ async def upload_file_endpoint(
         raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:
         raise
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(f"Upload ingest error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:

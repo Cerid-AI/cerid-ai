@@ -344,7 +344,7 @@ class TestStreamingTimeouts:
             return []
 
         with (
-            patch("agents.query_agent.lightweight_kb_query", side_effect=_mock_lightweight_kb_query),
+            patch("agents.decomposer.lightweight_kb_query", side_effect=_mock_lightweight_kb_query),
             patch("agents.hallucination.verification._verify_claim_externally", side_effect=_mock_external),
             patch("agents.hallucination.verification._query_memories", side_effect=_mock_memories),
         ):

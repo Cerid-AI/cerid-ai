@@ -361,7 +361,7 @@ async def _evaluate_condition(expression: str, input_data: dict[str, Any]) -> bo
                ">": lambda a, b: a > b, "<": lambda a, b: a < b,
                ">=": lambda a, b: a >= b, "<=": lambda a, b: a <= b}
         return ops[op](actual, val)
-    except (CeridError, ValueError, OSError, RuntimeError):
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         return True
 
 

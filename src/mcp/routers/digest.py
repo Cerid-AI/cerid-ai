@@ -60,7 +60,7 @@ async def digest_endpoint(hours: int = Query(24, ge=1, le=168)):
             rec = rel_result.single()
             if rec:
                 new_relationships = rec["cnt"]
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning(f"Digest Neo4j query failed: {e}")
 
     # Domain distribution of recent artifacts
@@ -71,7 +71,7 @@ async def digest_endpoint(hours: int = Query(24, ge=1, le=168)):
     # System health
     try:
         system_health = health_check()
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.debug(f"Health check failed during digest: {e}")
         system_health = {"status": "unknown"}
 
@@ -81,7 +81,7 @@ async def digest_endpoint(hours: int = Query(24, ge=1, le=168)):
         log = get_log(get_redis(), limit=20)
         if isinstance(log, list):
             recent_events = log
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.debug(f"Redis activity log unavailable for digest: {e}")
 
     return {

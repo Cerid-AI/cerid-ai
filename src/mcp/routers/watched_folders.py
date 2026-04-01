@@ -244,7 +244,7 @@ async def scan_watched_folder(folder_id: str, background_tasks: BackgroundTasks)
                     skipped += 1
                 elif result.status == "error":
                     errored += 1
-        except (IngestionError, ValueError, OSError, RuntimeError) as exc:
+        except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
             logger.error("Scan failed for folder %s: %s", folder_id, exc)
             errored += 1
 

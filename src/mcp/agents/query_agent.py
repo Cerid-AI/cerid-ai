@@ -103,7 +103,7 @@ async def agent_query(
                         "total_results": 0, "token_budget_used": 0,
                         "graph_results": 0, "results": [],
                         "degradation_tier": "offline"}
-    except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.debug("Degradation check skipped: %s", exc)
 
     from config.features import (
@@ -129,7 +129,7 @@ async def agent_query(
         elif _tier == DegradationTier.DIRECT:
             _degradation_skip_retrieval = True
             logger.info("Degradation tier: DIRECT — skipping retrieval")
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning("Degradation tier check failed: %s", e)
 
     # Semantic cache early-return — check before any retrieval work
@@ -146,7 +146,7 @@ async def agent_query(
                     if cached is not None:
                         cached["semantic_cache_hit"] = True
                         return cached
-            except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+            except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
                 logger.debug("Semantic cache lookup skipped: %s", e)
 
     # Degradation: CACHED tier — if semantic cache missed, return empty
@@ -188,7 +188,7 @@ async def agent_query(
                     "total_results": 0, "token_budget_used": 0,
                     "graph_results": 0, "results": [],
                     "intent": _query_intent, "rag_skipped": True}
-    except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.debug("Smart Auto-RAG classification skipped: %s", exc)
         _query_intent = "factual"
         _rag_config = {"inject": True, "top_k": 10, "decompose": True, "rerank": True}
@@ -274,7 +274,7 @@ async def agent_query(
                     logger.debug("Retrieval cache hit (top_k=%d)", effective_top_k)
                 else:
                     logger.debug("Retrieval cache miss")
-            except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
+            except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
                 logger.debug("Retrieval cache lookup failed: %s", exc)
 
         if not _skip_normal_retrieval and ENABLE_QUERY_DECOMPOSITION:
@@ -308,7 +308,7 @@ async def agent_query(
                 retrieval_cache.set(
                     _query_embedding.tolist(), effective_top_k, results,
                 )
-            except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
+            except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
                 logger.debug("Retrieval cache store failed: %s", exc)
 
     # Search adjacent domains at reduced weight when specific domains are requested.
@@ -349,7 +349,7 @@ async def agent_query(
                     if _hyde_results:
                         results = reciprocal_rank_fusion(results, _hyde_results)
                         logger.debug("HyDE fallback activated, merged %d results", len(results))
-        except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
             logger.debug("HyDE fallback skipped: %s", exc)
 
     results = deduplicate_results(results)
@@ -359,7 +359,7 @@ async def agent_query(
         if ENABLE_PARENT_CHILD_RETRIEVAL and chroma_client and results:
             try:
                 results = _resolve_parent_chunks(results, chroma_client)
-            except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
+            except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
                 logger.warning("Parent-child lookup failed: %s", exc)
 
     with timer.step("graph_expansion"):
@@ -397,7 +397,7 @@ async def agent_query(
                     results.extend(_graph_rag_results)
                     results = deduplicate_results(results)
                     logger.debug("Graph RAG added %d results", _graph_rag_count)
-            except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
+            except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
                 logger.warning("Graph RAG retrieval failed: %s", exc)
 
     # Enrich with external data sources for factual/analytical queries
@@ -418,7 +418,7 @@ async def agent_query(
                         "source_url": er.get("source_url", ""),
                     })
                 logger.debug("Added %d external data source results", len(_ext_results[:3]))
-    except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.debug("External data source enrichment skipped: %s", exc)
 
     from utils.temporal import is_within_window, parse_temporal_intent, recency_score
@@ -464,7 +464,7 @@ async def agent_query(
                     results = late_interaction_rerank(
                         results=results, query=query, embed_fn=_ef,
                     )
-            except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+            except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
                 logger.warning("Late interaction scoring failed: %s", e)
 
     # Step 5.5: Quality boost + summary enrichment — single Neo4j round-trip
@@ -478,7 +478,7 @@ async def agent_query(
             try:
                 from utils.diversity import mmr_reorder
                 results = mmr_reorder(results=results, query=query)
-            except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+            except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
                 logger.warning("MMR diversity reordering failed: %s", e)
 
     # Step 5.7: Filter low-relevance results below minimum threshold
@@ -500,7 +500,7 @@ async def agent_query(
                     results=results, query=query, max_chars=ctx_budget,
                 )
                 char_count = len(context)
-            except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+            except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
                 logger.warning("Intelligent assembly failed, falling back: %s", e)
                 context, sources, char_count = assemble_context(results, max_chars=ctx_budget)
         else:
@@ -526,7 +526,7 @@ async def agent_query(
                     "graph_results": graph_results_added,
                 },
             )
-        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.warning(f"Failed to log query: {e}")
 
     emit_agent_event(
@@ -556,7 +556,7 @@ async def agent_query(
         try:
             from utils.semantic_cache import cache_store
             cache_store(query, _query_embedding, result_dict, redis_client)
-        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.debug("Semantic cache store failed: %s", e)
 
     return result_dict
@@ -628,7 +628,7 @@ def _resolve_parent_chunks(
                         "parent_chunk_id": fid,
                         "parent_resolved": True,
                     })
-        except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
             logger.debug("Parent chunk fetch failed for domain %s: %s", domain, exc)
             # Fall back to original child results for this domain
             for pid in pids:
@@ -735,7 +735,7 @@ async def _graph_rag_retrieve(
                             **{k: v for k, v in meta.items()
                                if k in ("ingested_at", "sub_category", "tags_json")},
                         })
-                except (RetrievalError, ValueError, OSError, RuntimeError):
+                except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
                     # Chunk not found — use summary as fallback content
                     if item.get("summary"):
                         enriched.append({
@@ -748,7 +748,7 @@ async def _graph_rag_retrieve(
                             "graph_sourced": True,
                             "graph_score": item["graph_score"],
                         })
-        except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
             logger.debug("Graph RAG ChromaDB lookup failed for domain %s: %s", domain, exc)
 
     return enriched

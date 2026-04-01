@@ -300,7 +300,7 @@ def estimate_synopsis_run(
     for domain in target_domains:
         try:
             artifacts = list_artifacts(neo4j_driver, domain=domain, limit=max_artifacts)
-        except (RetrievalError, ValueError, OSError, RuntimeError):
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
             continue
         candidates = [
             a for a in artifacts
@@ -377,7 +377,7 @@ async def curate(
     for domain in target_domains:
         try:
             artifacts = list_artifacts(neo4j_driver, domain=domain, limit=max_artifacts)
-        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.warning(f"Failed to list artifacts for {domain}: {e}")
             continue
 
@@ -400,7 +400,7 @@ async def curate(
     if all_scores:
         try:
             updated = _store_quality_scores(neo4j_driver, all_scores)
-        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.error(f"Failed to store quality scores: {e}")
 
     # Synopsis generation pass
@@ -424,7 +424,7 @@ async def curate(
                 collection = chroma_client.get_collection(
                     name=config.collection_name(domain)
                 )
-            except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+            except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
                 logger.warning(f"Cannot access collection for {domain}: {e}")
                 continue
 
@@ -436,7 +436,7 @@ async def curate(
                     if not docs or not docs[0]:
                         continue
                     text = docs[0]
-                except (RetrievalError, ValueError, OSError, RuntimeError):
+                except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
                     continue
 
                 synopsis = await _generate_synopsis(
@@ -451,7 +451,7 @@ async def curate(
                     try:
                         update_artifact_summary(neo4j_driver, artifact["id"], synopsis)
                         synopses_generated += 1
-                    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+                    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
                         logger.warning(f"Failed to store synopsis for {artifact['id'][:8]}: {e}")
                 # Adaptive throttle based on model rate limits
                 await asyncio.sleep(float(throttle_delay))

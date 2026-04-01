@@ -77,7 +77,7 @@ def check_semantic_duplicate(
             )
             return match
 
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning(f"Semantic dedup check failed (non-blocking): {e}")
 
     return None

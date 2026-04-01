@@ -34,7 +34,7 @@ def migrate_chromadb(chroma_client: chromadb.ClientAPI, *, dry_run: bool = False
     coll_name = config.collection_name("conversations")
     try:
         collection = chroma_client.get_collection(name=coll_name)
-    except (CeridError, ValueError, OSError, RuntimeError):
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         logger.warning("Collection %s not found — nothing to migrate", coll_name)
         return 0
 

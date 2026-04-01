@@ -40,7 +40,7 @@ def parse_eml(file_path: str) -> dict[str, Any]:
 
     try:
         msg = message_from_bytes(raw, policy=email.policy.default)
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         raise ValueError(
             f"Failed to parse email '{path.name}': {e}. "
             f"File may not be a valid .eml file."
@@ -112,7 +112,7 @@ def parse_mbox(file_path: str) -> dict[str, Any]:
     path = Path(file_path)
     try:
         mbox = mailbox.mbox(file_path)
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         raise ValueError(
             f"Failed to parse mbox '{path.name}': {e}. "
             f"File may not be a valid .mbox file."

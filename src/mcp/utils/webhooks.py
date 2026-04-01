@@ -67,7 +67,7 @@ async def fire_event(
                     logger.debug(f"Webhook delivered: {event_type} -> {url} ({resp.status_code})")
                 else:
                     logger.warning(f"Webhook failed: {event_type} -> {url} ({resp.status_code})")
-            except (CeridError, ValueError, OSError, RuntimeError) as e:
+            except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
                 logger.warning(f"Webhook error: {event_type} -> {url}: {e}")
 
     return delivered

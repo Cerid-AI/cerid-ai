@@ -39,6 +39,6 @@ class WolframAlphaSource(DataSource):
                         confidence=0.95,
                     )]
                 return []
-        except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
             logger.debug("Wolfram Alpha query failed: %s", exc)
             return []

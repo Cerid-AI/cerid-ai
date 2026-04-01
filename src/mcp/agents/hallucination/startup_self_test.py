@@ -68,7 +68,7 @@ async def run_verification_self_test(redis_client) -> dict:
         result["status"] = "fail"
         result["extraction_method"] = "timeout"
         logger.warning("Verification self-test timed out after 30s")
-    except (VerificationError, ValueError, OSError, RuntimeError) as exc:
+    except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         result["status"] = "fail"
         result["extraction_method"] = "error"
         logger.warning("Verification self-test extraction error: %s", exc)
@@ -80,7 +80,7 @@ async def run_verification_self_test(redis_client) -> dict:
     try:
         if redis_client is not None:
             redis_client.set(_SELF_TEST_KEY, json.dumps(result), ex=86400)
-    except (VerificationError, ValueError, OSError, RuntimeError) as exc:
+    except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.debug("Failed to persist self-test result to Redis: %s", exc)
 
     return result
@@ -93,7 +93,7 @@ async def record_verification_failure(redis_client, failure_type: str) -> int:
         count = redis_client.incr(key)
         redis_client.expire(key, _FAILURE_TTL)
         return count
-    except (VerificationError, ValueError, OSError, RuntimeError):
+    except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         return -1
 
 
@@ -102,7 +102,7 @@ async def reset_verification_failures(redis_client, failure_type: str) -> None:
     key = f"{_FAILURE_KEY_PREFIX}{failure_type}"
     try:
         redis_client.delete(key)
-    except (VerificationError, ValueError, OSError, RuntimeError):
+    except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         pass  # Self-test: graceful failure expected
 
 
@@ -116,7 +116,7 @@ def get_failure_counts_sync(redis_client) -> dict[str, int]:
             val = redis_client.get(key)
             if val is not None:
                 counts[ft] = int(val)
-        except (VerificationError, ValueError, OSError, RuntimeError):
+        except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
             pass  # Self-test: graceful failure expected
     return counts
 
@@ -127,6 +127,6 @@ def get_self_test_status_sync(redis_client) -> dict | None:
         raw = redis_client.get(_SELF_TEST_KEY)
         if raw is not None:
             return json.loads(raw)
-    except (VerificationError, ValueError, OSError, RuntimeError):
+    except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         pass  # Self-test: graceful failure expected
     return None

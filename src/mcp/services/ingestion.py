@@ -80,7 +80,7 @@ def _rollback_chromadb(collection, chunk_ids: list[str]) -> None:
         logger.warning(
             "Rolled back %d ChromaDB chunks after graph failure", len(chunk_ids),
         )
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(
             "CRITICAL: ChromaDB rollback failed for %d chunks — orphaned data: %s",
             len(chunk_ids), e,
@@ -99,7 +99,7 @@ def _rollback_bm25(domain: str, chunk_ids: list[str]) -> None:
                 removed,
                 domain,
             )
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(
             "CRITICAL: BM25 rollback failed for %d chunks in '%s' — orphaned index entries: %s",
             len(chunk_ids),
@@ -132,7 +132,7 @@ def _push_to_dlq_sync(payload: dict, error: str, attempt: int = 1) -> None:
         logger.warning(
             "DLQ push (sync): attempt=%d error=%s", attempt, str(error)[:120]
         )
-    except (IngestionError, ValueError, OSError, RuntimeError) as dlq_err:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as dlq_err:
         logger.error("Failed to push to DLQ: %s", dlq_err)
 
 
@@ -153,7 +153,7 @@ def _check_duplicate(content_hash: str, domain: str) -> dict | None:
                         "filename": meta.get("filename", "unknown"),
                         "domain": meta.get("domain", domain),
                     }
-            except (IngestionError, ValueError, OSError, RuntimeError) as e:
+            except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
                 logger.debug(f"ChromaDB dedup fallback failed: {e}")
             return None
         with driver.session() as session:
@@ -169,7 +169,7 @@ def _check_duplicate(content_hash: str, domain: str) -> dict | None:
                     "filename": record["filename"],
                     "domain": record["domain"],
                 }
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning(f"Dedup check failed (proceeding with ingest): {e}")
     return None
 
@@ -188,7 +188,7 @@ def _reingest_artifact(
     if old_chunk_ids:
         try:
             collection.delete(ids=old_chunk_ids)
-        except (IngestionError, ValueError, OSError, RuntimeError) as e:
+        except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.warning(f"Failed to delete old chunks during re-ingest: {e}")
 
     # Create new chunks with contextual header
@@ -211,7 +211,7 @@ def _reingest_artifact(
                 content, max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP,
                 context_header=ctx_header,
             )
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning("Parent-child chunking failed (re-ingest), falling back: %s", e)
         _pc_chunks_reingest = None
         chunks = chunk_text(
@@ -224,7 +224,7 @@ def _reingest_artifact(
         try:
             from utils.contextual import contextualize_chunks
             chunks = contextualize_chunks(chunks, content, metadata)
-        except (IngestionError, ValueError, OSError, RuntimeError) as e:
+        except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.warning("Contextual enrichment skipped (re-ingest): %s", e)
 
     base_meta = {"domain": domain, "artifact_id": artifact_id, "ingested_at": utcnow_iso()}
@@ -248,7 +248,7 @@ def _reingest_artifact(
     try:
         from utils.bm25 import index_chunks
         index_chunks(domain, chunk_ids, chunks)
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.debug(f"BM25 indexing failed during re-ingest (non-blocking): {e}")
 
     # Compute quality_score for re-ingested content
@@ -291,7 +291,7 @@ def _reingest_artifact(
             )
         else:
             logger.debug("Lightweight mode — skipping Neo4j artifact update for re-ingest")
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(f"Failed to update artifact in Neo4j during re-ingest: {e}")
 
     logger.info(f"Re-ingested artifact {artifact_id[:8]} ({base_meta.get('filename', '?')})")
@@ -396,7 +396,7 @@ def ingest_content(
             domain=domain,
             chroma_client=get_chroma(),
         )
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.debug(f"Semantic dedup check skipped: {e}")
 
     # Re-ingestion check: same filename, different content
@@ -408,7 +408,7 @@ def ingest_content(
                 prev = graph.find_artifact_by_filename(_neo4j_driver, fname, domain)
                 if prev and prev["content_hash"] != content_hash:
                     return _reingest_artifact(prev, content, domain, metadata, content_hash)
-        except (IngestionError, ValueError, OSError, RuntimeError) as e:
+        except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.warning(f"Re-ingest check failed (proceeding as new): {e}")
 
     fname_for_header = (metadata or {}).get("filename", "")
@@ -432,7 +432,7 @@ def ingest_content(
                 content, max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP,
                 context_header=ctx_header,
             )
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning("Parent-child chunking failed, falling back to standard: %s", e)
         _pc_chunks = None
         chunks = chunk_text(
@@ -445,7 +445,7 @@ def ingest_content(
         try:
             from utils.contextual import contextualize_chunks
             chunks = contextualize_chunks(chunks, content, metadata)
-        except (IngestionError, ValueError, OSError, RuntimeError) as e:
+        except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.warning("Contextual enrichment skipped: %s", e)
 
     ingested_at = utcnow_iso()
@@ -514,7 +514,7 @@ def ingest_content(
     try:
         from utils.bm25 import index_chunks
         index_chunks(domain, chunk_ids, chunks)
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning(f"BM25 indexing failed (non-blocking): {e}")
 
     # Compute quality_score using weighted 4-dimension formula
@@ -555,7 +555,7 @@ def ingest_content(
                 client_source=base_meta.get("client_source", ""),
             )
             artifact_created = True
-        except (IngestionError, ValueError, OSError, RuntimeError) as e:
+        except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             err_msg = str(e).lower()
             if "constraint" in err_msg and "content_hash" in err_msg:
                 logger.info(f"Concurrent duplicate detected via constraint: {base_meta.get('filename', '?')}")
@@ -601,7 +601,7 @@ def ingest_content(
                 ids=chunk_ids[:1],
                 metadatas=[{**chunk_metadatas[0], "content_hash": content_hash}],
             )
-        except (IngestionError, ValueError, OSError, RuntimeError) as e:
+        except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.debug(f"Content hash metadata update failed: {e}")
 
     try:
@@ -612,7 +612,7 @@ def ingest_content(
             domain=domain,
             filename=base_meta.get("filename", "text_input"),
         )
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(f"Redis log failed: {e}")
 
     # Discover and create relationships with existing artifacts
@@ -627,7 +627,7 @@ def ingest_content(
                 keywords_json=base_meta.get("keywords_json", "[]"),
                 content=content[:5000],  # limit content scan for performance
             )
-        except (IngestionError, ValueError, OSError, RuntimeError) as e:
+        except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.warning(f"Relationship discovery failed (non-blocking): {e}")
 
     # Fire webhook notification
@@ -638,7 +638,7 @@ def ingest_content(
         )
     except RuntimeError:
         pass  # no running loop (e.g. sync context) — webhook skipped
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.debug(f"Webhook notification failed (non-blocking): {e}")
 
     # Surface related artifacts in response
@@ -653,7 +653,7 @@ def ingest_content(
                  "relationship_type": r.get("relationship_type", "")}
                 for r in found
             ]
-        except (IngestionError, ValueError, OSError, RuntimeError) as e:
+        except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.debug(f"Related artifacts lookup failed (non-blocking): {e}")
 
     result = {
@@ -794,7 +794,7 @@ async def ingest_batch(
                     )
                 else:
                     return {"status": "error", "error": "Item must have 'file_path' or 'content'"}
-            except (IngestionError, ValueError, OSError, RuntimeError) as e:
+            except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
                 logger.error("Batch ingest item failed: %s", e)
                 return {
                     "status": "error",

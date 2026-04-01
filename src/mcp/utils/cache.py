@@ -59,7 +59,7 @@ def log_event(
         pipe.ltrim(config.REDIS_INGEST_LOG, 0, config.REDIS_LOG_MAX - 1)
         pipe.expire(config.REDIS_INGEST_LOG, 86400 * 30)  # 30-day TTL
         pipe.execute()
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(f"Failed to log event to Redis: {e}")
 
 
@@ -68,7 +68,7 @@ def get_log(redis_client, limit: int = 50) -> list[dict[str, Any]]:
     try:
         entries = redis_client.lrange(config.REDIS_INGEST_LOG, 0, limit - 1)
         return [json.loads(e) for e in entries]
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(f"Failed to read ingest log: {e}")
         return []
 
@@ -101,7 +101,7 @@ def log_conversation_metrics(
     try:
         redis_client.rpush(key, entry)
         redis_client.expire(key, REDIS_CONV_METRICS_TTL)
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning(f"Failed to log conversation metrics: {e}")
 
 
@@ -150,7 +150,7 @@ def log_verification_metrics(
     try:
         redis_client.rpush(REDIS_VERIFICATION_METRICS_KEY, entry)
         redis_client.expire(REDIS_VERIFICATION_METRICS_KEY, REDIS_VERIFICATION_METRICS_TTL)
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning(f"Failed to log verification metrics: {e}")
 
 
@@ -172,7 +172,7 @@ def log_claim_feedback(
     try:
         redis_client.rpush(REDIS_VERIFICATION_FEEDBACK_KEY, entry)
         redis_client.expire(REDIS_VERIFICATION_FEEDBACK_KEY, REDIS_VERIFICATION_METRICS_TTL)
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning(f"Failed to log claim feedback: {e}")
 
 
@@ -211,5 +211,5 @@ def log_verification_error(
         # Trim to keep only the most recent errors
         redis_client.ltrim(REDIS_VERIFICATION_ERRORS_KEY, -REDIS_VERIFICATION_ERRORS_MAX, -1)
         redis_client.expire(REDIS_VERIFICATION_ERRORS_KEY, REDIS_VERIFICATION_METRICS_TTL)
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning(f"Failed to log verification error: {e}")

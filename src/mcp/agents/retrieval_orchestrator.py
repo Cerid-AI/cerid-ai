@@ -99,7 +99,7 @@ async def orchestrated_query(
             neo4j_driver=neo4j_driver,
             **kwargs,
         )
-    except (RetrievalError, ValueError, OSError, RuntimeError) as kb_exc:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as kb_exc:
         logger.error("KB query failed: %s", kb_exc)
         kb_result = {"results": [], "context": "", "strategy": "error"}
         source_status["kb"] = "error"
@@ -207,7 +207,7 @@ async def _recall_with_timeout(
     except asyncio.TimeoutError:
         logger.warning("Memory recall timed out after %dms", timeout_ms)
         return []
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning("Memory recall failed: %s", e)
         return []
 

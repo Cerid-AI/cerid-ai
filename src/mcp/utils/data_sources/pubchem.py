@@ -48,6 +48,6 @@ class PubChemSource(DataSource):
                         ))
 
                 return results
-        except (RetrievalError, ValueError, OSError, RuntimeError) as exc:
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
             logger.debug("PubChem query failed: %s", exc)
             return []

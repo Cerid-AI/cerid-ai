@@ -257,7 +257,7 @@ class OpenRouterSearchProvider(WebSearchProvider):
                 max_tokens=1500,
                 timeout=25.0,
             )
-        except (RetrievalError, ValueError, OSError, RuntimeError):
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
             _logger.warning("OpenRouter online search failed", exc_info=True)
             return []
 
@@ -338,7 +338,7 @@ async def search_and_verify(
 
     try:
         raw_results = await provider.search(query, max_results=effective_max)
-    except (RetrievalError, ValueError, OSError, RuntimeError):
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         _logger.exception("Web search failed (provider=%s)", provider.name)
         return {
             "query": query,
@@ -394,7 +394,7 @@ async def search_and_verify(
                 redis_client=redis_client,
             )
             verified_results = enhanced.get("results", results_dicts)
-        except (RetrievalError, ValueError, OSError, RuntimeError):
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
             _logger.warning("Self-RAG verification failed", exc_info=True)
 
     # ── Optional auto-ingest ──────────────────────────────────────────────
@@ -412,7 +412,7 @@ async def search_and_verify(
                 if result.get("status") == "ok":
                     ingested_count += 1
             _logger.info("Auto-ingested %d web search results", ingested_count)
-        except (RetrievalError, ValueError, OSError, RuntimeError):
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
             _logger.warning("Auto-ingest of web results failed", exc_info=True)
 
     return {

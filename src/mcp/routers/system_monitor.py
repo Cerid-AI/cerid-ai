@@ -65,7 +65,7 @@ def _chromadb_metrics() -> dict:
         for coll in collections:
             try:
                 total_chunks += coll.count()
-            except (CeridError, ValueError, OSError, RuntimeError):
+            except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
                 pass  # Collection count: skip unavailable collections
         # Disk size: ChromaDB persist directory inside the container
         chroma_dir = os.getenv("CHROMA_PERSIST_DIR", "/chroma/chroma")
@@ -75,7 +75,7 @@ def _chromadb_metrics() -> dict:
             "collections": len(collections),
             "chunks": total_chunks,
         }
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning("ChromaDB metrics unavailable: %s", e)
         return {"disk_mb": 0, "collections": 0, "chunks": 0, "error": str(e)}
 
@@ -90,7 +90,7 @@ def _neo4j_metrics() -> dict:
             nodes = session.run("MATCH (n) RETURN count(n) AS c").single()["c"]
             rels = session.run("MATCH ()-[r]-() RETURN count(r) AS c").single()["c"]
         return {"disk_mb": 0, "nodes": nodes, "relationships": rels}
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning("Neo4j metrics unavailable: %s", e)
         return {"disk_mb": 0, "nodes": 0, "relationships": 0, "error": str(e)}
 
@@ -104,7 +104,7 @@ def _redis_metrics() -> dict:
         peak = round(info.get("used_memory_peak", 0) / (1024 * 1024), 2)
         keys = r.dbsize()
         return {"memory_mb": used, "peak_mb": peak, "keys": keys}
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning("Redis metrics unavailable: %s", e)
         return {"memory_mb": 0, "peak_mb": 0, "keys": 0, "error": str(e)}
 
@@ -133,7 +133,7 @@ def get_storage_metrics():
         cached = r.get(_STORAGE_CACHE_KEY)
         if cached:
             return json.loads(cached)
-    except (CeridError, ValueError, OSError, RuntimeError):
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         pass  # Storage cache: compute fresh on miss
 
     chromadb = _chromadb_metrics()
@@ -172,7 +172,7 @@ def get_storage_metrics():
     try:
         r = get_redis()
         r.setex(_STORAGE_CACHE_KEY, _STORAGE_CACHE_TTL, json.dumps(result))
-    except (CeridError, ValueError, OSError, RuntimeError):
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         pass  # Storage cache: best-effort write
 
     return result
@@ -196,7 +196,7 @@ def get_ingest_history(
             if entries and entries[0][0] == offset:
                 entries = entries[1:]
             entries = entries[:limit]
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning("Ingest history unavailable: %s", e)
         return {"items": [], "total": 0, "next_cursor": None, "error": str(e)}
 
@@ -216,7 +216,7 @@ def get_ingest_history(
     # Total count in stream
     try:
         total = r.xlen(INGEST_HISTORY_STREAM)
-    except (CeridError, ValueError, OSError, RuntimeError):
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         total = len(items)
 
     next_cursor = items[-1]["id"] if len(items) == limit else None
@@ -263,5 +263,5 @@ def record_ingest_event(
         # Trim old entries: keep last N days worth or max 10k entries
         retention_ms = INGEST_HISTORY_RETENTION_DAYS * 86400 * 1000
         r.xtrim(INGEST_HISTORY_STREAM, minid=f"{int(time.time() * 1000) - retention_ms}-0")
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.debug("Failed to record ingest event: %s", e)

@@ -275,7 +275,7 @@ async def ai_categorize(
             "summary": result.get("summary", ""),
         }
 
-    except (IngestionError, ValueError, OSError, RuntimeError) as e:
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(f"AI categorization failed: {e}")
         return {}
 

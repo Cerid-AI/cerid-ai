@@ -218,7 +218,7 @@ async def extract_and_store_memories(
                             action_label = "UPDATE"
                         elif resolution["action"] == "merge" and resolution.get("merged_text"):
                             effective_content = resolution["merged_text"]
-                except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+                except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
                     logger.debug("Phase 44 conflict detection failed: %s", e)
 
             convo_prefix = conversation_id[:8] if conversation_id else "unknown"
@@ -268,7 +268,7 @@ async def extract_and_store_memories(
                                 "consolidation_action": action_label,
                             },
                         )
-                    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+                    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
                         logger.debug(f"Failed to log memory extraction event: {e}")
 
                 if neo4j_driver and new_artifact_id:
@@ -281,7 +281,7 @@ async def extract_and_store_memories(
                                 memory_id=new_artifact_id,
                                 convo_id=conversation_id,
                             )
-                    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+                    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
                         logger.warning("Failed to create EXTRACTED_FROM relationship: %s", e)
 
             entry = {
@@ -294,7 +294,7 @@ async def extract_and_store_memories(
             if conflict_resolutions:
                 entry["conflict_resolutions"] = conflict_resolutions
             results.append(entry)
-        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.warning(f"Failed to store memory: {e}")
             results.append({
                 "memory_type": mem["memory_type"],
@@ -352,7 +352,7 @@ async def detect_memory_conflict(
             n_results=5,
             include=["documents", "metadatas", "distances"],
         )
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.debug("Conflict detection similarity search failed: %s", e)
         return []
 
@@ -542,7 +542,7 @@ async def recall_memories(
             n_results=top_k * 4,
             include=["documents", "metadatas", "distances"],
         )
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.debug("Memory recall vector search failed: %s", e)
         return []
 
@@ -567,7 +567,7 @@ async def recall_memories(
                 )
                 for record in records:
                     access_logs[record["id"]] = record["access_log"]
-        except (RetrievalError, ValueError, OSError, RuntimeError):
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
             pass  # Graceful fallback to raw access_count from ChromaDB
 
     now = utcnow()
@@ -683,7 +683,7 @@ async def recall_memories(
                     now=now_iso,
                     max_log=config.MEMORY_ACCESS_LOG_MAX,
                 )
-        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.debug("Failed to update memory access counts in Neo4j: %s", e)
 
     # Sync updated access counts back to ChromaDB
@@ -697,7 +697,7 @@ async def recall_memories(
                     ids=[mem["chunk_id"]],
                     metadatas=[{"access_count": str(new_count), "last_accessed": now_iso}],
                 )
-        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.debug("Failed to sync access counts to ChromaDB: %s", e)
 
     return top_results
@@ -736,7 +736,7 @@ async def archive_old_memories(
             "cutoff_date": cutoff,
             "archived_count": archived_count,
         }
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error("Memory archival failed: %s", e)
         return {
             "timestamp": utcnow_iso(),

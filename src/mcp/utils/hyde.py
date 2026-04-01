@@ -67,7 +67,7 @@ async def generate_hypothetical_document(
             logger.debug("HyDE generated hypothetical doc (%d chars)", len(result))
             return result.strip()
         return None
-    except (RetrievalError, ValueError, OSError, RuntimeError):
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         logger.debug("HyDE generation failed, falling back to original results", exc_info=True)
         return None
 
@@ -108,7 +108,7 @@ def reciprocal_rank_fusion(
             len(original_results), len(hyde_results), len(merged),
         )
         return merged
-    except (RetrievalError, ValueError, OSError, RuntimeError):
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         logger.debug("RRF merge failed, returning original results", exc_info=True)
         return list(original_results)
 

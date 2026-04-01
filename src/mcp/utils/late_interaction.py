@@ -103,7 +103,7 @@ def late_interaction_rerank(
 
     try:
         query_embeddings = embed_fn(query_windows)
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning("Failed to embed query windows: %s", e)
         return results
 
@@ -116,7 +116,7 @@ def late_interaction_rerank(
 
         try:
             doc_embeddings = embed_fn(doc_windows[:20])  # Cap windows for performance
-        except (RetrievalError, ValueError, OSError, RuntimeError):
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
             continue
 
         maxsim = compute_maxsim(query_embeddings, doc_embeddings)

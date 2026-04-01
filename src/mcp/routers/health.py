@@ -38,12 +38,12 @@ def health_check() -> dict:
     try:
         get_chroma()
         status["chromadb"] = "connected"
-    except (CeridError, ValueError, OSError, RuntimeError) as exc:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         status["chromadb"] = f"error: {exc}"
     try:
         get_redis()
         status["redis"] = "connected"
-    except (CeridError, ValueError, OSError, RuntimeError) as exc:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         status["redis"] = f"error: {exc}"
     try:
         driver = get_neo4j()
@@ -55,7 +55,7 @@ def health_check() -> dict:
             with driver.session() as session:
                 session.run("RETURN 1").consume()
             status["neo4j"] = "connected"
-    except (CeridError, ValueError, OSError, RuntimeError) as exc:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         status["neo4j"] = f"error: {exc}"
     # Circuit breaker states
     try:
@@ -75,7 +75,7 @@ def health_check() -> dict:
     try:
         redis_client = get_redis()
         credits_exhausted = redis_client.get("cerid:openrouter:credits_exhausted") == "1"
-    except (CeridError, ValueError, OSError, RuntimeError) as exc:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.debug("Redis credits_exhausted check failed: %s", exc)
 
     # Ollama status (when enabled)
@@ -89,7 +89,7 @@ def health_check() -> dict:
             resp = httpx.get(f"{ollama_url}/api/tags", timeout=1)
             models = [m.get("name", "") for m in resp.json().get("models", [])] if resp.status_code == 200 else []
             ollama_status = {"reachable": True, "models": len(models), "url": ollama_url}
-        except (CeridError, ValueError, OSError, RuntimeError) as exc:
+        except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
             logger.debug("Ollama health probe failed: %s", exc)
             ollama_status = {"reachable": False, "url": ollama_url}
 
@@ -173,27 +173,27 @@ def degradation_status():
         result["can_retrieve"] = tier_info.get("can_retrieve", True)
         result["can_verify"] = tier_info.get("can_verify", True)
         result["can_generate"] = tier_info.get("can_generate", True)
-    except (CeridError, ValueError, OSError, RuntimeError) as exc:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.warning("Degradation status unavailable: %s", exc)
         result["degradation_tier"] = "unknown"
     # Add feature tier
     try:
         from config.features import FEATURE_TIER
         result["feature_tier"] = FEATURE_TIER
-    except (CeridError, ValueError, OSError, RuntimeError) as exc:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.debug("Feature tier unavailable: %s", exc)
     # Add pipeline provider config
     try:
         from config.settings import PIPELINE_PROVIDERS
         result["pipeline_providers"] = PIPELINE_PROVIDERS
-    except (CeridError, ValueError, OSError, RuntimeError) as exc:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.debug("Pipeline providers unavailable: %s", exc)
     # Add internal LLM model info for status bar
     try:
         import config as _cfg
         result["internal_llm_provider"] = _cfg.INTERNAL_LLM_PROVIDER
         result["internal_llm_model"] = _cfg.INTERNAL_LLM_MODEL or _cfg.OLLAMA_DEFAULT_MODEL
-    except (CeridError, ValueError, OSError, RuntimeError) as exc:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.debug("Suppressed error: %s", exc)
     # Add verification pipeline status
     try:
@@ -206,7 +206,7 @@ def degradation_status():
             "self_test": get_self_test_status_sync(_redis),
             "consecutive_failures": get_failure_counts_sync(_redis),
         }
-    except (CeridError, ValueError, OSError, RuntimeError) as exc:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.debug("Verification pipeline status unavailable: %s", exc)
     return result
 

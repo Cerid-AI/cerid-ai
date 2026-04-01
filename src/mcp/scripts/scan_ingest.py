@@ -136,7 +136,7 @@ def ingest_via_api(host_path: str, domain: str, sub_category: str) -> dict:
     if ext in text_extensions:
         try:
             text = content.decode("utf-8", errors="replace")
-        except (CeridError, ValueError, OSError, RuntimeError):
+        except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
             text = content.decode("latin-1", errors="replace")
 
         resp = requests.post(

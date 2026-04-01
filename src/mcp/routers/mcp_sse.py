@@ -60,7 +60,7 @@ async def build_response(msg_id, method: str, params: dict) -> dict:
                 "id": msg_id,
                 "result": {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]},
             }
-        except (CeridError, ValueError, OSError, RuntimeError) as e:
+        except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.error(f"Tool call error {tool_name}: {e}")
             return {"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32000, "message": str(e)}}
     elif method == "ping":
@@ -165,7 +165,7 @@ async def mcp_messages(request: Request):
         if not body_text or body_text == "{}":
             return Response(status_code=202)
         msg = json.loads(body_text)
-    except (CeridError, ValueError, OSError, RuntimeError) as e:
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(f"[MCP] Parse error: {e}")
         return Response(status_code=400, content=str(e))
 

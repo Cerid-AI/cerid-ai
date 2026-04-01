@@ -332,7 +332,7 @@ async def _call_ollama_direct(
             )
             resp.raise_for_status()
             return resp.json().get("message", {}).get("content", "")
-    except (ProviderError, ValueError, OSError, RuntimeError) as e:
+    except (ProviderError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         _logger.warning("Ollama call failed (%s), falling back to OpenRouter", e)
         return await call_llm(messages, temperature=temperature, max_tokens=max_tokens)
 

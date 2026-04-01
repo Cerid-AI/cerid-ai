@@ -102,7 +102,7 @@ def recategorize(
             filename=artifact.get("filename", ""),
             extra={"old_domain": old_domain, "sub_category": sub_category},
         )
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(f"Redis log failed: {e}")
 
     return {
@@ -134,7 +134,7 @@ async def related_artifacts_endpoint(
         return graph.find_related_artifacts(
             driver, artifact_ids=[artifact_id], depth=depth, max_results=max_results
         )
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(f"Related artifacts error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -192,7 +192,7 @@ async def artifact_detail_endpoint(artifact_id: str):
         }
     except HTTPException:
         raise
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(f"Artifact detail error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -221,7 +221,7 @@ async def list_artifacts_endpoint(
             offset=offset,
             limit=limit,
         )
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(f"List artifacts error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -232,7 +232,7 @@ async def recategorize_endpoint(req: RecategorizeRequest):
         return recategorize(req.artifact_id, req.new_domain, req.sub_category, req.tags)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(f"Recategorize error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -298,7 +298,7 @@ async def artifact_feedback_endpoint(artifact_id: str, req: FeedbackRequest):
                     "new_score": round(new_score, 4),
                 },
             )
-        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.debug(f"Feedback Redis log failed: {e}")
 
         return {
@@ -310,6 +310,6 @@ async def artifact_feedback_endpoint(artifact_id: str, req: FeedbackRequest):
         }
     except HTTPException:
         raise
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(f"Artifact feedback error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

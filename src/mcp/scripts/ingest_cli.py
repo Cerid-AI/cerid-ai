@@ -141,7 +141,7 @@ def _ingest_one(
             result["status"] = "failed"
             try:
                 detail = resp.json().get("detail", resp.text[:200])
-            except (CeridError, ValueError, OSError, RuntimeError):
+            except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
                 detail = resp.text[:200]
             result["error"] = f"HTTP {resp.status_code}: {detail}"
             result["error_type"] = f"HTTP {resp.status_code}"

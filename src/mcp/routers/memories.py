@@ -134,7 +134,7 @@ async def list_memories(
 
     except HTTPException:
         raise
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(f"List memories error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -185,7 +185,7 @@ async def update_memory(memory_id: str, req: MemoryUpdateRequest):
 
     except HTTPException:
         raise
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(f"Update memory error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -239,14 +239,14 @@ async def delete_memory(memory_id: str):
                 domain="conversations",
                 filename=record["filename"] or "",
             )
-        except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.warning(f"Redis audit log failed for memory deletion: {e}")
 
         return {"status": "deleted", "memory_id": memory_id}
 
     except HTTPException:
         raise
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(f"Delete memory error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -308,6 +308,6 @@ async def extract_memories_endpoint(req: MemoryExtractRequest, request: Request)
             redis_client=get_redis(),
         )
 
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(f"Memory extraction error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -420,7 +420,7 @@ async def poll_feed(feed_config: dict[str, Any]) -> dict[str, Any]:
             _mark_seen(ehash)
             summary["new_entries"] += 1
             _logger.info("Ingested RSS entry: %s (feed=%s)", title[:80], feed_name)
-        except (CeridError, IngestionError, ValueError, OSError, RuntimeError) as exc:
+        except (CeridError, IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
             summary["errors"].append(f"Ingest failed for '{title}': {exc}")
             _logger.warning("RSS ingest failed: %s — %s", title[:80], exc)
 

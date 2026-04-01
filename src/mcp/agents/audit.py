@@ -226,7 +226,7 @@ def get_conversation_analytics(
             keys.append(key)
             if len(keys) >= limit:
                 break
-    except (VerificationError, ValueError, OSError, RuntimeError) as e:
+    except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning(f"Failed to scan conversation metrics: {e}")
         return {"total_conversations": 0, "total_turns": 0, "models": {}, "total_cost_usd": 0.0}
 
@@ -256,7 +256,7 @@ def get_conversation_analytics(
                 rates = MODEL_COST_RATES.get(model_key, {"input": 0.001, "output": 0.005})
                 stats["cost_usd"] += (inp / 1000) * rates["input"] + (out / 1000) * rates["output"]
                 total_turns += 1
-        except (VerificationError, ValueError, OSError, RuntimeError) as e:
+        except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
             logger.debug(f"Failed to parse conversation metric entry: {e}")
             continue
 
@@ -290,7 +290,7 @@ def get_verification_analytics(
 
     try:
         raw_entries = redis_client.lrange(REDIS_VERIFICATION_METRICS_KEY, 0, -1)
-    except (VerificationError, ValueError, OSError, RuntimeError) as e:
+    except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning(f"Failed to read verification metrics: {e}")
         raw_entries = []
 
@@ -300,7 +300,7 @@ def get_verification_analytics(
             entry = json.loads(raw)
             if entry.get("timestamp", "") >= cutoff:
                 entries.append(entry)
-        except (VerificationError, ValueError, OSError, RuntimeError):
+        except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
             continue
 
     if not entries:
@@ -369,9 +369,9 @@ def get_verification_analytics(
                         feedback_stats["correct"] += 1
                     else:
                         feedback_stats["incorrect"] += 1
-            except (VerificationError, ValueError, OSError, RuntimeError):
+            except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
                 continue
-    except (VerificationError, ValueError, OSError, RuntimeError) as e:
+    except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.debug("Failed to read verification feedback: %s", e)
 
     # --- Verification error stats ---
@@ -386,11 +386,11 @@ def get_verification_analytics(
                 if err.get("timestamp", "") >= cutoff:
                     error_stats[err.get("error_type", "unknown")] += 1
                     recent_errors.append(err)
-            except (VerificationError, ValueError, OSError, RuntimeError):
+            except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
                 continue
         # Keep only last 10 recent errors for the response
         recent_errors = recent_errors[-10:]
-    except (VerificationError, ValueError, OSError, RuntimeError) as e:
+    except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.debug("Failed to read verification errors: %s", e)
 
     return {

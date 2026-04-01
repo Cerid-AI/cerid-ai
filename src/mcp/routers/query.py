@@ -45,7 +45,7 @@ def query_knowledge(query: str, domain: str = "general", top_k: int = 3) -> dict
             bm25_hits = bm25_mod.search_bm25(domain, query, top_k=top_k)
             if bm25_hits:
                 bm25_scores = dict(bm25_hits)
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.debug(f"BM25 hybrid scoring unavailable: {e}")
 
     sources = []
@@ -113,7 +113,7 @@ async def query_endpoint(req: QueryRequest, request: Request):
     try:
         from utils.private_mode import get_private_mode_level
         private_level = get_private_mode_level(client_id)
-    except (RetrievalError, ValueError, OSError, RuntimeError) as e:
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning("Private mode check failed (defaulting to disabled): %s", e)
         private_level = 0
 

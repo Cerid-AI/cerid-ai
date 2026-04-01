@@ -133,7 +133,7 @@ async def _run_single(
 
                 metrics = await evaluate_all(query, answer, contexts)
                 ragas_scores = {k: v.score for k, v in metrics.items()}
-            except (CeridError, ValueError, OSError, RuntimeError) as e:
+            except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
                 logger.warning("RAGAS eval failed for %s/%s: %s", config.name, query[:30], e)
 
         return AblationResult(
@@ -192,7 +192,7 @@ async def run_ablation(
                     run_ragas=run_ragas,
                 )
                 results.append(result)
-            except (CeridError, ValueError, OSError, RuntimeError) as e:
+            except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
                 logger.error("Ablation failed for %s/%s: %s", config.name, query[:30], e)
                 results.append(AblationResult(
                     config_name=config.name,

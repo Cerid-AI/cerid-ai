@@ -132,7 +132,7 @@ def _resolve_api_key(request: Request) -> str:
                 decrypted = decrypt_field(user["openrouter_api_key_encrypted"])
                 if decrypted:
                     return decrypted
-        except (ProviderError, ValueError, OSError, RuntimeError):
+        except (ProviderError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
             logger.debug("Failed to resolve per-user API key, falling back to global")
     return OPENROUTER_API_KEY
 
@@ -268,7 +268,7 @@ async def _attempt_stream(
                                 "Chat cost: model=%s prompt=%d completion=%d cost=$%.6f",
                                 bare_model, prompt_tokens, completion_tokens, cost,
                             )
-                    except (ProviderError, ValueError, OSError, RuntimeError) as exc:
+                    except (ProviderError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
                         logger.debug("Failed to record chat cost metrics: %s", exc)
 
         return _success_gen()
@@ -305,7 +305,7 @@ async def _proxy_stream(req: ChatRequest, request_id: str, api_key: str = "") ->
                 "Smart-routed to %s (%s, cost_sensitivity=%s)",
                 decision.model, decision.reason, req.cost_sensitivity,
             )
-        except (ProviderError, ValueError, OSError, RuntimeError) as exc:
+        except (ProviderError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
             logger.warning("Smart routing failed (%s), using fallback", exc)
             req.model = "openai/gpt-4o-mini"
 
@@ -369,7 +369,7 @@ async def chat_stream(req: ChatRequest, request: Request):
     try:
         from utils.private_mode import get_private_mode_level
         private_level = get_private_mode_level(client_id)
-    except (ProviderError, ValueError, OSError, RuntimeError) as e:
+    except (ProviderError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning("Private mode check failed (defaulting to disabled): %s", e)
 
     if private_level >= 3:

@@ -102,7 +102,7 @@ async def get_cached_verdict(redis_client, claim_text: str) -> dict[str, Any] | 
             _l1_set(key, verdict)  # promote to L1
             logger.debug("Claim L2 cache hit: %s -> %s", key, verdict.get("status"))
             return verdict
-    except (VerificationError, ValueError, OSError, RuntimeError):
+    except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         logger.debug("Claim cache miss or error: %s", key)
     return None
 
@@ -143,5 +143,5 @@ async def cache_verdict(
         _l1_set(key, cache_entry)  # populate L1 immediately
         await asyncio.to_thread(redis_client.set, key, json.dumps(cache_entry), ttl)
         logger.debug("Claim cached: %s (status=%s, ttl=%d)", key, cache_entry["status"], ttl)
-    except (VerificationError, ValueError, OSError, RuntimeError) as e:
+    except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.debug("Failed to cache claim %s: %s", key, e)

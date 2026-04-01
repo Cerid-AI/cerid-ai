@@ -38,7 +38,7 @@ def _strip_html_tags(html: str) -> str:
         stripper = _Stripper()
         stripper.feed(html)
         return "".join(stripper._parts).strip()
-    except (IngestionError, ValueError, OSError, RuntimeError):
+    except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         # Last resort: regex strip
         return re.sub(r"<[^>]+>", " ", html).strip()
 
