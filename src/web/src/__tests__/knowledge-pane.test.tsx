@@ -4,7 +4,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import type { Artifact, KBQueryResult } from "@/lib/types"
+import type { Artifact } from "@/lib/types"
 
 // Mock API module
 vi.mock("@/lib/api", () => ({

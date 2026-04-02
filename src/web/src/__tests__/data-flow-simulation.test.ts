@@ -329,9 +329,9 @@ describe("Settings Data Flow", () => {
   })
 
   it("pipeline toggle calls updateSettings with correct payload", async () => {
-    mockUpdateSettings.mockResolvedValue({ status: "ok", updated: { use_reranking: false } })
-    await updateSettings({ use_reranking: false })
-    expect(mockUpdateSettings).toHaveBeenCalledWith({ use_reranking: false })
+    mockUpdateSettings.mockResolvedValue({ status: "ok", updated: { enable_hallucination_check: false } })
+    await updateSettings({ enable_hallucination_check: false })
+    expect(mockUpdateSettings).toHaveBeenCalledWith({ enable_hallucination_check: false })
   })
 
   it("model change propagates to subsequent chat sends", async () => {

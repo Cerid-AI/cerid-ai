@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, within } from "@testing-library/react"
+import { render, screen, fireEvent } from "@testing-library/react"
 
 vi.mock("@/lib/api", () => ({
   applySetupConfig: vi.fn(),
