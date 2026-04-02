@@ -237,7 +237,7 @@ class TestCompressEndpoint:
 
     def test_falls_back_on_llm_failure(self, client):
         messages = [{"role": "user" if i % 2 == 0 else "assistant", "content": f"msg {i} " * 100} for i in range(20)]
-        with patch("utils.context_compression.call_llm", new_callable=AsyncMock, side_effect=Exception("LLM down")):
+        with patch("utils.context_compression.call_llm", new_callable=AsyncMock, side_effect=RuntimeError("LLM down")):
             resp = client.post("/chat/compress", json={
                 "messages": messages,
                 "target_tokens": 100,

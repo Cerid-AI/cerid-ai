@@ -60,9 +60,9 @@ class TestHealthEndpoint:
         assert data["status"] == "degraded"
         assert "error" in data["services"]["neo4j"]
 
-    @patch("routers.health.get_redis", side_effect=Exception("Redis down"))
-    @patch("routers.health.get_chroma", side_effect=Exception("Chroma down"))
-    @patch("routers.health.get_neo4j", side_effect=Exception("Neo4j down"))
+    @patch("routers.health.get_redis", side_effect=RuntimeError("Redis down"))
+    @patch("routers.health.get_chroma", side_effect=RuntimeError("Chroma down"))
+    @patch("routers.health.get_neo4j", side_effect=RuntimeError("Neo4j down"))
     def test_degraded_when_all_services_down(self, mock_neo4j, mock_chroma, mock_redis):
         client = TestClient(_make_app())
         response = client.get("/health")

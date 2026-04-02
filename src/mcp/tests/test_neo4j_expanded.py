@@ -99,7 +99,7 @@ class TestInitSchema:
 
         def side_effect(query, **kwargs):
             if "DROP INDEX" in query:
-                raise Exception("Index does not exist")
+                raise RuntimeError("Index does not exist")
             return MagicMock()
 
         session.run.side_effect = side_effect

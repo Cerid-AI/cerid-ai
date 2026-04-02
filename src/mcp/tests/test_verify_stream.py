@@ -377,7 +377,11 @@ class TestExtractionErrorHandling:
         async def _mock_call_llm(*args, **kwargs):
             raise httpx.ReadTimeout("Connection timed out")
 
-        with patch("agents.hallucination.extraction.call_llm", side_effect=_mock_call_llm):
+        async def _mock_internal_llm(*args, **kwargs):
+            raise RuntimeError("internal LLM unavailable")
+
+        with patch("agents.hallucination.extraction.call_internal_llm", side_effect=_mock_internal_llm), \
+             patch("agents.hallucination.extraction.call_llm", side_effect=_mock_call_llm):
             result = await _extract_claims_llm("Some response text for testing.", 10)
 
         assert result == []
@@ -392,7 +396,11 @@ class TestExtractionErrorHandling:
         async def _mock_call_llm(*args, **kwargs):
             raise httpx.ConnectError("Connection refused")
 
-        with patch("agents.hallucination.extraction.call_llm", side_effect=_mock_call_llm):
+        async def _mock_internal_llm(*args, **kwargs):
+            raise RuntimeError("internal LLM unavailable")
+
+        with patch("agents.hallucination.extraction.call_internal_llm", side_effect=_mock_internal_llm), \
+             patch("agents.hallucination.extraction.call_llm", side_effect=_mock_call_llm):
             result = await _extract_claims_llm("Some response text for testing.", 10)
 
         assert result == []

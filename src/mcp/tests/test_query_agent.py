@@ -10,11 +10,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-# test_hallucination.py may inject a stub agents.query_agent with only
-# `agent_query` — clear it so the real module loads.
-_existing = sys.modules.get("agents.query_agent")
-if _existing is not None and not hasattr(_existing, "StepTimer"):
-    del sys.modules["agents.query_agent"]
+# Other test files may inject stub modules — clear them so real modules load.
+for _mod_name in ("agents.query_agent", "agents.decomposer", "agents.assembler"):
+    _existing = sys.modules.get(_mod_name)
+    if _existing is not None and not hasattr(_existing, "__file__"):
+        del sys.modules[_mod_name]
 
 from agents.assembler import (  # noqa: E402
     apply_metadata_boost,
@@ -236,7 +236,7 @@ class TestMultiDomainQuery:
         mock_config.collection_name = lambda d: f"domain_{d}"
 
         chroma_client = MagicMock()
-        chroma_client.get_collection.side_effect = Exception("Collection not found")
+        chroma_client.get_collection.side_effect = RuntimeError("Collection not found")
 
         with patch("utils.bm25.is_available", return_value=False):
             results = asyncio.get_event_loop().run_until_complete(
@@ -277,12 +277,17 @@ class TestRerankResults:
         assert len(reranked) == 1
         assert reranked[0]["relevance"] == 0.5
 
+    @patch("utils.bifrost.get_bifrost_client", new_callable=AsyncMock)
     @patch("utils.internal_llm.call_internal_llm", new_callable=AsyncMock)
+    @patch("agents.assembler.config")
     @patch("agents.query_agent.config")
-    def test_llm_rerank_fallback_on_error(self, mock_config, mock_call_llm):
+    def test_llm_rerank_fallback_on_error(self, mock_config, mock_asm_config, mock_call_llm, _mock_bifrost):
         """When LLM reranking fails, falls back to embedding sort."""
         mock_config.RERANK_MODE = "llm"
         mock_config.QUERY_RERANK_CANDIDATES = 15
+        mock_asm_config.RERANK_PREFER_LOCAL = False
+        mock_asm_config.RERANK_MODE = "llm"
+        mock_asm_config.RERANK_ORIGINAL_WEIGHT = 0.3
 
         # Make the LLM call raise
         mock_call_llm.side_effect = httpx.HTTPStatusError(
@@ -451,9 +456,13 @@ class TestAgentQuery:
     @patch("agents.query_agent.multi_domain_query")
     @patch("agents.query_agent.config")
     @patch("config.features.ENABLE_ADAPTIVE_RETRIEVAL", False)
+    @patch("config.features.ENABLE_DEGRADATION_TIERS", True)
+    @patch("utils.degradation.degradation")
     def test_basic_query_response_shape(
-        self, mock_config, mock_mdq, mock_graph, mock_rerank, mock_log
+        self, mock_degradation, mock_config, mock_mdq, mock_graph, mock_rerank, mock_log
     ):
+        from utils.degradation import DegradationTier
+        mock_degradation.current_tier.return_value = DegradationTier.FULL
         mock_config.DOMAINS = ["coding", "general"]
         mock_config.DOMAIN_AFFINITY = {}
         mock_config.CROSS_DOMAIN_DEFAULT_AFFINITY = 0.2
@@ -497,9 +506,14 @@ class TestAgentQuery:
     @patch("agents.query_agent.multi_domain_query")
     @patch("agents.query_agent.config")
     @patch("config.features.ENABLE_ADAPTIVE_RETRIEVAL", False)
+    @patch("config.features.ENABLE_SEMANTIC_CACHE", False)
+    @patch("config.features.ENABLE_DEGRADATION_TIERS", True)
+    @patch("utils.degradation.degradation")
     def test_logs_to_redis_when_client_provided(
-        self, mock_config, mock_mdq, mock_graph, mock_rerank, mock_log
+        self, mock_degradation, mock_config, mock_mdq, mock_graph, mock_rerank, mock_log
     ):
+        from utils.degradation import DegradationTier
+        mock_degradation.current_tier.return_value = DegradationTier.FULL
         mock_config.DOMAINS = ["coding", "general"]
         mock_config.DOMAIN_AFFINITY = {}
         mock_config.CROSS_DOMAIN_DEFAULT_AFFINITY = 0.2
@@ -533,9 +547,13 @@ class TestAgentQuery:
     @patch("agents.query_agent.graph_expand_results")
     @patch("agents.query_agent.multi_domain_query")
     @patch("agents.query_agent.config")
+    @patch("config.features.ENABLE_DEGRADATION_TIERS", True)
+    @patch("utils.degradation.degradation")
     def test_no_results_returns_zero_confidence(
-        self, mock_config, mock_mdq, mock_graph, mock_rerank, mock_log
+        self, mock_degradation, mock_config, mock_mdq, mock_graph, mock_rerank, mock_log
     ):
+        from utils.degradation import DegradationTier
+        mock_degradation.current_tier.return_value = DegradationTier.FULL
         mock_config.DOMAINS = ["coding"]
         mock_config.DOMAIN_AFFINITY = {}
         mock_config.CROSS_DOMAIN_DEFAULT_AFFINITY = 0.2
@@ -896,7 +914,7 @@ class TestApplyQualityBoost:
     @patch("db.neo4j.artifacts.get_quality_scores")
     def test_lookup_failure(self, mock_scores):
         """If get_quality_scores raises, returns results unchanged."""
-        mock_scores.side_effect = Exception("Neo4j connection failed")
+        mock_scores.side_effect = RuntimeError("Neo4j connection failed")
         results = [_make_result(relevance=0.8, artifact_id="art-1")]
         boosted = apply_quality_boost(results, neo4j_driver=MagicMock())
         assert boosted[0]["relevance"] == 0.8

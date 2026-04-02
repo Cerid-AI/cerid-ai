@@ -5,7 +5,9 @@
 
 import json
 import math
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+UTC = timezone.utc
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -684,7 +686,7 @@ class TestCurate:
 
         # First domain fails, second succeeds
         mock_list.side_effect = [
-            Exception("Neo4j connection error"),
+            RuntimeError("Neo4j connection error"),
             [
                 {
                     "id": "art-1",
@@ -739,7 +741,7 @@ class TestCurate:
                 "sub_category": "general",
             },
         ]
-        mock_store.side_effect = Exception("Neo4j write failure")
+        mock_store.side_effect = RuntimeError("Neo4j write failure")
 
         driver = MagicMock()
         result = await curate(driver)

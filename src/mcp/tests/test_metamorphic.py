@@ -17,7 +17,16 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 # Load plugin module directly for unit testing.
-_plugin_path = Path(__file__).resolve().parents[3] / "plugins" / "metamorphic" / "plugin.py"
+# Walk up from tests/ to find the repo root (contains "plugins/" directory).
+_here = Path(__file__).resolve()
+_plugin_path = None
+for _parent in _here.parents:
+    _candidate = _parent / "plugins" / "metamorphic" / "plugin.py"
+    if _candidate.exists():
+        _plugin_path = _candidate
+        break
+if _plugin_path is None:
+    pytest.skip("metamorphic plugin not found", allow_module_level=True)
 _spec = importlib.util.spec_from_file_location("cerid_plugin_metamorphic_test", str(_plugin_path))
 _plugin = importlib.util.module_from_spec(_spec)  # type: ignore[arg-type]
 _spec.loader.exec_module(_plugin)  # type: ignore[union-attr]

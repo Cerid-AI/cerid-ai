@@ -234,6 +234,7 @@ class TestCustomSmartMode:
         with (
             patch("agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq,
             patch("agents.retrieval_orchestrator._recall_with_timeout", new_callable=AsyncMock) as mock_recall,
+            patch("agents.retrieval_orchestrator._custom_rag_fn", _apply_source_config),
         ):
             mock_aq.return_value = _fake_kb_result()
             mock_recall.return_value = _fake_memory_results()

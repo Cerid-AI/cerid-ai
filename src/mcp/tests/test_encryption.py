@@ -73,14 +73,15 @@ class TestFieldEncryptor:
 
     def test_different_keys_cannot_decrypt(self):
         """Different keys cannot decrypt each other's ciphertext."""
+        from cryptography.fernet import InvalidToken
+
         enc1, _ = self._make_encryptor()
         enc2, _ = self._make_encryptor()
 
         encrypted = enc1.encrypt("secret data")
-        # enc2 should fail to decrypt but not crash (returns raw ciphertext)
-        result = enc2.decrypt(encrypted)
-        # Should return the encrypted value (failed decryption)
-        assert result == encrypted
+        # enc2 should fail to decrypt — InvalidToken is raised
+        with pytest.raises(InvalidToken):
+            enc2.decrypt(encrypted)
 
     def test_key_hash_is_stable(self):
         """Same key produces same hash."""

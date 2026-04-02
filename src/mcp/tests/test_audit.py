@@ -296,7 +296,7 @@ class TestGetQueryPatterns:
 class TestGetConversationAnalytics:
     def test_redis_scan_error_returns_empty(self):
         redis = MagicMock()
-        redis.scan_iter.side_effect = Exception("Connection refused")
+        redis.scan_iter.side_effect = RuntimeError("Connection refused")
 
         result = get_conversation_analytics(redis)
         assert result["total_conversations"] == 0

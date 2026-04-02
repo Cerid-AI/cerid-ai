@@ -6,13 +6,27 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from routers.user_state import _sync_dir, router  # noqa: F401
+
+
+def _private_mode_zero(*_args, **_kwargs):
+    return 0
+
+@pytest.fixture(autouse=True)
+def _mock_redis():
+    """Prevent accidental Redis connections and disable private mode."""
+    mock_redis = MagicMock()
+    mock_redis.get.return_value = None  # no private mode flag
+    with patch("deps._redis", mock_redis), \
+         patch("deps.get_redis", return_value=mock_redis), \
+         patch("utils.private_mode.get_private_mode_level", _private_mode_zero):
+        yield
 
 
 @pytest.fixture()

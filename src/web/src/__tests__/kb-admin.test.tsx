@@ -69,6 +69,61 @@ function mockMultiFetch(settingsData: unknown, kbStatsData: unknown) {
         text: () => Promise.resolve("{}"),
       })
     }
+    if (url.includes("/providers/ollama/recommendations")) {
+      return Promise.resolve({
+        ok: true, status: 200,
+        json: () => Promise.resolve({ recommended: [] }),
+        text: () => Promise.resolve("{}"),
+      })
+    }
+    if (url.includes("/health/status")) {
+      return Promise.resolve({
+        ok: true, status: 200,
+        json: () => Promise.resolve({ services: {}, overall: "healthy", data: {} }),
+        text: () => Promise.resolve("{}"),
+      })
+    }
+    if (url.includes("/data-sources")) {
+      return Promise.resolve({
+        ok: true, status: 200,
+        json: () => Promise.resolve([]),
+        text: () => Promise.resolve("[]"),
+      })
+    }
+    if (url.includes("/admin/watched-folders")) {
+      return Promise.resolve({
+        ok: true, status: 200,
+        json: () => Promise.resolve([]),
+        text: () => Promise.resolve("[]"),
+      })
+    }
+    if (url.includes("/providers/models/updates")) {
+      return Promise.resolve({
+        ok: true, status: 200,
+        json: () => Promise.resolve({ updates: [], checked_at: null }),
+        text: () => Promise.resolve("{}"),
+      })
+    }
+    if (url.includes("/providers/credits")) {
+      return Promise.resolve({
+        ok: true, status: 200,
+        json: () => Promise.resolve({ balance: null, limit: null, used: null }),
+        text: () => Promise.resolve("{}"),
+      })
+    }
+    if (url.includes("/system/storage")) {
+      return Promise.resolve({
+        ok: true, status: 200,
+        json: () => Promise.resolve({
+          chromadb: { disk_mb: 10, collections: 2, chunks: 150 },
+          neo4j: { disk_mb: 5, nodes: 100, relationships: 50 },
+          redis: { memory_mb: 2, keys: 50, peak_mb: 3 },
+          bm25: { disk_mb: 1, index_count: 2 },
+          total_mb: 18, limit_mb: 1000, usage_pct: 1.8, status: "healthy",
+        }),
+        text: () => Promise.resolve("{}"),
+      })
+    }
     return Promise.resolve({
       ok: true,
       status: 200,

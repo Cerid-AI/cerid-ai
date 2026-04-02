@@ -53,7 +53,7 @@ class TestCheckSystemHealth:
         redis = mock_redis
 
         chroma = MagicMock()
-        chroma.heartbeat.side_effect = Exception("Connection refused")
+        chroma.heartbeat.side_effect = RuntimeError("Connection refused")
 
         session.run.return_value.single.side_effect = [{"artifact_count": 0}, {"domain_count": 0}]
         redis.ping.return_value = True
@@ -71,7 +71,7 @@ class TestCheckSystemHealth:
         redis = mock_redis
 
         driver = MagicMock()
-        driver.session.side_effect = Exception("Neo4j down")
+        driver.session.side_effect = RuntimeError("Neo4j down")
 
         client.list_collections.return_value = []
         redis.ping.return_value = True
@@ -88,7 +88,7 @@ class TestCheckSystemHealth:
         client, collection = mock_chroma
 
         redis = MagicMock()
-        redis.ping.side_effect = Exception("Redis down")
+        redis.ping.side_effect = RuntimeError("Redis down")
 
         client.list_collections.return_value = []
         session.run.return_value.single.side_effect = [{"artifact_count": 0}, {"domain_count": 0}]
@@ -171,7 +171,7 @@ class TestCheckBifrostSync:
     @patch("urllib.request.urlopen")
     def test_bifrost_unreachable(self, mock_urlopen, mock_config):
         mock_config.BIFROST_URL = "http://bifrost:8080/v1"
-        mock_urlopen.side_effect = Exception("Connection refused")
+        mock_urlopen.side_effect = OSError("Connection refused")
 
         result = _check_bifrost_sync()
         assert "unreachable" in result
@@ -232,7 +232,7 @@ class TestPurgeArtifacts:
         }.get(k, default)
 
         # Second artifact: driver error
-        session.run.return_value.single.side_effect = [record_ok, Exception("DB error")]
+        session.run.return_value.single.side_effect = [record_ok, RuntimeError("DB error")]
 
         result = purge_artifacts(driver, client, ["a1", "a2"])
         assert result["purged_count"] == 1

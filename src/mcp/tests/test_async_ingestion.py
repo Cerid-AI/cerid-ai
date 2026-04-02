@@ -17,6 +17,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _mock_redis_globally():
+    """Prevent Redis connections caused by cross-test module pollution."""
+    with patch("deps._redis", MagicMock()), \
+         patch("deps.get_redis", return_value=MagicMock()):
+        yield
+
+
 def _ensure_real_router():
     """Ensure the real routers.ingestion module is loaded.
 
@@ -232,7 +240,9 @@ class TestBatchEndpoint:
     """Test the batch ingestion REST endpoint."""
 
     @pytest.mark.asyncio
-    async def test_endpoint_returns_batch_result(self):
+    @patch("routers.system_monitor.get_redis", return_value=MagicMock())
+    @patch("deps.get_redis", return_value=MagicMock())
+    async def test_endpoint_returns_batch_result(self, _mock_redis, _mock_sysmon_redis):
         """POST /ingest_batch should return the batch result."""
         ri = _ensure_real_router()
 

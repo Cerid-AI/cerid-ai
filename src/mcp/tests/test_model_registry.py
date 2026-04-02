@@ -106,7 +106,7 @@ class TestValidateModels:
         """validate_models returns an error dict when the network is down."""
         with patch("utils.model_registry.httpx.AsyncClient") as mock_cls:
             mock_client = AsyncMock()
-            mock_client.get.side_effect = httpx.ConnectError("connection refused")
+            mock_client.get.side_effect = OSError("connection refused")
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
             mock_cls.return_value = mock_client

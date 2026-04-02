@@ -39,7 +39,7 @@ class TestDetectAvailableModels:
         """When httpx raises, detect_available_models returns []."""
         with patch("utils.ollama_models.httpx.AsyncClient") as mock_cls:
             mock_client = AsyncMock()
-            mock_client.get.side_effect = Exception("connection refused")
+            mock_client.get.side_effect = OSError("connection refused")
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
             mock_cls.return_value = mock_client

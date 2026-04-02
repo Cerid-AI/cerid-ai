@@ -292,14 +292,16 @@ class TestOCRPluginManifest:
 class TestFeatureFlagIntegration:
     """Test that Pro features are properly gated."""
 
-    def test_semantic_dedup_disabled_in_community(self):
+    def test_semantic_dedup_enabled_in_community(self):
         import config
 
         if config.FEATURE_TIER == "community":
-            assert config.FEATURE_FLAGS["semantic_dedup"] is False
+            # semantic_dedup is a community feature — always enabled
+            assert config.FEATURE_FLAGS["semantic_dedup"] is True
 
-    def test_ocr_disabled_in_community(self):
+    def test_ocr_enabled_in_community(self):
         import config
 
         if config.FEATURE_TIER == "community":
-            assert config.FEATURE_FLAGS["ocr_parsing"] is False
+            # ocr_parsing is a community feature — always enabled
+            assert config.FEATURE_FLAGS["ocr_parsing"] is True

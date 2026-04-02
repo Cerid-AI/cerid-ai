@@ -39,10 +39,9 @@ class TestCallBifrost:
 
         mock_client = AsyncMock()
         mock_client.post.return_value = mock_resp
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("utils.bifrost.httpx.AsyncClient", return_value=mock_client):
+        with patch("utils.bifrost.get_bifrost_client", new_callable=AsyncMock, return_value=mock_client), \
+             patch("utils.bifrost._clear_credits_exhausted"):
             result = await call_bifrost(
                 [{"role": "user", "content": "test"}],
                 breaker_name="bifrost-memory",
@@ -62,10 +61,9 @@ class TestCallBifrost:
 
         mock_client = AsyncMock()
         mock_client.post.return_value = mock_resp
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("utils.bifrost.httpx.AsyncClient", return_value=mock_client):
+        with patch("utils.bifrost.get_bifrost_client", new_callable=AsyncMock, return_value=mock_client), \
+             patch("utils.bifrost._clear_credits_exhausted"):
             await call_bifrost(
                 [{"role": "user", "content": "test"}],
                 breaker_name="bifrost-claims",
@@ -88,10 +86,8 @@ class TestCallBifrost:
 
         mock_client = AsyncMock()
         mock_client.post.return_value = mock_resp
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("utils.bifrost.httpx.AsyncClient", return_value=mock_client):
+        with patch("utils.bifrost.get_bifrost_client", new_callable=AsyncMock, return_value=mock_client):
             with pytest.raises(httpx.HTTPStatusError):
                 await call_bifrost(
                     [{"role": "user", "content": "test"}],
@@ -122,10 +118,9 @@ class TestCallBifrost:
 
         mock_client = AsyncMock()
         mock_client.post.return_value = mock_resp
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("utils.bifrost.httpx.AsyncClient", return_value=mock_client):
+        with patch("utils.bifrost.get_bifrost_client", new_callable=AsyncMock, return_value=mock_client), \
+             patch("utils.bifrost._clear_credits_exhausted"):
             await call_bifrost(
                 [{"role": "user", "content": "test"}],
                 breaker_name="bifrost-rerank",
@@ -143,10 +138,9 @@ class TestCallBifrost:
 
         mock_client = AsyncMock()
         mock_client.post.return_value = mock_resp
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("utils.bifrost.httpx.AsyncClient", return_value=mock_client):
+        with patch("utils.bifrost.get_bifrost_client", new_callable=AsyncMock, return_value=mock_client), \
+             patch("utils.bifrost._clear_credits_exhausted"):
             await call_bifrost(
                 [{"role": "user", "content": "test"}],
                 breaker_name="bifrost-verify",

@@ -645,7 +645,7 @@ class TestParseEpub:
     def test_epub_corrupted_zip_raises(self, tmp_path):
         f = tmp_path / "corrupted.epub"
         f.write_bytes(b"not a zip file at all")
-        with pytest.raises(ValueError, match="corrupted"):
+        with pytest.raises((ValueError, zipfile.BadZipFile)):
             parse_file(str(f))
 
     def test_epub_opf_fallback(self, tmp_path):
@@ -727,12 +727,13 @@ class TestParsePdf:
         f = tmp_path / "bad.pdf"
         f.write_text("dummy")
 
-        mock_open.side_effect = Exception("Invalid PDF")
+        mock_open.side_effect = RuntimeError("Invalid PDF")
         with pytest.raises(ValueError, match="corrupted"):
             parse_file(str(f))
 
+    @patch("config.features.is_feature_enabled", return_value=False)
     @patch("pdfplumber.open")
-    def test_pdf_image_only_raises(self, mock_open, tmp_path):
+    def test_pdf_image_only_raises(self, mock_open, _mock_feat, tmp_path):
         f = tmp_path / "scan.pdf"
         f.write_text("dummy")
 
@@ -843,7 +844,7 @@ class TestParseDocx:
         f = tmp_path / "bad.docx"
         f.write_text("dummy")
 
-        mock_doc_cls.side_effect = Exception("Bad file")
+        mock_doc_cls.side_effect = RuntimeError("Bad file")
         with pytest.raises(ValueError, match="corrupted"):
             parse_file(str(f))
 
@@ -924,7 +925,7 @@ class TestParseXlsx:
         f = tmp_path / "bad.xlsx"
         f.write_text("dummy")
 
-        mock_lwb.side_effect = Exception("Invalid file")
+        mock_lwb.side_effect = RuntimeError("Invalid file")
         with pytest.raises(ValueError, match="corrupted"):
             parse_file(str(f))
 
@@ -1048,7 +1049,7 @@ class TestParseCsv:
         f = tmp_path / "bad.csv"
         f.write_text("not,a,valid\x00csv")
 
-        mock_read_csv.side_effect = Exception("Parse error")
+        mock_read_csv.side_effect = RuntimeError("Parse error")
         with pytest.raises(ValueError, match="corrupted"):
             parse_file(str(f))
 

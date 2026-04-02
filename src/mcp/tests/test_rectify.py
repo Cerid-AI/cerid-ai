@@ -96,7 +96,7 @@ class TestFindSimilarArtifacts:
 
     def test_collection_not_found(self, mock_chroma):
         client, _ = mock_chroma
-        client.get_collection.side_effect = Exception("Not found")
+        client.get_collection.side_effect = RuntimeError("Not found")
 
         result = find_similar_artifacts("test", "coding", client)
         assert result == []
@@ -291,7 +291,7 @@ class TestCleanupOrphanedChunks:
     def test_error_returns_zero(self, mock_config, mock_chroma):
         mock_config.collection_name = lambda d: f"domain_{d}"
         client, collection = mock_chroma
-        collection.delete.side_effect = Exception("ChromaDB error")
+        collection.delete.side_effect = RuntimeError("ChromaDB error")
 
         orphaned = {"coding": [{"chunk_id": "c1"}]}
         result = cleanup_orphaned_chunks(client, orphaned)

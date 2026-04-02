@@ -69,6 +69,32 @@ function mockFetch(data: unknown, status = 200) {
         text: () => Promise.resolve("{}"),
       })
     }
+    // Storage metrics endpoint (needed for StorageBar on System tab)
+    if (typeof url === "string" && url.includes("/system/storage")) {
+      return Promise.resolve({
+        ok: true, status: 200,
+        json: () => Promise.resolve({
+          chromadb: { disk_mb: 10, collections: 2, chunks: 100 },
+          neo4j: { disk_mb: 5, nodes: 50, relationships: 20 },
+          redis: { memory_mb: 2, keys: 30, peak_mb: 3 },
+          bm25: { disk_mb: 1, index_count: 2 },
+          total_mb: 18, limit_mb: 1000, usage_pct: 1.8, status: "healthy",
+        }),
+        text: () => Promise.resolve("{}"),
+      })
+    }
+    // Catch-all for other endpoints used by System tab sub-components
+    if (typeof url === "string" && (
+      url.includes("/health/status") || url.includes("/data-sources") ||
+      url.includes("/admin/watched-folders") || url.includes("/providers/models/updates") ||
+      url.includes("/providers/credits") || url.includes("/providers/ollama/recommendations")
+    )) {
+      return Promise.resolve({
+        ok: true, status: 200,
+        json: () => Promise.resolve(url.includes("/data-sources") || url.includes("/watched-folders") ? [] : {}),
+        text: () => Promise.resolve("{}"),
+      })
+    }
     return Promise.resolve({
       ok: status >= 200 && status < 300,
       status,
@@ -162,9 +188,13 @@ describe("SettingsPane", () => {
 
   it("shows domains in taxonomy section on System tab", async () => {
     vi.stubGlobal("fetch", mockFetch(mockSettings))
+    const user = userEvent.setup()
     render(<SettingsPane />, { wrapper })
     await screen.findByText("Knowledge & Ingestion")
     await clickTab("System")
+    // Taxonomy section defaults to collapsed — expand it first
+    const taxonomyHeading = await screen.findByText("Taxonomy")
+    await user.click(taxonomyHeading)
     expect(await screen.findByText("coding")).toBeInTheDocument()
   })
 

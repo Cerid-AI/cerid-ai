@@ -364,7 +364,7 @@ class TestExportNeo4j:
         from sync.export import export_neo4j
 
         driver, session = mock_neo4j
-        session.run.side_effect = Exception("Neo4j down")
+        session.run.side_effect = RuntimeError("Neo4j down")
 
         result = export_neo4j(driver, str(tmp_path))
         assert "error" in result
@@ -397,7 +397,7 @@ class TestExportRedis:
 
         mock_config.REDIS_INGEST_LOG = "ingest:log"
         redis = MagicMock()
-        redis.lrange.side_effect = Exception("Redis down")
+        redis.lrange.side_effect = RuntimeError("Redis down")
 
         result = export_redis(redis, str(tmp_path))
         assert "error" in result

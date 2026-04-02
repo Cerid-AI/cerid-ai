@@ -21,6 +21,14 @@ if "agents.query_agent" not in sys.modules:
     import agents
     agents.query_agent = _stub  # type: ignore[attr-defined]
 
+# verify_claim now imports lightweight_kb_query from agents.decomposer
+if "agents.decomposer" not in sys.modules:
+    _decomposer_stub = ModuleType("agents.decomposer")
+    _decomposer_stub.lightweight_kb_query = None  # type: ignore[attr-defined]
+    _decomposer_stub.decompose_query = None  # type: ignore[attr-defined]
+    sys.modules["agents.decomposer"] = _decomposer_stub
+    agents.decomposer = _decomposer_stub  # type: ignore[attr-defined]
+
 import config
 from agents.hallucination import (
     REDIS_HALLUCINATION_PREFIX,
@@ -64,21 +72,10 @@ class TestExtractClaims:
         assert method == "none"
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_successful_extraction(self, mock_client_cls):
+    @patch("agents.hallucination.extraction._extract_claims_llm", new_callable=AsyncMock)
+    async def test_successful_extraction(self, mock_llm):
         """Valid LLM response should parse into claim list."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
-            "choices": [{"message": {"content": '["Python was created in 1991", "The GIL limits threading"]'}}]
-        }
-
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
+        mock_llm.return_value = ["Python was created in 1991", "The GIL limits threading"]
 
         claims, method = await extract_claims("x" * (config.HALLUCINATION_MIN_RESPONSE_LENGTH + 1))
         assert len(claims) == 2
@@ -86,20 +83,10 @@ class TestExtractClaims:
         assert method == "llm"
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_extraction_handles_code_block(self, mock_client_cls):
+    @patch("agents.hallucination.extraction._extract_claims_llm", new_callable=AsyncMock)
+    async def test_extraction_handles_code_block(self, mock_llm):
         """LLM responses wrapped in markdown code blocks should parse correctly."""
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
-            "choices": [{"message": {"content": '```json\n["claim one"]\n```'}}]
-        }
-
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
+        mock_llm.return_value = ["claim one"]
 
         claims, method = await extract_claims("x" * (config.HALLUCINATION_MIN_RESPONSE_LENGTH + 1))
         assert len(claims) == 1
@@ -107,20 +94,10 @@ class TestExtractClaims:
         assert method == "llm"
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_handles_structured_claim_objects(self, mock_client_cls):
+    @patch("agents.hallucination.extraction._extract_claims_llm", new_callable=AsyncMock)
+    async def test_handles_structured_claim_objects(self, mock_llm):
         """LLM returning structured {claim, type} objects should extract claim text."""
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
-            "choices": [{"message": {"content": '[{"claim": "Python was created in 1991", "type": "date"}, {"claim": "GIL limits threading", "type": "technical"}]'}}]
-        }
-
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
+        mock_llm.return_value = ["Python was created in 1991", "GIL limits threading"]
 
         claims, method = await extract_claims("x" * (config.HALLUCINATION_MIN_RESPONSE_LENGTH + 1))
         assert len(claims) == 2
@@ -351,7 +328,7 @@ class TestVerifyClaim:
 
     @pytest.mark.asyncio
     @patch("agents.hallucination.verification._query_memories", new_callable=AsyncMock, return_value=[])
-    @patch("agents.query_agent.lightweight_kb_query", new_callable=AsyncMock)
+    @patch("agents.decomposer.lightweight_kb_query", new_callable=AsyncMock)
     async def test_verified_claim(self, mock_query, _mock_mem, mock_chroma, mock_neo4j, mock_redis):
         """High-similarity result should mark claim as verified."""
         mock_query.return_value = [{"relevance": 0.85, "artifact_id": "abc", "filename": "doc.pdf", "domain": "general", "content": "matching text"}]
@@ -363,7 +340,7 @@ class TestVerifyClaim:
     @pytest.mark.asyncio
     @patch("agents.hallucination.verification._verify_claim_externally", new_callable=AsyncMock)
     @patch("agents.hallucination.verification._query_memories", new_callable=AsyncMock, return_value=[])
-    @patch("agents.query_agent.lightweight_kb_query", new_callable=AsyncMock)
+    @patch("agents.decomposer.lightweight_kb_query", new_callable=AsyncMock)
     async def test_unverified_claim(self, mock_query, _mock_mem, mock_ext, mock_chroma, mock_neo4j, mock_redis):
         """Low similarity (below escalation threshold) should mark claim as unverified when external also fails."""
         mock_query.return_value = [{"relevance": 0.4, "content": "unrelated"}]
@@ -377,7 +354,7 @@ class TestVerifyClaim:
     @pytest.mark.asyncio
     @patch("agents.hallucination.verification._verify_claim_externally", new_callable=AsyncMock)
     @patch("agents.hallucination.verification._query_memories", new_callable=AsyncMock, return_value=[])
-    @patch("agents.query_agent.lightweight_kb_query", new_callable=AsyncMock)
+    @patch("agents.decomposer.lightweight_kb_query", new_callable=AsyncMock)
     async def test_no_results(self, mock_query, _mock_mem, mock_ext, mock_chroma, mock_neo4j, mock_redis):
         """No KB results returns unverified via KB path (external skipped for efficiency)."""
         mock_query.return_value = []
@@ -396,7 +373,7 @@ class TestMemoryIntegration:
 
     @pytest.mark.asyncio
     @patch("agents.hallucination.verification._query_memories", new_callable=AsyncMock)
-    @patch("agents.query_agent.lightweight_kb_query", new_callable=AsyncMock)
+    @patch("agents.decomposer.lightweight_kb_query", new_callable=AsyncMock)
     async def test_memory_boosts_verification(self, mock_query, mock_mem, mock_chroma, mock_neo4j, mock_redis):
         """A strong memory match should boost an otherwise uncertain claim to verified."""
         # KB returns a moderate match
@@ -424,7 +401,7 @@ class TestMemoryIntegration:
     @pytest.mark.asyncio
     @patch("agents.hallucination.verification._verify_claim_externally", new_callable=AsyncMock)
     @patch("agents.hallucination.verification._query_memories", new_callable=AsyncMock)
-    @patch("agents.query_agent.lightweight_kb_query", new_callable=AsyncMock)
+    @patch("agents.decomposer.lightweight_kb_query", new_callable=AsyncMock)
     async def test_memories_ignored_when_no_match(self, mock_query, mock_mem, mock_ext, mock_chroma, mock_neo4j, mock_redis):
         """Low-relevance memories (below filter threshold) should be filtered out,
         and with no remaining results, external verification determines the result."""
@@ -487,7 +464,7 @@ class TestQueryMemories:
     @pytest.mark.asyncio
     async def test_handles_exception_gracefully(self, mock_chroma):
         """Should return empty list on error (non-blocking)."""
-        mock_chroma[0].get_collection.side_effect = Exception("collection not found")
+        mock_chroma[0].get_collection.side_effect = RuntimeError("collection not found")
         results = await _query_memories("something", mock_chroma[0])
         assert results == []
 
@@ -593,9 +570,10 @@ class TestStreamingPersistence:
     """Test that streaming path persists results to Redis."""
 
     @pytest.mark.asyncio
+    @patch("agents.hallucination.streaming._check_history_consistency", new_callable=AsyncMock, return_value=[])
     @patch("agents.hallucination.streaming.extract_claims", new_callable=AsyncMock)
     @patch("agents.hallucination.streaming.verify_claim", new_callable=AsyncMock)
-    async def test_persists_to_redis(self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis):
+    async def test_persists_to_redis(self, mock_verify, mock_extract, _mock_consistency, mock_chroma, mock_neo4j, mock_redis):
         """After streaming completes, report should be stored in Redis."""
         mock_extract.return_value = (["claim 1", "claim 2"], "heuristic")
         mock_verify.side_effect = [
@@ -799,19 +777,12 @@ class TestExternalVerification:
     """Test the full external verification pipeline (direct structured verdict)."""
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_successful_verification_supported(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_successful_verification_supported(self, mock_llm_raw):
         """Supported verdict from cross-model should return verified."""
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
+        mock_llm_raw.return_value = {
             "choices": [{"message": {"content": '{"verdict": "supported", "confidence": 0.92, "reasoning": "Python was first released in 1991 by Guido van Rossum."}'}}]
         }
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
 
         result = await _verify_claim_externally(
             "Python was released in 1991",
@@ -824,19 +795,12 @@ class TestExternalVerification:
         assert "verification_answer" in result
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_successful_verification_refuted(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_successful_verification_refuted(self, mock_llm_raw):
         """Refuted verdict from cross-model should return unverified."""
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
+        mock_llm_raw.return_value = {
             "choices": [{"message": {"content": '{"verdict": "refuted", "confidence": 0.95, "reasoning": "Python was created in 1991, not 2021."}'}}]
         }
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
 
         result = await _verify_claim_externally(
             "Python was released in 2021",
@@ -846,14 +810,10 @@ class TestExternalVerification:
         assert result["status"] == "unverified"
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_api_failure_returns_failed(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_api_failure_returns_failed(self, mock_llm_raw):
         """API failure should return verification_method='cross_model_failed'."""
-        mock_client = AsyncMock()
-        mock_client.post.side_effect = Exception("Connection refused")
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
+        mock_llm_raw.side_effect = RuntimeError("Connection refused")
 
         result = await _verify_claim_externally("test claim")
         assert result["verification_method"] == "cross_model_failed"
@@ -868,25 +828,18 @@ class TestExternalVerification:
         assert result["status"] == "uncertain"
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_uses_system_prompt(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_uses_system_prompt(self, mock_llm_raw):
         """Verification call should include system prompt for structured output."""
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
+        mock_llm_raw.return_value = {
             "choices": [{"message": {"content": '{"verdict": "supported", "confidence": 0.8, "reasoning": "OK"}'}}]
         }
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
 
         await _verify_claim_externally("test claim", generating_model="openrouter/anthropic/claude-sonnet-4")
 
         # Verify the LLM was called with system + user messages
-        call_args = mock_client.post.call_args
-        messages = call_args[1]["json"]["messages"] if "json" in call_args[1] else call_args[0][1]["messages"]
+        call_args = mock_llm_raw.call_args
+        messages = call_args[1].get("messages") or call_args[0][0]
         assert len(messages) == 2
         assert messages[0]["role"] == "system"
         assert "verdict" in messages[0]["content"]
@@ -957,19 +910,12 @@ class TestCurrentEventRouting:
     """Test that current-event claims get routed to the web-search model."""
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_current_event_uses_web_search_model(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_current_event_uses_web_search_model(self, mock_llm_raw):
         """Current-event claims should use the web-search-enabled model."""
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
+        mock_llm_raw.return_value = {
             "choices": [{"message": {"content": '{"verdict": "supported", "confidence": 0.9, "reasoning": "Confirmed per Reuters."}'}}]
         }
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
 
         result = await _verify_claim_externally(
             "SpaceX acquired xAI in February 2026",
@@ -980,19 +926,12 @@ class TestCurrentEventRouting:
         assert result["status"] == "verified"
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_current_event_uses_current_event_system_prompt(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_current_event_uses_current_event_system_prompt(self, mock_llm_raw):
         """Current-event claims should use the current-event system prompt."""
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
+        mock_llm_raw.return_value = {
             "choices": [{"message": {"content": '{"verdict": "supported", "confidence": 0.85, "reasoning": "OK"}'}}]
         }
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
 
         await _verify_claim_externally(
             "Grok 4.1 was recently released with web search support",
@@ -1000,27 +939,20 @@ class TestCurrentEventRouting:
         )
 
         # Verify the LLM was called with current-event system prompt
-        call_args = mock_client.post.call_args
-        messages = call_args[1]["json"]["messages"] if "json" in call_args[1] else call_args[0][1]["messages"]
+        call_args = mock_llm_raw.call_args
+        messages = call_args[0][0]
         assert len(messages) == 2
         assert messages[0]["role"] == "system"
         assert "web search" in messages[0]["content"]
         assert "real-time" in messages[0]["content"]
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_static_claim_uses_cross_model(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_static_claim_uses_cross_model(self, mock_llm_raw):
         """Static factual claims should still use cross-model verification."""
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
+        mock_llm_raw.return_value = {
             "choices": [{"message": {"content": '{"verdict": "supported", "confidence": 0.9, "reasoning": "Correct."}'}}]
         }
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
 
         result = await _verify_claim_externally(
             "Python was created by Guido van Rossum in 1991",
@@ -1031,14 +963,10 @@ class TestCurrentEventRouting:
         assert result["verification_model"] != config.VERIFICATION_CURRENT_EVENT_MODEL
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_web_search_failure_returns_correct_method(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_web_search_failure_returns_correct_method(self, mock_llm_raw):
         """When web search model fails, verification_method should include web_search."""
-        mock_client = AsyncMock()
-        mock_client.post.side_effect = Exception("Grok timeout")
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
+        mock_llm_raw.side_effect = RuntimeError("Grok timeout")
 
         result = await _verify_claim_externally(
             "OpenAI released GPT-5 this year",
@@ -1054,7 +982,7 @@ class TestVerifyClaimWithExternalFallback:
     @pytest.mark.asyncio
     @patch("agents.hallucination.verification._verify_claim_externally", new_callable=AsyncMock)
     @patch("agents.hallucination.verification._query_memories", new_callable=AsyncMock, return_value=[])
-    @patch("agents.query_agent.lightweight_kb_query", new_callable=AsyncMock)
+    @patch("agents.decomposer.lightweight_kb_query", new_callable=AsyncMock)
     async def test_no_kb_triggers_external(self, mock_query, _mock_mem, mock_ext, mock_chroma, mock_neo4j, mock_redis):
         """When KB returns no results, should fall back to external verification."""
         mock_query.return_value = []
@@ -1078,7 +1006,7 @@ class TestVerifyClaimWithExternalFallback:
     @pytest.mark.asyncio
     @patch("agents.hallucination.verification._verify_claim_externally", new_callable=AsyncMock)
     @patch("agents.hallucination.verification._query_memories", new_callable=AsyncMock, return_value=[])
-    @patch("agents.query_agent.lightweight_kb_query", new_callable=AsyncMock)
+    @patch("agents.decomposer.lightweight_kb_query", new_callable=AsyncMock)
     async def test_strong_kb_skips_external(self, mock_query, _mock_mem, mock_ext, mock_chroma, mock_neo4j, mock_redis):
         """When KB returns a strong match, should NOT call external verification."""
         mock_query.return_value = [{"relevance": 0.85, "artifact_id": "abc", "filename": "doc.pdf", "domain": "general", "content": "matching text"}]
@@ -1093,7 +1021,7 @@ class TestVerifyClaimWithExternalFallback:
     @pytest.mark.asyncio
     @patch("agents.hallucination.verification._verify_claim_externally", new_callable=AsyncMock)
     @patch("agents.hallucination.verification._query_memories", new_callable=AsyncMock, return_value=[])
-    @patch("agents.query_agent.lightweight_kb_query", new_callable=AsyncMock)
+    @patch("agents.decomposer.lightweight_kb_query", new_callable=AsyncMock)
     async def test_low_kb_triggers_external(self, mock_query, _mock_mem, mock_ext, mock_chroma, mock_neo4j, mock_redis):
         """When KB returns very low similarity, should try external verification."""
         mock_query.return_value = [{"relevance": 0.15, "artifact_id": "abc", "content": "barely related"}]
@@ -1168,12 +1096,10 @@ class TestSourceURLExtraction:
     """Test source URL extraction from OpenRouter annotations."""
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_web_search_extracts_source_urls(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_web_search_extracts_source_urls(self, mock_llm_raw):
         """Web search response with annotations should populate source_urls."""
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
+        mock_llm_raw.return_value = {
             "choices": [{
                 "message": {
                     "content": '{"verdict": "supported", "confidence": 0.95, "reasoning": "Confirmed per Reuters."}',
@@ -1196,11 +1122,6 @@ class TestSourceURLExtraction:
                 }
             }]
         }
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
 
         result = await _verify_claim_externally(
             "SpaceX launched Starship in March 2026",
@@ -1213,23 +1134,16 @@ class TestSourceURLExtraction:
         assert result["verification_method"] == "web_search"
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_no_annotations_returns_empty_list(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_no_annotations_returns_empty_list(self, mock_llm_raw):
         """Standard cross-model response without annotations should have empty source_urls."""
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
+        mock_llm_raw.return_value = {
             "choices": [{
                 "message": {
                     "content": '{"verdict": "supported", "confidence": 0.9, "reasoning": "Correct."}',
                 }
             }]
         }
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
 
         result = await _verify_claim_externally(
             "Python was created by Guido van Rossum in 1991",
@@ -1238,12 +1152,10 @@ class TestSourceURLExtraction:
         assert result["source_urls"] == []
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_deduplicates_source_urls(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_deduplicates_source_urls(self, mock_llm_raw):
         """Duplicate URLs in annotations should be deduplicated."""
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
+        mock_llm_raw.return_value = {
             "choices": [{
                 "message": {
                     "content": '{"verdict": "supported", "confidence": 0.9, "reasoning": "OK."}',
@@ -1255,11 +1167,6 @@ class TestSourceURLExtraction:
                 }
             }]
         }
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
 
         result = await _verify_claim_externally(
             "Apple released iOS 20 this week",
@@ -1278,14 +1185,10 @@ class TestSourceURLExtraction:
         assert result["source_urls"] == []
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_api_failure_returns_empty_urls(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_api_failure_returns_empty_urls(self, mock_llm_raw):
         """API failure should return empty source_urls."""
-        mock_client = AsyncMock()
-        mock_client.post.side_effect = Exception("Connection refused")
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
+        mock_llm_raw.side_effect = RuntimeError("Connection refused")
 
         result = await _verify_claim_externally("test claim about 2026 events")
         assert result["source_urls"] == []
@@ -1336,23 +1239,16 @@ class TestStalenessEscalation:
         assert result["source_urls"] == ["https://reuters.com/article/xyz"]
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_no_staleness_no_escalation(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_no_staleness_no_escalation(self, mock_llm_raw):
         """When static model gives confident reasoning without staleness, no escalation."""
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
+        mock_llm_raw.return_value = {
             "choices": [{
                 "message": {
                     "content": '{"verdict": "supported", "confidence": 0.92, "reasoning": "Python was indeed released in 1991 by Guido van Rossum."}'
                 }
             }]
         }
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
 
         result = await _verify_claim_externally(
             "Python was created by Guido van Rossum in 1991",
@@ -1362,107 +1258,79 @@ class TestStalenessEscalation:
         assert result["verification_method"] == "cross_model"
         assert result["status"] == "verified"
         # Only one call made (no escalation)
-        assert mock_client.post.call_count == 1
+        assert mock_llm_raw.call_count == 1
 
 
 class TestGeneratorModelContext:
     """Test that generating model is included in verification prompts."""
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_user_prompt_includes_generator_model(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_user_prompt_includes_generator_model(self, mock_llm_raw):
         """Verification user prompt should include the generating model name."""
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
+        mock_llm_raw.return_value = {
             "choices": [{"message": {"content": '{"verdict": "supported", "confidence": 0.8, "reasoning": "OK"}'}}]
         }
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
 
         await _verify_claim_externally(
             "test claim",
             generating_model="openrouter/anthropic/claude-sonnet-4",
         )
 
-        call_args = mock_client.post.call_args
-        messages = call_args[1]["json"]["messages"] if "json" in call_args[1] else call_args[0][1]["messages"]
+        call_args = mock_llm_raw.call_args
+        messages = call_args[0][0]
         user_msg = messages[1]["content"]
         assert "openrouter/anthropic/claude-sonnet-4" in user_msg
         assert "generated by" in user_msg
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_no_generator_model_omits_context(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_no_generator_model_omits_context(self, mock_llm_raw):
         """When no generating model is provided, user prompt should not include model context."""
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
+        mock_llm_raw.return_value = {
             "choices": [{"message": {"content": '{"verdict": "supported", "confidence": 0.8, "reasoning": "OK"}'}}]
         }
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
 
         await _verify_claim_externally("test claim", generating_model=None)
 
-        call_args = mock_client.post.call_args
-        messages = call_args[1]["json"]["messages"] if "json" in call_args[1] else call_args[0][1]["messages"]
+        call_args = mock_llm_raw.call_args
+        messages = call_args[0][0]
         user_msg = messages[1]["content"]
         assert "generated by" not in user_msg
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_system_prompt_mentions_different_ai(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_system_prompt_mentions_different_ai(self, mock_llm_raw):
         """System prompt should mention verifying a different AI model's claim."""
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
+        mock_llm_raw.return_value = {
             "choices": [{"message": {"content": '{"verdict": "supported", "confidence": 0.8, "reasoning": "OK"}'}}]
         }
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
 
         await _verify_claim_externally(
             "test claim",
             generating_model="openrouter/anthropic/claude-sonnet-4",
         )
 
-        call_args = mock_client.post.call_args
-        messages = call_args[1]["json"]["messages"] if "json" in call_args[1] else call_args[0][1]["messages"]
+        call_args = mock_llm_raw.call_args
+        messages = call_args[0][0]
         system_msg = messages[0]["content"]
         assert "different AI model" in system_msg
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_current_event_system_prompt_mentions_different_ai(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_current_event_system_prompt_mentions_different_ai(self, mock_llm_raw):
         """Current-event system prompt should also mention verifying another AI's claim."""
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
+        mock_llm_raw.return_value = {
             "choices": [{"message": {"content": '{"verdict": "supported", "confidence": 0.9, "reasoning": "Per Reuters."}'}}]
         }
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
 
         await _verify_claim_externally(
             "OpenAI launched GPT-5 this week in March 2026",
             generating_model="openrouter/anthropic/claude-sonnet-4",
         )
 
-        call_args = mock_client.post.call_args
-        messages = call_args[1]["json"]["messages"] if "json" in call_args[1] else call_args[0][1]["messages"]
+        call_args = mock_llm_raw.call_args
+        messages = call_args[0][0]
         system_msg = messages[0]["content"]
         assert "different AI model" in system_msg
         assert "web search" in system_msg.lower()
@@ -1618,21 +1486,14 @@ class TestIgnoranceClaimVerification:
     """Test end-to-end ignorance-admission claim verification."""
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_ignorance_claim_uses_web_search(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_ignorance_claim_uses_web_search(self, mock_llm_raw):
         """Ignorance-admitting claims should always route to web search."""
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
+        mock_llm_raw.return_value = {
             "choices": [{"message": {
                 "content": '{"verdict": "supported", "confidence": 0.9, "reasoning": "The One Big Beautiful Bill Act was signed July 4, 2025."}',
             }}]
         }
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
 
         result = await _verify_claim_externally(
             "I don't have information about the big beautiful bill passed in 2025",
@@ -1640,34 +1501,26 @@ class TestIgnoranceClaimVerification:
         )
 
         # Should use web search model (not regular cross-model)
-        call_args = mock_client.post.call_args
-        payload = call_args[1]["json"] if "json" in call_args[1] else call_args[0][1]
-        assert payload["model"] == config.VERIFICATION_CURRENT_EVENT_MODEL
+        call_args = mock_llm_raw.call_args
+        assert call_args[1]["model"] == config.VERIFICATION_CURRENT_EVENT_MODEL
         assert result["verification_method"] == "web_search"
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_ignorance_claim_uses_reframed_prompt(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_ignorance_claim_uses_reframed_prompt(self, mock_llm_raw):
         """Ignorance claims should use the reframed prompt, not the standard one."""
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
+        mock_llm_raw.return_value = {
             "choices": [{"message": {
                 "content": '{"verdict": "supported", "confidence": 0.9, "reasoning": "OK"}',
             }}]
         }
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
 
         await _verify_claim_externally(
             "I don't have information about the big beautiful bill passed in 2025",
         )
 
-        call_args = mock_client.post.call_args
-        messages = call_args[1]["json"]["messages"] if "json" in call_args[1] else call_args[0][1]["messages"]
+        call_args = mock_llm_raw.call_args
+        messages = call_args[0][0]
         user_msg = messages[1]["content"]
         system_msg = messages[0]["content"]
 
@@ -1680,16 +1533,14 @@ class TestIgnoranceClaimVerification:
         assert "UNDERLYING TOPIC" in system_msg
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_ignorance_claim_inverts_supported_to_refuted(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_ignorance_claim_inverts_supported_to_refuted(self, mock_llm_raw):
         """When verifier confirms facts exist, ignorance claim → unverified (refuted).
 
         Note: Uses a pure ignorance claim without recency qualifiers like
         "as of my last update" — those now route to recency detection instead.
         """
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
+        mock_llm_raw.return_value = {
             "choices": [{"message": {
                 "content": json.dumps({
                     "verdict": "supported",
@@ -1698,11 +1549,6 @@ class TestIgnoranceClaimVerification:
                 }),
             }}]
         }
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
 
         result = await _verify_claim_externally(
             "I don't have specific information about a big beautiful bill passed in 2025",
@@ -1715,12 +1561,10 @@ class TestIgnoranceClaimVerification:
         assert result["confidence"] == 0.92
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_ignorance_claim_inverts_refuted_to_verified(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_ignorance_claim_inverts_refuted_to_verified(self, mock_llm_raw):
         """When verifier says facts don't exist, ignorance claim → verified (correct)."""
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
+        mock_llm_raw.return_value = {
             "choices": [{"message": {
                 "content": json.dumps({
                     "verdict": "refuted",
@@ -1729,11 +1573,6 @@ class TestIgnoranceClaimVerification:
                 }),
             }}]
         }
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
 
         result = await _verify_claim_externally(
             "I don't have information about the unicorn trade deal of 2025",
@@ -1746,21 +1585,14 @@ class TestIgnoranceClaimVerification:
         assert result["confidence"] >= 0.7
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_normal_claim_not_affected(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_normal_claim_not_affected(self, mock_llm_raw):
         """Non-ignorance claims should NOT be inverted."""
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
+        mock_llm_raw.return_value = {
             "choices": [{"message": {
                 "content": '{"verdict": "supported", "confidence": 0.9, "reasoning": "Correct."}',
             }}]
         }
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
 
         result = await _verify_claim_externally(
             "Python was released in 1991 by Guido van Rossum",
@@ -2054,23 +1886,15 @@ class TestRecencyClaimVerification:
     """Test recency claims routed correctly through external verification."""
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_recency_claim_uses_web_search_model(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_recency_claim_uses_web_search_model(self, mock_llm_raw):
         """Recency claims should use the web search model (Grok :online)."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
+        mock_llm_raw.return_value = {
             "choices": [{"message": {
                 "content": '{"verdict": "refuted", "confidence": 0.85, "reasoning": "Current data shows 340M"}',
                 "annotations": [],
             }}]
         }
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
 
         result = await _verify_claim_externally(
             "As of my last update, the US population is 330 million",
@@ -2082,23 +1906,15 @@ class TestRecencyClaimVerification:
         assert "Outdated" in result.get("reason", "")
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_recency_supported_becomes_verified(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_recency_supported_becomes_verified(self, mock_llm_raw):
         """Recency claim where data is still current → verified."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
+        mock_llm_raw.return_value = {
             "choices": [{"message": {
                 "content": '{"verdict": "supported", "confidence": 0.9, "reasoning": "Data is current"}',
                 "annotations": [],
             }}]
         }
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
 
         result = await _verify_claim_externally(
             "As of my training data, Python 3.12 is the latest version",
@@ -2144,23 +1960,15 @@ class TestCitationClaimVerification:
     """Test citation claims routed through verification."""
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_citation_claim_uses_web_search(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_citation_claim_uses_web_search(self, mock_llm_raw):
         """Citation claims should use web search to verify source exists."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
+        mock_llm_raw.return_value = {
             "choices": [{"message": {
                 "content": '{"verdict": "supported", "confidence": 0.95, "reasoning": "Source exists"}',
                 "annotations": [],
             }}]
         }
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
 
         result = await _verify_claim_externally(
             '[CITATION] Source cited: "World Health Organization"',
@@ -2170,23 +1978,15 @@ class TestCitationClaimVerification:
         assert result["verification_method"] == "web_search"
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_fabricated_citation_detected(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_fabricated_citation_detected(self, mock_llm_raw):
         """Fabricated citation should be marked as unverified."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
+        mock_llm_raw.return_value = {
             "choices": [{"message": {
                 "content": '{"verdict": "refuted", "confidence": 0.9, "reasoning": "No such publication found"}',
                 "annotations": [],
             }}]
         }
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
 
         result = await _verify_claim_externally(
             '[CITATION] Source cited: "Journal of Fake Research 2024"',
@@ -2200,13 +2000,10 @@ class TestConsistencyChecking:
     """Test cross-turn and internal consistency checking."""
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_detects_history_contradiction(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_detects_history_contradiction(self, mock_llm_raw):
         """Should detect when current claims contradict prior turns."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
+        mock_llm_raw.return_value = {
             "choices": [{"message": {"content": json.dumps([
                 {
                     "claim_index": 0,
@@ -2215,11 +2012,6 @@ class TestConsistencyChecking:
                 }
             ])}}]
         }
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
 
         issues = await _check_history_consistency(
             claims=["Python was created in 1991"],
@@ -2232,13 +2024,10 @@ class TestConsistencyChecking:
         assert issues[0]["type"] == "history"
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_detects_internal_contradiction(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_detects_internal_contradiction(self, mock_llm_raw):
         """Should detect claims that contradict each other in the same response."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
+        mock_llm_raw.return_value = {
             "choices": [{"message": {"content": json.dumps([
                 {
                     "claim_index": 1,
@@ -2248,11 +2037,6 @@ class TestConsistencyChecking:
                 }
             ])}}]
         }
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
 
         issues = await _check_history_consistency(
             claims=["A is greater than B", "B is greater than A"],
@@ -2278,20 +2062,12 @@ class TestConsistencyChecking:
         assert issues == []
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_no_contradictions_returns_empty(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_no_contradictions_returns_empty(self, mock_llm_raw):
         """When LLM finds no contradictions, return empty list."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
+        mock_llm_raw.return_value = {
             "choices": [{"message": {"content": "[]"}}]
         }
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
 
         issues = await _check_history_consistency(
             claims=["Python is great", "Python is popular"],
@@ -2302,14 +2078,10 @@ class TestConsistencyChecking:
         assert issues == []
 
     @pytest.mark.asyncio
-    @patch("agents.hallucination.httpx.AsyncClient")
-    async def test_llm_failure_returns_empty(self, mock_client_cls):
+    @patch("utils.llm_client.call_llm_raw", new_callable=AsyncMock)
+    async def test_llm_failure_returns_empty(self, mock_llm_raw):
         """LLM call failure should return empty list gracefully."""
-        mock_client = AsyncMock()
-        mock_client.post.side_effect = Exception("Connection refused")
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client
+        mock_llm_raw.side_effect = RuntimeError("Connection refused")
 
         issues = await _check_history_consistency(
             claims=["Claim A", "Claim B"],
@@ -2509,10 +2281,11 @@ class TestStreamingGuaranteedSummary:
     """
 
     @pytest.mark.asyncio
+    @patch("agents.hallucination.streaming._check_history_consistency", new_callable=AsyncMock, return_value=[])
     @patch("agents.hallucination.streaming.extract_claims")
     @patch("agents.hallucination.streaming.verify_claim")
     async def test_summary_emitted_on_success(
-        self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis
+        self, mock_verify, mock_extract, _mock_consistency, mock_chroma, mock_neo4j, mock_redis
     ):
         """Happy path: all claims verify successfully → summary emitted."""
         mock_extract.return_value = (
@@ -2551,10 +2324,11 @@ class TestStreamingGuaranteedSummary:
         assert "interrupted" not in summary
 
     @pytest.mark.asyncio
+    @patch("agents.hallucination.streaming._check_history_consistency", new_callable=AsyncMock, return_value=[])
     @patch("agents.hallucination.streaming.extract_claims")
     @patch("agents.hallucination.streaming.verify_claim")
     async def test_summary_emitted_on_partial_failure(
-        self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis
+        self, mock_verify, mock_extract, _mock_consistency, mock_chroma, mock_neo4j, mock_redis
     ):
         """When some verification tasks fail, summary is still emitted."""
         mock_extract.return_value = (
@@ -2682,10 +2456,11 @@ class TestStreamingGuaranteedSummary:
         assert types[-1] == "summary"
 
     @pytest.mark.asyncio
+    @patch("agents.hallucination.streaming._check_history_consistency", new_callable=AsyncMock, return_value=[])
     @patch("agents.hallucination.streaming.extract_claims")
     @patch("agents.hallucination.streaming.verify_claim")
     async def test_mixed_statuses_in_summary(
-        self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis
+        self, mock_verify, mock_extract, _mock_consistency, mock_chroma, mock_neo4j, mock_redis
     ):
         """Summary correctly counts verified, unverified, and uncertain claims."""
         mock_extract.return_value = (
@@ -2742,7 +2517,7 @@ class TestVerificationErrorCaching:
         )
         mock_redis.rpush.assert_called_once()
         call_args = mock_redis.rpush.call_args
-        assert call_args[0][0] == "verify:errors"
+        assert call_args[0][0] == "cerid:verify:errors"
         entry = json.loads(call_args[0][1])
         assert entry["error_type"] == "stream_interrupted"
         assert entry["conversation_id"] == "conv-err-1"
@@ -2764,7 +2539,7 @@ class TestVerificationErrorCaching:
 
     def test_log_verification_error_handles_redis_failure(self, mock_redis):
         from utils.cache import log_verification_error
-        mock_redis.rpush.side_effect = Exception("Redis down")
+        mock_redis.rpush.side_effect = RuntimeError("Redis down")
         # Should not raise
         log_verification_error(
             mock_redis,

@@ -197,14 +197,13 @@ class TestFeatureFlags:
 
         assert is_feature_enabled("nonexistent_feature") is False
 
-    @patch("config.FEATURE_TIER", "community")
-    @patch("config.FEATURE_FLAGS", {"ocr_parsing": False, "semantic_dedup": False})
+    @patch("config.features.FEATURE_FLAGS", {"audio_transcription": False, "image_understanding": False})
     def test_pro_features_disabled_in_community(self):
         """Pro features are disabled in community tier."""
         from utils.features import is_feature_enabled
 
-        assert is_feature_enabled("ocr_parsing") is False
-        assert is_feature_enabled("semantic_dedup") is False
+        assert is_feature_enabled("audio_transcription") is False
+        assert is_feature_enabled("image_understanding") is False
 
     def test_get_feature_status(self):
         """get_feature_status returns tier and all flags."""

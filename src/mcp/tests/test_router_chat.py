@@ -7,8 +7,22 @@ from __future__ import annotations
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+
+@pytest.fixture(autouse=True)
+def _mock_redis_for_chat():
+    """Prevent Redis connections during chat router tests (rate limiting, metrics)."""
+    mock_redis = MagicMock()
+    mock_redis.get.return_value = None
+    mock_redis.pipeline.return_value.__enter__ = MagicMock(return_value=MagicMock())
+    mock_redis.pipeline.return_value.__exit__ = MagicMock(return_value=False)
+    with patch("deps._redis", mock_redis), \
+         patch("deps.get_redis", return_value=mock_redis), \
+         patch("utils.private_mode.get_private_mode_level", return_value=0):
+        yield
 
 
 def _make_app():
@@ -19,11 +33,11 @@ def _make_app():
     return app
 
 
-def _setup_mock_client(mock_client_cls, mock_response):
-    """Configure a mock httpx.AsyncClient that uses build_request + send."""
+def _setup_mock_client(mock_response):
+    """Configure a mock httpx client that uses build_request + send."""
     mock_client = AsyncMock()
+    mock_client.is_closed = False
     mock_client.aclose = AsyncMock()
-    mock_client_cls.return_value = mock_client
 
     mock_request = MagicMock()
     mock_client.build_request = MagicMock(return_value=mock_request)
@@ -61,10 +75,9 @@ class TestChatStreamEndpoint:
         with patch("routers.chat.OPENROUTER_API_KEY", "sk-test"):
             app = _make_app()
             client = TestClient(app)
+            mock_client = _setup_mock_client(mock_response)
 
-            with patch("routers.chat.httpx.AsyncClient") as mock_client_cls:
-                _setup_mock_client(mock_client_cls, mock_response)
-
+            with patch("routers.chat._get_chat_client", return_value=mock_client):
                 resp = client.post("/chat/stream", json={
                     "model": "openrouter/anthropic/claude-sonnet-4.6",
                     "messages": [{"role": "user", "content": "hello"}],
@@ -106,10 +119,9 @@ class TestChatStreamEndpoint:
         with patch("routers.chat.OPENROUTER_API_KEY", "sk-test"):
             app = _make_app()
             client = TestClient(app)
+            mock_client = _setup_mock_client(mock_response)
 
-            with patch("routers.chat.httpx.AsyncClient") as mock_client_cls:
-                _setup_mock_client(mock_client_cls, mock_response)
-
+            with patch("routers.chat._get_chat_client", return_value=mock_client):
                 resp = client.post("/chat/stream", json={
                     "model": "openrouter/anthropic/claude-sonnet-4.6",
                     "messages": [{"role": "user", "content": "hello"}],
@@ -146,10 +158,9 @@ class TestChatStreamEndpoint:
         with patch("routers.chat.OPENROUTER_API_KEY", "sk-test"):
             app = _make_app()
             client = TestClient(app)
+            mock_client = _setup_mock_client(mock_response)
 
-            with patch("routers.chat.httpx.AsyncClient") as mock_client_cls:
-                _setup_mock_client(mock_client_cls, mock_response)
-
+            with patch("routers.chat._get_chat_client", return_value=mock_client):
                 resp = client.post("/chat/stream", json={
                     "model": "openrouter/anthropic/claude-sonnet-4.6",
                     "messages": [{"role": "user", "content": "hello"}],
@@ -195,19 +206,18 @@ class TestChatRequestValidation:
             app = _make_app()
             client = TestClient(app)
 
-            with patch("routers.chat.httpx.AsyncClient") as mock_client_cls:
-                mock_resp = AsyncMock()
-                mock_resp.status_code = 200
-                mock_resp.aclose = AsyncMock()
-                mock_resp.aread = AsyncMock(return_value=b"")
+            mock_resp = AsyncMock()
+            mock_resp.status_code = 200
+            mock_resp.aclose = AsyncMock()
+            mock_resp.aread = AsyncMock(return_value=b"")
 
-                async def empty_stream():
-                    yield b"data: [DONE]\n\n"
+            async def empty_stream():
+                yield b"data: [DONE]\n\n"
 
-                mock_resp.aiter_bytes = empty_stream
+            mock_resp.aiter_bytes = empty_stream
+            mock_client = _setup_mock_client(mock_resp)
 
-                _setup_mock_client(mock_client_cls, mock_resp)
-
+            with patch("routers.chat._get_chat_client", return_value=mock_client):
                 resp = client.post("/chat/stream", json={
                     "model": "openrouter/openai/gpt-4o-mini",
                     "messages": [],
@@ -222,19 +232,18 @@ class TestChatRequestValidation:
             app = _make_app()
             client = TestClient(app)
 
-            with patch("routers.chat.httpx.AsyncClient") as mock_client_cls:
-                mock_resp = AsyncMock()
-                mock_resp.status_code = 200
-                mock_resp.aclose = AsyncMock()
-                mock_resp.aread = AsyncMock(return_value=b"")
+            mock_resp = AsyncMock()
+            mock_resp.status_code = 200
+            mock_resp.aclose = AsyncMock()
+            mock_resp.aread = AsyncMock(return_value=b"")
 
-                async def empty_stream():
-                    yield b"data: [DONE]\n\n"
+            async def empty_stream():
+                yield b"data: [DONE]\n\n"
 
-                mock_resp.aiter_bytes = empty_stream
+            mock_resp.aiter_bytes = empty_stream
+            mock_client = _setup_mock_client(mock_resp)
 
-                mock_client = _setup_mock_client(mock_client_cls, mock_resp)
-
+            with patch("routers.chat._get_chat_client", return_value=mock_client):
                 resp = client.post("/chat/stream", json={
                     "model": "openrouter/openai/gpt-4o-mini",
                     "messages": [{"role": "user", "content": "hi"}],

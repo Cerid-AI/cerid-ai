@@ -40,7 +40,7 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("fetchHealth", () => {
-  it("calls /health with API key header", async () => {
+  it("calls /health with client ID header", async () => {
     const healthData = { status: "healthy", services: {} }
     vi.stubGlobal("fetch", mockFetch(healthData))
 
@@ -49,7 +49,7 @@ describe("fetchHealth", () => {
     expect(fetch).toHaveBeenCalledWith(
       "http://test-mcp:8888/health",
       expect.objectContaining({
-        headers: expect.objectContaining({ "X-API-Key": "test-key-123" }),
+        headers: expect.objectContaining({ "X-Client-ID": "gui" }),
       }),
     )
   })
@@ -204,7 +204,7 @@ describe("fetchSyncStatus", () => {
     expect(fetch).toHaveBeenCalledWith(
       "http://test-mcp:8888/sync/status",
       expect.objectContaining({
-        headers: expect.objectContaining({ "X-API-Key": "test-key-123" }),
+        headers: expect.objectContaining({ "X-Client-ID": "gui" }),
       }),
     )
   })

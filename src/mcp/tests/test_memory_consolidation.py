@@ -71,7 +71,7 @@ class TestClassifyMemoryNoMatches:
     @pytest.mark.asyncio
     async def test_similarity_search_failure_returns_add(self, mock_chroma):
         client, collection = mock_chroma
-        collection.query.side_effect = Exception("ChromaDB unavailable")
+        collection.query.side_effect = RuntimeError("ChromaDB unavailable")
         result = await classify_memory("some fact", chroma_client=client)
         assert result.action == "ADD"
         assert "similarity search failed" in result.reason
@@ -258,7 +258,7 @@ class TestMarkSuperseded:
 
     def test_neo4j_failure_logs_warning(self, mock_neo4j):
         driver, session = mock_neo4j
-        session.run.side_effect = Exception("Neo4j down")
+        session.run.side_effect = RuntimeError("Neo4j down")
         # Should not raise — logs warning instead
         mark_superseded(driver, "art-old", "art-new")
 
