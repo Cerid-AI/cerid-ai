@@ -6,8 +6,6 @@
 import json
 import math
 from datetime import datetime, timedelta, timezone
-
-UTC = timezone.utc
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -21,6 +19,8 @@ from agents.curator import (
     score_keywords,
     score_summary,
 )
+
+UTC = timezone.utc
 
 # ---------------------------------------------------------------------------
 # Tests: score_summary

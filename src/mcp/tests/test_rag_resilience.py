@@ -22,18 +22,31 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+
 # Stub heavy reranker deps before import, but ONLY if they aren't already
 # real modules (avoids polluting other tests that use the real packages).
 class _UnionableMeta(type):
     def __or__(cls, other):
-        import typing; return typing.Union[cls, other]
+        import typing  # noqa: I001
+
+        return typing.Union[cls, other]
+
     def __ror__(cls, other):
-        import typing; return typing.Union[other, cls]
+        import typing  # noqa: I001
+
+        return typing.Union[other, cls]
 
 
-class _Stub1(metaclass=_UnionableMeta): pass  # InferenceSession
-class _Stub2(metaclass=_UnionableMeta): pass  # SessionOptions
-class _Stub3(metaclass=_UnionableMeta): pass  # Tokenizer
+class _Stub1(metaclass=_UnionableMeta):  # InferenceSession
+    pass
+
+
+class _Stub2(metaclass=_UnionableMeta):  # SessionOptions
+    pass
+
+
+class _Stub3(metaclass=_UnionableMeta):  # Tokenizer
+    pass
 
 for _mod_name in ("onnxruntime", "huggingface_hub", "tokenizers"):
     if _mod_name not in sys.modules:
@@ -400,7 +413,8 @@ class TestParallelExecution:
         }
 
         mock_chroma = MagicMock()
-        col_stub = MagicMock(); col_stub.name = "kb_general"
+        col_stub = MagicMock()
+        col_stub.name = "kb_general"
         mock_chroma.list_collections.return_value = [col_stub]
         mock_chroma.get_collection.return_value = mock_collection
 

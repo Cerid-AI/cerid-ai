@@ -5,12 +5,11 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from utils.circuit_breaker import AsyncCircuitBreaker, CircuitOpenError, CircuitState
+from utils.circuit_breaker import CircuitState
 from utils.data_sources import registry
 from utils.data_sources.base import DataSource, DataSourceRegistry, DataSourceResult
 from utils.data_sources.finance import ExchangeRatesSource

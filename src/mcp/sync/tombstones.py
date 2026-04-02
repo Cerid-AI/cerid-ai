@@ -9,8 +9,6 @@ import json
 import logging
 import os
 from datetime import datetime, timedelta, timezone
-
-UTC = timezone.utc
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +23,8 @@ from sync._helpers import (
     _ensure_dir,
     _iter_jsonl,
 )
+
+UTC = timezone.utc
 
 logger = logging.getLogger("ai-companion.sync")
 

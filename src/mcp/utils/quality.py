@@ -20,9 +20,9 @@ import json
 import math
 from datetime import datetime, timezone
 
-UTC = timezone.utc
-
 import config
+
+UTC = timezone.utc
 
 # ---------------------------------------------------------------------------
 # Helpers (portable — no Neo4j or ChromaDB dependency)

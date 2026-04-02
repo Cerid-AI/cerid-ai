@@ -6,11 +6,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-
-UTC = timezone.utc
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+UTC = timezone.utc
 
 # ---------------------------------------------------------------------------
 # JWT helpers

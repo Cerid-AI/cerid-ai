@@ -6,24 +6,20 @@
 from __future__ import annotations
 
 import time
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from utils.smart_router import (
     CAPABLE_MODELS,
     CHEAP_MODELS,
-    EXPERT_MODELS,
     FREE_MODELS,
-    RESEARCH_MODELS,
     Complexity,
-    RouteDecision,
     TaskType,
     _classify_complexity,
     get_model_registry,
     route,
 )
-
 
 # ---------------------------------------------------------------------------
 # _classify_complexity (heuristic, no LLM call)

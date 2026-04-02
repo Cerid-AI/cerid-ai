@@ -313,7 +313,6 @@ class TestQueryRetrievalPipeline:
         dependency chains (DegradationTier, semantic cache, etc.) that
         are already unit-tested elsewhere.
         """
-        from agents.query_agent import agent_query
 
         private_result = {
             "context": "", "sources": [], "total_results": 0,

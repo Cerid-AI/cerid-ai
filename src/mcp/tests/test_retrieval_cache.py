@@ -10,8 +10,6 @@ import sys
 from types import ModuleType
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 # Ensure numpy stub exists before importing the module under test.
 # The host Python may lack numpy; retrieval_cache.py imports it at module level.
 if "numpy" not in sys.modules:
@@ -50,7 +48,6 @@ if "numpy" not in sys.modules:
     sys.modules["numpy"] = _np
 
 from utils.retrieval_cache import RetrievalCache
-
 
 # ---------------------------------------------------------------------------
 # Helpers

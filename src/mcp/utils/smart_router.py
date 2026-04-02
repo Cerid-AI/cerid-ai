@@ -110,7 +110,7 @@ async def _check_ollama() -> bool:
     try:
         ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
         from utils.internal_llm import _get_ollama_client
-        client = _get_ollama_client()
+        client = await _get_ollama_client()
         resp = await client.get(f"{ollama_url}/api/tags")
         if resp.status_code == 200:
             data = resp.json()
@@ -259,7 +259,7 @@ async def _classify_with_best_available(query: str) -> Complexity:
         )
 
         from utils.internal_llm import _get_ollama_client
-        client = _get_ollama_client()
+        client = await _get_ollama_client()
         resp = await client.post(
             f"{ollama_url}/api/chat",
             json={

@@ -20,7 +20,6 @@ import pytest
 
 from services.ingestion import ingest_content
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -211,7 +210,7 @@ class TestMultiTurnConversation:
 
         with patch("agents.hallucination.verification.verify_claim",
                     new_callable=AsyncMock,
-                    return_value=_make_verify_result("PostgreSQL uses MVCC")) as mock_vc:
+                    return_value=_make_verify_result("PostgreSQL uses MVCC")):
             from agents.hallucination.verification import verify_claim
             vr = await verify_claim("PostgreSQL uses MVCC", MagicMock(), MagicMock(), MagicMock())
 

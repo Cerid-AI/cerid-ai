@@ -122,7 +122,7 @@ def warmup() -> None:
     try:
         _load_model()
         logger.info("Reranker ONNX model pre-warmed")
-    except Exception as e:
+    except (OSError, RuntimeError, ValueError, ImportError) as e:
         logger.warning("Reranker warmup failed (will retry on first use): %s", e)
 
 

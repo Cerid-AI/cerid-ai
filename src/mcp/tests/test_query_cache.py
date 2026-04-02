@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from unittest.mock import MagicMock, patch
 
@@ -20,7 +19,6 @@ from utils.query_cache import (
     invalidate_cache_non_blocking,
     set_cached,
 )
-
 
 # ---------------------------------------------------------------------------
 # _cache_key

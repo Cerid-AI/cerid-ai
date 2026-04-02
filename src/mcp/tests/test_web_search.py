@@ -8,14 +8,11 @@ circuit breaker integration, cascading failover, and result structure.
 """
 from __future__ import annotations
 
-import asyncio
-import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from utils.circuit_breaker import AsyncCircuitBreaker, CircuitOpenError, CircuitState
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -111,8 +108,8 @@ async def test_tavily_provider_timeout():
     with patch.dict("os.environ", {"TAVILY_API_KEY": "test-key"}), \
          patch("utils.web_search.TAVILY_API_KEY", "test-key"), \
          patch("utils.web_search._get_search_client", return_value=mock_client):
-        from utils.web_search import TavilyProvider
         from utils.circuit_breaker import get_breaker
+        from utils.web_search import TavilyProvider
         breaker = get_breaker("tavily")
         breaker.reset()
 
@@ -137,8 +134,8 @@ async def test_searxng_provider_success():
     with patch.dict("os.environ", {"SEARXNG_URL": "http://localhost:8080"}), \
          patch("utils.web_search.SEARXNG_URL", "http://localhost:8080"), \
          patch("utils.web_search._get_search_client", return_value=mock_client):
-        from utils.web_search import SearxngProvider
         from utils.circuit_breaker import get_breaker
+        from utils.web_search import SearxngProvider
         get_breaker("searxng").reset()
 
         provider = SearxngProvider()
@@ -197,7 +194,7 @@ async def test_cascading_failover():
     # Set up: Tavily configured but will error, SearXNG configured but will error
     with patch("utils.web_search.TAVILY_API_KEY", "test-key"), \
          patch("utils.web_search.SEARXNG_URL", "http://localhost:8080"):
-        from utils.web_search import get_search_provider, search_and_verify
+        from utils.web_search import get_search_provider
 
     # Use search_and_verify with a provider that fails, triggering the try/except
     mock_resp_fail = _make_mock_response({}, status_code=500)
@@ -208,8 +205,8 @@ async def test_cascading_failover():
          patch("utils.web_search.SEARXNG_URL", ""), \
          patch("utils.web_search._get_search_client", return_value=mock_client), \
          patch("utils.web_search._rate_window", []):
-        from utils.web_search import get_search_provider
         from utils.circuit_breaker import get_breaker
+        from utils.web_search import get_search_provider
         get_breaker("tavily").reset()
 
         provider = get_search_provider()
@@ -231,7 +228,7 @@ async def test_cascading_failover():
 
 def test_rate_limiter_blocks_excess():
     """Rate limiter should block the 11th request in a 1-second window."""
-    from utils.web_search import _check_rate_limit, _rate_window, WEB_SEARCH_RATE_LIMIT
+    from utils.web_search import WEB_SEARCH_RATE_LIMIT, _check_rate_limit, _rate_window
 
     # Clear the window
     _rate_window.clear()
@@ -288,8 +285,8 @@ async def test_web_search_returns_structured_results():
     with patch("utils.web_search.TAVILY_API_KEY", "test-key"), \
          patch("utils.web_search._get_search_client", return_value=mock_client), \
          patch("utils.web_search._rate_window", []):
-        from utils.web_search import search_and_verify
         from utils.circuit_breaker import get_breaker
+        from utils.web_search import search_and_verify
         get_breaker("tavily").reset()
 
         result = await search_and_verify("test query")
