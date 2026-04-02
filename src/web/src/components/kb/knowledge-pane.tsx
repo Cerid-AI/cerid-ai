@@ -60,10 +60,19 @@ function parseJsonArray(json: string | undefined): string[] {
 }
 
 function artifactToResult(a: Artifact): KBQueryResult & { chunk_count?: number; source_type?: string; client_source?: string } {
-  // Parse keywords to use as tags when the artifact has no tags
-  const tags = a.tags && a.tags.length > 0
-    ? a.tags
-    : parseJsonArray(a.keywords).slice(0, 5)
+  let tags: string[]
+  if (a.tags && a.tags.length > 0) {
+    tags = a.tags
+  } else {
+    // Fallback: derive display tags from NLP keywords. Keywords are often
+    // stemmed or partial tokens (e.g. "invest", "portfol"), so we filter to
+    // full words >= 4 chars, title-case them, limit to 3, and prefix with
+    // "~" so the renderer can style them as auto-generated.
+    tags = parseJsonArray(a.keywords)
+      .filter((kw) => kw.length >= 4 && /^[a-zA-Z]+$/.test(kw))
+      .slice(0, 3)
+      .map((kw) => `~${kw.charAt(0).toUpperCase()}${kw.slice(1).toLowerCase()}`)
+  }
 
   return {
     content: a.summary || "",

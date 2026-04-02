@@ -178,25 +178,24 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
               )}
             </div>
             {result.tags && result.tags.length > 0 && (
-              <div className="mt-1 flex flex-wrap gap-1">
-                {result.tags.slice(0, 4).map((tag) => (
-                  <span key={tag} className="inline-flex items-center truncate max-w-[120px] rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                    {tag}
-                  </span>
-                ))}
+              <div className="mt-1 flex min-w-0 flex-wrap gap-1">
+                {result.tags.slice(0, 4).map((tag) => {
+                  const isAuto = tag.startsWith("~")
+                  const label = isAuto ? tag.slice(1) : tag
+                  return (
+                    <span key={tag} className={`inline-flex items-center truncate max-w-[120px] rounded px-1.5 py-0.5 text-[10px] ${isAuto ? "bg-muted/50 italic text-muted-foreground/60" : "bg-muted text-muted-foreground"}`}>
+                      {label}
+                    </span>
+                  )
+                })}
                 {result.tags.length > 4 && (
                   <span className="text-[10px] text-muted-foreground">+{result.tags.length - 4}</span>
                 )}
               </div>
             )}
           </div>
-          {compact && result.content && (
-            <p className="mt-0.5 truncate text-[11px] leading-tight text-muted-foreground">
-              {result.content.replace(/[#*_[\]|>]/g, "").replace(/\s+/g, " ").trim().slice(0, 80)}
-            </p>
-          )}
           <TooltipProvider delayDuration={0}>
-            <div className="flex flex-col items-end gap-1">
+            <div className="flex shrink-0 flex-col items-end gap-1">
               {showRelevance && (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -227,6 +226,13 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
             </div>
           </TooltipProvider>
         </div>
+
+        {/* Compact content preview — outside header flex to avoid layout interference */}
+        {compact && result.content && (
+          <p className="mt-0.5 truncate text-[11px] leading-tight text-muted-foreground">
+            {result.content.replace(/[#*_[\]|>]/g, "").replace(/\s+/g, " ").trim().slice(0, 80)}
+          </p>
+        )}
 
         {/* Content */}
         {!compact && (cleanContent.length > 10 ? (

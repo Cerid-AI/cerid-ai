@@ -56,6 +56,10 @@ async def list_memories(
         params: dict = {"limit": limit, "offset": offset}
 
         conditions.append("a.filename STARTS WITH 'memory_'")
+        # Exclude non-GUI client sources (e.g. trading-agent ingested items)
+        conditions.append(
+            "(a.client_source IS NULL OR a.client_source = '' OR a.client_source = 'gui')"
+        )
         memory_type = None
 
         if type:
@@ -117,7 +121,10 @@ async def list_memories(
                 })
 
         # Get total count for pagination
-        count_conditions = ["a.filename STARTS WITH 'memory_'"]
+        count_conditions = [
+            "a.filename STARTS WITH 'memory_'",
+            "(a.client_source IS NULL OR a.client_source = '' OR a.client_source = 'gui')",
+        ]
         if type and memory_type:
             count_conditions.append("a.filename STARTS WITH $memory_type_prefix")
         if conversation_id:

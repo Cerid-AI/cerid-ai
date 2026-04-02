@@ -256,6 +256,17 @@ export function ChatPanel() {
   const orchestratedContext = useOrchestratedQuery(latestUserMessage, ragMode, recentMessages)
   const { injectedContext, clearInjected } = kbContext
 
+  // Merge orchestrated results into KB results pool for auto-inject.
+  // In smart/custom_smart modes, orchestrated results are conversation-aware
+  // and higher quality — prefer them over basic KB results.
+  // In manual mode, orchestrated results are ignored (user controls injection).
+  const effectiveKBResults = useMemo(() => {
+    if (ragMode === "manual") return kbContext.results
+    return orchestratedContext.results.length > 0
+      ? orchestratedContext.results
+      : kbContext.results
+  }, [ragMode, orchestratedContext.results, kbContext.results])
+
   // --- Model routing ---
   const { recommendation, dismiss: dismissRec, resetDismiss } = useModelRouter({
     routingMode,
@@ -314,7 +325,7 @@ export function ChatPanel() {
     autoInject,
     autoInjectThreshold,
     injectedContext,
-    kbResults: kbContext.results,
+    kbResults: effectiveKBResults,
     clearInjected,
     onBeforeSend: () => setVerificationRecBanner(null),
   })
@@ -795,7 +806,7 @@ export function ChatPanel() {
         {ragMode === "manual" ? (
           <KBContextPanel {...kbContext} onClose={() => setShowKB(false)} />
         ) : (
-          <KnowledgeConsole {...orchestratedContext} ragMode={ragMode} onClose={() => setShowKB(false)} />
+          <KnowledgeConsole {...orchestratedContext} ragMode={ragMode} onRagModeChange={setRagMode} onClose={() => setShowKB(false)} />
         )}
       </Panel>
     </Group>

@@ -118,7 +118,7 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts, onRecateg
   const hasFilter = filter.domain !== null
 
   return (
-    <div className="w-full space-y-1 rounded-lg border bg-card/50 p-2">
+    <div className="w-full overflow-hidden space-y-1 rounded-lg border bg-card/50 p-2">
       <div className="flex items-center justify-between px-2">
         <span className="text-xs font-medium text-muted-foreground">Taxonomy</span>
         <div className="flex gap-0.5">
@@ -171,8 +171,8 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts, onRecateg
         </div>
       )}
 
-      <ScrollArea className="max-h-[280px] w-full">
-        <div className="space-y-0.5 px-1 w-full">
+      <ScrollArea className="max-h-[280px] w-full overflow-x-hidden">
+        <div className="space-y-0.5 px-1 w-full overflow-hidden">
           {Object.entries(taxonomy.domains).map(([domain, info]) => {
             const isExpanded = expanded.has(domain)
             const isActive = filter.domain === domain
@@ -205,7 +205,7 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts, onRecateg
                 >
                   <button
                     className={cn(
-                      "flex flex-1 items-center gap-1.5 rounded px-2 py-1 text-left text-xs transition-colors",
+                      "flex min-w-0 flex-1 items-center gap-1.5 rounded px-2 py-1 text-left text-xs transition-colors",
                       "hover:bg-muted/50",
                       isActive && !filter.subCategory && "bg-primary/10 font-medium",
                     )}
@@ -268,7 +268,7 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts, onRecateg
                         <button
                           key={label}
                           className={cn(
-                            "flex w-full items-center gap-1.5 rounded px-2 py-0.5 text-left text-[11px] transition-colors",
+                            "flex min-w-0 w-full items-center gap-1.5 rounded px-2 py-0.5 text-left text-[11px] transition-colors",
                             "hover:bg-muted/50",
                             isSubActive && "bg-primary/10 font-medium",
                           )}

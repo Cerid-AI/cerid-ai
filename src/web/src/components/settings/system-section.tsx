@@ -104,28 +104,41 @@ export function SystemSection({
       {/* -- Taxonomy -- */}
       <SectionHeading icon={Tag} label="Taxonomy" open={sections.taxonomy} onToggle={() => toggleSection("taxonomy")} />
       {sections.taxonomy && (
-        <div className="mb-4 grid gap-3">
-          {Object.entries(settings.taxonomy).map(([domain, info]) => (
-            <Card key={domain}>
-              <CardHeader className="p-4 pb-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-base">{info.icon}</span>
-                  <CardTitle className="text-sm capitalize">{domain}</CardTitle>
-                </div>
-                <CardDescription className="text-xs">{info.description}</CardDescription>
-              </CardHeader>
-              {info.sub_categories.length > 0 && (
-                <CardContent className="flex flex-wrap gap-1.5 px-4 pb-3 pt-0">
-                  {info.sub_categories.map((sub) => (
-                    <Badge key={sub} variant="outline" className="text-[10px]">
-                      {sub}
-                    </Badge>
-                  ))}
-                </CardContent>
-              )}
-            </Card>
-          ))}
-        </div>
+        <Card className="mb-4">
+          <CardHeader className="px-4 pb-2 pt-4">
+            <CardDescription className="text-xs">
+              Taxonomy domains organize your knowledge base. Manage domains in the Knowledge tab.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="px-4 pb-4 pt-0">
+            <div className="rounded border">
+              {/* Table header */}
+              <div className="flex items-center gap-2 border-b bg-muted/30 px-3 py-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+                <span className="flex-1">Domain</span>
+                <span className="w-20 text-right">Sub-cats</span>
+                <span className="w-20 text-right">Artifacts</span>
+              </div>
+              {/* Table rows */}
+              {Object.entries(settings.taxonomy).map(([domain, info]) => {
+                const domainStats = kbStats?.domains?.[domain]
+                return (
+                  <div key={domain} className="flex items-center gap-2 border-b last:border-b-0 px-3 py-1.5 text-xs">
+                    <span className="flex items-center gap-1.5 flex-1 min-w-0">
+                      <span className="text-sm shrink-0">{info.icon}</span>
+                      <span className="capitalize truncate">{domain}</span>
+                    </span>
+                    <span className="w-20 text-right tabular-nums text-muted-foreground">
+                      {info.sub_categories.length}
+                    </span>
+                    <span className="w-20 text-right tabular-nums text-muted-foreground">
+                      {domainStats?.artifacts ?? "\u2014"}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {/* -- Storage Usage -- */}

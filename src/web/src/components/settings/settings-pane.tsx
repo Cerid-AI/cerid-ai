@@ -25,12 +25,12 @@ import type { SectionKey } from "./settings-primitives"
 
 type LoadState = "loading" | "error" | "ready"
 
-const SETTINGS_SECTIONS_VERSION = 3
+const SETTINGS_SECTIONS_VERSION = 4
 
 function readSectionState(): Record<SectionKey, boolean> {
   const defaults: Record<SectionKey, boolean> = {
     connection: true, knowledge_ingestion: true, features: true,
-    retrieval: true, search: true, taxonomy: true, infra_sync: true,
+    retrieval: true, search: true, taxonomy: false, infra_sync: true,
     ollama: true, kb_admin: true, credits: true, data_sources: false,
     rag_config: true, watched_folders: false,
   }

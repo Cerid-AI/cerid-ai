@@ -271,11 +271,13 @@ export function ConversationList({
                     aria-label={`Select ${convo.title}`}
                   />
                 )}
-                <span className="min-w-0 flex-1 truncate">
-                  <HighlightedText text={convo.title} query={debouncedQuery} />
-                </span>
+                <div className="min-w-0 flex-1 scroll-title">
+                  <span className="scroll-title-inner">
+                    <HighlightedText text={convo.title} query={debouncedQuery} />
+                  </span>
+                </div>
                 {!editMode && (
-                  <div className="flex flex-shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 [@media(pointer:coarse)]:opacity-60">
+                  <div className="relative z-10 flex flex-shrink-0 items-center gap-0.5 opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto [@media(pointer:coarse)]:opacity-60 [@media(pointer:coarse)]:pointer-events-auto">
                     {showArchived ? (
                       <Button
                         variant="ghost"

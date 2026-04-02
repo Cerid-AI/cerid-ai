@@ -129,7 +129,7 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
         <nav className="space-y-1 p-2">
           {visibleNav.map(({ pane, icon: Icon, label }) => {
             const showBadge = pane === "settings" && updateCount > 0
-            return (
+            const navButton = (
               <Tooltip key={pane}>
                 <TooltipTrigger asChild>
                   <Button
@@ -137,7 +137,8 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
                     className={cn(
                       "w-full justify-start gap-3",
                       collapsed && "justify-center px-0",
-                      activePane === pane && "border-l-2 border-brand bg-brand/5"
+                      activePane === pane && "border-l-2 border-brand bg-brand/5",
+                      pane === "chat" && !collapsed && "flex-1",
                     )}
                     onClick={() => onPaneChange(pane)}
                   >
@@ -164,25 +165,30 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
                 {collapsed && <TooltipContent side="right">{label}</TooltipContent>}
               </Tooltip>
             )
+            if (pane === "chat") {
+              return (
+                <div key={pane} className="flex items-center gap-1">
+                  {navButton}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+                        onClick={(e) => { e.stopPropagation(); handleNewChat() }}
+                        aria-label="New conversation"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">New conversation</TooltipContent>
+                  </Tooltip>
+                </div>
+              )
+            }
+            return navButton
           })}
 
-          {/* New Chat — always visible at top of sidebar nav */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                className={cn(
-                  "w-full justify-start gap-3 text-muted-foreground hover:text-foreground",
-                  collapsed && "justify-center px-0",
-                )}
-                onClick={handleNewChat}
-              >
-                <Plus className={cn("h-4 w-4 shrink-0")} />
-                {!collapsed && <span>New Chat</span>}
-              </Button>
-            </TooltipTrigger>
-            {collapsed && <TooltipContent side="right">New chat</TooltipContent>}
-          </Tooltip>
         </nav>
 
         {/* Conversation history — only when sidebar expanded */}

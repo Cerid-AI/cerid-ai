@@ -254,6 +254,21 @@
 .border-gold { border-color: oklch(0.78 0.12 85 / 50%); }
 .bg-gold\/10 { background: oklch(0.78 0.12 85 / 10%); }
 
+/* --- Chat title hover-scroll (marquee) --- */
+@keyframes marquee-scroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(var(--scroll-distance, -50%)); }
+}
+.scroll-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.group:hover .scroll-title-inner {
+  display: inline-block;
+  animation: marquee-scroll 4s linear 0.5s infinite alternate;
+}
+
 /* KB artifact card action buttons — always show pointer cursor */
 .artifact-action-btn {
   cursor: pointer;

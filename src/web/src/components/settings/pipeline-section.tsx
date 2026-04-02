@@ -110,6 +110,7 @@ export function PipelineSection({ settings, sections, toggleSection, patch }: Pi
                   enabled={settings.enable_adaptive_retrieval ?? false}
                   onToggle={(v) => patch({ enable_adaptive_retrieval: v })}
                   description="Classifies query complexity to skip or reduce retrieval for simple queries"
+                  info="Dynamically adjusts retrieval strategy based on query complexity. Minimal overhead."
                 >
                   <SliderRow
                     label="Light Top-K"
@@ -128,6 +129,7 @@ export function PipelineSection({ settings, sections, toggleSection, patch }: Pi
                   enabled={settings.enable_query_decomposition ?? false}
                   onToggle={(v) => patch({ enable_query_decomposition: v })}
                   description="Breaks complex multi-part questions into parallel sub-queries for broader coverage"
+                  info="Splits complex questions into sub-queries for broader retrieval. Adds one LLM call (~$0.001, ~500ms)."
                 >
                   <SliderRow
                     label="Max Sub-queries"
@@ -146,6 +148,7 @@ export function PipelineSection({ settings, sections, toggleSection, patch }: Pi
                   enabled={settings.enable_mmr_diversity ?? false}
                   onToggle={(v) => patch({ enable_mmr_diversity: v })}
                   description="Reorders results using Maximal Marginal Relevance for diverse, non-redundant context"
+                  info="Ensures retrieved chunks are diverse, not redundant. Minimal performance impact."
                 >
                   <SliderRow
                     label="Lambda"
@@ -174,6 +177,7 @@ export function PipelineSection({ settings, sections, toggleSection, patch }: Pi
                   enabled={settings.enable_late_interaction ?? false}
                   onToggle={(v) => patch({ enable_late_interaction: v })}
                   description="ColBERT-inspired MaxSim scoring for fine-grained token-level relevance"
+                  info="Uses token-level matching for fine-grained relevance scoring. Adds ~20ms."
                 >
                   <SliderRow
                     label="Top-N Candidates"
@@ -199,6 +203,7 @@ export function PipelineSection({ settings, sections, toggleSection, patch }: Pi
                   enabled={settings.enable_semantic_cache ?? false}
                   onToggle={(v) => patch({ enable_semantic_cache: v })}
                   description="Caches retrieval results keyed by semantic query similarity"
+                  info="Caches similar query results for 5 minutes. Faster repeated queries, no cost."
                 >
                   <SliderRow
                     label="Similarity Threshold"

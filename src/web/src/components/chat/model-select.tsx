@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select"
 import { MODELS } from "@/lib/types"
 import type { ModelCapabilities } from "@/lib/types"
 import { formatCost } from "@/lib/utils"
@@ -24,10 +24,11 @@ function topCapability(caps: ModelCapabilities): string {
 }
 
 export function ModelSelect({ value, onChange }: ModelSelectProps) {
+  const selectedModel = MODELS.find((m) => m.id === value)
   return (
     <Select value={value} onValueChange={onChange}>
       <SelectTrigger className="w-48">
-        <SelectValue />
+        <span className="truncate">{selectedModel?.label ?? "Select model"}</span>
       </SelectTrigger>
       <SelectContent position="popper" className="min-w-[20rem]">
         {MODELS.map((m) => {

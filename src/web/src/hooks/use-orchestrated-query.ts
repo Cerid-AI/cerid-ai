@@ -80,19 +80,36 @@ export function useOrchestratedQuery(
 
   const contextMsgCount = recentMessages?.length ?? 0
 
+  // Guard: treat empty conversation messages as undefined to avoid backend errors
+  const conversationMessages =
+    recentMessages && recentMessages.length > 0 ? recentMessages : undefined
+
   const { data, isLoading, isError, error, refetch } = useQuery<AgentQueryResponse>({
     queryKey: ["orchestrated-query", effectiveQuery, ragMode, domainKey, contextMsgCount],
-    queryFn: () =>
-      queryKBOrchestrated(
-        effectiveQuery,
-        ragMode,
-        activeDomains.size > 0 ? [...activeDomains] : undefined,
-        10,
-        recentMessages,
-      ),
+    queryFn: async () => {
+      try {
+        return await queryKBOrchestrated(
+          effectiveQuery,
+          ragMode,
+          activeDomains.size > 0 ? [...activeDomains] : undefined,
+          10,
+          conversationMessages,
+        )
+      } catch {
+        // Return a safe empty response so the error state doesn't block the console
+        return {
+          results: [],
+          confidence: 0,
+          total_results: 0,
+          execution_time_ms: 0,
+          source_breakdown: null,
+        } as unknown as AgentQueryResponse
+      }
+    },
     enabled: !!effectiveQuery && effectiveQuery.length > 2,
     staleTime: 15_000,
     retry: 1,
+    retryDelay: 2000,
   })
 
   const toggleDomain = useCallback((domain: string) => {

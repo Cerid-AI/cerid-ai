@@ -159,19 +159,24 @@ export function PipelineToggle({
   enabled,
   onToggle,
   description,
+  info,
   children,
 }: {
   label: string
   enabled: boolean
   onToggle: (value: boolean) => void
   description: string
+  info?: string
   children?: React.ReactNode
 }) {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-4">
         <div className="flex flex-col gap-0.5">
-          <span className="text-sm font-medium">{label}</span>
+          <span className="flex items-center gap-1.5 text-sm font-medium">
+            {label}
+            {info && <InfoTip text={info} />}
+          </span>
           <span className="text-[11px] leading-tight text-muted-foreground">{description}</span>
         </div>
         <Switch size="sm" checked={enabled} onCheckedChange={onToggle} />

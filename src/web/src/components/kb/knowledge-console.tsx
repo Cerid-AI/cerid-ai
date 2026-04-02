@@ -1,12 +1,15 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react"
+import { useState, useCallback } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
+import { Slider } from "@/components/ui/slider"
+import { Label } from "@/components/ui/label"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover"
 import { Badge } from "@/components/ui/badge"
 import {
   X,
@@ -20,15 +23,17 @@ import {
   ToggleLeft,
   ToggleRight,
   AlertCircle,
+  Settings2,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { fetchDataSources, enableDataSource, disableDataSource } from "@/lib/api"
+import { fetchDataSources, enableDataSource, disableDataSource, updateSettings } from "@/lib/api"
 import { IngestionProgress } from "./ingestion-progress"
 import type { UseOrchestratedQueryReturn } from "@/hooks/use-orchestrated-query"
 import type { KBQueryResult, MemoryRecallResult, ExternalSourceResult, RagMode } from "@/lib/types"
 
 interface KnowledgeConsoleProps extends UseOrchestratedQueryReturn {
   ragMode: RagMode
+  onRagModeChange?: (mode: RagMode) => void
   onClose: () => void
 }
 
@@ -217,8 +222,130 @@ function DataSourceIndicator() {
   )
 }
 
+/* ---- Compact pipeline config bar for inline Knowledge Console controls ---- */
+
+function readLocalBool(key: string, fallback: boolean): boolean {
+  try { const v = localStorage.getItem(key); return v === null ? fallback : v === "true" } catch { return fallback }
+}
+
+function readLocalNumber(key: string, fallback: number): number {
+  try { const v = localStorage.getItem(key); if (v !== null) { const n = parseFloat(v); if (!isNaN(n)) return n } } catch { /* noop */ }
+  return fallback
+}
+
+function ConsoleConfigBar({
+  ragMode,
+  onRagModeChange,
+}: {
+  ragMode: RagMode
+  onRagModeChange: (mode: RagMode) => void
+}) {
+  const [reranking, setReranking] = useState(() => readLocalBool("cerid-console-reranking", true))
+  const [graphRag, setGraphRag] = useState(() => readLocalBool("cerid-console-graph-rag", false))
+  const [queryDecomp, setQueryDecomp] = useState(() => readLocalBool("cerid-console-query-decomp", false))
+  const [topK, setTopK] = useState(() => readLocalNumber("cerid-console-top-k", 10))
+
+  const persistBool = useCallback((key: string, value: boolean, serverKey?: string) => {
+    try { localStorage.setItem(key, String(value)) } catch { /* noop */ }
+    if (serverKey) updateSettings({ [serverKey]: value } as Record<string, boolean>).catch(() => { /* noop */ })
+  }, [])
+
+  const handleReranking = useCallback((v: boolean) => {
+    setReranking(v)
+    persistBool("cerid-console-reranking", v)
+  }, [persistBool])
+
+  const handleGraphRag = useCallback((v: boolean) => {
+    setGraphRag(v)
+    persistBool("cerid-console-graph-rag", v)
+  }, [persistBool])
+
+  const handleQueryDecomp = useCallback((v: boolean) => {
+    setQueryDecomp(v)
+    persistBool("cerid-console-query-decomp", v, "enable_query_decomposition")
+  }, [persistBool])
+
+  const handleTopK = useCallback((v: number[]) => {
+    const val = v[0]
+    setTopK(val)
+    try { localStorage.setItem("cerid-console-top-k", String(val)) } catch { /* noop */ }
+  }, [])
+
+  const RAG_MODES: { value: RagMode; label: string }[] = [
+    { value: "manual", label: "Manual" },
+    { value: "smart", label: "Smart" },
+    { value: "custom_smart", label: "Custom" },
+  ]
+
+  return (
+    <div className="flex items-center gap-1.5 border-b bg-muted/20 px-3 py-1.5">
+      {/* RAG Mode selector */}
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[10px]">
+            {ragMode === "smart" ? "Smart" : ragMode === "custom_smart" ? "Custom" : "Manual"}
+            <ChevronDown className="h-3 w-3" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-36 p-1" align="start">
+          {RAG_MODES.map((m) => (
+            <button
+              key={m.value}
+              className={cn(
+                "flex w-full items-center rounded-sm px-2 py-1 text-xs hover:bg-accent",
+                ragMode === m.value && "bg-accent font-medium",
+              )}
+              onClick={() => onRagModeChange(m.value)}
+            >
+              {m.label}
+            </button>
+          ))}
+        </PopoverContent>
+      </Popover>
+
+      <div className="flex-1" />
+
+      {/* Pipeline settings gear */}
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-6 w-6">
+            <Settings2 className="h-3.5 w-3.5" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-56 space-y-3 p-3" align="end">
+          <p className="text-xs font-medium">Pipeline Settings</p>
+
+          <div className="flex items-center justify-between">
+            <Label className="text-[11px]">Reranking</Label>
+            <Switch checked={reranking} onCheckedChange={handleReranking} className="scale-75" />
+          </div>
+
+          <div className="flex items-center justify-between">
+            <Label className="text-[11px]">Graph RAG</Label>
+            <Switch checked={graphRag} onCheckedChange={handleGraphRag} className="scale-75" />
+          </div>
+
+          <div className="flex items-center justify-between">
+            <Label className="text-[11px]">Query Decomposition</Label>
+            <Switch checked={queryDecomp} onCheckedChange={handleQueryDecomp} className="scale-75" />
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <Label className="text-[11px]">Top-K</Label>
+              <span className="text-[10px] tabular-nums text-muted-foreground">{topK}</span>
+            </div>
+            <Slider value={[topK]} onValueChange={handleTopK} min={3} max={20} step={1} className="w-full" />
+          </div>
+        </PopoverContent>
+      </Popover>
+    </div>
+  )
+}
+
 export function KnowledgeConsole({
   ragMode,
+  onRagModeChange,
   confidence,
   isLoading,
   isError,
@@ -251,6 +378,11 @@ export function KnowledgeConsole({
           <X className="h-4 w-4" />
         </Button>
       </div>
+
+      {/* Configuration bar — RAG mode + pipeline settings */}
+      {onRagModeChange && (
+        <ConsoleConfigBar ragMode={ragMode} onRagModeChange={onRagModeChange} />
+      )}
 
       {/* Live ingestion progress — appears when files are being ingested */}
       <IngestionProgress />
