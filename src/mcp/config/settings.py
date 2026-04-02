@@ -471,7 +471,7 @@ CERID_RSS_POLL_INTERVAL = int(os.getenv("CERID_RSS_POLL_INTERVAL", "1800"))  # s
 # ---------------------------------------------------------------------------
 # Semantic cache: threshold for embedding similarity match (0.0-1.0)
 SEMANTIC_CACHE_THRESHOLD = float(os.getenv("SEMANTIC_CACHE_THRESHOLD", "0.92"))
-SEMANTIC_CACHE_TTL = int(os.getenv("SEMANTIC_CACHE_TTL", "300"))  # 5 minutes
+# NOTE: SEMANTIC_CACHE_TTL is defined in config/features.py (canonical location, 600s).
 
 # Query decomposition: max sub-queries to generate
 QUERY_DECOMPOSITION_MAX = int(os.getenv("QUERY_DECOMPOSITION_MAX", "3"))

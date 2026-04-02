@@ -50,6 +50,16 @@ _FULL_PATTERNS = [
     re.compile(r"\b(analyze|evaluate|assess|review)\b", re.IGNORECASE),
 ]
 
+# Technical terms that should prevent "light" classification — these queries need
+# full retrieval even when they look like simple "What is X?" lookups.
+_TECHNICAL_TERMS = frozenset({
+    "algorithm", "protocol", "architecture", "framework", "database",
+    "encryption", "theorem", "equation", "synthesis", "optimization",
+    "complexity", "neural", "quantum", "compiler", "runtime",
+    "middleware", "microservice", "consensus", "hashing", "serialization",
+    "inference", "embedding", "tokenizer", "transformer", "convolution",
+})
+
 
 def classify_retrieval_need(query: str) -> RetrievalDecision:
     """Classify whether a query needs KB retrieval."""
@@ -73,9 +83,15 @@ def classify_retrieval_need(query: str) -> RetrievalDecision:
         if pattern.search(q):
             return RetrievalDecision(action="full", top_k=10, reason="complex_query")
 
-    # Light patterns: simple lookups
+    # Light patterns: simple lookups — but upgrade to full for technical terms
     for pattern in _LIGHT_PATTERNS:
         if pattern.search(q):
+            query_words = {w.strip("?.!,;:'\"()") for w in q.lower().split()}
+            if query_words & _TECHNICAL_TERMS:
+                return RetrievalDecision(
+                    action="full", top_k=10,
+                    reason="technical_term_upgrade",
+                )
             return RetrievalDecision(
                 action="light",
                 top_k=ADAPTIVE_RETRIEVAL_LIGHT_TOP_K,

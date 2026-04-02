@@ -4,6 +4,7 @@
 """Base class for external data sources."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from abc import ABC, abstractmethod
 from typing import Any
@@ -69,14 +70,33 @@ class DataSourceRegistry:
     def has_enabled_sources(self) -> bool:
         return any(s.enabled and s.is_configured() for s in self._sources.values())
 
-    async def query_all(self, query: str, domain: str | None = None) -> list[dict]:
-        """Query all enabled sources and return merged results."""
-        import asyncio
+    async def query_all(self, query: str, domain: str | None = None, timeout: float = 5.0) -> list[dict]:
+        """Query all enabled sources and return merged results.
+
+        Each source query is wrapped in a circuit breaker (``datasource-{name}``)
+        and an ``asyncio.wait_for`` timeout to prevent slow sources from blocking
+        the entire pipeline.
+        """
+        from utils.circuit_breaker import CircuitOpenError, get_breaker
 
         sources = self.get_enabled_sources(domain)
         if not sources:
             return []
-        tasks = [s.query(query) for s in sources]
+
+        async def _guarded_query(source: DataSource) -> list[DataSourceResult]:
+            breaker = get_breaker(f"datasource-{source.name}")
+            try:
+                return await breaker.call(
+                    lambda: asyncio.wait_for(source.query(query), timeout=timeout),
+                )
+            except CircuitOpenError:
+                logger.debug("Data source %s circuit open, skipping", source.name)
+                return []
+            except asyncio.TimeoutError:
+                logger.warning("Data source %s timed out after %.1fs", source.name, timeout)
+                return []
+
+        tasks = [_guarded_query(s) for s in sources]
         results_lists = await asyncio.gather(*tasks, return_exceptions=True)
         merged = []
         for result_or_exc in results_lists:

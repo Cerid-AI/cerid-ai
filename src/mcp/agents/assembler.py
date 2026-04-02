@@ -6,6 +6,8 @@
 Dependencies: config/constants.py. Error types: none.
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging

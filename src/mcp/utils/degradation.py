@@ -25,7 +25,7 @@ from enum import Enum
 __all__ = ["DegradationTier", "DegradationManager", "degradation"]
 
 # Breaker names grouped by logical service.
-_CHROMADB_BREAKERS = ("bifrost-rerank",)
+_CHROMADB_BREAKERS = ("chromadb", "bifrost-rerank")
 _NEO4J_BREAKERS = ("neo4j",)
 _LLM_BREAKERS = ("bifrost-verify", "bifrost-claims", "openrouter", "ollama")
 
@@ -69,13 +69,23 @@ class DegradationManager:
     """Determines the current system capability tier."""
 
     def current_tier(self) -> DegradationTier:
-        if _redis_down():
+        redis_is_down = _redis_down()
+        chromadb_open = _any_open(_CHROMADB_BREAKERS)
+        neo4j_open = _any_open(_NEO4J_BREAKERS)
+
+        # OFFLINE only when Redis is down AND retrieval backends are also down.
+        # Redis alone going down should degrade to DIRECT (skip caching, still
+        # do retrieval) rather than blocking everything.
+        if redis_is_down and (chromadb_open or neo4j_open):
             return DegradationTier.OFFLINE
         if _all_open(_LLM_BREAKERS):
             return DegradationTier.CACHED
-        if _any_open(_CHROMADB_BREAKERS) and _any_open(_NEO4J_BREAKERS):
+        if redis_is_down:
+            # Redis down but ChromaDB + Neo4j healthy: skip caching, still retrieve
             return DegradationTier.DIRECT
-        if _any_open(_CHROMADB_BREAKERS):
+        if chromadb_open and neo4j_open:
+            return DegradationTier.DIRECT
+        if chromadb_open:
             return DegradationTier.LITE
         return DegradationTier.FULL
 

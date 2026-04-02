@@ -114,6 +114,18 @@ def _score_pairs(query: str, documents: list[str]) -> list[float]:
 # Public API
 # ---------------------------------------------------------------------------
 
+def warmup() -> None:
+    """Pre-load ONNX model at startup to avoid cold-start penalty."""
+    global _session, _tokenizer
+    if _session is not None:
+        return
+    try:
+        _load_model()
+        logger.info("Reranker ONNX model pre-warmed")
+    except Exception as e:
+        logger.warning("Reranker warmup failed (will retry on first use): %s", e)
+
+
 def rerank(
     query: str,
     results: list[dict[str, Any]],

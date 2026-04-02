@@ -3,7 +3,10 @@
 
 """Multi-domain knowledge base search with LLM reranking."""
 
+from __future__ import annotations
+
 import asyncio
+import json
 import logging
 import time
 from contextlib import contextmanager
@@ -122,13 +125,15 @@ async def agent_query(
     _degradation_skip_retrieval = False
     _degradation_cache_only = False
     try:
-        if _tier == DegradationTier.CACHED:
-            _degradation_cache_only = True
-            _degradation_skip_retrieval = True
-            logger.info("Degradation tier: CACHED — semantic cache only")
-        elif _tier == DegradationTier.DIRECT:
-            _degradation_skip_retrieval = True
-            logger.info("Degradation tier: DIRECT — skipping retrieval")
+        if _tier is not None:
+            from utils.degradation import DegradationTier as _DT
+            if _tier == _DT.CACHED:
+                _degradation_cache_only = True
+                _degradation_skip_retrieval = True
+                logger.info("Degradation tier: CACHED — semantic cache only")
+            elif _tier == _DT.DIRECT:
+                _degradation_skip_retrieval = True
+                logger.info("Degradation tier: DIRECT — skipping retrieval")
     except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning("Degradation tier check failed: %s", e)
 
@@ -312,23 +317,19 @@ async def agent_query(
                 logger.debug("Retrieval cache store failed: %s", exc)
 
     # Search adjacent domains at reduced weight when specific domains are requested.
+    # Runs in parallel with HyDE fallback to avoid sequential latency.
     # Skipped when strict_domains=True (consumer isolation — no cross-domain bleed).
+    _adjacent_task: asyncio.Task | None = None
+    _adjacent_map: dict[str, float] = {}
     if not strict_domains and domains and set(domains) != set(DOMAINS):
-        adjacent = _get_adjacent_domains(domains)
-        if adjacent:
-            cross_results = await multi_domain_query(
+        _adjacent_map = _get_adjacent_domains(domains)
+        if _adjacent_map:
+            _adjacent_task = asyncio.create_task(multi_domain_query(
                 query=search_query,
-                domains=list(adjacent.keys()),
+                domains=list(_adjacent_map.keys()),
                 top_k=max(3, top_k // 2),
                 chroma_client=chroma_client,
-            )
-            for r in cross_results:
-                r["relevance"] = round(
-                    r["relevance"] * adjacent.get(r["domain"], config.CROSS_DOMAIN_DEFAULT_AFFINITY),
-                    4,
-                )
-                r["cross_domain"] = True
-            results.extend(cross_results)
+            ))
 
     # HyDE fallback — if top score is below threshold, generate hypothetical doc and re-search
     if results and not _retrieval_cache_hit:
@@ -351,6 +352,22 @@ async def agent_query(
                         logger.debug("HyDE fallback activated, merged %d results", len(results))
         except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
             logger.debug("HyDE fallback skipped: %s", exc)
+
+    # Collect adjacent domain results (launched in parallel earlier)
+    if _adjacent_task is not None:
+        try:
+            cross_results = await _adjacent_task
+            if isinstance(cross_results, BaseException):
+                raise cross_results
+            for r in cross_results:
+                r["relevance"] = round(
+                    r["relevance"] * _adjacent_map.get(r["domain"], config.CROSS_DOMAIN_DEFAULT_AFFINITY),
+                    4,
+                )
+                r["cross_domain"] = True
+            results.extend(cross_results)
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
+            logger.warning("Adjacent domain search failed: %s", exc)
 
     results = deduplicate_results(results)
 
@@ -534,6 +551,16 @@ async def agent_query(
         f"Found {len(results)} results across {len(sources)} sources (confidence {confidence:.2f})",
         level="success",
     )
+
+    # Normalize tags_json (raw JSON string from ChromaDB metadata) into a
+    # proper ``tags`` list so the frontend receives parsed arrays, not strings.
+    for r in results:
+        raw = r.pop("tags_json", None)
+        if "tags" not in r:
+            try:
+                r["tags"] = json.loads(raw) if raw else []
+            except (json.JSONDecodeError, TypeError):
+                r["tags"] = []
 
     result_dict: dict[str, Any] = {
         "context": context,

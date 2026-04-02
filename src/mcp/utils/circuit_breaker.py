@@ -256,6 +256,7 @@ _web_search = AsyncCircuitBreaker("web-search", failure_threshold=3, recovery_ti
 _openrouter = AsyncCircuitBreaker("openrouter", failure_threshold=5, recovery_timeout=60)
 _tavily = AsyncCircuitBreaker("tavily", failure_threshold=3, recovery_timeout=30)
 _searxng = AsyncCircuitBreaker("searxng", failure_threshold=3, recovery_timeout=30)
+_chromadb = AsyncCircuitBreaker("chromadb", failure_threshold=5, recovery_timeout=30)
 _ragas_eval = AsyncCircuitBreaker("ragas_eval", failure_threshold=3, recovery_timeout=60)
 _trading_agent = AsyncCircuitBreaker("trading-agent", failure_threshold=3, recovery_timeout=120)
 _email_imap = AsyncCircuitBreaker("email-imap", failure_threshold=3, recovery_timeout=60)
@@ -265,6 +266,9 @@ _outlook = AsyncCircuitBreaker("outlook", failure_threshold=3, recovery_timeout=
 
 # Dynamic per-stage Ollama breakers — lazily created for "ollama-{stage}" names.
 _dynamic_ollama_breakers: dict[str, AsyncCircuitBreaker] = {}
+
+# Dynamic per-source data source breakers — lazily created for "datasource-{name}" names.
+_dynamic_datasource_breakers: dict[str, AsyncCircuitBreaker] = {}
 
 
 def get_breaker(name: str) -> AsyncCircuitBreaker:
@@ -282,6 +286,7 @@ def get_breaker(name: str) -> AsyncCircuitBreaker:
         "tavily": _tavily,
         "searxng": _searxng,
         "ragas_eval": _ragas_eval,
+        "chromadb": _chromadb,
         "neo4j": _neo4j,
         "ollama": _ollama,
         "trading-agent": _trading_agent,
@@ -300,4 +305,11 @@ def get_breaker(name: str) -> AsyncCircuitBreaker:
                 name, failure_threshold=3, recovery_timeout=30,
             )
         return _dynamic_ollama_breakers[name]
+    # Auto-create per-source data source breakers (e.g. "datasource-wikipedia")
+    if name.startswith("datasource-"):
+        if name not in _dynamic_datasource_breakers:
+            _dynamic_datasource_breakers[name] = AsyncCircuitBreaker(
+                name, failure_threshold=3, recovery_timeout=60,
+            )
+        return _dynamic_datasource_breakers[name]
     raise ValueError(f"Unknown circuit breaker: {name}")

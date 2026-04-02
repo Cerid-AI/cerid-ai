@@ -20,6 +20,7 @@ Usage::
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import TYPE_CHECKING
@@ -41,22 +42,30 @@ _logger = logging.getLogger("ai-companion.llm_client")
 # ---------------------------------------------------------------------------
 
 _client: httpx.AsyncClient | None = None
+_client_lock = asyncio.Lock()
 
 
-def _get_client() -> httpx.AsyncClient:
+async def _get_client() -> httpx.AsyncClient:
     """Get or create the shared httpx client for direct OpenRouter calls.
 
     Connection pool is sized for concurrent verification workloads
     (up to 20 concurrent connections, 10 keep-alive).
+
+    Uses double-checked locking to prevent race conditions under
+    concurrent async initialization.
     """
     global _client
-    if _client is None or _client.is_closed:
+    if _client is not None and not _client.is_closed:
+        return _client
+    async with _client_lock:
+        if _client is not None and not _client.is_closed:
+            return _client
         _client = httpx.AsyncClient(
             base_url="https://openrouter.ai/api/v1",
             timeout=httpx.Timeout(connect=10, read=60, write=10, pool=10),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
-    return _client
+        return _client
 
 
 async def close_client() -> None:
@@ -148,7 +157,7 @@ async def call_llm(
     breaker = get_breaker(breaker_name)
 
     async def _do_call() -> str:
-        client = _get_client()
+        client = await _get_client()
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -229,7 +238,7 @@ async def call_llm_raw(
     breaker = get_breaker(breaker_name)
 
     async def _do_call() -> dict:
-        client = _get_client()
+        client = await _get_client()
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",

@@ -6,6 +6,8 @@
 Dependencies: utils/llm_client.py. Error types: RetrievalError.
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
@@ -15,6 +17,7 @@ import config
 from config import DOMAINS
 from deps import get_chroma
 from errors import RetrievalError
+from utils.circuit_breaker import get_breaker
 from utils.text import STOPWORDS as _STOPWORDS
 from utils.text import WORD_RE as _WORD_RE
 
@@ -196,10 +199,14 @@ async def multi_domain_query(
         try:
             collection = chroma_client.get_collection(name=col_name)
 
-            results = collection.query(
-                query_texts=[query],
-                n_results=top_k,
-                include=["documents", "metadatas", "distances"]
+            chromadb_breaker = get_breaker("chromadb")
+            results = await chromadb_breaker.call(
+                lambda: asyncio.to_thread(
+                    collection.query,
+                    query_texts=[query],
+                    n_results=top_k,
+                    include=["documents", "metadatas", "distances"],
+                )
             )
 
             formatted = []
@@ -221,7 +228,14 @@ async def multi_domain_query(
 
             from utils import bm25 as bm25_mod
             if bm25_mod.is_available():
-                bm25_hits = await asyncio.to_thread(bm25_mod.search_bm25, domain, query, top_k)
+                try:
+                    bm25_hits = await asyncio.wait_for(
+                        asyncio.to_thread(bm25_mod.search_bm25, domain, query, top_k),
+                        timeout=2.0,  # 2 second max for BM25 per domain
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("BM25 search timed out for domain %s", domain)
+                    bm25_hits = None
                 if bm25_hits:
                     bm25_map = dict(bm25_hits)
 
