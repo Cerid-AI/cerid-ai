@@ -106,6 +106,45 @@ Container memory limit: 2GB. Socket timeout: 10s. Authentication via `REDIS_PASS
 
 ---
 
+## Graceful Degradation
+
+The system automatically degrades through 5 tiers based on service health:
+
+| Tier | Name | Condition | Capabilities |
+|------|------|-----------|--------------|
+| 1 | **FULL** | All services healthy | Full RAG pipeline, verification, graph traversal |
+| 2 | **LITE** | Non-critical service degraded | RAG without graph traversal or advanced reranking |
+| 3 | **DIRECT** | Redis-only failure | Direct LLM queries, no caching, no query history |
+| 4 | **CACHED** | Multiple services degraded | Serve from cache only, no new retrievals |
+| 5 | **OFFLINE** | Critical services unreachable | Static responses, health endpoint only |
+
+Redis-only failure results in DIRECT tier (not OFFLINE), since core retrieval via ChromaDB and Neo4j remains available.
+
+### Circuit Breakers
+
+Circuit breakers prevent cascading failures. Registered breakers:
+
+| Breaker | Service | Failure Threshold | Recovery Timeout |
+|---------|---------|-------------------|-----------------|
+| `chromadb` | ChromaDB vector store | 5 failures | 60s |
+| `neo4j` | Neo4j graph database | 5 failures | 60s |
+| `redis` | Redis cache | 5 failures | 60s |
+| `ollama` | Ollama local LLM | 5 failures | 60s |
+| `bifrost` | Bifrost LLM gateway | 5 failures | 60s |
+
+Client locks prevent concurrent connection attempts during recovery. States: CLOSED (healthy) -> OPEN (failing, fast-fail) -> HALF_OPEN (testing recovery).
+
+### Health Check Endpoints
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /health` | Full health check with circuit breaker states (cached 10s) |
+| `GET /health/live` | Liveness probe (always 200 unless process crashed) |
+| `GET /health/ready` | Readiness probe (503 when critical deps unreachable) |
+| `GET /health/status` | Degradation report with circuit breaker states, pipeline providers, per-capability flags |
+
+---
+
 ## Observability Dashboard
 
 The observability system collects 8 Redis time-series metrics and exposes them via API.
@@ -327,7 +366,7 @@ Branch protection is configured via **GitHub UI** (not checked into the reposito
 | Job | What It Checks |
 |-----|----------------|
 | `lint` | Ruff Python linting |
-| `test` | 1376+ pytest tests, 70% coverage minimum |
+| `test` | ~1941 pytest tests, 70% coverage minimum |
 | `security` | Bandit SAST + pip-audit dependency scan |
 | `lock-sync` | Lock file freshness (pip-compile) |
 | `frontend` | TypeScript types + ESLint + vitest + build + bundle size (<800KB) + npm audit |

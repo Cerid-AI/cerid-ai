@@ -170,10 +170,10 @@ See [`.claude/SETUP.md`](.claude/SETUP.md) for detailed Claude Code configuratio
 | Feature gating | `@require_feature()` decorator | `config/features.py` |
 | Configuration | `os.getenv()` in `config/settings.py` | `config/settings.py` |
 | Constants | Named constants (no magic numbers) | `config/constants.py` |
-| Circuit breakers | `circuit_breaker(name)` context manager | `utils/circuit_breaker.py` |
+| Circuit breakers | `circuit_breaker(name)` context manager (registered: chromadb, neo4j, redis, ollama, bifrost) with client locks | `utils/circuit_breaker.py` |
 | Redis cache keys | `cerid:{domain}:{key}` prefix convention | `utils/retrieval_cache.py` |
 | API error responses | `CeridError` → auto-converted via FastAPI exception handler | `main.py` |
-| Graceful degradation | `DegradationManager` (5 tiers: FULL→OFFLINE) | `utils/degradation.py` |
+| Graceful degradation | `DegradationManager` (5 tiers: FULL→LITE→DIRECT→CACHED→OFFLINE) | `utils/degradation.py` |
 | Retrieval cache | Redis with generation-counter invalidation | `utils/retrieval_cache.py` |
 | Ollama routing | `get_stage_provider()` per-stage routing (8 stages) | `config/settings.py` |
 | Model registry | `ModelRegistry` with OpenRouter auto-validation | `utils/model_registry.py` |
@@ -190,7 +190,7 @@ See [`.claude/SETUP.md`](.claude/SETUP.md) for detailed Claude Code configuratio
 
 | Module | Responsibility | Key Classes/Functions |
 |--------|---------------|---------------------|
-| `agents/query_agent.py` | RAG retrieval pipeline (8 strategies, decomposed: decomposer.py + assembler.py) | `QueryAgent.query()` |
+| `agents/query_agent.py` | RAG retrieval pipeline (8 strategies) with parallel retrieval, circuit breakers, semantic caching, 3-layer dedup | `QueryAgent.query()` |
 | `agents/hallucination/` | Claim extraction + verification (7 modules) | `verify_response_streaming()` |
 | `agents/memory.py` | Memory extraction, decay, conflict resolution | `MemoryAgent` |
 | `agents/curator.py` | KB quality scoring + recommendations | `CuratorAgent` |
@@ -203,8 +203,9 @@ See [`.claude/SETUP.md`](.claude/SETUP.md) for detailed Claude Code configuratio
 | `config/features.py` | Feature flags + `@require_feature` | `FEATURE_FLAGS`, `@require_feature()` |
 | `errors.py` | Exception hierarchy | `CeridError` and subclasses |
 | `tools.py` | MCP tool registry (26 tools) | `@mcp_tool()` decorator |
-| `agents/decomposer.py` | Query decomposition | `decompose_query()` |
-| `agents/assembler.py` | Result assembly | `assemble_results()` |
+| `agents/decomposer.py` | Query decomposition (extracted from query_agent.py) | `decompose_query()` |
+| `agents/assembler.py` | Result assembly (extracted from query_agent.py) | `assemble_results()` |
+| `agents/retrieval_orchestrator.py` | Smart mode orchestration (KB + memory + external in parallel) | `orchestrated_query()` |
 | `utils/error_handler.py` | Centralized error handling decorator | `@handle_errors()` |
 | `utils/degradation.py` | 5-tier graceful degradation manager | `DegradationManager` |
 | `utils/retrieval_cache.py` | Redis retrieval cache with generation-counter invalidation | `retrieval_cache_get/set()` |

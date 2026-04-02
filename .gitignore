@@ -1,5 +1,6 @@
 # Secrets & keys
 .env
+.env.age
 .env.local
 .env*.local
 !.env.example
@@ -33,6 +34,8 @@ logs/
 /redis/
 stacks/infrastructure/data/
 artifacts/
+artifacts
+data
 
 # Node
 node_modules/
@@ -87,3 +90,13 @@ packages/desktop/release/
 .internal/
 tests/beta/reports/
 tests/beta/eval/reports/
+
+# Internal task tracking & plans (not for public repo)
+tasks/
+.claude/plans/
+
+# Runtime log artifacts
+src/mcp/rag-api-logs.txt
+
+# Working documents (not for public repo)
+tests/BUG_REPORT.md

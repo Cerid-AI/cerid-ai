@@ -27,7 +27,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 - **Local LLM via Ollama** — Air-gapped deployment with local model routing
 - **Visual Workflow Builder** — DAG-based workflow engine with drag-and-drop SVG canvas
 - **Electron Desktop App** — Native macOS + Windows app with Docker lifecycle management
-- **Graceful Degradation** — 5-tier automatic service degradation (FULL -> REDUCED -> MINIMAL -> CACHE_ONLY -> OFFLINE)
+- **Graceful Degradation** — 5-tier automatic service degradation (FULL -> LITE -> DIRECT -> CACHED -> OFFLINE) with per-service circuit breakers
 - **Exception Hierarchy** — typed `CeridError` subclasses with `@handle_errors` decorator, zero silent failures
 - **Per-Stage Ollama Routing** — 8 pipeline stages independently routable to local or cloud LLM
 - **Memory Extraction** — facts, decisions, preferences extracted from conversations and stored as KB artifacts
@@ -36,7 +36,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 - **Hybrid BM25+Vector Search** with knowledge graph traversal and cross-domain connections
 - **KB Context Injection** — auto-query knowledge base on chat messages, inject as system prompt context
 - **File-Based Ingestion Pipeline** with structure-aware parsing (PDF tables as Markdown via pdfplumber, DOCX, XLSX, CSV, 30+ formats)
-- **Multi-Domain Query Agent** with parallel retrieval, LLM reranking, and token budget enforcement
+- **Multi-Domain Query Agent** with parallel retrieval, circuit breakers, graceful degradation (5 tiers), semantic caching, 3-layer dedup in frontend injection, technical query classification, reranker pre-warming, and parallel adjacent domain search
 - **Local Vector & Graph Storage** (ChromaDB, Neo4j, Redis)
 - **Backend Hardening** — API key auth, rate limiting, Redis query caching (5-min TTL)
 - **Scheduled Maintenance** via APScheduler with proactive knowledge surfacing
@@ -47,7 +47,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 - **External Data Sources** — pluggable framework for Wikipedia, Wolfram Alpha, Exchange Rates with enable/disable management
 - **Dynamic Model Registry** — OpenRouter auto-validation of 20+ models at startup, runtime model management
 - **Verification Activity Console** — real-time monospace pipeline log showing each verification stage
-- **GitHub Actions CI/CD** with 2,300+ tests (1800+ pytest + 500+ frontend)
+- **GitHub Actions CI/CD** with 2,550+ tests (~1941 pytest + ~611 frontend)
 - **Three-Tier AI Categorization** (manual, smart, pro) via Bifrost
 - **Obsidian Vault Integration** — auto-sync vault notes into knowledge base
 - **Reproducible Builds** — pip-compile lock files with hashes, pinned Docker images, Dependabot
@@ -88,6 +88,8 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 |  Tools: 26 MCP tools (pkb_*)   |
 |  Search: Hybrid BM25 + vector   |
 |  Middleware: auth, rate-limit    |
+|  Circuit breakers: chromadb,    |
+|    neo4j, redis, ollama, bifrost|
 |  Scheduler: APScheduler         |
 +-----------+---------------------+
             |
@@ -378,7 +380,7 @@ cerid-ai/
 |   +-- plugins/                       # Plugin system
 |   +-- utils/                         # Utility modules
 |   +-- middleware/                     # Auth + rate limiting + request tracing
-|   +-- tests/                         # 1800+ pytest tests
+|   +-- tests/                         # ~1941 pytest tests
 |
 +-- src/web/                           # React GUI
 |   +-- package.json                   # React 19, Vite 7, Tailwind v4, shadcn/ui
@@ -390,7 +392,7 @@ cerid-ai/
 |       +-- lib/                       # types.ts, api.ts, model-router.ts, utils.ts
 |       +-- hooks/                     # 9 custom hooks
 |       +-- contexts/                  # KB injection context provider
-|       +-- __tests__/                 # 500+ vitest tests
+|       +-- __tests__/                 # ~611 vitest tests
 |       +-- components/
 |           +-- layout/                # Sidebar, status bar, split-pane
 |           +-- chat/                  # Chat panel, input, bubbles, dashboard

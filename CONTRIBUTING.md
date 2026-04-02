@@ -33,10 +33,28 @@ docker network create llm-network
 ### Running Tests
 
 ```bash
+# Unit tests (backend, ~1941 tests)
 cd src/mcp
 pip install pytest pytest-asyncio httpx
 pytest tests/ -v
+
+# Frontend tests (~611 tests)
+cd src/web && npx vitest run
+
+# All checks (lint + typecheck + tests)
+make check-all
+
+# Monte Carlo retrieval evaluation
+make test-eval
+
+# E2E pipeline integration tests (requires running Docker stack)
+python -m pytest tests/test_e2e_integration.py
+
+# RAG resilience testing (circuit breakers, degradation paths)
+python -m pytest tests/test_rag_resilience.py -v
 ```
+
+Synthetic test fixture data lives in `tests/fixtures/synthetic/` and provides deterministic inputs for unit and integration tests.
 
 ### Linting
 
@@ -79,11 +97,11 @@ src/mcp/
   deps.py           — Database client singletons
   scheduler.py      — APScheduler background jobs
   routers/          — FastAPI endpoint modules
-  agents/           — LangGraph agent workflows (9 agents)
+  agents/           — LangGraph agent workflows (10 agents)
   utils/            — Shared utilities (graph, BM25, parsers, features, etc.)
   plugins/          — Plugin system (loader, base classes)
   middleware/       — Auth + rate limiting
-  tests/            — pytest test suite (950 tests)
+  tests/            — pytest test suite (~1941 tests)
 
 src/web/
   src/components/   — React components (layout, chat, kb, monitoring, audit, ui)
