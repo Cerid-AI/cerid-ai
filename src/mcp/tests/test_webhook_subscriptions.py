@@ -69,13 +69,12 @@ class TestSubscriptionModels:
         with pytest.raises(ValidationError):
             WebhookSubscriptionCreate(events=["test"])  # type: ignore[call-arg]
 
-    def test_create_request_requires_events(self):
-        from pydantic import ValidationError
-
+    def test_create_request_events_optional(self):
+        """events defaults to empty list (empty = subscribe to all events)."""
         from routers.webhook_subscriptions import WebhookSubscriptionCreate
 
-        with pytest.raises(ValidationError):
-            WebhookSubscriptionCreate(url="https://example.com")  # type: ignore[call-arg]
+        req = WebhookSubscriptionCreate(url="https://example.com")
+        assert req.events == []
 
     def test_subscription_has_defaults(self):
         from routers.webhook_subscriptions import WebhookSubscription
