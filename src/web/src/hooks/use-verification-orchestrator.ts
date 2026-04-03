@@ -262,7 +262,6 @@ export function useVerificationOrchestrator({
         }).catch(() => {})
       }
     }, 0)
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- context callbacks accessed via refs to prevent re-render loops
   }, [verification.phase, verification.report, activeId, lastAssistantMsgId])
 
   // Load saved verification report from local caches (module-level + localStorage).
@@ -362,7 +361,7 @@ export function useVerificationOrchestrator({
       }
     }
     return null
-  }, [hallucinationEnabled, effectiveMsgId, halLoading, halReport, claimUpdates, expertVerifiedClaims])
+  }, [hallucinationEnabled, effectiveMsgId, halLoading, halReport, claimUpdates, expertVerifiedClaims, verification.creditError])
 
   const handleVerifyMessage = useCallback(() => {
     // Clear completed mark + module cache so re-verification can proceed

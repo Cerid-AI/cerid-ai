@@ -63,15 +63,17 @@ export function KBOperations() {
   // Fetch synopsis estimate when synopses enabled or model changes
   useEffect(() => {
     if (!generateSynopses) {
-      setSynopsisEstimate(null)
+      queueMicrotask(() => setSynopsisEstimate(null))
       return
     }
     let cancelled = false
-    setEstimateLoading(true)
-    fetchSynopsisEstimate(synopsisModel)
-      .then((est) => { if (!cancelled) setSynopsisEstimate(est) })
-      .catch(() => { if (!cancelled) setSynopsisEstimate(null) })
-      .finally(() => { if (!cancelled) setEstimateLoading(false) })
+    queueMicrotask(() => {
+      setEstimateLoading(true)
+      fetchSynopsisEstimate(synopsisModel)
+        .then((est) => { if (!cancelled) setSynopsisEstimate(est) })
+        .catch(() => { if (!cancelled) setSynopsisEstimate(null) })
+        .finally(() => { if (!cancelled) setEstimateLoading(false) })
+    })
     return () => { cancelled = true }
   }, [generateSynopses, synopsisModel])
 

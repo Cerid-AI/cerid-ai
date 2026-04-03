@@ -24,6 +24,8 @@ interface UseChatOptions {
 export function useChat({ onMessageStart, onMessageUpdate, onModelResolved, onModelFallback, feedbackEnabled, privateModeLevel = 0 }: UseChatOptions) {
   const [isStreaming, setIsStreaming] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
+  const onModelFallbackRef = useRef(onModelFallback)
+  onModelFallbackRef.current = onModelFallback
 
   const send = useCallback(
     async (convoId: string, messages: Pick<ChatMessage, "role" | "content">[], model: string, sourcesUsed?: SourceRef[]) => {
@@ -75,7 +77,7 @@ export function useChat({ onMessageStart, onMessageUpdate, onModelResolved, onMo
           onModelResolved?.(convoId, resolvedModel)
           // Detect backend model fallback and surface to UI
           if (info.fallback_model) {
-            onModelFallback?.({
+            onModelFallbackRef.current?.({
               requestedModel: prevModel || model,
               fallbackModel: info.fallback_model,
               originalError: info.original_error,

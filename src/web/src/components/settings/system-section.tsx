@@ -483,7 +483,7 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
         }
       } catch { /* polling error — keep trying */ }
     }, 3000)
-  }, [refetchOllama, onRefresh, pullAndEnable])
+  }, [refetchOllama, pullAndEnable])
 
   // Cleanup polling on unmount
   useEffect(() => () => { if (pollingRef.current) clearInterval(pollingRef.current) }, [])
