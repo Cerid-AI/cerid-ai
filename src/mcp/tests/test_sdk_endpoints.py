@@ -190,7 +190,7 @@ class TestSDKHealth:
         mock_config.INTERNAL_LLM_MODEL = "anthropic/claude-sonnet-4"
         mock_config.OLLAMA_DEFAULT_MODEL = "llama3.2:3b"
 
-        with patch("routers.sdk.config.features.FEATURE_TOGGLES", {
+        with patch("config.features.FEATURE_TOGGLES", {
             "enable_hallucination_check": True,
             "enable_feedback_loop": True,
             "enable_self_rag": True,
@@ -218,7 +218,7 @@ class TestSDKHealth:
         mock_config.INTERNAL_LLM_MODEL = ""
         mock_config.OLLAMA_DEFAULT_MODEL = "llama3.2:3b"
 
-        with patch("routers.sdk.config.features.FEATURE_TOGGLES", {}):
+        with patch("config.features.FEATURE_TOGGLES", {}):
             client = TestClient(_make_app())
             resp = client.get("/sdk/v1/health")
 

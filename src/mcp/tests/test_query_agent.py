@@ -2,7 +2,7 @@
 """Tests for agents/query_agent.py — RAG retrieval pipeline."""
 
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 

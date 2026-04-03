@@ -103,7 +103,12 @@ def _save_sub(r, sub_id: str, data: dict[str, Any]) -> None:
 
 
 def sign_payload(payload: str, secret: str) -> str:
-    """Compute HMAC-SHA256 signature of *payload* using *secret*."""
+    """Compute HMAC-SHA256 signature of *payload* using *secret*.
+
+    Returns an empty string when secret is empty (no signing configured).
+    """
+    if not secret:
+        return ""
     return hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
