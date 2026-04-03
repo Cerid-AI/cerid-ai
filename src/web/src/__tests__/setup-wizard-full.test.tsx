@@ -7,6 +7,12 @@ import { render, screen, fireEvent } from "@testing-library/react"
 vi.mock("@/lib/api", () => ({
   applySetupConfig: vi.fn(),
   validateProviderKey: vi.fn(),
+  fetchSetupStatus: vi.fn().mockResolvedValue({
+    configured: false,
+    setup_required: true,
+    missing_keys: ["OPENROUTER_API_KEY"],
+    optional_keys: ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY"],
+  }),
   fetchSetupHealth: vi.fn().mockResolvedValue({ services: {} }),
   fetchProviderCredits: vi.fn().mockResolvedValue({ configured: false, balance: null }),
   fetchSystemCheck: vi.fn().mockResolvedValue({
