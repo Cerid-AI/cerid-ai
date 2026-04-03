@@ -169,11 +169,16 @@ _skip_no_trading = pytest.mark.skipif(
 
 @_skip_no_trading
 class TestSDKTradingGate:
+    """Test trading endpoints via agents.py router (trading lives at /agent/trading/*)."""
+
     def test_trading_endpoints_absent_when_disabled(self) -> None:
-        """When CERID_TRADING_ENABLED=false, /sdk/v1/trading/* routes return 404."""
-        app = _make_app(trading_enabled=False)
+        """When CERID_TRADING_ENABLED=false, /agent/trading/* routes return 404."""
+        from routers import agents as agents_router
+
+        app = FastAPI()
+        app.include_router(agents_router.router)
         client = TestClient(app)
-        resp = client.post("/sdk/v1/trading/signal", json={"query": "test"})
+        resp = client.post("/agent/trading/signal", json={"query": "test"})
         assert resp.status_code == 404
 
     @pytest.mark.asyncio
@@ -186,10 +191,13 @@ class TestSDKTradingGate:
             "historical_trades": [],
             "domains_searched": ["trading", "finance"],
         }
-        with patch("routers.sdk.trading_signal_endpoint", new_callable=AsyncMock, return_value=mock_result):
-            app = _make_app(trading_enabled=True)
+        with patch("routers.agents.trading_signal_endpoint", new_callable=AsyncMock, return_value=mock_result):
+            from routers import agents as agents_router
+
+            app = FastAPI()
+            app.include_router(agents_router.router)
             client = TestClient(app)
-            resp = client.post("/sdk/v1/trading/signal", json={
+            resp = client.post("/agent/trading/signal", json={
                 "query": "ETH long signal",
                 "signal_data": {"asset": "ETH", "direction": "long"},
             })
@@ -201,10 +209,13 @@ class TestSDKTradingGate:
     @pytest.mark.asyncio
     async def test_trading_herd_detect(self) -> None:
         mock_result = {"violations": [], "historical_matches": [], "sentiment_extreme": False}
-        with patch("routers.sdk.trading_herd_detect_endpoint", new_callable=AsyncMock, return_value=mock_result):
-            app = _make_app(trading_enabled=True)
+        with patch("routers.agents.trading_herd_detect_endpoint", new_callable=AsyncMock, return_value=mock_result):
+            from routers import agents as agents_router
+
+            app = FastAPI()
+            app.include_router(agents_router.router)
             client = TestClient(app)
-            resp = client.post("/sdk/v1/trading/herd-detect", json={
+            resp = client.post("/agent/trading/herd-detect", json={
                 "asset": "ETH",
                 "sentiment_data": {"finbert_score": 0.5},
             })
@@ -215,10 +226,13 @@ class TestSDKTradingGate:
     @pytest.mark.asyncio
     async def test_trading_kelly_size(self) -> None:
         mock_result = {"kelly_fraction": 0.15, "cv_edge": 0.08, "kelly_raw": 0.22, "strategy": "herd-fade"}
-        with patch("routers.sdk.trading_kelly_size_endpoint", new_callable=AsyncMock, return_value=mock_result):
-            app = _make_app(trading_enabled=True)
+        with patch("routers.agents.trading_kelly_size_endpoint", new_callable=AsyncMock, return_value=mock_result):
+            from routers import agents as agents_router
+
+            app = FastAPI()
+            app.include_router(agents_router.router)
             client = TestClient(app)
-            resp = client.post("/sdk/v1/trading/kelly-size", json={
+            resp = client.post("/agent/trading/kelly-size", json={
                 "strategy": "herd-fade",
                 "confidence": 0.75,
                 "win_loss_ratio": 1.5,
@@ -230,10 +244,13 @@ class TestSDKTradingGate:
     @pytest.mark.asyncio
     async def test_trading_cascade_confirm(self) -> None:
         mock_result = {"confirmation_score": 0.7, "historical_cascades": 3, "match_quality": "good"}
-        with patch("routers.sdk.trading_cascade_confirm_endpoint", new_callable=AsyncMock, return_value=mock_result):
-            app = _make_app(trading_enabled=True)
+        with patch("routers.agents.trading_cascade_confirm_endpoint", new_callable=AsyncMock, return_value=mock_result):
+            from routers import agents as agents_router
+
+            app = FastAPI()
+            app.include_router(agents_router.router)
             client = TestClient(app)
-            resp = client.post("/sdk/v1/trading/cascade-confirm", json={
+            resp = client.post("/agent/trading/cascade-confirm", json={
                 "asset": "ETH",
                 "liquidation_events": [{"exchange": "binance", "usd_value": 5000000}],
             })
@@ -244,10 +261,13 @@ class TestSDKTradingGate:
     @pytest.mark.asyncio
     async def test_trading_longshot_surface(self) -> None:
         mock_result = {"calibration_points": [], "count": 0, "asset": "ETH", "date_range": "2026-03-01/2026-03-15"}
-        with patch("routers.sdk.trading_longshot_surface_endpoint", new_callable=AsyncMock, return_value=mock_result):
-            app = _make_app(trading_enabled=True)
+        with patch("routers.agents.trading_longshot_surface_endpoint", new_callable=AsyncMock, return_value=mock_result):
+            from routers import agents as agents_router
+
+            app = FastAPI()
+            app.include_router(agents_router.router)
             client = TestClient(app)
-            resp = client.post("/sdk/v1/trading/longshot-surface", json={
+            resp = client.post("/agent/trading/longshot-surface", json={
                 "asset": "ETH",
                 "date_range": "2026-03-01/2026-03-15",
             })
