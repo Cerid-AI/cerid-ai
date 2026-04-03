@@ -259,9 +259,11 @@ def sdk_search(req: SDKSearchRequest):
 )
 def sdk_plugins():
     result = list_plugins()
+    raw_plugins = result.get("plugins", []) if isinstance(result, dict) else getattr(result, "plugins", [])
+    total = result.get("total", 0) if isinstance(result, dict) else getattr(result, "total", 0)
     plugins_dicts = [
-        p.model_dump() if hasattr(p, "model_dump") else dict(p)
-        for p in result.plugins
+        p.model_dump() if hasattr(p, "model_dump") else dict(p) if not isinstance(p, dict) else p
+        for p in raw_plugins
     ]
-    return SDKPluginListResponse(plugins=plugins_dicts, total=result.total)
+    return SDKPluginListResponse(plugins=plugins_dicts, total=total)
 

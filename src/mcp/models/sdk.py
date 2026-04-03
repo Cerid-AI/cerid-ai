@@ -122,7 +122,7 @@ class SDKTaxonomyResponse(_SDKBase):
     taxonomy: dict[str, Any] = Field(default_factory=dict, description="Full taxonomy tree")
 
 
-class SDKDetailedHealthResponse(SDKHealthResponse):
+class SDKDetailedHealthResponse(_SDKBase):
     """Response from ``GET /sdk/v1/health/detailed``."""
 
     circuit_breakers: dict[str, str] = Field(default_factory=dict, description="Breaker states")

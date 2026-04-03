@@ -251,7 +251,7 @@ class TestSDKIngest:
             json={
                 "content": "def hello(): pass",
                 "domain": "coding",
-                "tags": ["python", "example"],
+                "tags": "python,example",
             },
             headers={"x-client-id": "test-consumer"},
         )
@@ -302,7 +302,7 @@ class TestSDKIngestFile:
             json={
                 "file_path": "/data/reports/q4.pdf",
                 "domain": "finance",
-                "tags": ["quarterly"],
+                "tags": "quarterly",
             },
             headers={"x-client-id": "finance-dashboard"},
         )
@@ -339,10 +339,7 @@ class TestSDKCollections:
     @patch("routers.sdk.list_collections")
     def test_collections_success(self, mock_list):
         mock_list.return_value = {
-            "collections": [
-                {"name": "coding", "count": 1500},
-                {"name": "finance", "count": 320},
-            ],
+            "collections": ["coding", "finance"],
             "total": 2,
         }
 
