@@ -102,13 +102,16 @@ def _save_sub(r, sub_id: str, data: dict[str, Any]) -> None:
     r.set(_sub_key(sub_id), json.dumps(data))
 
 
-def sign_payload(payload: str, secret: str) -> str:
+def sign_payload(payload: "str | dict", secret: str) -> str:
     """Compute HMAC-SHA256 signature of *payload* using *secret*.
 
+    Accepts a dict (JSON-serialised with sorted keys) or a pre-encoded string.
     Returns an empty string when secret is empty (no signing configured).
     """
     if not secret:
         return ""
+    if isinstance(payload, dict):
+        payload = json.dumps(payload, separators=(",", ":"), sort_keys=True)
     return hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
