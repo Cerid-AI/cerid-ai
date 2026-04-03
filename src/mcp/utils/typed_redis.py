@@ -106,7 +106,7 @@ class TypedRedis:
 
     # -- Hash commands ------------------------------------------------------
     def hset(self, name: str, key: str | None = None, value: str | None = None, mapping: dict[str, str] | None = None) -> int:
-        return self._r.hset(name, key=key, value=value, mapping=mapping)  # type: ignore[return-value]
+        return self._r.hset(name, key=key, value=value, mapping=mapping)  # type: ignore[arg-type,return-value]
 
     def hget(self, name: str, key: str) -> str | None:
         return self._r.hget(name, key)  # type: ignore[return-value]
