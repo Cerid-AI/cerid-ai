@@ -18,6 +18,7 @@ from neo4j import GraphDatabase
 import config
 from config.constants import MAX_RETRIES, RETRY_BASE_DELAY, RETRY_MAX_DELAY
 from errors import ConfigError
+from utils.typed_redis import TypedRedis
 
 logger = logging.getLogger("ai-companion")
 
@@ -117,19 +118,20 @@ def get_chroma() -> Any:
     return _chroma
 
 
-def get_redis() -> redis.Redis:
+def get_redis() -> TypedRedis:
     global _redis
     if _redis is None:
         with _redis_lock:
             if _redis is None:
-                _redis = redis.from_url(
+                raw = redis.from_url(
                     config.REDIS_URL, decode_responses=True,
                     socket_connect_timeout=5, socket_timeout=10,
                     max_connections=20,
                 )
-                _retry(_redis.ping, "Redis")
+                _retry(raw.ping, "Redis")
+                _redis = TypedRedis(raw)
                 logger.info("Redis connected")
-    return _redis
+    return _redis  # type: ignore[return-value]
 
 
 _lightweight_logged = False
@@ -194,7 +196,7 @@ def close_redis():
     if _redis:
         try:
             _redis.close()
-        except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
-            logger.debug(f"Redis close error (ignored): {e}")
+        except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
+            logger.debug("Redis close error (ignored): %s", exc)
         _redis = None
         logger.info("Redis connection closed")

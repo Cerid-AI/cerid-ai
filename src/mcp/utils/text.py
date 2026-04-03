@@ -35,9 +35,3 @@ STOPWORDS: frozenset[str] = frozenset({
 WORD_RE: re.Pattern[str] = re.compile(r"[a-zA-Z0-9_]+(?:[-'][a-zA-Z0-9_]+)*")
 
 
-def tokenize_lower(text: str) -> list[str]:
-    """Tokenize text to lowercase words, excluding stopwords.
-
-    Returns a list (preserving order) of lowercase non-stopword tokens.
-    """
-    return [w for w in (m.lower() for m in WORD_RE.findall(text)) if w not in STOPWORDS]
