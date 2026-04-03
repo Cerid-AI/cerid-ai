@@ -118,7 +118,7 @@ async def reconnect_mcp_server(name: str):
     """Reconnect to a specific MCP server."""
     from utils.mcp_client import mcp_client_manager
 
-    success = await mcp_client_manager.reconnect(name)
+    await mcp_client_manager.reconnect(name)
     servers = mcp_client_manager.list_servers()
     info = next((s for s in servers if s["name"] == name), None)
     if not info:
