@@ -270,8 +270,9 @@ def sdk_plugins():
     from routers.plugins import list_plugins
 
     result = list_plugins()
-    plugins = result.plugins if hasattr(result, "plugins") else result.get("plugins", [])
-    plugins_dicts = [p.model_dump() if hasattr(p, "model_dump") else p for p in plugins]
-    total = result.total if hasattr(result, "total") else result.get("total", len(plugins_dicts))
-    return SDKPluginListResponse(plugins=plugins_dicts, total=total)
+    plugins_dicts = [
+        p.model_dump() if hasattr(p, "model_dump") else dict(p)
+        for p in result.plugins
+    ]
+    return SDKPluginListResponse(plugins=plugins_dicts, total=result.total)
 

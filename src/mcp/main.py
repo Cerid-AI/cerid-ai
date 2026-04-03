@@ -70,6 +70,7 @@ from routers import (
     health,
     ingestion,
     kb_admin,
+    mcp_client,
     mcp_sse,
     memories,
     models,
@@ -81,6 +82,7 @@ from routers import (
     query,
     scanner,
     sdk,
+    sdk_openapi,
     settings,
     setup,
     sync,
@@ -90,6 +92,7 @@ from routers import (
     user_state,
     watched_folders,
     webhook_subscriptions,
+    widget,
     workflows,
 )
 from scheduler import start_scheduler, stop_scheduler
@@ -269,7 +272,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         async def _webhook_bridge(event):
             try:
                 import dataclasses
-                payload = dataclasses.asdict(event) if dataclasses.is_dataclass(event) else {}
+                payload = dataclasses.asdict(event) if dataclasses.is_dataclass(event) else {}  # type: ignore[arg-type]
                 await fire_webhook_event(event.event_type, payload)
             except Exception:
                 pass
@@ -539,16 +542,13 @@ app.include_router(ollama_proxy.router, prefix="/api/v1")
 app.include_router(sdk.router)
 
 # SDK OpenAPI spec — isolated spec for /sdk/v1/ endpoints only
-from routers import sdk_openapi  # noqa: E402
 app.include_router(sdk_openapi.router)
 
 # MCP client — external MCP server management endpoints
-from routers import mcp_client  # noqa: E402
 app.include_router(mcp_client.router)
 app.include_router(mcp_client.router, prefix="/api/v1")
 
 # Embeddable chat widget — serves /widget.html, /widget.js, /widget/config
-from routers import widget  # noqa: E402
 app.include_router(widget.router)
 
 # A2A router — Agent Card at /.well-known/agent.json, tasks at /a2a/* (no prefix)
