@@ -206,6 +206,14 @@ def delete_agent(driver, agent_id: str) -> bool:
         return deleted
 
 
+def count_agents(driver) -> int:
+    """Return the total number of custom agents in the database."""
+    with driver.session() as session:
+        result = session.run("MATCH (a:CustomAgent) RETURN count(a) AS total")
+        record = result.single()
+        return record["total"] if record else 0
+
+
 def list_agents(
     driver,
     offset: int = 0,
