@@ -8,7 +8,6 @@ import pytest
 
 from utils.mcp_client import ExternalTool, MCPClientManager, MCPServerConfig
 
-
 # ---------------------------------------------------------------------------
 # MCPServerConfig dataclass
 # ---------------------------------------------------------------------------

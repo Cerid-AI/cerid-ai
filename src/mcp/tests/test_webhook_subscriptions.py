@@ -2,13 +2,9 @@
 """Tests for webhook subscription CRUD and delivery (Phase 3 — extensibility)."""
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
-from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # HMAC signing
@@ -67,6 +63,7 @@ class TestSubscriptionModels:
 
     def test_create_request_requires_url(self):
         from pydantic import ValidationError
+
         from routers.webhook_subscriptions import WebhookSubscriptionCreate
 
         with pytest.raises(ValidationError):
@@ -74,6 +71,7 @@ class TestSubscriptionModels:
 
     def test_create_request_requires_events(self):
         from pydantic import ValidationError
+
         from routers.webhook_subscriptions import WebhookSubscriptionCreate
 
         with pytest.raises(ValidationError):

@@ -2,8 +2,6 @@
 """Tests for the EventBus — pub/sub, wildcards, error isolation."""
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 
 from utils.event_bus import (
@@ -12,7 +10,6 @@ from utils.event_bus import (
     EventBus,
     MemoryCreated,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

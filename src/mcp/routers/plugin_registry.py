@@ -26,7 +26,7 @@ async def list_community_plugins(q: str = "", type: str = ""):
     try:
         results = await plugin_registry_client.search(query=q, plugin_type=type)
         return {"plugins": results, "total": len(results)}
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.warning("Plugin registry search failed: %s", exc)
         return {"plugins": [], "total": 0}
 
@@ -36,7 +36,7 @@ async def get_community_plugin(name: str):
     """Get details for a specific community plugin by name."""
     try:
         plugin = await plugin_registry_client.get_plugin(name)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.warning("Plugin registry lookup failed: %s", exc)
         raise HTTPException(status_code=502, detail="Registry unavailable") from exc
 

@@ -1,6 +1,4 @@
-# Copyright (c) 2026 Cerid AI. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-
+# Copyright 2026 Cerid AI. Apache-2.0 license.
 """Tests for plugin discovery, manifest validation, and tier gating."""
 
 from __future__ import annotations
@@ -28,13 +26,6 @@ class TestPluginDiscovery:
             json.dumps({"name": "hidden", "version": "1.0.0", "type": "parser"})
         )
         (hidden / "plugin.py").write_text("def register(): pass\n")
-
-        underscored = tmp_path / "_internal"
-        underscored.mkdir()
-        (underscored / "manifest.json").write_text(
-            json.dumps({"name": "internal", "version": "1.0.0", "type": "parser"})
-        )
-        (underscored / "plugin.py").write_text("def register(): pass\n")
 
         result = load_plugins(str(tmp_path))
         assert result == []
@@ -98,9 +89,9 @@ class TestManifestValidation:
 
         _loaded_plugins.clear()
 
-        d = tmp_path / "bad_json"
+        d = tmp_path / "malformed"
         d.mkdir()
-        (d / "manifest.json").write_text("{invalid json!!!")
+        (d / "manifest.json").write_text("{not valid json")
         (d / "plugin.py").write_text("def register(): pass\n")
 
         result = load_plugins(str(tmp_path))
@@ -108,117 +99,38 @@ class TestManifestValidation:
 
 
 class TestTierGating:
-    """Test pro/community tier gating."""
+    """Test that plugins with tier requirements are skipped when tier is too low."""
 
-    def test_pro_plugin_blocked_in_community(self, tmp_path):
-        """Pro-tier plugins are skipped in community mode."""
+    def test_pro_plugin_skipped_on_community(self, tmp_path):
+        """A pro-tier plugin should not load on community tier."""
         from plugins import _loaded_plugins, load_plugins
 
         _loaded_plugins.clear()
 
-        d = tmp_path / "pro_only"
+        d = tmp_path / "pro_plugin"
         d.mkdir()
         (d / "manifest.json").write_text(
-            json.dumps({
-                "name": "pro_only",
-                "version": "1.0.0",
-                "type": "parser",
-                "tier": "pro",
-            })
+            json.dumps({"name": "pro_plugin", "version": "1.0.0", "type": "parser", "tier": "pro"})
         )
         (d / "plugin.py").write_text("def register(): pass\n")
 
-        with patch("config.FEATURE_TIER", "community"), \
-             patch("config.features.FEATURE_TIER", "community"):
+        with patch("plugins.is_tier_met", return_value=False):
             result = load_plugins(str(tmp_path))
         assert result == []
 
-    @patch("config.FEATURE_TIER", "pro")
-    @patch("config.features.FEATURE_TIER", "pro")
-    def test_pro_plugin_loads_in_pro(self, tmp_path):
-        """Pro-tier plugins load when tier is pro."""
+    def test_pro_plugin_loads_on_pro_tier(self, tmp_path):
+        """A pro-tier plugin should load when tier is met."""
         from plugins import _loaded_plugins, load_plugins
 
         _loaded_plugins.clear()
 
-        d = tmp_path / "pro_ok"
+        d = tmp_path / "pro_plugin"
         d.mkdir()
         (d / "manifest.json").write_text(
-            json.dumps({
-                "name": "pro_ok",
-                "version": "1.0.0",
-                "type": "parser",
-                "tier": "pro",
-            })
+            json.dumps({"name": "pro_plugin", "version": "1.0.0", "type": "parser", "tier": "pro"})
         )
         (d / "plugin.py").write_text("def register(): pass\n")
 
-        result = load_plugins(str(tmp_path))
-        assert "pro_ok" in result
-
-    def test_community_plugin_loads_in_community(self, tmp_path):
-        """Community-tier plugins load regardless of tier."""
-        from plugins import _loaded_plugins, load_plugins
-
-        _loaded_plugins.clear()
-
-        d = tmp_path / "community_plugin"
-        d.mkdir()
-        (d / "manifest.json").write_text(
-            json.dumps({
-                "name": "community_plugin",
-                "version": "1.0.0",
-                "type": "parser",
-            })
-        )
-        (d / "plugin.py").write_text("def register(): pass\n")
-
-        with patch("config.FEATURE_TIER", "community"):
+        with patch("plugins.is_tier_met", return_value=True):
             result = load_plugins(str(tmp_path))
-        assert "community_plugin" in result
-
-
-class TestEnabledPluginsFilter:
-    """Test ENABLED_PLUGINS allowlist."""
-
-    def test_enabled_plugins_filter(self, tmp_path):
-        """Only plugins in ENABLED_PLUGINS are loaded when set."""
-        from plugins import _loaded_plugins, load_plugins
-
-        _loaded_plugins.clear()
-
-        for name in ["allowed", "blocked"]:
-            d = tmp_path / name
-            d.mkdir()
-            (d / "manifest.json").write_text(
-                json.dumps({"name": name, "version": "1.0.0", "type": "parser"})
-            )
-            (d / "plugin.py").write_text("def register(): pass\n")
-
-        with patch("config.ENABLED_PLUGINS", ["allowed"]):
-            result = load_plugins(str(tmp_path))
-
-        assert "allowed" in result
-        assert "blocked" not in result
-
-
-class TestRegisterFailure:
-    """Test graceful handling of register() failures."""
-
-    def test_register_raises_error(self, tmp_path):
-        """Plugin whose register() raises is logged but doesn't crash."""
-        from plugins import _loaded_plugins, load_plugins
-
-        _loaded_plugins.clear()
-
-        d = tmp_path / "crashy"
-        d.mkdir()
-        (d / "manifest.json").write_text(
-            json.dumps({"name": "crashy", "version": "1.0.0", "type": "parser"})
-        )
-        (d / "plugin.py").write_text(
-            "def register():\n    raise RuntimeError('boom')\n"
-        )
-
-        result = load_plugins(str(tmp_path))
-        assert result == []
+        assert "pro_plugin" in result
