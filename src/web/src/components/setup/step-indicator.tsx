@@ -26,35 +26,35 @@ export function StepIndicator({ steps, currentStep, skippedSteps }: StepIndicato
   }
 
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center justify-center gap-0.5">
       {steps.map((step, i) => {
         const state = getState(i)
         return (
-          <div key={i} className="flex items-center gap-1">
+          <div key={i} className="flex items-center gap-0.5">
             {i > 0 && (
               <div
                 className={cn(
-                  "h-px w-2",
+                  "h-px w-1.5 shrink-0",
                   state === "pending" ? "bg-muted-foreground/20" : "bg-brand/40",
                 )}
               />
             )}
             <div
               className={cn(
-                "flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium transition-colors",
+                "flex items-center gap-0.5 rounded-full px-1 py-0.5 text-[9px] font-medium whitespace-nowrap transition-colors",
                 state === "active" && "bg-brand/10 text-brand",
                 state === "completed" && "text-green-600 dark:text-green-400",
                 state === "skipped" && "text-muted-foreground/50",
                 state === "pending" && "text-muted-foreground/40",
               )}
             >
-              {state === "completed" && <Check className="h-2.5 w-2.5" />}
-              {state === "skipped" && <SkipForward className="h-2.5 w-2.5" />}
+              {state === "completed" && <Check className="h-2 w-2" />}
+              {state === "skipped" && <SkipForward className="h-2 w-2" />}
               {state === "active" && (
                 <div className="h-1.5 w-1.5 rounded-full bg-brand" />
               )}
               {state === "pending" && (
-                <div className="h-1.5 w-1.5 rounded-full bg-muted-foreground/30" />
+                <div className="h-1 w-1 rounded-full bg-muted-foreground/30" />
               )}
               <span className="hidden sm:inline">{step.shortLabel}</span>
             </div>
