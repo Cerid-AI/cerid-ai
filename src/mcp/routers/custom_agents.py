@@ -85,13 +85,15 @@ async def list_agents(
     limit: int = Query(50, ge=1, le=200),
 ):
     """List all custom agents (newest first)."""
+    from db.neo4j.agents import count_agents as _count
     from db.neo4j.agents import list_agents as _list
 
     driver = get_neo4j()
     agents = _list(driver, offset=offset, limit=limit)
+    total = _count(driver)
     return AgentListResponse(
         agents=[AgentDefinition(**a) if isinstance(a, dict) else a for a in agents],
-        total=len(agents),
+        total=total,
     )
 
 
@@ -167,5 +169,14 @@ async def query_agent(agent_id: str, body: AgentQueryRequest):
     result = await agent_query(
         query=body.query,
         domains=agent.get("domains") or None,
+        model=agent.get("model_override") or None,
+        top_k=body.top_k if hasattr(body, "top_k") else 10,
     )
+    # Attach agent context so the caller can apply system_prompt/temperature
+    result["agent_config"] = {
+        "system_prompt": agent.get("system_prompt", ""),
+        "temperature": agent.get("temperature", 0.7),
+        "rag_mode": agent.get("rag_mode", "smart"),
+        "tools": agent.get("tools", []),
+    }
     return result
