@@ -133,8 +133,8 @@ async def _run_sync_export() -> None:
         try:
             manifest = read_manifest(config.SYNC_DIR)
             since = manifest.get("last_exported_at")
-        except (FileNotFoundError, ValueError):
-            pass
+        except (FileNotFoundError, ValueError) as e:
+            logger.debug("No existing manifest (first export or missing): %s", e)
 
         result = export_all(
             driver=get_neo4j(),

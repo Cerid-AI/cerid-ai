@@ -608,8 +608,8 @@ def import_all(
         from sync.manifest import read_manifest
         manifest = read_manifest(sync_dir)
         last_sync_at = manifest.get("last_exported_at")
-    except (FileNotFoundError, ValueError):
-        pass
+    except (FileNotFoundError, ValueError) as e:
+        logger.debug("No existing manifest for import (first sync or missing): %s", e)
 
     # Apply tombstones first (delete remote-deleted artifacts before importing new data)
     tombstone_result: dict[str, Any] = {"deleted": 0}

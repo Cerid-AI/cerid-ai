@@ -274,8 +274,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
                 import dataclasses
                 payload = dataclasses.asdict(event) if dataclasses.is_dataclass(event) else {}  # type: ignore[arg-type]
                 await fire_webhook_event(event.event_type, payload)
-            except Exception:
-                pass
+            except Exception as _e:  # noqa: BLE001
+                logger.debug("Webhook bridge delivery failed (non-blocking): %s", _e)
 
         event_bus.subscribe_all(_webhook_bridge)
         logger.info("Event bus webhook bridge registered")
