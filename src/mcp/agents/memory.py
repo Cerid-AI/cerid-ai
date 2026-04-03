@@ -110,9 +110,6 @@ async def extract_memories(
     except Exception as e:  # noqa: BLE001
         logger.warning("Memory extraction failed unexpectedly: %s", e)
         return []
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Memory extraction failed unexpectedly: %s", e)
-        return []
 
 
 # ---------------------------------------------------------------------------
