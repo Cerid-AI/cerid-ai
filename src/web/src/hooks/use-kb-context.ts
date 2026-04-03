@@ -109,9 +109,9 @@ export function useKBContext(
   }, [])
 
   // Client-side relevance + tag filtering
-  const rawResults = data?.results ?? []
   const MIN_RELEVANCE = 0.35
   const filteredResults = useMemo(() => {
+    const rawResults = data?.results ?? []
     let results = rawResults
     // Filter out low-relevance results (skip if all relevance=0, e.g., browse mode)
     if (results.some((r) => r.relevance > 0)) {
@@ -122,7 +122,7 @@ export function useKBContext(
       const rTags = r.tags ?? []
       return activeTags.every((t) => rTags.includes(t))
     })
-  }, [rawResults, activeTags])
+  }, [data?.results, activeTags])
 
   return {
     results: filteredResults,

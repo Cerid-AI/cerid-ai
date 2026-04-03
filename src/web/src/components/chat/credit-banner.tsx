@@ -42,8 +42,8 @@ export function CreditBanner() {
   }, [])
 
   useEffect(() => {
-    poll()
-    const id = setInterval(poll, POLL_INTERVAL_MS)
+    void (async () => { await poll() })()
+    const id = setInterval(() => void poll(), POLL_INTERVAL_MS)
     return () => clearInterval(id)
   }, [poll])
 

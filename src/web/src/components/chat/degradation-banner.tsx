@@ -126,18 +126,21 @@ export function DegradationBanner() {
     }
   }, [isDegraded, health])
 
-  // Detect recovery: was degraded, now healthy → show recovery toast
+  // Detect recovery: was degraded, now healthy → show recovery toast.
+  // Use queueMicrotask to avoid synchronous setState in useEffect (React Compiler).
   useEffect(() => {
     const prevTier = prevTierRef.current
+    prevTierRef.current = tier
     if (prevTier && prevTier !== "full" && tier === "full") {
-      setShowRecoveryToast(true)
-      setDismissedTier(null)
-      try { sessionStorage.removeItem(DISMISS_KEY) } catch { /* noop */ }
+      queueMicrotask(() => {
+        setShowRecoveryToast(true)
+        setDismissedTier(null)
+        try { sessionStorage.removeItem(DISMISS_KEY) } catch { /* noop */ }
+      })
       recoveryTimerRef.current = setTimeout(() => {
         setShowRecoveryToast(false)
       }, RECOVERY_TOAST_MS)
     }
-    prevTierRef.current = tier
     return () => {
       if (recoveryTimerRef.current) clearTimeout(recoveryTimerRef.current)
     }

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { WorkflowNode, WorkflowEdge, WorkflowRunStatus } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -99,8 +99,8 @@ export default function WorkflowCanvas({
 
   const isNarrow = containerWidth < NARROW_VIEWPORT_THRESHOLD
 
-  // Build node map for edge lookups
-  const nodeMap = new Map(nodes.map((n) => [n.id, n]))
+  // Build node map for edge lookups — memoized to stabilize useCallback deps
+  const nodeMap = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes])
 
   // Calculate canvas bounds
   const maxX = Math.max(400, ...nodes.map((n) => n.position.x + NODE_W + 40))

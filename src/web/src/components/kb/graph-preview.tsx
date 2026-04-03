@@ -17,9 +17,10 @@ export function GraphPreview({ artifactId }: GraphPreviewProps) {
   const [stack, setStack] = useState<string[]>([])
   const currentId = stack.length > 0 ? stack[stack.length - 1] : artifactId
 
-  // Reset stack when root artifact changes
+  // Reset stack when root artifact changes.
+  // Wrapped in queueMicrotask to avoid synchronous setState in useEffect (React Compiler).
   useEffect(() => {
-    setStack([])
+    queueMicrotask(() => setStack([]))
   }, [artifactId])
 
   const { data: related, isLoading } = useQuery({

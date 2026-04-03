@@ -62,12 +62,14 @@ export function KBContextPanel({
   const latestQuery = manualQuery || ""
   useEffect(() => {
     if (!hasQueried || !results.length) return
-    setMemoryLoading(true)
-    // Use the query that produced the current KB results
-    recallMemories(latestQuery || results[0]?.content?.slice(0, 100) || "", 5, 0.4)
-      .then(setMemoryResults)
-      .catch(() => setMemoryResults([]))
-      .finally(() => setMemoryLoading(false))
+    queueMicrotask(() => {
+      setMemoryLoading(true)
+      // Use the query that produced the current KB results
+      recallMemories(latestQuery || results[0]?.content?.slice(0, 100) || "", 5, 0.4)
+        .then(setMemoryResults)
+        .catch(() => setMemoryResults([]))
+        .finally(() => setMemoryLoading(false))
+    })
   }, [hasQueried, results.length, latestQuery]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Separate external sources from KB results

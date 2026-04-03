@@ -65,29 +65,32 @@ export default function AutomationDialog({ open, onClose, automation, onSave, sa
   const [domains, setDomains] = useState<string[]>(["general"])
   const [enabled, setEnabled] = useState(true)
 
-  // Reset form when dialog opens or automation changes
+  // Reset form when dialog opens or automation changes.
+  // Wrapped in queueMicrotask to avoid synchronous setState in useEffect (React Compiler).
   useEffect(() => {
     if (open) {
-      if (automation) {
-        setName(automation.name)
-        setDescription(automation.description)
-        setPrompt(automation.prompt)
-        const key = resolvePresetKey(automation.schedule)
-        setScheduleKey(key)
-        setCustomCron(key === "custom" ? automation.schedule : "")
-        setAction(automation.action)
-        setDomains(automation.domains.length > 0 ? automation.domains : ["general"])
-        setEnabled(automation.enabled)
-      } else {
-        setName("")
-        setDescription("")
-        setPrompt("")
-        setScheduleKey("daily_9am")
-        setCustomCron("")
-        setAction("notify")
-        setDomains(["general"])
-        setEnabled(true)
-      }
+      queueMicrotask(() => {
+        if (automation) {
+          setName(automation.name)
+          setDescription(automation.description)
+          setPrompt(automation.prompt)
+          const key = resolvePresetKey(automation.schedule)
+          setScheduleKey(key)
+          setCustomCron(key === "custom" ? automation.schedule : "")
+          setAction(automation.action)
+          setDomains(automation.domains.length > 0 ? automation.domains : ["general"])
+          setEnabled(automation.enabled)
+        } else {
+          setName("")
+          setDescription("")
+          setPrompt("")
+          setScheduleKey("daily_9am")
+          setCustomCron("")
+          setAction("notify")
+          setDomains(["general"])
+          setEnabled(true)
+        }
+      })
     }
   }, [open, automation])
 
