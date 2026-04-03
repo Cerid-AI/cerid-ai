@@ -19,7 +19,7 @@ class StubDataSource(DataSource):
     description = "Stub source for tests"
     enabled = True
     requires_api_key = True
-    api_key_env_var = "STUB_API_KEY"
+    api_key_env_var = "STUB_API_KEY"  # pragma: allowlist secret
     domains = ["general"]
 
     async def query(self, query: str, **kwargs) -> list[DataSourceResult]:
@@ -56,7 +56,7 @@ class TestDataSourceRegistry:
         info = reg.list_sources()[0]
         assert info["name"] == "stub"
         assert info["requires_api_key"] is True
-        assert info["api_key_env_var"] == "STUB_API_KEY"
+        assert info["api_key_env_var"] == "STUB_API_KEY"  # pragma: allowlist secret
         assert "configured" in info
 
     @patch.dict("os.environ", {"STUB_API_KEY": "sk-test"})

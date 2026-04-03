@@ -87,7 +87,7 @@ async def add_mcp_server(req: MCPServerAddRequest):
     mcp_client_manager.add_server(cfg)
 
     # Attempt to connect immediately
-    connected = await mcp_client_manager.connect_all()
+    await mcp_client_manager.connect_all()
     servers = mcp_client_manager.list_servers()
     info = next((s for s in servers if s["name"] == req.name), {})
 

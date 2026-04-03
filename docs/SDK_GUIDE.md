@@ -81,7 +81,7 @@ import { CeridClient } from "@cerid-ai/sdk";
 const client = new CeridClient({
   baseUrl: "http://localhost:8888",
   clientId: "my-app",
-  apiKey: "sk-cerid-...", // optional
+  apiKey: "sk-cerid-...", // optional  // pragma: allowlist secret
 });
 
 // Query the knowledge base

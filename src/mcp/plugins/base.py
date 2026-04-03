@@ -211,7 +211,7 @@ class ConnectorPlugin(CeridPlugin):
             name = "slack"
             description = "Search Slack messages"
             requires_api_key = True
-            api_key_env_var = "SLACK_BOT_TOKEN"
+            api_key_env_var = "SLACK_BOT_TOKEN"  # pragma: allowlist secret
 
             async def query(self, query, **kwargs):
                 ...
