@@ -17,6 +17,7 @@ interface ApiKeyInputProps {
   required?: boolean
   helpUrl?: string
   placeholder?: string
+  preconfigured?: boolean
   onKeyValidated: (key: string, valid: boolean) => void
 }
 
@@ -26,11 +27,12 @@ export function ApiKeyInput({
   required = false,
   helpUrl,
   placeholder,
+  preconfigured = false,
   onKeyValidated,
 }: ApiKeyInputProps) {
   const [value, setValue] = useState("")
   const [visible, setVisible] = useState(false)
-  const [status, setStatus] = useState<ValidationStatus>("idle")
+  const [status, setStatus] = useState<ValidationStatus>(preconfigured ? "valid" : "idle")
   const [error, setError] = useState<string | null>(null)
 
   const handleTest = useCallback(async () => {
@@ -132,7 +134,13 @@ export function ApiKeyInput({
       {error && (
         <p className="text-xs text-destructive">{error}</p>
       )}
-      {status === "valid" && (
+      {status === "valid" && preconfigured && !value && (
+        <p className="text-xs text-green-600 dark:text-green-400">
+          <Check className="mr-1 inline h-3 w-3" />
+          Already configured in environment
+        </p>
+      )}
+      {status === "valid" && !(preconfigured && !value) && (
         <p className="text-xs text-green-600 dark:text-green-400">Key validated successfully</p>
       )}
     </div>

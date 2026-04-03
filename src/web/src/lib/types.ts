@@ -929,8 +929,12 @@ export interface ChatModelInfo {
 // -- Setup Wizard types (first-run) -------------------------------------------
 
 export interface SetupStatus {
+  configured: boolean
   setup_required: boolean
+  missing_keys: string[]
+  optional_keys: string[]
   configured_providers: string[]
+  services?: Record<string, string>
 }
 
 export interface KeyValidation {
