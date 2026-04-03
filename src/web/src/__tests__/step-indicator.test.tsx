@@ -34,7 +34,7 @@ describe("StepIndicator", () => {
     const activeLabel = Array.from(labels).find((el) => el.textContent === "Keys")
     expect(activeLabel).toBeTruthy()
     // The parent div of the active label should contain brand color styling
-    const parentDiv = activeLabel!.closest("div.flex.items-center.gap-1.rounded-full")
+    const parentDiv = activeLabel!.closest("div.flex.items-center.gap-0\\.5.rounded-full")
     expect(parentDiv?.className).toContain("text-brand")
     expect(parentDiv?.className).toContain("bg-brand/10")
   })
@@ -44,7 +44,7 @@ describe("StepIndicator", () => {
       <StepIndicator steps={STEPS} currentStep={3} skippedSteps={new Set()} />,
     )
     // Steps 0, 1, 2 should be completed and have green text
-    const stepDivs = container.querySelectorAll("div.flex.items-center.gap-1.rounded-full")
+    const stepDivs = container.querySelectorAll("div.flex.items-center.gap-0\\.5.rounded-full")
     // Steps 0, 1, 2 are completed => text-green-600
     for (let i = 0; i < 3; i++) {
       expect(stepDivs[i]?.className).toContain("text-green-600")
@@ -59,7 +59,7 @@ describe("StepIndicator", () => {
         skippedSteps={new Set([1, 3])}
       />,
     )
-    const stepDivs = container.querySelectorAll("div.flex.items-center.gap-1.rounded-full")
+    const stepDivs = container.querySelectorAll("div.flex.items-center.gap-0\\.5.rounded-full")
     // Step 1 and step 3 should have skipped styling (text-muted-foreground/50)
     expect(stepDivs[1]?.className).toContain("text-muted-foreground/50")
     expect(stepDivs[3]?.className).toContain("text-muted-foreground/50")
