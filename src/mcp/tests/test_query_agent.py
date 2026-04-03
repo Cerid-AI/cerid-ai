@@ -122,7 +122,9 @@ class TestAgentQuery:
     def test_agent_query_is_importable(self):
         """agent_query should be importable and be a coroutine function."""
         import asyncio
+        import importlib
 
-        from agents.query_agent import agent_query
+        import agents.query_agent as mod
 
-        assert asyncio.iscoroutinefunction(agent_query)
+        importlib.reload(mod)
+        assert asyncio.iscoroutinefunction(mod.agent_query)
