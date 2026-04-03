@@ -1,0 +1,338 @@
+/* Copyright (c) 2026 Cerid AI. All rights reserved. */
+/* SPDX-License-Identifier: Apache-2.0 */
+
+/* =========================================================================
+   Cerid AI Chat Widget — Base Styles
+
+   These styles are injected into a Shadow DOM host so they won't leak into
+   or be affected by the embedding page's styles.
+   ========================================================================= */
+
+:host {
+  --cerid-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --cerid-radius: 12px;
+  --cerid-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+  --cerid-transition: 200ms ease;
+
+  /* Light theme (default) */
+  --cerid-bg: #ffffff;
+  --cerid-bg-secondary: #f4f5f7;
+  --cerid-text: #1a1a2e;
+  --cerid-text-secondary: #6b7280;
+  --cerid-border: #e5e7eb;
+  --cerid-accent: #3b82f6;
+  --cerid-accent-hover: #2563eb;
+  --cerid-user-bg: #3b82f6;
+  --cerid-user-text: #ffffff;
+  --cerid-assistant-bg: #f4f5f7;
+  --cerid-assistant-text: #1a1a2e;
+  --cerid-input-bg: #ffffff;
+  --cerid-input-border: #d1d5db;
+
+  font-family: var(--cerid-font);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--cerid-text);
+}
+
+/* Dark theme */
+:host(.cerid-dark) {
+  --cerid-bg: #1a1a2e;
+  --cerid-bg-secondary: #232340;
+  --cerid-text: #e5e7eb;
+  --cerid-text-secondary: #9ca3af;
+  --cerid-border: #374151;
+  --cerid-accent: #60a5fa;
+  --cerid-accent-hover: #3b82f6;
+  --cerid-user-bg: #3b82f6;
+  --cerid-user-text: #ffffff;
+  --cerid-assistant-bg: #232340;
+  --cerid-assistant-text: #e5e7eb;
+  --cerid-input-bg: #232340;
+  --cerid-input-border: #4b5563;
+}
+
+/* ---- Layout ---- */
+
+.cerid-widget-container {
+  position: fixed;
+  z-index: 2147483646;
+  display: flex;
+  flex-direction: column;
+}
+
+.cerid-widget-container.bottom-right {
+  bottom: 24px;
+  right: 24px;
+}
+
+.cerid-widget-container.bottom-left {
+  bottom: 24px;
+  left: 24px;
+}
+
+/* ---- Bubble ---- */
+
+.cerid-bubble {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--cerid-accent);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--cerid-shadow);
+  transition: transform var(--cerid-transition),
+    background var(--cerid-transition);
+  align-self: flex-end;
+}
+
+.cerid-bubble:hover {
+  background: var(--cerid-accent-hover);
+  transform: scale(1.08);
+}
+
+.cerid-bubble svg {
+  width: 26px;
+  height: 26px;
+  fill: currentColor;
+}
+
+/* ---- Panel ---- */
+
+.cerid-panel {
+  width: 380px;
+  max-width: calc(100vw - 48px);
+  height: 520px;
+  max-height: calc(100vh - 120px);
+  border-radius: var(--cerid-radius);
+  background: var(--cerid-bg);
+  box-shadow: var(--cerid-shadow);
+  border: 1px solid var(--cerid-border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  margin-bottom: 12px;
+  animation: cerid-slide-up 200ms ease forwards;
+}
+
+@keyframes cerid-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ---- Header ---- */
+
+.cerid-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--cerid-border);
+  background: var(--cerid-bg);
+  flex-shrink: 0;
+}
+
+.cerid-header-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--cerid-text);
+  margin: 0;
+}
+
+.cerid-header-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.cerid-header-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  color: var(--cerid-text-secondary);
+  transition: background var(--cerid-transition);
+}
+
+.cerid-header-btn:hover {
+  background: var(--cerid-bg-secondary);
+}
+
+/* ---- Messages ---- */
+
+.cerid-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  scroll-behavior: smooth;
+}
+
+.cerid-message {
+  max-width: 85%;
+  padding: 10px 14px;
+  border-radius: 16px;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.cerid-message.user {
+  align-self: flex-end;
+  background: var(--cerid-user-bg);
+  color: var(--cerid-user-text);
+  border-bottom-right-radius: 4px;
+}
+
+.cerid-message.assistant {
+  align-self: flex-start;
+  background: var(--cerid-assistant-bg);
+  color: var(--cerid-assistant-text);
+  border-bottom-left-radius: 4px;
+}
+
+/* Streaming cursor */
+.cerid-message.assistant.streaming::after {
+  content: "\25CF";
+  animation: cerid-blink 1s step-start infinite;
+  margin-left: 2px;
+  color: var(--cerid-accent);
+}
+
+@keyframes cerid-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* Welcome message */
+.cerid-welcome {
+  text-align: center;
+  color: var(--cerid-text-secondary);
+  padding: 32px 16px;
+  font-size: 14px;
+}
+
+/* ---- Input area ---- */
+
+.cerid-input-area {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--cerid-border);
+  background: var(--cerid-bg);
+  flex-shrink: 0;
+}
+
+.cerid-input {
+  flex: 1;
+  resize: none;
+  border: 1px solid var(--cerid-input-border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-family: var(--cerid-font);
+  font-size: 14px;
+  line-height: 1.4;
+  background: var(--cerid-input-bg);
+  color: var(--cerid-text);
+  outline: none;
+  min-height: 40px;
+  max-height: 120px;
+  transition: border-color var(--cerid-transition);
+}
+
+.cerid-input::placeholder {
+  color: var(--cerid-text-secondary);
+}
+
+.cerid-input:focus {
+  border-color: var(--cerid-accent);
+}
+
+.cerid-send-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--cerid-accent);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background var(--cerid-transition), opacity var(--cerid-transition);
+}
+
+.cerid-send-btn:hover {
+  background: var(--cerid-accent-hover);
+}
+
+.cerid-send-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.cerid-send-btn svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+/* ---- Powered-by footer ---- */
+
+.cerid-footer {
+  text-align: center;
+  padding: 6px 0;
+  font-size: 11px;
+  color: var(--cerid-text-secondary);
+  border-top: 1px solid var(--cerid-border);
+  flex-shrink: 0;
+}
+
+.cerid-footer a {
+  color: var(--cerid-accent);
+  text-decoration: none;
+}
+
+/* ---- Scrollbar ---- */
+
+.cerid-messages::-webkit-scrollbar {
+  width: 6px;
+}
+
+.cerid-messages::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.cerid-messages::-webkit-scrollbar-thumb {
+  background: var(--cerid-border);
+  border-radius: 3px;
+}
+
+/* ---- Full-page mode (iframe) ---- */
+
+.cerid-fullpage .cerid-panel {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  border-radius: 0;
+  border: none;
+  margin: 0;
+}

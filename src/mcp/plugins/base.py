@@ -140,3 +140,94 @@ class SyncBackendPlugin(CeridPlugin):
     def register(self) -> None:
         # Sync backends are collected and made available via config
         pass
+
+
+class ToolPlugin(CeridPlugin):
+    """
+    Plugin that registers custom MCP tools.
+
+    Subclass and implement get_tools() to return tool definitions
+    with their async handler functions. Tools are merged into the
+    MCP tool palette and dispatched via ``execute_tool()``.
+
+    Example:
+        class MyToolPlugin(ToolPlugin):
+            name = "my-tools"
+            version = "1.0.0"
+
+            def get_tools(self):
+                return [{
+                    "name": "plg_my_search",
+                    "description": "Search my custom source",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                        "required": ["query"],
+                    },
+                    "handler": self.handle_search,
+                }]
+
+            async def handle_search(self, arguments: dict):
+                return {"results": []}
+    """
+
+    @abstractmethod
+    def get_tools(self) -> list[dict[str, Any]]:
+        """Return list of tool definitions.
+
+        Each dict must have:
+          name: str — tool name (use ``plg_{plugin_name}_`` prefix)
+          description: str — human-readable description
+          inputSchema: dict — JSON Schema for parameters
+          handler: Callable[[dict], Awaitable[Any]] — async handler
+
+        Optionally:
+          outputSchema: dict — JSON Schema for return value
+        """
+        ...
+
+    def register(self) -> None:
+        # Tools are collected by the plugin loader after all plugins load
+        pass
+
+
+class ConnectorPlugin(CeridPlugin):
+    """
+    Plugin that registers a data source connector.
+
+    Wraps the existing DataSource ABC as a plugin type. The connector
+    is registered with the global DataSourceRegistry and participates
+    in circuit-breaker-protected parallel queries automatically.
+
+    Example:
+        class SlackConnector(ConnectorPlugin):
+            name = "slack"
+            version = "1.0.0"
+
+            def get_data_source(self):
+                return SlackDataSource()
+
+        class SlackDataSource(DataSource):
+            name = "slack"
+            description = "Search Slack messages"
+            requires_api_key = True
+            api_key_env_var = "SLACK_BOT_TOKEN"
+
+            async def query(self, query, **kwargs):
+                ...
+    """
+
+    @abstractmethod
+    def get_data_source(self) -> Any:
+        """Return a configured DataSource instance.
+
+        The returned object must be a subclass of
+        ``utils.data_sources.base.DataSource``.
+        """
+        ...
+
+    def register(self) -> None:
+        from utils.data_sources import registry
+
+        source = self.get_data_source()
+        registry.register(source)

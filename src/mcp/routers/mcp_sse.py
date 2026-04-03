@@ -49,7 +49,19 @@ async def build_response(msg_id, method: str, params: dict) -> dict:
             },
         }
     elif method == "tools/list":
-        return {"jsonrpc": "2.0", "id": msg_id, "result": {"tools": MCP_TOOLS}}
+        # Merge internal tools + plugin tools + external MCP tools
+        all_tools = list(MCP_TOOLS)
+        try:
+            from plugins import _plugin_tool_definitions
+            all_tools.extend(_plugin_tool_definitions)
+        except ImportError:
+            pass
+        try:
+            from utils.mcp_client import mcp_client_manager
+            all_tools.extend(mcp_client_manager.list_external_tools())
+        except ImportError:
+            pass
+        return {"jsonrpc": "2.0", "id": msg_id, "result": {"tools": all_tools}}
     elif method == "tools/call":
         tool_name = params.get("name", "")
         tool_args = params.get("arguments", {})

@@ -346,6 +346,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     except Exception as e:
         logger.debug("License check skipped: %s", e)
 
+    # Connect to external MCP servers (non-blocking per server)
+    try:
+        from utils.mcp_client import mcp_client_manager
+        mcp_client_manager.load_config()
+        if mcp_client_manager._configs:
+            connected = await mcp_client_manager.connect_all()
+            if connected:
+                logger.info("MCP client: %d external server(s) connected", len(connected))
+    except Exception as e:
+        logger.debug("MCP client startup skipped: %s", e)
+
     # Verification pipeline self-test (lightweight, non-blocking)
     try:
         from agents.hallucination.startup_self_test import run_verification_self_test
@@ -366,6 +377,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # Shutdown: stop scheduler, flush caches, close connections, clear MCP sessions
     stop_scheduler()
+    try:
+        from utils.mcp_client import mcp_client_manager
+        await mcp_client_manager.shutdown()
+    except Exception as exc:
+        logger.warning("MCP client shutdown failed: %s", exc)
     try:
         from utils.llm_client import close_client
         await close_client()
@@ -501,6 +517,15 @@ app.include_router(sdk.router)
 # SDK OpenAPI spec — isolated spec for /sdk/v1/ endpoints only
 from routers import sdk_openapi  # noqa: E402
 app.include_router(sdk_openapi.router)
+
+# MCP client — external MCP server management endpoints
+from routers import mcp_client  # noqa: E402
+app.include_router(mcp_client.router)
+app.include_router(mcp_client.router, prefix="/api/v1")
+
+# Embeddable chat widget — serves /widget.html, /widget.js, /widget/config
+from routers import widget  # noqa: E402
+app.include_router(widget.router)
 
 # A2A router — Agent Card at /.well-known/agent.json, tasks at /a2a/* (no prefix)
 app.include_router(a2a.router)
