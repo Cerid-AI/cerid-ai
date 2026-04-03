@@ -56,7 +56,6 @@ export function useAgentConsole(enabled: boolean) {
     if (!enabled) {
       eventSourceRef.current?.close()
       eventSourceRef.current = null
-      setConnected(false)
       return
     }
 
