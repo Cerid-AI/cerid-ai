@@ -603,6 +603,52 @@ make deps-check
 - `PUT /plugins/{name}/config` — Update plugin configuration
 - `POST /plugins/scan` — Scan for new plugins
 
+### Custom Agents
+
+User-defined custom agents with CRUD operations and template support.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/custom-agents/templates` | List built-in agent templates |
+| `POST` | `/custom-agents/from-template/{template_id}` | Create agent from template with optional overrides |
+| `GET` | `/custom-agents` | List custom agents (pagination: `offset`, `limit`) |
+| `POST` | `/custom-agents` | Create a new custom agent |
+| `GET` | `/custom-agents/{agent_id}` | Get agent details |
+| `PATCH` | `/custom-agents/{agent_id}` | Partially update an agent |
+| `DELETE` | `/custom-agents/{agent_id}` | Delete an agent |
+| `POST` | `/custom-agents/{agent_id}/query` | Execute query using agent's config (domains, model, returns `agent_config` with system_prompt, temperature) |
+
+### Plugin Registry (Community)
+
+Browse and search community plugins from the external registry.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/plugin-registry` | Search/list community plugins (query: `q`, `type`) |
+| `GET` | `/plugin-registry/{name}` | Get community plugin details by name |
+
+### System Monitor
+
+Storage metrics and ingestion history.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/system/storage` | Aggregated storage metrics across ChromaDB, Neo4j, Redis, BM25 (cached 60s). Returns status: healthy/warning/critical |
+| `GET` | `/admin/ingest-history` | Recent ingestion events from Redis stream (pagination: `limit`, `offset` as stream cursor) |
+
+### Webhook Subscriptions
+
+Subscribe to events and receive webhook notifications.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/webhooks` | List all webhook subscriptions |
+| `POST` | `/webhooks` | Create a webhook subscription |
+| `GET` | `/webhooks/{sub_id}` | Get subscription details |
+| `PATCH` | `/webhooks/{sub_id}` | Update a subscription |
+| `DELETE` | `/webhooks/{sub_id}` | Delete a subscription |
+| `GET` | `/webhooks/{sub_id}/deliveries` | List delivery history for a subscription |
+
 ### Workflows
 - `GET /workflows` — List workflows
 - `POST /workflows` — Create workflow
@@ -658,6 +704,9 @@ Model can be changed post-setup via Settings UI → Ollama → Change button.
 **Cost:** $0 for all internal LLM calls when using Ollama. Falls back to OpenRouter (paid) when Ollama is unavailable.
 
 ### Billing & Licensing
+
+> **Internal** — These endpoints are defined but not yet registered in the API. They require Stripe integration and are not accessible via the default server configuration.
+
 - `POST /billing/create-checkout` — Create Stripe Checkout session for Pro tier upgrade
 - `POST /billing/webhook` — Stripe webhook handler (checkout.session.completed, invoice.payment_succeeded, customer.subscription.deleted)
 - `GET /billing/status` — Current license/subscription status
@@ -679,25 +728,6 @@ Model can be changed post-setup via Settings UI → Ollama → Change button.
 - `GET /watched-folders` — List watched folders
 - `PATCH /watched-folders/{id}` — Update folder config
 - `DELETE /watched-folders/{id}` — Remove watched folder
-
-#### Boardroom Endpoints
-
-Stable endpoints for the cerid-boardroom agent (`X-Client-ID: boardroom-agent`):
-
-- `GET /sdk/v1/ops/health` — Boardroom-specific health check (tier, domains)
-- `POST /sdk/v1/ops/competitive-scan` — Competitive landscape analysis against KB
-- `POST /sdk/v1/ops/strategy-brief` — Strategy brief generation from KB context
-- `GET /sdk/v1/ops/governance-log` — Query boardroom audit trail for agent actions and approvals
-
-### Trading Proxy (gated by `CERID_TRADING_ENABLED`)
-
-GUI proxy routes to the external trading agent at `TRADING_AGENT_URL`:
-- `GET /api/trading/sessions` — List trading sessions
-- `GET /api/trading/sessions/{name}/portfolio` — Session portfolio
-- `GET /api/trading/sessions/{name}/positions` — Session positions
-- `GET /api/trading/sessions/{name}/signals` — Session signals
-- `GET /api/trading/aggregate/portfolio` — Aggregate portfolio across sessions
-- `GET /api/trading/market-data` — Market data feed
 
 ### Web Search
 - Tool: `pkb_web_search` — Search web with verification
