@@ -12,8 +12,8 @@ for _mod_name in ("agents.query_agent", "agents.decomposer", "agents.assembler")
     if _existing is not None and not hasattr(_existing, "__file__"):
         del sys.modules[_mod_name]
 
-from agents.assembler import deduplicate_results, rerank_results
-from agents.decomposer import _get_adjacent_domains
+from agents.assembler import deduplicate_results, rerank_results  # noqa: E402
+from agents.decomposer import _get_adjacent_domains  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers
