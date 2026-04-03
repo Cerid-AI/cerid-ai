@@ -150,8 +150,8 @@ def _list_automations() -> list[Automation]:
         if raw is not None:
             try:
                 automations.append(Automation(**json.loads(raw)))
-            except (json.JSONDecodeError, ValueError, KeyError):
-                pass
+            except (json.JSONDecodeError, ValueError, KeyError) as _auto_err:
+                _logger.warning("Skipping malformed automation record: %s", _auto_err)
     automations.sort(key=lambda a: a.created_at, reverse=True)
     return automations
 
