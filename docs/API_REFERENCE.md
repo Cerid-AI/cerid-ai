@@ -546,8 +546,9 @@ make deps-check
 
 ### Setup & Configuration
 - `GET /setup/status` — Check if system is configured
+- `GET /setup/system-check` — Auto-detect system capabilities (RAM, Docker, .env keys, Ollama, archive path)
 - `POST /setup/validate-key` — Test an API key
-- `POST /setup/configure` — Apply initial configuration
+- `POST /setup/configure` — Apply initial configuration (API keys + KB config + Ollama settings)
 - `GET /setup/health` — Service health dashboard
 
 ### Providers (BYOK)
