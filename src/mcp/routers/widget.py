@@ -30,7 +30,7 @@ _WIDGET_ENABLED = os.getenv("CERID_WIDGET_ENABLED", "true").lower() in (
 # Docker image copies this to ``/app/static/cerid-widget.js``.
 _STATIC_DIR = Path(os.getenv(
     "CERID_WIDGET_STATIC_DIR",
-    str(Path(__file__).resolve().parents[3] / "packages" / "widget" / "dist"),
+    str(Path("/app/static")),
 ))
 
 # ---------------------------------------------------------------------------
@@ -199,7 +199,7 @@ async def widget_page(request: Request) -> HTMLResponse:
         widget_css = css_path.read_text(encoding="utf-8")
     else:
         # Fallback: try the source CSS
-        src_css = Path(__file__).resolve().parents[3] / "packages" / "widget" / "src" / "styles.css"
+        src_css = _STATIC_DIR / "styles.css"
         if src_css.is_file():
             widget_css = src_css.read_text(encoding="utf-8")
 
