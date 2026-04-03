@@ -6,15 +6,22 @@ import { streamChat, ingestFeedback, extractMemories } from "@/lib/api"
 import { uuid } from "@/lib/utils"
 import type { ChatMessage, SourceRef } from "@/lib/types"
 
+export interface ModelFallbackEvent {
+  requestedModel: string
+  fallbackModel: string
+  originalError?: number
+}
+
 interface UseChatOptions {
   onMessageStart: (convoId: string, message: ChatMessage) => void
   onMessageUpdate: (convoId: string, content: string) => void
   onModelResolved?: (convoId: string, model: string) => void
+  onModelFallback?: (event: ModelFallbackEvent) => void
   feedbackEnabled?: boolean
   privateModeLevel?: number
 }
 
-export function useChat({ onMessageStart, onMessageUpdate, onModelResolved, feedbackEnabled, privateModeLevel = 0 }: UseChatOptions) {
+export function useChat({ onMessageStart, onMessageUpdate, onModelResolved, onModelFallback, feedbackEnabled, privateModeLevel = 0 }: UseChatOptions) {
   const [isStreaming, setIsStreaming] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
 
@@ -63,8 +70,17 @@ export function useChat({ onMessageStart, onMessageUpdate, onModelResolved, feed
             })
           }
         }, abortRef.current.signal, (info) => {
+          const prevModel = resolvedModel
           resolvedModel = `openrouter/${info.resolved_model}`
           onModelResolved?.(convoId, resolvedModel)
+          // Detect backend model fallback and surface to UI
+          if (info.fallback_model) {
+            onModelFallback?.({
+              requestedModel: prevModel || model,
+              fallbackModel: info.fallback_model,
+              originalError: info.original_error,
+            })
+          }
         })
         // Flush any remaining throttled content
         if (rafId) { cancelAnimationFrame(rafId); rafId = null }

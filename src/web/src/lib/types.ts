@@ -941,6 +941,35 @@ export interface KeyValidation {
 
 export interface SetupConfig {
   keys: Record<string, string>
+  archive_path?: string
+  domains?: string[]
+  lightweight_mode?: boolean
+  watch_folder?: boolean
+  ollama_enabled?: boolean
+  ollama_model?: string
+}
+
+export interface SetupConfigRequest {
+  keys?: Record<string, string>
+  archive_path?: string
+  domains?: string[]
+  lightweight_mode?: boolean
+  watch_folder?: boolean
+  ollama_enabled?: boolean
+  ollama_model?: string
+}
+
+export interface SystemCheckResponse {
+  ram_gb: number
+  docker_running: boolean
+  env_exists: boolean
+  env_keys_present: string[]
+  ollama_detected: boolean
+  ollama_url: string | null
+  ollama_models: string[]
+  lightweight_recommended: boolean
+  archive_path_exists: boolean
+  default_archive_path: string
 }
 
 export interface SetupServiceHealth {
