@@ -390,13 +390,13 @@ def register_all_automations() -> int:
 # ---------------------------------------------------------------------------
 
 
-@router.get("")
+@router.get("", response_model=list[Automation])
 async def list_automations():
     """List all automations."""
     return [a.model_dump() for a in _list_automations()]
 
 
-@router.post("", status_code=201)
+@router.post("", status_code=201, response_model=Automation)
 async def create_automation(req: AutomationCreate):
     """Create a new automation."""
     _validate_cron(req.schedule)
@@ -420,7 +420,7 @@ async def get_presets():
     return SCHEDULE_PRESETS
 
 
-@router.get("/{automation_id}")
+@router.get("/{automation_id}", response_model=Automation)
 async def get_automation(automation_id: str):
     """Get a single automation by ID."""
     auto = _load_automation(automation_id)
@@ -429,7 +429,7 @@ async def get_automation(automation_id: str):
     return auto.model_dump()
 
 
-@router.put("/{automation_id}")
+@router.put("/{automation_id}", response_model=Automation)
 async def update_automation(automation_id: str, req: AutomationUpdate):
     """Update an automation."""
     auto = _load_automation(automation_id)
@@ -467,7 +467,7 @@ async def delete_automation(automation_id: str):
     return {"status": "deleted", "id": automation_id}
 
 
-@router.post("/{automation_id}/enable")
+@router.post("/{automation_id}/enable", response_model=Automation)
 async def enable_automation(automation_id: str):
     """Enable an automation."""
     auto = _load_automation(automation_id)
@@ -480,7 +480,7 @@ async def enable_automation(automation_id: str):
     return auto.model_dump()
 
 
-@router.post("/{automation_id}/disable")
+@router.post("/{automation_id}/disable", response_model=Automation)
 async def disable_automation(automation_id: str):
     """Disable an automation."""
     auto = _load_automation(automation_id)
@@ -493,7 +493,7 @@ async def disable_automation(automation_id: str):
     return auto.model_dump()
 
 
-@router.post("/{automation_id}/run")
+@router.post("/{automation_id}/run", response_model=AutomationRun)
 async def trigger_manual_run(automation_id: str):
     """Trigger an immediate manual run of an automation."""
     auto = _load_automation(automation_id)
@@ -503,7 +503,7 @@ async def trigger_manual_run(automation_id: str):
     return run.model_dump()
 
 
-@router.get("/{automation_id}/history")
+@router.get("/{automation_id}/history", response_model=list[AutomationRun])
 async def get_history(automation_id: str, limit: int = 20):
     """Get execution history for an automation (last N runs)."""
     auto = _load_automation(automation_id)

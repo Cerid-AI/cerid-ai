@@ -23,6 +23,12 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field, HttpUrl
 
 from deps import get_redis
+from models.webhooks import (
+    WebhookDeleteResponse,
+    WebhookDeliveryListResponse,
+    WebhookSubscriptionListResponse,
+    WebhookSubscriptionResponse,
+)
 from utils.time import utcnow_iso
 
 router = APIRouter(tags=["webhooks"])
@@ -120,7 +126,7 @@ def sign_payload(payload: "str | dict", secret: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/webhooks")
+@router.get("/webhooks", response_model=WebhookSubscriptionListResponse)
 async def list_subscriptions():
     """List all webhook subscriptions."""
     r = get_redis()
@@ -136,7 +142,7 @@ async def list_subscriptions():
     return {"subscriptions": subs, "total": len(subs)}
 
 
-@router.post("/webhooks", status_code=201)
+@router.post("/webhooks", status_code=201, response_model=WebhookSubscriptionResponse)
 async def create_subscription(body: WebhookSubscriptionCreate):
     """Create a new webhook subscription."""
     r = get_redis()
@@ -159,7 +165,7 @@ async def create_subscription(body: WebhookSubscriptionCreate):
     return resp
 
 
-@router.get("/webhooks/{sub_id}")
+@router.get("/webhooks/{sub_id}", response_model=WebhookSubscriptionResponse)
 async def get_subscription(sub_id: str):
     """Retrieve a single webhook subscription by ID."""
     r = get_redis()
@@ -170,7 +176,7 @@ async def get_subscription(sub_id: str):
     return data
 
 
-@router.patch("/webhooks/{sub_id}")
+@router.patch("/webhooks/{sub_id}", response_model=WebhookSubscriptionResponse)
 async def update_subscription(sub_id: str, body: WebhookSubscriptionUpdate):
     """Partially update a webhook subscription."""
     r = get_redis()
@@ -189,7 +195,7 @@ async def update_subscription(sub_id: str, body: WebhookSubscriptionUpdate):
     return data
 
 
-@router.delete("/webhooks/{sub_id}")
+@router.delete("/webhooks/{sub_id}", response_model=WebhookDeleteResponse)
 async def delete_subscription(sub_id: str):
     """Delete a webhook subscription and its delivery history."""
     r = get_redis()
@@ -201,7 +207,7 @@ async def delete_subscription(sub_id: str):
     return {"deleted": True, "id": sub_id}
 
 
-@router.get("/webhooks/{sub_id}/deliveries")
+@router.get("/webhooks/{sub_id}/deliveries", response_model=WebhookDeliveryListResponse)
 async def list_deliveries(
     sub_id: str,
     limit: int = Query(20, ge=1, le=100),

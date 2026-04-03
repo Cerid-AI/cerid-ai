@@ -17,6 +17,13 @@ import config
 from db import neo4j as graph
 from deps import get_neo4j
 from errors import RetrievalError
+from models.taxonomy import (
+    CreateDomainResponse,
+    CreateSubCategoryResponse,
+    TagItem,
+    TagSuggestionItem,
+    TaxonomyResponse,
+)
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion.taxonomy")
@@ -49,7 +56,7 @@ class MergeTagsRequest(BaseModel):
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
-@router.get("/taxonomy")
+@router.get("/taxonomy", response_model=TaxonomyResponse)
 async def get_taxonomy_endpoint():
     """Return the full taxonomy tree (domains, sub-categories, tags)."""
     try:
@@ -60,7 +67,7 @@ async def get_taxonomy_endpoint():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/taxonomy/domain")
+@router.post("/taxonomy/domain", response_model=CreateDomainResponse)
 async def create_domain_endpoint(req: CreateDomainRequest):
     """Create a new domain with optional sub-categories."""
     name = req.name.strip().lower()
@@ -92,7 +99,7 @@ async def create_domain_endpoint(req: CreateDomainRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/taxonomy/subcategory")
+@router.post("/taxonomy/subcategory", response_model=CreateSubCategoryResponse)
 async def create_subcategory_endpoint(req: CreateSubCategoryRequest):
     """Add a sub-category to an existing domain."""
     domain = req.domain.strip().lower()
@@ -120,7 +127,7 @@ async def create_subcategory_endpoint(req: CreateSubCategoryRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/tags")
+@router.get("/tags", response_model=list[TagItem])
 async def list_tags_endpoint(
     limit: int = Query(100, ge=1, le=500),
 ):
@@ -152,7 +159,7 @@ async def update_artifact_taxonomy_endpoint(req: UpdateArtifactTaxonomyRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/tags/suggest")
+@router.get("/tags/suggest", response_model=list[TagSuggestionItem])
 async def suggest_tags_endpoint(
     domain: str | None = Query(None, description="Filter vocabulary by domain"),
     prefix: str = Query("", description="Prefix filter for typeahead"),
