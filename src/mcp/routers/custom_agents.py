@@ -89,7 +89,10 @@ async def list_agents(
 
     driver = get_neo4j()
     agents = _list(driver, offset=offset, limit=limit)
-    return AgentListResponse(agents=agents, total=len(agents))
+    return AgentListResponse(
+        agents=[AgentDefinition(**a) if isinstance(a, dict) else a for a in agents],
+        total=len(agents),
+    )
 
 
 @router.post("/custom-agents", status_code=201)
@@ -159,14 +162,10 @@ async def query_agent(agent_id: str, body: AgentQueryRequest):
         raise HTTPException(status_code=404, detail="Agent not found")
 
     # Delegate to the query agent with the custom agent's configuration
-    from agents.query_agent import QueryAgent
+    from agents.query_agent import agent_query
 
-    qa = QueryAgent()
-    result = await qa.query(
+    result = await agent_query(
         query=body.query,
         domains=agent.get("domains") or None,
-        mode=agent.get("rag_mode", "smart"),
-        conversation_id=body.conversation_id,
-        system_prompt=agent.get("system_prompt", ""),
     )
     return result

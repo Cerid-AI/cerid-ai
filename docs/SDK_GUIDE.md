@@ -45,7 +45,7 @@ from cerid_sdk import CeridClient
 client = CeridClient(
     base_url="http://localhost:8888",
     client_id="my-app",
-    api_key="sk-cerid-...",  # optional
+    api_key="sk-cerid-...",  # optional  # pragma: allowlist secret
 )
 
 # Query the knowledge base

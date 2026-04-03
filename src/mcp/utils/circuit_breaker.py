@@ -118,6 +118,12 @@ class AsyncCircuitBreaker:
             remaining = self.recovery_timeout - (time.monotonic() - self._last_failure_time)
             raise CircuitOpenError(self.name, max(0, remaining))
 
+        # Materialise the HALF_OPEN virtual state so _on_success / _on_failure
+        # see the correct value (the property derives it from elapsed time but
+        # never writes _state).
+        if current_state == CircuitState.HALF_OPEN:
+            self._state = CircuitState.HALF_OPEN
+
         try:
             result = await fn(*args, **kwargs)
         except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
@@ -177,6 +183,9 @@ class AsyncCircuitBreaker:
         if current_state == CircuitState.OPEN:
             remaining = self.recovery_timeout - (time.monotonic() - self._last_failure_time)
             raise CircuitOpenError(self.name, max(0, remaining))
+
+        if current_state == CircuitState.HALF_OPEN:
+            self._state = CircuitState.HALF_OPEN
 
         try:
             result = fn(*args, **kwargs)
@@ -258,7 +267,6 @@ _tavily = AsyncCircuitBreaker("tavily", failure_threshold=3, recovery_timeout=30
 _searxng = AsyncCircuitBreaker("searxng", failure_threshold=3, recovery_timeout=30)
 _chromadb = AsyncCircuitBreaker("chromadb", failure_threshold=5, recovery_timeout=30)
 _ragas_eval = AsyncCircuitBreaker("ragas_eval", failure_threshold=3, recovery_timeout=60)
-_trading_agent = AsyncCircuitBreaker("trading-agent", failure_threshold=3, recovery_timeout=120)
 _email_imap = AsyncCircuitBreaker("email-imap", failure_threshold=3, recovery_timeout=60)
 _rss_feed = AsyncCircuitBreaker("rss-feed", failure_threshold=3, recovery_timeout=60)
 _gmail = AsyncCircuitBreaker("gmail", failure_threshold=3, recovery_timeout=60)
@@ -289,7 +297,6 @@ def get_breaker(name: str) -> AsyncCircuitBreaker:
         "chromadb": _chromadb,
         "neo4j": _neo4j,
         "ollama": _ollama,
-        "trading-agent": _trading_agent,
         "email-imap": _email_imap,
         "rss-feed": _rss_feed,
         "gmail": _gmail,
