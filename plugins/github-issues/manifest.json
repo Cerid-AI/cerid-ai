@@ -1,0 +1,10 @@
+{
+  "name": "github-issues",
+  "version": "0.1.0",
+  "type": "connector",
+  "description": "Search GitHub Issues via the GitHub REST API",
+  "tier": "community",
+  "author": "Cerid AI",
+  "license": "Apache-2.0",
+  "requires": []
+}

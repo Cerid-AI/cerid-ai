@@ -63,6 +63,7 @@ from routers import (
     artifacts,
     automations,
     chat,
+    custom_agents,
     data_sources,
     digest,
     dlq,
@@ -74,6 +75,7 @@ from routers import (
     models,
     observability,
     ollama_proxy,
+    plugin_registry,
     plugins,
     providers,
     query,
@@ -87,6 +89,7 @@ from routers import (
     upload,
     user_state,
     watched_folders,
+    webhook_subscriptions,
     workflows,
 )
 from scheduler import start_scheduler, stop_scheduler
@@ -257,6 +260,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             logger.info(f"Plugins loaded: {', '.join(loaded)}")
     except Exception as e:
         logger.warning(f"Plugin loading failed (server runs without plugins): {e}")
+
+    # Register event bus → webhook bridge (Phase 3 extensibility)
+    try:
+        from utils.event_bus import event_bus
+        from utils.webhooks import fire_event as fire_webhook_event
+
+        async def _webhook_bridge(event):
+            try:
+                import dataclasses
+                payload = dataclasses.asdict(event) if dataclasses.is_dataclass(event) else {}
+                await fire_webhook_event(event.event_type, payload)
+            except Exception:
+                pass
+
+        event_bus.subscribe_all(_webhook_bridge)
+        logger.info("Event bus webhook bridge registered")
+    except Exception as e:
+        logger.debug("Event bus setup skipped: %s", e)
 
     # Start scheduled maintenance engine
     try:
@@ -490,6 +511,9 @@ _api_routers = [
     workflows.router,
     agent_console.router,
     system_monitor.router,
+    plugin_registry.router,
+    custom_agents.router,
+    webhook_subscriptions.router,
 ]
 for r in _api_routers:
     app.include_router(r)
