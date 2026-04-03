@@ -104,12 +104,12 @@ class TestIngestFile:
             mock_config.ARCHIVE_PATH = str(tmp_path)
             mock_config.DOMAINS = ["coding"]
             mock_config.DEFAULT_DOMAIN = "coding"
+            import asyncio
             try:
-                import asyncio
                 asyncio.get_event_loop().run_until_complete(
                     ingest_file(str(test_file), domain="coding")
                 )
-            except Exception:
-                pass  # Mocking is incomplete — we just verify no import errors
+            except (AttributeError, TypeError, KeyError):
+                pass  # Expected — mocking is incomplete for full pipeline
 
         mock_parse.assert_called_once()
