@@ -21,6 +21,7 @@ import config
 from config.features import CERID_WEBHOOK_SECRET
 from deps import get_chroma, get_neo4j, get_redis
 from errors import IngestionError
+from models.ingestion import IngestBatchResponse, IngestFileResponse, IngestResponse
 from services.ingestion import ingest_batch, ingest_content, ingest_file
 from utils import cache
 from utils.time import utcnow
@@ -83,7 +84,7 @@ class WebhookIngestPayload(BaseModel):
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
-@router.post("/ingest")
+@router.post("/ingest", response_model=IngestResponse)
 async def ingest_endpoint(req: IngestRequest, request: Request):
     client_source = request.headers.get("X-Client-ID", "")
     metadata = {"client_source": client_source} if client_source else None
@@ -97,7 +98,7 @@ async def ingest_endpoint(req: IngestRequest, request: Request):
     return result
 
 
-@router.post("/ingest_file")
+@router.post("/ingest_file", response_model=IngestFileResponse)
 async def ingest_file_endpoint(req: IngestFileRequest, request: Request):
     try:
         # Run AI triage scoring when enabled (gates low-value content)
@@ -141,7 +142,7 @@ async def ingest_file_endpoint(req: IngestFileRequest, request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/ingest_batch")
+@router.post("/ingest_batch", response_model=IngestBatchResponse)
 async def ingest_batch_endpoint(req: BatchIngestRequest):
     """Ingest up to 20 files/content items concurrently."""
     try:

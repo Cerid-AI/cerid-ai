@@ -8,13 +8,26 @@ import logging
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
+from models.data_sources import (
+    BookmarkDetectResponse,
+    BookmarkImportResponse,
+    BookmarkStatusResponse,
+    DataSourceListResponse,
+    DataSourceToggleResponse,
+    RssAddResponse,
+    RssDeleteResponse,
+    RssFeedEntriesResponse,
+    RssFeedListResponse,
+    RssFetchNowResponse,
+    RssPollAllResponse,
+)
 from utils.error_handler import handle_errors
 
 router = APIRouter(tags=["data-sources"])
 logger = logging.getLogger("ai-companion.data_sources")
 
 
-@router.get("/data-sources")
+@router.get("/data-sources", response_model=DataSourceListResponse)
 async def list_data_sources():
     """List all registered data sources with their status."""
     from utils.data_sources import registry
@@ -22,7 +35,7 @@ async def list_data_sources():
     return {"sources": sources, "total": len(sources)}
 
 
-@router.post("/data-sources/{name}/enable")
+@router.post("/data-sources/{name}/enable", response_model=DataSourceToggleResponse)
 async def enable_source(name: str):
     """Enable a registered data source by name."""
     from utils.data_sources import registry
@@ -33,7 +46,7 @@ async def enable_source(name: str):
     return {"error": f"Source '{name}' not found"}
 
 
-@router.post("/data-sources/{name}/disable")
+@router.post("/data-sources/{name}/disable", response_model=DataSourceToggleResponse)
 async def disable_source(name: str):
     """Disable a registered data source by name."""
     from utils.data_sources import registry
@@ -53,7 +66,7 @@ class BookmarkImportRequest(BaseModel):
     browser: str = "all"
 
 
-@router.get("/data-sources/bookmarks/detect")
+@router.get("/data-sources/bookmarks/detect", response_model=BookmarkDetectResponse)
 @handle_errors()
 async def detect_bookmark_browsers():
     """Detect installed browsers and return bookmark counts."""
@@ -64,7 +77,7 @@ async def detect_bookmark_browsers():
     return await asyncio.to_thread(detect_browsers)
 
 
-@router.post("/data-sources/bookmarks/import")
+@router.post("/data-sources/bookmarks/import", response_model=BookmarkImportResponse)
 @handle_errors()
 async def import_browser_bookmarks(body: BookmarkImportRequest):
     """Trigger bookmark import from specified browser(s).
@@ -76,7 +89,7 @@ async def import_browser_bookmarks(body: BookmarkImportRequest):
     return await import_bookmarks(browser=body.browser)
 
 
-@router.get("/data-sources/bookmarks/status")
+@router.get("/data-sources/bookmarks/status", response_model=BookmarkStatusResponse)
 @handle_errors(fallback={"last_import": None, "total_imported": 0, "total_skipped": 0, "total_errors": 0})
 async def bookmark_import_status():
     """Return stats from the most recent bookmark import."""
@@ -161,7 +174,7 @@ class AddFeedRequest(BaseModel):
     domain: str = "general"
 
 
-@router.post("/data-sources/rss")
+@router.post("/data-sources/rss", response_model=RssAddResponse)
 @handle_errors(breaker_name="rss-feed")
 async def add_rss_feed(body: AddFeedRequest):
     """Add a new RSS/Atom feed. Validates the URL is reachable and parseable."""
@@ -175,7 +188,7 @@ async def add_rss_feed(body: AddFeedRequest):
     return {"status": "added", "feed": feed, "validation": message}
 
 
-@router.get("/data-sources/rss")
+@router.get("/data-sources/rss", response_model=RssFeedListResponse)
 @handle_errors(fallback={"feeds": [], "total": 0})
 async def list_rss_feeds():
     """List all configured RSS/Atom feeds with their last-fetch status."""
@@ -185,7 +198,7 @@ async def list_rss_feeds():
     return {"feeds": feeds, "total": len(feeds)}
 
 
-@router.delete("/data-sources/rss/{feed_id}")
+@router.delete("/data-sources/rss/{feed_id}", response_model=RssDeleteResponse)
 @handle_errors()
 async def delete_rss_feed(feed_id: str):
     """Remove a configured RSS/Atom feed by ID."""
@@ -197,7 +210,7 @@ async def delete_rss_feed(feed_id: str):
     return {"status": "removed", "feed_id": feed_id}
 
 
-@router.post("/data-sources/rss/{feed_id}/fetch-now")
+@router.post("/data-sources/rss/{feed_id}/fetch-now", response_model=RssFetchNowResponse)
 @handle_errors(breaker_name="rss-feed")
 async def fetch_rss_feed_now(feed_id: str):
     """Immediately poll a single RSS/Atom feed."""
@@ -210,7 +223,7 @@ async def fetch_rss_feed_now(feed_id: str):
     return {"status": "polled", "result": result}
 
 
-@router.get("/data-sources/rss/{feed_id}/entries")
+@router.get("/data-sources/rss/{feed_id}/entries", response_model=RssFeedEntriesResponse)
 @handle_errors(fallback={"entries": [], "total": 0})
 async def list_rss_feed_entries(
     feed_id: str,
@@ -252,7 +265,7 @@ async def list_rss_feed_entries(
     return {"entries": entries, "total": len(items), "showing": len(entries)}
 
 
-@router.post("/data-sources/rss/poll-all")
+@router.post("/data-sources/rss/poll-all", response_model=RssPollAllResponse)
 @handle_errors(breaker_name="rss-feed")
 async def poll_all_rss_feeds():
     """Poll all enabled RSS/Atom feeds now."""

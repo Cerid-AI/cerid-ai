@@ -12,6 +12,12 @@ from pydantic import BaseModel
 
 from deps import get_chroma, get_neo4j, get_redis
 from errors import RetrievalError
+from models.memories import (
+    MemoryDeleteResponse,
+    MemoryExtractResponse,
+    MemoryItem,
+    MemoryListResponse,
+)
 from utils import cache
 
 router = APIRouter()
@@ -37,7 +43,7 @@ class MemoryExtractRequest(BaseModel):
 # GET /memories — list memories with filtering
 # ---------------------------------------------------------------------------
 
-@router.get("/memories")
+@router.get("/memories", response_model=MemoryListResponse)
 async def list_memories(
     type: str | None = Query(None, description="Filter by memory type (facts/decisions/preferences/action-items)"),
     conversation_id: str | None = Query(None, description="Filter by conversation ID"),
@@ -56,7 +62,7 @@ async def list_memories(
         params: dict = {"limit": limit, "offset": offset}
 
         conditions.append("a.filename STARTS WITH 'memory_'")
-        # Exclude non-GUI client sources (e.g. external SDK client ingested items)
+        # Exclude non-GUI client sources (e.g. trading-agent ingested items)
         conditions.append(
             "(a.client_source IS NULL OR a.client_source = '' OR a.client_source = 'gui')"
         )
@@ -150,7 +156,7 @@ async def list_memories(
 # PATCH /memories/{memory_id} — edit a memory's summary
 # ---------------------------------------------------------------------------
 
-@router.patch("/memories/{memory_id}")
+@router.patch("/memories/{memory_id}", response_model=MemoryItem)
 async def update_memory(memory_id: str, req: MemoryUpdateRequest):
     """Update a memory's summary text."""
     try:
@@ -201,7 +207,7 @@ async def update_memory(memory_id: str, req: MemoryUpdateRequest):
 # DELETE /memories/{memory_id} — delete a memory
 # ---------------------------------------------------------------------------
 
-@router.delete("/memories/{memory_id}")
+@router.delete("/memories/{memory_id}", response_model=MemoryDeleteResponse)
 async def delete_memory(memory_id: str):
     """Delete a memory from Neo4j and its chunks from ChromaDB."""
     try:
@@ -262,7 +268,7 @@ async def delete_memory(memory_id: str):
 # POST /memories/extract — trigger memory extraction for a conversation
 # ---------------------------------------------------------------------------
 
-@router.post("/memories/extract")
+@router.post("/memories/extract", response_model=MemoryExtractResponse)
 async def extract_memories_endpoint(req: MemoryExtractRequest, request: Request):
     """Trigger memory extraction from conversation messages.
 

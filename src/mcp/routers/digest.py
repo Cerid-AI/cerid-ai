@@ -11,6 +11,7 @@ from fastapi import APIRouter, Query
 
 from deps import get_neo4j, get_redis
 from errors import RetrievalError
+from models.digest import DigestResponse
 from routers.health import health_check
 from utils.cache import get_log
 from utils.time import utcnow, utcnow_iso
@@ -19,7 +20,7 @@ router = APIRouter()
 logger = logging.getLogger("ai-companion")
 
 
-@router.get("/digest")
+@router.get("/digest", response_model=DigestResponse)
 async def digest_endpoint(hours: int = Query(24, ge=1, le=168)):
     """
     Summarize recent activity: new artifacts, connections, and system health.

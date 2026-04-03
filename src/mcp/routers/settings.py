@@ -16,6 +16,7 @@ import config.features as features_mod
 from config.features import require_feature
 from deps import get_redis
 from errors import ConfigError
+from models.settings import SettingsResponse, SettingsUpdateResponse
 from utils.error_handler import handle_errors
 from utils.features import set_toggle
 
@@ -134,7 +135,7 @@ class SettingsUpdateRequest(BaseModel):
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
-@router.get("/settings")
+@router.get("/settings", response_model=SettingsResponse)
 async def get_settings_endpoint():
     """Return current server settings (read-only view of safe-to-expose config)."""
     return {
@@ -198,6 +199,8 @@ async def get_settings_endpoint():
         "late_interaction_blend_weight": features_mod.LATE_INTERACTION_BLEND_WEIGHT,
         "enable_semantic_cache": features_mod.ENABLE_SEMANTIC_CACHE,
         "semantic_cache_threshold": features_mod.SEMANTIC_CACHE_THRESHOLD,
+        # Trading agent integration
+        "trading_enabled": config.CERID_TRADING_ENABLED,
         # Ollama add-on
         "ollama_enabled": os.getenv("OLLAMA_ENABLED", "false").lower() in ("true", "1"),
         "ollama_url": os.getenv("OLLAMA_URL", "http://localhost:11434"),
@@ -206,7 +209,7 @@ async def get_settings_endpoint():
     }
 
 
-@router.patch("/settings")
+@router.patch("/settings", response_model=SettingsUpdateResponse)
 async def update_settings_endpoint(req: SettingsUpdateRequest):
     """Update a subset of settings at runtime.
 

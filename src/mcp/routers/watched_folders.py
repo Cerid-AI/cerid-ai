@@ -22,6 +22,11 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
 
 from errors import IngestionError
+from models.watched_folders import (
+    WatchedFolderDetail,
+    WatchedFolderListResponse,
+    WatchedFolderStatusResponse,
+)
 
 # Allowed root directories for watched folders (prevents path traversal)
 _ALLOWED_ROOTS = [
@@ -112,7 +117,7 @@ def _remove_from_index(redis, folder_id: str) -> None:
 # Endpoints
 # ---------------------------------------------------------------------------
 
-@router.post("")
+@router.post("", response_model=WatchedFolderDetail)
 async def create_watched_folder(body: WatchedFolderCreate):
     """Add a new watched folder."""
     # Validate path exists and is within allowed roots
@@ -149,7 +154,7 @@ async def create_watched_folder(body: WatchedFolderCreate):
     return data
 
 
-@router.get("")
+@router.get("", response_model=WatchedFolderListResponse)
 async def list_watched_folders():
     """List all watched folders with status."""
     redis = _get_redis()
@@ -166,7 +171,7 @@ async def list_watched_folders():
     return {"folders": folders, "total": len(folders)}
 
 
-@router.get("/{folder_id}")
+@router.get("/{folder_id}", response_model=WatchedFolderDetail)
 async def get_watched_folder(folder_id: str):
     """Get a specific watched folder."""
     redis = _get_redis()
@@ -265,7 +270,7 @@ async def scan_watched_folder(folder_id: str, background_tasks: BackgroundTasks)
     }
 
 
-@router.get("/{folder_id}/status")
+@router.get("/{folder_id}/status", response_model=WatchedFolderStatusResponse)
 async def get_folder_status(folder_id: str):
     """Get scan status for a specific folder."""
     redis = _get_redis()
