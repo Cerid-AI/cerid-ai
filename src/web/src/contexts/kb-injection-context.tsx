@@ -40,6 +40,7 @@ export function KBInjectionProvider({ children }: { children: ReactNode }) {
   )
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- co-located context hook
 export function useKBInjection(): KBInjectionContextValue {
   const ctx = useContext(KBInjectionContext)
   if (!ctx) throw new Error("useKBInjection must be used within KBInjectionProvider")

@@ -80,10 +80,11 @@ export function useSmartSuggestions({
 
   // Cleanup timer on unmount
   useEffect(() => {
+    const gen = generationRef
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current)
       // Invalidate any in-flight requests
-      generationRef.current++
+      gen.current++
     }
   }, [])
 

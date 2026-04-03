@@ -25,6 +25,7 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
   )
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- co-located context hook
 export function useConversationsContext(): ConversationsContextValue {
   const ctx = useContext(ConversationsContext)
   if (!ctx) throw new Error("useConversationsContext must be used within ConversationsProvider")

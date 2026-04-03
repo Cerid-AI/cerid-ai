@@ -52,6 +52,7 @@ export function UIModeProvider({ children }: { children: ReactNode }) {
   )
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- co-located context hook
 export function useUIMode(): UIModeContextType {
   const ctx = useContext(UIModeContext)
   if (!ctx) throw new Error("useUIMode must be used within UIModeProvider")

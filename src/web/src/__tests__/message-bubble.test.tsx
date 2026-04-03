@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import { MessageBubble } from "@/components/chat/message-bubble"
 import type { ChatMessage, SourceRef } from "@/lib/types"
 
@@ -211,13 +211,15 @@ describe("MessageBubble", () => {
 
   // --- TOC ---
 
-  it("shows TOC for message with 3+ headings", () => {
+  it("shows TOC for message with 3+ headings", async () => {
     const md = "# Introduction\n\nText\n\n## Background\n\nMore text\n\n## Methods\n\nDetails\n\n## Results\n\nFindings"
     render(
       <MessageBubble message={makeMsg({ content: md })} />,
     )
-    // TOC should be present with "Contents" label
-    expect(screen.getByText("Contents")).toBeInTheDocument()
+    // TOC headings are set via queueMicrotask — wait for async flush
+    await waitFor(() => {
+      expect(screen.getByText("Contents")).toBeInTheDocument()
+    })
     // Should list heading texts
     expect(screen.getAllByText("Introduction")).toHaveLength(2) // One in TOC, one in heading
     expect(screen.getAllByText("Background")).toHaveLength(2)

@@ -97,8 +97,10 @@ export function ConversationList({
     setSelectedIds(new Set())
   }, [])
 
+  // Reset edit mode when archive view changes.
+  // Wrapped in queueMicrotask to avoid synchronous setState in useEffect (React Compiler).
   useEffect(() => {
-    exitEditMode()
+    queueMicrotask(() => exitEditMode())
   }, [showArchived, exitEditMode])
 
   const toggleSelected = useCallback((id: string) => {

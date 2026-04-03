@@ -377,9 +377,9 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
   const [claimSpans, setClaimSpans] = useState<ReturnType<typeof matchClaimsToText>>([])
   const claimsMatchedRef = useRef<string>("")
   useEffect(() => {
-    if (!verificationClaims?.length) { setClaimSpans([]); claimsMatchedRef.current = ""; return }
+    if (!verificationClaims?.length) { queueMicrotask(() => { setClaimSpans([]); claimsMatchedRef.current = "" }); return }
     const domText = proseRef.current?.textContent ?? undefined
-    if (!domText) { setClaimSpans([]); return }
+    if (!domText) { queueMicrotask(() => setClaimSpans([])); return }
     // Guard: only recalculate if claims actually changed (not on DOM mutations)
     const claimKey = verificationClaims.map(c => c.claim).join("|")
     if (claimsMatchedRef.current === claimKey) return
@@ -388,7 +388,7 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
     if (import.meta.env.DEV && verificationClaims.length > 0 && spans.length !== verificationClaims.length) {
       console.warn(`[inline-markup] mismatch: claims=${verificationClaims.length} spans=${spans.length}`)
     }
-    setClaimSpans(spans)
+    queueMicrotask(() => setClaimSpans(spans))
   }, [message.content, verificationClaims])
 
   // Inline verification markups via DOM text node highlighting.
@@ -485,7 +485,7 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
   // Scan headings for TOC after render
   useEffect(() => {
     const container = proseRef.current
-    if (!container || isUser) { setHeadings([]); return }
+    if (!container || isUser) { queueMicrotask(() => setHeadings([])); return }
     const els = container.querySelectorAll<HTMLElement>("h1, h2, h3, h4")
     const entries: TOCEntry[] = []
     els.forEach((el) => {
@@ -493,7 +493,7 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
         entries.push({ id: el.id, text: el.textContent, level: parseInt(el.tagName[1], 10) })
       }
     })
-    setHeadings(entries)
+    queueMicrotask(() => setHeadings(entries))
   }, [message.content, isUser])
 
   return (

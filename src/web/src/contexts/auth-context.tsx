@@ -68,7 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const token = localStorage.getItem(TOKEN_KEY)
     if (!token) {
-      setIsLoading(false)
+      queueMicrotask(() => setIsLoading(false))
       return
     }
 
@@ -146,6 +146,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- co-located context hook
 export function useAuth(): AuthState {
   const ctx = useContext(AuthContext)
   if (!ctx) throw new Error("useAuth must be used within AuthProvider")

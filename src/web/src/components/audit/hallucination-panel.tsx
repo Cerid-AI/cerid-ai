@@ -105,10 +105,8 @@ function ClaimBadge({
   )
   const [expanded, setExpanded] = useState(false)
 
-  // Auto-expand when focused from inline annotation click
-  useEffect(() => {
-    if (focused) setExpanded(true)
-  }, [focused])
+  // Auto-expand when focused — compute directly instead of syncing via effect
+  const effectiveExpanded = expanded || focused
 
   const displayStatus = getClaimDisplayStatus(claim.status, claim.verification_method, claim.claim_type)
 
@@ -168,18 +166,18 @@ function ClaimBadge({
           </div>
         )}
         {/* Compact: claim text (clamped) + method badge */}
-        <p className={cn("text-sm leading-relaxed", !expanded && "line-clamp-1")}>{stripMarkdown(claim.claim)}</p>
+        <p className={cn("text-sm leading-relaxed", !effectiveExpanded && "line-clamp-1")}>{stripMarkdown(claim.claim)}</p>
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
           <VerificationMethodBadge method={claim.verification_method} model={claim.verification_model} />
           {claim.similarity > 0 && <span>({Math.round(claim.similarity * 100)}% match)</span>}
           <span className="inline-flex items-center gap-0.5 text-amber-600 dark:text-yellow-400">
-            {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-            {expanded ? "Hide details" : "Show details"}
+            {effectiveExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            {effectiveExpanded ? "Hide details" : "Show details"}
           </span>
         </div>
 
         {/* Expanded details */}
-        {expanded && (
+        {effectiveExpanded && (
           <div className="mt-2 space-y-2">
             {claim.source_filename && (
               <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">

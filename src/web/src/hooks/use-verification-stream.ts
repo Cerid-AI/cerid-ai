@@ -389,7 +389,6 @@ export function useVerificationStream(
       cancelled = true
       abort()
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- responseText/userQuery/enabled read via refs to prevent mid-stream restarts
   }, [conversationId, triggerKey])
 
   const verifiedCount = claims.filter((c) => c.status && c.status !== "pending").length
