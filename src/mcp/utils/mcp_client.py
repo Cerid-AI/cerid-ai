@@ -176,7 +176,7 @@ class MCPClientManager:
                     "MCP server '%s' connected (%s), %d tools discovered",
                     name, cfg.transport, tool_count,
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 self._errors[name] = str(e)
                 logger.warning("MCP server '%s' failed to connect: %s", name, e)
 
@@ -327,7 +327,7 @@ class MCPClientManager:
             self._connected.add(name)
             await self._discover_tools(name, session)
             return True
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             self._errors[name] = str(e)
             logger.warning("Reconnect to '%s' failed: %s", name, e)
             return False
@@ -337,7 +337,7 @@ class MCPClientManager:
         if self._exit_stack:
             try:
                 await self._exit_stack.aclose()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("MCP client shutdown error: %s", e)
             self._exit_stack = None
         self._sessions.clear()

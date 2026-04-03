@@ -178,7 +178,7 @@ class EventBus:
         async def _safe_call(h: Handler) -> None:
             try:
                 await h(event)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 logger.exception(
                     "Event handler %s failed for %s",
                     getattr(h, "__name__", repr(h)),

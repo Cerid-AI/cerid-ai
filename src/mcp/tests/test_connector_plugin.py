@@ -6,7 +6,6 @@ from unittest.mock import patch
 from plugins.base import ConnectorPlugin
 from utils.data_sources.base import DataSource, DataSourceRegistry, DataSourceResult
 
-
 # ---------------------------------------------------------------------------
 # Mock data source + connector plugin
 # ---------------------------------------------------------------------------
@@ -59,7 +58,7 @@ class TestDataSourceRegistry:
         assert info["api_key_env_var"] == "STUB_API_KEY"  # pragma: allowlist secret
         assert "configured" in info
 
-    @patch.dict("os.environ", {"STUB_API_KEY": "sk-test"})
+    @patch.dict("os.environ", {"STUB_API_KEY": "sk-test"})  # pragma: allowlist secret
     def test_is_configured_with_key(self):
         src = StubDataSource()
         assert src.is_configured() is True
@@ -94,7 +93,7 @@ class TestConnectorPlugin:
         sources = reg.list_sources()
         assert any(s["name"] == "stub" for s in sources)
 
-    @patch.dict("os.environ", {"STUB_API_KEY": "test-key"})
+    @patch.dict("os.environ", {"STUB_API_KEY": "test-key"})  # pragma: allowlist secret
     def test_registered_source_appears_in_enabled(self):
         reg = DataSourceRegistry()
         plugin = StubConnectorPlugin()

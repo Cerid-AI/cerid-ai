@@ -51,7 +51,7 @@ class PluginRegistryClient:
                 self._cache_ts = now
                 logger.info("Plugin registry fetched: %d entries", len(plugins))
                 return plugins
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             logger.warning("Failed to fetch plugin registry: %s", exc)
             # Return stale cache on failure (graceful degradation)
             return self._cache
