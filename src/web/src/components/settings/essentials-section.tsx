@@ -17,9 +17,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Database, ToggleLeft, CreditCard, ExternalLink, Globe } from "lucide-react"
-import { fetchDataSources, enableDataSource, disableDataSource } from "@/lib/api"
+import { Database, ToggleLeft, CreditCard, ExternalLink, Globe, Shield, AlertTriangle } from "lucide-react"
+import { fetchDataSources, enableDataSource, disableDataSource, fetchSetupStatus, fetchHealthStatus } from "@/lib/api"
 import { SectionHeading, LabelWithInfo, Row, ToggleRow, SliderRow } from "./settings-primitives"
+import { assessRuntime, fromHealthStatus, CAPABILITY_STATUS_DOT, COST_PROFILE_LABELS } from "@/lib/provider-capabilities"
 
 interface EssentialsSectionProps {
   settings: ServerSettings
@@ -31,6 +32,16 @@ interface EssentialsSectionProps {
 
 export function EssentialsSection({ settings, sections, toggleSection, patch, credits }: EssentialsSectionProps) {
   const { routingMode, setRoutingMode } = useSettings()
+  const { data: healthStatus } = useQuery({
+    queryKey: ["health-status"],
+    queryFn: fetchHealthStatus,
+    refetchInterval: 15_000,
+    retry: 1,
+    staleTime: 10_000,
+  })
+  const canVerify = healthStatus?.can_verify ?? true
+  const canRetrieve = healthStatus?.can_retrieve ?? true
+  const canGenerate = healthStatus?.can_generate ?? true
 
   return (
     <>
@@ -79,6 +90,12 @@ export function EssentialsSection({ settings, sections, toggleSection, patch, cr
             )}
           </CardContent>
         </Card>
+      )}
+
+      {/* -- Provider Status -- */}
+      <SectionHeading icon={Shield} label="Provider Status" open={sections.provider_status} onToggle={() => toggleSection("provider_status")} />
+      {sections.provider_status && (
+        <ProviderStatusPanel settings={settings} />
       )}
 
       {/* -- Knowledge & Ingestion -- */}
@@ -172,30 +189,50 @@ export function EssentialsSection({ settings, sections, toggleSection, patch, cr
       {sections.features && (
         <Card className="mb-4">
           <CardContent className="grid gap-3 pt-4">
-            <ToggleRow
-              label="Self-RAG Validation"
-              enabled={settings.enable_self_rag ?? true}
-              onToggle={(v) => patch({ enable_self_rag: v })}
-              info="Validates retrieval quality and retries with refined queries if results are insufficient"
-            />
-            <ToggleRow
-              label="Feedback Loop"
-              enabled={settings.enable_feedback_loop}
-              onToggle={(v) => patch({ enable_feedback_loop: v })}
-              info="Saves AI responses back to your knowledge base for continuous improvement"
-            />
-            <ToggleRow
-              label="Hallucination Check"
-              enabled={settings.enable_hallucination_check}
-              onToggle={(v) => patch({ enable_hallucination_check: v })}
-              info="Verifies factual claims in AI responses against your knowledge base"
-            />
-            <ToggleRow
-              label="Memory Extraction"
-              enabled={settings.enable_memory_extraction}
-              onToggle={(v) => patch({ enable_memory_extraction: v })}
-              info="Extracts key facts and preferences from conversations into long-term memory"
-            />
+            <div>
+              <ToggleRow
+                label="Self-RAG Validation"
+                enabled={settings.enable_self_rag ?? true}
+                onToggle={(v) => patch({ enable_self_rag: v })}
+                info="Validates retrieval quality and retries with refined queries if results are insufficient"
+              />
+              {!canRetrieve && (settings.enable_self_rag ?? true) && (
+                <DegradedFeatureNote message="Retrieval services temporarily unavailable" command="docker restart ai-companion-chroma ai-companion-neo4j" />
+              )}
+            </div>
+            <div>
+              <ToggleRow
+                label="Feedback Loop"
+                enabled={settings.enable_feedback_loop}
+                onToggle={(v) => patch({ enable_feedback_loop: v })}
+                info="Saves AI responses back to your knowledge base for continuous improvement"
+              />
+              {!canGenerate && settings.enable_feedback_loop && (
+                <DegradedFeatureNote message="AI generation temporarily unavailable" command="docker logs ai-companion-mcp --tail 20" />
+              )}
+            </div>
+            <div>
+              <ToggleRow
+                label="Hallucination Check"
+                enabled={settings.enable_hallucination_check}
+                onToggle={(v) => patch({ enable_hallucination_check: v })}
+                info="Verifies factual claims in AI responses against your knowledge base"
+              />
+              {!canVerify && settings.enable_hallucination_check && (
+                <DegradedFeatureNote message="Verification services temporarily unavailable" command="docker logs ai-companion-mcp --tail 20" />
+              )}
+            </div>
+            <div>
+              <ToggleRow
+                label="Memory Extraction"
+                enabled={settings.enable_memory_extraction}
+                onToggle={(v) => patch({ enable_memory_extraction: v })}
+                info="Extracts key facts and preferences from conversations into long-term memory"
+              />
+              {!canGenerate && settings.enable_memory_extraction && (
+                <DegradedFeatureNote message="AI generation temporarily unavailable" command="docker logs ai-companion-mcp --tail 20" />
+              )}
+            </div>
 
             <div className="my-1 h-px bg-border" />
 
@@ -250,6 +287,140 @@ export function EssentialsSection({ settings, sections, toggleSection, patch, cr
       <SectionHeading icon={Globe} label="External Data Sources" open={sections.data_sources} onToggle={() => toggleSection("data_sources")} />
       {sections.data_sources && <DataSourcesPanel />}
     </>
+  )
+}
+
+
+function DegradedFeatureNote({ message, command }: { message: string; command?: string }) {
+  return (
+    <div className="mt-1 rounded bg-yellow-500/10 px-2.5 py-1" role="status">
+      <div className="flex items-center gap-1.5">
+        <AlertTriangle className="h-3 w-3 shrink-0 text-yellow-600 dark:text-yellow-400" />
+        <span className="text-[10px] text-yellow-600 dark:text-yellow-400">{message}</span>
+      </div>
+      {command && (
+        <code className="mt-1 block rounded bg-background/60 px-2 py-0.5 font-mono text-[9px] text-muted-foreground">
+          {command}
+        </code>
+      )}
+    </div>
+  )
+}
+
+function ProviderStatusPanel({ settings }: { settings: ServerSettings }) {
+  const { data: setupStatus } = useQuery({
+    queryKey: ["setup-status"],
+    queryFn: fetchSetupStatus,
+    staleTime: 60_000,
+  })
+  const { data: healthStatus } = useQuery({
+    queryKey: ["health-status"],
+    queryFn: fetchHealthStatus,
+    refetchInterval: 15_000,
+    retry: 1,
+    staleTime: 10_000,
+  })
+
+  const configuredProviders = setupStatus?.configured_providers ?? []
+  const ollamaEnabled = settings.ollama_enabled ?? false
+  const assessment = assessRuntime(
+    fromHealthStatus(healthStatus ?? {}, configuredProviders, ollamaEnabled),
+  )
+
+  const ALL_PROVIDERS = [
+    { id: "openrouter", label: "OpenRouter" },
+    { id: "openai", label: "OpenAI" },
+    { id: "anthropic", label: "Anthropic" },
+    { id: "xai", label: "xAI (Grok)" },
+  ]
+
+  return (
+    <Card className="mb-4">
+      <CardContent className="grid gap-3 pt-4">
+        {/* Provider badges */}
+        <div className="flex flex-wrap gap-1.5">
+          {ALL_PROVIDERS.map((p) => {
+            const configured = configuredProviders.includes(p.id)
+            return (
+              <div
+                key={p.id}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px]",
+                  configured
+                    ? "border-green-500/30 bg-green-500/5 text-green-600 dark:text-green-400"
+                    : "border-muted text-muted-foreground",
+                )}
+              >
+                <span className={cn("h-1.5 w-1.5 rounded-full", configured ? "bg-green-500" : "bg-muted-foreground/30")} />
+                {p.label}
+              </div>
+            )
+          })}
+          <div
+            className={cn(
+              "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px]",
+              ollamaEnabled
+                ? "border-green-500/30 bg-green-500/5 text-green-600 dark:text-green-400"
+                : "border-muted text-muted-foreground",
+            )}
+          >
+            <span className={cn("h-1.5 w-1.5 rounded-full", ollamaEnabled ? "bg-green-500" : "bg-muted-foreground/30")} />
+            Ollama
+          </div>
+        </div>
+
+        {/* Capability grid */}
+        <div className="rounded border bg-muted/30 p-2.5">
+          <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            Capabilities
+          </p>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+            {assessment.capabilities.map((cap) => (
+              <div key={cap.label}>
+                <div className="flex items-center gap-1.5">
+                  <div className={cn("h-1.5 w-1.5 rounded-full shrink-0", CAPABILITY_STATUS_DOT[cap.status])} />
+                  <span className="text-[11px] text-muted-foreground">{cap.label}</span>
+                </div>
+                {cap.status !== "available" && cap.reason && (
+                  <p className="ml-3 text-[9px] text-muted-foreground/70">{cap.reason}</p>
+                )}
+                {cap.fix && cap.status !== "available" && cap.fix.command && (
+                  <code className="ml-3 mt-0.5 block text-[8px] font-mono text-muted-foreground/60">
+                    {cap.fix.command}
+                  </code>
+                )}
+              </div>
+            ))}
+          </div>
+          <p className="mt-1.5 text-[10px] text-muted-foreground/70">
+            {COST_PROFILE_LABELS[assessment.costProfile]}
+          </p>
+        </div>
+
+        {/* Warnings */}
+        {assessment.warnings.length > 0 && (
+          <div className="space-y-1.5">
+            {assessment.warnings.map((w, i) => (
+              <div key={i}>
+                <p className={cn(
+                  "text-[11px] leading-relaxed",
+                  w.severity === "error" && "text-destructive",
+                  w.severity === "warning" && "text-yellow-600 dark:text-yellow-400",
+                  w.severity === "info" && "text-muted-foreground",
+                )}>
+                  {w.message}
+                </p>
+                {w.fix?.command && (
+                  <code className="mt-0.5 block rounded bg-background/60 px-2 py-0.5 text-[9px] font-mono text-muted-foreground">
+                    {w.fix.command}
+                  </code>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }
 

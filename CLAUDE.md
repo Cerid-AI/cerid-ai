@@ -324,6 +324,7 @@ See [`.claude/SETUP.md`](.claude/SETUP.md) for detailed Claude Code configuratio
 - **Observability (`routers/observability.py`):** `MetricsCollector` writes 8 Redis time-series metrics. Health score computed as weighted A-F grade.
 - **A2A Protocol (`routers/a2a.py`):** Agent Card at `/.well-known/agent.json`. Task lifecycle: create → status → cancel with Redis-backed storage.
 - **Ollama Add-On (optional):** Local LLM for pipeline intelligence. Enable via `OLLAMA_ENABLED=true` + `INTERNAL_LLM_PROVIDER=ollama`. Default model: `llama3.2:3b`. Circuit breaker: `"ollama"`. Fallback: automatic to OpenRouter when unavailable.
+- **Setup Wizard (`components/setup/`):** 8-step onboarding: Welcome (system check) → API Keys (4 providers) → KB Config → Ollama → Review & Apply → Health → First Document → Mode. Uses `useReducer` with `WizardState`, progress persisted to localStorage (24h expiry), skip logic for steps 2/3/6. Provider capability assessment via `provider-capabilities.ts` (pure functions, zero React deps). Degradation banner in chat with adaptive polling, "Check now" + recovery toast. Model fallback notice surfaces backend fallback chain (OpenRouter → Bifrost → free Llama) to user. Settings Essentials tab has Provider Status section with runtime health grid.
 
 ## Dependency Sync Guide
 

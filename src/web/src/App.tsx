@@ -13,7 +13,6 @@ import { AuthProvider } from "@/contexts/auth-context"
 import { UIModeProvider } from "@/contexts/ui-mode-context"
 import { ProtectedRoute } from "@/components/auth/protected-route"
 import { fetchSettings, fetchSetupStatus, setTierOverride } from "@/lib/api"
-import { OnboardingDialog } from "@/components/onboarding/onboarding-dialog"
 import { SetupWizard } from "@/components/setup/setup-wizard"
 
 const KnowledgePane = lazy(() => import("@/components/kb/knowledge-pane"))
@@ -40,9 +39,6 @@ export default function App() {
   const [showOnboarding, setShowOnboarding] = useState(() => {
     try { return !localStorage.getItem("cerid-onboarding-complete") } catch { return false }
   })
-
-  const handleOnboardingComplete = useCallback(() => setShowOnboarding(false), [])
-  const handleSetupComplete = useCallback(() => setSetupRequired(false), [])
 
   const cycleTier = useCallback(async () => {
     if (tierCycling.current) return
@@ -101,9 +97,19 @@ export default function App() {
     )
   }
 
-  // Show setup wizard if backend reports no API keys configured
-  if (setupRequired) {
-    return <SetupWizard open onComplete={handleSetupComplete} />
+  // Show setup wizard if backend reports no API keys configured OR first-run onboarding
+  if (setupRequired || showOnboarding) {
+    return (
+      <UIModeProvider>
+        <SetupWizard
+          open
+          onComplete={() => {
+            setSetupRequired(false)
+            setShowOnboarding(false)
+          }}
+        />
+      </UIModeProvider>
+    )
   }
 
   return (
@@ -111,7 +117,6 @@ export default function App() {
     <AuthProvider>
     <ProtectedRoute multiUser={multiUser}>
     <UIModeProvider>
-    {showOnboarding && <OnboardingDialog open={showOnboarding} onComplete={handleOnboardingComplete} />}
     <ConversationsProvider>
     <KBInjectionProvider>
     <AppLayout featureTier={featureTier} onCycleTier={cycleTier}>
