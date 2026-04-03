@@ -1,7 +1,6 @@
 # Cerid AI — Integration Guide for New Cerid-Series Agents
 
-> **Last updated:** 2026-03-28
-> **Reference implementation:** cerid-trading-agent (`docs/DEPENDENCY_COUPLING.md`)
+> **Last updated:** 2026-04-02
 
 ---
 
@@ -16,7 +15,7 @@ Cerid AI is a self-hosted personal AI knowledge companion that exposes a stable 
 - **SDK API:** Stable `/sdk/v1/` endpoints for external consumers with per-client rate limiting, domain access control, and typed Pydantic response models.
 - **A2A Protocol:** Agent-to-Agent communication via `/.well-known/agent.json` agent cards. Task lifecycle (create/status/cancel) with Redis-backed storage. Remote agent discovery and invocation via A2A client.
 - **Plugin System:** Extend functionality via manifest-based plugins (`plugins/` directory). Plugin management API (7 endpoints), tier gating (community/pro), BSL-1.1 licensing.
-- **26 MCP Tools:** 18 core + 5 trading + `pkb_web_search` + `pkb_memory_recall` + `pkb_ingest_multimodal`.
+- **21 MCP Tools:** 19 core + `pkb_web_search` + `pkb_memory_recall`.
 
 New cerid-series agents (e.g., trading, compliance, research) integrate by registering as consumers, defining their KB domain, and calling SDK endpoints. Alternatively, agents can discover and invoke cerid-ai via the A2A protocol.
 
@@ -29,7 +28,7 @@ Before integrating a new agent:
 - [ ] Running cerid-ai stack (`./scripts/start-cerid.sh`) with healthy MCP server at `http://localhost:8888`
 - [ ] Understanding of the agent's knowledge domain and sub-categories
 - [ ] Familiarity with `config/settings.py`, `config/taxonomy.py`, and `routers/sdk.py`
-- [ ] Read `docs/DEPENDENCY_COUPLING.md` for the existing trading-agent integration pattern
+- [ ] Read `docs/DEPENDENCY_COUPLING.md` for cross-service version coupling constraints
 
 ---
 
@@ -188,8 +187,6 @@ Update the following files:
 - `docs/DEPENDENCY_COUPLING.md` — Add coupled interfaces table, safe-to-change list, and breaking changes.
 - `docs/ISSUES.md` — Add a phase section documenting what was resolved.
 
-**Second reference implementation:** The cerid-boardroom agent (`Cerid-AI/cerid-boardroom`) follows the same integration pattern with boardroom-specific SDK endpoints under `/sdk/v1/ops/`. See `docs/DEPENDENCY_COUPLING.md` for its coupled interfaces.
-
 ---
 
 ## 4. Domain Segregation Rules
@@ -229,54 +226,7 @@ External agents should implement a circuit breaker for cerid-ai calls (e.g., 5 f
 
 ---
 
-## 6. Example: Trading Agent Integration
-
-The cerid-trading-agent is the reference implementation for this integration pattern.
-
-### What was added to cerid-ai:
-
-| Step | File(s) | What |
-|------|---------|------|
-| Feature flag | `config/settings.py` | `CERID_TRADING_ENABLED` |
-| Domain | `config/taxonomy.py` | `trading` domain with 6 sub-categories |
-| Consumer | `config/settings.py` | `CONSUMER_REGISTRY["trading-agent"]` with 80 req/min, `strict_domains: True` |
-| Request models | `models/trading.py` | `TradingSignalRequest`, `HerdDetectRequest`, etc. |
-| Response models | `models/sdk.py` | `TradingSignalResponse`, `HerdDetectResponse`, etc. |
-| SDK endpoints | `routers/sdk.py` | 5 endpoints under `/sdk/v1/trading/` |
-| MCP tools | `tools.py` | 5 tools: `pkb_trading_signal`, `pkb_herd_detect`, `pkb_kelly_size`, `pkb_cascade_confirm`, `pkb_longshot_surface` |
-| Proxy routes | `routers/trading_proxy.py` | GUI proxy to trading agent at `TRADING_AGENT_URL` |
-| Scheduler | `scheduler.py` | 3 cron jobs (autoresearch, Platt mirror, longshot surface) |
-| Tests | `tests/test_router_sdk.py` | SDK endpoint tests with domain access control |
-| Docs | `CLAUDE.md`, `DEPENDENCY_COUPLING.md` | Full contract documentation |
-
-### How the trading agent calls cerid-ai:
-
-```python
-# In cerid-trading-agent: src/cerid_client.py
-class CeridClient:
-    def __init__(self):
-        self.base_url = os.getenv("CERID_MCP_URL", "http://localhost:8888")
-        self.client = httpx.AsyncClient(
-            headers={"X-Client-ID": "trading-agent"},
-            timeout=30.0,
-        )
-
-    async def trading_signal(self, query: str, signal_data: dict) -> dict:
-        resp = await self.client.post(
-            f"{self.base_url}/sdk/v1/trading/signal",
-            json={"query": query, "signal_data": signal_data, "domains": ["trading"], "top_k": 5},
-        )
-        resp.raise_for_status()
-        return resp.json()
-```
-
-### Graceful degradation:
-
-The trading agent uses `AsyncCircuitBreaker` (5 failures, 60s open, half-open probe). When cerid-ai is unavailable, the agent skips KB enrichment and operates on its own context alone.
-
----
-
-## 7. Alternative Integration: A2A Protocol
+## 6. Alternative Integration: A2A Protocol
 
 For agents that prefer standard agent-to-agent communication over direct SDK calls, cerid-ai exposes an A2A-compatible interface:
 
@@ -289,7 +239,7 @@ A2A is complementary to the SDK — use SDK for tight integration with typed res
 
 ---
 
-## 8. Extending via Plugins
+## 7. Extending via Plugins
 
 The plugin system (`plugins/` directory) allows extending cerid-ai without modifying core code:
 
@@ -302,6 +252,6 @@ The plugin system (`plugins/` directory) allows extending cerid-ai without modif
 
 ## See Also
 
-- [`docs/DEPENDENCY_COUPLING.md`](DEPENDENCY_COUPLING.md) — Full contract for the trading agent integration
+- [`docs/DEPENDENCY_COUPLING.md`](DEPENDENCY_COUPLING.md) — Cross-service version coupling constraints
 - [`docs/API_REFERENCE.md`](API_REFERENCE.md) — Complete API endpoint documentation
 - [`CLAUDE.md`](../CLAUDE.md) — Project overview and conventions

@@ -258,7 +258,6 @@ _tavily = AsyncCircuitBreaker("tavily", failure_threshold=3, recovery_timeout=30
 _searxng = AsyncCircuitBreaker("searxng", failure_threshold=3, recovery_timeout=30)
 _chromadb = AsyncCircuitBreaker("chromadb", failure_threshold=5, recovery_timeout=30)
 _ragas_eval = AsyncCircuitBreaker("ragas_eval", failure_threshold=3, recovery_timeout=60)
-_trading_agent = AsyncCircuitBreaker("trading-agent", failure_threshold=3, recovery_timeout=120)
 _email_imap = AsyncCircuitBreaker("email-imap", failure_threshold=3, recovery_timeout=60)
 _rss_feed = AsyncCircuitBreaker("rss-feed", failure_threshold=3, recovery_timeout=60)
 _gmail = AsyncCircuitBreaker("gmail", failure_threshold=3, recovery_timeout=60)
@@ -289,7 +288,6 @@ def get_breaker(name: str) -> AsyncCircuitBreaker:
         "chromadb": _chromadb,
         "neo4j": _neo4j,
         "ollama": _ollama,
-        "trading-agent": _trading_agent,
         "email-imap": _email_imap,
         "rss-feed": _rss_feed,
         "gmail": _gmail,

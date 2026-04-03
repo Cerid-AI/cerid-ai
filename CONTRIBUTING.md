@@ -48,13 +48,11 @@ make check-all
 make test-eval
 
 # E2E pipeline integration tests (requires running Docker stack)
-python -m pytest tests/test_e2e_integration.py
+python -m pytest src/mcp/tests/
 
 # RAG resilience testing (circuit breakers, degradation paths)
 python -m pytest tests/test_rag_resilience.py -v
 ```
-
-Synthetic test fixture data lives in `tests/fixtures/synthetic/` and provides deterministic inputs for unit and integration tests.
 
 ### Linting
 

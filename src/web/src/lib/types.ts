@@ -690,8 +690,6 @@ export interface ServerSettings {
   semantic_cache_threshold?: number
   enable_memory_consolidation?: boolean
   enable_context_compression?: boolean
-  // Trading agent integration
-  trading_enabled?: boolean
   // Ollama add-on (local LLM for pipeline tasks)
   pipeline_providers?: PipelineProviders
   ollama_enabled?: boolean

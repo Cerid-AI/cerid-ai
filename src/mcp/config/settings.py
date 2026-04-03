@@ -659,7 +659,7 @@ CONSUMER_REGISTRY: dict[str, dict] = {
             "/sdk/": (40, 60),
         },
         "allowed_domains": ["finance", "strategy", "general"],
-        "strict_domains": True,      # No bleed into personal/trading/coding data
+        "strict_domains": True,      # No bleed into personal/coding data
     },
     "folder_scanner": {
         "rate_limits": {

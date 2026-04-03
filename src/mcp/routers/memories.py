@@ -56,7 +56,7 @@ async def list_memories(
         params: dict = {"limit": limit, "offset": offset}
 
         conditions.append("a.filename STARTS WITH 'memory_'")
-        # Exclude non-GUI client sources (e.g. trading-agent ingested items)
+        # Exclude non-GUI client sources (e.g. external SDK client ingested items)
         conditions.append(
             "(a.client_source IS NULL OR a.client_source = '' OR a.client_source = 'gui')"
         )

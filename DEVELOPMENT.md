@@ -61,17 +61,13 @@ make test-eval
 
 **Integration tests (requires running Docker stack):**
 ```bash
-python -m pytest tests/test_e2e_integration.py
+python -m pytest src/mcp/tests/
 ```
 
 **RAG resilience testing:**
 ```bash
 python -m pytest tests/test_rag_resilience.py -v
 ```
-
-### Synthetic Test Fixtures
-
-Synthetic test data lives in `tests/fixtures/synthetic/`. These fixtures provide deterministic, reproducible test inputs for unit and integration tests without requiring a live knowledge base. Use them for testing retrieval pipelines, deduplication logic, and context assembly.
 
 ---
 
