@@ -91,7 +91,7 @@ class TestSDKHallucination:
             "/sdk/v1/hallucination",
             json={
                 "response_text": "Python uses a GIL for thread safety.",
-                "query": "How does Python handle threads?",
+                "conversation_id": "conv-100",
             },
         )
         assert resp.status_code == 200
@@ -251,7 +251,7 @@ class TestSDKIngest:
             json={
                 "content": "def hello(): pass",
                 "domain": "coding",
-                "tags": ["python", "example"],
+                "tags": "python,example",
             },
             headers={"x-client-id": "test-consumer"},
         )
@@ -302,7 +302,7 @@ class TestSDKIngestFile:
             json={
                 "file_path": "/data/reports/q4.pdf",
                 "domain": "finance",
-                "tags": ["quarterly"],
+                "tags": "quarterly",
             },
             headers={"x-client-id": "finance-dashboard"},
         )
@@ -339,10 +339,7 @@ class TestSDKCollections:
     @patch("routers.sdk.list_collections")
     def test_collections_success(self, mock_list):
         mock_list.return_value = {
-            "collections": [
-                {"name": "coding", "count": 1500},
-                {"name": "finance", "count": 320},
-            ],
+            "collections": ["coding", "finance"],
             "total": 2,
         }
 
@@ -404,9 +401,12 @@ class TestSDKHealthDetailed:
     @patch("routers.sdk.degradation_status")
     def test_detailed_health_success(self, mock_degrad):
         mock_degrad.return_value = {
-            "tier": "FULL",
+            "status": "healthy",
+            "version": "1.1.0",
             "services": {"chromadb": "up", "neo4j": "up", "redis": "up"},
+            "features": {},
             "circuit_breakers": {"chromadb": "closed", "neo4j": "closed"},
+            "degradation_tier": "FULL",
             "uptime_seconds": 86400,
         }
 
@@ -414,14 +414,17 @@ class TestSDKHealthDetailed:
         resp = client.get("/sdk/v1/health/detailed")
         assert resp.status_code == 200
         data = resp.json()
-        assert "tier" in data or "services" in data
+        assert "services" in data
 
     @patch("routers.sdk.degradation_status")
     def test_detailed_health_degraded(self, mock_degrad):
         mock_degrad.return_value = {
-            "tier": "LITE",
+            "status": "degraded",
+            "version": "1.1.0",
             "services": {"chromadb": "down", "neo4j": "up", "redis": "up"},
+            "features": {},
             "circuit_breakers": {"chromadb": "open"},
+            "degradation_tier": "LITE",
             "uptime_seconds": 3600,
         }
 
@@ -509,13 +512,15 @@ class TestSDKPlugins:
 
     @patch("routers.sdk.list_plugins")
     def test_plugins_success(self, mock_lp):
-        mock_lp.return_value = {
-            "plugins": [
-                {"name": "audio", "status": "loaded", "tier": "pro"},
-                {"name": "vision", "status": "loaded", "tier": "pro"},
-            ],
-            "total": 2,
-        }
+        from unittest.mock import MagicMock
+
+        result_obj = MagicMock()
+        result_obj.plugins = [
+            MagicMock(model_dump=MagicMock(return_value={"name": "audio", "status": "loaded", "tier": "pro"})),
+            MagicMock(model_dump=MagicMock(return_value={"name": "vision", "status": "loaded", "tier": "pro"})),
+        ]
+        result_obj.total = 2
+        mock_lp.return_value = result_obj
 
         client = TestClient(_make_app())
         resp = client.get("/sdk/v1/plugins")
@@ -526,7 +531,12 @@ class TestSDKPlugins:
 
     @patch("routers.sdk.list_plugins")
     def test_plugins_empty(self, mock_lp):
-        mock_lp.return_value = {"plugins": [], "total": 0}
+        from unittest.mock import MagicMock
+
+        result_obj = MagicMock()
+        result_obj.plugins = []
+        result_obj.total = 0
+        mock_lp.return_value = result_obj
 
         client = TestClient(_make_app())
         resp = client.get("/sdk/v1/plugins")
