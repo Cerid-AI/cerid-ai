@@ -17,6 +17,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 
 import config
+from config.features import FEATURE_FLAGS, FEATURE_TIER
+from config.taxonomy import DOMAINS, TAXONOMY
 from models.sdk import (
     SDKCollectionsResponse,
     SDKDetailedHealthResponse,
@@ -41,8 +43,6 @@ from routers.agents import (
     hallucination_check_endpoint,
     memory_extract_endpoint,
 )
-from config.features import FEATURE_FLAGS, FEATURE_TIER
-from config.taxonomy import DOMAINS, TAXONOMY
 from routers.health import degradation_status, health_check, list_collections
 from routers.plugins import list_plugins
 from routers.query import query_knowledge

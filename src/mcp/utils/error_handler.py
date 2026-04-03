@@ -50,8 +50,8 @@ def handle_errors(
                     from utils.circuit_breaker import get_breaker
 
                     get_breaker(breaker_name)._on_failure_sync(exc)
-                except Exception:
-                    pass
+                except Exception as _cb_err:  # noqa: BLE001
+                    logger.debug("Circuit breaker update failed: %s", _cb_err)
             if fallback is not None:
                 return fallback
             raise RoutingError(

@@ -91,17 +91,17 @@ class TestParserRegistry:
         """Unknown file types should either fall back to text or raise."""
         f = tmp_path / "test.xyz"
         f.write_text("some content")
-        # Should either return dict or raise — not crash silently
+        # Should either return content or raise — not crash silently
         try:
             result = parse_file(str(f))
-            assert isinstance(result, dict)
+            assert isinstance(result, str)
         except (ValueError, KeyError):
             pass  # Expected for unsupported formats
 
     def test_register_parser_custom(self):
-        """Custom parsers can be registered via register_parser."""
+        """Custom parsers can be registered via register_parser decorator."""
+        @register_parser([".myext"])
         def my_parser(path):
             return {"text": "custom parsed", "file_type": "myext", "page_count": None}
 
-        register_parser([".myext"])(my_parser)
         assert ".myext" in PARSER_REGISTRY
