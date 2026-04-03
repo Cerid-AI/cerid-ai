@@ -27,7 +27,7 @@ function createClient(fetchMock: typeof globalThis.fetch) {
   return new CeridClient({
     baseUrl: "http://localhost:8888",
     clientId: "test-client",
-    apiKey: "test-key",
+    apiKey: "test-key", // pragma: allowlist secret
     fetch: fetchMock,
   });
 }

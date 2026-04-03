@@ -116,7 +116,7 @@ class TestRedisStorage:
             id="abc",
             url="https://example.com",
             events=["document.ingested"],
-            secret="hidden",
+            secret="hidden",  # pragma: allowlist secret
             active=True,
         )
         data = sub.model_dump()

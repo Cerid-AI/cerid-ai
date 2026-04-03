@@ -22,7 +22,7 @@ class GitHubIssuesSource(DataSource):
     description = "Search GitHub Issues"
     enabled = True
     requires_api_key = True
-    api_key_env_var = "GITHUB_TOKEN"
+    api_key_env_var = "GITHUB_TOKEN"  # pragma: allowlist secret
 
     _API_URL = "https://api.github.com/search/issues"
 
@@ -31,7 +31,7 @@ class GitHubIssuesSource(DataSource):
 
         Returns up to 5 results with title, body snippet, and URL.
         """
-        token = os.getenv(self.api_key_env_var, "")
+        token = os.getenv(self.api_key_env_var, "")  # pragma: allowlist secret
         if not token:
             logger.debug("GITHUB_TOKEN not set — skipping GitHub Issues search")
             return []
