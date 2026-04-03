@@ -76,6 +76,8 @@ export function DegradationBanner() {
   const queryClient = useQueryClient()
   const [checkCooldown, setCheckCooldown] = useState(false)
   const [showRecoveryToast, setShowRecoveryToast] = useState(false)
+  const [expanded, setExpanded] = useState(false)
+  const [copied, setCopied] = useState(false)
   const recoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const prevTierRef = useRef<DegradationTier | null>(null)
   const degradedSinceRef = useRef<number | null>(null)
@@ -186,9 +188,6 @@ export function DegradationBanner() {
       </div>
     )
   }
-
-  const [expanded, setExpanded] = useState(false)
-  const [copied, setCopied] = useState(false)
 
   // Don't show degradation banner if healthy, no tier info, or dismissed
   if (!isDegraded || !info || dismissedTier === tier) return null
