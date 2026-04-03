@@ -1,4 +1,53 @@
-# CLAUDE.md - Cerid AI
+# CLAUDE.md - Cerid AI (Internal)
+
+> **This is the canonical development repo** (`Cerid-AI/cerid-ai-internal`, private).
+> All development happens here. The public repo is a distribution artifact.
+
+## Repository Architecture
+
+Cerid AI uses a two-repo open-core model:
+
+| Repo | Visibility | Location | Purpose |
+|------|-----------|----------|---------|
+| **cerid-ai-internal** (this repo) | Private | `~/Develop/cerid-ai` | Canonical development — all code, Pro/Enterprise plugins, full test harness, CI, internal docs |
+| **cerid-ai** (public) | Public | `~/Develop/cerid-ai-public` | Apache-2.0 distribution — core product, SDK, community plugins |
+
+### What's only in internal (not in public)
+
+- **12 BSL-1.1 plugins:** audio, vision, OCR, analytics, workflow-builder, apple-notes, calendar, custom-rag, docling-parser, gmail, metamorphic, outlook
+- **Billing:** `routers/billing.py`, `models/billing.py` (Stripe integration)
+- **Trading SDK:** 5 trading endpoints + 5 MCP tools + `agents/trading_agent.py`
+- **Boardroom SDK:** 3 boardroom endpoints
+- **Full test harness:** 97+ test files (1673+ Python tests), beta E2E suite, eval harness
+- **Eval suite:** `src/mcp/eval/` (NDCG, MRR, P@K, RAGAS)
+- **Internal docs:** `docs/BRANDING.md`, `docs/MARKET_ANALYSIS.md`, `docs/COMPETITIVE_ANALYSIS_2026-04.md`
+- **Claude Code config:** `.claude/` directory (agents, commands, hooks, settings)
+- **Task tracking:** `tasks/todo.md`, `tasks/lessons.md`
+
+### Syncing to public
+
+```bash
+# Core improvements → public (cherry-pick)
+git checkout -b sync/feature public/main
+git cherry-pick <commits>
+git push public sync/feature
+# Then open PR on public repo
+
+# Community PRs → internal (merge)
+git fetch public && git merge public/main
+```
+
+**Pre-push check:** Before syncing to public, verify no Pro content leaks:
+```bash
+grep -r "BSL-1.1" --include="*.py" --include="*.json" src/ plugins/ | grep -v "comment\|noqa"
+```
+
+### Public repo CI (6 jobs)
+
+The public repo has a simplified CI: lint, typecheck, test (60% floor), security, frontend, docker.
+The internal repo has the full 8-job pipeline with lock-sync and frontend-desktop.
+
+---
 
 ## Project Overview
 
