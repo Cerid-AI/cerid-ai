@@ -64,6 +64,7 @@ from routers import (
     automations,
     billing,
     chat,
+    custom_agents,
     data_sources,
     digest,
     dlq,
@@ -75,6 +76,7 @@ from routers import (
     models,
     observability,
     ollama_proxy,
+    plugin_registry,
     plugins,
     providers,
     query,
@@ -88,6 +90,7 @@ from routers import (
     upload,
     user_state,
     watched_folders,
+    webhook_subscriptions,
     workflows,
 )
 from scheduler import start_scheduler, stop_scheduler
@@ -259,6 +262,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     except Exception as e:
         logger.warning(f"Plugin loading failed (server runs without plugins): {e}")
 
+    # Register event bus → webhook bridge (Phase 3 extensibility)
+    try:
+        from utils.event_bus import event_bus
+        from utils.webhooks import fire_event as fire_webhook_event
+
+        async def _webhook_bridge(event):
+            try:
+                import dataclasses
+                payload = dataclasses.asdict(event) if dataclasses.is_dataclass(event) else {}
+                await fire_webhook_event(event.event_type, payload)
+            except Exception:
+                pass
+
+        event_bus.subscribe_all(_webhook_bridge)
+        logger.info("Event bus webhook bridge registered")
+    except Exception as e:
+        logger.debug("Event bus setup skipped: %s", e)
+
     # Start scheduled maintenance engine
     try:
         start_scheduler()
@@ -347,6 +368,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     except Exception as e:
         logger.debug("License check skipped: %s", e)
 
+    # Connect to external MCP servers (non-blocking per server)
+    try:
+        from utils.mcp_client import mcp_client_manager
+        mcp_client_manager.load_config()
+        if mcp_client_manager._configs:
+            connected = await mcp_client_manager.connect_all()
+            if connected:
+                logger.info("MCP client: %d external server(s) connected", len(connected))
+    except Exception as e:
+        logger.debug("MCP client startup skipped: %s", e)
+
     # Verification pipeline self-test (lightweight, non-blocking)
     try:
         from agents.hallucination.startup_self_test import run_verification_self_test
@@ -367,6 +399,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # Shutdown: stop scheduler, flush caches, close connections, clear MCP sessions
     stop_scheduler()
+    try:
+        from utils.mcp_client import mcp_client_manager
+        await mcp_client_manager.shutdown()
+    except Exception as exc:
+        logger.warning("MCP client shutdown failed: %s", exc)
     try:
         from utils.llm_client import close_client
         await close_client()
@@ -475,6 +512,9 @@ _api_routers = [
     workflows.router,
     agent_console.router,
     system_monitor.router,
+    plugin_registry.router,
+    custom_agents.router,
+    webhook_subscriptions.router,
 ]
 for r in _api_routers:
     app.include_router(r)
@@ -502,6 +542,19 @@ app.include_router(ollama_proxy.router, prefix="/api/v1")
 
 # SDK router — stable external contract (manages its own /sdk/v1/ prefix)
 app.include_router(sdk.router)
+
+# SDK OpenAPI spec — isolated spec for /sdk/v1/ endpoints only
+from routers import sdk_openapi  # noqa: E402
+app.include_router(sdk_openapi.router)
+
+# MCP client — external MCP server management endpoints
+from routers import mcp_client  # noqa: E402
+app.include_router(mcp_client.router)
+app.include_router(mcp_client.router, prefix="/api/v1")
+
+# Embeddable chat widget — serves /widget.html, /widget.js, /widget/config
+from routers import widget  # noqa: E402
+app.include_router(widget.router)
 
 # A2A router — Agent Card at /.well-known/agent.json, tasks at /a2a/* (no prefix)
 app.include_router(a2a.router)

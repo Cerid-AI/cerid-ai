@@ -11,6 +11,8 @@ Plugin types:
   - parser: Registers file parsers via @register_parser
   - agent: Registers agent workflows
   - sync: Registers sync backends
+  - tool: Registers custom MCP tools (merged into tool palette)
+  - connector: Registers data source connectors (merged into DataSourceRegistry)
 
 Usage:
     from plugins import load_plugins, get_loaded_plugins
@@ -35,6 +37,12 @@ logger = logging.getLogger("ai-companion.plugins")
 # Global registry of loaded plugins
 _loaded_plugins: dict[str, dict[str, Any]] = {}
 
+# Tool handlers registered by ToolPlugin instances (name -> async handler)
+_plugin_tool_handlers: dict[str, Any] = {}
+
+# Tool definitions registered by ToolPlugin instances (for MCP_TOOLS merge)
+_plugin_tool_definitions: list[dict[str, Any]] = []
+
 
 class PluginLoadError(Exception):
     """Raised when a plugin fails to load."""
@@ -51,7 +59,7 @@ def _validate_manifest(manifest: dict[str, Any], plugin_dir: Path) -> None:
             f"Plugin at {plugin_dir}: manifest.json missing required fields: {missing}"
         )
 
-    valid_types = ["parser", "agent", "sync", "middleware"]
+    valid_types = ["parser", "agent", "sync", "middleware", "tool", "connector"]
     if manifest["type"] not in valid_types:
         raise PluginLoadError(
             f"Plugin '{manifest['name']}': invalid type '{manifest['type']}'. "
@@ -224,6 +232,26 @@ def load_plugins(plugin_dir: str | None = None) -> list[str]:
         logger.info(f"Loaded {len(loaded)} plugin(s): {', '.join(loaded)}")
     else:
         logger.debug("No plugins loaded")
+
+    # Collect tool definitions from ToolPlugin instances
+    from plugins.base import ToolPlugin
+
+    for name, info in _loaded_plugins.items():
+        module = info.get("module")
+        if not module:
+            continue
+        instance = getattr(module, "_instance", None)
+        if isinstance(instance, ToolPlugin):
+            try:
+                for tool_def in instance.get_tools():
+                    tool_name = tool_def["name"]
+                    handler = tool_def.pop("handler", None)
+                    if handler and callable(handler):
+                        _plugin_tool_handlers[tool_name] = handler
+                        _plugin_tool_definitions.append(tool_def)
+                        logger.info("Plugin '%s' registered tool: %s", name, tool_name)
+            except (AttributeError, KeyError, TypeError) as e:
+                logger.error("Plugin '%s': failed to collect tools: %s", name, e)
 
     return loaded
 

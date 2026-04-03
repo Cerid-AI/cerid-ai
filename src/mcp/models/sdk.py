@@ -124,3 +124,87 @@ class SDKLongshotSurfaceResponse(_SDKBase):
     count: int = Field(default=0, ge=0, description="Number of calibration points returned")
     asset: str = Field(default="", description="Asset queried")
     date_range: str = Field(default="", description="Date range queried (ISO format)")
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 — expanded SDK endpoints
+# ---------------------------------------------------------------------------
+
+
+class SDKIngestRequest(BaseModel):
+    """Request body for ``POST /sdk/v1/ingest``."""
+
+    content: str = Field(..., min_length=1, description="Text content to ingest")
+    domain: str = Field("general", description="Target knowledge domain")
+    tags: str = Field("", description="Comma-separated tags")
+
+
+class SDKIngestFileRequest(BaseModel):
+    """Request body for ``POST /sdk/v1/ingest/file``."""
+
+    file_path: str = Field(..., description="Path to file (in cerid-archive or absolute)")
+    domain: str = Field("", description="Domain (empty for auto-detect)")
+    tags: str = Field("", description="Comma-separated tags")
+    categorize_mode: str = Field("", description="Categorization: manual, smart, or pro")
+
+
+class SDKIngestResponse(_SDKBase):
+    """Response from ``POST /sdk/v1/ingest`` and ``POST /sdk/v1/ingest/file``."""
+
+    status: str = Field(description="'ok' or 'error'")
+    artifact_id: str = Field(default="", description="UUID of created artifact")
+    chunks: int = Field(default=0, ge=0, description="Number of chunks created")
+    domain: str = Field(default="", description="Domain the content was ingested into")
+
+
+class SDKCollectionsResponse(_SDKBase):
+    """Response from ``GET /sdk/v1/collections``."""
+
+    collections: list[str] = Field(default_factory=list, description="Collection names")
+    total: int = Field(default=0, ge=0, description="Total collection count")
+
+
+class SDKTaxonomyResponse(_SDKBase):
+    """Response from ``GET /sdk/v1/taxonomy``."""
+
+    domains: list[str] = Field(default_factory=list, description="Active domain names")
+    taxonomy: dict[str, Any] = Field(default_factory=dict, description="Full taxonomy tree")
+
+
+class SDKDetailedHealthResponse(SDKHealthResponse):
+    """Response from ``GET /sdk/v1/health/detailed``."""
+
+    circuit_breakers: dict[str, str] = Field(default_factory=dict, description="Breaker states")
+    degradation_tier: str = Field(default="FULL", description="Current degradation level")
+    uptime_seconds: float = Field(default=0.0, description="Server uptime")
+
+
+class SDKSettingsResponse(_SDKBase):
+    """Response from ``GET /sdk/v1/settings`` — read-only server config."""
+
+    version: str = Field(description="Server version")
+    tier: str = Field(description="Feature tier: community, pro, or enterprise")
+    features: dict[str, bool] = Field(default_factory=dict, description="Feature flags")
+
+
+class SDKSearchRequest(BaseModel):
+    """Request body for ``POST /sdk/v1/search``."""
+
+    query: str = Field(..., min_length=1, description="Search query")
+    domain: str = Field("general", description="Domain to search")
+    top_k: int = Field(5, ge=1, le=50, description="Number of results")
+
+
+class SDKSearchResponse(_SDKBase):
+    """Response from ``POST /sdk/v1/search`` — raw vector search."""
+
+    results: list[dict[str, Any]] = Field(default_factory=list, description="Search results with relevance")
+    total_results: int = Field(default=0, ge=0, description="Total results returned")
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0, description="Average relevance")
+
+
+class SDKPluginListResponse(_SDKBase):
+    """Response from ``GET /sdk/v1/plugins``."""
+
+    plugins: list[dict[str, Any]] = Field(default_factory=list, description="Loaded plugins with status")
+    total: int = Field(default=0, ge=0, description="Total plugin count")

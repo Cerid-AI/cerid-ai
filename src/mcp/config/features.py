@@ -82,6 +82,9 @@ FEATURE_FLAGS = {
     "live_metrics":          True,
     # Private mode: Level 1 available on all tiers; higher levels require pro
     "private_mode":          True,
+    # Workflow engine (Phase 4 — extensibility sprint)
+    "basic_workflows":       True,  # Always enabled (community)
+    "advanced_workflows":    _TIER_LEVELS.get(FEATURE_TIER, 0) >= _TIER_LEVELS["pro"],
 }
 
 
@@ -100,6 +103,9 @@ def _refresh_flags() -> None:
     for key in ("sso_saml", "audit_logging", "priority_support"):
         FEATURE_FLAGS[key] = tier_level >= _TIER_LEVELS["enterprise"]
     FEATURE_FLAGS["multi_user"] = CERID_MULTI_USER or tier_level >= _TIER_LEVELS["enterprise"]
+    # Workflow engine: basic always enabled, advanced requires pro
+    FEATURE_FLAGS["basic_workflows"] = True
+    FEATURE_FLAGS["advanced_workflows"] = tier_level >= _TIER_LEVELS["pro"]
 
 
 # ---------------------------------------------------------------------------
@@ -333,6 +339,9 @@ def set_tier(new_tier: str) -> str:
         "sso_saml": level >= ent_level,
         "audit_logging": level >= ent_level,
         "priority_support": level >= ent_level,
+        # Workflow engine
+        "basic_workflows": True,  # Always enabled (community)
+        "advanced_workflows": level >= pro_level,
     })
     _config_logger.info("Runtime tier override: %s (flags recomputed)", new_tier)
     return new_tier
@@ -348,7 +357,8 @@ def _get_feature_tier(feature_name: str) -> str:
     # Community features (always enabled)
     if feature_name in ("hierarchical_taxonomy", "file_upload_gui",
                         "encryption_at_rest", "truth_audit", "live_metrics",
-                        "ocr_parsing", "semantic_dedup"):
+                        "ocr_parsing", "semantic_dedup", "basic_workflows",
+                        "private_mode"):
         return "community"
     # Everything else is pro
     return "pro"

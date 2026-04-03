@@ -962,4 +962,14 @@ async def execute_tool(name: str, arguments: dict) -> Any:
             tags=arguments.get("tags", ""),
             plugin_override=arguments.get("plugin", ""),
         )
+    # Check plugin-registered tools (ToolPlugin instances)
+    from plugins import _plugin_tool_handlers
+    if name in _plugin_tool_handlers:
+        return await _plugin_tool_handlers[name](arguments)
+
+    # Check external MCP server tools (ext_* prefix)
+    if name.startswith("ext_"):
+        from utils.mcp_client import mcp_client_manager
+        return await mcp_client_manager.call_tool(name, arguments)
+
     raise ValueError(f"Unknown tool: {name}")
