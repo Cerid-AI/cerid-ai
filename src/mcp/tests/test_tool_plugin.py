@@ -2,12 +2,11 @@
 """Tests for ToolPlugin — custom MCP tool registration via plugins."""
 
 import logging
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
 from plugins.base import ToolPlugin
-
 
 # ---------------------------------------------------------------------------
 # Concrete mock subclass

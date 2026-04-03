@@ -5,9 +5,8 @@ Covers every endpoint in routers/sdk.py with mocked backend services,
 verifying status codes, response shapes, and delegation wiring.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
-import pytest
 from fastapi import FastAPI
 from starlette.testclient import TestClient
 

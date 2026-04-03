@@ -7,7 +7,6 @@ external consumers get a stable API surface.
 
 from unittest.mock import AsyncMock, patch
 
-import pytest
 from fastapi import FastAPI
 from starlette.testclient import TestClient
 

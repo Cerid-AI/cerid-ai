@@ -2,13 +2,9 @@
 """Tests for parsers/ sub-package — registry, utility functions, and parsers."""
 
 import json
-from unittest.mock import MagicMock, patch
-
-import pytest
 
 from parsers._utils import _strip_html_tags, _strip_rtf
 from parsers.registry import PARSER_REGISTRY, parse_file, register_parser
-
 
 # ---------------------------------------------------------------------------
 # Tests: _strip_html_tags (pure function)

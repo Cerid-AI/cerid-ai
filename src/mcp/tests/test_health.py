@@ -3,7 +3,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 from starlette.testclient import TestClient
 
 from routers.health import health_check, router

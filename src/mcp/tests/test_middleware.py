@@ -3,16 +3,14 @@
 
 import hashlib
 
-import pytest
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from middleware.auth import EXEMPT_PATHS, EXEMPT_PREFIXES, APIKeyMiddleware, _redact_ip
-from middleware.request_id import RequestIDMiddleware, get_request_id, request_id_var
-
+from middleware.auth import APIKeyMiddleware, _redact_ip
+from middleware.request_id import RequestIDMiddleware
 
 # ---------------------------------------------------------------------------
 # Helper: minimal ASGI app for middleware testing

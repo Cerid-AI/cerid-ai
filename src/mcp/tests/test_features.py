@@ -6,8 +6,8 @@ from unittest.mock import patch
 import pytest
 
 from config.features import (
-    FEATURE_FLAGS,
     _TIER_LEVELS,
+    FEATURE_FLAGS,
     check_feature,
     check_tier,
     is_feature_enabled,
@@ -15,7 +15,6 @@ from config.features import (
     require_feature,
 )
 from errors import FeatureGateError
-
 
 # ---------------------------------------------------------------------------
 # Tests: is_feature_enabled

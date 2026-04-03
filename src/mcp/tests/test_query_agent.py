@@ -2,8 +2,7 @@
 """Tests for agents/query_agent.py — RAG retrieval pipeline."""
 
 import sys
-from types import ModuleType
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -15,7 +14,6 @@ for _mod_name in ("agents.query_agent", "agents.decomposer", "agents.assembler")
 
 from agents.assembler import deduplicate_results, rerank_results
 from agents.decomposer import _get_adjacent_domains
-
 
 # ---------------------------------------------------------------------------
 # Helpers

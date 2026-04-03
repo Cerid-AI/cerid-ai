@@ -19,7 +19,6 @@ from errors import (
 )
 from utils.error_handler import handle_errors
 
-
 # ---------------------------------------------------------------------------
 # Tests: CeridError base class
 # ---------------------------------------------------------------------------

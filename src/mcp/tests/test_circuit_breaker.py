@@ -2,7 +2,6 @@
 """Tests for circuit breaker: open/close/half-open states."""
 
 import asyncio
-import time
 
 import pytest
 
@@ -12,7 +11,6 @@ from utils.circuit_breaker import (
     CircuitState,
     _is_client_error,
 )
-
 
 # ---------------------------------------------------------------------------
 # Tests: CircuitState enum

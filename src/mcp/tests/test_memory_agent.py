@@ -19,7 +19,6 @@ if "routers.ingestion" not in sys.modules:
 
 from agents.memory import extract_memories
 
-
 # ---------------------------------------------------------------------------
 # Tests: extract_memories
 # ---------------------------------------------------------------------------

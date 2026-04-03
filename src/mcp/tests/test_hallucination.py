@@ -3,7 +3,7 @@
 
 import sys
 from types import ModuleType
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -26,11 +26,10 @@ if "agents.decomposer" not in sys.modules:
 import config
 from agents.hallucination.extraction import (
     _detect_evasion,
-    _extract_claims_heuristic,
     _extract_citation_claims,
+    _extract_claims_heuristic,
     extract_claims,
 )
-
 
 # ---------------------------------------------------------------------------
 # Tests: Claim extraction
