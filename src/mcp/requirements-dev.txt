@@ -1,0 +1,7 @@
+pytest
+pytest-asyncio
+httpx
+pytest-cov
+respx
+mypy>=1.10
+types-redis

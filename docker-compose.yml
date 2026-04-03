@@ -1,0 +1,279 @@
+# Copyright 2024-2026 Cerid AI — Licensed under the Apache License, Version 2.0
+# See LICENSE file for full license text.
+#
+# Unified Docker Compose for Cerid AI
+#
+# Startup order (enforced via depends_on healthcheck conditions):
+#
+#   1. Infrastructure: neo4j, chromadb, redis  (no dependencies, start in parallel)
+#   2. Bifrost:        LLM gateway             (waits for infra to be healthy)
+#   3. MCP Server:     core API                (waits for neo4j, chromadb, redis, bifrost)
+#   4. Cerid Web:      React frontend          (waits for mcp-server)
+#
+# Usage:
+#   docker compose up -d          # start all services
+#   docker compose up -d --build  # rebuild MCP + Web images
+#   docker compose logs -f        # tail all logs
+
+services:
+  # ──────────────────────────────────────────────
+  # Layer 1: Infrastructure (no dependencies)
+  # ──────────────────────────────────────────────
+
+  neo4j:
+    container_name: ai-companion-neo4j
+    image: neo4j:5.26.21-community
+    ports:
+      - "127.0.0.1:${CERID_PORT_NEO4J:-7474}:7474"
+      - "127.0.0.1:${CERID_PORT_NEO4J_BOLT:-7687}:7687"
+    volumes:
+      - ./stacks/infrastructure/data/neo4j:/data
+      - ./stacks/infrastructure/data/neo4j-logs:/logs
+    environment:
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD}
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_server_memory_heap_max__size=1G
+      - NEO4J_server_memory_pagecache_size=2G
+    networks:
+      - llm-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 4G
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:7474 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  chromadb:
+    container_name: ai-companion-chroma
+    image: chromadb/chroma:0.5.23
+    ports:
+      - "127.0.0.1:${CERID_PORT_CHROMA:-8001}:8000"
+    volumes:
+      - ./stacks/infrastructure/data/chroma:/chroma/chroma
+    environment:
+      - ANONYMIZED_TELEMETRY=false
+      - CHROMA_ANONYMIZED_TELEMETRY=false
+      - ALLOW_RESET=false
+      - IS_PERSISTENT=true
+      - LOG_LEVEL=WARNING
+    networks:
+      - llm-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/v1/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+
+  redis:
+    container_name: ai-companion-redis
+    image: redis:7.4.8-alpine
+    ports:
+      - "127.0.0.1:${CERID_PORT_REDIS:-6379}:6379"
+    volumes:
+      - ./stacks/infrastructure/data/redis:/data
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-cerid-dev}
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-cerid-dev} --maxmemory 1gb --maxmemory-policy allkeys-lru
+    networks:
+      - llm-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ──────────────────────────────────────────────
+  # Layer 2: LLM Gateway
+  # Optional — only needed when CERID_USE_BIFROST=true (for intent-based
+  # auto-routing on user chat).  All internal LLM calls now go directly
+  # to OpenRouter via llm_client.py.  To disable, comment out the bifrost
+  # service and remove the bifrost dependency from mcp-server below.
+  # ──────────────────────────────────────────────
+
+  bifrost:
+    container_name: bifrost
+    profiles: ["bifrost"]
+    image: maximhq/bifrost:latest@sha256:0fa2596eb2d05cf2f58b6d7b31076b0cc153f2c60972e83eb1f634bccd0372df
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${CERID_BIND_ADDR:-127.0.0.1}:${CERID_PORT_BIFROST:-8080}:8080"
+    volumes:
+      - ./stacks/bifrost/data/config.json:/app/data/config.json
+      - ./stacks/bifrost/data:/app/data
+    env_file:
+      - .env
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - APP_HOST=0.0.0.0
+      - APP_PORT=8080
+      - LOG_LEVEL=info
+    networks:
+      - llm-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/api/providers || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ──────────────────────────────────────────────
+  # Layer 3: Core API
+  # ──────────────────────────────────────────────
+
+  mcp-server:
+    container_name: ai-companion-mcp
+    build:
+      context: ./src/mcp
+      dockerfile: Dockerfile
+    ports:
+      - "${CERID_BIND_ADDR:-127.0.0.1}:${CERID_PORT_MCP:-8888}:8888"
+    volumes:
+      - ./src/mcp:/app
+      - ${HOME}/cerid-archive:/archive:cached
+      - ${CERID_SYNC_DIR:-${HOME}/Dropbox/cerid-sync}:/sync
+    env_file:
+      - .env
+    environment:
+      - CHROMA_URL=http://ai-companion-chroma:8000
+      - NEO4J_URI=bolt://ai-companion-neo4j:7687
+      - NEO4J_USER=neo4j
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-cerid-dev}@ai-companion-redis:6379
+      - BIFROST_URL=http://bifrost:8080/v1
+      - ARCHIVE_PATH=/archive
+      - CERID_SYNC_DIR=/sync
+      - ENABLE_SEMANTIC_CACHE=true
+      - RERANK_ONNX_FILENAME=onnx/model_quint8_avx2.onnx
+      - EMBEDDING_MODEL=Snowflake/snowflake-arctic-embed-m-v1.5
+      - SEMANTIC_CACHE_DIM=768
+      - SENTRY_DSN=${SENTRY_DSN_MCP}
+      - SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-development}
+      - OLLAMA_ENABLED=${OLLAMA_ENABLED:-false}
+      - OLLAMA_URL=${OLLAMA_URL:-http://cerid-ollama:11434}
+      - INTERNAL_LLM_PROVIDER=${INTERNAL_LLM_PROVIDER:-bifrost}
+      - INTERNAL_LLM_MODEL=${INTERNAL_LLM_MODEL:-openrouter/openai/gpt-4o-mini}
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      # Bifrost is optional — start with: docker compose --profile bifrost up
+      # When the bifrost profile is active, mcp-server will wait for it via
+      # the CERID_USE_BIFROST env var check in main.py, not via depends_on.
+    networks:
+      - llm-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 6G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8888/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ──────────────────────────────────────────────
+  # Layer 4: Frontend
+  # ──────────────────────────────────────────────
+
+  cerid-web:
+    container_name: cerid-web
+    build:
+      context: ./src/web
+      dockerfile: Dockerfile
+    ports:
+      - "${CERID_BIND_ADDR:-127.0.0.1}:${CERID_PORT_GUI:-3000}:80"
+    environment:
+      - VITE_MCP_URL=${VITE_MCP_URL:-/api/mcp}
+    depends_on:
+      mcp-server:
+        condition: service_healthy
+    networks:
+      - llm-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 256M
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ──────────────────────────────────────────────
+  # Optional: Local LLM (Ollama Add-On)
+  # ──────────────────────────────────────────────
+  # Activated via: OLLAMA_ENABLED=true in .env (set by start-cerid.sh prompt)
+  # Start with: docker compose --profile ollama up -d
+  # macOS Apple Silicon: runs natively (not in Docker) for Metal acceleration
+
+  ollama:
+    container_name: cerid-ollama
+    image: ${CERID_OLLAMA_IMAGE:-ollama/ollama:latest}
+    profiles: ["ollama"]
+    ports:
+      - "${CERID_BIND_ADDR:-127.0.0.1}:11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    networks:
+      - llm-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 4G
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+networks:
+  llm-network:
+    driver: bridge
+
+volumes:
+  ollama-data:

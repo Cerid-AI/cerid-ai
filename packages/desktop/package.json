@@ -1,0 +1,73 @@
+{
+  "name": "cerid-desktop",
+  "version": "0.80.0",
+  "description": "Cerid AI Desktop — Personal AI Knowledge Companion",
+  "main": "out/main/main.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "package:mac": "electron-builder --mac",
+    "package:win": "electron-builder --win",
+    "typecheck": "tsc --noEmit"
+  },
+  "build": {
+    "appId": "ai.cerid.desktop",
+    "productName": "Cerid AI",
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        { "target": "dmg", "arch": ["universal"] }
+      ],
+      "icon": "resources/icon.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "resources/entitlements.mac.plist",
+      "entitlementsInherit": "resources/entitlements.mac.plist",
+      "notarize": false
+    },
+    "dmg": {
+      "background": "resources/dmg-background.png",
+      "iconSize": 80,
+      "iconTextSize": 12,
+      "contents": [
+        { "x": 130, "y": 220 },
+        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+      ]
+    },
+    "afterSign": "scripts/notarize.js",
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "resources/icon.ico"
+    },
+    "files": [
+      "out/**/*"
+    ],
+    "extraResources": [
+      "resources/**",
+      { "from": "../../src/web/dist", "to": "web", "filter": ["**/*"] }
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "Cerid-AI",
+      "repo": "cerid-ai"
+    }
+  },
+  "devDependencies": {
+    "@electron/notarize": "^2.5.0",
+    "@types/dockerode": "^4.0.1",
+    "@types/node": "^22.0.0",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0",
+    "electron-vite": "^3.0.0",
+    "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "dockerode": "^4.0.0",
+    "electron-updater": "^6.3.0"
+  }
+}
