@@ -37,7 +37,7 @@ async def list_templates():
     return {"templates": _list()}
 
 
-@router.post("/custom-agents/from-template/{template_id}", status_code=201)
+@router.post("/custom-agents/from-template/{template_id}", status_code=201, response_model=AgentDefinition)
 async def create_from_template(
     template_id: str,
     overrides: AgentCreateRequest | None = None,
@@ -97,7 +97,7 @@ async def list_agents(
     )
 
 
-@router.post("/custom-agents", status_code=201)
+@router.post("/custom-agents", status_code=201, response_model=AgentDefinition)
 async def create_agent(body: AgentCreateRequest):
     """Create a new custom agent from scratch."""
     from db.neo4j.agents import create_agent as _create
@@ -107,7 +107,7 @@ async def create_agent(body: AgentCreateRequest):
     return agent
 
 
-@router.get("/custom-agents/{agent_id}")
+@router.get("/custom-agents/{agent_id}", response_model=AgentDefinition)
 async def get_agent(agent_id: str):
     """Retrieve a single custom agent by ID."""
     from db.neo4j.agents import get_agent as _get
@@ -119,7 +119,7 @@ async def get_agent(agent_id: str):
     return agent
 
 
-@router.patch("/custom-agents/{agent_id}")
+@router.patch("/custom-agents/{agent_id}", response_model=AgentDefinition)
 async def update_agent(agent_id: str, body: AgentUpdateRequest):
     """Partially update a custom agent (PATCH semantics)."""
     from db.neo4j.agents import update_agent as _update
