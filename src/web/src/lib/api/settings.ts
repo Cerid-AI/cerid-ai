@@ -232,7 +232,7 @@ export async function fetchSystemCheck(): Promise<SystemCheckResponse> {
 // ---------------------------------------------------------------------------
 
 export async function fetchOpenRouterCredits(): Promise<import("../types").OpenRouterCredits> {
-  const res = await fetch(`${MCP_BASE}/providers/openrouter/credits`, {
+  const res = await fetch(`${MCP_BASE}/providers/credits`, {
     headers: mcpHeaders(),
   })
   if (!res.ok) return { available: false, error: `HTTP ${res.status}` }
@@ -403,10 +403,10 @@ export async function deleteAutomation(id: string): Promise<void> {
 }
 
 export async function toggleAutomation(id: string, enabled: boolean): Promise<void> {
-  const res = await fetch(`${MCP_BASE}/automations/${id}/toggle`, {
+  const action = enabled ? "enable" : "disable"
+  const res = await fetch(`${MCP_BASE}/automations/${id}/${action}`, {
     method: "POST",
-    headers: mcpHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ enabled }),
+    headers: mcpHeaders(),
   })
   if (!res.ok) throw new Error(await extractError(res, `Toggle automation failed: ${res.status}`))
 }

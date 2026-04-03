@@ -105,10 +105,6 @@ class ChatRequest(BaseModel):
     cost_sensitivity: str = "medium"  # "low", "medium", "high"
 
 
-class CompressRequest(BaseModel):
-    messages: list[_ChatMessage]
-    target_tokens: int = 4000
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -407,22 +403,3 @@ async def chat_stream(req: ChatRequest, request: Request):
     )
 
 
-@router.post("/chat/compress")
-async def compress_context(req: CompressRequest):
-    """Compress conversation history to fit a target token budget."""
-    from utils.context_compression import (
-        _estimate_messages_tokens,
-        compress_history,
-    )
-
-    raw_messages = [{"role": m.role, "content": m.content} for m in req.messages]
-    original_tokens = _estimate_messages_tokens(raw_messages)
-
-    compressed = await compress_history(raw_messages, req.target_tokens)
-    compressed_tokens = _estimate_messages_tokens(compressed)
-
-    return {
-        "compressed_messages": compressed,
-        "original_tokens": original_tokens,
-        "compressed_tokens": compressed_tokens,
-    }
