@@ -78,6 +78,13 @@ export function DegradationBanner() {
   const [showRecoveryToast, setShowRecoveryToast] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [dismissedTier, setDismissedTier] = useState<string | null>(() => {
+    try {
+      return sessionStorage.getItem(DISMISS_KEY)
+    } catch {
+      return null
+    }
+  })
   const recoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const prevTierRef = useRef<DegradationTier | null>(null)
   const degradedSinceRef = useRef<number | null>(null)
@@ -135,14 +142,6 @@ export function DegradationBanner() {
       if (recoveryTimerRef.current) clearTimeout(recoveryTimerRef.current)
     }
   }, [tier])
-
-  const [dismissedTier, setDismissedTier] = useState<string | null>(() => {
-    try {
-      return sessionStorage.getItem(DISMISS_KEY)
-    } catch {
-      return null
-    }
-  })
 
   const handleDismiss = useCallback(() => {
     if (tier && tier !== "full") {

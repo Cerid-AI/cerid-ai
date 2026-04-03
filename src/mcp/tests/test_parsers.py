@@ -69,23 +69,23 @@ class TestParserRegistry:
         f = tmp_path / "test.txt"
         f.write_text("Hello, world!")
         result = parse_file(str(f))
-        assert "Hello" in result
+        assert "Hello" in result["text"]
 
     def test_parse_file_json(self, tmp_path):
         """Parsing a .json file should return stringified content."""
         f = tmp_path / "test.json"
         f.write_text(json.dumps({"key": "value"}))
         result = parse_file(str(f))
-        assert "key" in result
-        assert "value" in result
+        assert "key" in result["text"]
+        assert "value" in result["text"]
 
     def test_parse_file_csv(self, tmp_path):
         """Parsing a .csv file should return readable content."""
         f = tmp_path / "test.csv"
         f.write_text("name,age\nAlice,30\nBob,25\n")
         result = parse_file(str(f))
-        assert "Alice" in result
-        assert "Bob" in result
+        assert "Alice" in result["text"]
+        assert "Bob" in result["text"]
 
     def test_parse_file_unknown_extension(self, tmp_path):
         """Unknown file types should either fall back to text or raise."""
@@ -99,9 +99,9 @@ class TestParserRegistry:
             pass  # Expected for unsupported formats
 
     def test_register_parser_custom(self):
-        """Custom parsers can be registered via register_parser."""
+        """Custom parsers can be registered via register_parser decorator."""
+        @register_parser([".myext"])
         def my_parser(path):
-            return "custom parsed"
+            return {"text": "custom parsed", "file_type": "myext", "page_count": None}
 
-        register_parser(".myext", my_parser)
         assert ".myext" in PARSER_REGISTRY
