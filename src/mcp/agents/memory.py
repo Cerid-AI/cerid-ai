@@ -107,6 +107,12 @@ async def extract_memories(
     except (httpx.HTTPStatusError, json.JSONDecodeError, KeyError) as e:
         logger.warning("Memory extraction LLM call failed: %s", e)
         return []
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Memory extraction failed unexpectedly: %s", e)
+        return []
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Memory extraction failed unexpectedly: %s", e)
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -159,8 +165,8 @@ async def extract_and_store_memories(
                 classify_memory,
                 mark_superseded,
             )
-    except ImportError:
-        pass
+    except ImportError as _imp_err:
+        logger.debug("Memory consolidation module unavailable: %s", _imp_err)
 
     results = []
     stored_count = 0
@@ -567,8 +573,8 @@ async def recall_memories(
                 )
                 for record in records:
                     access_logs[record["id"]] = record["access_log"]
-        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
-            pass  # Graceful fallback to raw access_count from ChromaDB
+        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as _access_log_err:
+            logger.debug("Neo4j access log fetch skipped, falling back to raw access_count: %s", _access_log_err)
 
     now = utcnow()
     scored_memories: list[dict] = []

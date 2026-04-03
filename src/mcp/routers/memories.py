@@ -281,8 +281,8 @@ async def extract_memories_endpoint(req: MemoryExtractRequest, request: Request)
                 "note": "Private mode active — memory extraction skipped",
                 "private_mode": True,
             }
-    except (ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
-        pass
+    except (ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as _pm_err:
+        logger.debug("Private mode check skipped: %s", _pm_err)
 
     try:
         # Build the response text from messages (assistant messages are the

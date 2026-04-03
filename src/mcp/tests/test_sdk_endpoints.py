@@ -91,7 +91,7 @@ class TestSDKHallucination:
             "/sdk/v1/hallucination",
             json={
                 "response_text": "Python uses a GIL for thread safety.",
-                "query": "How does Python handle threads?",
+                "conversation_id": "conv-100",
             },
         )
         assert resp.status_code == 200
@@ -113,7 +113,7 @@ class TestSDKHallucination:
             "/sdk/v1/hallucination",
             json={
                 "response_text": "Redis uses port 6380 by default.",
-                "context": "Redis configuration",
+                "conversation_id": "conv-101",
             },
         )
         assert resp.status_code == 200
@@ -140,7 +140,7 @@ class TestSDKMemoryExtract:
         resp = client.post(
             "/sdk/v1/memory/extract",
             json={
-                "text": "We use PostgreSQL 16 and Redis 7 for caching.",
+                "response_text": "We use PostgreSQL 16 and Redis 7 for caching.",
                 "conversation_id": "conv-42",
             },
         )
@@ -160,7 +160,7 @@ class TestSDKMemoryExtract:
         client = TestClient(_make_app())
         resp = client.post(
             "/sdk/v1/memory/extract",
-            json={"text": "Hello, how are you?", "conversation_id": "conv-43"},
+            json={"response_text": "Hello, how are you?", "conversation_id": "conv-43"},
         )
         assert resp.status_code == 200
         assert resp.json()["memories_extracted"] == 0
