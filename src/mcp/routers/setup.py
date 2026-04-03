@@ -67,6 +67,7 @@ class SetupStatus(BaseModel):
     setup_required: bool
     missing_keys: list[str]
     optional_keys: list[str]
+    configured_providers: list[str]
     services: dict[str, str]
 
 
@@ -127,6 +128,22 @@ def _is_configured() -> bool:
 
 def _missing_keys() -> list[str]:
     return [k for k in _REQUIRED_KEYS if not os.environ.get(k, "").strip()]
+
+
+_KEY_TO_PROVIDER = {
+    "OPENROUTER_API_KEY": "openrouter",
+    "OPENAI_API_KEY": "openai",
+    "ANTHROPIC_API_KEY": "anthropic",
+    "XAI_API_KEY": "xai",
+}
+
+
+def _configured_providers() -> list[str]:
+    """Return provider IDs whose API keys are set in the environment."""
+    return [
+        pid for key, pid in _KEY_TO_PROVIDER.items()
+        if os.environ.get(key, "").strip()
+    ]
 
 
 async def _check_service(name: str, url: str, timeout: float = 2.0) -> str:
@@ -243,6 +260,7 @@ async def setup_status() -> SetupStatus:
         setup_required=not _is_configured(),
         missing_keys=_missing_keys(),
         optional_keys=_OPTIONAL_KEYS,
+        configured_providers=_configured_providers(),
         services=services,
     )
 
@@ -372,7 +390,9 @@ async def setup_health() -> dict:
     except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
         services.append({"name": "verification_pipeline", "status": "unavailable", "port": 0})
 
-    all_healthy = all(s["status"] in ("healthy", "connected") for s in services)
+    _OPTIONAL_SERVICES = {"bifrost", "verification_pipeline"}
+    required = [s for s in services if s["name"] not in _OPTIONAL_SERVICES]
+    all_healthy = all(s["status"] in ("healthy", "connected") for s in required)
     return {
         "all_healthy": all_healthy,
         "services": services,
