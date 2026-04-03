@@ -250,14 +250,30 @@ async def setup_status() -> SetupStatus:
 @router.get("/system-check", response_model=SystemCheckResponse)
 async def system_check() -> SystemCheckResponse:
     """Detect host capabilities for the setup wizard."""
-    # RAM detection (works on macOS/Linux without psutil)
+    # RAM detection — prefer /proc/meminfo (reports host RAM even inside Docker)
+    # because os.sysconf reports cgroup-limited memory in containers.
+    ram_gb = 0.0
     try:
-        ram_gb = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / (1024**3)
-    except OSError:
-        ram_gb = 0.0
+        meminfo = Path("/proc/meminfo").read_text()
+        for line in meminfo.splitlines():
+            if line.startswith("MemTotal:"):
+                ram_kb = int(line.split()[1])
+                ram_gb = ram_kb / (1024**2)
+                break
+    except (OSError, ValueError):
+        pass
+    if ram_gb == 0.0:
+        try:
+            ram_gb = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / (1024**3)
+        except OSError:
+            pass
 
-    # Docker detection (socket or binary on PATH)
-    docker_running = Path("/var/run/docker.sock").exists() or shutil.which("docker") is not None
+    # Docker detection: running inside a container, socket mounted, or binary on PATH
+    docker_running = (
+        Path("/.dockerenv").exists()
+        or Path("/var/run/docker.sock").exists()
+        or shutil.which("docker") is not None
+    )
 
     # .env file scan
     env_exists = _ENV_FILE.exists()

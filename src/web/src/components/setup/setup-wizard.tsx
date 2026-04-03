@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useReducer, useCallback, useEffect, useRef, useState, useMemo } from "react"
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import {
   Sparkles, Key, CheckCircle2, Activity,
@@ -17,7 +17,7 @@ import { OllamaStep } from "@/components/setup/ollama-step"
 import { FirstDocumentStep } from "@/components/setup/first-document-step"
 import { ModeSelectionStep } from "@/components/setup/mode-selection-step"
 import { StepIndicator, type StepDef } from "@/components/setup/step-indicator"
-import { applySetupConfig, fetchProviderCredits } from "@/lib/api"
+import { applySetupConfig, fetchProviderCredits, fetchSetupStatus } from "@/lib/api"
 import { useUIMode } from "@/contexts/ui-mode-context"
 import { assessCapabilities, fromWizardState, CAPABILITY_STATUS_DOT, COST_PROFILE_LABELS } from "@/lib/provider-capabilities"
 import type { CapabilityAssessment, Warning as ProviderWarning } from "@/lib/provider-capabilities"
@@ -258,6 +258,33 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
     }
   }, [])
 
+  // Detect pre-configured keys from backend (e.g. already in .env)
+  useEffect(() => {
+    fetchSetupStatus()
+      .then((status) => {
+        if (status.configured && status.missing_keys.length === 0) {
+          // OpenRouter is configured — mark as valid so user can proceed
+          dispatch({ type: "SET_KEY", provider: "openrouter", key: "(configured)", valid: true })
+          // Check which optional keys are NOT in the optional_keys list (meaning they're set)
+          const optionalProviders = ["openai", "anthropic", "xai"]
+          const optionalKeyNames: Record<string, string> = {
+            openai: "OPENAI_API_KEY",
+            anthropic: "ANTHROPIC_API_KEY",
+            xai: "XAI_API_KEY",
+          }
+          for (const p of optionalProviders) {
+            if (!status.optional_keys.includes(optionalKeyNames[p])) {
+              dispatch({ type: "SET_KEY", provider: p, key: "(configured)", valid: true })
+            }
+          }
+          fetchProviderCredits()
+            .then((c) => dispatch({ type: "SET_CREDITS", credits: c }))
+            .catch(() => {})
+        }
+      })
+      .catch(() => {})
+  }, [])
+
   // Save progress when step changes
   useEffect(() => {
     if (state.step > 0) saveProgress(state)
@@ -373,13 +400,16 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   return (
     <Dialog open={open} onOpenChange={() => {}}>
       <DialogContent
-        className="max-w-xl gap-0 p-0 [&>button]:hidden"
+        className="max-w-xl gap-0 overflow-hidden p-0 [&>button]:hidden flex flex-col max-h-[85vh]"
         onPointerDownOutside={(e) => e.preventDefault()}
         onEscapeKeyDown={(e) => e.preventDefault()}
       >
         <DialogTitle className="sr-only">Cerid AI Setup</DialogTitle>
+        <DialogDescription className="sr-only">
+          Setup wizard to configure API keys, knowledge base, and local services.
+        </DialogDescription>
 
-        <div className="max-h-[80vh] overflow-y-auto p-6">
+        <div className="min-h-0 flex-1 overflow-y-auto p-6">
           {/* Resume prompt */}
           {showResumePrompt && (
             <div className="space-y-3 text-center">
@@ -410,31 +440,31 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
               <h3 className="mb-2 text-center text-lg font-semibold">
                 Welcome to Cerid AI
               </h3>
-              <div className="space-y-3 text-center">
-                <p className="text-sm text-muted-foreground">
+              <div className="space-y-3">
+                <p className="text-center text-sm text-muted-foreground">
                   Your personal AI knowledge companion. Cerid connects your documents to
                   powerful language models with RAG-powered retrieval, intelligent agents,
                   and built-in verification — all running locally on your machine.
                 </p>
-                <div className="mx-auto flex max-w-xs flex-col gap-2 text-left text-xs text-muted-foreground">
+                <div className="mx-auto flex max-w-sm flex-col gap-2 text-left text-xs text-muted-foreground">
                   <div className="flex items-start gap-2">
-                    <span className="mt-0.5 text-brand">✦</span>
+                    <span className="mt-0.5 shrink-0 text-brand">✦</span>
                     <span>Chat with AI grounded in your own documents and notes</span>
                   </div>
                   <div className="flex items-start gap-2">
-                    <span className="mt-0.5 text-brand">✦</span>
+                    <span className="mt-0.5 shrink-0 text-brand">✦</span>
                     <span>Multi-domain knowledge base with smart query routing</span>
                   </div>
                   <div className="flex items-start gap-2">
-                    <span className="mt-0.5 text-brand">✦</span>
+                    <span className="mt-0.5 shrink-0 text-brand">✦</span>
                     <span>Verify every AI response against your source documents</span>
                   </div>
                   <div className="flex items-start gap-2">
-                    <span className="mt-0.5 text-brand">✦</span>
+                    <span className="mt-0.5 shrink-0 text-brand">✦</span>
                     <span>Privacy-first — your data never leaves your machine</span>
                   </div>
                 </div>
-                <p className="text-xs text-muted-foreground/70">
+                <p className="text-center text-xs text-muted-foreground/70">
                   This wizard will walk you through connecting an LLM provider,
                   configuring your knowledge base, and ingesting your first document.
                 </p>
@@ -462,6 +492,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                   provider="openrouter"
                   label="OpenRouter API Key"
                   required
+                  preconfigured={state.keys.openrouter.key === "(configured)"}
                   placeholder="sk-or-v1-..."
                   helpUrl="https://openrouter.ai/keys"
                   onKeyValidated={handleKeyValidated("openrouter")}
@@ -507,6 +538,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                     <ApiKeyInput
                       provider="openai"
                       label="OpenAI API Key"
+                      preconfigured={state.keys.openai.key === "(configured)"}
                       placeholder="sk-proj-..."
                       helpUrl="https://platform.openai.com/api-keys"
                       onKeyValidated={handleKeyValidated("openai")}
@@ -514,6 +546,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                     <ApiKeyInput
                       provider="anthropic"
                       label="Anthropic API Key"
+                      preconfigured={state.keys.anthropic.key === "(configured)"}
                       placeholder="sk-ant-api03-..."
                       helpUrl="https://console.anthropic.com/settings/keys"
                       onKeyValidated={handleKeyValidated("anthropic")}
@@ -521,6 +554,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                     <ApiKeyInput
                       provider="xai"
                       label="xAI (Grok) API Key"
+                      preconfigured={state.keys.xai.key === "(configured)"}
                       placeholder="xai-..."
                       helpUrl="https://console.x.ai/api-keys"
                       onKeyValidated={handleKeyValidated("xai")}
@@ -691,14 +725,8 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
 
         {/* Footer */}
         {!showResumePrompt && (
-          <div className="flex items-center justify-between border-t px-6 py-3">
-            <StepIndicator
-              steps={STEP_DEFS}
-              currentStep={state.step}
-              skippedSteps={state.skippedSteps}
-            />
-
-            <div className="flex gap-2">
+          <div className="shrink-0 border-t px-6 pb-5 pt-3 space-y-2">
+            <div className="flex items-center justify-end gap-2">
               {/* Back button (not on welcome or health) */}
               {state.step > 0 && state.step !== 5 && (
                 <Button variant="ghost" size="sm" onClick={goBack}>
@@ -779,6 +807,12 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                 </Button>
               )}
             </div>
+
+            <StepIndicator
+              steps={STEP_DEFS}
+              currentStep={state.step}
+              skippedSteps={state.skippedSteps}
+            />
           </div>
         )}
       </DialogContent>
