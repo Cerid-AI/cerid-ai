@@ -1,9 +1,7 @@
 # Copyright (c) 2026 Cerid AI. Apache-2.0 license.
 """Tests for ConnectorPlugin — data source registration via plugins."""
 
-from unittest.mock import AsyncMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from plugins.base import ConnectorPlugin
 from utils.data_sources.base import DataSource, DataSourceRegistry, DataSourceResult
@@ -89,13 +87,9 @@ class TestConnectorPlugin:
         reg = DataSourceRegistry()
         plugin = StubConnectorPlugin()
 
-        # Patch the registry import inside plugins.base so register() targets our test registry
-        with patch("plugins.base.registry", reg):
-            # Call the real register() inherited from ConnectorPlugin
-            from plugins.base import ConnectorPlugin as _CP
-            # Manually invoke the base register logic
-            source = plugin.get_data_source()
-            reg.register(source)
+        # Patch the module-level registry that plugins.base imports at call time
+        with patch("utils.data_sources.registry", reg):
+            plugin.register()
 
         sources = reg.list_sources()
         assert any(s["name"] == "stub" for s in sources)

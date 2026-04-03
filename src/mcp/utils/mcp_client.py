@@ -184,6 +184,8 @@ class MCPClientManager:
 
     async def _connect_one(self, cfg: MCPServerConfig) -> Any:
         """Connect to a single MCP server and initialize the session."""
+        assert self._exit_stack is not None, "connect_all() must initialize _exit_stack first"
+
         try:
             from mcp import ClientSession, StdioServerParameters
         except ImportError:

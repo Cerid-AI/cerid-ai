@@ -48,7 +48,7 @@ class TestCeridClientConstruction:
         client = CeridClient(
             base_url="http://localhost:8888",
             client_id="my-app",
-            api_key="secret-key",
+            api_key="secret-key",  # pragma: allowlist secret
         )
         headers = client._build_headers()
         assert headers["X-API-Key"] == "secret-key"

@@ -118,6 +118,12 @@ class AsyncCircuitBreaker:
             remaining = self.recovery_timeout - (time.monotonic() - self._last_failure_time)
             raise CircuitOpenError(self.name, max(0, remaining))
 
+        # Materialise the HALF_OPEN virtual state so _on_success / _on_failure
+        # see the correct value (the property derives it from elapsed time but
+        # never writes _state).
+        if current_state == CircuitState.HALF_OPEN:
+            self._state = CircuitState.HALF_OPEN
+
         try:
             result = await fn(*args, **kwargs)
         except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
@@ -177,6 +183,9 @@ class AsyncCircuitBreaker:
         if current_state == CircuitState.OPEN:
             remaining = self.recovery_timeout - (time.monotonic() - self._last_failure_time)
             raise CircuitOpenError(self.name, max(0, remaining))
+
+        if current_state == CircuitState.HALF_OPEN:
+            self._state = CircuitState.HALF_OPEN
 
         try:
             result = fn(*args, **kwargs)
