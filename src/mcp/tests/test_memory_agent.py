@@ -64,7 +64,10 @@ class TestExtractMemories:
     @patch("agents.memory.call_internal_llm", new_callable=AsyncMock)
     async def test_llm_failure_returns_empty(self, mock_llm):
         """LLM failure should return empty list gracefully."""
-        mock_llm.side_effect = Exception("LLM unavailable")
+        async def _raise(*args, **kwargs):
+            raise Exception("LLM unavailable")  # noqa: TRY002
+
+        mock_llm.side_effect = _raise
 
         result = await extract_memories("x" * 200, "conv-123")
         assert result == []

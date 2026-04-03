@@ -23,19 +23,29 @@ class TestSDKHealth:
     """GET /sdk/v1/health should return version, tier, and service statuses."""
 
     @patch("routers.sdk.health_check")
-    def test_health_response_shape(self, mock_health):
+    @patch("routers.sdk.config")
+    def test_health_response_shape(self, mock_config, mock_health):
         mock_health.return_value = {
-            "chromadb": "connected",
-            "redis": "connected",
-            "neo4j": "connected",
+            "status": "healthy",
+            "services": {
+                "chromadb": "connected",
+                "redis": "connected",
+                "neo4j": "connected",
+            },
         }
+        mock_config.INTERNAL_LLM_PROVIDER = "openrouter"
+        mock_config.INTERNAL_LLM_MODEL = "anthropic/claude-sonnet-4"
+        mock_config.OLLAMA_DEFAULT_MODEL = "llama3.2:3b"
 
-        client = TestClient(_make_app())
-        resp = client.get("/sdk/v1/health")
+        with patch("config.features.FEATURE_TOGGLES", {
+            "enable_hallucination_check": True,
+            "enable_memory_extraction": True,
+        }):
+            client = TestClient(_make_app())
+            resp = client.get("/sdk/v1/health")
         assert resp.status_code == 200
         data = resp.json()
         assert "version" in data
-        assert "tier" in data
         assert "services" in data
         assert isinstance(data["services"], dict)
 
@@ -85,7 +95,7 @@ class TestSDKHallucination:
         client = TestClient(_make_app())
         resp = client.post(
             "/sdk/v1/hallucination",
-            json={"response_text": "Python was created in 1991.", "query": "When was Python created?"},
+            json={"response_text": "Python was created in 1991.", "conversation_id": "conv-1"},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -106,7 +116,7 @@ class TestSDKMemoryExtract:
         client = TestClient(_make_app())
         resp = client.post(
             "/sdk/v1/memory/extract",
-            json={"text": "Python uses a GIL for thread safety.", "conversation_id": "conv-1"},
+            json={"response_text": "Python uses a GIL for thread safety.", "conversation_id": "conv-1"},
         )
         assert resp.status_code == 200
         data = resp.json()

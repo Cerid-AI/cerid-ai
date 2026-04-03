@@ -33,6 +33,8 @@ from models.sdk import (
     SDKSettingsResponse,
     SDKTaxonomyResponse,
 )
+from config.features import FEATURE_FLAGS, FEATURE_TIER
+from config.taxonomy import DOMAINS, TAXONOMY
 from routers.agents import (
     AgentQueryRequest,
     HallucinationCheckRequest,
@@ -41,7 +43,10 @@ from routers.agents import (
     hallucination_check_endpoint,
     memory_extract_endpoint,
 )
-from routers.health import health_check
+from routers.health import degradation_status, health_check, list_collections
+from routers.plugins import list_plugins
+from routers.query import query_knowledge
+from services.ingestion import ingest_content, ingest_file
 
 router = APIRouter(prefix="/sdk/v1", tags=["SDK"])
 
@@ -137,8 +142,6 @@ def sdk_health():
     responses={422: _422, 503: _503},
 )
 def sdk_ingest(req: SDKIngestRequest, request: Request):
-    from services.ingestion import ingest_content
-
     client_id = request.headers.get("x-client-id", "sdk")
     result = ingest_content(
         content=req.content,
@@ -162,8 +165,6 @@ def sdk_ingest(req: SDKIngestRequest, request: Request):
     responses={422: _422, 503: _503},
 )
 async def sdk_ingest_file(req: SDKIngestFileRequest, request: Request):
-    from services.ingestion import ingest_file
-
     client_id = request.headers.get("x-client-id", "sdk")
     result = await ingest_file(
         file_path=req.file_path,
@@ -187,8 +188,6 @@ async def sdk_ingest_file(req: SDKIngestFileRequest, request: Request):
     description="List all knowledge base collections (one per domain).",
 )
 def sdk_collections():
-    from routers.health import list_collections
-
     result = list_collections()
     return SDKCollectionsResponse(
         collections=result.get("collections", []),
@@ -203,8 +202,6 @@ def sdk_collections():
     description="Get the domain taxonomy tree with sub-categories and tag vocabulary.",
 )
 def sdk_taxonomy():
-    from config.taxonomy import DOMAINS, TAXONOMY
-
     return SDKTaxonomyResponse(
         domains=list(DOMAINS),
         taxonomy=dict(TAXONOMY),
@@ -219,8 +216,6 @@ def sdk_taxonomy():
     "degradation tier, and uptime.",
 )
 def sdk_health_detailed():
-    from routers.health import degradation_status
-
     result = degradation_status()
     return result
 
@@ -232,8 +227,6 @@ def sdk_health_detailed():
     description="Read-only server configuration: version, tier, and feature flags.",
 )
 def sdk_settings():
-    from config.features import FEATURE_FLAGS, FEATURE_TIER
-
     return SDKSettingsResponse(
         version=_VERSION,
         tier=FEATURE_TIER,
@@ -250,8 +243,6 @@ def sdk_settings():
     responses={422: _422, 503: _503},
 )
 def sdk_search(req: SDKSearchRequest):
-    from routers.query import query_knowledge
-
     result = query_knowledge(query=req.query, domain=req.domain, top_k=req.top_k)
     return SDKSearchResponse(
         results=result.get("sources", []),
@@ -267,8 +258,6 @@ def sdk_search(req: SDKSearchRequest):
     description="List all loaded plugins with their status, tier, and capabilities.",
 )
 def sdk_plugins():
-    from routers.plugins import list_plugins
-
     result = list_plugins()
     plugins_dicts = [
         p.model_dump() if hasattr(p, "model_dump") else dict(p)

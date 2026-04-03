@@ -107,6 +107,9 @@ async def extract_memories(
     except (httpx.HTTPStatusError, json.JSONDecodeError, KeyError) as e:
         logger.warning("Memory extraction LLM call failed: %s", e)
         return []
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Memory extraction failed unexpectedly: %s", e)
+        return []
 
 
 # ---------------------------------------------------------------------------

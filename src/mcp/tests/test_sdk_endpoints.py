@@ -113,7 +113,7 @@ class TestSDKHallucination:
             "/sdk/v1/hallucination",
             json={
                 "response_text": "Redis uses port 6380 by default.",
-                "context": "Redis configuration",
+                "conversation_id": "conv-101",
             },
         )
         assert resp.status_code == 200
@@ -140,7 +140,7 @@ class TestSDKMemoryExtract:
         resp = client.post(
             "/sdk/v1/memory/extract",
             json={
-                "text": "We use PostgreSQL 16 and Redis 7 for caching.",
+                "response_text": "We use PostgreSQL 16 and Redis 7 for caching.",
                 "conversation_id": "conv-42",
             },
         )
@@ -160,7 +160,7 @@ class TestSDKMemoryExtract:
         client = TestClient(_make_app())
         resp = client.post(
             "/sdk/v1/memory/extract",
-            json={"text": "Hello, how are you?", "conversation_id": "conv-43"},
+            json={"response_text": "Hello, how are you?", "conversation_id": "conv-43"},
         )
         assert resp.status_code == 200
         assert resp.json()["memories_extracted"] == 0
@@ -190,7 +190,7 @@ class TestSDKHealth:
         mock_config.INTERNAL_LLM_MODEL = "anthropic/claude-sonnet-4"
         mock_config.OLLAMA_DEFAULT_MODEL = "llama3.2:3b"
 
-        with patch("routers.sdk.config.features.FEATURE_TOGGLES", {
+        with patch("config.features.FEATURE_TOGGLES", {
             "enable_hallucination_check": True,
             "enable_feedback_loop": True,
             "enable_self_rag": True,
@@ -218,7 +218,7 @@ class TestSDKHealth:
         mock_config.INTERNAL_LLM_MODEL = ""
         mock_config.OLLAMA_DEFAULT_MODEL = "llama3.2:3b"
 
-        with patch("routers.sdk.config.features.FEATURE_TOGGLES", {}):
+        with patch("config.features.FEATURE_TOGGLES", {}):
             client = TestClient(_make_app())
             resp = client.get("/sdk/v1/health")
 
