@@ -68,8 +68,8 @@ services:
     volumes:
       - ./data/redis:/data
     environment:
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-cerid-dev}
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-cerid-dev} --maxmemory 1gb --maxmemory-policy allkeys-lru
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env} --maxmemory 1gb --maxmemory-policy allkeys-lru
     networks:
       - llm-network
     restart: unless-stopped
