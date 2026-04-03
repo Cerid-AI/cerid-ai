@@ -498,6 +498,10 @@ app.include_router(ollama_proxy.router, prefix="/api/v1")
 # SDK router — stable external contract (manages its own /sdk/v1/ prefix)
 app.include_router(sdk.router)
 
+# SDK OpenAPI spec — isolated spec for /sdk/v1/ endpoints only
+from routers import sdk_openapi  # noqa: E402
+app.include_router(sdk_openapi.router)
+
 # A2A router — Agent Card at /.well-known/agent.json, tasks at /a2a/* (no prefix)
 app.include_router(a2a.router)
 
