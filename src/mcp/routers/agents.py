@@ -15,6 +15,21 @@ from pydantic import BaseModel, Field
 import config
 from deps import get_chroma, get_neo4j, get_redis
 from errors import CeridError
+from models.agents_response import (
+    AgentQueryResponse,
+    CompressResponse,
+    HallucinationCheckResponse,
+    HallucinationReport,
+    MemoryArchiveResponse,
+    MemoryExtractionResponse,
+    MemoryRecallResponse,
+    StatusResponse,
+    TradingResponse,
+    TriageBatchResponse,
+    TriageResponse,
+    VerificationReportResponse,
+    VerificationSaveResponse,
+)
 from models.trading import (
     CascadeConfirmRequest,
     HerdDetectRequest,
@@ -151,7 +166,7 @@ async def stream_agent_activity(request: Request):
     )
 
 
-@router.post("/chat/compress")
+@router.post("/chat/compress", response_model=CompressResponse)
 async def compress_history_endpoint(req: CompressRequest):
     """Compress conversation history to fit a target token budget.
 
@@ -193,7 +208,7 @@ async def compress_history_endpoint(req: CompressRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/agent/query")
+@router.post("/agent/query", response_model=AgentQueryResponse)
 async def agent_query_endpoint(req: AgentQueryRequest, request: Request):
     # Private mode: level >= 2 skips KB context injection (return empty context)
     client_id = request.headers.get("X-Client-ID", "unknown")
@@ -299,7 +314,7 @@ async def agent_query_endpoint(req: AgentQueryRequest, request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/agent/triage")
+@router.post("/agent/triage", response_model=TriageResponse)
 async def triage_file_endpoint(req: TriageFileRequest):
     try:
         validate_file_path(req.file_path)
@@ -333,7 +348,7 @@ async def triage_file_endpoint(req: TriageFileRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/agent/triage/batch")
+@router.post("/agent/triage/batch", response_model=TriageBatchResponse)
 async def triage_batch_endpoint(req: TriageBatchRequest):
     try:
         from agents.triage import triage_batch
@@ -380,7 +395,7 @@ async def triage_batch_endpoint(req: TriageBatchRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/agent/hallucination")
+@router.post("/agent/hallucination", response_model=HallucinationCheckResponse)
 async def hallucination_check_endpoint(req: HallucinationCheckRequest):
     try:
         from agents.hallucination import check_hallucinations
@@ -398,7 +413,7 @@ async def hallucination_check_endpoint(req: HallucinationCheckRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/agent/hallucination/{conversation_id}")
+@router.get("/agent/hallucination/{conversation_id}", response_model=HallucinationReport)
 async def hallucination_report_endpoint(conversation_id: str):
     try:
         from agents.hallucination import get_hallucination_report
@@ -419,7 +434,7 @@ class ClaimFeedbackRequest(BaseModel):
     correct: bool
 
 
-@router.post("/agent/hallucination/feedback")
+@router.post("/agent/hallucination/feedback", response_model=StatusResponse)
 async def claim_feedback_endpoint(req: ClaimFeedbackRequest):
     """Record user feedback on a verification claim."""
     try:
@@ -454,7 +469,7 @@ async def claim_feedback_endpoint(req: ClaimFeedbackRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/agent/memory/recall")
+@router.post("/agent/memory/recall", response_model=MemoryRecallResponse)
 async def memory_recall_endpoint(req: MemoryRecallRequest):
     """Recall relevant memories with salience-aware scoring.
 
@@ -496,7 +511,7 @@ async def memory_recall_endpoint(req: MemoryRecallRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/agent/memory/extract")
+@router.post("/agent/memory/extract", response_model=MemoryExtractionResponse)
 async def memory_extract_endpoint(req: MemoryExtractionRequest):
     try:
         from agents.memory import extract_and_store_memories
@@ -513,7 +528,7 @@ async def memory_extract_endpoint(req: MemoryExtractionRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/agent/memory/archive")
+@router.post("/agent/memory/archive", response_model=MemoryArchiveResponse)
 async def memory_archive_endpoint(req: MemoryArchiveRequest):
     try:
         from agents.memory import archive_old_memories
@@ -703,7 +718,7 @@ class SaveVerificationRequest(BaseModel):
     total: int = 0
 
 
-@router.post("/verification/save")
+@router.post("/verification/save", response_model=VerificationSaveResponse)
 async def save_verification_report(req: SaveVerificationRequest):
     """Persist a verification report to Neo4j for long-term storage."""
     from db.neo4j.artifacts import save_verification_report as _save
@@ -725,7 +740,7 @@ async def save_verification_report(req: SaveVerificationRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/verification/{conversation_id}")
+@router.get("/verification/{conversation_id}", response_model=VerificationReportResponse)
 async def get_verification_report(conversation_id: str):
     """Retrieve a saved verification report by conversation ID."""
     from db.neo4j.artifacts import get_verification_report as _get
@@ -828,7 +843,7 @@ async def curate_estimate_endpoint(req: CurateEstimateRequest):
 # Trading agent endpoints (cerid-trading-agent KB enrichment)
 # ---------------------------------------------------------------------------
 
-@router.post("/agent/trading/signal")
+@router.post("/agent/trading/signal", response_model=TradingResponse)
 async def trading_signal_endpoint(req: TradingSignalRequest):
     """Enrich a trading signal with KB context."""
     try:
@@ -846,7 +861,7 @@ async def trading_signal_endpoint(req: TradingSignalRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/agent/trading/herd-detect")
+@router.post("/agent/trading/herd-detect", response_model=TradingResponse)
 async def trading_herd_detect_endpoint(req: HerdDetectRequest):
     """Detect herd behavior via correlation graph violations."""
     try:
@@ -861,7 +876,7 @@ async def trading_herd_detect_endpoint(req: HerdDetectRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/agent/trading/kelly-size")
+@router.post("/agent/trading/kelly-size", response_model=TradingResponse)
 async def trading_kelly_size_endpoint(req: KellySizeRequest):
     """Query historical CV_edge for Kelly sizing."""
     try:
@@ -877,7 +892,7 @@ async def trading_kelly_size_endpoint(req: KellySizeRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/agent/trading/cascade-confirm")
+@router.post("/agent/trading/cascade-confirm", response_model=TradingResponse)
 async def trading_cascade_confirm_endpoint(req: CascadeConfirmRequest):
     """Confirm cascade pattern against historical data."""
     try:
@@ -892,7 +907,7 @@ async def trading_cascade_confirm_endpoint(req: CascadeConfirmRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/agent/trading/longshot-surface")
+@router.post("/agent/trading/longshot-surface", response_model=TradingResponse)
 async def trading_longshot_surface_endpoint(req: LongshotSurfaceRequest):
     """Query stored calibration surface from Neo4j."""
     try:

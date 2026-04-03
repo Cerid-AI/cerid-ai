@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 import config
 from deps import get_chroma
 from errors import RetrievalError
+from models.query import QueryResponse
 from utils.time import utcnow_iso
 
 router = APIRouter()
@@ -102,7 +103,7 @@ class QueryRequest(BaseModel):
     top_k: int = Field(3, ge=1, le=100)
 
 
-@router.post("/query")
+@router.post("/query", response_model=QueryResponse)
 async def query_endpoint(req: QueryRequest, request: Request):
     import asyncio
 

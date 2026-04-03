@@ -11,6 +11,11 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 
 import config
+from models.user_state import (
+    ConversationBulkSaveResponse,
+    ConversationSaveResponse,
+    UserStateSummary,
+)
 from sync.user_state import (
     delete_conversation,
     read_conversation,
@@ -30,7 +35,7 @@ def _sync_dir() -> str:
     return config.SYNC_DIR
 
 
-@router.get("")
+@router.get("", response_model=UserStateSummary)
 def get_user_state_summary():
     """Return a summary of user state: settings, preferences, conversation IDs."""
     sd = _sync_dir()
@@ -67,7 +72,7 @@ def get_conversation(conv_id: str):
     return data
 
 
-@router.post("/conversations")
+@router.post("/conversations", response_model=ConversationSaveResponse)
 def save_conversation(body: dict[str, Any], request: Request):
     """Save a single conversation. Body must contain an 'id' field.
 
@@ -91,7 +96,7 @@ def save_conversation(body: dict[str, Any], request: Request):
     return {"saved": body["id"]}
 
 
-@router.post("/conversations/bulk")
+@router.post("/conversations/bulk", response_model=ConversationBulkSaveResponse)
 def save_conversations_bulk(body: list[dict[str, Any]], request: Request):
     """Save multiple conversations. Each dict must contain an 'id' field.
 
