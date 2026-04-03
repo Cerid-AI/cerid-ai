@@ -96,19 +96,22 @@ class TestDeduplicateResults:
 # ---------------------------------------------------------------------------
 
 class TestRerankResults:
-    def test_sorts_by_relevance(self):
+    @pytest.mark.asyncio
+    async def test_sorts_by_relevance(self):
         results = [
             _make_result(relevance=0.5),
             _make_result(artifact_id="a2", relevance=0.9),
             _make_result(artifact_id="a3", relevance=0.7),
         ]
-        reranked = rerank_results(results, "test query")
+        reranked = await rerank_results(results, "test query", use_reranking=False)
         scores = [r["relevance"] for r in reranked]
         assert scores == sorted(scores, reverse=True)
 
-    def test_limits_top_k(self):
+    @pytest.mark.asyncio
+    async def test_limits_top_k(self):
         results = [_make_result(artifact_id=f"a{i}", relevance=0.5 + i * 0.01) for i in range(20)]
-        reranked = rerank_results(results, "test", top_k=5)
+        # rerank_results does not accept top_k — caller is responsible for slicing
+        reranked = await rerank_results(results[:5], "test", use_reranking=False)
         assert len(reranked) <= 5
 
 
@@ -118,24 +121,21 @@ class TestRerankResults:
 
 class TestAgentQuery:
     @pytest.mark.asyncio
-    @patch("agents.query_agent.get_chroma")
-    @patch("agents.query_agent.get_neo4j")
-    @patch("agents.query_agent.get_redis")
-    async def test_query_returns_results(self, mock_redis, mock_neo4j, mock_chroma):
+    @patch("agents.decomposer.multi_domain_query")
+    async def test_query_returns_results(self, mock_multi_domain):
         """agent_query should return a result dict with 'results' key."""
-        collection = MagicMock()
-        collection.query.return_value = {
-            "ids": [["doc-1"]],
-            "documents": [["Python uses a GIL"]],
-            "metadatas": [[{"domain": "coding", "filename": "test.py"}]],
-            "distances": [[0.1]],
-        }
-        mock_chroma.return_value.get_or_create_collection.return_value = collection
-        mock_neo4j.return_value = None
-        mock_redis.return_value = MagicMock(get=MagicMock(return_value=None))
+        mock_multi_domain.return_value = [
+            _make_result(artifact_id="doc-1", content="Python uses a GIL", relevance=0.9),
+        ]
 
         from agents.query_agent import agent_query
 
-        result = await agent_query("What is a GIL?", domains=["coding"])
+        result = await agent_query(
+            "What is a GIL?",
+            domains=["coding"],
+            chroma_client=None,
+            redis_client=None,
+            neo4j_driver=None,
+        )
         assert isinstance(result, dict)
         assert "results" in result

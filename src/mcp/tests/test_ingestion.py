@@ -43,15 +43,17 @@ class TestValidateFilePath:
 # ---------------------------------------------------------------------------
 
 class TestIngestContent:
+    @patch("deps.get_redis")
     @patch("services.ingestion.get_redis")
     @patch("services.ingestion.get_neo4j")
     @patch("services.ingestion.get_chroma")
     @patch("services.ingestion.extract_metadata", new_callable=AsyncMock)
     @patch("services.ingestion.ai_categorize", new_callable=AsyncMock)
     def test_ingest_content_creates_artifact(
-        self, mock_categorize, mock_metadata, mock_chroma, mock_neo4j, mock_redis
+        self, mock_categorize, mock_metadata, mock_chroma, mock_neo4j, mock_redis, mock_deps_redis
     ):
         """ingest_content should create ChromaDB + Neo4j entries."""
+        mock_deps_redis.return_value = MagicMock()
         mock_categorize.return_value = {"domain": "coding", "keywords": []}
         mock_metadata.return_value = {"title": "Test", "summary": "A test doc"}
 

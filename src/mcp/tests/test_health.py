@@ -35,9 +35,9 @@ class TestHealthCheckFunction:
         mock_redis.return_value = MagicMock()
 
         result = health_check()
-        assert result["chromadb"] == "connected"
-        assert result["redis"] == "connected"
-        assert result["neo4j"] == "connected"
+        assert result["services"]["chromadb"] == "connected"
+        assert result["services"]["redis"] == "connected"
+        assert result["services"]["neo4j"] == "connected"
 
     @patch("routers.health.get_redis")
     @patch("routers.health.get_neo4j")
@@ -49,8 +49,8 @@ class TestHealthCheckFunction:
         mock_redis.return_value = MagicMock()
 
         result = health_check()
-        assert "error" in result["chromadb"]
-        assert result["redis"] == "connected"
+        assert "error" in result["services"]["chromadb"]
+        assert result["services"]["redis"] == "connected"
 
     @patch("routers.health.get_redis")
     @patch("routers.health.get_neo4j")
@@ -62,7 +62,7 @@ class TestHealthCheckFunction:
         mock_redis.return_value = MagicMock()
 
         result = health_check()
-        assert "disabled" in result["neo4j"] or "lightweight" in result["neo4j"]
+        assert "disabled" in result["services"]["neo4j"] or "lightweight" in result["services"]["neo4j"]
 
 
 class TestHealthEndpoints:
@@ -96,5 +96,5 @@ class TestHealthEndpoints:
         resp = client.get("/health")
         assert resp.status_code == 200
         data = resp.json()
-        assert "chromadb" in data
-        assert "redis" in data
+        assert "chromadb" in data["services"]
+        assert "redis" in data["services"]
