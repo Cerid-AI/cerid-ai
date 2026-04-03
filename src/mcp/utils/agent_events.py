@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from typing import Any
 
 logger = logging.getLogger("ai-companion.agent_events")
 
@@ -59,20 +60,20 @@ def get_recent_events(count: int = 50) -> list[dict]:
         entries = redis.xrevrange(STREAM_KEY, count=count)
         results = []
         for eid, fields in entries:
-            fields["id"] = eid
+            event: dict[str, Any] = {**fields, "id": eid}
             # Decode timestamp back to float for JSON serialization
-            if "timestamp" in fields:
+            if "timestamp" in event:
                 try:
-                    fields["timestamp"] = float(fields["timestamp"])
+                    event["timestamp"] = float(event["timestamp"])
                 except (ValueError, TypeError):
                     pass
             # Decode metadata JSON
-            if "metadata" in fields:
+            if "metadata" in event:
                 try:
-                    fields["metadata"] = json.loads(fields["metadata"])
+                    event["metadata"] = json.loads(event["metadata"])
                 except (json.JSONDecodeError, TypeError):
-                    fields["metadata"] = {}
-            results.append(fields)
+                    event["metadata"] = {}
+            results.append(event)
         return results
     except Exception as e:  # noqa: BLE001
         logger.debug("Failed to get recent agent events: %s", e)
