@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Build stage
-FROM node:22-alpine3.21 AS build
+FROM node:25-alpine3.21 AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
