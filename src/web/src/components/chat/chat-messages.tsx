@@ -8,6 +8,8 @@
 
 import { useRef, useEffect } from "react"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Button } from "@/components/ui/button"
+import { RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { MessageBubble, type MessageVerificationStatus } from "./message-bubble"
 import { ModelSwitchDivider } from "./model-switch-divider"
@@ -43,6 +45,8 @@ interface ChatMessagesProps {
   onClaimFocus?: (index: number) => void
   onArtifactClick: (artifactId: string) => void
   onSelectVerificationMsg?: (msgId: string | null) => void
+  /** Called when user clicks "Try again" on a failed assistant message. Receives the preceding user message content. */
+  onRetry?: (userContent: string) => void
 }
 
 export function ChatMessages({
@@ -58,6 +62,7 @@ export function ChatMessages({
   onClaimFocus,
   onArtifactClick,
   onSelectVerificationMsg,
+  onRetry,
 }: ChatMessagesProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -112,6 +117,15 @@ export function ChatMessages({
             ? () => onSelectVerificationMsg?.(isSelected ? null : msg.id)  // Toggle: click again to deselect
             : undefined
 
+          // Detect failed assistant messages (error embedded in content)
+          const isError =
+            msg.role === "assistant" &&
+            !isStreaming &&
+            (msg.content.includes("**Error:**") || msg.content.startsWith("\u26A0"))
+          const precedingUserMsg = isError
+            ? messages.slice(0, i).findLast((m) => m.role === "user")
+            : undefined
+
           return (
             <div
               key={msg.id}
@@ -138,6 +152,22 @@ export function ChatMessages({
                 onClaimFocus={isSelected ? onClaimFocus : undefined}
                 onArtifactClick={msg.role === "assistant" ? onArtifactClick : undefined}
               />
+              {isError && precedingUserMsg && onRetry && (
+                <div className="flex items-center gap-2 px-12 pb-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 gap-1.5 text-xs text-muted-foreground"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onRetry(precedingUserMsg.content)
+                    }}
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                    Try again
+                  </Button>
+                </div>
+              )}
             </div>
           )
         })}

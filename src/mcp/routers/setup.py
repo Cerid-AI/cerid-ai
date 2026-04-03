@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import secrets
+import shutil
 from pathlib import Path
 
 import httpx
@@ -80,12 +81,32 @@ class KeyValidationResponse(BaseModel):
     models_available: int | None = None
 
 
+class SystemCheckResponse(BaseModel):
+    ram_gb: float
+    docker_running: bool
+    env_exists: bool
+    env_keys_present: list[str]
+    ollama_detected: bool
+    ollama_url: str | None = None
+    ollama_models: list[str] = Field(default_factory=list)
+    lightweight_recommended: bool
+    archive_path_exists: bool
+    default_archive_path: str
+
+
 class ConfigureRequest(BaseModel):
     openrouter_api_key: str | None = None
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
     xai_api_key: str | None = None
     neo4j_password: str | None = None
+    # New fields
+    archive_path: str | None = None
+    domains: list[str] | None = None
+    lightweight_mode: bool | None = None
+    watch_folder: bool | None = None
+    ollama_enabled: bool | None = None
+    ollama_model: str | None = None
 
 
 class ConfigureResponse(BaseModel):
@@ -223,6 +244,63 @@ async def setup_status() -> SetupStatus:
         missing_keys=_missing_keys(),
         optional_keys=_OPTIONAL_KEYS,
         services=services,
+    )
+
+
+@router.get("/system-check", response_model=SystemCheckResponse)
+async def system_check() -> SystemCheckResponse:
+    """Detect host capabilities for the setup wizard."""
+    # RAM detection (works on macOS/Linux without psutil)
+    try:
+        ram_gb = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / (1024**3)
+    except OSError:
+        ram_gb = 0.0
+
+    # Docker detection (socket or binary on PATH)
+    docker_running = Path("/var/run/docker.sock").exists() or shutil.which("docker") is not None
+
+    # .env file scan
+    env_exists = _ENV_FILE.exists()
+    env_keys_present: list[str] = []
+    if env_exists:
+        content = _read_env_file()
+        for line in content.splitlines():
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#") and "=" in stripped:
+                key, _, value = stripped.partition("=")
+                if value.strip():
+                    env_keys_present.append(key.strip())
+
+    # Ollama detection
+    ollama_detected = False
+    ollama_url: str | None = None
+    ollama_models: list[str] = []
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            resp = await client.get("http://localhost:11434/api/tags")
+            if resp.status_code == 200:
+                ollama_detected = True
+                ollama_url = "http://localhost:11434"
+                data = resp.json()
+                ollama_models = [m["name"] for m in data.get("models", [])]
+    except (httpx.ConnectError, httpx.TimeoutException, OSError, KeyError, ValueError):
+        pass  # Ollama not running — detected stays False
+
+    # Archive path
+    default_archive_path = str(Path.home() / "cerid-archive")
+    archive_path_exists = Path(default_archive_path).exists()
+
+    return SystemCheckResponse(
+        ram_gb=round(ram_gb, 1),
+        docker_running=docker_running,
+        env_exists=env_exists,
+        env_keys_present=env_keys_present,
+        ollama_detected=ollama_detected,
+        ollama_url=ollama_url,
+        ollama_models=ollama_models,
+        lightweight_recommended=ram_gb < 12,
+        archive_path_exists=archive_path_exists,
+        default_archive_path=default_archive_path,
     )
 
 
@@ -366,6 +444,26 @@ async def configure(req: ConfigureRequest) -> ConfigureResponse:
             else:
                 updates["NEO4J_PASSWORD"] = req.neo4j_password
 
+        # Handle new configuration fields
+        if req.archive_path:
+            updates["WATCH_FOLDER"] = req.archive_path
+        if req.domains is not None:
+            updates["CERID_ACTIVE_DOMAINS"] = ",".join(req.domains)
+        if req.lightweight_mode is not None:
+            updates["CERID_LIGHTWEIGHT"] = str(req.lightweight_mode).lower()
+        if req.watch_folder is not None:
+            updates["CERID_WATCH_ENABLED"] = str(req.watch_folder).lower()
+        if req.ollama_enabled is not None:
+            updates["OLLAMA_ENABLED"] = str(req.ollama_enabled).lower()
+        if req.ollama_model:
+            updates["OLLAMA_DEFAULT_MODEL"] = req.ollama_model
+
+        # Auto-generate infrastructure passwords if not already set
+        if not os.environ.get("NEO4J_PASSWORD", "").strip():
+            updates.setdefault("NEO4J_PASSWORD", secrets.token_hex(16))
+        if not os.environ.get("REDIS_PASSWORD", "").strip():
+            updates["REDIS_PASSWORD"] = secrets.token_hex(16)
+
         if not updates:
             return ConfigureResponse(success=False, error="No keys provided")
 
@@ -375,6 +473,14 @@ async def configure(req: ConfigureRequest) -> ConfigureResponse:
         # health checks pick up the change without a restart.
         for key, value in updates.items():
             os.environ[key] = value
+
+        # Create archive directory + domain subdirectories if configured
+        if req.archive_path:
+            archive = Path(req.archive_path).expanduser()
+            archive.mkdir(parents=True, exist_ok=True)
+            if req.domains:
+                for domain in req.domains:
+                    (archive / domain).mkdir(exist_ok=True)
 
         _logger.info(
             "First-run configuration applied: %s",

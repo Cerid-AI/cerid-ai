@@ -7,8 +7,9 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
-import { Check, Cpu, Copy, Database, Loader2 as Loader2Icon, X, Zap, Sparkles, MessageSquarePlus, Clock, ShieldCheck } from "lucide-react"
+import { AlertTriangle, Check, Cpu, Copy, Database, Loader2 as Loader2Icon, X, Zap, Sparkles, MessageSquarePlus, Clock, ShieldCheck } from "lucide-react"
 import { CreditBanner } from "./credit-banner"
+import { DegradationBanner } from "./degradation-banner"
 import { ChatToolbar } from "./chat-toolbar"
 import { ChatMessages } from "./chat-messages"
 import { ChatInput } from "./chat-input"
@@ -19,7 +20,7 @@ import { HallucinationPanel } from "@/components/audit/hallucination-panel"
 import { VerificationStatusBar } from "@/components/audit/verification-status-bar"
 import { ChatDashboard } from "./chat-dashboard"
 import { ModelSwitchDialog } from "./model-switch-dialog"
-import { useChat } from "@/hooks/use-chat"
+import { useChat, type ModelFallbackEvent } from "@/hooks/use-chat"
 import { useChatSend } from "@/hooks/use-chat-send"
 import { useConversationsContext } from "@/contexts/conversations-context"
 import { useKBContext } from "@/hooks/use-kb-context"
@@ -95,10 +96,24 @@ export function ChatPanel() {
     privateModeEnabled, privateModeLevel, togglePrivateMode, changePrivateModeLevel,
   } = useSettings()
 
+  const [fallbackNotice, setFallbackNotice] = useState<string | null>(null)
+
   const { send, stop, isStreaming } = useChat({
     onMessageStart: (convoId, msg) => addMessage(convoId, msg),
     onMessageUpdate: (convoId, content) => updateLastMessage(convoId, content),
     onModelResolved: (convoId, model) => updateLastMessageModel(convoId, model),
+    onModelFallback: (event: ModelFallbackEvent) => {
+      const reason = event.originalError === 402
+        ? "API credits exhausted"
+        : event.originalError
+          ? "primary model unavailable"
+          : "provider temporarily unreachable"
+      const modelName = event.fallbackModel.split("/").pop() ?? event.fallbackModel
+      setFallbackNotice(
+        `Using fallback model (${modelName}) — ${reason}. Responses may be slower or lower quality.`,
+      )
+      setTimeout(() => setFallbackNotice(null), 10_000)
+    },
     feedbackEnabled: feedbackLoop,
     privateModeLevel,
   })
@@ -126,6 +141,8 @@ export function ChatPanel() {
   const ollamaLocalCount = ollamaHealth?.pipeline_providers
     ? Object.values(ollamaHealth.pipeline_providers).filter(p => p === "ollama").length
     : 0
+  const verificationUnavailable = ollamaHealth?.can_verify === false
+  const verificationDegraded = !verificationUnavailable && (ollamaHealth?.degradation_tier === "lite")
 
   const runOllamaSetup = useCallback(async () => {
     setOllamaSetupActive(true)
@@ -458,6 +475,8 @@ export function ChatPanel() {
         expertVerification={expertVerification}
         toggleExpertVerification={toggleExpertVerification}
         onVerifyMessage={handleVerifyMessage}
+        verificationDegraded={verificationDegraded}
+        verificationUnavailable={verificationUnavailable}
         feedbackLoop={feedbackLoop}
         toggleFeedbackLoop={toggleFeedbackLoop}
         memoryExtraction={memoryExtraction}
@@ -480,6 +499,9 @@ export function ChatPanel() {
 
       {/* Credit exhaustion banner */}
       <CreditBanner />
+
+      {/* Service degradation banner */}
+      <DegradationBanner />
 
       {/* Dashboard metrics bar (advanced only) */}
       {!isSimple && showDashboard && (
@@ -677,6 +699,10 @@ export function ChatPanel() {
           setSelectedVerificationMsgId(msgId ?? null)
           setFocusedClaimIndex(null)
         }}
+        onRetry={(userContent) => {
+          handleSend(userContent)
+          smartSuggestions.clear()
+        }}
       />
 
       {/* Smart KB suggestions (advanced only) */}
@@ -732,6 +758,14 @@ export function ChatPanel() {
         <div className="flex items-center gap-1.5 border-t bg-yellow-500/10 px-4 py-1">
           <Zap className="h-3 w-3 shrink-0 text-yellow-500" />
           <span className="text-xs text-muted-foreground">{autoRouteNotice}</span>
+        </div>
+      )}
+
+      {/* Model fallback notice — visible to all users */}
+      {fallbackNotice && (
+        <div className="flex items-center gap-1.5 border-t bg-amber-500/10 px-4 py-1">
+          <AlertTriangle className="h-3 w-3 shrink-0 text-amber-500" />
+          <span className="text-xs text-amber-700 dark:text-amber-400">{fallbackNotice}</span>
         </div>
       )}
 
