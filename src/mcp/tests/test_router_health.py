@@ -118,21 +118,9 @@ class TestSchedulerEndpoint:
 
 
 class TestPluginsEndpoint:
-    def test_returns_plugins_and_features(self):
-        mock_plugins = MagicMock(get_loaded_plugins=MagicMock(return_value=[]))
-        mock_features = MagicMock(
-            get_feature_status=MagicMock(
-                return_value={"features": {"encryption": False}, "tier": "community"}
-            )
-        )
-
-        with patch.dict(
-            "sys.modules",
-            {"plugins": mock_plugins, "utils.features": mock_features},
-        ):
-            client = TestClient(_make_app())
-            response = client.get("/plugins")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert "plugins" in data
+    def test_plugins_endpoint_moved_to_plugins_router(self):
+        """GET /plugins was moved from health.py to plugins.py — verify 404 here."""
+        client = TestClient(_make_app())
+        response = client.get("/plugins")
+        # health.py no longer serves /plugins — the full implementation is in plugins.py
+        assert response.status_code == 404

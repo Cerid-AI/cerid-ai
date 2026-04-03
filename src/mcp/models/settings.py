@@ -33,7 +33,7 @@ class SettingsResponse(BaseModel):
     # Core settings
     categorize_mode: str = ""
     chunk_max_tokens: int = 0
-    chunk_overlap: int = 0
+    chunk_overlap: float = 0
     enable_encryption: bool = False
     enable_feedback_loop: bool = False
     enable_hallucination_check: bool = False
