@@ -95,6 +95,9 @@ from routers import (
     widget,
     workflows,
 )
+from routers import (
+    eval as eval_router,
+)
 from scheduler import start_scheduler, stop_scheduler
 
 logging.basicConfig(
@@ -543,6 +546,9 @@ app.include_router(sdk.router)
 
 # SDK OpenAPI spec — isolated spec for /sdk/v1/ endpoints only
 app.include_router(sdk_openapi.router)
+
+# Eval harness — retrieval evaluation benchmarks (self-gated by CERID_EVAL_ENABLED)
+app.include_router(eval_router.router)
 
 # MCP client — external MCP server management endpoints
 app.include_router(mcp_client.router)
