@@ -21,6 +21,7 @@ __all__ = [
 # Registry and orchestration
 # Shared utilities
 from parsers._utils import _strip_html_tags, _strip_rtf  # noqa: F401
+from parsers.code_ast import parse_js_ts, parse_python_ast  # noqa: F401
 from parsers.ebook import parse_epub, parse_rtf  # noqa: F401
 from parsers.email import parse_eml, parse_mbox  # noqa: F401
 from parsers.office import parse_docx, parse_xlsx  # noqa: F401
