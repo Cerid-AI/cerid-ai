@@ -12,6 +12,7 @@ import type {
   KeyValidation,
   SetupConfig,
   SetupHealth,
+  SystemCheckResponse,
   Automation,
   AutomationCreate,
   AutomationRun,
@@ -173,10 +174,40 @@ export async function validateProviderKey(provider: string, apiKey: string): Pro
 }
 
 export async function applySetupConfig(config: SetupConfig): Promise<{ success: boolean }> {
+  // Transform the keys dict into the backend's ConfigureRequest individual fields,
+  // and pass through KB/Ollama fields directly.
+  const KEY_FIELD_MAP: Record<string, string> = {
+    openrouter: "openrouter_api_key",
+    openai: "openai_api_key",
+    anthropic: "anthropic_api_key",
+    xai: "xai_api_key",
+    neo4j: "neo4j_password",
+  }
+
+  const payload: Record<string, unknown> = {}
+
+  // Map provider keys to individual backend fields
+  if (config.keys) {
+    for (const [provider, value] of Object.entries(config.keys)) {
+      const field = KEY_FIELD_MAP[provider.toLowerCase()]
+      if (field) {
+        payload[field] = value
+      }
+    }
+  }
+
+  // Pass through expanded config fields directly
+  if (config.archive_path !== undefined) payload.archive_path = config.archive_path
+  if (config.domains !== undefined) payload.domains = config.domains
+  if (config.lightweight_mode !== undefined) payload.lightweight_mode = config.lightweight_mode
+  if (config.watch_folder !== undefined) payload.watch_folder = config.watch_folder
+  if (config.ollama_enabled !== undefined) payload.ollama_enabled = config.ollama_enabled
+  if (config.ollama_model !== undefined) payload.ollama_model = config.ollama_model
+
   const res = await fetch(`${MCP_BASE}/setup/configure`, {
     method: "POST",
     headers: mcpHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify(config),
+    body: JSON.stringify(payload),
   })
   if (!res.ok) throw new Error(await extractError(res, `Setup configure failed: ${res.status}`))
   return res.json()
@@ -185,6 +216,14 @@ export async function applySetupConfig(config: SetupConfig): Promise<{ success: 
 export async function fetchSetupHealth(): Promise<SetupHealth> {
   const res = await fetch(`${MCP_BASE}/setup/health`, { headers: mcpHeaders() })
   if (!res.ok) throw new Error(await extractError(res, `Setup health check failed: ${res.status}`))
+  return res.json()
+}
+
+export async function fetchSystemCheck(): Promise<SystemCheckResponse> {
+  const res = await fetch(`${MCP_BASE}/setup/system-check`, {
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error("System check failed")
   return res.json()
 }
 

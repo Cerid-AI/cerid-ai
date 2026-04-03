@@ -16,6 +16,7 @@ interface ApiKeyInputProps {
   label: string
   required?: boolean
   helpUrl?: string
+  placeholder?: string
   onKeyValidated: (key: string, valid: boolean) => void
 }
 
@@ -24,6 +25,7 @@ export function ApiKeyInput({
   label,
   required = false,
   helpUrl,
+  placeholder,
   onKeyValidated,
 }: ApiKeyInputProps) {
   const [value, setValue] = useState("")
@@ -88,7 +90,7 @@ export function ApiKeyInput({
             type={visible ? "text" : "password"}
             value={value}
             onChange={handleChange}
-            placeholder={`sk-or-v1-...`}
+            placeholder={placeholder ?? "sk-..."}
             className={cn(
               "pr-9 font-mono text-xs",
               status === "valid" && "border-green-500/50",
@@ -98,6 +100,7 @@ export function ApiKeyInput({
           <button
             type="button"
             onClick={() => setVisible(!visible)}
+            aria-label={visible ? "Hide API key" : "Show API key"}
             className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
           >
             {visible ? (

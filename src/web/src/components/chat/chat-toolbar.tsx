@@ -19,7 +19,7 @@ import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { useState, useCallback } from "react"
-import { Plus, Database, Rss, LayoutDashboard, Zap, Shield, ShieldCheck, MoreVertical, Brain, Check, Layers, ChevronDown, Lock, LockOpen } from "lucide-react"
+import { Plus, Database, Rss, LayoutDashboard, Zap, Shield, ShieldCheck, ShieldOff, MoreVertical, Brain, Check, Layers, ChevronDown, Lock, LockOpen } from "lucide-react"
 import type { RagMode } from "@/lib/types"
 import { ModelSelect } from "./model-select"
 import { cn } from "@/lib/utils"
@@ -173,6 +173,8 @@ interface ChatToolbarProps {
   expertVerification: boolean
   toggleExpertVerification: () => void
   onVerifyMessage: () => void
+  verificationDegraded?: boolean
+  verificationUnavailable?: boolean
   // Feedback + Memory
   feedbackLoop: boolean
   toggleFeedbackLoop: () => void
@@ -207,6 +209,7 @@ export function ChatToolbar({
   autoInject, toggleAutoInject, autoInjectThreshold, setAutoInjectThreshold,
   hallucinationEnabled, toggleHallucinationEnabled,
   inlineMarkups, toggleInlineMarkups, expertVerification, toggleExpertVerification, onVerifyMessage,
+  verificationDegraded, verificationUnavailable,
   feedbackLoop, toggleFeedbackLoop,
   memoryExtraction, toggleMemoryExtraction,
   showDashboard, toggleDashboard,
@@ -334,22 +337,38 @@ export function ChatToolbar({
         <ToolbarButtonWithMenu
           icon={
             <>
-              {expertVerification && hallucinationEnabled && (
+              {hallucinationEnabled && verificationUnavailable && (
+                <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-destructive" />
+              )}
+              {hallucinationEnabled && verificationDegraded && !verificationUnavailable && (
+                <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-yellow-500" />
+              )}
+              {expertVerification && hallucinationEnabled && !verificationDegraded && !verificationUnavailable && (
                 <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-amber-500" />
               )}
-              {expertVerification && hallucinationEnabled ? <ShieldCheck className="h-4 w-4" /> : <Shield className="h-4 w-4" />}
+              {verificationUnavailable ? <ShieldOff className="h-4 w-4" /> : expertVerification && hallucinationEnabled ? <ShieldCheck className="h-4 w-4" /> : <Shield className="h-4 w-4" />}
             </>
           }
           active={hallucinationEnabled}
           onClick={toggleHallucinationEnabled}
-          ariaLabel={hallucinationEnabled ? "Disable response verification" : "Enable response verification"}
+          ariaLabel={
+            verificationUnavailable
+              ? "Verification enabled but temporarily unavailable"
+              : hallucinationEnabled
+                ? "Disable response verification"
+                : "Enable response verification"
+          }
           title="Verification"
           tooltip={
-            hallucinationEnabled
-              ? expertVerification
-                ? "Expert verification: ON"
-                : "Response verification: ON"
-              : "Response verification: OFF"
+            verificationUnavailable
+              ? "Verification enabled but unavailable — services degraded"
+              : verificationDegraded
+                ? "Verification active (single-model only)"
+                : hallucinationEnabled
+                  ? expertVerification
+                    ? "Expert verification: ON"
+                    : "Response verification: ON"
+                  : "Response verification: OFF"
           }
           className="relative"
           menuContent={
