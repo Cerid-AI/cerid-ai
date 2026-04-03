@@ -18,7 +18,7 @@ Cerid AI uses a two-repo open-core model:
 - **Billing:** `routers/billing.py`, `models/billing.py` (Stripe integration)
 - **Trading SDK:** 5 trading endpoints + 5 MCP tools + `agents/trading_agent.py`
 - **Boardroom SDK:** 3 boardroom endpoints
-- **Full test harness:** 97+ test files (1673+ Python tests), beta E2E suite, eval harness
+- **Full test harness:** 109+ test files (1740+ Python tests), beta E2E suite, eval harness
 - **Eval suite:** `src/mcp/eval/` (NDCG, MRR, P@K, RAGAS)
 - **Internal docs:** `docs/BRANDING.md`, `docs/MARKET_ANALYSIS.md`, `docs/COMPETITIVE_ANALYSIS_2026-04.md`
 - **Claude Code config:** `.claude/` directory (agents, commands, hooks, settings)
@@ -44,8 +44,8 @@ grep -r "BSL-1.1" --include="*.py" --include="*.json" src/ plugins/ | grep -v "c
 
 ### Public repo CI (6 jobs)
 
-The public repo has a simplified CI: lint, typecheck, test (60% floor), security, frontend, docker.
-The internal repo has the full 8-job pipeline with lock-sync and frontend-desktop.
+Both repos run the same 6-job CI pipeline: lint, typecheck, test, security, frontend, docker.
+Internal uses 60% coverage floor; public uses 20% (fewer tests since internal-only code is excluded).
 
 ---
 
@@ -106,7 +106,7 @@ React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly
 │   ├── parsers/                 # registry, pdf, office, structured, email, ebook
 │   ├── services/                # ingestion.py (ingest_content, ingest_file, dedup)
 │   ├── eval/                    # Retrieval evaluation harness (NDCG, MRR, P@K, R@K)
-│   ├── agents/                  # query, curator, triage, rectify, audit, maintenance, hallucination/, memory, self_rag, decomposer, assembler
+│   ├── agents/                  # query, curator, triage, rectify, audit, maintenance, hallucination/, memory, self_rag, decomposer, assembler, retrieval_orchestrator, trading_agent, templates
 │   ├── routers/                 # FastAPI routers (health, query, ingestion, agents, taxonomy, setup, providers, models, automations, a2a, observability, plugins, workflows, ollama_proxy, eval, data_sources, etc.)
 │   ├── models/                  # user.py, sdk.py, trading.py (Pydantic schemas)
 │   ├── middleware/              # 6 middleware: auth.py, rate_limit.py, request_id.py, jwt_auth.py, tenant_context.py, metrics.py
@@ -341,20 +341,18 @@ See [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) for the full developer refere
 
 **Version coupling:** Python 3.11 (Dockerfile + CI + pyproject.toml), Node 22 (.nvmrc + Dockerfile), ChromaDB client >=0.5,<0.6 must match server 0.5.23.
 
-## CI Pipeline (8 jobs)
+## CI Pipeline (6 jobs)
 
 | Job | What |
 |-----|------|
 | lint | `ruff check src/mcp/` |
 | typecheck | `mypy src/mcp/` |
-| test | pytest (70% coverage floor) + Codecov upload + license audit |
+| test | pytest (60% coverage floor) + Codecov upload + license audit |
 | security | detect-secrets + bandit + pip-audit + dlint ReDoS |
-| lock-sync | pip-compile lock file freshness check |
 | frontend | tsc + ESLint + Vitest + Vite build + bundle size check (800KB limit) + npm audit + license audit |
 | docker | hadolint + `docker build` + Trivy CRITICAL/HIGH scan |
-| frontend-desktop | npm ci + `npm run typecheck` |
 
-Docker gates on all 8 prior jobs. Trivy CVE ignore list is in `.github/workflows/ci.yml` with inline rationale for each ignored CVE.
+Docker gates on all 6 prior jobs. Trivy CVE ignore list is in `.github/workflows/ci.yml` with inline rationale for each ignored CVE.
 
 ## Sentry
 
