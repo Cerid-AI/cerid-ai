@@ -770,6 +770,9 @@ async def ingest_file(
         meta["table_count"] = parsed["table_count"]
     if client_source:
         meta["client_source"] = client_source
+    # Guarantee a summary exists — fallback to first 200 chars if LLM didn't generate one
+    if not meta.get("summary"):
+        meta["summary"] = text[:200].strip()
     # Run sync ingest_content in thread pool to avoid blocking the event loop
     # (I/O-bound: Neo4j, ChromaDB, Redis writes + CPU-bound tiktoken chunking)
     result = await asyncio.to_thread(ingest_content, text, domain, meta, triage_result)

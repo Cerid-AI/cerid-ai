@@ -235,6 +235,31 @@ async def artifact_detail_endpoint(artifact_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class ArtifactUpdateRequest(BaseModel):
+    title: str | None = None
+    summary: str | None = None
+
+
+@router.patch("/artifacts/{artifact_id}")
+async def update_artifact_fields(artifact_id: str, body: ArtifactUpdateRequest):
+    """Update mutable fields on an artifact (title, summary)."""
+    try:
+        driver = get_neo4j()
+        artifact = graph.get_artifact(driver, artifact_id)
+        if not artifact:
+            raise HTTPException(status_code=404, detail="Artifact not found")
+        if body.title is not None:
+            graph.update_artifact(driver, artifact_id, {"filename": body.title})
+        if body.summary is not None:
+            graph.update_artifact_summary(driver, artifact_id, body.summary)
+        return {"artifact_id": artifact_id, "updated": True}
+    except HTTPException:
+        raise
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
+        logger.error(f"Artifact update error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.patch("/artifacts/{artifact_id}/star")
 async def toggle_artifact_star(artifact_id: str):
     """Toggle the starred flag on an artifact."""
@@ -375,3 +400,35 @@ async def artifact_feedback_endpoint(artifact_id: str, req: FeedbackRequest):
     except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(f"Artifact feedback error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/artifacts/{artifact_id}/regenerate-synopsis")
+async def regenerate_synopsis(artifact_id: str):
+    """Re-run metadata extraction for an artifact to regenerate its synopsis."""
+    driver = get_neo4j()
+    artifact = graph.get_artifact(driver, artifact_id)
+    if not artifact:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+
+    # Get content from ChromaDB
+    try:
+        chroma = get_chroma()
+        domain = artifact.get("domain", config.DEFAULT_DOMAIN)
+        coll = chroma.get_or_create_collection(name=config.collection_name(domain))
+        results = coll.get(where={"artifact_id": artifact_id}, limit=1, include=["documents"])
+        content = results["documents"][0] if results["documents"] else ""
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
+        content = ""
+
+    if not content:
+        raise HTTPException(status_code=400, detail="No content found for this artifact")
+
+    from utils.metadata import extract_metadata
+    filename = artifact.get("filename", "")
+    meta = extract_metadata(content, filename, domain)
+    summary = meta.get("summary", content[:200].strip())
+
+    # Update Neo4j
+    graph.update_artifact_summary(driver, artifact_id, summary)
+
+    return {"artifact_id": artifact_id, "summary": summary, "method": "llm" if meta.get("summary") else "fallback"}

@@ -72,6 +72,9 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
   const [editedTags, setEditedTags] = useState<string[]>([])
   const [savingTags, setSavingTags] = useState(false)
   const [reIngesting, setReIngesting] = useState(false)
+  const [editingTitle, setEditingTitle] = useState(false)
+  const [titleValue, setTitleValue] = useState("")
+  const [regeneratingSynopsis, setRegeneratingSynopsis] = useState(false)
   const cardRef = useRef<HTMLDivElement>(null)
 
   // Scroll card into view when expanding via card click
@@ -136,7 +139,34 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
-              <p className="min-w-0 truncate text-sm font-medium" title={result.filename}>{normalizeFilename(result.filename)}</p>
+              {editingTitle ? (
+                <input
+                  autoFocus
+                  className="min-w-0 w-full bg-transparent text-sm font-medium outline-none border-b border-brand"
+                  value={titleValue}
+                  onChange={(e) => setTitleValue(e.target.value)}
+                  onBlur={async () => {
+                    const trimmed = titleValue.trim()
+                    if (trimmed && trimmed !== result.filename) {
+                      const MCP_URL = import.meta.env.VITE_MCP_URL || "http://localhost:8888"
+                      await fetch(`${MCP_URL}/artifacts/${result.artifact_id}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json", "X-Client-ID": "gui" },
+                        body: JSON.stringify({ title: trimmed }),
+                      }).catch(() => {})
+                    }
+                    setEditingTitle(false)
+                  }}
+                  onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") setEditingTitle(false) }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              ) : (
+                <p
+                  className="min-w-0 truncate text-sm font-medium cursor-text"
+                  title={`${result.filename} (double-click to rename)`}
+                  onDoubleClick={(e) => { e.stopPropagation(); setEditingTitle(true); setTitleValue(normalizeFilename(result.filename)) }}
+                >{normalizeFilename(result.filename)}</p>
+              )}
               {chunkCount != null && (
                 <TooltipProvider delayDuration={200}>
                   <Tooltip>
@@ -294,6 +324,26 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
                 <span className="text-muted-foreground">{Math.round(result.quality_score * 100)}%</span>
               </div>
             )}
+            {/* Re-generate synopsis action */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 gap-1 px-2 text-[10px]"
+              disabled={regeneratingSynopsis}
+              onClick={async (e) => {
+                e.stopPropagation()
+                setRegeneratingSynopsis(true)
+                const MCP_URL = import.meta.env.VITE_MCP_URL || "http://localhost:8888"
+                await fetch(`${MCP_URL}/artifacts/${result.artifact_id}/regenerate-synopsis`, {
+                  method: "POST",
+                  headers: { "X-Client-ID": "gui" },
+                }).catch(() => {})
+                setRegeneratingSynopsis(false)
+              }}
+            >
+              {regeneratingSynopsis ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <RefreshCw className="h-2.5 w-2.5" />}
+              Re-generate synopsis
+            </Button>
           </div>
         )}
 
