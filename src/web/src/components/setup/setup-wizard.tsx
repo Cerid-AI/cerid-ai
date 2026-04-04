@@ -404,7 +404,9 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   }, [resumeStep])
 
   // Compute config summary for mode selection step
-  const providerCount = Object.values(state.keys).filter((k) => k.valid).length
+  const validProviders = Object.entries(state.keys).filter(([, k]) => k.valid)
+  const providerCount = validProviders.length
+  const providerNames = validProviders.map(([name]) => name.charAt(0).toUpperCase() + name.slice(1))
   const domainCount = state.kbConfig.domains.length
 
   return (
@@ -725,8 +727,11 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
               onSelectMode={(mode) => dispatch({ type: "SET_MODE", mode })}
               configSummary={{
                 providerCount,
+                providerNames,
                 domainCount,
                 ollamaEnabled: state.ollama.enabled,
+                ollamaModel: state.ollama.model,
+                documentCount: state.firstDoc.ingested ? 1 : 0,
               }}
             />
           )}
