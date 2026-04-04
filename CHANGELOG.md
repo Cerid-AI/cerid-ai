@@ -2,6 +2,34 @@
 
 All notable changes to cerid-ai are documented here.
 
+## v0.81 — Beta Test Implementation (2026-04-04)
+
+### Phase 1 (P0 — Critical Path)
+- **PDF Drag-Drop & Ingestion** — Fix macOS file handler interception, add ChromaDB write-flush check, add `skip_quality` for faster wizard ingestion
+- **Provider Detection** — Strip env var quotes, add unified `detect_provider_status()`, structured validation errors
+- **Dev Tier Switch** — Hidden in production builds
+- **Quality Scoring v2** — 6-dimension domain-adaptive scoring (richness, metadata, freshness, authority, utility, coherence), star/evergreen support
+- **Preview Fix** — Handle external artifacts and malformed `chunk_ids` gracefully
+- **Wizard Cleanup** — Remove Domains card, rename step to "Storage & Archive"
+
+### Phase 2 (P1 — Usability & Polish)
+- **Wizard Overhaul** — Optional Features step (Ollama + data sources), Bifrost hidden from health, health tooltips and fix actions
+- **Custom LLM** — Custom OpenAI-compatible provider input, credits link, usage explainer
+- **Chat UX** — Plain-language tooltips on all toolbar controls, privacy color escalation (green→red), verification cost explainer
+- **KB Improvements** — MessageSquarePlus icon, chunk tooltip, star/evergreen buttons
+- **Settings Polish** — Chunk size tooltip, cursor-default on Row, section state version bump
+
+### Phase 3 (P2 — Backlog)
+- **External Enrichment** — Enrich button on chat messages (Globe icon)
+- **Console Consistency** — Read-only RAG mode display, pulse animation on unread badge
+- **Custom API Wizard** — CustomApiSource backend (3 auth modes), CustomApiDialog frontend
+
+### New Files
+- `src/web/src/components/setup/optional-features-step.tsx`
+- `src/web/src/components/setup/custom-provider-input.tsx`
+- `src/web/src/components/kb/custom-api-dialog.tsx`
+- `src/mcp/utils/data_sources/custom.py`
+
 ## [0.81] - 2026-04-03
 
 ### Features
