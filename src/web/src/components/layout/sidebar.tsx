@@ -297,8 +297,8 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
             {collapsed && <TooltipContent side="right">Toggle theme</TooltipContent>}
           </Tooltip>
 
-          {/* Tier toggle (dev/demo) */}
-          {onCycleTier && (
+          {/* Tier toggle (dev/demo) — hidden in production builds */}
+          {import.meta.env.DEV && onCycleTier && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
