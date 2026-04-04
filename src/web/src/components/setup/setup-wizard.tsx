@@ -262,10 +262,17 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   useEffect(() => {
     fetchSetupStatus()
       .then((status) => {
-        if (status.configured && status.missing_keys.length === 0) {
-          // OpenRouter is configured — mark as valid so user can proceed
+        // Use unified provider_status map when available (WP2 fix)
+        const ps = status.provider_status
+        if (ps && Object.keys(ps).length > 0) {
+          for (const [provider, info] of Object.entries(ps)) {
+            if (info.configured) {
+              dispatch({ type: "SET_KEY", provider, key: "(from .env)", valid: true })
+            }
+          }
+        } else if (status.configured && status.missing_keys.length === 0) {
+          // Fallback: legacy detection for older backends
           dispatch({ type: "SET_KEY", provider: "openrouter", key: "(configured)", valid: true })
-          // Check which optional keys are NOT in the optional_keys list (meaning they're set)
           const optionalProviders = ["openai", "anthropic", "xai"]
           const optionalKeyNames: Record<string, string> = {
             openai: "OPENAI_API_KEY",
@@ -277,6 +284,9 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
               dispatch({ type: "SET_KEY", provider: p, key: "(configured)", valid: true })
             }
           }
+        }
+        // Fetch credits if any provider is configured
+        if (status.configured_providers?.length > 0) {
           fetchProviderCredits()
             .then((c) => dispatch({ type: "SET_CREDITS", credits: c }))
             .catch(() => {})
