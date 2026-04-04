@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useEffect, useState } from "react"
-import { Check, X, Minus, Loader2, MemoryStick, Container, FileText, Bot } from "lucide-react"
+import { Check, X, Minus, Loader2, MemoryStick, Container, FileText, Bot, ExternalLink } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { fetchSystemCheck } from "@/lib/api"
 import type { SystemCheckResponse } from "@/lib/types"
@@ -43,6 +43,7 @@ export function SystemCheckCard({ onCheckComplete }: SystemCheckCardProps) {
     { label: "Ollama", icon: Bot, status: "checking", detail: "Detecting..." },
   ])
   const [error, setError] = useState<string | null>(null)
+  const [dockerMissing, setDockerMissing] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -92,6 +93,7 @@ export function SystemCheckCard({ onCheckComplete }: SystemCheckCardProps) {
         ]
 
         setChecks(newChecks)
+        setDockerMissing(!result.docker_running)
         onCheckComplete(result)
       })
       .catch(() => {
@@ -136,6 +138,28 @@ export function SystemCheckCard({ onCheckComplete }: SystemCheckCardProps) {
       {error && (
         <div className="border-t px-3 py-2">
           <p className="text-xs text-destructive">{error}</p>
+        </div>
+      )}
+      {dockerMissing && (
+        <div className="border-t px-3 py-2.5">
+          <p className="mb-1.5 text-xs font-medium text-destructive">
+            Docker is required to run Cerid AI services.
+          </p>
+          <ol className="ml-4 list-decimal space-y-0.5 text-[11px] text-muted-foreground">
+            <li>
+              <a
+                href="https://www.docker.com/products/docker-desktop/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-brand underline hover:text-brand/80"
+              >
+                Download Docker Desktop
+                <ExternalLink className="h-2.5 w-2.5" />
+              </a>
+            </li>
+            <li>Install and launch Docker Desktop</li>
+            <li>Return here — the check updates automatically</li>
+          </ol>
         </div>
       )}
     </div>
