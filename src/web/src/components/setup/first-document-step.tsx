@@ -50,7 +50,7 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
       setIngestProgress("Chunking & embedding...")
       // Use manual categorization in wizard — AI categorization is unreliable
       // before providers are configured, and adds 2-5s latency
-      await uploadFile(file, { categorizeMode: "manual", domain: "general", skipQuality: true })
+      await uploadFile(file, { categorizeMode: "manual", domain: "general", skipQuality: true, skipMetadata: true })
       setIngestProgress("Indexing...")
       // Brief delay to let ChromaDB flush writes before enabling queries
       await new Promise((r) => setTimeout(r, 1000))
@@ -104,11 +104,14 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
     setResponse(null)
 
     try {
+      // Retry with exponential backoff — ChromaDB may not have flushed yet
       let result = await queryKB(text.trim())
-      // Retry once if no results — ChromaDB may not have flushed yet
       if (!result.results?.length) {
-        await new Promise((r) => setTimeout(r, 2000))
-        result = await queryKB(text.trim())
+        for (const delay of [500, 1000, 2000]) {
+          await new Promise((r) => setTimeout(r, delay))
+          result = await queryKB(text.trim())
+          if (result.results?.length) break
+        }
       }
       const topResult = result.results?.[0]
       setResponse(

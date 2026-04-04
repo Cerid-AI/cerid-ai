@@ -72,6 +72,9 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
   const [editedTags, setEditedTags] = useState<string[]>([])
   const [savingTags, setSavingTags] = useState(false)
   const [reIngesting, setReIngesting] = useState(false)
+  const [editingTitle, setEditingTitle] = useState(false)
+  const [titleValue, setTitleValue] = useState("")
+  const [regeneratingSynopsis, setRegeneratingSynopsis] = useState(false)
   const cardRef = useRef<HTMLDivElement>(null)
 
   // Scroll card into view when expanding via card click
@@ -136,7 +139,34 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
-              <p className="min-w-0 truncate text-sm font-medium" title={result.filename}>{normalizeFilename(result.filename)}</p>
+              {editingTitle ? (
+                <input
+                  autoFocus
+                  className="min-w-0 w-full bg-transparent text-sm font-medium outline-none border-b border-brand"
+                  value={titleValue}
+                  onChange={(e) => setTitleValue(e.target.value)}
+                  onBlur={async () => {
+                    const trimmed = titleValue.trim()
+                    if (trimmed && trimmed !== result.filename) {
+                      const MCP_URL = import.meta.env.VITE_MCP_URL || "http://localhost:8888"
+                      await fetch(`${MCP_URL}/artifacts/${result.artifact_id}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json", "X-Client-ID": "gui" },
+                        body: JSON.stringify({ title: trimmed }),
+                      }).catch(() => {})
+                    }
+                    setEditingTitle(false)
+                  }}
+                  onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") setEditingTitle(false) }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              ) : (
+                <p
+                  className="min-w-0 truncate text-sm font-medium cursor-text"
+                  title={`${result.filename} (double-click to rename)`}
+                  onDoubleClick={(e) => { e.stopPropagation(); setEditingTitle(true); setTitleValue(normalizeFilename(result.filename)) }}
+                >{normalizeFilename(result.filename)}</p>
+              )}
               {chunkCount != null && (
                 <TooltipProvider delayDuration={200}>
                   <Tooltip>
@@ -262,6 +292,60 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
             No summary available
           </p>
         ) : null)}
+
+        {/* Expanded view: metadata, keywords, quality breakdown */}
+        {!compact && expanded && (
+          <div className="mt-3 space-y-2 border-t pt-3 transition-all duration-200">
+            {/* Keyword tags */}
+            {result.keywords && result.keywords.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {result.keywords.map((k: string) => (
+                  <Badge key={k} variant="secondary" className="text-[10px]">{k}</Badge>
+                ))}
+              </div>
+            )}
+            {/* Metadata row */}
+            <div className="flex flex-wrap gap-3 text-[10px] text-muted-foreground">
+              {result.source_type && <span>Source: {result.source_type}</span>}
+              {result.chunk_count != null && <span>Chunks: {result.chunk_count}</span>}
+              {result.ingested_at && <span>Ingested: {new Date(result.ingested_at).toLocaleDateString()}</span>}
+              {result.retrieval_count != null && <span>Retrievals: {result.retrieval_count}</span>}
+            </div>
+            {/* Quality score */}
+            {result.quality_score != null && (
+              <div className="flex items-center gap-2 text-[10px]">
+                <span className="text-muted-foreground">Quality:</span>
+                <div className="h-1.5 w-20 rounded-full bg-muted">
+                  <div
+                    className="h-1.5 rounded-full bg-emerald-500"
+                    style={{ width: `${Math.round(result.quality_score * 100)}%` }}
+                  />
+                </div>
+                <span className="text-muted-foreground">{Math.round(result.quality_score * 100)}%</span>
+              </div>
+            )}
+            {/* Re-generate synopsis action */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 gap-1 px-2 text-[10px]"
+              disabled={regeneratingSynopsis}
+              onClick={async (e) => {
+                e.stopPropagation()
+                setRegeneratingSynopsis(true)
+                const MCP_URL = import.meta.env.VITE_MCP_URL || "http://localhost:8888"
+                await fetch(`${MCP_URL}/artifacts/${result.artifact_id}/regenerate-synopsis`, {
+                  method: "POST",
+                  headers: { "X-Client-ID": "gui" },
+                }).catch(() => {})
+                setRegeneratingSynopsis(false)
+              }}
+            >
+              {regeneratingSynopsis ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <RefreshCw className="h-2.5 w-2.5" />}
+              Re-generate synopsis
+            </Button>
+          </div>
+        )}
 
         {/* Recategorize inline picker */}
         {!compact && showRecategorize && domains && onRecategorize && (

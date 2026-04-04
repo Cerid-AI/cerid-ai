@@ -36,8 +36,21 @@ def parse_file(file_path: str) -> dict[str, Any]:
         raise ValueError(f"File is empty (0 bytes): {path.name}")
 
     ext = path.suffix.lower()
+
+    # User-friendly messages for common unsupported formats
+    _UNSUPPORTED_HINTS: dict[str, str] = {
+        ".doc": "Old Word format (.doc) is not supported. Please save as .docx and re-import.",
+        ".ppt": "PowerPoint .ppt is not supported. Please save as .pptx or export to PDF.",
+        ".pptx": "PowerPoint .pptx is not yet supported. Please export to PDF and re-import.",
+        ".odt": "OpenDocument .odt is not yet supported. Please save as .docx or PDF.",
+        ".pages": "Apple Pages is not supported. Please export to PDF and re-import.",
+    }
+
     parser = PARSER_REGISTRY.get(ext)
     if not parser:
+        hint = _UNSUPPORTED_HINTS.get(ext)
+        if hint:
+            raise ValueError(hint)
         raise ValueError(
             f"Unsupported file type: {ext}. "
             f"Supported: {sorted(PARSER_REGISTRY.keys())}"

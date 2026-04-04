@@ -74,7 +74,7 @@ class SetupStatus(BaseModel):
 
 class KeyValidationRequest(BaseModel):
     provider: str
-    api_key: str = Field(..., min_length=1)
+    api_key: str = Field(default="", description="Key to validate. Empty = test the env-var key.")
 
 
 class KeyValidationResponse(BaseModel):
@@ -148,20 +148,13 @@ def _configured_providers() -> list[str]:
 
 
 def detect_provider_status() -> dict[str, dict]:
-    """Canonical provider detection — single source of truth for all endpoints.
+    """Provider detection — delegates to canonical utility.
 
     Returns {provider_id: {configured: bool, key_env_var: str, key_present: bool}}.
     """
-    result = {}
-    for key, pid in _KEY_TO_PROVIDER.items():
-        raw = os.environ.get(key, "")
-        cleaned = raw.strip().strip('"').strip("'")
-        result[pid] = {
-            "configured": bool(cleaned),
-            "key_env_var": key,
-            "key_present": bool(cleaned),
-        }
-    return result
+    from utils.provider_detection import detect_all_providers
+
+    return detect_all_providers()
 
 
 async def _check_service(name: str, url: str, timeout: float = 2.0) -> str:
@@ -423,11 +416,23 @@ async def setup_health() -> dict:
 
 @router.post("/validate-key", response_model=KeyValidationResponse)
 async def validate_key(req: KeyValidationRequest) -> KeyValidationResponse:
-    """Validate an API key for a specific LLM provider."""
+    """Validate an API key for a specific LLM provider.
+
+    When *api_key* is empty the endpoint tests the key already present
+    in the environment (preconfigured via ``.env``).
+    """
+    api_key = req.api_key
+    if not api_key:
+        from utils.provider_detection import get_env_key
+
+        api_key = get_env_key(req.provider)
+        if not api_key:
+            return KeyValidationResponse(valid=False, error="No key configured for this provider")
+
     try:
         from config.providers import validate_provider_key
 
-        valid, message = await validate_provider_key(req.provider, req.api_key)
+        valid, message = await validate_provider_key(req.provider, api_key)
         return KeyValidationResponse(valid=valid, error=message if not valid else None)
     except ImportError:
         _logger.warning("config.providers not available, falling back to basic validation")
@@ -501,6 +506,27 @@ async def configure(req: ConfigureRequest) -> ConfigureResponse:
         # Handle new configuration fields
         if req.archive_path:
             updates["WATCH_FOLDER"] = req.archive_path
+            # Also register as a watched folder so it appears in the UI (S4.4)
+            try:
+                import uuid as _uuid
+                from datetime import datetime, timezone
+
+                from routers.watched_folders import _add_to_index, _save_folder
+                from routers.watched_folders import _get_redis as _wf_redis
+                _r = _wf_redis()
+                _fid = _uuid.uuid4().hex[:12]
+                _now = datetime.now(timezone.utc).isoformat()
+                _save_folder(_r, _fid, {
+                    "id": _fid, "path": req.archive_path,
+                    "label": "Archive", "enabled": True,
+                    "domain_override": None, "exclude_patterns": [],
+                    "search_enabled": True, "last_scanned_at": None,
+                    "stats": {"ingested": 0, "skipped": 0, "errored": 0},
+                    "created_at": _now,
+                })
+                _add_to_index(_r, _fid)
+            except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
+                _logger.warning("Failed to register archive as watched folder")
         if req.domains is not None:
             updates["CERID_ACTIVE_DOMAINS"] = ",".join(req.domains)
         if req.lightweight_mode is not None:
@@ -541,8 +567,41 @@ async def configure(req: ConfigureRequest) -> ConfigureResponse:
             ", ".join(updates.keys()),
         )
 
+        # Re-run verification self-test now that API keys are available (S2.1)
+        import asyncio as _asyncio
+
+        try:
+            from agents.hallucination.startup_self_test import run_verification_self_test
+            from deps import get_redis
+
+            _asyncio.ensure_future(run_verification_self_test(get_redis()))
+        except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
+            pass  # Non-blocking — next health check will pick it up
+
         return ConfigureResponse(success=True, restart_required=True)
 
     except (OSError, ValueError) as exc:
         _logger.exception("Failed to apply configuration")
         return ConfigureResponse(success=False, error=str(exc))
+
+
+class SelfTestResult(BaseModel):
+    status: str
+    claims_found: int = 0
+    extraction_method: str = ""
+    duration_ms: float = 0.0
+
+
+@router.post("/retest-verification", response_model=SelfTestResult)
+async def retest_verification() -> SelfTestResult:
+    """Re-run verification pipeline self-test (called from health dashboard)."""
+    from agents.hallucination.startup_self_test import run_verification_self_test
+    from deps import get_redis
+
+    result = await run_verification_self_test(get_redis())
+    return SelfTestResult(
+        status=result.get("status", "fail"),
+        claims_found=result.get("claims_found", 0),
+        extraction_method=result.get("extraction_method", ""),
+        duration_ms=result.get("duration_ms", 0.0),
+    )

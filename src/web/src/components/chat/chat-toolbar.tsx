@@ -379,21 +379,26 @@ export function ChatToolbar({
           menuContent={
             <>
               <MenuItem onClick={onVerifyMessage}>
-                Verify last response
+                <span className="flex flex-col gap-0.5">
+                  <span>Verify last response</span>
+                  <span className="text-[9px] text-muted-foreground font-normal">Check facts in the most recent AI response</span>
+                </span>
               </MenuItem>
               <MenuSeparator />
               <MenuCheckboxItem checked={inlineMarkups} onCheckedChange={toggleInlineMarkups}>
-                Inline claim markups
+                <span className="flex flex-col gap-0.5">
+                  <span>Inline claim markups</span>
+                  <span className="text-[9px] text-muted-foreground font-normal">Highlight verified/unverified claims in message text</span>
+                </span>
               </MenuCheckboxItem>
               <MenuSeparator />
               <MenuCheckboxItem checked={expertVerification} onCheckedChange={toggleExpertVerification}>
                 <span className="flex flex-col gap-0.5">
                   <span className="flex items-center gap-1">
                     Expert verification
-                    <Badge variant="outline" className="text-[9px] ml-1 px-1 py-0 text-amber-500">Premium</Badge>
                   </span>
                   <span className="text-[9px] text-muted-foreground font-normal">
-                    Uses premium models — less token-efficient but more thorough
+                    Uses advanced models for more thorough fact-checking
                   </span>
                 </span>
               </MenuCheckboxItem>
@@ -415,10 +420,16 @@ export function ChatToolbar({
               menuContent={
                 <>
                   <MenuCheckboxItem checked={feedbackLoop} onCheckedChange={toggleFeedbackLoop}>
-                    Feedback loop
+                    <span className="flex flex-col gap-0.5">
+                      <span>Feedback loop</span>
+                      <span className="text-[9px] text-muted-foreground font-normal">Save AI responses to your KB for future retrieval</span>
+                    </span>
                   </MenuCheckboxItem>
                   <MenuCheckboxItem checked={memoryExtraction} onCheckedChange={toggleMemoryExtraction}>
-                    Memory extraction
+                    <span className="flex flex-col gap-0.5">
+                      <span>Memory extraction</span>
+                      <span className="text-[9px] text-muted-foreground font-normal">Extract and remember key facts from conversations</span>
+                    </span>
                   </MenuCheckboxItem>
                 </>
               }

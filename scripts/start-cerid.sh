@@ -85,6 +85,17 @@ if [ -z "${HOST_MEMORY_GB:-}" ]; then
 fi
 export HOST_MEMORY_GB="${HOST_MEMORY_GB:-}"
 
+# Platform-aware Ollama URL default (Section 4: Multi-OS)
+# macOS/Windows Docker Desktop: host.docker.internal
+# Linux Docker Engine: localhost (host network accessible)
+if [ -z "${OLLAMA_URL:-}" ]; then
+    case "$(uname -s)" in
+        Darwin)  export OLLAMA_URL="http://host.docker.internal:11434" ;;
+        MINGW*|MSYS*|CYGWIN*)  export OLLAMA_URL="http://host.docker.internal:11434" ;;
+        Linux)   export OLLAMA_URL="http://host.docker.internal:11434" ;;
+    esac
+fi
+
 # --- Pre-flight checks (27B) ---
 preflight_checks() {
     local fail=0

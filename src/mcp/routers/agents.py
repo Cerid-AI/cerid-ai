@@ -830,3 +830,39 @@ async def curate_estimate_endpoint(req: CurateEstimateRequest):
         logger.error(f"Curate estimate error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ---------------------------------------------------------------------------
+# Enrichment — external source query for a message
+# ---------------------------------------------------------------------------
+
+
+class EnrichRequest(BaseModel):
+    message_id: str
+    content: str
+
+
+class EnrichResult(BaseModel):
+    source: str
+    snippet: str
+
+
+class EnrichResponse(BaseModel):
+    results: list[EnrichResult]
+    source_count: int
+
+
+@router.post("/agent/enrich", response_model=EnrichResponse)
+async def enrich_endpoint(req: EnrichRequest):
+    """Query external data sources with message content for additional context."""
+    try:
+        from utils.data_sources import registry as ds_registry
+        raw_results = await ds_registry.query_all(req.content)
+        results = [
+            EnrichResult(source=r.get("source", "unknown"), snippet=r.get("content", "")[:300])
+            for r in raw_results
+        ]
+        return EnrichResponse(results=results, source_count=len(results))
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
+        logger.warning("Enrichment failed: %s", e)
+        return EnrichResponse(results=[], source_count=0)
+

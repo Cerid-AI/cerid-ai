@@ -167,6 +167,7 @@ export function PipelineSection({ settings, sections, toggleSection, patch }: Pi
                   enabled={settings.enable_intelligent_assembly ?? false}
                   onToggle={(v) => patch({ enable_intelligent_assembly: v })}
                   description="Three-pass context assembly maximizing query facet coverage"
+                  info="Assembles KB context in three passes to cover all facets of your query. Adds one LLM call (~$0.001). Disabling uses simpler top-N selection."
                 />
 
                 <div className="h-px bg-border" />
@@ -211,6 +212,7 @@ export function PipelineSection({ settings, sections, toggleSection, patch }: Pi
                     onChange={(v) => patch({ semantic_cache_threshold: v })}
                     min={0.8} max={1} step={0.01}
                     info="Minimum cosine similarity for a cache hit"
+                    recommended="Recommended: 0.90-0.95"
                   />
                 </PipelineToggle>
 
@@ -222,6 +224,7 @@ export function PipelineSection({ settings, sections, toggleSection, patch }: Pi
                   enabled={settings.enable_memory_consolidation ?? true}
                   onToggle={(v) => patch({ enable_memory_consolidation: v })}
                   description="Deduplicate and merge similar memories during extraction"
+                  info="Merges duplicate and near-duplicate memories to keep your memory store clean. Runs during memory extraction. Disabling may create redundant memories."
                 />
 
                 <div className="h-px bg-border" />
@@ -232,6 +235,7 @@ export function PipelineSection({ settings, sections, toggleSection, patch }: Pi
                   enabled={settings.enable_context_compression ?? true}
                   onToggle={(v) => patch({ enable_context_compression: v })}
                   description="Compress conversation history to fit within model context window"
+                  info="Summarizes older conversation turns to fit within the model's context limit. Disabling may cause context overflow on long conversations."
                 />
               </div>
             )}
@@ -250,6 +254,7 @@ export function PipelineSection({ settings, sections, toggleSection, patch }: Pi
               onChange={(v) => patch({ hybrid_vector_weight: v })}
               min={0} max={1} step={0.05}
               info="Weight for vector similarity in hybrid search (0-1)"
+              recommended="Recommended: 0.45-0.55"
             />
             <SliderRow
               label="Keyword Weight"
@@ -257,6 +262,7 @@ export function PipelineSection({ settings, sections, toggleSection, patch }: Pi
               onChange={(v) => patch({ hybrid_keyword_weight: v })}
               min={0} max={1} step={0.05}
               info="Weight for BM25 keyword matching in hybrid search (0-1)"
+              recommended="Recommended: 0.45-0.55"
             />
 
             <div className="my-1 h-px bg-border" />

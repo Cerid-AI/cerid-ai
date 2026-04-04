@@ -45,6 +45,7 @@ interface ChatMessagesProps {
   onClaimFocus?: (index: number) => void
   onArtifactClick: (artifactId: string) => void
   onSelectVerificationMsg?: (msgId: string | null) => void
+  onEnrich?: (messageId: string, content: string) => void
   /** Called when user clicks "Try again" on a failed assistant message. Receives the preceding user message content. */
   onRetry?: (userContent: string) => void
 }
@@ -62,6 +63,7 @@ export function ChatMessages({
   onClaimFocus,
   onArtifactClick,
   onSelectVerificationMsg,
+  onEnrich,
   onRetry,
 }: ChatMessagesProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -151,6 +153,7 @@ export function ChatMessages({
                 }
                 onClaimFocus={isSelected ? onClaimFocus : undefined}
                 onArtifactClick={msg.role === "assistant" ? onArtifactClick : undefined}
+                onEnrich={msg.role === "assistant" && !isStreaming ? onEnrich : undefined}
               />
               {isError && precedingUserMsg && onRetry && (
                 <div className="flex items-center gap-2 px-12 pb-2">
