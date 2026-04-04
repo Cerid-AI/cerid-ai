@@ -185,7 +185,7 @@ export function StatusBar({ consoleOpen, onToggleConsole, consoleUnreadCount = 0
                 <Terminal className="h-3 w-3" />
                 <span className="hidden sm:inline">Console</span>
                 {!consoleOpen && consoleUnreadCount > 0 && (
-                  <span className="absolute -right-1 -top-1 flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-teal-500 px-1 text-[9px] font-bold text-white">
+                  <span className="absolute -right-1 -top-1 flex h-3.5 min-w-[14px] animate-pulse items-center justify-center rounded-full bg-teal-500 px-1 text-[9px] font-bold text-white">
                     {consoleUnreadCount > 99 ? "99+" : consoleUnreadCount}
                   </span>
                 )}

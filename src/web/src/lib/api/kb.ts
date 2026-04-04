@@ -340,7 +340,7 @@ export async function fetchAudit(
 
 export async function uploadFile(
   file: File,
-  opts: { domain?: string; subCategory?: string; tags?: string; categorizeMode?: string } = {},
+  opts: { domain?: string; subCategory?: string; tags?: string; categorizeMode?: string; skipQuality?: boolean } = {},
 ): Promise<UploadResult> {
   const formData = new FormData()
   formData.append("file", file)
@@ -349,6 +349,7 @@ export async function uploadFile(
   if (opts.subCategory) params.set("sub_category", opts.subCategory)
   if (opts.tags) params.set("tags", opts.tags)
   if (opts.categorizeMode) params.set("categorize_mode", opts.categorizeMode)
+  if (opts.skipQuality) params.set("skip_quality", "true")
 
   const res = await fetch(`${MCP_BASE}/upload?${params}`, {
     method: "POST",

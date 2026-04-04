@@ -52,6 +52,9 @@ def create_artifact(
                 content_hash: $content_hash,
                 quality_score: $quality_score,
                 client_source: $client_source,
+                starred: false,
+                evergreen: false,
+                retrieval_count: 0,
                 ingested_at: $ingested_at,
                 updated_at: $ingested_at
             })
@@ -588,3 +591,51 @@ def get_verification_report(driver, conversation_id: str) -> dict | None:
             "total": record["total"],
             "created_at": record["created_at"],
         }
+
+
+# ---------------------------------------------------------------------------
+# Star / Evergreen / Retrieval count (WP4)
+# ---------------------------------------------------------------------------
+
+
+def toggle_starred(driver, artifact_id: str) -> bool:
+    """Toggle the starred flag on an artifact. Returns the new value."""
+    with driver.session() as session:
+        result = session.run(
+            "MATCH (a:Artifact {id: $id}) "
+            "SET a.starred = NOT coalesce(a.starred, false) "
+            "RETURN a.starred AS starred",
+            id=artifact_id,
+        )
+        record = result.single()
+        if not record:
+            raise RetrievalError(f"Artifact not found: {artifact_id}")
+        return record["starred"]
+
+
+def toggle_evergreen(driver, artifact_id: str) -> bool:
+    """Toggle the evergreen flag on an artifact. Returns the new value."""
+    with driver.session() as session:
+        result = session.run(
+            "MATCH (a:Artifact {id: $id}) "
+            "SET a.evergreen = NOT coalesce(a.evergreen, false) "
+            "RETURN a.evergreen AS evergreen",
+            id=artifact_id,
+        )
+        record = result.single()
+        if not record:
+            raise RetrievalError(f"Artifact not found: {artifact_id}")
+        return record["evergreen"]
+
+
+def increment_retrieval_count(driver, artifact_ids: list[str]) -> None:
+    """Increment retrieval_count for a batch of artifacts."""
+    if not artifact_ids:
+        return
+    with driver.session() as session:
+        session.run(
+            "UNWIND $ids AS aid "
+            "MATCH (a:Artifact {id: aid}) "
+            "SET a.retrieval_count = coalesce(a.retrieval_count, 0) + 1",
+            ids=artifact_ids,
+        )

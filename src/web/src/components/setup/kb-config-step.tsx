@@ -4,18 +4,7 @@
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Database, AlertTriangle } from "lucide-react"
-import { cn } from "@/lib/utils"
-
-/** Core personal-use domains shown during setup. */
-const SETUP_DOMAINS = [
-  { id: "coding", label: "Coding", description: "Source code & technical docs" },
-  { id: "finance", label: "Finance", description: "Tax records, budgets, receipts" },
-  { id: "general", label: "General", description: "Uncategorized content" },
-  { id: "personal", label: "Personal", description: "Notes, journal, health" },
-  { id: "projects", label: "Projects", description: "Plans, specs, meeting notes" },
-]
+import { HardDrive, AlertTriangle } from "lucide-react"
 
 interface KBConfigState {
   archivePath: string
@@ -32,21 +21,14 @@ interface KBConfigStepProps {
 }
 
 export function KBConfigStep({ config, onChange, lightweightRecommended, ramGb }: KBConfigStepProps) {
-  const toggleDomain = (domain: string) => {
-    const next = config.domains.includes(domain)
-      ? config.domains.filter((d) => d !== domain)
-      : [...config.domains, domain]
-    onChange({ ...config, domains: next })
-  }
-
   return (
     <>
       <div className="mb-2 flex items-center justify-center">
         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand/10">
-          <Database className="h-5 w-5 text-brand" />
+          <HardDrive className="h-5 w-5 text-brand" />
         </div>
       </div>
-      <h3 className="mb-4 text-center text-lg font-semibold">Knowledge Base</h3>
+      <h3 className="mb-4 text-center text-lg font-semibold">Storage & Archive</h3>
 
       <div className="space-y-5">
         {/* Archive Path */}
@@ -59,39 +41,8 @@ export function KBConfigStep({ config, onChange, lightweightRecommended, ramGb }
             className="font-mono text-xs"
           />
           <p className="text-[11px] text-muted-foreground">
-            Where Cerid looks for your documents. Files are organized into domain folders.
+            Where Cerid looks for your documents. Domains are created automatically as you add content.
           </p>
-        </div>
-
-        {/* Domain Quickstart */}
-        <div className="space-y-2">
-          <Label className="text-sm font-medium">Domains</Label>
-          <p className="text-[11px] text-muted-foreground">
-            Domains help route queries to the right documents. You can add more later in Settings.
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            {SETUP_DOMAINS.map((domain) => (
-              <label
-                key={domain.id}
-                className={cn(
-                  "flex cursor-pointer items-start gap-2 rounded-lg border p-2.5 transition-colors",
-                  config.domains.includes(domain.id)
-                    ? "border-brand/40 bg-brand/5"
-                    : "border-muted hover:border-muted-foreground/30",
-                )}
-              >
-                <Checkbox
-                  checked={config.domains.includes(domain.id)}
-                  onCheckedChange={() => toggleDomain(domain.id)}
-                  className="mt-0.5"
-                />
-                <div>
-                  <p className="text-xs font-medium">{domain.label}</p>
-                  <p className="text-[10px] text-muted-foreground">{domain.description}</p>
-                </div>
-              </label>
-            ))}
-          </div>
         </div>
 
         {/* Lightweight Mode (conditional) */}

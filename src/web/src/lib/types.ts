@@ -305,6 +305,9 @@ export interface KBQueryResult {
   summary?: string
   source_url?: string
   source_type?: "kb" | "memory" | "external"
+  starred?: boolean
+  evergreen?: boolean
+  retrieval_count?: number
 }
 
 export interface MemoryRecallResult {
@@ -934,6 +937,7 @@ export interface SetupStatus {
   missing_keys: string[]
   optional_keys: string[]
   configured_providers: string[]
+  provider_status?: Record<string, { configured: boolean; key_env_var: string; key_present: boolean }>
   services?: Record<string, string>
 }
 
@@ -941,6 +945,9 @@ export interface KeyValidation {
   valid: boolean
   provider: string
   error?: string
+  error_type?: string
+  suggestion?: string
+  provider_name?: string
 }
 
 export interface SetupConfig {

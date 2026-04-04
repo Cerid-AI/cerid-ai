@@ -10,6 +10,7 @@ import {
   AlertTriangle, Info,
 } from "lucide-react"
 import { ApiKeyInput } from "@/components/setup/api-key-input"
+import { CustomProviderInput } from "@/components/setup/custom-provider-input"
 import { HealthDashboard } from "@/components/setup/health-dashboard"
 import { SystemCheckCard } from "@/components/setup/system-check-card"
 import { KBConfigStep } from "@/components/setup/kb-config-step"
@@ -36,7 +37,7 @@ const STORAGE_KEY = "cerid-setup-progress"
 const STEP_DEFS: StepDef[] = [
   { label: "Welcome", shortLabel: "Welcome" },
   { label: "API Keys", shortLabel: "Keys" },
-  { label: "Knowledge Base", shortLabel: "KB" },
+  { label: "Storage & Archive", shortLabel: "Storage" },
   { label: "Ollama", shortLabel: "Ollama" },
   { label: "Review & Apply", shortLabel: "Apply" },
   { label: "Service Health", shortLabel: "Health" },
@@ -262,10 +263,17 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   useEffect(() => {
     fetchSetupStatus()
       .then((status) => {
-        if (status.configured && status.missing_keys.length === 0) {
-          // OpenRouter is configured — mark as valid so user can proceed
+        // Use unified provider_status map when available (WP2 fix)
+        const ps = status.provider_status
+        if (ps && Object.keys(ps).length > 0) {
+          for (const [provider, info] of Object.entries(ps)) {
+            if (info.configured) {
+              dispatch({ type: "SET_KEY", provider, key: "(from .env)", valid: true })
+            }
+          }
+        } else if (status.configured && status.missing_keys.length === 0) {
+          // Fallback: legacy detection for older backends
           dispatch({ type: "SET_KEY", provider: "openrouter", key: "(configured)", valid: true })
-          // Check which optional keys are NOT in the optional_keys list (meaning they're set)
           const optionalProviders = ["openai", "anthropic", "xai"]
           const optionalKeyNames: Record<string, string> = {
             openai: "OPENAI_API_KEY",
@@ -277,6 +285,9 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
               dispatch({ type: "SET_KEY", provider: p, key: "(configured)", valid: true })
             }
           }
+        }
+        // Fetch credits if any provider is configured
+        if (status.configured_providers?.length > 0) {
           fetchProviderCredits()
             .then((c) => dispatch({ type: "SET_CREDITS", credits: c }))
             .catch(() => {})
@@ -340,7 +351,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
       const result = await applySetupConfig({
         keys: config,
         archive_path: state.kbConfig.archivePath,
-        domains: state.kbConfig.domains,
+        domains: ["general"],
         lightweight_mode: state.kbConfig.lightweightMode,
         watch_folder: state.kbConfig.watchFolder,
         ollama_enabled: state.ollama.enabled,
@@ -394,7 +405,9 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   }, [resumeStep])
 
   // Compute config summary for mode selection step
-  const providerCount = Object.values(state.keys).filter((k) => k.valid).length
+  const validProviders = Object.entries(state.keys).filter(([, k]) => k.valid)
+  const providerCount = validProviders.length
+  const providerNames = validProviders.map(([name]) => name.charAt(0).toUpperCase() + name.slice(1))
   const domainCount = state.kbConfig.domains.length
 
   return (
@@ -520,13 +533,38 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                   </div>
                 )}
                 {state.keys.openrouter.valid && state.credits?.configured && state.credits.balance != null && (
-                  <div className="flex items-center justify-between rounded-lg border border-green-500/30 bg-green-500/5 px-3 py-2">
-                    <span className="text-xs text-green-600 dark:text-green-400">
-                      OpenRouter balance
-                    </span>
-                    <span className="text-sm font-semibold tabular-nums text-green-600 dark:text-green-400">
-                      ${state.credits.balance.toFixed(2)}
-                    </span>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between rounded-lg border border-green-500/30 bg-green-500/5 px-3 py-2">
+                      <span className="text-xs text-green-600 dark:text-green-400">
+                        OpenRouter balance
+                      </span>
+                      <span className="text-sm font-semibold tabular-nums text-green-600 dark:text-green-400">
+                        ${state.credits.balance.toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between px-1">
+                      <a
+                        href="https://openrouter.ai/credits"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[10px] text-brand hover:underline"
+                      >
+                        Add Credits &rarr;
+                      </a>
+                      <span className="text-[10px] text-muted-foreground">
+                        Credits purchased through OpenRouter, not Cerid
+                      </span>
+                    </div>
+                  </div>
+                )}
+                {/* Usage rate explainer */}
+                {state.keys.openrouter.valid && (
+                  <div className="rounded-lg border bg-muted/20 px-3 py-2 text-[10px] text-muted-foreground">
+                    Costs vary by model. A typical query costs $0.001-0.01. Verification adds ~$0.001 per 10 claims.
+                    Expert mode uses premium models at higher rates.{" "}
+                    <a href="https://openrouter.ai/models" target="_blank" rel="noopener noreferrer" className="text-brand hover:underline">
+                      See pricing
+                    </a>
                   </div>
                 )}
 
@@ -559,6 +597,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                       helpUrl="https://console.x.ai/api-keys"
                       onKeyValidated={handleKeyValidated("xai")}
                     />
+                    <CustomProviderInput onValidated={() => {}} />
                   </div>
                 </div>
 
@@ -621,13 +660,12 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                   ))}
                 </div>
 
-                {/* KB Summary */}
+                {/* Storage & Archive Summary */}
                 {!state.skippedSteps.has(2) && (
                   <div className="rounded-lg border bg-card px-3 py-2">
-                    <p className="text-xs font-medium text-muted-foreground">Knowledge Base</p>
+                    <p className="text-xs font-medium text-muted-foreground">Storage & Archive</p>
                     <p className="mt-0.5 text-xs">
-                      {state.kbConfig.domains.length} domain{state.kbConfig.domains.length !== 1 ? "s" : ""}
-                      {" · "}<span className="font-mono">{state.kbConfig.archivePath}</span>
+                      <span className="font-mono">{state.kbConfig.archivePath}</span>
                       {state.kbConfig.lightweightMode && " · Lightweight"}
                       {state.kbConfig.watchFolder && " · Auto-watch"}
                     </p>
@@ -716,8 +754,11 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
               onSelectMode={(mode) => dispatch({ type: "SET_MODE", mode })}
               configSummary={{
                 providerCount,
+                providerNames,
                 domainCount,
                 ollamaEnabled: state.ollama.enabled,
+                ollamaModel: state.ollama.model,
+                documentCount: state.firstDoc.ingested ? 1 : 0,
               }}
             />
           )}

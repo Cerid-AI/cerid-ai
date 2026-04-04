@@ -7,8 +7,11 @@ import { ModeSelectionStep } from "@/components/setup/mode-selection-step"
 
 const DEFAULT_SUMMARY = {
   providerCount: 1,
+  providerNames: ["Openrouter"],
   domainCount: 3,
   ollamaEnabled: false,
+  ollamaModel: null,
+  documentCount: 0,
 }
 
 const onSelectMode = vi.fn<(mode: "simple" | "advanced") => void>()
@@ -29,7 +32,7 @@ describe("ModeSelectionStep", () => {
     expect(screen.getByText("Choose Your Mode")).toBeInTheDocument()
   })
 
-  it("shows Simple and Advanced buttons", () => {
+  it("shows Clean & Simple and Advanced buttons", () => {
     render(
       <ModeSelectionStep
         selectedMode="simple"
@@ -37,11 +40,11 @@ describe("ModeSelectionStep", () => {
         configSummary={DEFAULT_SUMMARY}
       />,
     )
-    expect(screen.getByText("Simple")).toBeInTheDocument()
+    expect(screen.getByText("Clean & Simple")).toBeInTheDocument()
     expect(screen.getByText("Advanced")).toBeInTheDocument()
   })
 
-  it("has Simple mode visually selected by default", () => {
+  it("has Clean & Simple mode visually selected by default", () => {
     render(
       <ModeSelectionStep
         selectedMode="simple"
@@ -49,7 +52,7 @@ describe("ModeSelectionStep", () => {
         configSummary={DEFAULT_SUMMARY}
       />,
     )
-    const simpleButton = screen.getByText("Simple").closest("button")
+    const simpleButton = screen.getByText("Clean & Simple").closest("button")
     expect(simpleButton?.className).toContain("border-brand")
 
     const advancedButton = screen.getByText("Advanced").closest("button")
@@ -69,7 +72,7 @@ describe("ModeSelectionStep", () => {
     expect(onSelectMode).toHaveBeenCalledWith("advanced")
   })
 
-  it("calls onSelectMode('simple') when clicking Simple", () => {
+  it("calls onSelectMode('simple') when clicking Clean & Simple", () => {
     render(
       <ModeSelectionStep
         selectedMode="advanced"
@@ -77,25 +80,32 @@ describe("ModeSelectionStep", () => {
         configSummary={DEFAULT_SUMMARY}
       />,
     )
-    const simpleButton = screen.getByText("Simple").closest("button")
+    const simpleButton = screen.getByText("Clean & Simple").closest("button")
     fireEvent.click(simpleButton!)
     expect(onSelectMode).toHaveBeenCalledWith("simple")
   })
 
-  it("shows config summary text with provider, domain, and ollama info", () => {
+  it("shows config summary with provider names and document count", () => {
     render(
       <ModeSelectionStep
         selectedMode="simple"
         onSelectMode={onSelectMode}
-        configSummary={{ providerCount: 2, domainCount: 4, ollamaEnabled: true }}
+        configSummary={{
+          providerCount: 2,
+          providerNames: ["Openrouter", "Anthropic"],
+          domainCount: 4,
+          ollamaEnabled: true,
+          ollamaModel: "llama3.2:3b",
+          documentCount: 3,
+        }}
       />,
     )
-    expect(screen.getByText(/2 LLM providers/)).toBeInTheDocument()
-    expect(screen.getByText(/4 KB domains/)).toBeInTheDocument()
-    expect(screen.getByText(/enabled/)).toBeInTheDocument()
+    expect(screen.getByText(/Openrouter \+ Anthropic configured/)).toBeInTheDocument()
+    expect(screen.getByText(/3 documents ingested/)).toBeInTheDocument()
+    expect(screen.getByText(/llama3\.2:3b/)).toBeInTheDocument()
   })
 
-  it("shows 'disabled' when ollama is not enabled", () => {
+  it("shows 'not configured' when ollama is disabled", () => {
     render(
       <ModeSelectionStep
         selectedMode="simple"
@@ -103,6 +113,6 @@ describe("ModeSelectionStep", () => {
         configSummary={DEFAULT_SUMMARY}
       />,
     )
-    expect(screen.getByText(/disabled/)).toBeInTheDocument()
+    expect(screen.getByText(/not configured/)).toBeInTheDocument()
   })
 })

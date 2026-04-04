@@ -68,6 +68,7 @@ class SetupStatus(BaseModel):
     missing_keys: list[str]
     optional_keys: list[str]
     configured_providers: list[str]
+    provider_status: dict[str, dict] = {}
     services: dict[str, str]
 
 
@@ -142,8 +143,25 @@ def _configured_providers() -> list[str]:
     """Return provider IDs whose API keys are set in the environment."""
     return [
         pid for key, pid in _KEY_TO_PROVIDER.items()
-        if os.environ.get(key, "").strip()
+        if os.environ.get(key, "").strip().strip('"').strip("'")
     ]
+
+
+def detect_provider_status() -> dict[str, dict]:
+    """Canonical provider detection — single source of truth for all endpoints.
+
+    Returns {provider_id: {configured: bool, key_env_var: str, key_present: bool}}.
+    """
+    result = {}
+    for key, pid in _KEY_TO_PROVIDER.items():
+        raw = os.environ.get(key, "")
+        cleaned = raw.strip().strip('"').strip("'")
+        result[pid] = {
+            "configured": bool(cleaned),
+            "key_env_var": key,
+            "key_present": bool(cleaned),
+        }
+    return result
 
 
 async def _check_service(name: str, url: str, timeout: float = 2.0) -> str:
@@ -261,6 +279,7 @@ async def setup_status() -> SetupStatus:
         missing_keys=_missing_keys(),
         optional_keys=_OPTIONAL_KEYS,
         configured_providers=_configured_providers(),
+        provider_status=detect_provider_status(),
         services=services,
     )
 
