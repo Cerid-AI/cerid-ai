@@ -74,7 +74,7 @@ class SetupStatus(BaseModel):
 
 class KeyValidationRequest(BaseModel):
     provider: str
-    api_key: str = Field(..., min_length=1)
+    api_key: str = Field(default="", description="Key to validate. Empty = test the env-var key.")
 
 
 class KeyValidationResponse(BaseModel):
@@ -148,20 +148,13 @@ def _configured_providers() -> list[str]:
 
 
 def detect_provider_status() -> dict[str, dict]:
-    """Canonical provider detection — single source of truth for all endpoints.
+    """Provider detection — delegates to canonical utility.
 
     Returns {provider_id: {configured: bool, key_env_var: str, key_present: bool}}.
     """
-    result = {}
-    for key, pid in _KEY_TO_PROVIDER.items():
-        raw = os.environ.get(key, "")
-        cleaned = raw.strip().strip('"').strip("'")
-        result[pid] = {
-            "configured": bool(cleaned),
-            "key_env_var": key,
-            "key_present": bool(cleaned),
-        }
-    return result
+    from utils.provider_detection import detect_all_providers
+
+    return detect_all_providers()
 
 
 async def _check_service(name: str, url: str, timeout: float = 2.0) -> str:
@@ -423,11 +416,23 @@ async def setup_health() -> dict:
 
 @router.post("/validate-key", response_model=KeyValidationResponse)
 async def validate_key(req: KeyValidationRequest) -> KeyValidationResponse:
-    """Validate an API key for a specific LLM provider."""
+    """Validate an API key for a specific LLM provider.
+
+    When *api_key* is empty the endpoint tests the key already present
+    in the environment (preconfigured via ``.env``).
+    """
+    api_key = req.api_key
+    if not api_key:
+        from utils.provider_detection import get_env_key
+
+        api_key = get_env_key(req.provider)
+        if not api_key:
+            return KeyValidationResponse(valid=False, error="No key configured for this provider")
+
     try:
         from config.providers import validate_provider_key
 
-        valid, message = await validate_provider_key(req.provider, req.api_key)
+        valid, message = await validate_provider_key(req.provider, api_key)
         return KeyValidationResponse(valid=valid, error=message if not valid else None)
     except ImportError:
         _logger.warning("config.providers not available, falling back to basic validation")

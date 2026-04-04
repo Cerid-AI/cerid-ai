@@ -62,18 +62,14 @@ class ProviderListResponse(BaseModel):
 @router.get("", response_model=ProviderListResponse)
 async def list_providers():
     """List all supported providers with their connection status."""
+    from utils.provider_detection import detect_all_providers
+
+    detected = detect_all_providers()
     providers = []
     for name, entry in PROVIDER_REGISTRY.items():
-        env_var = entry["env_var"]
-        api_key = os.getenv(env_var, "").strip().strip('"').strip("'") if env_var else ""
-        key_set = bool(api_key) or not entry["requires_api_key"]
-
-        # Mask key preview
-        key_preview = None
-        if api_key and len(api_key) > 8:
-            key_preview = f"{api_key[:4]}...{api_key[-4:]}"
-        elif api_key:
-            key_preview = "****"
+        det = detected.get(name, {})
+        key_set = det.get("key_present", False) or not entry["requires_api_key"]
+        key_preview = det.get("key_preview") or None
 
         providers.append(ProviderInfo(
             name=entry["name"],
@@ -81,7 +77,7 @@ async def list_providers():
             base_url=entry["base_url"],
             requires_api_key=entry["requires_api_key"],
             key_set=key_set,
-            key_preview=key_preview,
+            key_preview=key_preview if key_preview and key_preview != "" else None,
             models=entry["models"],
         ))
 
@@ -616,5 +612,6 @@ async def validate_key(name: str, req: ValidateKeyRequest):
 @router.get("/diagnose")
 async def diagnose_providers():
     """Debug endpoint: show which provider env vars are set and their key lengths."""
-    from routers.setup import detect_provider_status
-    return detect_provider_status()
+    from utils.provider_detection import detect_all_providers
+
+    return detect_all_providers()

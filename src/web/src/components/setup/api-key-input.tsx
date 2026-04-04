@@ -37,7 +37,10 @@ export function ApiKeyInput({
   const abortRef = useRef<AbortController | null>(null)
 
   const handleTest = useCallback(async () => {
-    if (!value.trim()) return
+    // For preconfigured keys, send empty string — backend tests the env-var key
+    const keyToTest = value.trim()
+    if (!keyToTest && !preconfigured) return
+
     // Cancel any in-flight validation
     abortRef.current?.abort()
     const controller = new AbortController()
@@ -50,30 +53,30 @@ export function ApiKeyInput({
     const timeout = setTimeout(() => controller.abort(), 5000)
 
     try {
-      const result = await validateProviderKey(provider, value.trim())
+      const result = await validateProviderKey(provider, keyToTest)
       if (controller.signal.aborted) return
       clearTimeout(timeout)
       if (result.valid) {
         setStatus("valid")
-        onKeyValidated(value.trim(), true)
+        onKeyValidated(keyToTest || "(from .env)", true)
       } else {
         setStatus("invalid")
         setError(result.suggestion ?? result.error ?? "Invalid API key")
-        onKeyValidated(value.trim(), false)
+        onKeyValidated(keyToTest, false)
       }
     } catch {
       if (controller.signal.aborted) {
         setStatus("invalid")
         setError("Validation timed out — backend not responding. Is Docker running?")
-        onKeyValidated(value.trim(), false)
+        onKeyValidated(keyToTest, false)
         return
       }
       clearTimeout(timeout)
       setStatus("invalid")
       setError("Connection failed — is the backend running?")
-      onKeyValidated(value.trim(), false)
+      onKeyValidated(keyToTest, false)
     }
-  }, [value, provider, onKeyValidated])
+  }, [value, provider, preconfigured, onKeyValidated])
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setValue(e.target.value)
@@ -111,7 +114,7 @@ export function ApiKeyInput({
             type={visible ? "text" : "password"}
             value={value}
             onChange={handleChange}
-            placeholder={placeholder ?? "sk-..."}
+            placeholder={preconfigured && !value ? "(from .env)" : (placeholder ?? "sk-...")}
             className={cn(
               "pr-9 font-mono text-xs",
               status === "valid" && "border-green-500/50",
@@ -136,7 +139,7 @@ export function ApiKeyInput({
           variant="outline"
           size="sm"
           onClick={handleTest}
-          disabled={!value.trim() || status === "checking"}
+          disabled={(!value.trim() && !preconfigured) || status === "checking"}
           className="shrink-0"
         >
           {status === "checking" ? (
