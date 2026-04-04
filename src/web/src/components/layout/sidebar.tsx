@@ -61,7 +61,7 @@ const TIER_COLORS: Record<string, string> = { community: "text-muted-foreground"
 
 export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse, theme, onToggleTheme, featureTier, onCycleTier }: SidebarProps) {
   const {
-    visibleConversations, activeId, setActiveId, create, remove,
+    visibleConversations, activeId, setActiveId, create, remove, rename,
     archive, unarchive, showArchived, toggleShowArchived, archivedCount,
     bulkDelete, bulkArchive,
   } = useConversationsContext()
@@ -215,6 +215,7 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
                   onDelete={remove}
                   onArchive={archive}
                   onUnarchive={unarchive}
+                  onRename={rename}
                   showArchived={showArchived}
                   archivedCount={archivedCount}
                   onToggleShowArchived={toggleShowArchived}

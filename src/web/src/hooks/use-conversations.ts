@@ -309,6 +309,18 @@ export function useConversations() {
     setShowArchived((prev) => !prev)
   }, [])
 
+  const rename = useCallback((convoId: string, newTitle: string) => {
+    setConversations((prev) => {
+      const next = prev.map((c) =>
+        c.id === convoId ? { ...c, title: newTitle, updatedAt: Date.now() } : c
+      )
+      saveConversations(next)
+      const updated = next.find((c) => c.id === convoId)
+      if (updated) syncToServer(updated)
+      return next
+    })
+  }, [syncToServer])
+
   const archive = useCallback((convoId: string) => {
     setConversations((prev) => {
       const next = prev.map((c) =>
@@ -405,7 +417,7 @@ export function useConversations() {
 
   return {
     conversations, visibleConversations, active, activeId, setActiveId,
-    create, addMessage, updateLastMessage, updateLastMessageModel, updateModel, remove,
+    create, addMessage, updateLastMessage, updateLastMessageModel, updateModel, remove, rename,
     replaceMessages, clearMessages,
     verifiedConversations, markVerified, clearVerified,
     saveVerification, getVerification, getAllVerificationReports,
