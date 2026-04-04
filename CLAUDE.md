@@ -103,16 +103,16 @@ React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly
 │   ├── config/                  # settings.py, taxonomy.py, features.py, providers.py, constants.py
 │   ├── db/neo4j/                # schema, artifacts, relationships, taxonomy, memory
 │   ├── sync/                    # export, import_, manifest, status
-│   ├── parsers/                 # registry, pdf, office, structured, email, ebook
+│   ├── parsers/                 # registry, pdf, office, structured, email, ebook, code_ast
 │   ├── services/                # ingestion.py (ingest_content, ingest_file, dedup)
 │   ├── eval/                    # Retrieval evaluation harness (NDCG, MRR, P@K, R@K)
 │   ├── agents/                  # query, curator, triage, rectify, audit, maintenance, hallucination/, memory, self_rag, decomposer, assembler, retrieval_orchestrator, trading_agent, templates
 │   ├── routers/                 # FastAPI routers (health, query, ingestion, agents, taxonomy, setup, providers, models, automations, a2a, observability, plugins, workflows, ollama_proxy, eval, data_sources, etc.)
-│   ├── models/                  # user.py, sdk.py, trading.py (Pydantic schemas)
+│   ├── models/                  # Pydantic schemas — user, sdk, trading, agents_response, artifacts, data_sources, ingestion, settings, memories, taxonomy, upload, user_state, webhooks, watched_folders, query, digest
 │   ├── middleware/              # 6 middleware: auth.py, rate_limit.py, request_id.py, jwt_auth.py, tenant_context.py, metrics.py
 │   ├── tools.py                 # MCP tool registry + dispatcher (26 tools)
 │   ├── plugins/                 # Plugin loader + built-in plugin scaffold
-│   ├── utils/                   # bm25, cache, query_cache, embeddings, chunker, dedup, encryption, web_search, a2a_client, error_handler, degradation, retrieval_cache, hyde, ollama_models, model_registry, query_classifier, data_sources/, etc.
+│   ├── utils/                   # bm25, cache, query_cache, embeddings, chunker, dedup, encryption, web_search, typed_redis, error_handler, degradation, retrieval_cache, hyde, ollama_models, model_registry, query_classifier, data_sources/, etc.
 │   ├── scripts/                 # watch_ingest.py, watch_obsidian.py, ingest_cli.py
 │   └── requirements.txt/.lock   # Python deps (ranges / pinned with hashes)
 ├── src/web/                     # React GUI (React 19, Vite 7, Tailwind v4, shadcn/ui)
@@ -228,6 +228,8 @@ See [`.claude/SETUP.md`](.claude/SETUP.md) for detailed Claude Code configuratio
 | Model registry | `ModelRegistry` with OpenRouter auto-validation | `utils/model_registry.py` |
 | Query classification | `classify_query()` intent detection (5 intents) | `utils/query_classifier.py` |
 | External data sources | Pluggable data source framework | `utils/data_sources/` |
+| Redis client | `TypedRedis` wrapper (narrowed sync return types) | `utils/typed_redis.py` |
+| Response models | Pydantic `response_model=` on all user-facing endpoints | `models/*.py` |
 
 **Rules:**
 - Typed errors (`CeridError` subclasses) are the ONLY way to signal failures. No `raise HTTPException` in business logic.
@@ -259,6 +261,7 @@ See [`.claude/SETUP.md`](.claude/SETUP.md) for detailed Claude Code configuratio
 | `utils/degradation.py` | 5-tier graceful degradation manager | `DegradationManager` |
 | `utils/retrieval_cache.py` | Redis retrieval cache with generation-counter invalidation | `retrieval_cache_get/set()` |
 | `utils/hyde.py` | HyDE (Hypothetical Document Embedding) fallback | `hyde_expand()` |
+| `utils/typed_redis.py` | Typed sync Redis facade (narrowed `Awaitable\|Any` → concrete types) | `TypedRedis` (35 methods) |
 | `utils/ollama_models.py` | Ollama model management | `list_models()`, `pull_model()` |
 | `routers/sdk.py` | Stable external API (`/sdk/v1/`) | Versioned contract |
 | `routers/data_sources.py` | External data source management endpoints | `/data-sources` CRUD |
