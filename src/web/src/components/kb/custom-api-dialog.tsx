@@ -31,7 +31,7 @@ export function CustomApiDialog({ open, onClose, onSave }: CustomApiDialogProps)
     name: "",
     baseUrl: "",
     authType: "bearer",
-    authKey: "Authorization",
+    authKey: "Authorization", // pragma: allowlist secret
     authValue: "",
     responsePath: "data",
     titleField: "title",

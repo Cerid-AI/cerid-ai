@@ -235,7 +235,6 @@ function readLocalNumber(key: string, fallback: number): number {
 
 function ConsoleConfigBar({
   ragMode,
-  onRagModeChange,
 }: {
   ragMode: RagMode
   onRagModeChange: (mode: RagMode) => void
@@ -270,12 +269,6 @@ function ConsoleConfigBar({
     setTopK(val)
     try { localStorage.setItem("cerid-console-top-k", String(val)) } catch { /* noop */ }
   }, [])
-
-  const RAG_MODES: { value: RagMode; label: string }[] = [
-    { value: "manual", label: "Manual" },
-    { value: "smart", label: "Smart" },
-    { value: "custom_smart", label: "Custom" },
-  ]
 
   return (
     <div className="flex items-center gap-1.5 border-b bg-muted/20 px-3 py-1.5">

@@ -75,14 +75,14 @@ class CustomApiSource(DataSource):
                 return []
         return current if isinstance(current, list) else [current]
 
-    async def query(self, text: str, **kwargs: Any) -> list[DataSourceResult]:
+    async def query(self, query: str, **kwargs: Any) -> list[DataSourceResult]:
         """Query the custom API and return parsed results."""
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.get(
                     f"{self.base_url}/search",
                     headers=self._build_headers(),
-                    params=self._build_params(text),
+                    params=self._build_params(query),
                 )
                 resp.raise_for_status()
                 data = resp.json()
