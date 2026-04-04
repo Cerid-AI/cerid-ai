@@ -147,3 +147,23 @@ See `docs/CONTRIBUTING.md` for the full sync reference. Key points:
 | frontend | tsc + ESLint + Vitest + Vite build + bundle size check (800KB limit) |
 | docker | hadolint + `docker build` + Trivy scan |
 | frontend-desktop | npm ci + `npm run typecheck` |
+
+## Platform Notes
+
+### macOS (ARM + Intel)
+- Docker Desktop uses virtiofs for mounts — `Errno 35` handled via retry (see `OPERATIONS.md`)
+- Ollama: install natively for Metal GPU acceleration. Containers access via `host.docker.internal:11434`
+- RAM: Docker reports VM memory, not host. `start-cerid.sh` sets `HOST_MEMORY_GB` via `sysctl`
+- GPU: Metal is not accessible from Linux containers. Use host Ollama for GPU inference
+
+### Linux (x86_64 + ARM64)
+- Native Docker Engine — no virtiofs issues
+- Ollama: host install, `localhost:11434`. NVIDIA GPU via Container Toolkit
+- ARM64: ChromaDB ONNX may lack AVX2 — set `REBUILD_HNSWLIB=1` if embedding fails
+- SELinux (Fedora/RHEL): volume mounts may need `:z` suffix
+
+### Windows (WSL2)
+- Requires WSL2 backend for Docker Desktop
+- Ollama: install inside WSL2. Access at `localhost:11434`
+- Keep data dirs on WSL2 filesystem (not `/mnt/c/`) for performance
+- Recommended `.wslconfig`: `memory=12GB` minimum
