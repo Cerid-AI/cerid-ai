@@ -22,7 +22,6 @@ import math
 import re
 from datetime import datetime, timezone
 
-import config
 from config.constants import (
     QUALITY_EVERGREEN_DOMAINS,
     QUALITY_EVERGREEN_HALF_LIFE_DAYS,

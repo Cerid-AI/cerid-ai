@@ -61,7 +61,7 @@ export function ApiKeyInput({
         setError(result.suggestion ?? result.error ?? "Invalid API key")
         onKeyValidated(value.trim(), false)
       }
-    } catch (err) {
+    } catch {
       if (controller.signal.aborted) {
         setStatus("invalid")
         setError("Validation timed out — backend not responding. Is Docker running?")
