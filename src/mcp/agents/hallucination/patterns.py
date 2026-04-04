@@ -104,6 +104,12 @@ STRONG_FACTUAL_PATTERNS = [
     re.compile(r"\b(?:faster|slower|better|worse|larger|smaller|more|fewer)\s+than\b", re.I),
     re.compile(r"\b(?:according to|reported by|published by)\b", re.I),
     re.compile(r"\b\d{4}\b.*\b(?:released|created|founded|introduced|launched)\b", re.I),
+    # "X is a/an Y" definitional claims (e.g., "Python is a programming language")
+    re.compile(r"\b\w+\s+is\s+a(?:n)?\s+\w+", re.I),
+    # "was created/founded/developed by" attribution claims
+    re.compile(r"\b(?:created|founded|developed|invented)\s+by\s+[A-Z]"),
+    # "was born/established/released in" temporal claims
+    re.compile(r"\b(?:was|were)\s+(?:born|established|released|published|introduced)\s+in\b", re.I),
 ]
 
 # ---------------------------------------------------------------------------

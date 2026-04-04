@@ -191,7 +191,7 @@ def get_configured_providers() -> list[dict]:
             })
             continue
 
-        api_key = os.getenv(env_var, "")
+        api_key = os.getenv(env_var, "").strip().strip('"').strip("'")
         if api_key:
             # Mask key: show first 4 and last 4 chars
             if len(api_key) > 8:

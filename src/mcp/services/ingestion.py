@@ -312,6 +312,7 @@ def ingest_content(
     metadata: dict[str, Any] | None = None,
     triage_result: Any | None = None,
     skip_quality: bool = False,
+    skip_metadata: bool = False,
 ) -> dict:
     """Core ingest path. Called by REST endpoints, agents, and MCP tool dispatcher.
 
@@ -453,6 +454,17 @@ def ingest_content(
     base_meta = {"domain": domain, "artifact_id": artifact_id, "ingested_at": ingested_at}
     if metadata:
         base_meta.update(metadata)
+
+    # When skip_metadata is set (wizard fast-path), generate lightweight
+    # summary and keywords from the content itself instead of calling the LLM.
+    if skip_metadata and not base_meta.get("summary"):
+        base_meta["summary"] = content[:200].strip()
+        fname = base_meta.get("filename", "")
+        base_meta.setdefault(
+            "keywords_json",
+            json.dumps([w for w in Path(fname).stem.replace("_", " ").replace("-", " ").split() if w][:5])
+            if fname else "[]",
+        )
 
     # Propagate client_source for provenance tracking
     if metadata and metadata.get("client_source"):
@@ -713,7 +725,14 @@ async def ingest_file(
     filename = Path(file_path).name
     # Run sync parser in thread pool to avoid blocking the event loop
     # (CPU-bound: PDF/DOCX parsing can take 100ms–2s per file)
-    parsed = await asyncio.to_thread(parse_file, file_path)
+    # Wrapped with virtiofs retry for macOS Docker Errno 35 (S4.2)
+    from utils.virtiofs_retry import virtiofs_retry
+
+    @virtiofs_retry()
+    def _parse_with_retry(fp: str) -> dict:
+        return parse_file(fp)
+
+    parsed = await asyncio.to_thread(_parse_with_retry, file_path)
     text = parsed["text"]
     meta = extract_metadata(text, filename, domain or config.DEFAULT_DOMAIN)
     mode = categorize_mode or (
@@ -751,6 +770,9 @@ async def ingest_file(
         meta["table_count"] = parsed["table_count"]
     if client_source:
         meta["client_source"] = client_source
+    # Guarantee a summary exists — fallback to first 200 chars if LLM didn't generate one
+    if not meta.get("summary"):
+        meta["summary"] = text[:200].strip()
     # Run sync ingest_content in thread pool to avoid blocking the event loop
     # (I/O-bound: Neo4j, ChromaDB, Redis writes + CPU-bound tiktoken chunking)
     result = await asyncio.to_thread(ingest_content, text, domain, meta, triage_result)

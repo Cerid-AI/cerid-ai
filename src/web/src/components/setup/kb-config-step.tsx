@@ -41,7 +41,10 @@ export function KBConfigStep({ config, onChange, lightweightRecommended, ramGb }
             className="font-mono text-xs"
           />
           <p className="text-[11px] text-muted-foreground">
-            Where Cerid looks for your documents. Domains are created automatically as you add content.
+            Where Cerid stores and watches for your documents. Domain subfolders are created automatically.
+          </p>
+          <p className="text-[10px] text-muted-foreground/70">
+            Tip: place this inside Dropbox or iCloud Drive to sync your knowledge base across machines.
           </p>
         </div>
 

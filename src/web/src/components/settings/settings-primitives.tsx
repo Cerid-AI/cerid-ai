@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
 import { Switch } from "@/components/ui/switch"
 import { Slider } from "@/components/ui/slider"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { ChevronDown, ChevronRight, Info } from "lucide-react"
+import { ChevronDown, ChevronRight, Info, Lock } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 
@@ -79,15 +79,18 @@ export function LabelWithInfo({ label, info }: { label: string; info: string }) 
   )
 }
 
-export function Row({ label, value, mono, info }: { label: string; value: string; mono?: boolean; info?: string }) {
+export function Row({ label, value, mono, info, readOnly }: { label: string; value: string; mono?: boolean; info?: string; readOnly?: boolean }) {
   return (
     <div className="flex cursor-default items-center justify-between">
-      {info ? (
-        <LabelWithInfo label={label} info={info} />
-      ) : (
-        <span className="text-sm text-muted-foreground">{label}</span>
-      )}
-      <span className={cn("text-sm", mono && "font-mono text-xs")}>{value}</span>
+      <span className="flex items-center gap-1">
+        {info ? (
+          <LabelWithInfo label={label} info={info} />
+        ) : (
+          <span className="text-sm text-muted-foreground">{label}</span>
+        )}
+        {readOnly && <Lock className="h-2.5 w-2.5 text-muted-foreground/40" />}
+      </span>
+      <span className={cn("text-sm", mono && "font-mono text-xs", readOnly && "text-muted-foreground")}>{value}</span>
     </div>
   )
 }
@@ -123,6 +126,7 @@ export function SliderRow({
   max,
   step,
   info,
+  recommended,
 }: {
   label: string
   value: number
@@ -131,25 +135,32 @@ export function SliderRow({
   max: number
   step: number
   info?: string
+  /** Display text like "Recommended: 400-512" below the slider */
+  recommended?: string
 }) {
   const display = step >= 1 ? String(value) : value.toFixed(2)
   return (
-    <div className="flex items-center justify-between gap-4">
-      <div className="flex min-w-0 items-center gap-1.5">
-        <LabelWithInfo
-          label={`${label}: ${display}`}
-          info={info ?? label}
+    <div className="space-y-0.5">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <LabelWithInfo
+            label={`${label}: ${display}`}
+            info={info ?? label}
+          />
+        </div>
+        <Slider
+          value={[value]}
+          onValueChange={([v]) => onChange(v)}
+          min={min}
+          max={max}
+          step={step}
+          className="w-32"
+          aria-label={label}
         />
       </div>
-      <Slider
-        value={[value]}
-        onValueChange={([v]) => onChange(v)}
-        min={min}
-        max={max}
-        step={step}
-        className="w-32"
-        aria-label={label}
-      />
+      {recommended && (
+        <p className="text-[9px] text-muted-foreground/60 pl-0.5">{recommended}</p>
+      )}
     </div>
   )
 }

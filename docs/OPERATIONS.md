@@ -552,3 +552,17 @@ Some features only appear under specific conditions:
 - 1 glibc heap corruption (no fix in Debian 13)
 - 1 wheel privilege escalation (build-time only)
 - 3 libxml2 in Alpine (nginx static files only)
+
+---
+
+## macOS Docker virtiofs Known Issue
+
+**Symptom:** `[Errno 35] Resource deadlock avoided` during sync, ingestion, or file watching.
+
+**Cause:** Docker Desktop for Mac uses the virtiofs filesystem for bind mounts. Concurrent file access from multiple processes (Dropbox sync, file watcher, manual uploads) across the host/container boundary can trigger `EDEADLK` (errno 35).
+
+**Mitigations built into Cerid:**
+
+1. **Automatic retry** — File parsing in the ingestion pipeline uses `@virtiofs_retry()` (3 attempts, exponential backoff: 0.5s → 1s → 2s).
+2. **Friendly errors** — Sync status catches errno 35 and returns a user-facing message instead of a raw stack trace.
+3. **Workaround** — Avoid running Dropbox sync + file watcher + manual uploads simultaneously. If you see persistent deadlocks, pause Dropbox sync during bulk ingestion.

@@ -5,15 +5,19 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { Loader2, Info, Copy } from "lucide-react"
+import { Loader2, Info, Copy, RefreshCw } from "lucide-react"
 import { fetchSetupHealth } from "@/lib/api"
 import type { SetupHealth, SetupServiceHealth } from "@/lib/types"
+
+const MCP_BASE = import.meta.env.VITE_MCP_URL || "http://localhost:8888"
 
 interface HealthDashboardProps {
   polling?: boolean
   interval?: number
   onAllHealthy?: () => void
   lightweightMode?: boolean
+  /** Provider IDs that have API keys configured (e.g., ["openrouter", "anthropic"]) */
+  configuredProviders?: string[]
 }
 
 const SERVICE_META: Record<string, { label: string; port: number; description: string; optional?: boolean; tooltip?: string; fixAction?: string }> = {
@@ -37,10 +41,11 @@ function statusBadge(status: string, serviceName?: string) {
   }
 }
 
-export function HealthDashboard({ polling = true, interval = 2000, onAllHealthy, lightweightMode }: HealthDashboardProps) {
+export function HealthDashboard({ polling = true, interval = 2000, onAllHealthy, lightweightMode, configuredProviders = [] }: HealthDashboardProps) {
   const [health, setHealth] = useState<SetupHealth | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [retesting, setRetesting] = useState(false)
   const notifiedRef = useRef(false)
   const onAllHealthyRef = useRef(onAllHealthy)
   onAllHealthyRef.current = onAllHealthy
@@ -61,6 +66,18 @@ export function HealthDashboard({ polling = true, interval = 2000, onAllHealthy,
       setLoading(false)
     }
   }, [])
+
+  const handleRetestVerification = useCallback(async () => {
+    setRetesting(true)
+    try {
+      await fetch(`${MCP_BASE}/setup/retest-verification`, { method: "POST" })
+      await checkHealth()
+    } catch {
+      // Next poll will update
+    } finally {
+      setRetesting(false)
+    }
+  }, [checkHealth])
 
   useEffect(() => {
     checkHealth()
@@ -144,6 +161,28 @@ export function HealthDashboard({ polling = true, interval = 2000, onAllHealthy,
                     <Copy className="h-2.5 w-2.5" />
                     {meta.fixAction}
                   </Button>
+                )}
+                {/* Verification pipeline: contextual message + re-check */}
+                {svc.name === "verification_pipeline" && isOffline && (
+                  <div className="mt-1 flex items-center gap-2">
+                    <p className="text-[10px] text-muted-foreground">
+                      {configuredProviders.length === 0
+                        ? "Requires API key — configure a provider first"
+                        : "Self-test failed — click Re-check after configuring keys"}
+                    </p>
+                    {configuredProviders.length > 0 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-5 gap-1 px-1.5 text-[10px]"
+                        onClick={handleRetestVerification}
+                        disabled={retesting}
+                      >
+                        {retesting ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <RefreshCw className="h-2.5 w-2.5" />}
+                        Re-check
+                      </Button>
+                    )}
+                  </div>
                 )}
               </div>
               {statusBadge(svc.status, meta?.label)}

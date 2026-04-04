@@ -6,6 +6,7 @@ import { render, screen } from "@testing-library/react"
 
 vi.mock("@/lib/api", () => ({
   pullOllamaModel: vi.fn().mockResolvedValue(new Response()),
+  fetchOllamaRecommendations: vi.fn().mockResolvedValue({ hardware: null, models: [] }),
 }))
 
 import { OllamaStep } from "@/components/setup/ollama-step"

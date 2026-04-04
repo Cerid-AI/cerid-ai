@@ -46,6 +46,7 @@ interface ConversationListProps {
   onDelete: (id: string) => void
   onArchive: (id: string) => void
   onUnarchive: (id: string) => void
+  onRename?: (id: string, newTitle: string) => void
   showArchived: boolean
   archivedCount: number
   onToggleShowArchived: () => void
@@ -60,6 +61,7 @@ export function ConversationList({
   onDelete,
   onArchive,
   onUnarchive,
+  onRename,
   showArchived,
   archivedCount,
   onToggleShowArchived,
@@ -67,6 +69,8 @@ export function ConversationList({
   onBulkArchive,
 }: ConversationListProps) {
   const [searchQuery, setSearchQuery] = useState("")
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState("")
   const [debouncedQuery, setDebouncedQuery] = useState("")
   const [editMode, setEditMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -274,9 +278,35 @@ export function ConversationList({
                   />
                 )}
                 <div className="min-w-0 flex-1 scroll-title">
-                  <span className="scroll-title-inner">
-                    <HighlightedText text={convo.title} query={debouncedQuery} />
-                  </span>
+                  {renamingId === convo.id ? (
+                    <input
+                      autoFocus
+                      className="w-full bg-transparent text-xs outline-none border-b border-brand"
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onBlur={() => {
+                        if (renameValue.trim() && renameValue !== convo.title) onRename?.(convo.id, renameValue.trim())
+                        setRenamingId(null)
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") { e.currentTarget.blur() }
+                        if (e.key === "Escape") { setRenamingId(null) }
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  ) : (
+                    <span
+                      className="scroll-title-inner"
+                      onDoubleClick={(e) => {
+                        if (!onRename) return
+                        e.stopPropagation()
+                        setRenamingId(convo.id)
+                        setRenameValue(convo.title)
+                      }}
+                    >
+                      <HighlightedText text={convo.title} query={debouncedQuery} />
+                    </span>
+                  )}
                 </div>
                 {!editMode && (
                   <div className="relative z-10 flex flex-shrink-0 items-center gap-0.5 opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto [@media(pointer:coarse)]:opacity-60 [@media(pointer:coarse)]:pointer-events-auto">
