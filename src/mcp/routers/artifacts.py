@@ -249,7 +249,11 @@ async def update_artifact_fields(artifact_id: str, body: ArtifactUpdateRequest):
         if not artifact:
             raise HTTPException(status_code=404, detail="Artifact not found")
         if body.title is not None:
-            graph.update_artifact(driver, artifact_id, {"filename": body.title})
+            with driver.session() as session:
+                session.run(
+                    "MATCH (a:Artifact {id: $aid}) SET a.filename = $title, a.updated_at = $now",
+                    aid=artifact_id, title=body.title, now=utcnow_iso(),
+                )
         if body.summary is not None:
             graph.update_artifact_summary(driver, artifact_id, body.summary)
         return {"artifact_id": artifact_id, "updated": True}
