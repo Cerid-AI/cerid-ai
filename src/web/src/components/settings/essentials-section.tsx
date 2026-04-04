@@ -157,7 +157,7 @@ export function EssentialsSection({ settings, sections, toggleSection, patch, cr
             <Row
               label="Chunk Size"
               value={`${settings.chunk_max_tokens} tokens / ${settings.chunk_overlap} overlap`}
-              info="Max tokens per chunk and overlap between chunks for embedding"
+              info="Chunk size: how many tokens per searchable segment (larger = more context per result, fewer results). Overlap: how much adjacent chunks share (higher = better context continuity, more storage). Recommended: 400-512 tokens, 15-25% overlap."
             />
             <div className="flex items-center justify-between">
               <LabelWithInfo label="Storage Mode" info="Extract-only parses text and discards the file. Archive keeps a copy in the sync directory." />

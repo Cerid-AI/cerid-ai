@@ -25,7 +25,7 @@ import type { SectionKey } from "./settings-primitives"
 
 type LoadState = "loading" | "error" | "ready"
 
-const SETTINGS_SECTIONS_VERSION = 5
+const SETTINGS_SECTIONS_VERSION = 6
 
 function readSectionState(): Record<SectionKey, boolean> {
   const defaults: Record<SectionKey, boolean> = {

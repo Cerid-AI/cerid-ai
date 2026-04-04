@@ -81,7 +81,7 @@ export function LabelWithInfo({ label, info }: { label: string; info: string }) 
 
 export function Row({ label, value, mono, info }: { label: string; value: string; mono?: boolean; info?: string }) {
   return (
-    <div className="flex items-center justify-between">
+    <div className="flex cursor-default items-center justify-between">
       {info ? (
         <LabelWithInfo label={label} info={info} />
       ) : (
