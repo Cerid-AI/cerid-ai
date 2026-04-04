@@ -32,7 +32,7 @@ _TEST_QUERY = "What technologies does the system use?"
 # Redis keys
 _SELF_TEST_KEY = "cerid:verification:self_test:last_result"
 _FAILURE_KEY_PREFIX = "cerid:verification:failures:"
-_FAILURE_TTL = 86400  # 24 hours
+_FAILURE_TTL = 3600  # 1 hour — failed results expire faster, allowing natural recovery
 
 
 async def run_verification_self_test(redis_client) -> dict:
@@ -79,7 +79,7 @@ async def run_verification_self_test(redis_client) -> dict:
     # Persist result to Redis (fire-and-forget, non-blocking)
     try:
         if redis_client is not None:
-            redis_client.set(_SELF_TEST_KEY, json.dumps(result), ex=86400)
+            redis_client.set(_SELF_TEST_KEY, json.dumps(result), ex=3600)
     except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
         logger.debug("Failed to persist self-test result to Redis: %s", exc)
 

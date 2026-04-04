@@ -312,6 +312,7 @@ def ingest_content(
     metadata: dict[str, Any] | None = None,
     triage_result: Any | None = None,
     skip_quality: bool = False,
+    skip_metadata: bool = False,
 ) -> dict:
     """Core ingest path. Called by REST endpoints, agents, and MCP tool dispatcher.
 
@@ -453,6 +454,17 @@ def ingest_content(
     base_meta = {"domain": domain, "artifact_id": artifact_id, "ingested_at": ingested_at}
     if metadata:
         base_meta.update(metadata)
+
+    # When skip_metadata is set (wizard fast-path), generate lightweight
+    # summary and keywords from the content itself instead of calling the LLM.
+    if skip_metadata and not base_meta.get("summary"):
+        base_meta["summary"] = content[:200].strip()
+        fname = base_meta.get("filename", "")
+        base_meta.setdefault(
+            "keywords_json",
+            json.dumps([w for w in Path(fname).stem.replace("_", " ").replace("-", " ").split() if w][:5])
+            if fname else "[]",
+        )
 
     # Propagate client_source for provenance tracking
     if metadata and metadata.get("client_source"):

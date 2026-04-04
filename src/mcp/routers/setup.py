@@ -546,8 +546,41 @@ async def configure(req: ConfigureRequest) -> ConfigureResponse:
             ", ".join(updates.keys()),
         )
 
+        # Re-run verification self-test now that API keys are available (S2.1)
+        import asyncio as _asyncio
+
+        try:
+            from agents.hallucination.startup_self_test import run_verification_self_test
+            from deps import get_redis
+
+            _asyncio.ensure_future(run_verification_self_test(get_redis()))
+        except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
+            pass  # Non-blocking — next health check will pick it up
+
         return ConfigureResponse(success=True, restart_required=True)
 
     except (OSError, ValueError) as exc:
         _logger.exception("Failed to apply configuration")
         return ConfigureResponse(success=False, error=str(exc))
+
+
+class SelfTestResult(BaseModel):
+    status: str
+    claims_found: int = 0
+    extraction_method: str = ""
+    duration_ms: float = 0.0
+
+
+@router.post("/retest-verification", response_model=SelfTestResult)
+async def retest_verification() -> SelfTestResult:
+    """Re-run verification pipeline self-test (called from health dashboard)."""
+    from agents.hallucination.startup_self_test import run_verification_self_test
+    from deps import get_redis
+
+    result = await run_verification_self_test(get_redis())
+    return SelfTestResult(
+        status=result.get("status", "fail"),
+        claims_found=result.get("claims_found", 0),
+        extraction_method=result.get("extraction_method", ""),
+        duration_ms=result.get("duration_ms", 0.0),
+    )

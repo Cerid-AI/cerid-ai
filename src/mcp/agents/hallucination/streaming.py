@@ -635,6 +635,14 @@ async def verify_response_streaming(
             loop_exc,
         )
         stream_interrupted = True
+        # Emit explicit error event so frontend can display the message
+        yield {
+            "type": "error",
+            "message": str(loop_exc),
+            "recoverable": False,
+            "claims_completed": verified_count + unverified_count + uncertain_count,
+            "claims_total": len(claims),
+        }
         try:
             from utils.cache import log_verification_error
             log_verification_error(
