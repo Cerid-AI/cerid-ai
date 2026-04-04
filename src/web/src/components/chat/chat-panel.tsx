@@ -401,6 +401,34 @@ export function ChatPanel() {
     [activeId, active, replaceMessages, addMessage, send, selectedModel],
   )
 
+  const handleEnrich = useCallback(
+    async (messageId: string, content: string) => {
+      const MCP_URL = import.meta.env.VITE_MCP_URL || "http://localhost:8888"
+      try {
+        const res = await fetch(`${MCP_URL}/agent/enrich`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Client-ID": "gui" },
+          body: JSON.stringify({ message_id: messageId, content }),
+        })
+        if (!res.ok) return
+        const data = await res.json()
+        // If enrichment returned results, inject them as a system note
+        if (data.results?.length && activeId) {
+          const note: ChatMessage = {
+            id: uuid(),
+            role: "assistant",
+            content: `**Enrichment** (${data.source_count} sources):\n${data.results.map((r: { source: string; snippet: string }) => `- **${r.source}**: ${r.snippet}`).join("\n")}`,
+            timestamp: Date.now(),
+          }
+          addMessage(activeId, note)
+        }
+      } catch {
+        // Enrichment is non-critical — silently fail
+      }
+    },
+    [activeId, addMessage],
+  )
+
   // --- Welcome state (no active conversation) ---
   const recentConversations = conversations.slice(0, 3)
 
@@ -699,6 +727,7 @@ export function ChatPanel() {
           setSelectedVerificationMsgId(msgId ?? null)
           setFocusedClaimIndex(null)
         }}
+        onEnrich={handleEnrich}
         onRetry={(userContent) => {
           handleSend(userContent)
           smartSuggestions.clear()

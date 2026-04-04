@@ -25,8 +25,10 @@ import {
   AlertCircle,
   Settings2,
 } from "lucide-react"
+import { Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { fetchDataSources, enableDataSource, disableDataSource, updateSettings } from "@/lib/api"
+import { CustomApiDialog } from "./custom-api-dialog"
 import { IngestionProgress } from "./ingestion-progress"
 import type { UseOrchestratedQueryReturn } from "@/hooks/use-orchestrated-query"
 import type { KBQueryResult, MemoryRecallResult, ExternalSourceResult, RagMode } from "@/lib/types"
@@ -271,7 +273,7 @@ function ConsoleConfigBar({
   }, [])
 
   return (
-    <div className="flex items-center gap-1.5 border-b bg-muted/20 px-3 py-1.5">
+    <div className="sticky top-0 z-10 flex items-center gap-1.5 border-b bg-background/95 backdrop-blur px-3 py-1.5">
       {/* RAG Mode display (read-only — primary control is in chat toolbar) */}
       <span className="rounded bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
         {ragMode === "smart" ? "Smart" : ragMode === "custom_smart" ? "Custom" : "Manual"}
@@ -339,6 +341,7 @@ export function KnowledgeConsole({
 }: KnowledgeConsoleProps) {
   const confidencePct = Math.round(confidence * 100)
   const totalSources = kbSources.length + memorySources.length + externalSources.length
+  const [customApiOpen, setCustomApiOpen] = useState(false)
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
@@ -431,6 +434,19 @@ export function KnowledgeConsole({
                   externalSources.map((r, i) => <ExternalSourceCard key={`ext-${i}`} result={r} />)
                 )}
                 <DataSourceIndicator />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-1 h-6 gap-1 text-[10px] w-full"
+                  onClick={() => setCustomApiOpen(true)}
+                >
+                  <Plus className="h-3 w-3" /> Add Custom API
+                </Button>
+                <CustomApiDialog
+                  open={customApiOpen}
+                  onClose={() => setCustomApiOpen(false)}
+                  onSave={() => setCustomApiOpen(false)}
+                />
               </SourceSection>
             </>
           )}

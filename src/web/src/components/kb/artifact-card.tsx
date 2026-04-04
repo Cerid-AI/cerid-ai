@@ -263,6 +263,40 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
           </p>
         ) : null)}
 
+        {/* Expanded view: metadata, keywords, quality breakdown */}
+        {!compact && expanded && (
+          <div className="mt-3 space-y-2 border-t pt-3 transition-all duration-200">
+            {/* Keyword tags */}
+            {result.keywords && result.keywords.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {result.keywords.map((k: string) => (
+                  <Badge key={k} variant="secondary" className="text-[10px]">{k}</Badge>
+                ))}
+              </div>
+            )}
+            {/* Metadata row */}
+            <div className="flex flex-wrap gap-3 text-[10px] text-muted-foreground">
+              {result.source_type && <span>Source: {result.source_type}</span>}
+              {result.chunk_count != null && <span>Chunks: {result.chunk_count}</span>}
+              {result.ingested_at && <span>Ingested: {new Date(result.ingested_at).toLocaleDateString()}</span>}
+              {result.retrieval_count != null && <span>Retrievals: {result.retrieval_count}</span>}
+            </div>
+            {/* Quality score */}
+            {result.quality_score != null && (
+              <div className="flex items-center gap-2 text-[10px]">
+                <span className="text-muted-foreground">Quality:</span>
+                <div className="h-1.5 w-20 rounded-full bg-muted">
+                  <div
+                    className="h-1.5 rounded-full bg-emerald-500"
+                    style={{ width: `${Math.round(result.quality_score * 100)}%` }}
+                  />
+                </div>
+                <span className="text-muted-foreground">{Math.round(result.quality_score * 100)}%</span>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Recategorize inline picker */}
         {!compact && showRecategorize && domains && onRecategorize && (
           <div className="mt-2 flex flex-wrap items-center gap-1 rounded border bg-muted/30 p-2">

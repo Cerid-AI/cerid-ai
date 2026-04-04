@@ -920,3 +920,40 @@ async def trading_longshot_surface_endpoint(req: LongshotSurfaceRequest):
     except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(f"Longshot surface error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Enrichment (S1.1 — external source query for a message)
+# ---------------------------------------------------------------------------
+
+
+class EnrichRequest(BaseModel):
+    message_id: str
+    content: str
+
+
+class EnrichResult(BaseModel):
+    source: str
+    snippet: str
+
+
+class EnrichResponse(BaseModel):
+    results: list[EnrichResult]
+    source_count: int
+
+
+@router.post("/agent/enrich", response_model=EnrichResponse)
+async def enrich_endpoint(req: EnrichRequest):
+    """Query external data sources with message content for additional context."""
+    try:
+        from utils.data_sources import DataSourceManager
+        mgr = DataSourceManager()
+        raw_results = await mgr.query_all(req.content, limit=5)
+        results = [
+            EnrichResult(source=r.get("source", "unknown"), snippet=r.get("content", "")[:300])
+            for r in raw_results
+        ]
+        return EnrichResponse(results=results, source_count=len(results))
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
+        logger.warning("Enrichment failed: %s", e)
+        return EnrichResponse(results=[], source_count=0)
