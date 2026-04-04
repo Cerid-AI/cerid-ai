@@ -5,7 +5,7 @@ import remarkGfm from "remark-gfm"
 import { lazy, Suspense, useState, useCallback, useMemo, useRef, useEffect, isValidElement, type ReactNode } from "react"
 
 import ReactMarkdown from "react-markdown"
-import { Copy, Check, User, Bot, ShieldCheck, ShieldAlert, Loader2, Pencil, Shield, ExternalLink, Sparkles } from "lucide-react"
+import { Copy, Check, User, Bot, ShieldCheck, ShieldAlert, Loader2, Pencil, Shield, ExternalLink, Sparkles, Globe } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn, formatCost } from "@/lib/utils"
@@ -353,6 +353,7 @@ interface MessageBubbleProps {
   verificationClaims?: HallucinationClaim[]
   inlineMarkups?: boolean
   onCorrect?: (messageId: string, correction: string) => void
+  onEnrich?: (messageId: string, content: string) => void
   onToggleMarkup?: () => void
   /** Switch the verification panel to this message's report (non-selected messages). */
   onSelectForVerification?: () => void
@@ -360,7 +361,7 @@ interface MessageBubbleProps {
   onArtifactClick?: (artifactId: string) => void
 }
 
-export function MessageBubble({ message, verificationStatus, verificationClaims, inlineMarkups, onCorrect, onToggleMarkup, onSelectForVerification, onClaimFocus, onArtifactClick }: MessageBubbleProps) {
+export function MessageBubble({ message, verificationStatus, verificationClaims, inlineMarkups, onCorrect, onEnrich, onToggleMarkup, onSelectForVerification, onClaimFocus, onArtifactClick }: MessageBubbleProps) {
   const isUser = message.role === "user"
   const [correcting, setCorrecting] = useState(false)
   const [correctionText, setCorrectionText] = useState("")
@@ -558,6 +559,24 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
               >
                 <Pencil className="h-3 w-3" />
               </Button>
+            )}
+            {onEnrich && (
+              <TooltipProvider delayDuration={200}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      aria-label="Enrich with external sources"
+                      onClick={() => onEnrich(message.id, message.content)}
+                    >
+                      <Globe className="h-3 w-3" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Search external sources for more context on this response</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             )}
           </div>
         )}
