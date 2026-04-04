@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { PlusCircle, GitBranch, Globe, ArrowRightLeft, Loader2, X, Eye, Trash2, Tags, Check, RefreshCw, Layers, Star, Leaf } from "lucide-react"
+import { MessageSquarePlus, GitBranch, Globe, ArrowRightLeft, Loader2, X, Eye, Trash2, Tags, Check, RefreshCw, Layers, Star, Leaf } from "lucide-react"
 import { DomainBadge } from "@/components/ui/domain-badge"
 import { SourceTypeBadge } from "./source-type-badge"
 import { QualityDot } from "./quality-dot"
@@ -138,10 +138,17 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
             <div className="flex items-center gap-1.5">
               <p className="min-w-0 truncate text-sm font-medium" title={result.filename}>{normalizeFilename(result.filename)}</p>
               {chunkCount != null && (
-                <Badge variant="outline" className="shrink-0 gap-0.5 text-[9px] px-1.5 py-0">
-                  <Layers className="h-2.5 w-2.5" />
-                  {chunkCount}
-                </Badge>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Badge variant="outline" className="shrink-0 gap-0.5 text-[9px] px-1.5 py-0">
+                      <Layers className="h-2.5 w-2.5" />
+                      {chunkCount}
+                    </Badge>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-[200px] text-xs">
+                    {chunkCount} searchable segment{chunkCount !== 1 ? "s" : ""}. Documents are split into chunks for more precise retrieval.
+                  </TooltipContent>
+                </Tooltip>
               )}
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-1.5">
@@ -480,9 +487,9 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
               e.stopPropagation()
               onInject()
             }}
-            title="Inject into chat context"
+            title="Add this document's content to the current conversation context"
           >
-            <PlusCircle className={compact ? "h-2.5 w-2.5" : "h-3 w-3"} />
+            <MessageSquarePlus className={compact ? "h-2.5 w-2.5" : "h-3 w-3"} />
           </Button>
         </div>
       </CardContent>
