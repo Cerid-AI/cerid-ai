@@ -350,7 +350,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
       const result = await applySetupConfig({
         keys: config,
         archive_path: state.kbConfig.archivePath,
-        domains: state.kbConfig.domains,
+        domains: ["general"],
         lightweight_mode: state.kbConfig.lightweightMode,
         watch_folder: state.kbConfig.watchFolder,
         ollama_enabled: state.ollama.enabled,
@@ -631,13 +631,12 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                   ))}
                 </div>
 
-                {/* KB Summary */}
+                {/* Storage & Archive Summary */}
                 {!state.skippedSteps.has(2) && (
                   <div className="rounded-lg border bg-card px-3 py-2">
-                    <p className="text-xs font-medium text-muted-foreground">Knowledge Base</p>
+                    <p className="text-xs font-medium text-muted-foreground">Storage & Archive</p>
                     <p className="mt-0.5 text-xs">
-                      {state.kbConfig.domains.length} domain{state.kbConfig.domains.length !== 1 ? "s" : ""}
-                      {" · "}<span className="font-mono">{state.kbConfig.archivePath}</span>
+                      <span className="font-mono">{state.kbConfig.archivePath}</span>
                       {state.kbConfig.lightweightMode && " · Lightweight"}
                       {state.kbConfig.watchFolder && " · Auto-watch"}
                     </p>
