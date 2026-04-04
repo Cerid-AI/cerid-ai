@@ -4,10 +4,8 @@
 import { useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
-import { Label } from "@/components/ui/label"
 import { Settings2, ChevronDown, ChevronRight, Check, Cpu, Globe, Zap } from "lucide-react"
 import { OllamaStep } from "./ollama-step"
-import { cn } from "@/lib/utils"
 
 interface OllamaState {
   detected: boolean

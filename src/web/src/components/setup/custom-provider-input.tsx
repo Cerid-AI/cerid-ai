@@ -6,8 +6,6 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { ChevronDown, ChevronRight, Loader2, Check, X } from "lucide-react"
-import { cn } from "@/lib/utils"
-
 interface CustomProviderState {
   name: string
   baseUrl: string
