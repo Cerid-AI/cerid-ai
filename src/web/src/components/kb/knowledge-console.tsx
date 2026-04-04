@@ -279,29 +279,10 @@ function ConsoleConfigBar({
 
   return (
     <div className="flex items-center gap-1.5 border-b bg-muted/20 px-3 py-1.5">
-      {/* RAG Mode selector */}
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[10px]">
-            {ragMode === "smart" ? "Smart" : ragMode === "custom_smart" ? "Custom" : "Manual"}
-            <ChevronDown className="h-3 w-3" />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-36 p-1" align="start">
-          {RAG_MODES.map((m) => (
-            <button
-              key={m.value}
-              className={cn(
-                "flex w-full items-center rounded-sm px-2 py-1 text-xs hover:bg-accent",
-                ragMode === m.value && "bg-accent font-medium",
-              )}
-              onClick={() => onRagModeChange(m.value)}
-            >
-              {m.label}
-            </button>
-          ))}
-        </PopoverContent>
-      </Popover>
+      {/* RAG Mode display (read-only — primary control is in chat toolbar) */}
+      <span className="rounded bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+        {ragMode === "smart" ? "Smart" : ragMode === "custom_smart" ? "Custom" : "Manual"}
+      </span>
 
       <div className="flex-1" />
 
