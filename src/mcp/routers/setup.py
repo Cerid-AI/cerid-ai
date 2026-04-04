@@ -508,9 +508,11 @@ async def configure(req: ConfigureRequest) -> ConfigureResponse:
             updates["WATCH_FOLDER"] = req.archive_path
             # Also register as a watched folder so it appears in the UI (S4.4)
             try:
-                from routers.watched_folders import _get_redis as _wf_redis, _save_folder, _add_to_index
                 import uuid as _uuid
                 from datetime import datetime, timezone
+
+                from routers.watched_folders import _add_to_index, _save_folder
+                from routers.watched_folders import _get_redis as _wf_redis
                 _r = _wf_redis()
                 _fid = _uuid.uuid4().hex[:12]
                 _now = datetime.now(timezone.utc).isoformat()
