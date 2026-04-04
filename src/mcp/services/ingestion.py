@@ -725,7 +725,14 @@ async def ingest_file(
     filename = Path(file_path).name
     # Run sync parser in thread pool to avoid blocking the event loop
     # (CPU-bound: PDF/DOCX parsing can take 100ms–2s per file)
-    parsed = await asyncio.to_thread(parse_file, file_path)
+    # Wrapped with virtiofs retry for macOS Docker Errno 35 (S4.2)
+    from utils.virtiofs_retry import virtiofs_retry
+
+    @virtiofs_retry()
+    def _parse_with_retry(fp: str) -> dict:
+        return parse_file(fp)
+
+    parsed = await asyncio.to_thread(_parse_with_retry, file_path)
     text = parsed["text"]
     meta = extract_metadata(text, filename, domain or config.DEFAULT_DOMAIN)
     mode = categorize_mode or (

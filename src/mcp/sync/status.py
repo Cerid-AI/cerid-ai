@@ -120,6 +120,16 @@ def compare_status(
         logger.warning("No manifest found at %s — sync counts will be 0", sync_dir)
     except ValueError as exc:
         logger.warning("Manifest parse error: %s", exc)
+    except OSError as exc:
+        import errno as _errno
+        if exc.errno in (_errno.EDEADLK, 35):
+            logger.warning("virtiofs Errno 35 during sync status — file system busy")
+            return {
+                "status": "busy",
+                "message": "File system busy — common with Docker on macOS. Try again in a few seconds.",
+                "retry_after": 3,
+            }
+        raise
 
     # --- Diff ---
     diff: dict[str, Any] = {}

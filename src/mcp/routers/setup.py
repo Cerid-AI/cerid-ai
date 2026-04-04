@@ -506,6 +506,25 @@ async def configure(req: ConfigureRequest) -> ConfigureResponse:
         # Handle new configuration fields
         if req.archive_path:
             updates["WATCH_FOLDER"] = req.archive_path
+            # Also register as a watched folder so it appears in the UI (S4.4)
+            try:
+                from routers.watched_folders import _get_redis as _wf_redis, _save_folder, _add_to_index
+                import uuid as _uuid
+                from datetime import datetime, timezone
+                _r = _wf_redis()
+                _fid = _uuid.uuid4().hex[:12]
+                _now = datetime.now(timezone.utc).isoformat()
+                _save_folder(_r, _fid, {
+                    "id": _fid, "path": req.archive_path,
+                    "label": "Archive", "enabled": True,
+                    "domain_override": None, "exclude_patterns": [],
+                    "search_enabled": True, "last_scanned_at": None,
+                    "stats": {"ingested": 0, "skipped": 0, "errored": 0},
+                    "created_at": _now,
+                })
+                _add_to_index(_r, _fid)
+            except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
+                _logger.warning("Failed to register archive as watched folder")
         if req.domains is not None:
             updates["CERID_ACTIVE_DOMAINS"] = ",".join(req.domains)
         if req.lightweight_mode is not None:
