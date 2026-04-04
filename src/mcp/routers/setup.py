@@ -268,19 +268,18 @@ async def setup_status() -> SetupStatus:
 @router.get("/system-check", response_model=SystemCheckResponse)
 async def system_check() -> SystemCheckResponse:
     """Detect host capabilities for the setup wizard."""
-    # RAM detection — prefer /proc/meminfo (reports host RAM even inside Docker)
-    # because os.sysconf reports cgroup-limited memory in containers.
-    ram_gb = 0.0
-    try:
-        meminfo = Path("/proc/meminfo").read_text()
-        for line in meminfo.splitlines():
-            if line.startswith("MemTotal:"):
-                ram_kb = int(line.split()[1])
-                ram_gb = ram_kb / (1024**2)
-                break
-    except (OSError, ValueError):
-        pass
-    if ram_gb == 0.0:
+    # RAM detection — HOST_MEMORY_GB env var takes priority (set in docker-compose.yml
+    # from the host's actual memory). Inside Docker Desktop for Mac/Windows, both
+    # /proc/meminfo and os.sysconf report the VM's cgroup limit, not the host's RAM.
+    # Threshold: < 12 GB triggers lightweight mode recommendation.
+    host_override = os.environ.get("HOST_MEMORY_GB", "").strip()
+    if host_override:
+        try:
+            ram_gb = float(host_override)
+        except ValueError:
+            ram_gb = 0.0
+    else:
+        ram_gb = 0.0
         try:
             ram_gb = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / (1024**3)
         except OSError:
