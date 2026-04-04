@@ -48,7 +48,12 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
 
     try {
       setIngestProgress("Chunking & embedding...")
-      await uploadFile(file, { categorizeMode: "smart" })
+      // Use manual categorization in wizard — AI categorization is unreliable
+      // before providers are configured, and adds 2-5s latency
+      await uploadFile(file, { categorizeMode: "manual", domain: "general", skipQuality: true })
+      setIngestProgress("Indexing...")
+      // Brief delay to let ChromaDB flush writes before enabling queries
+      await new Promise((r) => setTimeout(r, 1000))
       setIngestProgress(null)
       setPhase("chat")
       onChange({ ...state, ingested: true })
@@ -99,7 +104,12 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
     setResponse(null)
 
     try {
-      const result = await queryKB(text.trim())
+      let result = await queryKB(text.trim())
+      // Retry once if no results — ChromaDB may not have flushed yet
+      if (!result.results?.length) {
+        await new Promise((r) => setTimeout(r, 2000))
+        result = await queryKB(text.trim())
+      }
       const topResult = result.results?.[0]
       setResponse(
         topResult?.content
@@ -122,7 +132,7 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
     [handleIngestFile],
   )
 
-  const { isDragOver, ...dragProps } = useDragDrop(onFilesDropped)
+  const { isDragOver, dragHandlers } = useDragDrop(onFilesDropped)
 
   return (
     <>
@@ -142,10 +152,10 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
 
           {/* Drag-drop upload zone */}
           <div
-            {...dragProps}
+            {...dragHandlers}
             onClick={() => fileInputRef.current?.click()}
             className={cn(
-              "flex cursor-pointer flex-col items-center gap-2 rounded-lg border-2 border-dashed p-6 transition-colors",
+              "relative flex cursor-pointer flex-col items-center gap-2 rounded-lg border-2 border-dashed p-6 transition-colors",
               isDragOver
                 ? "border-brand bg-brand/5"
                 : "border-muted-foreground/20 hover:border-muted-foreground/40",
@@ -158,12 +168,17 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
               ref={fileInputRef}
               type="file"
               accept={ACCEPTED_EXTS}
-              className="hidden"
+              className="pointer-events-none hidden"
+              tabIndex={-1}
               onChange={(e) => {
                 const file = e.target.files?.[0]
                 if (file) handleIngestFile(file)
               }}
             />
+            {/* Full-zone overlay during drag to prevent OS file handler interception */}
+            {isDragOver && (
+              <div className="absolute inset-0 z-50" />
+            )}
           </div>
 
           {/* Sample content option */}

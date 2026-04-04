@@ -32,6 +32,7 @@ async def upload_file_endpoint(
     sub_category: str = Query("", description="Sub-category within domain"),
     tags: str = Query("", description="Comma-separated tags or JSON array"),
     categorize_mode: str = Query("", description="Categorization tier: manual, smart, or pro"),
+    skip_quality: bool = Query(False, description="Skip quality scoring (faster wizard ingestion)"),
 ):
     """Accept a multipart file upload, validate it, and ingest into the knowledge base.
 
@@ -95,6 +96,7 @@ async def upload_file_endpoint(
             text,
             domain or "general",
             metadata,
+            skip_quality=skip_quality,
         )
         result["categorize_mode"] = categorize_mode or "smart"
         result["metadata"] = metadata
