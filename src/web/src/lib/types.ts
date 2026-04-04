@@ -295,15 +295,19 @@ export interface KBQueryResult {
   domain: string
   sub_category?: string
   tags?: string[]
+  keywords?: string[]
   chunk_index: number
+  chunk_count?: number
   collection: string
   ingested_at: string
   graph_source?: boolean
   relationship_type?: string
   cross_domain?: boolean
   quality_score?: number
+  quality_scores?: Record<string, number>
   summary?: string
   source_url?: string
+  source_name?: string
   source_type?: "kb" | "memory" | "external"
   starred?: boolean
   evergreen?: boolean

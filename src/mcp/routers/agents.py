@@ -946,9 +946,8 @@ class EnrichResponse(BaseModel):
 async def enrich_endpoint(req: EnrichRequest):
     """Query external data sources with message content for additional context."""
     try:
-        from utils.data_sources import DataSourceManager
-        mgr = DataSourceManager()
-        raw_results = await mgr.query_all(req.content, limit=5)
+        from utils.data_sources import registry as ds_registry
+        raw_results = await ds_registry.query_all(req.content)
         results = [
             EnrichResult(source=r.get("source", "unknown"), snippet=r.get("content", "")[:300])
             for r in raw_results

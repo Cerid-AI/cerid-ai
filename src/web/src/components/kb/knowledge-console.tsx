@@ -445,7 +445,7 @@ export function KnowledgeConsole({
                 <CustomApiDialog
                   open={customApiOpen}
                   onClose={() => setCustomApiOpen(false)}
-                  onSave={() => setCustomApiOpen(false)}
+                  onSave={async () => { setCustomApiOpen(false) }}
                 />
               </SourceSection>
             </>

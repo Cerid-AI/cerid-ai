@@ -73,10 +73,12 @@ class TestAsyncFileParsing:
         # Verify to_thread was called twice (parse_file + ingest_content)
         assert mock_asyncio.to_thread.call_count == 2
 
-        # First call should be parse_file
+        # First call should be the virtiofs-retry-wrapped parse_file
         first_call = mock_asyncio.to_thread.call_args_list[0]
+        target_fn = first_call.args[0]
+        # Accept either the raw parse_file or the @virtiofs_retry wrapper
         from parsers import parse_file
-        assert first_call.args[0] is parse_file
+        assert target_fn is parse_file or getattr(target_fn, "__wrapped__", None) is parse_file or target_fn.__name__ == "_parse_with_retry"
 
     @patch("services.ingestion.asyncio")
     @patch("services.ingestion.ai_categorize", new_callable=AsyncMock)
