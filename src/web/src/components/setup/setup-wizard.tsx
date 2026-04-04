@@ -654,7 +654,20 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                           Ready
                         </span>
                       ) : (
-                        <span className="text-xs text-muted-foreground">Not configured</span>
+                        <span className="flex items-center gap-2">
+                          <span className="text-xs text-muted-foreground">Not configured</span>
+                          {provider !== "openrouter" && (
+                            <span className="text-[10px] text-muted-foreground/60">Optional</span>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-5 px-1.5 text-[10px] text-brand"
+                            onClick={() => dispatch({ type: "SET_STEP", step: 1 })}
+                          >
+                            Fix →
+                          </Button>
+                        </span>
                       )}
                     </div>
                   ))}

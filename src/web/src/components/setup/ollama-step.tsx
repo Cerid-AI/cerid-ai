@@ -1,13 +1,13 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
-import { Cpu, ExternalLink, Loader2, Check, Download } from "lucide-react"
-import { pullOllamaModel } from "@/lib/api"
+import { Cpu, ExternalLink, Loader2, Check, Download, Star, HardDrive } from "lucide-react"
+import { pullOllamaModel, fetchOllamaRecommendations } from "@/lib/api"
 
 interface OllamaState {
   detected: boolean
@@ -26,9 +26,36 @@ interface OllamaStepProps {
 const RECOMMENDED_MODEL = "llama3.2:3b"
 const RECOMMENDED_MODEL_SIZE = "2.0 GB"
 
+interface HardwareInfo {
+  ram_gb: number
+  cpu: string
+  gpu: string
+}
+
+interface ModelRecommendation {
+  id: string
+  name: string
+  origin: string
+  size_gb: number
+  description: string
+  strengths: string
+  compatible: boolean
+  recommended: boolean
+}
+
 export function OllamaStep({ ollamaDetected, ollamaModels, state, onChange }: OllamaStepProps) {
   const [pullProgress, setPullProgress] = useState<string | null>(null)
   const [pullError, setPullError] = useState<string | null>(null)
+  const [hardware, setHardware] = useState<HardwareInfo | null>(null)
+  const [modelRecs, setModelRecs] = useState<ModelRecommendation[]>([])
+
+  useEffect(() => {
+    if (!ollamaDetected) return
+    fetchOllamaRecommendations().then((data) => {
+      if (data?.hardware) setHardware(data.hardware)
+      if (data?.models) setModelRecs(data.models)
+    }).catch(() => { /* non-critical */ })
+  }, [ollamaDetected])
 
   const handlePull = useCallback(async () => {
     onChange({ ...state, pulling: true })
@@ -82,7 +109,95 @@ export function OllamaStep({ ollamaDetected, ollamaModels, state, onChange }: Ol
 
         {ollamaDetected ? (
           <>
-            {/* Models */}
+            {/* Hardware info card */}
+            {hardware && (
+              <div className="rounded-lg border bg-card p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <HardDrive className="h-3 w-3 text-muted-foreground" />
+                  <p className="text-[11px] font-medium text-muted-foreground">Your Hardware</p>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-[10px]">
+                  <div>
+                    <p className="text-muted-foreground">RAM</p>
+                    <p className="font-medium">{hardware.ram_gb} GB</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">CPU</p>
+                    <p className="font-medium truncate">{hardware.cpu || "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">GPU</p>
+                    <p className="font-medium truncate">{hardware.gpu || "—"}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Model recommendations (dynamic from backend) */}
+            {modelRecs.length > 0 && (
+              <div className="space-y-1.5">
+                <p className="text-[11px] font-medium text-muted-foreground">Recommended Models</p>
+                {modelRecs.map((m) => {
+                  const installed = ollamaModels.some((om) => om.startsWith(m.id.split(":")[0]))
+                  return (
+                    <div key={m.id} className={`rounded-lg border bg-card p-3 ${!m.compatible ? "opacity-50" : ""}`}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <p className="text-xs font-medium">{m.name}</p>
+                            {m.recommended && (
+                              <Badge variant="outline" className="text-[9px] px-1 py-0 border-brand/30 text-brand">
+                                <Star className="mr-0.5 h-2 w-2" /> Recommended
+                              </Badge>
+                            )}
+                            {installed && (
+                              <Badge variant="outline" className="text-[9px] px-1 py-0 border-green-500/30 text-green-600">
+                                Installed
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">{m.description}</p>
+                          <p className="text-[9px] text-muted-foreground/70 mt-0.5">{m.origin} · {m.size_gb} GB</p>
+                        </div>
+                        {!installed && m.compatible && (
+                          <Button size="sm" variant="outline" className="shrink-0 h-7" onClick={handlePull} disabled={state.pulling}>
+                            {state.pulling ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Download className="mr-1 h-3 w-3" />}
+                            Pull
+                          </Button>
+                        )}
+                        {!m.compatible && (
+                          <span className="text-[9px] text-muted-foreground shrink-0">Needs {m.size_gb * 2}+ GB RAM</span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+                {pullProgress && <p className="text-[10px] text-muted-foreground">{pullProgress}</p>}
+                {pullError && <p className="text-[10px] text-destructive">{pullError}</p>}
+              </div>
+            )}
+
+            {/* Fallback: static recommendation if backend didn't respond */}
+            {modelRecs.length === 0 && !hasRecommendedModel && !state.model && (
+              <div className="rounded-lg border bg-card p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-medium">{RECOMMENDED_MODEL}</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {RECOMMENDED_MODEL_SIZE} — best balance of speed and quality for pipeline tasks
+                    </p>
+                  </div>
+                  <Button size="sm" variant="outline" onClick={handlePull} disabled={state.pulling} className="shrink-0">
+                    {state.pulling ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Download className="mr-1 h-3 w-3" />}
+                    Pull
+                  </Button>
+                </div>
+                {pullProgress && <p className="mt-2 text-[10px] text-muted-foreground">{pullProgress}</p>}
+                {pullError && <p className="mt-2 text-[10px] text-destructive">{pullError}</p>}
+              </div>
+            )}
+
+            {/* Installed Models */}
             {ollamaModels.length > 0 && (
               <div className="rounded-lg border bg-card p-3">
                 <p className="mb-2 text-[11px] font-medium text-muted-foreground">
@@ -95,40 +210,6 @@ export function OllamaStep({ ollamaDetected, ollamaModels, state, onChange }: Ol
                     </Badge>
                   ))}
                 </div>
-              </div>
-            )}
-
-            {/* Pull recommendation */}
-            {!hasRecommendedModel && !state.model && (
-              <div className="rounded-lg border bg-card p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-medium">{RECOMMENDED_MODEL}</p>
-                    <p className="text-[10px] text-muted-foreground">
-                      {RECOMMENDED_MODEL_SIZE} — best balance of speed and quality for pipeline tasks
-                    </p>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={handlePull}
-                    disabled={state.pulling}
-                    className="shrink-0"
-                  >
-                    {state.pulling ? (
-                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                    ) : (
-                      <Download className="mr-1 h-3 w-3" />
-                    )}
-                    Pull
-                  </Button>
-                </div>
-                {pullProgress && (
-                  <p className="mt-2 text-[10px] text-muted-foreground">{pullProgress}</p>
-                )}
-                {pullError && (
-                  <p className="mt-2 text-[10px] text-destructive">{pullError}</p>
-                )}
               </div>
             )}
 
