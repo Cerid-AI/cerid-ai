@@ -44,6 +44,7 @@ export function useDragDrop(onFiles: (files: File[]) => void): UseDragDropReturn
   const onDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
+    e.dataTransfer.dropEffect = "copy"
   }, [])
 
   const onDrop = useCallback((e: React.DragEvent) => {

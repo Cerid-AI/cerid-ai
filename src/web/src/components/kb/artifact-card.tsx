@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { PlusCircle, GitBranch, Globe, ArrowRightLeft, Loader2, X, Eye, Trash2, Tags, Check, RefreshCw, Layers } from "lucide-react"
+import { MessageSquarePlus, GitBranch, Globe, ArrowRightLeft, Loader2, X, Eye, Trash2, Tags, Check, RefreshCw, Layers, Star, Leaf } from "lucide-react"
 import { DomainBadge } from "@/components/ui/domain-badge"
 import { SourceTypeBadge } from "./source-type-badge"
 import { QualityDot } from "./quality-dot"
@@ -53,13 +53,15 @@ interface ArtifactCardProps {
   onDelete?: (artifactId: string) => Promise<void>
   onUpdateTags?: (artifactId: string, tags: string[]) => Promise<void>
   onReIngest?: (artifactId: string) => Promise<void>
+  onToggleStar?: (artifactId: string) => Promise<void>
+  onToggleEvergreen?: (artifactId: string) => Promise<void>
   /** When true, show the client_source badge on each card. */
   showSource?: boolean
   /** When true, show a compact card with no content preview or action buttons. */
   compact?: boolean
 }
 
-export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, onRecategorize, onPreview, onDelete, onUpdateTags, onReIngest, showSource, compact }: ArtifactCardProps) {
+export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, onRecategorize, onPreview, onDelete, onUpdateTags, onReIngest, onToggleStar, onToggleEvergreen, showSource, compact }: ArtifactCardProps) {
   const [expanded, setExpanded] = useState(false)
   const [showRecategorize, setShowRecategorize] = useState(false)
   const [recategorizing, setRecategorizing] = useState(false)
@@ -136,10 +138,19 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
             <div className="flex items-center gap-1.5">
               <p className="min-w-0 truncate text-sm font-medium" title={result.filename}>{normalizeFilename(result.filename)}</p>
               {chunkCount != null && (
-                <Badge variant="outline" className="shrink-0 gap-0.5 text-[9px] px-1.5 py-0">
-                  <Layers className="h-2.5 w-2.5" />
-                  {chunkCount}
-                </Badge>
+                <TooltipProvider delayDuration={200}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Badge variant="outline" className="shrink-0 gap-0.5 text-[9px] px-1.5 py-0">
+                        <Layers className="h-2.5 w-2.5" />
+                        {chunkCount}
+                      </Badge>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-[200px] text-xs">
+                      {chunkCount} searchable segment{chunkCount !== 1 ? "s" : ""}. Documents are split into chunks for more precise retrieval.
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               )}
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-1.5">
@@ -391,6 +402,34 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
               <Eye className={compact ? "h-2.5 w-2.5" : "h-3 w-3"} />
             </Button>
           )}
+          {!compact && onToggleStar && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="artifact-action-btn h-6 w-6"
+              onClick={(e) => {
+                e.stopPropagation()
+                onToggleStar(result.artifact_id)
+              }}
+              title={result.starred ? "Unstar" : "Star"}
+            >
+              <Star className={cn("h-3 w-3", result.starred && "fill-yellow-400 text-yellow-400")} />
+            </Button>
+          )}
+          {!compact && onToggleEvergreen && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="artifact-action-btn h-6 w-6"
+              onClick={(e) => {
+                e.stopPropagation()
+                onToggleEvergreen(result.artifact_id)
+              }}
+              title={result.evergreen ? "Remove evergreen" : "Mark evergreen"}
+            >
+              <Leaf className={cn("h-3 w-3", result.evergreen && "fill-green-400 text-green-400")} />
+            </Button>
+          )}
           {!compact && onUpdateTags && (
             <Button
               variant="ghost"
@@ -450,9 +489,9 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
               e.stopPropagation()
               onInject()
             }}
-            title="Inject into chat context"
+            title="Add this document's content to the current conversation context"
           >
-            <PlusCircle className={compact ? "h-2.5 w-2.5" : "h-3 w-3"} />
+            <MessageSquarePlus className={compact ? "h-2.5 w-2.5" : "h-3 w-3"} />
           </Button>
         </div>
       </CardContent>

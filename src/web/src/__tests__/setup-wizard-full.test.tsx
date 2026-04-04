@@ -144,7 +144,7 @@ describe("SetupWizard", () => {
     // Check for distinctive labels that don't collide with step content.
     expect(screen.getByText("Welcome")).toBeInTheDocument()
     expect(screen.getByText("Keys")).toBeInTheDocument()
-    expect(screen.getByText("KB")).toBeInTheDocument()
+    expect(screen.getByText("Storage")).toBeInTheDocument()
     expect(screen.getByText("Apply")).toBeInTheDocument()
     expect(screen.getByText("Health")).toBeInTheDocument()
     expect(screen.getByText("Try")).toBeInTheDocument()

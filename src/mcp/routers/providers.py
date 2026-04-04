@@ -65,7 +65,7 @@ async def list_providers():
     providers = []
     for name, entry in PROVIDER_REGISTRY.items():
         env_var = entry["env_var"]
-        api_key = os.getenv(env_var, "") if env_var else ""
+        api_key = os.getenv(env_var, "").strip().strip('"').strip("'") if env_var else ""
         key_set = bool(api_key) or not entry["requires_api_key"]
 
         # Mask key preview
@@ -590,7 +590,31 @@ async def validate_key(name: str, req: ValidateKeyRequest):
     logger.info("Validating key for provider: %s", name)
     valid, error = await validate_provider_key(name, req.api_key)
 
-    return ValidateKeyResponse(
-        valid=valid,
-        error=error if not valid else None,
-    )
+    # Classify error type for better frontend messaging
+    error_type = None
+    suggestion = None
+    if not valid and error:
+        err_lower = error.lower()
+        if "timeout" in err_lower or "timed out" in err_lower:
+            error_type = "timeout"
+            suggestion = "The provider may be slow to respond. Try again."
+        elif "connect" in err_lower or "network" in err_lower or "refused" in err_lower:
+            error_type = "connection_failed"
+            suggestion = "Could not reach the provider. Check your network."
+        else:
+            error_type = "invalid_key"
+            suggestion = "Double-check the API key and try again."
+
+    resp = {"valid": valid, "error": error if not valid else None}
+    if error_type:
+        resp["error_type"] = error_type
+        resp["suggestion"] = suggestion
+        resp["provider_name"] = name
+    return resp
+
+
+@router.get("/diagnose")
+async def diagnose_providers():
+    """Debug endpoint: show which provider env vars are set and their key lengths."""
+    from routers.setup import detect_provider_status
+    return detect_provider_status()

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useRef } from "react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -34,22 +34,41 @@ export function ApiKeyInput({
   const [visible, setVisible] = useState(false)
   const [status, setStatus] = useState<ValidationStatus>(preconfigured ? "valid" : "idle")
   const [error, setError] = useState<string | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
   const handleTest = useCallback(async () => {
     if (!value.trim()) return
+    // Cancel any in-flight validation
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+
     setStatus("checking")
     setError(null)
+
+    // 5s timeout
+    const timeout = setTimeout(() => controller.abort(), 5000)
+
     try {
       const result = await validateProviderKey(provider, value.trim())
+      if (controller.signal.aborted) return
+      clearTimeout(timeout)
       if (result.valid) {
         setStatus("valid")
         onKeyValidated(value.trim(), true)
       } else {
         setStatus("invalid")
-        setError(result.error ?? "Invalid API key")
+        setError(result.suggestion ?? result.error ?? "Invalid API key")
         onKeyValidated(value.trim(), false)
       }
     } catch {
+      if (controller.signal.aborted) {
+        setStatus("invalid")
+        setError("Validation timed out — backend not responding. Is Docker running?")
+        onKeyValidated(value.trim(), false)
+        return
+      }
+      clearTimeout(timeout)
       setStatus("invalid")
       setError("Connection failed — is the backend running?")
       onKeyValidated(value.trim(), false)

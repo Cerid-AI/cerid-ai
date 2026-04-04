@@ -153,31 +153,59 @@ async def artifact_detail_endpoint(artifact_id: str):
         driver = get_neo4j()
         chroma = get_chroma()
 
+        # Handle external:* artifact IDs gracefully
+        if artifact_id.startswith("external:"):
+            return {
+                "artifact_id": artifact_id,
+                "title": artifact_id,
+                "domain": "external",
+                "filename": "",
+                "source_type": "external",
+                "chunk_count": 0,
+                "total_content": "External source — no preview available",
+                "chunks": [],
+                "metadata": {},
+            }
+
         artifact = graph.get_artifact(driver, artifact_id)
         if not artifact:
             raise HTTPException(status_code=404, detail=f"Artifact not found: {artifact_id}")
 
-        chunk_ids = json.loads(artifact.get("chunk_ids", "[]"))
+        # Parse chunk_ids with error handling for malformed JSON
+        try:
+            chunk_ids = json.loads(artifact.get("chunk_ids", "[]"))
+        except (json.JSONDecodeError, TypeError):
+            chunk_ids = []
+
         chunks = []
         total_content = ""
 
         if chunk_ids:
-            collection = chroma.get_or_create_collection(
-                name=config.collection_name(artifact["domain"])
-            )
-            fetched = collection.get(ids=chunk_ids, include=["documents", "metadatas"])
+            try:
+                collection = chroma.get_or_create_collection(
+                    name=config.collection_name(artifact["domain"])
+                )
+                fetched = collection.get(ids=chunk_ids, include=["documents", "metadatas"])
 
-            # Build sorted chunks by chunk_index
-            raw_chunks = []
-            for i, doc_id in enumerate(fetched["ids"]):
-                meta = fetched["metadatas"][i] if fetched["metadatas"] else {}
-                text = fetched["documents"][i] if fetched["documents"] else ""
-                idx = int(meta.get("chunk_index", i))
-                raw_chunks.append({"index": idx, "text": text})
+                # Build sorted chunks by chunk_index
+                raw_chunks = []
+                for i, doc_id in enumerate(fetched["ids"]):
+                    meta = fetched["metadatas"][i] if fetched["metadatas"] else {}
+                    text = fetched["documents"][i] if fetched["documents"] else ""
+                    idx = int(meta.get("chunk_index", i))
+                    raw_chunks.append({"index": idx, "text": text})
 
-            raw_chunks.sort(key=lambda c: c["index"])
-            chunks = raw_chunks
-            total_content = "\n\n".join(str(c["text"]) for c in raw_chunks)
+                raw_chunks.sort(key=lambda c: c["index"])
+                chunks = raw_chunks
+                total_content = "\n\n".join(str(c["text"]) for c in raw_chunks)
+            except (ValueError, KeyError, RuntimeError) as chunk_err:
+                logger.warning(f"Chunk reassembly failed for {artifact_id}: {chunk_err}")
+                # Fallback: use summary as preview content
+                total_content = artifact.get("summary", "Preview unavailable — chunk reassembly failed")
+
+        # Fallback when no chunks and no content reassembled
+        if not total_content:
+            total_content = artifact.get("summary", "")
 
         return {
             "artifact_id": artifact["id"],
@@ -195,12 +223,39 @@ async def artifact_detail_endpoint(artifact_id: str):
                 "summary": artifact.get("summary", ""),
                 "ingested_at": artifact.get("ingested_at", ""),
                 "recategorized_at": artifact.get("recategorized_at"),
+                "starred": artifact.get("starred", False),
+                "evergreen": artifact.get("evergreen", False),
+                "retrieval_count": artifact.get("retrieval_count", 0),
             },
         }
     except HTTPException:
         raise
     except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(f"Artifact detail error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/artifacts/{artifact_id}/star")
+async def toggle_artifact_star(artifact_id: str):
+    """Toggle the starred flag on an artifact."""
+    try:
+        driver = get_neo4j()
+        new_val = graph.toggle_starred(driver, artifact_id)
+        return {"artifact_id": artifact_id, "starred": new_val}
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
+        logger.error(f"Toggle star error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/artifacts/{artifact_id}/evergreen")
+async def toggle_artifact_evergreen(artifact_id: str):
+    """Toggle the evergreen flag on an artifact."""
+    try:
+        driver = get_neo4j()
+        new_val = graph.toggle_evergreen(driver, artifact_id)
+        return {"artifact_id": artifact_id, "evergreen": new_val}
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
+        logger.error(f"Toggle evergreen error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

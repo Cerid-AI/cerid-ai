@@ -311,6 +311,7 @@ def ingest_content(
     domain: str = "general",
     metadata: dict[str, Any] | None = None,
     triage_result: Any | None = None,
+    skip_quality: bool = False,
 ) -> dict:
     """Core ingest path. Called by REST endpoints, agents, and MCP tool dispatcher.
 
@@ -517,17 +518,29 @@ def ingest_content(
     except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.warning(f"BM25 indexing failed (non-blocking): {e}")
 
-    # Compute quality_score using weighted 4-dimension formula
-    from utils.quality import compute_quality_score as _compute_quality
+    # Read-back first chunk to confirm ChromaDB write flushed
+    try:
+        collection.get(ids=[chunk_ids[0]])
+    except (ValueError, KeyError, IndexError):
+        pass  # Non-critical — query retry handles eventual consistency
 
-    quality_score = _compute_quality(
-        summary=base_meta.get("summary", ""),
-        keywords=base_meta.get("keywords_json", "[]"),
-        tags=base_meta.get("tags_json", "[]"),
-        sub_category=base_meta.get("sub_category", ""),
-        default_sub_category=config.DEFAULT_SUB_CATEGORY,
-        ingested_at=base_meta.get("ingested_at"),
-    )
+    # Compute quality_score using weighted 4-dimension formula
+    if skip_quality:
+        quality_score = 0.5
+    else:
+        from utils.quality import compute_quality_score as _compute_quality
+
+        quality_score = _compute_quality(
+            summary=base_meta.get("summary", ""),
+            keywords=base_meta.get("keywords_json", "[]"),
+            tags=base_meta.get("tags_json", "[]"),
+            sub_category=base_meta.get("sub_category", ""),
+            default_sub_category=config.DEFAULT_SUB_CATEGORY,
+            ingested_at=base_meta.get("ingested_at"),
+            content=content,
+            domain=domain,
+            source_type=base_meta.get("client_source", "upload"),
+        )
 
     # If triage provided an AI-derived quality_score, use the higher of the two
     if triage_result is not None:

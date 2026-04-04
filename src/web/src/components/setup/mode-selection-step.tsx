@@ -9,8 +9,11 @@ interface ModeSelectionStepProps {
   onSelectMode: (mode: "simple" | "advanced") => void
   configSummary: {
     providerCount: number
+    providerNames: string[]
     domainCount: number
     ollamaEnabled: boolean
+    ollamaModel: string | null
+    documentCount: number
   }
 }
 
@@ -19,6 +22,18 @@ export function ModeSelectionStep({
   onSelectMode,
   configSummary,
 }: ModeSelectionStepProps) {
+  const providerText = configSummary.providerNames.length > 0
+    ? configSummary.providerNames.join(" + ") + " configured"
+    : "No providers configured"
+
+  const kbText = configSummary.documentCount > 0
+    ? `${configSummary.documentCount} document${configSummary.documentCount !== 1 ? "s" : ""} ingested`
+    : "0 documents"
+
+  const ollamaText = configSummary.ollamaEnabled && configSummary.ollamaModel
+    ? `Local LLM: ${configSummary.ollamaModel}`
+    : "Local LLM: not configured"
+
   return (
     <>
       <div className="mb-2 flex items-center justify-center">
@@ -28,14 +43,9 @@ export function ModeSelectionStep({
       </div>
       <h3 className="mb-2 text-center text-lg font-semibold">Choose Your Mode</h3>
 
-      <p className="mb-1 text-center text-xs text-muted-foreground">
-        You configured {configSummary.providerCount} LLM provider{configSummary.providerCount !== 1 ? "s" : ""},
-        {" "}{configSummary.domainCount} KB domain{configSummary.domainCount !== 1 ? "s" : ""},
-        and Ollama is {configSummary.ollamaEnabled ? "enabled" : "disabled"}.
-      </p>
-      <p className="mb-4 text-center text-xs text-muted-foreground">
-        You can change this anytime from the sidebar.
-      </p>
+      <div className="mb-4 rounded-lg border bg-card px-3 py-2 text-center text-[11px] text-muted-foreground">
+        {providerText} · {kbText} · {ollamaText}
+      </div>
 
       <div className="space-y-2">
         <button
@@ -48,10 +58,10 @@ export function ModeSelectionStep({
               : "border-muted hover:border-muted-foreground/30",
           )}
         >
-          <p className="text-sm font-medium">Simple</p>
+          <p className="text-sm font-medium">Clean & Simple</p>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Clean chat interface — KB toggles, verification, and analytics hidden.
-            Perfect for everyday use.
+            A clean chat focused on your knowledge — no technical controls visible.
+            Perfect for everyday use. You can switch to Advanced anytime in Settings.
           </p>
         </button>
         <button
@@ -71,6 +81,10 @@ export function ModeSelectionStep({
           </p>
         </button>
       </div>
+
+      <p className="mt-3 text-center text-[10px] text-muted-foreground">
+        You can change this anytime from the sidebar.
+      </p>
     </>
   )
 }

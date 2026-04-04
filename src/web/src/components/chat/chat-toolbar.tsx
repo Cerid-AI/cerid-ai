@@ -240,10 +240,15 @@ export function ChatToolbar({
           title="Private Mode"
           tooltip={
             privateModeEnabled
-              ? `Private mode: ON (Level ${privateModeLevel})`
-              : "Private mode: OFF"
+              ? `Private mode: Level ${privateModeLevel} — ${["Off", "Skip saves & sync", "Also skip KB injection", "Also no logging", "Full ephemeral — nothing persisted"][privateModeLevel]}`
+              : "Private mode: OFF — normal operation"
           }
-          className={privateModeEnabled ? "text-amber-500 hover:text-amber-500 bg-amber-500/10" : ""}
+          className={cn(
+            privateModeEnabled && privateModeLevel === 1 && "text-green-500 hover:text-green-500 bg-green-500/10",
+            privateModeEnabled && privateModeLevel === 2 && "text-yellow-500 hover:text-yellow-500 bg-yellow-500/10",
+            privateModeEnabled && privateModeLevel === 3 && "text-orange-500 hover:text-orange-500 bg-orange-500/10 animate-pulse",
+            privateModeEnabled && privateModeLevel === 4 && "text-red-500 hover:text-red-500 bg-red-500/10 animate-pulse",
+          )}
           menuContent={
             <>
               <MenuLabel>Privacy Level</MenuLabel>
@@ -254,13 +259,13 @@ export function ChatToolbar({
                 L1 — skip saves &amp; sync
               </MenuRadioItem>
               <MenuRadioItem checked={privateModeLevel === 2} onClick={() => changePrivateModeLevel(2)}>
-                L2 — plus skip KB injection
+                L2 — also skip KB injection
               </MenuRadioItem>
               <MenuRadioItem checked={privateModeLevel === 3} onClick={() => changePrivateModeLevel(3)}>
-                L3 — plus no logging
+                L3 — also no logging
               </MenuRadioItem>
               <MenuRadioItem checked={privateModeLevel === 4} onClick={() => changePrivateModeLevel(4)}>
-                L4 — full ephemeral
+                L4 — full ephemeral, nothing persisted
               </MenuRadioItem>
             </>
           }
@@ -285,15 +290,15 @@ export function ChatToolbar({
           ariaLabel={`RAG mode: ${ragMode}`}
           title="RAG Mode"
           tooltip={
-            ragMode === "manual" ? "RAG: Manual"
-              : ragMode === "smart" ? "RAG: Smart (auto KB + memory + external)"
-              : "RAG: Custom Smart (Pro)"
+            ragMode === "manual" ? "Manual: you control which docs are included"
+              : ragMode === "smart" ? "Smart: automatically finds relevant docs + memories + external sources"
+              : "Custom: fine-tune retrieval weights (Pro)"
           }
           menuContent={
             <>
               <MenuLabel>RAG Mode</MenuLabel>
-              <MenuRadioItem checked={ragMode === "manual"} onClick={() => setRagMode("manual")}>Manual</MenuRadioItem>
-              <MenuRadioItem checked={ragMode === "smart"} onClick={() => setRagMode("smart")}>Smart</MenuRadioItem>
+              <MenuRadioItem checked={ragMode === "manual"} onClick={() => setRagMode("manual")}>Manual — you pick docs</MenuRadioItem>
+              <MenuRadioItem checked={ragMode === "smart"} onClick={() => setRagMode("smart")}>Smart — auto-retrieval</MenuRadioItem>
               <MenuRadioItem checked={ragMode === "custom_smart"} onClick={() => setRagMode("custom_smart")}>
                 <span className="flex items-center gap-1">
                   Custom
@@ -311,7 +316,7 @@ export function ChatToolbar({
           onClick={onToggleKB}
           ariaLabel={showKB ? "Hide knowledge context" : "Show knowledge context"}
           title="Knowledge Base"
-          tooltip={showKB ? "Hide knowledge context" : "Show knowledge context"}
+          tooltip={showKB ? "Include relevant documents from your knowledge base in AI responses" : "Knowledge base context disabled — AI responds without your documents"}
           menuContent={
             <>
               <MenuCheckboxItem checked={autoInject} onCheckedChange={toggleAutoInject}>
@@ -320,10 +325,10 @@ export function ChatToolbar({
               <MenuSeparator />
               <MenuLabel>Injection threshold</MenuLabel>
               {[
-                { value: 0.10, label: "Broad (10%)" },
-                { value: 0.15, label: "Standard (15%)" },
-                { value: 0.25, label: "Focused (25%)" },
-                { value: 0.40, label: "Strict (40%)" },
+                { value: 0.10, label: "Broad — include loosely related docs" },
+                { value: 0.15, label: "Standard — balanced relevance" },
+                { value: 0.25, label: "Focused — only highly relevant" },
+                { value: 0.40, label: "Strict — exact matches only" },
               ].map((t) => (
                 <MenuRadioItem key={t.value} checked={autoInjectThreshold === t.value} onClick={() => setAutoInjectThreshold(t.value)}>
                   {t.label}
@@ -361,14 +366,14 @@ export function ChatToolbar({
           title="Verification"
           tooltip={
             verificationUnavailable
-              ? "Verification enabled but unavailable — services degraded"
+              ? "Fact-checking unavailable — verification services degraded"
               : verificationDegraded
-                ? "Verification active (single-model only)"
+                ? "Fact-checking active (single-model fallback)"
                 : hallucinationEnabled
                   ? expertVerification
-                    ? "Expert verification: ON"
-                    : "Response verification: ON"
-                  : "Response verification: OFF"
+                    ? "Expert verification: claims verified against KB at no cost, then externally with premium models"
+                    : "Fact-check AI responses against your KB and external sources"
+                  : "Fact-checking disabled — toggle to verify AI claims"
           }
           className="relative"
           menuContent={
@@ -382,9 +387,14 @@ export function ChatToolbar({
               </MenuCheckboxItem>
               <MenuSeparator />
               <MenuCheckboxItem checked={expertVerification} onCheckedChange={toggleExpertVerification}>
-                <span className="flex items-center gap-1">
-                  Expert verification (Grok 4)
-                  <Badge variant="outline" className="text-[9px] ml-1 px-1 py-0 text-amber-500">~15x cost</Badge>
+                <span className="flex flex-col gap-0.5">
+                  <span className="flex items-center gap-1">
+                    Expert verification
+                    <Badge variant="outline" className="text-[9px] ml-1 px-1 py-0 text-amber-500">Premium</Badge>
+                  </span>
+                  <span className="text-[9px] text-muted-foreground font-normal">
+                    Uses premium models — less token-efficient but more thorough
+                  </span>
                 </span>
               </MenuCheckboxItem>
             </>
@@ -401,7 +411,7 @@ export function ChatToolbar({
               onClick={toggleFeedbackLoop}
               ariaLabel={feedbackLoop ? "Disable feedback loop" : "Enable feedback loop"}
               title="Learning"
-              tooltip={feedbackLoop ? "Feedback loop: ON (responses saved to KB)" : "Feedback loop: OFF"}
+              tooltip={feedbackLoop ? "Learning: AI responses are saved back to your KB, improving future answers" : "Learning disabled — AI responses are not saved to your KB"}
               menuContent={
                 <>
                   <MenuCheckboxItem checked={feedbackLoop} onCheckedChange={toggleFeedbackLoop}>
@@ -428,7 +438,7 @@ export function ChatToolbar({
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
-                {showDashboard ? "Hide metrics dashboard" : "Show metrics dashboard"}
+                {showDashboard ? "Hide token usage, response timing, and retrieval metrics" : "Show token usage, response timing, and retrieval metrics"}
               </TooltipContent>
             </Tooltip>
 
@@ -439,13 +449,13 @@ export function ChatToolbar({
               onClick={cycleRoutingMode}
               ariaLabel={`Smart routing: ${routingMode}`}
               title="Model Routing"
-              tooltip={routingMode === "manual" ? "Smart routing: OFF" : routingMode === "recommend" ? "Smart routing: Recommend" : "Smart routing: Auto"}
+              tooltip={routingMode === "manual" ? "Manual: you pick the model" : routingMode === "recommend" ? "Recommend: AI suggests optimal model" : "Auto: AI picks the best model for each query"}
               menuContent={
                 <>
                   <MenuLabel>Routing mode</MenuLabel>
-                  <MenuRadioItem checked={routingMode === "manual"} onClick={() => setRoutingMode("manual")}>Manual</MenuRadioItem>
-                  <MenuRadioItem checked={routingMode === "recommend"} onClick={() => setRoutingMode("recommend")}>Recommend</MenuRadioItem>
-                  <MenuRadioItem checked={routingMode === "auto"} onClick={() => setRoutingMode("auto")}>Auto</MenuRadioItem>
+                  <MenuRadioItem checked={routingMode === "manual"} onClick={() => setRoutingMode("manual")}>Manual — you pick</MenuRadioItem>
+                  <MenuRadioItem checked={routingMode === "recommend"} onClick={() => setRoutingMode("recommend")}>Recommend — AI suggests</MenuRadioItem>
+                  <MenuRadioItem checked={routingMode === "auto"} onClick={() => setRoutingMode("auto")}>Auto — AI picks</MenuRadioItem>
                 </>
               }
             />

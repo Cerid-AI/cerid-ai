@@ -10,7 +10,7 @@ const STEPS: StepDef[] = [
   { label: "Welcome", shortLabel: "Welcome" },
   { label: "System Check", shortLabel: "Check" },
   { label: "API Keys", shortLabel: "Keys" },
-  { label: "Knowledge Base", shortLabel: "KB" },
+  { label: "Storage & Archive", shortLabel: "Storage" },
   { label: "Ollama", shortLabel: "Ollama" },
 ]
 
