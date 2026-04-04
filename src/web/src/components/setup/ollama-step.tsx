@@ -161,8 +161,8 @@ export function OllamaStep({ ollamaDetected, ollamaModels, state, onChange }: Ol
                           <p className="text-[10px] text-muted-foreground mt-0.5">{m.description}</p>
                           <p className="text-[9px] text-muted-foreground/70 mt-0.5">
                             {m.origin} · {m.size_gb} GB
-                            {m.expected_tokens_per_sec > 0 && ` · ~${m.expected_tokens_per_sec} tok/s`}
-                            {m.ram_usage_pct > 0 && ` · ${m.ram_usage_pct}% RAM`}
+                            {(m.expected_tokens_per_sec ?? 0) > 0 && ` · ~${m.expected_tokens_per_sec} tok/s`}
+                            {(m.ram_usage_pct ?? 0) > 0 && ` · ${m.ram_usage_pct}% RAM`}
                           </p>
                         </div>
                         {!installed && m.compatible && (
