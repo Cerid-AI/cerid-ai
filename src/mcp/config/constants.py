@@ -41,11 +41,21 @@ GRAPH_RAG_DEFAULT_MAX_HOPS = 2
 GRAPH_RAG_DEFAULT_MAX_RESULTS = 10
 GRAPH_RAG_FUZZY_THRESHOLD = 0.8  # min fuzzy match score for entity matching
 
-# ── Quality scoring ────────────────────────────────────────────────
+# ── Quality scoring v2 ─────────────────────────────────────────────
 QUALITY_TIER_EXCELLENT = 0.8
 QUALITY_TIER_GOOD = 0.6
 QUALITY_TIER_FAIR = 0.4
 MIN_QUALITY_SCORE = 0.4
+QUALITY_WEIGHT_RICHNESS = 0.25
+QUALITY_WEIGHT_METADATA = 0.20
+QUALITY_WEIGHT_FRESHNESS = 0.15
+QUALITY_WEIGHT_AUTHORITY = 0.15
+QUALITY_WEIGHT_UTILITY = 0.15
+QUALITY_WEIGHT_COHERENCE = 0.10
+QUALITY_MIN_FLOOR = 0.35
+QUALITY_EVERGREEN_DOMAINS = ["coding", "personal", "projects"]
+QUALITY_TEMPORAL_HALF_LIFE_DAYS = 7
+QUALITY_EVERGREEN_HALF_LIFE_DAYS = 365
 
 # ── Memory ─────────────────────────────────────────────────────────
 MEMORY_HALF_LIFE_DAYS = 30.0

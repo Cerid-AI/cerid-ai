@@ -537,6 +537,9 @@ def ingest_content(
             sub_category=base_meta.get("sub_category", ""),
             default_sub_category=config.DEFAULT_SUB_CATEGORY,
             ingested_at=base_meta.get("ingested_at"),
+            content=content,
+            domain=domain,
+            source_type=base_meta.get("client_source", "upload"),
         )
 
     # If triage provided an AI-derived quality_score, use the higher of the two

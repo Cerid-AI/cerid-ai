@@ -305,6 +305,9 @@ export interface KBQueryResult {
   summary?: string
   source_url?: string
   source_type?: "kb" | "memory" | "external"
+  starred?: boolean
+  evergreen?: boolean
+  retrieval_count?: number
 }
 
 export interface MemoryRecallResult {
