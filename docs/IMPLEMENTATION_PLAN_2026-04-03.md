@@ -178,7 +178,7 @@ Total for 2-page PDF: ~5-10s (dominated by AI categorization + embedding)
 
 **Root Cause:** `_configured_providers()` in `routers/setup.py:141-146` checks `os.environ.get(key)`. In Docker, env vars are loaded from `.env` via `env_file: ../../.env` in `docker-compose.yml`. But the `_KEY_TO_PROVIDER` map (lines 133-138) maps exact env var names to provider IDs.
 
-The likely bug: Docker `env_file` strips quotes from values. If `.env` has `OPENAI_API_KEY="sk-..."` (with quotes), `os.environ.get("OPENAI_API_KEY")` returns `"sk-..."` including the literal quotes. The `strip()` call on line 145 strips whitespace but not quotes.
+The likely bug: Docker `env_file` strips quotes from values. If `.env` has `OPENAI_API_KEY="sk-..."` (with quotes), `os.environ.get("OPENAI_API_KEY")` returns `"sk-..."` including the literal quotes. The `strip()` call on line 145 strips whitespace but not quotes.  # pragma: allowlist secret
 
 Alternative cause: The `.env` file may have the keys with a different variable name format, or the keys may be commented out with a space (` #OPENAI_API_KEY=...`).
 

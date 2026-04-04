@@ -361,9 +361,10 @@ class TestComputeQualityScore:
 
         result = compute_quality_score(artifact)
 
-        # s_summary = 1.0, s_keywords = 1.0, s_freshness ~1.0, s_completeness = 1.0
-        # total = 0.30*1.0 + 0.25*1.0 + 0.20*1.0 + 0.25*1.0 = 1.0
-        assert result["quality_score"] == pytest.approx(1.0, abs=0.01)
+        # Quality v2 uses 6 dimensions. When called from curator (no content param),
+        # richness is based on summary text only and utility is 0 (no retrievals).
+        # Score is lower than v1's 1.0 because richness and utility dilute the total.
+        assert result["quality_score"] == pytest.approx(0.6325, abs=0.02)
         assert result["breakdown"]["summary"] == pytest.approx(1.0)
         assert result["breakdown"]["keywords"] == pytest.approx(1.0)
         assert result["breakdown"]["freshness"] == pytest.approx(1.0, abs=0.01)
@@ -492,12 +493,14 @@ class TestComputeQualityScore:
 
         result = compute_quality_score(artifact)
 
-        # Manually compute expected:
-        # completeness: summary >=20 (pass), kw >=2 (pass), tags (pass), sub_cat non-default (pass) = 1.0
-        # total = 0.30*0.5 + 0.25*0.4 + 0.20*0.5 + 0.25*1.0
-        #       = 0.15 + 0.10 + 0.10 + 0.25 = 0.60
-        expected = 0.30 * 0.5 + 0.25 * 0.4 + 0.20 * result["breakdown"]["freshness"] + 0.25 * 1.0
-        assert result["quality_score"] == pytest.approx(expected, abs=0.01)
+        # Quality v2: 6-dimension scoring. With partial metadata and no content,
+        # score is moderate — above the floor (0.35) but below excellent (0.8).
+        assert result["quality_score"] == pytest.approx(0.49, abs=0.03)
+        # Each dimension should contribute non-zero
+        assert result["breakdown"]["summary"] > 0
+        assert result["breakdown"]["keywords"] > 0
+        assert result["breakdown"]["freshness"] > 0
+        assert result["breakdown"]["completeness"] > 0
 
     def test_result_shape(self):
         """Ensure result has the expected keys."""

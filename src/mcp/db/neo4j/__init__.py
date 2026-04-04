@@ -33,9 +33,12 @@ from db.neo4j.artifacts import (  # noqa: F401,E402
     get_artifact,
     get_quality_scores,
     get_verification_report,
+    increment_retrieval_count,
     list_artifacts,
     recategorize_artifact,
     save_verification_report,
+    toggle_evergreen,
+    toggle_starred,
     update_artifact,
     update_artifact_summary,
 )
