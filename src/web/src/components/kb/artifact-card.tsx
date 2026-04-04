@@ -138,17 +138,19 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
             <div className="flex items-center gap-1.5">
               <p className="min-w-0 truncate text-sm font-medium" title={result.filename}>{normalizeFilename(result.filename)}</p>
               {chunkCount != null && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Badge variant="outline" className="shrink-0 gap-0.5 text-[9px] px-1.5 py-0">
-                      <Layers className="h-2.5 w-2.5" />
-                      {chunkCount}
-                    </Badge>
-                  </TooltipTrigger>
-                  <TooltipContent side="top" className="max-w-[200px] text-xs">
-                    {chunkCount} searchable segment{chunkCount !== 1 ? "s" : ""}. Documents are split into chunks for more precise retrieval.
-                  </TooltipContent>
-                </Tooltip>
+                <TooltipProvider delayDuration={200}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Badge variant="outline" className="shrink-0 gap-0.5 text-[9px] px-1.5 py-0">
+                        <Layers className="h-2.5 w-2.5" />
+                        {chunkCount}
+                      </Badge>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-[200px] text-xs">
+                      {chunkCount} searchable segment{chunkCount !== 1 ? "s" : ""}. Documents are split into chunks for more precise retrieval.
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               )}
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-1.5">
