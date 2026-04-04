@@ -10,6 +10,7 @@ import {
   AlertTriangle, Info,
 } from "lucide-react"
 import { ApiKeyInput } from "@/components/setup/api-key-input"
+import { CustomProviderInput } from "@/components/setup/custom-provider-input"
 import { HealthDashboard } from "@/components/setup/health-dashboard"
 import { SystemCheckCard } from "@/components/setup/system-check-card"
 import { KBConfigStep } from "@/components/setup/kb-config-step"
@@ -532,13 +533,38 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                   </div>
                 )}
                 {state.keys.openrouter.valid && state.credits?.configured && state.credits.balance != null && (
-                  <div className="flex items-center justify-between rounded-lg border border-green-500/30 bg-green-500/5 px-3 py-2">
-                    <span className="text-xs text-green-600 dark:text-green-400">
-                      OpenRouter balance
-                    </span>
-                    <span className="text-sm font-semibold tabular-nums text-green-600 dark:text-green-400">
-                      ${state.credits.balance.toFixed(2)}
-                    </span>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between rounded-lg border border-green-500/30 bg-green-500/5 px-3 py-2">
+                      <span className="text-xs text-green-600 dark:text-green-400">
+                        OpenRouter balance
+                      </span>
+                      <span className="text-sm font-semibold tabular-nums text-green-600 dark:text-green-400">
+                        ${state.credits.balance.toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between px-1">
+                      <a
+                        href="https://openrouter.ai/credits"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[10px] text-brand hover:underline"
+                      >
+                        Add Credits &rarr;
+                      </a>
+                      <span className="text-[10px] text-muted-foreground">
+                        Credits purchased through OpenRouter, not Cerid
+                      </span>
+                    </div>
+                  </div>
+                )}
+                {/* Usage rate explainer */}
+                {state.keys.openrouter.valid && (
+                  <div className="rounded-lg border bg-muted/20 px-3 py-2 text-[10px] text-muted-foreground">
+                    Costs vary by model. A typical query costs $0.001-0.01. Verification adds ~$0.001 per 10 claims.
+                    Expert mode uses premium models at higher rates.{" "}
+                    <a href="https://openrouter.ai/models" target="_blank" rel="noopener noreferrer" className="text-brand hover:underline">
+                      See pricing
+                    </a>
                   </div>
                 )}
 
@@ -571,6 +597,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                       helpUrl="https://console.x.ai/api-keys"
                       onKeyValidated={handleKeyValidated("xai")}
                     />
+                    <CustomProviderInput onValidated={() => {}} />
                   </div>
                 </div>
 
