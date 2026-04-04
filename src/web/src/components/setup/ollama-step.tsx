@@ -41,6 +41,8 @@ interface ModelRecommendation {
   strengths: string
   compatible: boolean
   recommended: boolean
+  expected_tokens_per_sec?: number
+  ram_usage_pct?: number
 }
 
 export function OllamaStep({ ollamaDetected, ollamaModels, state, onChange }: OllamaStepProps) {
@@ -157,7 +159,11 @@ export function OllamaStep({ ollamaDetected, ollamaModels, state, onChange }: Ol
                             )}
                           </div>
                           <p className="text-[10px] text-muted-foreground mt-0.5">{m.description}</p>
-                          <p className="text-[9px] text-muted-foreground/70 mt-0.5">{m.origin} · {m.size_gb} GB</p>
+                          <p className="text-[9px] text-muted-foreground/70 mt-0.5">
+                            {m.origin} · {m.size_gb} GB
+                            {m.expected_tokens_per_sec > 0 && ` · ~${m.expected_tokens_per_sec} tok/s`}
+                            {m.ram_usage_pct > 0 && ` · ${m.ram_usage_pct}% RAM`}
+                          </p>
                         </div>
                         {!installed && m.compatible && (
                           <Button size="sm" variant="outline" className="shrink-0 h-7" onClick={handlePull} disabled={state.pulling}>

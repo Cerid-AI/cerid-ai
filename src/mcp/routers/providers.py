@@ -237,6 +237,38 @@ async def get_ollama_recommendations():
 
     ram_gb = round(ram_gb, 1)
 
+    # VRAM detection for discrete GPUs (NVIDIA)
+    vram_gb: float = 0.0
+    if "NVIDIA" in gpu_info:
+        try:
+            vram_raw = await asyncio.to_thread(
+                functools.partial(
+                    subprocess.check_output,
+                    ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+                    text=True,
+                ),
+            )
+            vram_gb = round(float(vram_raw.strip()) / 1024, 1)
+        except (ProviderError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
+            pass
+
+    # Compute effective memory for recommendation
+    is_apple_silicon = platform.machine() == "arm64" and system == "Darwin"
+    has_gpu = bool(gpu_info and gpu_info != "CPU only") or is_apple_silicon
+    # Apple Silicon: unified memory = full RAM available for model
+    # Discrete GPU: use VRAM if detected, else fall back to RAM
+    effective_memory = ram_gb if is_apple_silicon else (vram_gb if vram_gb > 0 else ram_gb)
+    # CPU-only penalty: halve effective memory (CPU inference needs headroom)
+    if not has_gpu and effective_memory >= 8:
+        effective_memory *= 0.5
+
+    # Speed estimate lookup (tokens/sec)
+    _SPEED_ESTIMATES: dict[str, dict[str, int]] = {
+        "llama3.2:3b": {"gpu": 15, "cpu": 3},
+        "llama3.1:8b": {"gpu": 20, "cpu": 5},
+        "phi4:14b": {"gpu": 15, "cpu": 2},
+    }
+
     # Model catalog — USG-compliant models only
     models: list[dict] = [
         {
@@ -271,26 +303,33 @@ async def get_ollama_recommendations():
         },
     ]
 
-    # Determine recommendation based on RAM (aligned with min_ram_gb tiers)
-    if ram_gb >= 32:
+    # Determine recommendation based on effective memory
+    if effective_memory >= 32:
         recommended = "phi4:14b"
-    elif ram_gb >= 16:
+    elif effective_memory >= 12:
         recommended = "llama3.1:8b"
     else:
         recommended = "llama3.2:3b"
 
-    # Mark which models are compatible with this machine
+    # Mark which models are compatible and add speed estimates
     for m in models:
         min_ram: int = m["min_ram_gb"]  # type: ignore[assignment]
         m["compatible"] = ram_gb >= min_ram
         m["recommended"] = m["id"] == recommended
+        speed_key = "gpu" if has_gpu else "cpu"
+        m["expected_tokens_per_sec"] = _SPEED_ESTIMATES.get(m["id"], {}).get(speed_key, 0)
+        m["ram_usage_pct"] = round(m["size_gb"] / ram_gb * 100, 0) if ram_gb > 0 else 0
 
     return {
         "hardware": {
             "ram_gb": ram_gb,
             "cpu": cpu_info,
             "gpu": gpu_info,
+            "vram_gb": vram_gb,
             "platform": system,
+            "has_gpu": has_gpu,
+            "is_apple_silicon": is_apple_silicon,
+            "effective_memory_gb": round(effective_memory, 1),
         },
         "models": models,
         "recommended": recommended,
