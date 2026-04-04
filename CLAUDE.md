@@ -1,5 +1,14 @@
 # CLAUDE.md - Cerid AI (Internal)
 
+## Global Configuration (REQUIRED)
+
+This repo's Claude Code sessions **MUST** also load the global orchestrator config:
+→ **https://github.com/sunrunnerfire/dotfiles/blob/main/claude.md**
+
+Load both this file AND the global config at session start. The global config contains lead orchestrator/agent parameters that govern all Cerid development sessions.
+
+---
+
 > **This is the canonical development repo** (`Cerid-AI/cerid-ai-internal`, private).
 > All development happens here. The public repo is a distribution artifact.
 
