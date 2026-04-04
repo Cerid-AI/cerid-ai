@@ -74,6 +74,17 @@ export CERID_PORT_NEO4J_BOLT="${CERID_PORT_NEO4J_BOLT:-7687}"
 export CERID_PORT_CHROMA="${CERID_PORT_CHROMA:-8001}"
 export CERID_PORT_REDIS="${CERID_PORT_REDIS:-6379}"
 
+# Auto-detect host memory (GB) for setup wizard system check.
+# Inside Docker Desktop for Mac/Windows, /proc/meminfo reports VM memory, not host.
+# This passes the real host RAM into the container via HOST_MEMORY_GB env var.
+if [ -z "${HOST_MEMORY_GB:-}" ]; then
+    case "$(uname -s)" in
+        Darwin)  HOST_MEMORY_GB=$(sysctl -n hw.memsize 2>/dev/null | awk '{printf "%.1f", $1/1073741824}') ;;
+        Linux)   HOST_MEMORY_GB=$(awk '/MemTotal/{printf "%.1f", $2/1048576}' /proc/meminfo 2>/dev/null) ;;
+    esac
+fi
+export HOST_MEMORY_GB="${HOST_MEMORY_GB:-}"
+
 # --- Pre-flight checks (27B) ---
 preflight_checks() {
     local fail=0
