@@ -1,5 +1,14 @@
 # CLAUDE.md - Cerid AI (Open Source)
 
+## Global Configuration (REQUIRED)
+
+This repo's Claude Code sessions **MUST** also load the global orchestrator config:
+→ **https://github.com/sunrunnerfire/dotfiles/blob/main/claude.md**
+
+Load both this file AND the global config at session start. The global config contains lead orchestrator/agent parameters that govern all Cerid development sessions.
+
+---
+
 ## Project Overview
 
 Cerid AI is a self-hosted, privacy-first AI Knowledge Companion. RAG-powered retrieval, intelligent agents, and an extensible SDK. Apache-2.0 licensed.
