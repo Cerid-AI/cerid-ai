@@ -36,7 +36,7 @@ const STORAGE_KEY = "cerid-setup-progress"
 const STEP_DEFS: StepDef[] = [
   { label: "Welcome", shortLabel: "Welcome" },
   { label: "API Keys", shortLabel: "Keys" },
-  { label: "Knowledge Base", shortLabel: "KB" },
+  { label: "Storage & Archive", shortLabel: "Storage" },
   { label: "Ollama", shortLabel: "Ollama" },
   { label: "Review & Apply", shortLabel: "Apply" },
   { label: "Service Health", shortLabel: "Health" },

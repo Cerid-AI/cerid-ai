@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 import { KBConfigStep } from "@/components/setup/kb-config-step"
 
 const DEFAULT_CONFIG = {
@@ -26,7 +26,7 @@ beforeEach(() => {
 })
 
 describe("KBConfigStep", () => {
-  it("renders 'Knowledge Base' heading", () => {
+  it("renders 'Storage & Archive' heading", () => {
     render(
       <KBConfigStep
         config={DEFAULT_CONFIG}
@@ -35,7 +35,7 @@ describe("KBConfigStep", () => {
         ramGb={16}
       />,
     )
-    expect(screen.getByText("Knowledge Base")).toBeInTheDocument()
+    expect(screen.getByText("Storage & Archive")).toBeInTheDocument()
   })
 
   it("shows archive path input with current value", () => {
@@ -49,54 +49,6 @@ describe("KBConfigStep", () => {
     )
     const input = screen.getByDisplayValue("~/cerid-archive")
     expect(input).toBeInTheDocument()
-  })
-
-  it("shows all 5 domain checkboxes", () => {
-    render(
-      <KBConfigStep
-        config={DEFAULT_CONFIG}
-        onChange={onChange}
-        lightweightRecommended={false}
-        ramGb={16}
-      />,
-    )
-    expect(screen.getByText("Coding")).toBeInTheDocument()
-    expect(screen.getByText("Finance")).toBeInTheDocument()
-    expect(screen.getByText("General")).toBeInTheDocument()
-    expect(screen.getByText("Personal")).toBeInTheDocument()
-    expect(screen.getByText("Projects")).toBeInTheDocument()
-  })
-
-  it("has General domain checked by default", () => {
-    render(
-      <KBConfigStep
-        config={DEFAULT_CONFIG}
-        onChange={onChange}
-        lightweightRecommended={false}
-        ramGb={16}
-      />,
-    )
-    // The General domain card should have the selected border style
-    const generalLabel = screen.getByText("General").closest("label")
-    expect(generalLabel?.className).toContain("border-brand/40")
-  })
-
-  it("calls onChange when toggling a domain", () => {
-    render(
-      <KBConfigStep
-        config={DEFAULT_CONFIG}
-        onChange={onChange}
-        lightweightRecommended={false}
-        ramGb={16}
-      />,
-    )
-    // Click the Coding domain label to toggle it on
-    const codingLabel = screen.getByText("Coding").closest("label")
-    fireEvent.click(codingLabel!)
-    expect(onChange).toHaveBeenCalledWith({
-      ...DEFAULT_CONFIG,
-      domains: ["general", "coding"],
-    })
   })
 
   it("shows Watch for new files toggle", () => {
