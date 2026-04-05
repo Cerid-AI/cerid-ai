@@ -349,7 +349,7 @@ async def detect_memory_conflict(
 
     try:
         coll_name = config.collection_name("conversations")
-        collection = chroma_client.get_collection(name=coll_name)
+        collection = chroma_client.get_or_create_collection(name=coll_name)
         results = collection.query(
             query_texts=[new_memory_text],
             n_results=5,
@@ -539,7 +539,7 @@ async def recall_memories(
     # Step 1: Vector search — over-fetch 4x to compensate for aggressive decay filtering
     try:
         coll_name = config.collection_name("conversations")
-        collection = chroma_client.get_collection(name=coll_name)
+        collection = chroma_client.get_or_create_collection(name=coll_name)
         results = collection.query(
             query_texts=[query],
             n_results=top_k * 4,
@@ -693,7 +693,7 @@ async def recall_memories(
     if chroma_client and top_results:
         try:
             coll_name = config.collection_name("conversations")
-            collection = chroma_client.get_collection(name=coll_name)
+            collection = chroma_client.get_or_create_collection(name=coll_name)
             for mem in top_results:
                 new_count = mem["access_count"] + 1
                 collection.update(
