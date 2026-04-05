@@ -132,6 +132,23 @@ export type PipelineStage =
 
 export type PipelineProviders = Partial<Record<PipelineStage, "ollama" | "bifrost">>
 
+/** Inference provider status from tiered detection system. */
+export type InferenceTier = "optimal" | "good" | "degraded" | "unknown"
+
+export interface InferenceStatus {
+  provider: string
+  tier: InferenceTier
+  gpu: boolean
+  gpu_name: string
+  platform: string
+  onnx_providers: string[]
+  ollama_available: boolean
+  sidecar_available: boolean
+  embed_latency_ms: number
+  rerank_latency_ms: number
+  message: string
+}
+
 /** Extended health from GET /health/status — includes degradation + pipeline routing. */
 export interface HealthStatusResponse extends HealthResponse {
   degradation_tier?: DegradationTier
@@ -142,6 +159,7 @@ export interface HealthStatusResponse extends HealthResponse {
   pipeline_providers?: PipelineProviders
   internal_llm_provider?: string
   internal_llm_model?: string
+  inference?: InferenceStatus
 }
 
 /** Structured error response from CeridError hierarchy. */
