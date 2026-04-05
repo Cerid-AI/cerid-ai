@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 import sentry_sdk
 
 sentry_sdk.init(
-    dsn=os.environ.get("SENTRY_DSN"),
+    dsn=os.environ.get("SENTRY_DSN_MCP"),
     environment=os.environ.get("SENTRY_ENVIRONMENT", "development"),
     release=os.environ.get("SENTRY_RELEASE"),
     send_default_pii=False,  # Privacy-first: don't send API keys, IPs, or request bodies

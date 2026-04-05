@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 import config
 import config.features as features_mod
+from app.deps import get_redis
 from utils.features import set_toggle
 
 router = APIRouter()
@@ -370,3 +371,63 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
 
     logger.info(f"Settings updated: {updated}")
     return {"status": "success", "updated": updated}
+
+
+# ── Private mode endpoints ──────────────────────────────────────────────────
+
+_PRIVATE_MODE_KEY = "cerid:private_mode:global"
+
+
+@router.get("/settings/private-mode")
+async def get_private_mode():
+    """Return current private mode level (0 = disabled)."""
+    try:
+        redis = get_redis()
+        level = redis.get(_PRIVATE_MODE_KEY)
+        return {"level": int(level) if level is not None else 0}
+    except Exception:
+        return {"level": 0}
+
+
+class PrivateModeRequest(BaseModel):
+    level: int = Field(..., ge=0, le=3, description="Private mode level (0=off, 1-3)")
+
+
+@router.post("/settings/private-mode")
+async def set_private_mode(req: PrivateModeRequest):
+    """Set private mode level."""
+    redis = get_redis()
+    redis.set(_PRIVATE_MODE_KEY, str(req.level))
+    logger.info("Private mode set to level %d", req.level)
+    return {"level": req.level}
+
+
+@router.delete("/settings/private-mode")
+async def reset_private_mode():
+    """Reset private mode to level 0 (disabled)."""
+    redis = get_redis()
+    redis.delete(_PRIVATE_MODE_KEY)
+    logger.info("Private mode reset to 0")
+    return {"level": 0}
+
+
+# ── Tier endpoint ───────────────────────────────────────────────────────────
+
+class TierRequest(BaseModel):
+    tier: str = Field(..., description="Feature tier: community, pro, or enterprise")
+
+
+@router.post("/settings/tier")
+async def set_tier(req: TierRequest):
+    """Update feature tier at runtime and recalculate feature flags."""
+    valid_tiers = ("community", "pro", "enterprise")
+    if req.tier not in valid_tiers:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid tier: '{req.tier}'. Must be one of {valid_tiers}",
+        )
+    config.FEATURE_TIER = req.tier
+    features_mod.FEATURE_TIER = req.tier
+    features_mod._refresh_flags()
+    logger.info("Feature tier updated to '%s', flags refreshed", req.tier)
+    return {"tier": req.tier, "feature_flags": config.FEATURE_FLAGS}

@@ -138,6 +138,12 @@ def health_check_endpoint():
     return result
 
 
+@router.get("/health/status")
+def health_status_endpoint():
+    """Extended health check with degradation tier and uptime."""
+    return degradation_status()
+
+
 @router.get("/collections")
 def list_collections_endpoint():
     return list_collections()

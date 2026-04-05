@@ -275,6 +275,14 @@ async def _stream_chat(
     )
 
 
+@router.get("/recommendations")
+async def get_recommendations():
+    """Return recommended Ollama models per pipeline stage."""
+    _require_enabled()
+    from utils.ollama_models import get_recommended_models
+    return {"recommendations": get_recommended_models()}
+
+
 @router.post("/pull")
 async def pull_model(req: PullRequest):
     """Pull (download) a model to the local Ollama server.

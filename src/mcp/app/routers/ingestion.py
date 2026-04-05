@@ -224,6 +224,12 @@ async def ingest_feedback_endpoint(req: FeedbackIngestRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/ingestion/progress")
+async def ingestion_progress():
+    """Return current ingestion queue status (stub for upload progress UI)."""
+    return {"active": False, "queue": [], "completed": 0}
+
+
 @router.get("/ingest_log")
 async def ingest_log_endpoint(limit: int = Query(50, ge=1, le=500)):
     try:

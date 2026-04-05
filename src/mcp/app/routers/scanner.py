@@ -199,6 +199,19 @@ async def scan_preview(
     return PreviewResponse(**result)
 
 
+class ScanPreviewRequest(BaseModel):
+    path: str
+    max_file_size_mb: int = 50
+
+
+@router.post("/admin/scan/preview")
+async def scan_preview_post(req: ScanPreviewRequest) -> PreviewResponse:
+    """Quick preview of a directory (POST variant — accepts JSON body)."""
+    _validate_scan_path(req.path)
+    result = await preview_folder(req.path, max_file_size_mb=req.max_file_size_mb)
+    return PreviewResponse(**result)
+
+
 @router.get("/admin/scan/{scan_id}")
 def get_scan_progress(scan_id: str) -> ScanProgress:
     """Get progress of an active or completed scan."""

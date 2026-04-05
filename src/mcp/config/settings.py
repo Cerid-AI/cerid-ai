@@ -493,8 +493,8 @@ SMART_ROUTING_ENABLED = os.getenv("SMART_ROUTING_ENABLED", "true").lower() == "t
 
 # Internal LLM: model to use for pipeline intelligence operations
 # (categorization, decomposition, contextual chunks, claim extraction)
-# Options: "bifrost" (default, uses Bifrost routing), "ollama" (local), or specific model ID
-INTERNAL_LLM_PROVIDER = os.getenv("INTERNAL_LLM_PROVIDER", "bifrost")
+# Options: "openrouter" (default, direct calls), "ollama" (local, the special case), or specific model ID
+INTERNAL_LLM_PROVIDER = os.getenv("INTERNAL_LLM_PROVIDER", "openrouter")
 INTERNAL_LLM_MODEL = os.getenv("INTERNAL_LLM_MODEL", "")  # empty = provider default
 
 # Default Ollama model for pipeline tasks — lightweight, runs on CPU or GPU
@@ -510,7 +510,7 @@ INTELLIGENCE_MODEL = os.getenv("INTELLIGENCE_MODEL", "")  # empty = auto-select
 #   Override per-stage via env vars: PROVIDER_CLAIM_EXTRACTION=bifrost
 #   Backward compat: INTERNAL_LLM_PROVIDER=ollama sets ALL stages to ollama.
 # ---------------------------------------------------------------------------
-_global_provider = os.getenv("INTERNAL_LLM_PROVIDER", "bifrost")
+_global_provider = os.getenv("INTERNAL_LLM_PROVIDER", "openrouter")
 
 # ---------------------------------------------------------------------------
 # Inference Detection
