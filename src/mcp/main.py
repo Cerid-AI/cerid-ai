@@ -298,6 +298,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     except Exception as e:
         logger.warning(f"Automation registration failed (server runs without it): {e}")
 
+    # Pre-import heavy modules to avoid cold-start on first request
+    try:
+        import parsers  # noqa: F401 — 4s import on ARM64, must happen at startup
+        logger.info("Parser registry pre-imported (%d parsers)", len(parsers.PARSER_REGISTRY))
+    except Exception as e:  # noqa: BLE001
+        logger.debug("Parser pre-import failed: %s", e)
+
     # Pre-warm connections and models for faster first request
     try:
         from config.taxonomy import DOMAINS, collection_name
@@ -306,8 +313,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         _first_domain = DOMAINS[0] if DOMAINS else None
         if _first_domain:
             chroma.get_or_create_collection(name=collection_name(_first_domain))
+        # Force embedding model load by running a dummy embed
+        from utils.embeddings import get_embedding_function
+        _ef = get_embedding_function()
+        _ef(["warmup"])  # Loads ONNX model into memory
         logger.info("ChromaDB + embedding model pre-warmed")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.debug("Pre-warm ChromaDB failed (lazy init on first use): %s", e)
 
     # Pre-warm reranker ONNX model to avoid cold-start penalty on first query
