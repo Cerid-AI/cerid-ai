@@ -188,7 +188,7 @@ jobs:
   # Docker
   docker:
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, test, security, lock-sync, frontend, frontend-marketing, frontend-desktop]
+    needs: [lint, typecheck, test, security, lock-sync, frontend, frontend-desktop]
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
@@ -244,26 +244,7 @@ jobs:
           trivyignores: .trivyignore
           version: v0.69.3
 
-  frontend-marketing:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: packages/marketing
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: packages/marketing/package-lock.json
-      - run: npm ci
-      - name: TypeScript type check
-        run: npx tsc -b
-      - name: ESLint
-        run: npm run lint
-      - name: Next.js build
-        run: npm run build
+  # frontend-marketing: removed — marketing site separated to Cerid-AI/cerid-ai-marketing repo
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.SENTRY_DSN_MARKETING }}

@@ -312,29 +312,35 @@ def start_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
-    # Trading jobs (gated by CERID_TRADING_ENABLED)
+    # Trading jobs (gated by CERID_TRADING_ENABLED + per-job schedule config)
     if getattr(config, "CERID_TRADING_ENABLED", False):
-        _scheduler.add_job(
-            _run_trading_autoresearch,
-            CronTrigger.from_crontab(config.SCHEDULE_TRADING_AUTORESEARCH),
-            id="trading_autoresearch",
-            name="Trading auto-research",
-            replace_existing=True,
-        )
-        _scheduler.add_job(
-            _run_platt_scaling_mirror,
-            CronTrigger.from_crontab(config.SCHEDULE_PLATT_MIRROR),
-            id="platt_scaling_mirror",
-            name="Platt scaling mirror",
-            replace_existing=True,
-        )
-        _scheduler.add_job(
-            _run_longshot_surface_rebuild,
-            CronTrigger.from_crontab(config.SCHEDULE_LONGSHOT_SURFACE),
-            id="longshot_surface_rebuild",
-            name="Longshot surface rebuild",
-            replace_existing=True,
-        )
+        _trading_schedule = getattr(config, "SCHEDULE_TRADING_AUTORESEARCH", "")
+        if _trading_schedule:
+            _scheduler.add_job(
+                _run_trading_autoresearch,
+                CronTrigger.from_crontab(_trading_schedule),
+                id="trading_autoresearch",
+                name="Trading auto-research",
+                replace_existing=True,
+            )
+        _platt_schedule = getattr(config, "SCHEDULE_PLATT_MIRROR", "")
+        if _platt_schedule:
+            _scheduler.add_job(
+                _run_platt_scaling_mirror,
+                CronTrigger.from_crontab(_platt_schedule),
+                id="platt_scaling_mirror",
+                name="Platt scaling mirror",
+                replace_existing=True,
+            )
+        _longshot_schedule = getattr(config, "SCHEDULE_LONGSHOT_SURFACE", "")
+        if _longshot_schedule:
+            _scheduler.add_job(
+                _run_longshot_surface_rebuild,
+                CronTrigger.from_crontab(_longshot_schedule),
+                id="longshot_surface_rebuild",
+                name="Longshot surface rebuild",
+                replace_existing=True,
+            )
         logger.info("Trading scheduler jobs registered (CERID_TRADING_ENABLED=true)")
 
     # Folder scan (opt-in — empty SCHEDULE_FOLDER_SCAN disables)
