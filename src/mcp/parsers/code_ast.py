@@ -15,7 +15,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from parsers.registry import _MAX_TEXT_CHARS, register_parser
+from parsers.registry import _MAX_TEXT_CHARS, register_parser  # type: ignore[attr-defined]
 
 # ---------------------------------------------------------------------------
 # Python AST parser

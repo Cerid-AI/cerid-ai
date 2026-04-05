@@ -82,7 +82,7 @@ async def rerank_results(
     # available, always use it regardless of RERANK_MODE — faster and free.
     if getattr(config, "RERANK_PREFER_LOCAL", False) and mode == "llm":
         try:
-            from utils.reranker import _session
+            from utils.reranker import _session  # type: ignore[attr-defined]
             if _session is not None:
                 logger.debug("RERANK_PREFER_LOCAL: overriding llm → cross_encoder")
                 return await _rerank_cross_encoder(results, query)
