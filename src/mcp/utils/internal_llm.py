@@ -46,7 +46,7 @@ async def _get_ollama_client() -> httpx.AsyncClient:
             return _ollama_client
         _ollama_client = httpx.AsyncClient(
             timeout=httpx.Timeout(60.0, connect=5.0),
-            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=8),
         )
         return _ollama_client
 

@@ -32,6 +32,7 @@ function MenuItem({ children, onClick, className }: { children: React.ReactNode;
       className={cn(
         "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none",
         "hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent",
+        "transition-colors",
         className,
       )}
       onClick={onClick}
@@ -74,11 +75,11 @@ function MenuRadioItem({ children, checked, onClick }: { children: React.ReactNo
 }
 
 function MenuLabel({ children }: { children: React.ReactNode }) {
-  return <div className="px-2 py-1.5 text-xs text-muted-foreground">{children}</div>
+  return <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">{children}</div>
 }
 
 function MenuSeparator() {
-  return <Separator className="-mx-1 my-1" />
+  return <Separator className="-mx-1 my-1.5" />
 }
 
 /**
@@ -141,10 +142,10 @@ function ToolbarButtonWithMenu({
             <ChevronDown className="h-3 w-3" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-56" align="start">
+        <PopoverContent className="w-56 p-2" align="start">
           {title && (
             <>
-              <p className="px-2 pb-1 text-xs font-semibold">{title}</p>
+              <p className="px-2 pb-1.5 text-xs font-semibold">{title}</p>
               <MenuSeparator />
             </>
           )}
@@ -481,7 +482,7 @@ export function ChatToolbar({
                 <MoreVertical className="h-4 w-4" />
               </Button>
             </PopoverTrigger>
-            <PopoverContent className="w-48">
+            <PopoverContent className="w-48 p-2">
               <button
                 className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent", ragMode !== "manual" && "text-brand bg-brand/10")}
                 onClick={cycleRagMode}
