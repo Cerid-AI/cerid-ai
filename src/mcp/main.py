@@ -313,7 +313,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         # Force embedding model load by running a dummy embed
         from utils.embeddings import get_embedding_function
         _ef = get_embedding_function()
-        _ef(["warmup"])  # Loads ONNX model into memory
+        if _ef is not None:
+            _ef(["warmup"])  # Loads ONNX model into memory
         logger.info("ChromaDB + embedding model pre-warmed")
     except Exception as e:  # noqa: BLE001
         logger.debug("Pre-warm ChromaDB/embedding failed (lazy init on first use): %s", e)
