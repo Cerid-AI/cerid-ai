@@ -371,7 +371,7 @@ export function ChatToolbar({
                 ? "Fact-checking active (single-model fallback)"
                 : hallucinationEnabled
                   ? expertVerification
-                    ? "Expert verification: claims verified against KB at no cost, then externally with premium models"
+                    ? "Expert verification: claims verified against KB at no cost, then externally with advanced models"
                     : "Fact-check AI responses against your KB and external sources"
                   : "Fact-checking disabled — toggle to verify AI claims"
           }
