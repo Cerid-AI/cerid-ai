@@ -107,6 +107,14 @@ def health_check() -> dict:
     }
     if ollama_status is not None:
         result["ollama"] = ollama_status
+
+    # Inference provider detection status
+    try:
+        from utils.inference_config import inference_health_payload
+        result["inference"] = inference_health_payload()
+    except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
+        logger.debug("Inference status unavailable: %s", exc)
+
     return result
 
 

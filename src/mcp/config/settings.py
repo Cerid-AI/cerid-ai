@@ -507,6 +507,17 @@ INTELLIGENCE_MODEL = os.getenv("INTELLIGENCE_MODEL", "")  # empty = auto-select
 # ---------------------------------------------------------------------------
 _global_provider = os.getenv("INTERNAL_LLM_PROVIDER", "bifrost")
 
+# ---------------------------------------------------------------------------
+# Inference Detection
+#   INFERENCE_MODE controls how embedding/reranking models are loaded.
+#   "auto" (default) = detect best provider at startup.
+#   Manual: "onnx-cpu", "onnx-gpu", "ollama", "fastembed-sidecar"
+# ---------------------------------------------------------------------------
+INFERENCE_MODE = os.getenv("INFERENCE_MODE", "auto")
+CERID_SIDECAR_PORT = int(os.getenv("CERID_SIDECAR_PORT", "8889"))
+CERID_SIDECAR_URL = os.getenv("CERID_SIDECAR_URL", f"http://localhost:{CERID_SIDECAR_PORT}")
+INFERENCE_RECHECK_INTERVAL = int(os.getenv("INFERENCE_RECHECK_INTERVAL", "300"))
+
 PIPELINE_PROVIDERS: dict[str, str] = {
     "claim_extraction": os.getenv("PROVIDER_CLAIM_EXTRACTION", _global_provider),
     "query_decomposition": os.getenv("PROVIDER_QUERY_DECOMPOSITION", _global_provider),
