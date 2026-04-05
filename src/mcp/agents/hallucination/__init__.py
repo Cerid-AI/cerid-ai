@@ -7,4 +7,5 @@ from core.agents.hallucination import (  # noqa: F401
     _check_numeric_alignment,
     _compute_adjusted_confidence,
     _detect_evasion,
+    _extract_claims_heuristic,
 )
