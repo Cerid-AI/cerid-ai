@@ -302,6 +302,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     except Exception as e:  # noqa: BLE001
         logger.debug("Parser pre-import failed: %s", e)
 
+    # Detect inference provider (GPU, sidecar, Ollama, CPU fallback)
+    try:
+        from utils.inference_config import detect_embedding_provider
+        _inf_cfg = detect_embedding_provider()
+        logger.info(
+            "Inference provider: %s (tier=%s, gpu=%s)",
+            _inf_cfg.provider, _inf_cfg.tier.value, _inf_cfg.gpu_name or "none",
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Inference detection failed (using CPU defaults): %s", e)
+
     # Pre-warm connections and models for faster first request
     try:
         from config.taxonomy import DOMAINS, collection_name
