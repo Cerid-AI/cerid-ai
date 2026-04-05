@@ -75,8 +75,8 @@ async def sidecar_embed(
             cfg.embed_latency_ms = cfg.embed_latency_ms * 0.7 + latency_ms * 0.3
         else:
             cfg.embed_latency_ms = latency_ms
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Latency tracking failed: %s", exc)
 
     logger.debug("Sidecar embed: %d texts in %.1fms", len(texts), latency_ms)
     return data["embeddings"]
@@ -115,8 +115,8 @@ async def sidecar_rerank(
             cfg.rerank_latency_ms = cfg.rerank_latency_ms * 0.7 + latency_ms * 0.3
         else:
             cfg.rerank_latency_ms = latency_ms
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Latency tracking failed: %s", exc)
 
     logger.debug("Sidecar rerank: %d docs in %.1fms", len(documents), latency_ms)
     return data["scores"]
@@ -130,8 +130,8 @@ async def sidecar_health() -> dict | None:
         resp = await client.get(f"{url}/health", timeout=2)
         if resp.status_code == 200:
             return resp.json()
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Sidecar health check failed: %s", exc)
     return None
 
 

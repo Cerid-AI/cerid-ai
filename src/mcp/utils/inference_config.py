@@ -115,8 +115,8 @@ def _probe_gpu(plat: Platform) -> tuple[bool, str]:
                 )
                 if result.returncode == 0 and result.stdout.strip():
                     return True, result.stdout.strip().split("\n")[0]
-            except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-                pass
+            except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
+                logger.debug("nvidia-smi probe failed: %s", exc)
         # Check ROCm
         if shutil.which("rocm-smi"):
             try:
@@ -126,8 +126,8 @@ def _probe_gpu(plat: Platform) -> tuple[bool, str]:
                 )
                 if result.returncode == 0:
                     return True, "AMD ROCm GPU"
-            except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-                pass
+            except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
+                logger.debug("rocm-smi probe failed: %s", exc)
 
     return False, ""
 
@@ -139,16 +139,16 @@ def _probe_ollama() -> bool:
         import httpx
         resp = httpx.get(f"{ollama_url}/api/tags", timeout=2)
         return resp.status_code == 200
-    except (httpx.HTTPError, OSError, ValueError):  # noqa: BLE001
-        pass
+    except (httpx.HTTPError, OSError, ValueError) as exc:  # noqa: BLE001
+        logger.debug("Ollama probe failed (%s): %s", ollama_url, exc)
     # Fallback: try localhost
     if "host.docker.internal" in ollama_url:
         try:
             import httpx
             resp = httpx.get("http://localhost:11434/api/tags", timeout=2)
             return resp.status_code == 200
-        except (httpx.HTTPError, OSError, ValueError):  # noqa: BLE001
-            pass
+        except (httpx.HTTPError, OSError, ValueError) as exc:  # noqa: BLE001
+            logger.debug("Ollama probe failed (localhost fallback): %s", exc)
     return False
 
 
@@ -161,8 +161,8 @@ def _probe_sidecar() -> tuple[bool, str]:
         resp = httpx.get(f"{url}/health", timeout=2)
         if resp.status_code == 200:
             return True, url
-    except (httpx.HTTPError, OSError, ValueError):  # noqa: BLE001
-        pass
+    except (httpx.HTTPError, OSError, ValueError) as exc:  # noqa: BLE001
+        logger.debug("Sidecar probe failed (%s): %s", url, exc)
     return False, url
 
 
@@ -178,7 +178,7 @@ def _select_onnx_providers(plat: Platform, gpu_available: bool) -> list[str]:
             if "CoreMLExecutionProvider" in available:
                 providers.append("CoreMLExecutionProvider")
         except ImportError:
-            pass
+            logger.debug("onnxruntime not available for CoreML detection")
 
     if plat in (Platform.LINUX_X86, Platform.LINUX_ARM) and gpu_available:
         try:
@@ -189,7 +189,7 @@ def _select_onnx_providers(plat: Platform, gpu_available: bool) -> list[str]:
             if "ROCMExecutionProvider" in available:
                 providers.append("ROCMExecutionProvider")
         except ImportError:
-            pass
+            logger.debug("onnxruntime not available for CUDA/ROCm detection")
 
     if plat == Platform.WINDOWS and gpu_available:
         try:
@@ -200,7 +200,7 @@ def _select_onnx_providers(plat: Platform, gpu_available: bool) -> list[str]:
             if "CUDAExecutionProvider" in available:
                 providers.append("CUDAExecutionProvider")
         except ImportError:
-            pass
+            logger.debug("onnxruntime not available for DML/CUDA detection")
 
     # CPU is always the fallback
     providers.append("CPUExecutionProvider")
@@ -309,8 +309,8 @@ async def _inference_recheck_loop() -> None:
                         "new_tier": new.tier.value,
                         "direction": direction,
                     })
-                except (ImportError, AttributeError):
-                    pass
+                except (ImportError, AttributeError) as exc:
+                    logger.debug("Event bus unavailable: %s", exc)
             else:
                 logger.debug("Inference recheck: no change (%s/%s)", new.provider, new.tier.value)
         except Exception:  # noqa: BLE001
