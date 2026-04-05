@@ -12,10 +12,12 @@ import numpy as np
 import pytest
 
 import utils.semantic_cache as sc
-from utils.semantic_cache import (
+from core.retrieval.semantic_cache import (
     _dequantize_int8,
     _HNSWIndex,
     _quantize_int8,
+)
+from utils.semantic_cache import (
     cache_lookup,
     cache_store,
     invalidate_cache,

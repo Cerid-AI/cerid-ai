@@ -41,7 +41,7 @@ def _mock_response(contexts: list[str], status_code: int = 200):
 class TestContextualizeChunks:
     """Tests for the main contextualize_chunks function."""
 
-    @patch("utils.contextual.config")
+    @patch("core.utils.contextual.config")
     def test_disabled_returns_original(self, mock_config):
         """When ENABLE_CONTEXTUAL_CHUNKS is False, chunks pass through unchanged."""
         mock_config.ENABLE_CONTEXTUAL_CHUNKS = False
@@ -51,7 +51,7 @@ class TestContextualizeChunks:
         result = contextualize_chunks(chunks, "full doc text")
         assert result == chunks
 
-    @patch("utils.contextual.config")
+    @patch("core.utils.contextual.config")
     def test_empty_chunks_returns_empty(self, mock_config):
         """Empty input returns empty output."""
         mock_config.ENABLE_CONTEXTUAL_CHUNKS = True
@@ -60,8 +60,8 @@ class TestContextualizeChunks:
         result = contextualize_chunks([], "full text")
         assert result == []
 
-    @patch("utils.contextual.httpx")
-    @patch("utils.contextual.config")
+    @patch("core.utils.contextual.httpx")
+    @patch("core.utils.contextual.config")
     def test_successful_enrichment(self, mock_config, mock_httpx):
         """Successful LLM call prepends context to each chunk."""
         mock_config.ENABLE_CONTEXTUAL_CHUNKS = True
@@ -80,8 +80,8 @@ class TestContextualizeChunks:
         assert result[0] == "[revenue discussion in Q3 report]\nRevenue increased 15%"
         assert result[1] == "[API auth setup guide]\nSet up API key in config.yaml"
 
-    @patch("utils.contextual.httpx")
-    @patch("utils.contextual.config")
+    @patch("core.utils.contextual.httpx")
+    @patch("core.utils.contextual.config")
     def test_batching(self, mock_config, mock_httpx):
         """Chunks are processed in batches of 5."""
         mock_config.ENABLE_CONTEXTUAL_CHUNKS = True
@@ -106,8 +106,8 @@ class TestContextualizeChunks:
         assert result[0] == "[ctx 0]\nchunk 0"
         assert result[6] == "[ctx 6]\nchunk 6"
 
-    @patch("utils.contextual.httpx.post")
-    @patch("utils.contextual.config")
+    @patch("core.utils.contextual.httpx.post")
+    @patch("core.utils.contextual.config")
     def test_http_error_returns_originals(self, mock_config, mock_post):
         """On HTTP error, returns original chunks unchanged."""
         mock_config.ENABLE_CONTEXTUAL_CHUNKS = True
@@ -124,8 +124,8 @@ class TestContextualizeChunks:
         # Should fall back — chunks pass through without context
         assert result == chunks
 
-    @patch("utils.contextual.httpx")
-    @patch("utils.contextual.config")
+    @patch("core.utils.contextual.httpx")
+    @patch("core.utils.contextual.config")
     def test_mismatched_count_returns_no_context(self, mock_config, mock_httpx):
         """When LLM returns wrong number of contexts, chunks pass through."""
         mock_config.ENABLE_CONTEXTUAL_CHUNKS = True
@@ -142,8 +142,8 @@ class TestContextualizeChunks:
         # Mismatched count → no context prepended
         assert result == ["chunk 1", "chunk 2", "chunk 3"]
 
-    @patch("utils.contextual.httpx")
-    @patch("utils.contextual.config")
+    @patch("core.utils.contextual.httpx")
+    @patch("core.utils.contextual.config")
     def test_markdown_code_block_stripped(self, mock_config, mock_httpx):
         """LLM responses wrapped in ```json code blocks are handled."""
         mock_config.ENABLE_CONTEXTUAL_CHUNKS = True
@@ -170,8 +170,8 @@ class TestContextualizeChunks:
         assert result[0] == "[ctx for chunk 0]\nchunk 0"
         assert result[1] == "[ctx for chunk 1]\nchunk 1"
 
-    @patch("utils.contextual.httpx")
-    @patch("utils.contextual.config")
+    @patch("core.utils.contextual.httpx")
+    @patch("core.utils.contextual.config")
     def test_metadata_passed_to_prompt(self, mock_config, mock_httpx):
         """Filename and domain from metadata are included in the LLM prompt."""
         mock_config.ENABLE_CONTEXTUAL_CHUNKS = True
@@ -193,8 +193,8 @@ class TestContextualizeChunks:
         assert "report.pdf" in prompt
         assert "finance" in prompt
 
-    @patch("utils.contextual.httpx")
-    @patch("utils.contextual.config")
+    @patch("core.utils.contextual.httpx")
+    @patch("core.utils.contextual.config")
     def test_doc_preview_truncated(self, mock_config, mock_httpx):
         """Full text is truncated to ~3000 chars in the LLM prompt."""
         mock_config.ENABLE_CONTEXTUAL_CHUNKS = True
@@ -224,8 +224,8 @@ class TestContextualizeChunks:
 class TestGenerateContexts:
     """Tests for the internal _generate_contexts function."""
 
-    @patch("utils.contextual.httpx.post")
-    @patch("utils.contextual.config")
+    @patch("core.utils.contextual.httpx.post")
+    @patch("core.utils.contextual.config")
     def test_json_decode_error_returns_empty(self, mock_config, mock_post):
         """Invalid JSON from LLM returns empty strings."""
         mock_config.CONTEXTUAL_CHUNKS_MODEL = "test-model"
@@ -241,13 +241,13 @@ class TestGenerateContexts:
         }
         mock_post.return_value = resp
 
-        from utils.contextual import _generate_contexts
+        from core.utils.contextual import _generate_contexts
 
         result = _generate_contexts(["chunk"], "doc preview", "file.txt", "")
         assert result == [""]
 
-    @patch("utils.contextual.httpx.post")
-    @patch("utils.contextual.config")
+    @patch("core.utils.contextual.httpx.post")
+    @patch("core.utils.contextual.config")
     def test_chunk_preview_truncated(self, mock_config, mock_post):
         """Individual chunk previews are truncated to 300 chars in the prompt."""
         mock_config.CONTEXTUAL_CHUNKS_MODEL = "test-model"
@@ -255,7 +255,7 @@ class TestGenerateContexts:
 
         mock_post.return_value = _mock_response(["ctx"])
 
-        from utils.contextual import _generate_contexts
+        from core.utils.contextual import _generate_contexts
 
         # Use a character that won't appear in the prompt boilerplate
         long_chunk = "\u00e9" * 500

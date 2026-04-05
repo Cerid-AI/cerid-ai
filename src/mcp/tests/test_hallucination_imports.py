@@ -5,19 +5,19 @@
 
 The monolithic ``agents/hallucination.py`` was split into a
 package with five submodules (patterns, extraction, verification, streaming,
-persistence).  The ``__init__.py`` facade re-exports all public and test-used
-symbols so that existing ``from agents.hallucination import X`` statements
-continue to work without changes.
+persistence).  The ``core/agents/hallucination/__init__.py`` facade re-exports
+all public and test-used symbols.  Private (underscore-prefixed) names must
+be imported from the specific core submodule.
 """
 
 from __future__ import annotations
 
 
 class TestPatternSymbols:
-    """Symbols re-exported from patterns.py."""
+    """Symbols from patterns.py."""
 
     def test_semaphore_getters(self):
-        from agents.hallucination import (
+        from core.agents.hallucination.patterns import (
             _get_claim_verify_semaphore,
             _get_ext_verify_semaphore,
         )
@@ -25,7 +25,7 @@ class TestPatternSymbols:
         assert callable(_get_ext_verify_semaphore)
 
     def test_pattern_helpers(self):
-        from agents.hallucination import (
+        from core.agents.hallucination.patterns import (
             _has_staleness_indicators,
             _is_complex_claim,
             _is_current_event_claim,
@@ -39,20 +39,20 @@ class TestPatternSymbols:
         assert callable(_is_recency_claim)
 
     def test_model_helpers(self):
-        from agents.hallucination import _model_family, _pick_verification_model
+        from core.agents.hallucination.patterns import _model_family, _pick_verification_model
         assert callable(_model_family)
         assert callable(_pick_verification_model)
 
 
 class TestExtractionSymbols:
-    """Symbols re-exported from extraction.py."""
+    """Symbols from extraction.py."""
 
     def test_extract_claims(self):
         from agents.hallucination import extract_claims
         assert callable(extract_claims)
 
     def test_internal_extraction_functions(self):
-        from agents.hallucination import (
+        from core.agents.hallucination.extraction import (
             _detect_evasion,
             _extract_citation_claims,
             _extract_claims_heuristic,
@@ -65,14 +65,14 @@ class TestExtractionSymbols:
 
 
 class TestVerificationSymbols:
-    """Symbols re-exported from verification.py."""
+    """Symbols from verification.py."""
 
     def test_verify_claim(self):
         from agents.hallucination import verify_claim
         assert callable(verify_claim)
 
     def test_system_prompts(self):
-        from agents.hallucination import (
+        from core.agents.hallucination.verification import (
             _SYSTEM_CITATION_VERIFICATION,
             _SYSTEM_CONSISTENCY_CHECK,
             _SYSTEM_CURRENT_EVENT_VERIFICATION,
@@ -92,7 +92,7 @@ class TestVerificationSymbols:
             assert len(prompt) > 50  # Non-trivial system prompts
 
     def test_verification_helpers(self):
-        from agents.hallucination import (
+        from core.agents.hallucination.verification import (
             _build_verification_details,
             _check_history_consistency,
             _check_numeric_alignment,
@@ -124,7 +124,7 @@ class TestVerificationSymbols:
 
 
 class TestStreamingSymbols:
-    """Symbols re-exported from streaming.py."""
+    """Symbols from streaming.py."""
 
     def test_check_hallucinations(self):
         from agents.hallucination import check_hallucinations
@@ -136,7 +136,7 @@ class TestStreamingSymbols:
 
 
 class TestPersistenceSymbols:
-    """Symbols re-exported from persistence.py."""
+    """Symbols from persistence.py."""
 
     def test_get_hallucination_report(self):
         from agents.hallucination import get_hallucination_report
@@ -156,23 +156,23 @@ class TestSubmoduleAccess:
     """Verify that submodules are importable directly."""
 
     def test_import_patterns(self):
-        import agents.hallucination.patterns as m
+        import core.agents.hallucination.patterns as m
         assert hasattr(m, "_is_ignorance_admission")
 
     def test_import_extraction(self):
-        import agents.hallucination.extraction as m
+        import core.agents.hallucination.extraction as m
         assert hasattr(m, "extract_claims")
 
     def test_import_verification(self):
-        import agents.hallucination.verification as m
+        import core.agents.hallucination.verification as m
         assert hasattr(m, "verify_claim")
 
     def test_import_streaming(self):
-        import agents.hallucination.streaming as m
+        import core.agents.hallucination.streaming as m
         assert hasattr(m, "verify_response_streaming")
 
     def test_import_persistence(self):
-        import agents.hallucination.persistence as m
+        import core.agents.hallucination.persistence as m
         assert hasattr(m, "get_hallucination_report")
 
     def test_httpx_accessible_on_package(self):

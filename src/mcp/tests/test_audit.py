@@ -64,8 +64,8 @@ class TestConstants:
 # ---------------------------------------------------------------------------
 
 class TestGetActivitySummary:
-    @patch("agents.audit.get_log")
-    @patch("agents.audit.utcnow")
+    @patch("core.agents.audit.get_log")
+    @patch("core.agents.audit.utcnow")
     def test_empty_log(self, mock_utcnow, mock_get_log):
         from datetime import datetime
         mock_utcnow.return_value = datetime(2026, 2, 28, 12, 0, 0)
@@ -76,8 +76,8 @@ class TestGetActivitySummary:
         assert result["event_breakdown"] == {}
         assert result["domain_breakdown"] == {}
 
-    @patch("agents.audit.get_log")
-    @patch("agents.audit.utcnow")
+    @patch("core.agents.audit.get_log")
+    @patch("core.agents.audit.utcnow")
     def test_counts_recent_events(self, mock_utcnow, mock_get_log):
         from datetime import datetime
         mock_utcnow.return_value = datetime(2026, 2, 28, 12, 0, 0)
@@ -93,8 +93,8 @@ class TestGetActivitySummary:
         assert result["event_breakdown"]["query"] == 1
         assert result["domain_breakdown"]["coding"] == 2
 
-    @patch("agents.audit.get_log")
-    @patch("agents.audit.utcnow")
+    @patch("core.agents.audit.get_log")
+    @patch("core.agents.audit.utcnow")
     def test_filters_by_time_window(self, mock_utcnow, mock_get_log):
         from datetime import datetime
         mock_utcnow.return_value = datetime(2026, 2, 28, 12, 0, 0)
@@ -107,8 +107,8 @@ class TestGetActivitySummary:
         result = get_activity_summary(MagicMock(), hours=24)
         assert result["total_events"] == 2
 
-    @patch("agents.audit.get_log")
-    @patch("agents.audit.utcnow")
+    @patch("core.agents.audit.get_log")
+    @patch("core.agents.audit.utcnow")
     def test_hourly_timeline(self, mock_utcnow, mock_get_log):
         from datetime import datetime
         mock_utcnow.return_value = datetime(2026, 2, 28, 12, 0, 0)
@@ -122,8 +122,8 @@ class TestGetActivitySummary:
         assert result["hourly_timeline"]["2026-02-28T10"] == 2
         assert result["hourly_timeline"]["2026-02-28T11"] == 1
 
-    @patch("agents.audit.get_log")
-    @patch("agents.audit.utcnow")
+    @patch("core.agents.audit.get_log")
+    @patch("core.agents.audit.utcnow")
     def test_captures_failures(self, mock_utcnow, mock_get_log):
         from datetime import datetime
         mock_utcnow.return_value = datetime(2026, 2, 28, 12, 0, 0)
@@ -142,7 +142,7 @@ class TestGetActivitySummary:
 # ---------------------------------------------------------------------------
 
 class TestGetIngestionStats:
-    @patch("agents.audit.get_log")
+    @patch("core.agents.audit.get_log")
     def test_basic_stats(self, mock_get_log):
         mock_get_log.return_value = [
             _make_entry(event="ingest", filename="a.py", chunks=5),
@@ -155,7 +155,7 @@ class TestGetIngestionStats:
         assert result["total_duplicates"] == 1
         assert result["duplicate_rate"] == round(1 / 3, 3)
 
-    @patch("agents.audit.get_log")
+    @patch("core.agents.audit.get_log")
     def test_file_type_distribution(self, mock_get_log):
         mock_get_log.return_value = [
             _make_entry(event="ingest", filename="a.py"),
@@ -167,7 +167,7 @@ class TestGetIngestionStats:
         assert result["file_type_distribution"]["py"] == 2
         assert result["file_type_distribution"]["md"] == 1
 
-    @patch("agents.audit.get_log")
+    @patch("core.agents.audit.get_log")
     def test_avg_chunks(self, mock_get_log):
         mock_get_log.return_value = [
             _make_entry(event="ingest", chunks=4),
@@ -177,7 +177,7 @@ class TestGetIngestionStats:
         result = get_ingestion_stats(MagicMock())
         assert result["avg_chunks_per_file"] == 5.0
 
-    @patch("agents.audit.get_log")
+    @patch("core.agents.audit.get_log")
     def test_no_ingests(self, mock_get_log):
         mock_get_log.return_value = []
 
@@ -186,7 +186,7 @@ class TestGetIngestionStats:
         assert result["duplicate_rate"] == 0.0
         assert result["avg_chunks_per_file"] == 0
 
-    @patch("agents.audit.get_log")
+    @patch("core.agents.audit.get_log")
     def test_duplicate_status_counted(self, mock_get_log):
         """Entries with status='duplicate' should also count as duplicates."""
         mock_get_log.return_value = [
@@ -203,8 +203,8 @@ class TestGetIngestionStats:
 # ---------------------------------------------------------------------------
 
 class TestEstimateCosts:
-    @patch("agents.audit.get_log")
-    @patch("agents.audit.utcnow")
+    @patch("core.agents.audit.get_log")
+    @patch("core.agents.audit.utcnow")
     def test_cost_calculation(self, mock_utcnow, mock_get_log):
         from datetime import datetime
         mock_utcnow.return_value = datetime(2026, 2, 28, 12, 0, 0)
@@ -225,8 +225,8 @@ class TestEstimateCosts:
         assert result["estimated_tokens"]["pro"] == AVG_TOKENS["categorize_pro"]
         assert result["estimated_tokens"]["rerank"] == AVG_TOKENS["rerank"]
 
-    @patch("agents.audit.get_log")
-    @patch("agents.audit.utcnow")
+    @patch("core.agents.audit.get_log")
+    @patch("core.agents.audit.utcnow")
     def test_smart_tier_zero_cost(self, mock_utcnow, mock_get_log):
         from datetime import datetime
         mock_utcnow.return_value = datetime(2026, 2, 28, 12, 0, 0)
@@ -238,8 +238,8 @@ class TestEstimateCosts:
         result = estimate_costs(MagicMock())
         assert result["estimated_cost_usd"]["smart"] == 0.0
 
-    @patch("agents.audit.get_log")
-    @patch("agents.audit.utcnow")
+    @patch("core.agents.audit.get_log")
+    @patch("core.agents.audit.utcnow")
     def test_no_operations(self, mock_utcnow, mock_get_log):
         from datetime import datetime
         mock_utcnow.return_value = datetime(2026, 2, 28, 12, 0, 0)
@@ -255,7 +255,7 @@ class TestEstimateCosts:
 # ---------------------------------------------------------------------------
 
 class TestGetQueryPatterns:
-    @patch("agents.audit.get_log")
+    @patch("core.agents.audit.get_log")
     def test_basic_patterns(self, mock_get_log):
         mock_get_log.return_value = [
             _make_entry(event="query", domain="coding", results=5),
@@ -267,7 +267,7 @@ class TestGetQueryPatterns:
         assert result["domain_frequency"]["coding"] == 2
         assert result["domain_frequency"]["finance"] == 1
 
-    @patch("agents.audit.get_log")
+    @patch("core.agents.audit.get_log")
     def test_avg_results(self, mock_get_log):
         mock_get_log.return_value = [
             _make_entry(event="query", results=4),
@@ -277,7 +277,7 @@ class TestGetQueryPatterns:
         result = get_query_patterns(MagicMock())
         assert result["avg_results_per_query"] == 6.0
 
-    @patch("agents.audit.get_log")
+    @patch("core.agents.audit.get_log")
     def test_no_queries(self, mock_get_log):
         mock_get_log.return_value = [
             _make_entry(event="ingest"),  # Not a query
@@ -384,11 +384,11 @@ class TestGetConversationAnalytics:
 # ---------------------------------------------------------------------------
 
 class TestAudit:
-    @patch("agents.audit.get_conversation_analytics")
-    @patch("agents.audit.get_query_patterns")
-    @patch("agents.audit.estimate_costs")
-    @patch("agents.audit.get_ingestion_stats")
-    @patch("agents.audit.get_activity_summary")
+    @patch("core.agents.audit.get_conversation_analytics")
+    @patch("core.agents.audit.get_query_patterns")
+    @patch("core.agents.audit.estimate_costs")
+    @patch("core.agents.audit.get_ingestion_stats")
+    @patch("core.agents.audit.get_activity_summary")
     def test_all_reports(self, mock_activity, mock_ingest, mock_costs, mock_queries, mock_conv):
         mock_activity.return_value = {"total_events": 0}
         mock_ingest.return_value = {"total_ingests": 0}
@@ -406,7 +406,7 @@ class TestAudit:
         assert "queries" in result
         assert "conversations" in result
 
-    @patch("agents.audit.get_activity_summary")
+    @patch("core.agents.audit.get_activity_summary")
     def test_single_report(self, mock_activity):
         mock_activity.return_value = {"total_events": 5}
 

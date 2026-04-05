@@ -1,62 +1,16 @@
-# CLAUDE.md - Cerid AI (Internal)
+# CLAUDE.md - Cerid AI
 
-## Global Configuration (REQUIRED)
+> **Extends:** `sunrunnerfire/dotfiles` — all global workflow orchestration, core principles,
+> commit policy, and task management rules apply here. This file adds only project-specific context.
 
-This repo's Claude Code sessions **MUST** also load the global orchestrator config:
-→ **https://github.com/sunrunnerfire/dotfiles/blob/main/claude.md**
+## Session Start (Required)
 
-Load both this file AND the global config at session start. The global config contains lead orchestrator/agent parameters that govern all Cerid development sessions.
+Before beginning any development work in this repo, if not already done in this session:
 
----
-
-> **This is the canonical development repo** (`Cerid-AI/cerid-ai-internal`, private).
-> All development happens here. The public repo is a distribution artifact.
-
-## Repository Architecture
-
-Cerid AI uses a two-repo open-core model:
-
-| Repo | Visibility | Location | Purpose |
-|------|-----------|----------|---------|
-| **cerid-ai-internal** (this repo) | Private | `~/Develop/cerid-ai-internal` | Canonical development — all code, Pro/Enterprise plugins, full test harness, CI, internal docs |
-| **cerid-ai** (public) | Private (GitHub) | `~/Develop/cerid-ai` | Apache-2.0 distribution — core product, SDK, community plugins |
-
-### What's only in internal (not in public)
-
-- **12 BSL-1.1 plugins:** audio, vision, OCR, analytics, workflow-builder, apple-notes, calendar, custom-rag, docling-parser, gmail, metamorphic, outlook
-- **Billing:** `routers/billing.py`, `models/billing.py` (Stripe integration)
-- **Trading SDK:** 5 trading endpoints + 5 MCP tools + `agents/trading_agent.py`
-- **Boardroom SDK:** 3 boardroom endpoints
-- **Full test harness:** 109+ test files (1740+ Python tests), beta E2E suite, eval harness
-- **Eval suite:** `src/mcp/eval/` (NDCG, MRR, P@K, RAGAS)
-- **Internal docs:** `docs/BRANDING.md`, `docs/MARKET_ANALYSIS.md`, `docs/COMPETITIVE_ANALYSIS_2026-04.md`
-- **Claude Code config:** `.claude/` directory (agents, commands, hooks, settings)
-- **Task tracking:** `tasks/todo.md`, `tasks/lessons.md`
-- **`structlog` dependency:** removed from public, kept here for trading agent tests
-- **`packages/desktop/`:** Electron app (removed from public to eliminate 26 Dependabot vulns)
-
-### Syncing to public
-
-```bash
-# Core improvements → public (cherry-pick)
-git checkout -b sync/feature public/main
-git cherry-pick <commits>
-git push public sync/feature
-# Then open PR on public repo
-
-# Community PRs → internal (merge)
-git fetch public && git merge public/main
-```
-
-**Pre-push check:** Before syncing to public, verify no Pro content leaks:
-```bash
-grep -r "BSL-1.1" --include="*.py" --include="*.json" src/ plugins/ | grep -v "comment\|noqa"
-```
-
-### Public repo CI (6 jobs)
-
-Both repos run the same 6-job CI pipeline: lint, typecheck, test, security, frontend, docker.
-Internal uses 60% coverage floor; public uses 20% (fewer tests since internal-only code is excluded).
+1. Read global framework context from the dotfiles repo using the GitHub MCP tool:
+   - `sunrunnerfire/dotfiles` → `CLAUDE.md` (workflow principles, commit policy)
+   - `sunrunnerfire/dotfiles` → `CLAUDE_CODE_SETUP.md` (plugins, MCP servers)
+2. Never add AI attribution to commits — see dotfiles `CLAUDE.md` commit policy.
 
 ---
 
@@ -64,11 +18,11 @@ Internal uses 60% coverage floor; public uses 20% (fewer tests since internal-on
 
 Cerid AI is a self-hosted, privacy-first Personal AI Knowledge Companion. It unifies multi-domain knowledge bases (code, finance, projects, artifacts) into a context-aware LLM interface with RAG-powered retrieval and intelligent agents. Knowledge base stays local; LLM API calls send query context to the configured provider. Optional cloud sync (Dropbox) for cross-machine settings/conversations, encrypted when CERID_ENCRYPTION_KEY is set.
 
-**Status:** Version 0.82.0. See [`docs/COMPLETED_PHASES.md`](docs/COMPLETED_PHASES.md) for history.
+**Status:** All phases through 50 complete + Phase C core extraction + Leapfrog Roadmap (6 features). 1660+ Python tests, 545+ frontend tests. 9 agents, 27 MCP tools (19 core + 5 trading + pkb_web_search + pkb_memory_recall + pkb_ingest_multimodal), hybrid BM25s+vector search with semantic chunking, cross-encoder reranking (ONNX, three modes), switchable client-side embeddings (Matryoshka, zero-migration), contextual chunking (LLM-generated situational summaries), advanced RAG pipeline (adaptive retrieval gate, query decomposition with parallel sub-retrieval, MMR diversity reordering, intelligent context assembly with facet coverage, ColBERT-inspired late interaction scoring, semantic query cache with quantized int8 embeddings), circuit breakers on all Bifrost + Neo4j calls, shared Bifrost call utility with singleton httpx connection pool, distributed request tracing, adaptive quality feedback, per-domain tag vocabulary with typeahead UI, improved synopsis generation, streaming verification with 4 claim types (evasion/citation/recency/ignorance) + interactive inline verification (ClaimOverlay popovers, footnote markers, source navigation) + expert verification mode (Grok 4) + per-message verification selection, Self-RAG validation loop, smart routing (direct-to-OpenRouter chat proxy, capability-based model scoring, three-way routing mode, proactive model switch on ignorance detection), context-aware chat (corrections, token-budget KB injection, semantic dedup), advanced response formatting (15 MD component overrides, collapsible code blocks, TOC for long responses), right-click context menus on toolbar icons, drag-drop ingestion on KB pane + chat input + artifact drag-to-chat, infrastructure settings + search tuning sliders, KB admin endpoints (rebuild/rescore/clear/delete/stats) + Settings GUI, incremental knowledge sync with tombstones and conflict resolution, sync GUI with export/import/status dashboard, archive storage mode, mypy type checking in CI, React GUI with iPad/tablet responsive touch UX, LAN access with robust multi-interface IP detection and stale-IP auto-fix, pre-flight validation (port conflicts, env vars, disk space), post-startup reachability checks, guided `setup.sh` installer, configurable port overrides (`CERID_PORT_*`), optional Caddy HTTPS gateway and Cloudflare Tunnel for demos, multi-user auth foundations (opt-in JWT, tenant context, per-user API keys, usage metering), marketing website at cerid.ai (Next.js 16 + Vercel), brand identity (teal accent color system), Simple/Advanced mode (progressive disclosure), settings reorganization (3-tab layout with user experience presets), first-run onboarding dialog, marketing site refreshed (changelog, SEO, animations), MCP server performance optimization (lightweight verification retrieval, connection pooling, parallel graph expansion, deferred cache persistence, startup pre-warming). Infrastructure security hardened (Redis auth, port binding, resource limits, security headers, nginx hardening). CI/CD 9-job pipeline with timeouts. See [`docs/COMPLETED_PHASES.md`](docs/COMPLETED_PHASES.md) for history.
 
-**Next:** See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+**Next:** See [`tasks/todo.md`](tasks/todo.md).
 
-**Open issues:** [`docs/ISSUES.md`](docs/ISSUES.md).
+**Open issues:** [`docs/ISSUES.md`](docs/ISSUES.md) (0 open — 160+ resolved).
 
 ## Architecture
 
@@ -84,7 +38,7 @@ Microservices architecture with Docker Compose orchestration on a shared `llm-ne
 | Neo4j (Graph) | 7474/7687 | `stacks/infrastructure/` | Graph DB |
 | Redis (Cache) | 6379 | `stacks/infrastructure/` | Cache + audit log |
 | React GUI | 3000 | `src/web/` | React 19 + Vite + nginx |
-| Marketing Site | cerid.ai (3001 dev) | Separate repo: `Cerid-AI/cerid-ai-marketing` | Next.js 16 + Vercel |
+| Marketing Site | cerid.ai (3001 dev) | `packages/marketing/` | Next.js 16 + Vercel |
 | Ollama (Optional) | 11434 | External / Docker | Local LLM for pipeline tasks |
 
 ### Key Data Flow
@@ -110,21 +64,29 @@ React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly
 ├── docs/                        # API_REFERENCE.md, ISSUES.md, OPERATIONS.md, plans/
 ├── plugins/                     # BSL-1.1 pro-tier plugins (multimodal/, workflow/)
 ├── src/mcp/                     # FastAPI MCP server (Python 3.11)
-│   ├── main.py                  # Entry point
-│   ├── config/                  # settings.py, taxonomy.py, features.py, providers.py, constants.py
-│   ├── db/neo4j/                # schema, artifacts, relationships, taxonomy, memory
-│   ├── sync/                    # export, import_, manifest, status
-│   ├── parsers/                 # registry, pdf, office, structured, email, ebook, code_ast
-│   ├── services/                # ingestion.py (ingest_content, ingest_file, dedup)
-│   ├── eval/                    # Retrieval evaluation harness (NDCG, MRR, P@K, R@K)
-│   ├── agents/                  # query, curator, triage, rectify, audit, maintenance, hallucination/, memory, self_rag, decomposer, assembler, retrieval_orchestrator, trading_agent, templates
-│   ├── routers/                 # FastAPI routers (health, query, ingestion, agents, taxonomy, setup, providers, models, automations, a2a, observability, plugins, workflows, ollama_proxy, eval, data_sources, etc.)
-│   ├── models/                  # Pydantic schemas — user, sdk, trading, agents_response, artifacts, data_sources, ingestion, settings, memories, taxonomy, upload, user_state, webhooks, watched_folders, query, digest
-│   ├── middleware/              # 6 middleware: auth.py, rate_limit.py, request_id.py, jwt_auth.py, tenant_context.py, metrics.py
-│   ├── tools.py                 # MCP tool registry + dispatcher (26 tools)
-│   ├── plugins/                 # Plugin loader + built-in plugin scaffold
-│   ├── utils/                   # bm25, cache, query_cache, embeddings, chunker, dedup, encryption, web_search, typed_redis, error_handler, degradation, retrieval_cache, hyde, ollama_models, model_registry, query_classifier, data_sources/, etc.
-│   ├── scripts/                 # watch_ingest.py, watch_obsidian.py, ingest_cli.py
+│   ├── core/                    # Portable orchestrator core (Apache-2.0)
+│   │   ├── agents/              # Query, memory, hallucination, curator, self_rag
+│   │   ├── contracts/           # ABCs: VectorStore, GraphStore, CacheStore, LLMClient
+│   │   ├── retrieval/           # BM25, reranker, semantic cache, query decomposition
+│   │   ├── routing/             # Smart router, model providers
+│   │   └── utils/               # Embeddings, circuit breaker, LLM client
+│   ├── app/                     # Application layer (concrete implementations)
+│   │   ├── routers/             # FastAPI routers (27+ endpoints)
+│   │   ├── stores/              # ChromaVectorStore, Neo4jGraphStore, RedisCacheStore
+│   │   ├── db/neo4j/            # Cypher queries, schema, artifacts
+│   │   ├── services/            # ingestion.py (ingest_content, ingest_file, dedup)
+│   │   ├── middleware/          # auth, rate_limit, request_id, jwt, tenant_context
+│   │   ├── parsers/             # PDF, office, structured, email, ebook
+│   │   ├── eval/                # Retrieval evaluation harness + benchmark suite
+│   │   ├── sync/                # CRDT, export, import, manifest, status
+│   │   ├── models/              # Pydantic schemas
+│   │   ├── main.py              # Entry point
+│   │   └── tools.py             # MCP tool registry + dispatcher (27 tools)
+│   ├── enterprise/              # Enterprise overlay (ABAC, SSO, classification, immutable audit)
+│   ├── config/                  # settings.py, taxonomy.py, features.py, providers.py
+│   ├── agents/                  # Bridge modules (re-export from core.agents)
+│   ├── utils/                   # Bridge modules (re-export from core.utils)
+│   ├── services/                # Bridge modules (re-export from app.services)
 │   └── requirements.txt/.lock   # Python deps (ranges / pinned with hashes)
 ├── src/web/                     # React GUI (React 19, Vite 7, Tailwind v4, shadcn/ui)
 │   ├── docker-compose.yml       # cerid-web service (separate from MCP)
@@ -132,8 +94,8 @@ React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly
 │   ├── src/hooks/               # use-chat, use-kb-context, use-settings, use-verification-stream, use-drag-drop, use-verification-orchestrator, etc.
 │   ├── src/contexts/            # SettingsContext, KBInjectionContext, ConversationsContext, AuthContext
 │   ├── src/components/          # layout/, chat/, kb/, monitoring/, audit/, memories/, settings/, workflows/, setup/, ui/
-│   └── src/__tests__/           # vitest tests
-├── packages/marketing/          # Next.js 16 marketing site (being separated to Cerid-AI/cerid-ai-marketing)
+│   └── src/__tests__/           # 545+ vitest tests
+├── packages/marketing/          # Next.js 16 marketing site (cerid.ai, Vercel)
 ├── packages/desktop/            # Electron desktop app (macOS + Windows)
 ├── stacks/                      # infrastructure/ (Neo4j, ChromaDB, Redis), bifrost/
 ├── artifacts/ → ~/Dropbox/AI-Artifacts (symlink)
@@ -141,6 +103,16 @@ React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly
 ```
 
 > For API endpoints, agent details, ingestion pipeline, and sync commands, see [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md).
+
+## Phase C Architecture
+
+The `src/mcp/` codebase is split into three layers:
+
+- **`core/`** contains portable orchestration logic: agents, retrieval algorithms (BM25, reranker, semantic cache, query decomposition), routing (smart router, model providers), and contracts (ABCs for `VectorStore`, `GraphStore`, `CacheStore`, `LLMClient`). This layer has zero FastAPI or infrastructure dependencies and is licensed Apache-2.0 for standalone reuse.
+- **`app/`** contains concrete implementations: FastAPI routers, store adapters (`ChromaVectorStore`, `Neo4jGraphStore`, `RedisCacheStore`), parsers, middleware, sync, eval, and the application entry point.
+- **Bridge modules** (`agents/`, `utils/`, `services/` at the `src/mcp/` root) re-export from `core` and `app` to provide backward-compatible import paths. Existing code that imports `from agents.query_agent import ...` continues to work unchanged.
+- **import-linter** enforces layer boundaries: `core/` must not import `app/`, `config/` must not import `core/`. Violations fail CI.
+- **`enterprise/`** is a standalone overlay (ABAC, SSO, classification, immutable audit) — scaffolded but not wired for beta.
 
 ## Development
 
@@ -179,6 +151,18 @@ Startup order: `[1/4]` Infrastructure (Neo4j, ChromaDB, Redis) → `[2/4]` Bifro
 ./scripts/validate-env.sh --fix    # auto-start missing infrastructure
 ```
 
+### Second-Machine Bootstrap
+
+```bash
+git clone git@github.com:sunrunnerfire/dotfiles.git ~/dotfiles && cd ~/dotfiles && bash install.sh
+brew install age
+git clone git@github.com:sunrunnerfire/cerid-ai.git ~/cerid-ai && cd ~/cerid-ai
+./scripts/env-unlock.sh
+ln -s ~/Dropbox/cerid-archive ~/cerid-archive
+./scripts/start-cerid.sh          # auto-imports KB from Dropbox sync if Neo4j empty
+./scripts/validate-env.sh
+```
+
 ### Dependency Management
 
 ```bash
@@ -191,10 +175,9 @@ Cross-service version constraints: see `docs/DEPENDENCY_COUPLING.md`.
 
 ### Configuration
 
-- `.env` (repo root) — All secrets. Encrypted as `.env.age` via `age`. Key at `~/.config/cerid/age-key.txt`
+- `.env` (repo root) — All secrets. Encrypted as `.env.age`. Never committed in plaintext.
 - `src/mcp/config/settings.py` — Domains, tiers, URLs, sync, model IDs
 - `stacks/bifrost/config.yaml` — Intent classification, model routing, budget
-- `CERID_PRELOAD_MODELS` — Docker build ARG (default `true`). Set `false` for ~3GB smaller image at cost of slower first startup (models download on first use). Usage: `docker compose build --build-arg CERID_PRELOAD_MODELS=false mcp-server`
 
 ### Verification
 
@@ -204,229 +187,95 @@ curl http://localhost:8888/collections
 curl http://localhost:8888/artifacts
 ```
 
-### Running Tests
+## Claude Code Setup (New Machine)
 
-**Python tests** (run in Docker since host macOS lacks chromadb):
+> **Global setup applies first** — see `sunrunnerfire/dotfiles` → `CLAUDE_CODE_SETUP.md` for global plugins and MCP servers shared across all projects.
+
+### Project Setup
+
+1. **Verify prerequisites:** Docker running, `.env` decrypted, `age` installed, archive directory exists
+2. **Install global plugins + MCP servers** — follow `sunrunnerfire/dotfiles` → `CLAUDE_CODE_SETUP.md`
+3. **Run `./scripts/validate-env.sh`** to check all 14 environment validations
+4. **If containers are down:** `./scripts/start-cerid.sh` (or `--build` after a `git pull`)
+
+### Project-Level Config (committed, auto-applied)
+
+| File | Purpose |
+|------|---------|
+| `.mcp.json` | Cerid KB MCP at `http://localhost:8888/mcp/sse` (27 `pkb_*` tools) — Claude Code runs on the host so `localhost` is correct here |
+| `.claude/settings.json` | Hooks config (session-start, safety-check, typecheck, pythonlint) |
+| `.claude/hooks/session-start.sh` | SessionStart — Docker + MCP + GUI health check |
+| `.claude/hooks/safety-check.sh` | PreToolUse/Bash — blocks destructive commands |
+| `.claude/hooks/typecheck.sh` | PostToolUse/Edit\|Write — `npx tsc --noEmit` for `.ts`/`.tsx` in `src/web/` |
+| `.claude/hooks/pythonlint.sh` | PostToolUse/Edit\|Write — `ruff check` for `.py` in `src/mcp/` |
+| `.claude/commands/` | Custom commands: stack, test, sync, lock |
+| `.claude/launch.json` | Dev server configs (cerid-web, react-gui, marketing) |
+| `.claude/agents/kb-curator.md` | Opus subagent for KB schema-aware curation, dedup, and cross-store consistency checks |
+| `.claudeignore` | Excludes node_modules, dist, runtime data, binaries, lock files |
+
+### Per-Machine Config (gitignored)
+
+| File | Purpose |
+|------|---------|
+| `.claude/settings.local.json` | Bash permission allowlists (auto-populated as you approve commands) |
+
+### Global Plugins Required
+
+See `sunrunnerfire/dotfiles` → `CLAUDE_CODE_SETUP.md` for full list. Key plugins for this project:
+
+- `superpowers` — plan execution, TDD, code review, debugging workflows
+- `pyright-lsp` — Python type checking
+- `frontend-design` — React GUI development
+- `claude-md-management` — CLAUDE.md maintenance
+
+### Global MCP Servers Required
+
+See `sunrunnerfire/dotfiles` → `CLAUDE_CODE_SETUP.md` for install commands:
+
+- **context7** — live docs for React, FastAPI, pydantic, ChromaDB, Neo4j
+- **github-mcp** — GitHub issues, PRs, actions
+
+**Tests:** Run Python tests in Docker (`host macOS lacks chromadb`):
 ```bash
 docker run --rm -v "$(pwd)/src/mcp:/work" -w /work python:3.11-slim bash -c "pip install -q -r requirements.txt -r requirements-dev.txt && python -m pytest tests/ -v"
 ```
-
-**Frontend tests:**
-```bash
-cd src/web && npx vitest run
-```
-
-## Claude Code Setup
-
-See [`.claude/SETUP.md`](.claude/SETUP.md) for detailed Claude Code configuration, plugins, MCP servers, and new machine bootstrap.
-
-## Cross-Cutting Patterns (THE ONE way to do each concern)
-
-> **Context resilience:** After compaction events, AI agents must use THESE patterns — no alternatives. Each concern has exactly ONE canonical implementation.
-
-| Concern | The ONE Pattern | Canonical Location |
-|---------|----------------|--------------------|
-| Error handling | `@handle_errors()` decorator | `utils/error_handler.py` |
-| Error types | `CeridError` hierarchy | `errors.py` |
-| Feature gating | `@require_feature()` decorator | `config/features.py` |
-| Configuration | `os.getenv()` in `config/settings.py` | `config/settings.py` |
-| Constants | Named constants (no magic numbers) | `config/constants.py` |
-| Circuit breakers | `circuit_breaker(name)` context manager (registered: chromadb, neo4j, redis, ollama, bifrost) with client locks | `utils/circuit_breaker.py` |
-| Redis cache keys | `cerid:{domain}:{key}` prefix convention | `utils/retrieval_cache.py` |
-| API error responses | `CeridError` → auto-converted via FastAPI exception handler | `main.py` |
-| Graceful degradation | `DegradationManager` (5 tiers: FULL→LITE→DIRECT→CACHED→OFFLINE) | `utils/degradation.py` |
-| Retrieval cache | Redis with generation-counter invalidation | `utils/retrieval_cache.py` |
-| Ollama routing | `get_stage_provider()` per-stage routing (8 stages) | `config/settings.py` |
-| Model registry | `ModelRegistry` with OpenRouter auto-validation | `utils/model_registry.py` |
-| Query classification | `classify_query()` intent detection (5 intents) | `utils/query_classifier.py` |
-| External data sources | Pluggable data source framework | `utils/data_sources/` |
-| Redis client | `TypedRedis` wrapper (narrowed sync return types) | `utils/typed_redis.py` |
-| Response models | Pydantic `response_model=` on all user-facing endpoints | `models/*.py` |
-| Inference detection | `detect_embedding_provider()` | `utils/inference_config.py` |
-| Sidecar HTTP client | `sidecar_embed()` / `sidecar_rerank()` | `utils/inference_sidecar_client.py` |
-| Startup prereqs | Port checks, Docker memory, python3/curl | `scripts/start-cerid.sh` |
-| Sidecar auto-start | Detect installed → start in background | `scripts/start-cerid.sh` |
-
-**Rules:**
-- Typed errors (`CeridError` subclasses) are the ONLY way to signal failures. No `raise HTTPException` in business logic.
-- `@require_feature("feature_name")` is the ONLY tier gate. No inline `if FEATURE_TIER == "pro"` checks.
-- All numeric constants live in `config/constants.py`. Import from there.
-- Every `except` block MUST either log + degrade or raise a typed error. Zero silent `pass` blocks.
-- HTTP client is `httpx` everywhere — `requests` is not a direct dependency.
-- Conversation grouping: ingestion checks for existing artifact with matching `conversation_id`. If found, appends as new chunk instead of creating separate artifact. See `services/ingestion.py` ~line 375.
-- Feedback buttons: thumbs up/down on assistant messages via `FeedbackButtons` component in `message-bubble.tsx`. Calls `POST /artifacts/{id}/feedback`. Opt-in per conversation, controlled via settings.
-
-## Tiered Inference
-
-GPU-aware embedding/reranking provider detection. Auto-selects the best backend at startup:
-
-| Tier | Provider | When |
-|------|----------|------|
-| Optimal | `fastembed-sidecar` or `onnx-gpu` | GPU available (Metal/CUDA/ROCm) |
-| Good | `ollama` or CPU sidecar | Ollama running or native sidecar without GPU |
-| Degraded | `onnx-cpu` | Docker CPU (default) |
-
-```bash
-# Check current inference tier
-curl http://localhost:8888/health | jq .inference
-
-# Override manually
-INFERENCE_MODE=onnx-cpu  # or: onnx-gpu, ollama, fastembed-sidecar
-
-# Install sidecar for native GPU acceleration
-bash scripts/install-sidecar.sh
-python scripts/cerid-sidecar.py  # runs outside Docker
-```
-
-Key files: `utils/inference_config.py` (detection), `utils/inference_sidecar_client.py` (HTTP client), `scripts/cerid-sidecar.py` (server).
-
-Re-check loop runs every 300s — auto-detects Ollama start/stop mid-session.
-
-## Dependency Strategy
-
-Direct dependencies are minimal — only what core functionality requires. See [`docs/DEPENDENCY_AUDIT_2026-04-05.md`](docs/DEPENDENCY_AUDIT_2026-04-05.md) for the full audit.
-
-**Core deps (14 direct in public, ~16 in internal):** fastapi, uvicorn, pydantic, httpx, chromadb, neo4j, redis, tiktoken, langgraph, pdfplumber, python-docx, openpyxl, pandas, apscheduler + utilities. Internal adds: stripe (billing).
-
-**What's NOT a direct dependency:**
-- `requests` — replaced with `httpx` everywhere (scripts, server, CLI tools)
-- `structlog` — replaced with stdlib `logging`
-- `faster-whisper` — audio plugin, optional install
-- `pytesseract` / `Pillow` — Pro OCR plugin, optional install
-- `bcrypt` / `PyJWT` — only for multi-user mode, optional install
-
-**Optional extras (install separately):**
-```bash
-pip install pytesseract Pillow          # OCR plugin (+ apt install tesseract-ocr)
-pip install faster-whisper              # Audio transcription (+ ffmpeg)
-pip install bcrypt PyJWT                # Multi-user JWT authentication
-```
-
-**Docker image (~3.2 GB):** No tesseract-ocr or ffmpeg in base — Pro plugins install their own system deps. ONNX models pre-downloaded at build time.
-
-**Auth imports are graceful:** `routers/auth.py` and `middleware/jwt_auth.py` only loaded when `CERID_MULTI_USER=true` (conditional import in `main.py`).
-
-**Protected Dependencies (do NOT remove):**
-- `langgraph` — triage.py is 469 lines with 16 functions building a real conditional routing graph. Reimplementing would lose graph execution, error propagation, and routing visualization.
-- `pandas` — CSV parser uses pd.read_csv for auto-delimiter detection, encoding fallback, column type inference, df.describe() statistics. These enrich KB artifacts. Already lazy-imported.
-- `react-syntax-highlighter` — uses PrismLight with 25 registered languages (~200KB lazy chunk). npm install size is large but runtime bundle is small via tree-shaking + Vite manual chunks.
-
-**Public vs Internal deps:** `packages/desktop/` (Electron) exists only in internal. `stripe` exists only in internal. Everything else is shared.
-
-## Developer Notes (v0.82 Sprint Lessons)
-
-**Live-test everything.** Never mark a task done based on code existing — test it with `curl` against running containers. The CI environment differs from Docker Desktop (Linux x86 vs macOS ARM).
-
-**Dependency removal requires lock regeneration.** The pre-commit hook blocks commits when `requirements.txt` changes without matching `requirements.lock`. Use `make lock-python` or the Docker pip-compile command.
-
-**Silent `except: pass` is a CI failure.** Ruff BLE001 + the custom "no silent except:pass" lint rule (threshold-based) catch bare exception handlers. Always add `logger.debug()` or use specific exception types.
-
-**Import ordering matters.** Ruff I001 catches unsorted import blocks. Conditional imports inside `if` blocks need `# noqa: I001` to suppress false positives.
-
-**Frontend test assertions must match UI text.** When changing visible text (e.g. "Install Ollama" → "All platforms"), update the corresponding test assertions in `src/web/src/__tests__/`.
-
-**ChromaDB collections must be get_or_create.** Memory recall and conversation features fail on fresh installs if collections don't exist. Always use `get_or_create_collection`, never `get_collection`.
-
-**Internal repo keeps structlog.** Public repo removed it (replaced with stdlib logging), but internal keeps it for trading agent tests. Don't sync that removal.
-
-**Sidecar runs outside Docker.** The FastEmbed sidecar needs host GPU access (Metal/CUDA), so it runs as a native process. `start-cerid.sh` auto-detects and auto-starts it.
-
-**Internal repo keeps structlog (trading agent tests need it). Public repo removed it. Don't sync that removal to internal.** The `structlog` dependency was removed from public requirements.txt and replaced with stdlib `logging` in `startup_self_test.py`. Internal keeps `structlog` because `test_trading_agent.py` imports it.
-
-## Module Responsibility Map
-
-| Module | Responsibility | Key Classes/Functions |
-|--------|---------------|---------------------|
-| `agents/query_agent.py` | RAG retrieval pipeline (8 strategies) with parallel retrieval, circuit breakers, semantic caching, 3-layer dedup | `QueryAgent.query()` |
-| `agents/hallucination/` | Claim extraction + verification (7 modules) | `verify_response_streaming()` |
-| `agents/memory.py` | Memory extraction, decay, conflict resolution | `MemoryAgent` |
-| `agents/curator.py` | KB quality scoring + recommendations | `CuratorAgent` |
-| `services/ingestion.py` | File parsing → chunking → ChromaDB + Neo4j | `ingest_file()`, `ingest_content()` |
-| `utils/llm_client.py` | Direct OpenRouter HTTP calls | `llm_call()` |
-| `utils/smart_router.py` | Model capability scoring + routing | `SmartRouter.route()` |
-| `utils/circuit_breaker.py` | Circuit breaker registry | `circuit_breaker(name)` |
-| `config/settings.py` | All env var config | Module-level constants |
-| `config/constants.py` | All magic numbers | Pure values, no logic |
-| `config/features.py` | Feature flags + `@require_feature` | `FEATURE_FLAGS`, `@require_feature()` |
-| `errors.py` | Exception hierarchy | `CeridError` and subclasses |
-| `tools.py` | MCP tool registry (26 tools) | `@mcp_tool()` decorator |
-| `agents/decomposer.py` | Query decomposition (extracted from query_agent.py) | `decompose_query()` |
-| `agents/assembler.py` | Result assembly (extracted from query_agent.py) | `assemble_results()` |
-| `agents/retrieval_orchestrator.py` | Smart mode orchestration (KB + memory + external in parallel) | `orchestrated_query()` |
-| `utils/error_handler.py` | Centralized error handling decorator | `@handle_errors()` |
-| `utils/degradation.py` | 5-tier graceful degradation manager | `DegradationManager` |
-| `utils/retrieval_cache.py` | Redis retrieval cache with generation-counter invalidation | `retrieval_cache_get/set()` |
-| `utils/hyde.py` | HyDE (Hypothetical Document Embedding) fallback | `hyde_expand()` |
-| `utils/typed_redis.py` | Typed sync Redis facade (narrowed `Awaitable\|Any` → concrete types) | `TypedRedis` (35 methods) |
-| `utils/ollama_models.py` | Ollama model management | `list_models()`, `pull_model()` |
-| `routers/sdk.py` | Stable external API (`/sdk/v1/`) | Versioned contract |
-| `routers/data_sources.py` | External data source management endpoints | `/data-sources` CRUD |
-| `utils/model_registry.py` | Dynamic model registry with OpenRouter validation | `ModelRegistry`, `validate_models()` |
-| `utils/query_classifier.py` | Query intent classification | `classify_query()` |
-| `utils/data_sources/` | Pluggable external data source framework | `DataSourceManager` |
-| `scripts/cerid-sidecar.py` | FastEmbed embedding/rerank server (runs on host, not Docker) | `/embed`, `/rerank`, `/health` |
-| `scripts/install-sidecar.sh` | Per-platform sidecar installer (CoreML/CUDA/ROCm/DirectML) | Auto-detects GPU |
-| `docs/FEEDBACK_LOOP_DESIGN.md` | Opt-in per-conversation feedback architecture | Design doc |
-
-## Product Tiers
-
-| Tier | License | Env Var |
-|------|---------|---------|
-| Core | Apache-2.0 | `CERID_TIER=community` (default) |
-| Pro | BSL-1.1 | `CERID_TIER=pro` |
-| Enterprise | Commercial | `CERID_TIER=enterprise` |
-
-- Gate features with `@require_feature("feature_name")` decorator (async endpoints)
-- Gate sync functions with `check_feature("feature_name")` or `check_tier("pro")`
-- Plugin tier: set `"tier": "pro"` in `manifest.json`
-- Enterprise includes all Pro features. Pro includes all Core features.
-- See `docs/TIER_MATRIX.md` for complete feature matrix.
-
-## Compliance — USG Technology Restrictions
-
-**No Chinese-origin AI models or technology.** The codebase has been purged of all Chinese-origin model references (DeepSeek, Qwen/Alibaba, Baichuan, Yi, GLM/Zhipu, MiniMax, Moonshot, 01.AI) for USG alignment.
-
-**Rules:**
-- Do NOT add model entries for DeepSeek, Qwen, Alibaba, or any Chinese-origin LLM provider
-- Default Ollama model: `llama3.2:3b` (Meta, US-origin) — NOT Qwen
-- Approved providers: OpenAI, Anthropic, Google, xAI, Meta (Llama), Microsoft (Phi), Mistral (French)
-- When adding new models to the selector or pipeline config, verify the model's country of origin
-- Run `grep -rn "deepseek\|qwen\|alibaba\|baichuan\|zhipu" src/ --include="*.py" --include="*.ts" --include="*.tsx"` to verify compliance before committing
+Frontend tests: `cd src/web && npx vitest run`
 
 ## Conventions
 
+- **Session start:** Run `./scripts/validate-env.sh --quick` at the beginning of every session. If the session-start hook reports missing plugins or MCP servers, run `bash ~/dotfiles/install.sh` before proceeding with any other work
 - Docker services use container-name-based discovery on `llm-network`
 - MCP protocol uses SSE transport with session-based message queuing
 - Secrets go in root `.env`, encrypted as `.env.age` via `age`. Key at `~/.config/cerid/age-key.txt`
-- User files (`~/cerid-archive/`) mounted read-only, never in git repo
+- User files (`~/cerid-archive/`) mounted read-only, never in git repo. Symlinked to `~/Dropbox/cerid-archive` for multi-machine sync
 - Symlinks used for `artifacts/` and `data/` — don't break them
 - Infrastructure DB data at `stacks/infrastructure/data/` (.gitignored)
 - ChromaDB metadata values are strings/ints only (lists stored as JSON strings)
 - ChromaDB client version must match server (currently `>=0.5,<0.6`)
-- Error responses use typed `CeridError` exceptions → auto-converted to JSON via FastAPI exception handler in `main.py`. Do NOT use `HTTPException` in business logic — only in routers for HTTP-specific concerns (404, 401)
+- Error responses use `HTTPException` (returns `{"detail": "..."}`)
 - Neo4j Cypher: use explicit RETURN clauses, not map projections (breaks with Python string ops)
 - Deduplication: SHA-256 of parsed text, atomic via Neo4j UNIQUE CONSTRAINT on `content_hash`
 - Batch ChromaDB writes: single `collection.add()` call per ingest, not per-chunk
 - PDF parsing: pdfplumber extracts tables as Markdown, non-table text extracted separately to avoid duplication
+- Host: Mac Pro (16-Core Xeon W, 160GB RAM), macOS
 - **React GUI (`src/web/`):** Tailwind CSS v4 (uses `@tailwindcss/vite` plugin — no `tailwind.config.ts`); shadcn/ui New York style, Zinc base color; path alias `@/*` → `./src/*`; Bifrost CORS handled via Vite dev proxy (`/api/bifrost` → `localhost:8080`) and nginx proxy in Docker; `VITE_MCP_URL` and `VITE_BIFROST_URL` are `ENV` defaults baked into Dockerfile (not runtime-configurable without rebuild); `VITE_CERID_API_KEY` is a build `ARG`; bundle splitting via React.lazy + Vite manualChunks (75% main chunk reduction); iPad/tablet responsive: sidebar auto-collapses at 1024px, KB pane becomes bottom Sheet drawer on narrow viewports, toolbar overflow menu, `@media (hover: none)` touch visibility overrides, `@media (pointer: coarse)` 44px touch targets, iOS safe area insets, zoom prevention
-- **Backend Hardening (`src/mcp/middleware/`):** API key auth is opt-in — set `CERID_API_KEY` env var to enable (header: `X-API-Key`). Multi-user JWT auth is opt-in — set `CERID_MULTI_USER=true` + `CERID_JWT_SECRET` to enable. Rate limiting uses in-memory sliding window with per-client isolation via `X-Client-ID` header. Stable external API at `/sdk/v1/` (`routers/sdk.py`) for cerid-series consumers. Redis query cache with 5-min TTL (`utils/query_cache.py`). CORS origins configurable via `CORS_ORIGINS` (defaults to `*`)
-- **API Architecture (dual-path, intentional):** The React GUI calls internal `/agent/*` and service endpoints directly (via `api.ts` with `X-Client-ID: gui`). External cerid-series consumers use the stable `/sdk/v1/*` contract with typed response models and consumer domain isolation. Both paths share the same middleware stack.
-- **Trading Agent Integration (`CERID_TRADING_ENABLED`):** When enabled, cerid-ai provides KB enrichment for cerid-trading-agent via 5 SDK endpoints and 5 MCP tools. Config: `CERID_TRADING_ENABLED=true` + `TRADING_AGENT_URL`. The trading agent calls INTO cerid-ai's SDK. All trading features are backward-compatible and default to disabled. See `docs/DEPENDENCY_COUPLING.md` for the full contract.
-- **Docker build verification:** After `docker compose build`, verify with `docker compose build --progress=plain cerid-web 2>&1 | grep error`. TypeScript strict mode in `npm run build` catches errors that `npx tsc --noEmit` misses.
-- **Circuit breaker naming:** All LLM call sites must use breaker names registered in `circuit_breaker.py`. Avoid `f"bifrost-{breaker_name}"` in fallback paths — it can double-prefix names.
-- **Docker env var pattern:** `src/mcp/docker-compose.yml` uses `env_file: ../../.env` to load secrets. Do NOT add `${VAR}` interpolation in the `environment:` section for passthrough vars — it fails without `--env-file`. Always rebuild MCP via `docker compose -f src/mcp/docker-compose.yml --env-file .env up -d --build` or use `scripts/start-cerid.sh`.
-- **Neo4j auth validation:** `deps.py` `get_neo4j()` validates credentials by running `RETURN 1` (not just `verify_connectivity()`). Empty `NEO4J_PASSWORD` raises `RuntimeError` immediately.
-- **Trading domain segregation:** KB has a dedicated `trading` domain (`config/taxonomy.py`). Trading agent queries scoped to `domains=["trading"]`. Domain affinity: trading↔finance at 0.3 weight.
-- **Embedding function returns `list[np.ndarray]`** for ChromaDB 0.5.x compatibility.
-- **JWT startup validation:** When `CERID_MULTI_USER=true`, missing `CERID_JWT_SECRET` raises `RuntimeError` at startup.
-- **Rate limit middleware reads X-Client-ID from headers directly**, not from `request.state`.
-- **Keywords metadata uses `keywords_json`** (JSON-encoded string) consistently across ingest and Neo4j artifact creation.
-- **Plugin development (`plugins/`):** Each plugin has a `manifest.json`. BSL-1.1 licensed. Plugins loaded via dual-directory scanning. Tier gating enforced at load time.
-- **Workflow engine (`routers/workflows.py`):** DAG validation via Kahn's algorithm. Topological execution order. 4 built-in templates. BSL-1.1 pro-tier.
-- **Observability (`routers/observability.py`):** `MetricsCollector` writes 8 Redis time-series metrics. Health score computed as weighted A-F grade.
-- **A2A Protocol (`routers/a2a.py`):** Agent Card at `/.well-known/agent.json`. Task lifecycle: create → status → cancel with Redis-backed storage.
-- **Ollama Add-On (optional):** Local LLM for pipeline intelligence. Enable via `OLLAMA_ENABLED=true` + `INTERNAL_LLM_PROVIDER=ollama`. Default model: `llama3.2:3b`. Circuit breaker: `"ollama"`. Fallback: automatic to OpenRouter when unavailable.
-- **Setup Wizard (`components/setup/`):** 8-step onboarding: Welcome (system check) → API Keys (4 providers) → KB Config → Ollama → Review & Apply → Health → First Document → Mode. Uses `useReducer` with `WizardState`, progress persisted to localStorage (24h expiry), skip logic for steps 2/3/6. Provider capability assessment via `provider-capabilities.ts` (pure functions, zero React deps). Degradation banner in chat with adaptive polling, "Check now" + recovery toast. Model fallback notice surfaces backend fallback chain (OpenRouter → Bifrost → free Llama) to user. Settings Essentials tab has Provider Status section with runtime health grid.
+- **Backend Hardening (`src/mcp/middleware/`):** API key auth is opt-in — set `CERID_API_KEY` env var to enable (header: `X-API-Key`). Multi-user JWT auth is opt-in — set `CERID_MULTI_USER=true` + `CERID_JWT_SECRET` to enable (adds 9 `/auth/*` endpoints, JWT Bearer middleware, tenant context propagation, per-user API keys with Fernet encryption, Redis usage metering). Rate limiting uses in-memory sliding window with per-client isolation via `X-Client-ID` header (`config/settings.py:CLIENT_RATE_LIMITS`); GUI 20 req/min on `/agent/`, trading-agent 80 req/min (raised from 30 to cover 5-session worst-case burst of 67.5/min), unknown clients 10 req/min. Stable external API at `/sdk/v1/` (`routers/sdk.py`) for cerid-series consumers. `CONSUMER_REGISTRY` in `config/settings.py` defines per-consumer `allowed_domains`, `strict_domains`, and rate limits — see `docs/INTEGRATION_GUIDE.md` for the full 13-step checklist for adding new agent integrations. Redis query cache with 5-min TTL (`utils/query_cache.py`) — caches `/query` and `/agent/query` results. LLM feedback loop toggled via `ENABLE_FEEDBACK_LOOP` env var. CORS origins configurable via `CORS_ORIGINS` (defaults to `*`)
+- **API Architecture (dual-path, intentional):** The React GUI calls internal `/agent/*` and service endpoints directly (via `api.ts` with `X-Client-ID: gui`). External cerid-series consumers use the stable `/sdk/v1/*` contract with typed response models and consumer domain isolation. This separation is deliberate: the GUI needs full domain access and internal-only endpoints (settings, taxonomy, admin, chat streaming) that have no SDK equivalent. The SDK layer provides versioned contracts, OpenAPI schemas, and consumer scoping for external agents. Both paths share the same middleware stack (rate limiting, auth, request tracing). All frontend API calls route through `src/web/src/lib/api.ts` which sets `X-Client-ID: gui`, `X-Request-ID`, and optional auth headers on every request.
+- **Trading Agent Integration (`CERID_TRADING_ENABLED`):** When enabled, cerid-ai integrates with cerid-trading-agent via 5 SDK endpoints (`/sdk/v1/trading/signal`, `herd-detect`, `kelly-size`, `cascade-confirm`, `longshot-surface`), 5 MCP tools (`pkb_trading_signal`, etc.), and 3 scheduler jobs (autoresearch at 01:00, Platt mirror at 02:00, longshot surface at 02:30). Config: `CERID_TRADING_ENABLED=true` + `TRADING_AGENT_URL=http://localhost:8090` (or `http://trading-agent:8090` in Docker). React GUI includes a lazy-loaded TradingPane with KPIs, session cards, and 10s polling via `/api/trading/*` proxy routes. All trading features are backward-compatible and default to disabled. See `docs/DEPENDENCY_COUPLING.md` for the full contract.
+- **Docker build verification:** After `docker compose build`, always verify success with `docker compose build --progress=plain cerid-web 2>&1 | grep error`. TypeScript strict mode in `npm run build` catches errors that `npx tsc --noEmit` misses. Docker may silently reuse a cached image when the build stage fails with exit code 2.
+- **Circuit breaker naming:** All LLM call sites must use breaker names registered in `circuit_breaker.py`. Update the registry when adding new call sites. Avoid `f"bifrost-{breaker_name}"` in fallback paths — it can double-prefix names that already start with `bifrost-`.
+- **Docker env var pattern:** `src/mcp/docker-compose.yml` uses `env_file: ../../.env` to load secrets into the MCP container. Do NOT add `${VAR}` interpolation in the `environment:` section for passthrough vars (e.g., `NEO4J_PASSWORD`) — it fails when running without `--env-file` and the empty value overrides the env_file entry. Container-specific overrides (service URLs, paths) are fine in `environment:` since they're literal values. Always rebuild MCP via `docker compose -f src/mcp/docker-compose.yml --env-file .env up -d --build` or use `scripts/start-cerid.sh`.
+- **Neo4j auth validation:** `deps.py` `get_neo4j()` validates credentials by running `RETURN 1` (not just `verify_connectivity()` which only checks transport). `/health` endpoint also runs a Cypher query on every call. Empty `NEO4J_PASSWORD` raises `RuntimeError` immediately.
+- **Trading domain segregation:** KB has a dedicated `trading` domain (`config/taxonomy.py`) with sub-categories: signals, market-analysis, execution, post-analysis, strategy-research, risk-analysis. Trading agent queries are scoped to `domains=["trading"]` — personal finance data (tax returns, budgets) stays in `domain_finance`. Domain affinity: trading↔finance at 0.3 weight.
+- **Embedding function returns `list[np.ndarray]`** for ChromaDB 0.5.x compatibility. The `OnnxEmbeddingFunction.__call__()` returns individual numpy array slices, NOT `.tolist()` (which would produce `list[list[float]]` that fails ChromaDB's `validate_embeddings` check).
+- **JWT startup validation:** When `CERID_MULTI_USER=true`, missing `CERID_JWT_SECRET` raises `RuntimeError` at startup (not just a warning). Prevents running with empty secret.
+- **Rate limit middleware reads X-Client-ID from headers directly**, not from `request.state` — eliminates middleware ordering dependency. Per-client isolation verified: trading-agent=80/min, gui=20/min.
+- **Keywords metadata uses `keywords_json`** (JSON-encoded string) consistently across ingest_file, ingest_content, reingest, and Neo4j artifact creation. Previous inconsistency (`keywords` vs `keywords_json`) caused silent data loss.
+- **Plugin development (`plugins/`):** Each plugin has a `manifest.json` (name, version, tier, description, entry point). BSL-1.1 licensed (converts to Apache-2.0 after 3 years). Plugins are loaded via dual-directory scanning (`src/mcp/plugins/` for built-in, `plugins/` for external). Tier gating enforced at load time (`CERID_TIER`). Plugin management via `routers/plugins.py` (7 endpoints: list, enable/disable, config CRUD, scan).
+- **Workflow engine (`routers/workflows.py`):** DAG validation via Kahn's algorithm (rejects cycles). Topological execution order. 4 built-in templates (research, ingest, verify, custom). Nodes are typed (query, ingest, verify, transform, notify). SVG canvas for visual editing. BSL-1.1 pro-tier via `plugins/workflow/`.
+- **Observability (`routers/observability.py`):** `MetricsCollector` writes 8 Redis time-series metrics (latency, cost, NDCG, cache hit rate, verification accuracy, error rate, throughput, memory usage). Health score computed as weighted A-F grade. Dashboard endpoint returns sparkline data for configurable time windows.
+- **A2A Protocol (`routers/a2a.py`):** Agent Card served at `/.well-known/agent.json`. Task lifecycle: create → status → cancel with Redis-backed storage. A2A client (`utils/a2a_client.py`) discovers remote agents and invokes tasks. Cerid is the first personal KB with dual MCP + A2A protocol support.
+- **Ollama Add-On (optional):** Local LLM for pipeline intelligence (claim extraction, query decomposition, memory resolution, topic extraction, LLM reranking). Default model: `qwen2.5:1.5b` (1.5B params, ~1GB). Enable via `OLLAMA_ENABLED=true` + `INTERNAL_LLM_PROVIDER=ollama` (set by `start-cerid.sh` on first run). Docker profile: `--profile ollama`. macOS Apple Silicon: runs natively for Metal acceleration. Circuit breaker: `"ollama"` in `circuit_breaker.py`. Fallback: automatic to OpenRouter when Ollama unavailable. Cost: $0 (local inference). Hardware detection: `scripts/detect-gpu.sh` (NVIDIA/AMD ROCm/macOS Metal/CPU). Status: `/health` reports Ollama reachability when enabled. Config: `/providers/ollama/status`, `/providers/ollama/enable`, `/providers/ollama/disable`.
 
 ## Dependency Sync Guide
 
@@ -443,24 +292,37 @@ See [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) for the full developer refere
 
 **Version coupling:** Python 3.11 (Dockerfile + CI + pyproject.toml), Node 22 (.nvmrc + Dockerfile), ChromaDB client >=0.5,<0.6 must match server 0.5.23.
 
-## CI Pipeline (6 jobs)
+## CI Pipeline (9 jobs)
 
 | Job | What |
 |-----|------|
 | lint | `ruff check src/mcp/` |
 | typecheck | `mypy src/mcp/` |
-| test | pytest (60% coverage floor) + Codecov upload + license audit |
-| security | detect-secrets + bandit + pip-audit + dlint ReDoS |
+| test | pytest 1660+ tests (70% coverage floor) + Codecov upload + license audit |
+| security | detect-secrets + bandit + pip-audit (CVE-ignores documented inline) + dlint ReDoS |
+| lock-sync | pip-compile lock file freshness check |
 | frontend | tsc + ESLint + Vitest + Vite build + bundle size check (800KB limit) + npm audit + license audit |
-| docker | hadolint + `docker build` + Trivy CRITICAL/HIGH scan |
+| docker | hadolint (mcp + web Dockerfiles) + `docker build` + Trivy CRITICAL/HIGH scan |
+| frontend-marketing | tsc + ESLint + `next build` (uploads Sentry source maps via `SENTRY_AUTH_TOKEN`) |
+| frontend-desktop | npm ci + `npm run typecheck` |
 
-Docker gates on all 6 prior jobs. Trivy CVE ignore list is in `.github/workflows/ci.yml` with inline rationale for each ignored CVE.
+Docker gates on all 8 prior jobs. Trivy CVE ignore list is in `.github/workflows/ci.yml` with inline rationale for each ignored CVE.
 
 ## Sentry
 
-Error monitoring via Sentry org `cerid-ai`. **MCP server Sentry is opt-in** — requires `ENABLE_SENTRY=true` in addition to `SENTRY_DSN`. When disabled (default), no telemetry data leaves the machine.
+Error monitoring via Sentry org `cerid-ai`. Two projects in this repo:
 
 | Project | SDK | Where initialized |
 |---------|-----|-------------------|
 | `cerid-ai-mcp` | `sentry-sdk[fastapi]` | `src/mcp/main.py` — before `app = FastAPI()` |
-| `cerid-ai-marketing` | `@sentry/nextjs` | Moved to `Cerid-AI/cerid-ai-marketing` repo |
+| `cerid-ai-marketing` | `@sentry/nextjs` | `packages/marketing/sentry.server.config.ts`, `sentry.edge.config.ts`, `src/instrumentation.ts`, `src/instrumentation-client.ts`, `src/app/global-error.tsx` |
+
+**GitHub secrets required:**
+
+| Secret | Used by |
+|--------|---------|
+| `SENTRY_AUTH_TOKEN` | Source map uploads during `next build` (CI `frontend-marketing` job) |
+| `SENTRY_DSN_MCP` | Python FastAPI error reporting |
+| `SENTRY_DSN_MARKETING` | Next.js error reporting + Vercel env var `NEXT_PUBLIC_SENTRY_DSN` |
+
+**`withSentryConfig`** wraps `next.config.ts` in `packages/marketing/` with `org: "cerid-ai"`, `project: "cerid-ai-marketing"`, `tunnelRoute: "/monitoring"`, and `widenClientFileUpload: true`. Source maps are uploaded automatically on every `next build` in CI when `SENTRY_AUTH_TOKEN` is present.

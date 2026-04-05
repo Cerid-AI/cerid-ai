@@ -98,7 +98,7 @@ class TestLongshotSurfaceQuery:
             call_args.append((cypher, params))
             return [{"market_id": "m1", "implied_prob": 0.10, "actual_outcome": 0.12, "timestamp": None}]
 
-        import agents.trading_agent as _ta
+        import core.agents.trading_agent as _ta
         original = _ta._neo4j_query
         _ta._neo4j_query = fake_query  # type: ignore[assignment]
         try:
@@ -123,7 +123,7 @@ class TestLongshotSurfaceQuery:
             call_args.append((cypher, params))
             return []
 
-        import agents.trading_agent as _ta
+        import core.agents.trading_agent as _ta
         original = _ta._neo4j_query
         _ta._neo4j_query = fake_query  # type: ignore[assignment]
         try:

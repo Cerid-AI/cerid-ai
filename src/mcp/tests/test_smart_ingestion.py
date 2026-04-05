@@ -35,7 +35,7 @@ class TestMboxParser:
         mbox_path = tmp_path / "test.mbox"
         mbox_path.write_bytes(mbox_content.encode("utf-8"))
 
-        from parsers import parse_mbox
+        from app.parsers import parse_mbox
 
         result = parse_mbox(str(mbox_path))
 
@@ -67,7 +67,7 @@ class TestEnhancedCsvParser:
         csv_path = tmp_path / "test.csv"
         csv_path.write_text(csv_content)
 
-        from parsers import parse_csv
+        from app.parsers import parse_csv
 
         result = parse_csv(str(csv_path))
 
@@ -87,7 +87,7 @@ class TestEnhancedCsvParser:
         tsv_path = tmp_path / "test.tsv"
         tsv_path.write_text(tsv_content)
 
-        from parsers import parse_csv
+        from app.parsers import parse_csv
 
         result = parse_csv(str(tsv_path))
 
@@ -101,7 +101,7 @@ class TestEnhancedCsvParser:
         csv_path = tmp_path / "semicolon.csv"
         csv_path.write_text(csv_content)
 
-        from parsers import parse_csv
+        from app.parsers import parse_csv
 
         result = parse_csv(str(csv_path))
 
@@ -117,7 +117,7 @@ class TestEnhancedCsvParser:
         csv_path = tmp_path / "large.csv"
         csv_path.write_text("\n".join(lines))
 
-        from parsers import parse_csv
+        from app.parsers import parse_csv
 
         result = parse_csv(str(csv_path))
 
@@ -129,7 +129,7 @@ class TestParserRegistry:
     """Test that parser extensions are registered."""
 
     def test_new_extensions_in_registry(self):
-        from parsers import PARSER_REGISTRY
+        from app.parsers import PARSER_REGISTRY
 
         new_exts = [".eml", ".mbox", ".epub", ".rtf", ".tsv"]
         for ext in new_exts:
@@ -154,7 +154,7 @@ class TestParserRegistry:
         eml_path = tmp_path / "dispatch.eml"
         eml_path.write_bytes(eml.encode())
 
-        from parsers import parse_file
+        from app.parsers import parse_file
 
         result = parse_file(str(eml_path))
         assert result["file_type"] == "eml"

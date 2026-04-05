@@ -20,9 +20,9 @@ class TestOnnxEmbeddingFunction:
         ef = OnnxEmbeddingFunction(model_id="test-model")
         assert ef([]) == []
 
-    @patch("utils.embeddings.hf_hub_download")
-    @patch("utils.embeddings.ort.InferenceSession")
-    @patch("utils.embeddings.Tokenizer.from_file")
+    @patch("core.utils.embeddings.hf_hub_download")
+    @patch("core.utils.embeddings.ort.InferenceSession")
+    @patch("core.utils.embeddings.Tokenizer.from_file")
     def test_mean_pooling_and_normalization(self, mock_tok_cls, mock_session_cls, mock_dl):
         """Verify mean pooling + L2 normalization produces unit-length vectors."""
         from utils.embeddings import OnnxEmbeddingFunction
@@ -61,9 +61,9 @@ class TestOnnxEmbeddingFunction:
         assert abs(np.linalg.norm(vec) - 1.0) < 1e-5, "Output should be L2-normalized"
         assert vec[3] == pytest.approx(0.0, abs=1e-5), "Fourth dim should be ~0"
 
-    @patch("utils.embeddings.hf_hub_download")
-    @patch("utils.embeddings.ort.InferenceSession")
-    @patch("utils.embeddings.Tokenizer.from_file")
+    @patch("core.utils.embeddings.hf_hub_download")
+    @patch("core.utils.embeddings.ort.InferenceSession")
+    @patch("core.utils.embeddings.Tokenizer.from_file")
     def test_matryoshka_truncation(self, mock_tok_cls, mock_session_cls, mock_dl):
         """Matryoshka truncation reduces dimensions and re-normalizes."""
         from utils.embeddings import OnnxEmbeddingFunction
@@ -132,7 +132,7 @@ class TestGetEmbeddingFunction:
 class TestEmbeddingAwareClient:
     def test_injects_embedding_function(self):
         """Wrapper injects ef when model differs from server default."""
-        from deps import _EmbeddingAwareClient
+        from app.deps import _EmbeddingAwareClient
 
         mock_client = MagicMock()
         mock_collection = MagicMock()
@@ -149,7 +149,7 @@ class TestEmbeddingAwareClient:
 
     def test_no_injection_when_server_default(self):
         """Wrapper passes through without ef when using server default model."""
-        from deps import _EmbeddingAwareClient
+        from app.deps import _EmbeddingAwareClient
 
         mock_client = MagicMock()
         wrapper = _EmbeddingAwareClient(mock_client)
@@ -162,7 +162,7 @@ class TestEmbeddingAwareClient:
 
     def test_passthrough_other_methods(self):
         """Other methods (heartbeat, list_collections, etc.) pass through."""
-        from deps import _EmbeddingAwareClient
+        from app.deps import _EmbeddingAwareClient
 
         mock_client = MagicMock()
         mock_client.heartbeat.return_value = 12345
@@ -173,7 +173,7 @@ class TestEmbeddingAwareClient:
 
     def test_get_collection_also_injects(self):
         """get_collection (read path) also gets the embedding function."""
-        from deps import _EmbeddingAwareClient
+        from app.deps import _EmbeddingAwareClient
 
         mock_client = MagicMock()
         wrapper = _EmbeddingAwareClient(mock_client)

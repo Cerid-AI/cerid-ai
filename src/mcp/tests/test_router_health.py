@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Cerid AI. All rights reserved.
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Integration tests for health, collections, scheduler, and plugins endpoints."""
@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 
 def _make_app():
-    from routers.health import router
+    from app.routers.health import router
 
     app = FastAPI()
     app.include_router(router)
@@ -22,13 +22,13 @@ def _make_app():
 class TestHealthEndpoint:
     def setup_method(self):
         """Reset the health cache between tests."""
-        import routers.health as h
+        import app.routers.health as h
         h._health_cache = {}
         h._health_cache_ts = 0.0
 
-    @patch("routers.health.get_redis")
-    @patch("routers.health.get_chroma")
-    @patch("routers.health.get_neo4j")
+    @patch("app.routers.health.get_redis")
+    @patch("app.routers.health.get_chroma")
+    @patch("app.routers.health.get_neo4j")
     def test_healthy_when_all_connected(self, mock_neo4j, mock_chroma, mock_redis):
         driver = MagicMock()
         session = MagicMock()
@@ -46,9 +46,9 @@ class TestHealthEndpoint:
         assert data["services"]["redis"] == "connected"
         assert data["services"]["neo4j"] == "connected"
 
-    @patch("routers.health.get_redis")
-    @patch("routers.health.get_chroma")
-    @patch("routers.health.get_neo4j")
+    @patch("app.routers.health.get_redis")
+    @patch("app.routers.health.get_chroma")
+    @patch("app.routers.health.get_neo4j")
     def test_degraded_when_service_down(self, mock_neo4j, mock_chroma, mock_redis):
         mock_neo4j.side_effect = ConnectionError("Neo4j unreachable")
 
@@ -60,9 +60,9 @@ class TestHealthEndpoint:
         assert data["status"] == "degraded"
         assert "error" in data["services"]["neo4j"]
 
-    @patch("routers.health.get_redis", side_effect=RuntimeError("Redis down"))
-    @patch("routers.health.get_chroma", side_effect=RuntimeError("Chroma down"))
-    @patch("routers.health.get_neo4j", side_effect=RuntimeError("Neo4j down"))
+    @patch("app.routers.health.get_redis", side_effect=Exception("Redis down"))
+    @patch("app.routers.health.get_chroma", side_effect=Exception("Chroma down"))
+    @patch("app.routers.health.get_neo4j", side_effect=Exception("Neo4j down"))
     def test_degraded_when_all_services_down(self, mock_neo4j, mock_chroma, mock_redis):
         client = TestClient(_make_app())
         response = client.get("/health")
@@ -75,7 +75,7 @@ class TestHealthEndpoint:
 
 
 class TestCollectionsEndpoint:
-    @patch("routers.health.get_chroma")
+    @patch("app.routers.health.get_chroma")
     def test_returns_collection_list(self, mock_chroma):
         coll1, coll2 = MagicMock(), MagicMock()
         coll1.name = "kb_coding"
@@ -91,7 +91,7 @@ class TestCollectionsEndpoint:
         assert "kb_coding" in data["collections"]
         assert "kb_finance" in data["collections"]
 
-    @patch("routers.health.get_chroma")
+    @patch("app.routers.health.get_chroma")
     def test_returns_empty_when_no_collections(self, mock_chroma):
         mock_chroma.return_value.list_collections.return_value = []
 
@@ -118,9 +118,21 @@ class TestSchedulerEndpoint:
 
 
 class TestPluginsEndpoint:
-    def test_plugins_endpoint_moved_to_plugins_router(self):
-        """GET /plugins was moved from health.py to plugins.py — verify 404 here."""
-        client = TestClient(_make_app())
-        response = client.get("/plugins")
-        # health.py no longer serves /plugins — the full implementation is in plugins.py
-        assert response.status_code == 404
+    def test_returns_plugins_and_features(self):
+        mock_plugins = MagicMock(get_loaded_plugins=MagicMock(return_value=[]))
+        mock_features = MagicMock(
+            get_feature_status=MagicMock(
+                return_value={"features": {"encryption": False}, "tier": "community"}
+            )
+        )
+
+        with patch.dict(
+            "sys.modules",
+            {"plugins": mock_plugins, "utils.features": mock_features},
+        ):
+            client = TestClient(_make_app())
+            response = client.get("/plugins")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "plugins" in data

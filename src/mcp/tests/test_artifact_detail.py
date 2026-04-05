@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 def _make_app():
     """Create minimal FastAPI app with just the artifacts router."""
-    from routers.artifacts import router
+    from app.routers.artifacts import router
 
     app = FastAPI()
     app.include_router(router)
@@ -44,10 +44,10 @@ def _sample_artifact(
 class TestArtifactDetailEndpoint:
     """Tests for the artifact detail endpoint."""
 
-    @patch("routers.artifacts.get_redis")
-    @patch("routers.artifacts.get_chroma")
-    @patch("routers.artifacts.get_neo4j")
-    @patch("routers.artifacts.graph")
+    @patch("app.routers.artifacts.get_redis")
+    @patch("app.routers.artifacts.get_chroma")
+    @patch("app.routers.artifacts.get_neo4j")
+    @patch("app.routers.artifacts.graph")
     def test_returns_artifact_with_chunks(self, mock_graph, mock_neo4j, mock_chroma, _mock_redis):
         client = TestClient(_make_app())
 
@@ -75,10 +75,10 @@ class TestArtifactDetailEndpoint:
         assert "chunk one content" in data["total_content"]
         assert "chunk two content" in data["total_content"]
 
-    @patch("routers.artifacts.get_redis")
-    @patch("routers.artifacts.get_chroma")
-    @patch("routers.artifacts.get_neo4j")
-    @patch("routers.artifacts.graph")
+    @patch("app.routers.artifacts.get_redis")
+    @patch("app.routers.artifacts.get_chroma")
+    @patch("app.routers.artifacts.get_neo4j")
+    @patch("app.routers.artifacts.graph")
     def test_returns_404_when_not_found(self, mock_graph, mock_neo4j, mock_chroma, _mock_redis):
         client = TestClient(_make_app())
 
@@ -88,10 +88,10 @@ class TestArtifactDetailEndpoint:
         assert response.status_code == 404
         assert "not found" in response.json()["detail"].lower()
 
-    @patch("routers.artifacts.get_redis")
-    @patch("routers.artifacts.get_chroma")
-    @patch("routers.artifacts.get_neo4j")
-    @patch("routers.artifacts.graph")
+    @patch("app.routers.artifacts.get_redis")
+    @patch("app.routers.artifacts.get_chroma")
+    @patch("app.routers.artifacts.get_neo4j")
+    @patch("app.routers.artifacts.graph")
     def test_chunks_sorted_by_index(self, mock_graph, mock_neo4j, mock_chroma, _mock_redis):
         client = TestClient(_make_app())
 
@@ -119,10 +119,10 @@ class TestArtifactDetailEndpoint:
         assert data["chunks"][2]["index"] == 2
         assert data["chunks"][2]["text"] == "second chunk"
 
-    @patch("routers.artifacts.get_redis")
-    @patch("routers.artifacts.get_chroma")
-    @patch("routers.artifacts.get_neo4j")
-    @patch("routers.artifacts.graph")
+    @patch("app.routers.artifacts.get_redis")
+    @patch("app.routers.artifacts.get_chroma")
+    @patch("app.routers.artifacts.get_neo4j")
+    @patch("app.routers.artifacts.graph")
     def test_total_content_assembled_in_order(self, mock_graph, mock_neo4j, mock_chroma, _mock_redis):
         client = TestClient(_make_app())
 
@@ -144,10 +144,10 @@ class TestArtifactDetailEndpoint:
         # total_content should be assembled in sorted order: BBB then AAA
         assert data["total_content"] == "BBB\n\nAAA"
 
-    @patch("routers.artifacts.get_redis")
-    @patch("routers.artifacts.get_chroma")
-    @patch("routers.artifacts.get_neo4j")
-    @patch("routers.artifacts.graph")
+    @patch("app.routers.artifacts.get_redis")
+    @patch("app.routers.artifacts.get_chroma")
+    @patch("app.routers.artifacts.get_neo4j")
+    @patch("app.routers.artifacts.graph")
     def test_empty_chunk_ids_returns_empty_content(self, mock_graph, mock_neo4j, mock_chroma, _mock_redis):
         client = TestClient(_make_app())
 
@@ -164,10 +164,10 @@ class TestArtifactDetailEndpoint:
         # With no chunks, the endpoint falls back to the artifact's summary
         assert data["total_content"] == "A sample artifact"
 
-    @patch("routers.artifacts.get_redis")
-    @patch("routers.artifacts.get_chroma")
-    @patch("routers.artifacts.get_neo4j")
-    @patch("routers.artifacts.graph")
+    @patch("app.routers.artifacts.get_redis")
+    @patch("app.routers.artifacts.get_chroma")
+    @patch("app.routers.artifacts.get_neo4j")
+    @patch("app.routers.artifacts.graph")
     def test_metadata_fields_included(self, mock_graph, mock_neo4j, mock_chroma, _mock_redis):
         client = TestClient(_make_app())
 

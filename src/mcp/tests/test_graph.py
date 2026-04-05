@@ -4,7 +4,7 @@
 """Tests for graph utilities."""
 
 
-from db.neo4j import _extract_references, _parse_keywords
+from app.db.neo4j import _extract_references, _parse_keywords
 
 
 class TestParseKeywords:

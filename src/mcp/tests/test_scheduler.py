@@ -13,7 +13,7 @@ import pytest
 # scheduler.py imports from deps at module level.
 sys.modules.setdefault("deps", MagicMock())
 
-from scheduler import get_job_status, start_scheduler, stop_scheduler  # noqa: E402
+from app.scheduler import get_job_status, start_scheduler, stop_scheduler  # noqa: E402
 
 
 class TestSchedulerJobStatus:

@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 
 def _make_app():
-    from routers.mcp_sse import router
+    from app.routers.mcp_sse import router
 
     app = FastAPI()
     app.include_router(router)
@@ -131,7 +131,7 @@ class TestSessionManagement:
         assert response.status_code == 200
 
     def test_clear_sessions(self):
-        from routers.mcp_sse import _sessions, clear_sessions
+        from app.routers.mcp_sse import _sessions, clear_sessions
 
         _sessions["test-session"] = asyncio.Queue()
         assert len(_sessions) > 0
@@ -152,7 +152,7 @@ class TestSessionEviction:
     """Test session eviction at capacity."""
 
     def test_max_sessions_enforced(self):
-        from routers.mcp_sse import _MAX_SESSIONS, _sessions
+        from app.routers.mcp_sse import _MAX_SESSIONS, _sessions
 
         # Clear any existing sessions
         _sessions.clear()

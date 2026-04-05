@@ -15,7 +15,7 @@ import pytest
 _config_stub = type("config", (), {"MACHINE_ID": "test-machine"})()
 
 with mock.patch.dict("sys.modules", {"config": _config_stub}):
-    from sync.user_state import (
+    from app.sync.user_state import (
         delete_conversation,
         read_conversation,
         read_conversations,

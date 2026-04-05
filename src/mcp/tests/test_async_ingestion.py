@@ -1,12 +1,12 @@
-# Copyright (c) 2026 Cerid AI. All rights reserved.
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for async ingestion and batch support.
+"""Tests for Sprint 4: async ingestion and batch support.
 
 Covers:
-- asyncio.to_thread() wrapping of parse_file / ingest_content
-- ingest_batch() service function and POST /ingest_batch endpoint
-- Watcher batch queue integration
+- 4A: asyncio.to_thread() wrapping of parse_file / ingest_content
+- 4B: ingest_batch() service function and POST /ingest_batch endpoint
+- 4C: Watcher batch queue integration
 """
 
 import asyncio
@@ -17,26 +17,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
-@pytest.fixture(autouse=True)
-def _mock_redis_globally():
-    """Prevent Redis connections caused by cross-test module pollution."""
-    with patch("deps._redis", MagicMock()), \
-         patch("deps.get_redis", return_value=MagicMock()):
-        yield
-
-
 def _ensure_real_router():
     """Ensure the real routers.ingestion module is loaded.
 
     test_memory.py may inject a stub into sys.modules that lacks the batch
     endpoint. This helper detects the stub and force-loads the real module.
     """
-    ri = sys.modules.get("routers.ingestion")
+    ri = sys.modules.get("app.routers.ingestion")
     if ri is not None and not hasattr(ri, "ingest_batch_endpoint"):
-        del sys.modules["routers.ingestion"]
-        import routers.ingestion  # noqa: F811
-        importlib.reload(routers.ingestion)
-    return importlib.import_module("routers.ingestion")
+        del sys.modules["app.routers.ingestion"]
+        importlib.import_module("app.routers.ingestion")
+    return importlib.import_module("app.routers.ingestion")
 
 # ---------------------------------------------------------------------------
 # 4A: Async file parsing — asyncio.to_thread() wrapping
@@ -45,10 +36,10 @@ def _ensure_real_router():
 class TestAsyncFileParsing:
     """Verify that ingest_file() uses asyncio.to_thread() for blocking calls."""
 
-    @patch("services.ingestion.asyncio")
-    @patch("services.ingestion.ai_categorize", new_callable=AsyncMock)
-    @patch("services.ingestion.extract_metadata")
-    @patch("services.ingestion.validate_file_path")
+    @patch("app.services.ingestion.asyncio")
+    @patch("app.services.ingestion.ai_categorize", new_callable=AsyncMock)
+    @patch("app.services.ingestion.extract_metadata")
+    @patch("app.services.ingestion.validate_file_path")
     def test_parse_file_runs_in_thread(
         self, mock_validate, mock_meta, mock_ai_cat, mock_asyncio
     ):
@@ -64,7 +55,7 @@ class TestAsyncFileParsing:
             {"status": "success", "domain": "coding", "chunks": 1},  # ingest_content
         ])
 
-        from services.ingestion import ingest_file
+        from app.services.ingestion import ingest_file
 
         asyncio.get_event_loop().run_until_complete(
             ingest_file("/archive/test.txt", domain="coding")
@@ -73,17 +64,15 @@ class TestAsyncFileParsing:
         # Verify to_thread was called twice (parse_file + ingest_content)
         assert mock_asyncio.to_thread.call_count == 2
 
-        # First call should be the virtiofs-retry-wrapped parse_file
+        # First call should be parse_file
         first_call = mock_asyncio.to_thread.call_args_list[0]
-        target_fn = first_call.args[0]
-        # Accept either the raw parse_file or the @virtiofs_retry wrapper
-        from parsers import parse_file
-        assert target_fn is parse_file or getattr(target_fn, "__wrapped__", None) is parse_file or target_fn.__name__ == "_parse_with_retry"
+        from app.parsers import parse_file
+        assert first_call.args[0] is parse_file
 
-    @patch("services.ingestion.asyncio")
-    @patch("services.ingestion.ai_categorize", new_callable=AsyncMock)
-    @patch("services.ingestion.extract_metadata")
-    @patch("services.ingestion.validate_file_path")
+    @patch("app.services.ingestion.asyncio")
+    @patch("app.services.ingestion.ai_categorize", new_callable=AsyncMock)
+    @patch("app.services.ingestion.extract_metadata")
+    @patch("app.services.ingestion.validate_file_path")
     def test_ingest_content_runs_in_thread(
         self, mock_validate, mock_meta, mock_ai_cat, mock_asyncio
     ):
@@ -97,7 +86,7 @@ class TestAsyncFileParsing:
             {"status": "success", "domain": "coding", "chunks": 2},
         ])
 
-        from services.ingestion import ingest_file
+        from app.services.ingestion import ingest_file
 
         asyncio.get_event_loop().run_until_complete(
             ingest_file("/archive/test.txt", domain="coding")
@@ -105,13 +94,13 @@ class TestAsyncFileParsing:
 
         # Second to_thread call should be ingest_content
         second_call = mock_asyncio.to_thread.call_args_list[1]
-        from services.ingestion import ingest_content
+        from app.services.ingestion import ingest_content
         assert second_call.args[0] is ingest_content
 
-    @patch("services.ingestion.asyncio")
-    @patch("services.ingestion.ai_categorize", new_callable=AsyncMock)
-    @patch("services.ingestion.extract_metadata")
-    @patch("services.ingestion.validate_file_path")
+    @patch("app.services.ingestion.asyncio")
+    @patch("app.services.ingestion.ai_categorize", new_callable=AsyncMock)
+    @patch("app.services.ingestion.extract_metadata")
+    @patch("app.services.ingestion.validate_file_path")
     def test_parse_output_preserved(
         self, mock_validate, mock_meta, mock_ai_cat, mock_asyncio
     ):
@@ -126,7 +115,7 @@ class TestAsyncFileParsing:
             {"status": "success", "domain": "general", "chunks": 3},
         ])
 
-        from services.ingestion import ingest_file
+        from app.services.ingestion import ingest_file
 
         result = asyncio.get_event_loop().run_until_complete(
             ingest_file("/archive/doc.pdf", domain="general")
@@ -145,19 +134,19 @@ class TestIngestBatch:
     @pytest.mark.asyncio
     async def test_batch_validates_max_items(self):
         """Batch size exceeding BATCH_MAX_ITEMS should raise ValueError."""
-        from services.ingestion import ingest_batch
+        from app.services.ingestion import ingest_batch
 
         items = [{"content": f"item {i}"} for i in range(21)]
         with pytest.raises(ValueError, match="exceeds maximum"):
             await ingest_batch(items)
 
     @pytest.mark.asyncio
-    @patch("services.ingestion.ingest_content")
+    @patch("app.services.ingestion.ingest_content")
     async def test_batch_content_items(self, mock_ingest):
         """Batch should handle content-based items."""
         mock_ingest.return_value = {"status": "success", "chunks": 1}
 
-        from services.ingestion import ingest_batch
+        from app.services.ingestion import ingest_batch
 
         items = [
             {"content": "first item", "domain": "coding"},
@@ -172,7 +161,7 @@ class TestIngestBatch:
     @pytest.mark.asyncio
     async def test_batch_empty_item_returns_error(self):
         """Items without content or file_path should return an error result."""
-        from services.ingestion import ingest_batch
+        from app.services.ingestion import ingest_batch
 
         items = [{"domain": "coding"}]  # No content or file_path
         result = await ingest_batch(items)
@@ -181,7 +170,7 @@ class TestIngestBatch:
         assert result["results"][0]["status"] == "error"
 
     @pytest.mark.asyncio
-    @patch("services.ingestion.ingest_content")
+    @patch("app.services.ingestion.ingest_content")
     async def test_batch_individual_failures_dont_block(self, mock_ingest):
         """Individual item failures should not prevent other items from succeeding."""
         mock_ingest.side_effect = [
@@ -190,7 +179,7 @@ class TestIngestBatch:
             {"status": "success", "chunks": 2},
         ]
 
-        from services.ingestion import ingest_batch
+        from app.services.ingestion import ingest_batch
 
         items = [
             {"content": "good 1", "domain": "coding"},
@@ -204,12 +193,12 @@ class TestIngestBatch:
         assert result["results"][1]["status"] == "error"
 
     @pytest.mark.asyncio
-    @patch("services.ingestion.ingest_content")
+    @patch("app.services.ingestion.ingest_content")
     async def test_batch_duplicate_counted_as_success(self, mock_ingest):
         """Duplicate results should count as 'succeeded'."""
         mock_ingest.return_value = {"status": "duplicate", "duplicate_of": "existing.txt"}
 
-        from services.ingestion import ingest_batch
+        from app.services.ingestion import ingest_batch
 
         items = [{"content": "duplicate content"}]
         result = await ingest_batch(items)
@@ -218,12 +207,12 @@ class TestIngestBatch:
         assert result["failed"] == 0
 
     @pytest.mark.asyncio
-    @patch("services.ingestion.ingest_file", new_callable=AsyncMock)
+    @patch("app.services.ingestion.ingest_file", new_callable=AsyncMock)
     async def test_batch_file_items(self, mock_ingest_file):
         """Batch should handle file_path-based items."""
         mock_ingest_file.return_value = {"status": "success", "chunks": 3}
 
-        from services.ingestion import ingest_batch
+        from app.services.ingestion import ingest_batch
 
         items = [
             {"file_path": "/archive/test.pdf", "domain": "coding"},
@@ -242,9 +231,7 @@ class TestBatchEndpoint:
     """Test the batch ingestion REST endpoint."""
 
     @pytest.mark.asyncio
-    @patch("routers.system_monitor.get_redis", return_value=MagicMock())
-    @patch("deps.get_redis", return_value=MagicMock())
-    async def test_endpoint_returns_batch_result(self, _mock_redis, _mock_sysmon_redis):
+    async def test_endpoint_returns_batch_result(self):
         """POST /ingest_batch should return the batch result."""
         ri = _ensure_real_router()
 
@@ -349,7 +336,7 @@ class TestWatcherBatchQueue:
             "failed": 0,
         }
 
-        with patch("scripts.watch_ingest.httpx.post", return_value=mock_resp) as mock_post:
+        with patch("scripts.watch_ingest.requests.post", return_value=mock_resp) as mock_post:
             watcher._flush_batch()
 
         mock_post.assert_called_once()
@@ -373,7 +360,7 @@ class TestWatcherBatchQueue:
             "failed": 0,
         }
 
-        with patch("scripts.watch_ingest.httpx.post", return_value=mock_resp):
+        with patch("scripts.watch_ingest.requests.post", return_value=mock_resp):
             watcher._flush_batch()
 
         assert len(watcher._pending_queue) == 0
@@ -390,7 +377,7 @@ class TestWatcherBatchQueue:
         mock_resp.status_code = 500
         mock_resp.text = "Internal Server Error"
 
-        with patch("scripts.watch_ingest.httpx.post", return_value=mock_resp):
+        with patch("scripts.watch_ingest.requests.post", return_value=mock_resp):
             watcher._flush_batch()
 
         # Should have scheduled a retry
@@ -406,7 +393,7 @@ class TestWatcherBatchQueue:
 
         watcher._pending_queue.clear()
 
-        with patch("scripts.watch_ingest.httpx.post") as mock_post:
+        with patch("scripts.watch_ingest.requests.post") as mock_post:
             watcher._flush_batch()
 
         mock_post.assert_not_called()
@@ -428,7 +415,7 @@ class TestWatcherBatchQueue:
 
         with patch.object(watcher, "_should_process", return_value=True), \
              patch.object(watcher, "_wait_for_stable", return_value=True), \
-             patch("scripts.watch_ingest.httpx.post", return_value=mock_resp) as mock_post:
+             patch("scripts.watch_ingest.requests.post", return_value=mock_resp) as mock_post:
 
             for i in range(watcher.BATCH_MAX):
                 watcher._queue_for_batch(f"/archive/file_{i}.txt", "smart")

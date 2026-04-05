@@ -1,7 +1,7 @@
-# Copyright (c) 2026 Cerid AI. All rights reserved.
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for memory extraction agent."""
+"""Tests for memory extraction agent (Phase 7C)."""
 
 import sys
 from types import ModuleType
@@ -18,8 +18,10 @@ if "routers.ingestion" not in sys.modules:
     _stub.router = MagicMock()  # type: ignore[attr-defined]
     sys.modules["routers.ingestion"] = _stub
     # Also register as attribute on the parent package so _dot_lookup works.
-    import routers
-    routers.ingestion = _stub  # type: ignore[attr-defined]
+    if "routers" not in sys.modules:
+        sys.modules["routers"] = ModuleType("routers")
+    _routers_pkg = sys.modules["routers"]
+    _routers_pkg.ingestion = _stub  # type: ignore[attr-defined]
 
 from agents.memory import (
     archive_old_memories,
@@ -38,32 +40,31 @@ class TestExtractMemories:
         assert result == []
 
     @pytest.mark.asyncio
-    @patch("agents.memory.call_internal_llm", new_callable=AsyncMock)
+    @patch("core.agents.memory.call_internal_llm", new_callable=AsyncMock)
     async def test_successful_extraction(self, mock_llm):
         """Valid LLM response should parse into memory list."""
         mock_llm.return_value = '[{"content":"Python uses GIL","memory_type":"fact","summary":"Python GIL"}]'
 
         result = await extract_memories("x" * 200, "conv-123")
         assert len(result) == 1
-        # Legacy "fact" is migrated to "empirical" at extraction time
-        assert result[0]["memory_type"] == "empirical"
+        assert result[0]["memory_type"] == "fact"
         assert "GIL" in result[0]["content"]
 
     @pytest.mark.asyncio
-    @patch("agents.memory.call_internal_llm", new_callable=AsyncMock)
-    async def test_invalid_memory_type_defaults_to_empirical(self, mock_llm):
-        """Unknown memory_type should default to 'empirical'."""
+    @patch("core.agents.memory.call_internal_llm", new_callable=AsyncMock)
+    async def test_invalid_memory_type_defaults_to_fact(self, mock_llm):
+        """Unknown memory_type should default to 'fact'."""
         mock_llm.return_value = '[{"content":"test","memory_type":"invalid_type","summary":"test"}]'
 
         result = await extract_memories("x" * 200, "conv-123")
-        assert result[0]["memory_type"] == "empirical"
+        assert result[0]["memory_type"] == "fact"
 
 
 class TestExtractAndStoreMemories:
     """Test full extraction + storage pipeline."""
 
     @pytest.mark.asyncio
-    @patch("agents.memory.config")
+    @patch("core.agents.memory.config")
     async def test_disabled_returns_skipped(self, mock_config):
         """Should skip when ENABLE_MEMORY_EXTRACTION is False."""
         mock_config.ENABLE_MEMORY_EXTRACTION = False
@@ -71,21 +72,21 @@ class TestExtractAndStoreMemories:
         assert result["status"] == "skipped"
 
     @pytest.mark.asyncio
-    @patch("agents.memory.config")
-    @patch("agents.memory.extract_memories", new_callable=AsyncMock)
-    @patch("services.ingestion.ingest_content")
-    async def test_successful_storage(self, mock_ingest, mock_extract, mock_config, mock_redis, mock_neo4j):
+    @patch("core.agents.memory.config")
+    @patch("core.agents.memory.extract_memories", new_callable=AsyncMock)
+    async def test_successful_storage(self, mock_extract, mock_config, mock_redis, mock_neo4j):
         """Extracted memories should be ingested into conversations domain."""
         mock_config.ENABLE_MEMORY_EXTRACTION = True
         mock_extract.return_value = [
             {"content": "Python uses GIL", "memory_type": "fact", "summary": "GIL info"},
         ]
-        mock_ingest.return_value = {"status": "success", "artifact_id": "art-123"}
+        mock_ingest = MagicMock(return_value={"status": "success", "artifact_id": "art-123"})
 
         result = await extract_and_store_memories(
             "x" * 200, "conv-123", "claude",
             redis_client=mock_redis,
             neo4j_driver=mock_neo4j[0],
+            ingest_fn=mock_ingest,
         )
         assert result["memories_extracted"] == 1
         assert result["memories_stored"] == 1

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging as _logging
 import os
+import re as _re
 
 from config.constants import CHUNK_MAX_TOKENS  # noqa: F401  # re-exported
 from utils.model_registry import get_model
@@ -189,6 +190,10 @@ GRAPH_RELATIONSHIP_TYPES = [
     "SUPERSEDES",       # re-ingested file replacing an older version
     "REFERENCES",       # explicit filename mention in content
 ]
+
+# Validate relationship type names are safe for Cypher injection
+for _rt in GRAPH_RELATIONSHIP_TYPES:
+    assert _re.fullmatch(r"[A-Z_]+", _rt), f"Invalid GRAPH_RELATIONSHIP_TYPE: {_rt!r} — must match ^[A-Z_]+$"
 
 # ---------------------------------------------------------------------------
 # Embedding Model
@@ -739,6 +744,41 @@ CONSUMER_REGISTRY: dict[str, dict] = {
 CLIENT_RATE_LIMITS: dict[str, dict[str, tuple[int, int]]] = {
     k: v["rate_limits"] for k, v in CONSUMER_REGISTRY.items()
 }
+
+# ---------------------------------------------------------------------------
+# Alerting
+# ---------------------------------------------------------------------------
+ALERT_CHECK_INTERVAL_S: int = 60
+ALERT_MAX_PER_METRIC: int = 5
+ALERT_WEBHOOK_TIMEOUT_S: int = 10
+ALERT_EVENTS_MAX: int = 1000  # Max stored alert events
+
+# ---------------------------------------------------------------------------
+# Eval Harness
+# ---------------------------------------------------------------------------
+EVAL_RAGAS_MODEL: str = os.getenv("CERID_EVAL_RAGAS_MODEL", "")
+EVAL_LEADERBOARD_MAX: int = 50
+EVAL_DEFAULT_BENCHMARK: str = "beir_subset.jsonl"
+
+# ---------------------------------------------------------------------------
+# Enterprise Features
+# ---------------------------------------------------------------------------
+CERID_ENTERPRISE = os.getenv("CERID_ENTERPRISE", "false").lower() in ("1", "true")
+ABAC_POLICY_KEY = "cerid:enterprise:abac_policy"
+SSO_PROVIDER = os.getenv("CERID_SSO_PROVIDER", "")  # saml | oidc
+SSO_METADATA_URL = os.getenv("CERID_SSO_METADATA_URL", "")
+CLASSIFICATION_ENABLED = os.getenv("CERID_CLASSIFICATION", "false").lower() in ("1", "true")
+AUDIT_STREAM_KEY = "cerid:audit:stream"
+AUDIT_RETENTION_DAYS = int(os.getenv("CERID_AUDIT_RETENTION_DAYS", "365"))
+
+# ---------------------------------------------------------------------------
+# WebSocket Sync
+# ---------------------------------------------------------------------------
+WS_SYNC_ENABLED = os.getenv("CERID_WS_SYNC", "false").lower() in ("1", "true")
+WS_HEARTBEAT_INTERVAL_S = 30
+WS_PRESENCE_TIMEOUT_S = 90
+WS_MAX_CONNECTIONS = 50
+SYNC_CRDT_ENABLED = True
 
 if not NEO4J_PASSWORD:
     _config_logger.warning(

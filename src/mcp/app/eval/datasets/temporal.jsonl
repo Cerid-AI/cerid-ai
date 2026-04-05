@@ -1,0 +1,20 @@
+{"query": "What changed in React 19?", "domain": "domain_code", "expected_keywords": ["server components", "actions", "use hook", "compiler"], "difficulty": "medium"}
+{"query": "Latest Python packaging standards", "domain": "domain_code", "expected_keywords": ["pyproject.toml", "PEP 621", "build system", "uv"], "difficulty": "medium"}
+{"query": "What are the new features in TypeScript 5.x?", "domain": "domain_code", "expected_keywords": ["decorators", "const type parameters", "satisfies", "module resolution"], "difficulty": "medium"}
+{"query": "How has the Docker Compose V2 syntax changed from V1?", "domain": "domain_code", "expected_keywords": ["docker compose", "version field", "profiles", "watch"], "difficulty": "easy"}
+{"query": "What security improvements were added in Node.js 22?", "domain": "domain_code", "expected_keywords": ["permission model", "single executable", "WebSocket client"], "difficulty": "medium"}
+{"query": "What is the current state of HTTP/3 adoption?", "domain": "domain_code", "expected_keywords": ["QUIC", "UDP", "browser support", "CDN"], "difficulty": "medium"}
+{"query": "How has Kubernetes admission control evolved recently?", "domain": "domain_code", "expected_keywords": ["validating admission policy", "CEL", "webhook", "gateway API"], "difficulty": "hard"}
+{"query": "What are the latest OWASP Top 10 changes?", "domain": "domain_code", "expected_keywords": ["SSRF", "insecure design", "software integrity", "supply chain"], "difficulty": "medium"}
+{"query": "What improvements did PostgreSQL 17 introduce?", "domain": "domain_code", "expected_keywords": ["incremental backup", "JSON_TABLE", "logical replication"], "difficulty": "hard"}
+{"query": "How has the Rust async ecosystem matured in 2025?", "domain": "domain_code", "expected_keywords": ["async trait", "tokio", "async drop", "RPITIT"], "difficulty": "hard"}
+{"query": "What is the current recommended approach for Python type checking?", "domain": "domain_code", "expected_keywords": ["mypy", "pyright", "type narrowing", "ParamSpec"], "difficulty": "medium"}
+{"query": "How has CSS container queries changed web layout patterns?", "domain": "domain_code", "expected_keywords": ["container-type", "responsive", "component-level", "size query"], "difficulty": "medium"}
+{"query": "What are the latest changes to the OpenAI API?", "domain": "domain_code", "expected_keywords": ["structured outputs", "function calling", "vision", "assistants"], "difficulty": "medium"}
+{"query": "How has GitHub Actions evolved its reusable workflow support?", "domain": "domain_code", "expected_keywords": ["composite actions", "workflow_call", "required workflows", "matrix"], "difficulty": "medium"}
+{"query": "What are the new Tailwind CSS v4 features?", "domain": "domain_code", "expected_keywords": ["Oxide engine", "CSS-first config", "container queries", "zero-config"], "difficulty": "medium"}
+{"query": "How has WebAssembly support expanded beyond browsers?", "domain": "domain_code", "expected_keywords": ["WASI", "component model", "edge runtime", "wasmtime"], "difficulty": "hard"}
+{"query": "What are the current best practices for LLM application security?", "domain": "domain_code", "expected_keywords": ["prompt injection", "guardrails", "output filtering", "red teaming"], "difficulty": "hard"}
+{"query": "How has the FastAPI framework evolved in recent versions?", "domain": "domain_code", "expected_keywords": ["lifespan", "Annotated", "dependency override", "OpenAPI 3.1"], "difficulty": "medium"}
+{"query": "What improvements were made to ChromaDB in the 0.5.x series?", "domain": "domain_code", "expected_keywords": ["multi-tenancy", "auth", "distributed", "HNSW"], "difficulty": "hard"}
+{"query": "What is the current state of passkey adoption for web authentication?", "domain": "domain_code", "expected_keywords": ["WebAuthn", "FIDO2", "discoverable credential", "platform authenticator"], "difficulty": "medium"}

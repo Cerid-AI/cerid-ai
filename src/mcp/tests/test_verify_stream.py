@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Cerid AI. All rights reserved.
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Tests for the SSE verify-stream endpoint keepalive mechanism.
@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 import pytest
 
-from routers.agents import _STREAM_END, _safe_anext
+from app.routers.agents import _STREAM_END, _safe_anext
 
 # ---------------------------------------------------------------------------
 # Helpers — synthetic async generators for testing
@@ -216,9 +216,9 @@ class TestStreamingTimeouts:
         # Patch verify_claim and extract_claims with fast fakes, and set
         # very short per-claim timeout (0.1s) so the test doesn't wait long.
         with (
-            patch("agents.hallucination.streaming.verify_claim", side_effect=_mock_verify_claim),
+            patch("core.agents.hallucination.streaming.verify_claim", side_effect=_mock_verify_claim),
             patch(
-                "agents.hallucination.streaming.extract_claims",
+                "core.agents.hallucination.streaming.extract_claims",
                 return_value=(["Paris is the capital of France."], "heuristic"),
             ),
             patch("config.STREAMING_PER_CLAIM_TIMEOUT", 0.1),
@@ -261,9 +261,9 @@ class TestStreamingTimeouts:
             return {"status": "verified", "similarity": 0.9}
 
         with (
-            patch("agents.hallucination.streaming.verify_claim", side_effect=_mock_verify_claim),
+            patch("core.agents.hallucination.streaming.verify_claim", side_effect=_mock_verify_claim),
             patch(
-                "agents.hallucination.streaming.extract_claims",
+                "core.agents.hallucination.streaming.extract_claims",
                 return_value=(
                     ["Claim 1.", "Claim 2.", "Claim 3."],
                     "heuristic",
@@ -290,7 +290,7 @@ class TestStreamingTimeouts:
     @pytest.mark.asyncio
     async def test_streaming_flag_limits_retries(self):
         """In streaming mode, _llm_call_with_retry should use fewer attempts."""
-        from agents.hallucination import _llm_call_with_retry
+        from core.agents.hallucination.verification import _llm_call_with_retry
 
         call_count = 0
 
@@ -344,9 +344,9 @@ class TestStreamingTimeouts:
             return []
 
         with (
-            patch("agents.decomposer.lightweight_kb_query", side_effect=_mock_lightweight_kb_query),
-            patch("agents.hallucination.verification._verify_claim_externally", side_effect=_mock_external),
-            patch("agents.hallucination.verification._query_memories", side_effect=_mock_memories),
+            patch("core.agents.query_agent.lightweight_kb_query", side_effect=_mock_lightweight_kb_query),
+            patch("core.agents.hallucination.verification._verify_claim_externally", side_effect=_mock_external),
+            patch("core.agents.hallucination.verification._query_memories", side_effect=_mock_memories),
         ):
             # Non-streaming: should make 2 external calls (cross-model + web escalation)
             external_calls.clear()
@@ -372,16 +372,12 @@ class TestExtractionErrorHandling:
         """httpx.TimeoutException in LLM extraction should return empty list."""
         import httpx
 
-        from agents.hallucination import _extract_claims_llm
+        from core.agents.hallucination.extraction import _extract_claims_llm
 
         async def _mock_call_llm(*args, **kwargs):
             raise httpx.ReadTimeout("Connection timed out")
 
-        async def _mock_internal_llm(*args, **kwargs):
-            raise RuntimeError("internal LLM unavailable")
-
-        with patch("agents.hallucination.extraction.call_internal_llm", side_effect=_mock_internal_llm), \
-             patch("agents.hallucination.extraction.call_llm", side_effect=_mock_call_llm):
+        with patch("core.agents.hallucination.extraction.call_llm", side_effect=_mock_call_llm):
             result = await _extract_claims_llm("Some response text for testing.", 10)
 
         assert result == []
@@ -391,16 +387,12 @@ class TestExtractionErrorHandling:
         """httpx.ConnectError in LLM extraction should return empty list."""
         import httpx
 
-        from agents.hallucination import _extract_claims_llm
+        from core.agents.hallucination.extraction import _extract_claims_llm
 
         async def _mock_call_llm(*args, **kwargs):
             raise httpx.ConnectError("Connection refused")
 
-        async def _mock_internal_llm(*args, **kwargs):
-            raise RuntimeError("internal LLM unavailable")
-
-        with patch("agents.hallucination.extraction.call_internal_llm", side_effect=_mock_internal_llm), \
-             patch("agents.hallucination.extraction.call_llm", side_effect=_mock_call_llm):
+        with patch("core.agents.hallucination.extraction.call_llm", side_effect=_mock_call_llm):
             result = await _extract_claims_llm("Some response text for testing.", 10)
 
         assert result == []
@@ -414,7 +406,7 @@ class TestExtractionErrorHandling:
             raise RuntimeError("Bifrost is down")
 
         with (
-            patch("agents.hallucination.streaming.extract_claims", side_effect=_crash_extract),
+            patch("core.agents.hallucination.streaming.extract_claims", side_effect=_crash_extract),
             patch("config.HALLUCINATION_MIN_RESPONSE_LENGTH", 10),
         ):
             events = []
@@ -444,7 +436,7 @@ class TestExtractionErrorHandling:
             raise TimeoutError("simulated extraction timeout")
 
         with (
-            patch("agents.hallucination.streaming.extract_claims", side_effect=_timeout_extract),
+            patch("core.agents.hallucination.streaming.extract_claims", side_effect=_timeout_extract),
             patch("config.HALLUCINATION_MIN_RESPONSE_LENGTH", 10),
         ):
             events = []

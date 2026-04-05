@@ -13,19 +13,19 @@ from fastapi.testclient import TestClient
 @pytest.fixture()
 def client():
     """Create a test client with mocked dependencies."""
-    from main import app  # noqa: E402 — triggers router imports
+    from app.main import app  # noqa: E402 — triggers router imports
 
     with (
-        patch("routers.kb_admin.get_neo4j", return_value=MagicMock()),
-        patch("routers.kb_admin.get_chroma", return_value=MagicMock()),
+        patch("app.routers.kb_admin.get_neo4j", return_value=MagicMock()),
+        patch("app.routers.kb_admin.get_chroma", return_value=MagicMock()),
     ):
         yield TestClient(app, raise_server_exceptions=False)
 
 
 class TestRebuildIndexes:
     def test_rebuild_indexes_success(self, client: TestClient):
-        with patch("routers.kb_admin.rebuild_bm25_all", return_value=5):
-            with patch("routers.kb_admin.invalidate_cache_non_blocking", new_callable=AsyncMock):
+        with patch("app.routers.kb_admin.rebuild_bm25_all", return_value=5):
+            with patch("app.routers.kb_admin.invalidate_cache_non_blocking", new_callable=AsyncMock):
                 res = client.post("/admin/kb/rebuild-index")
         assert res.status_code == 200
         data = res.json()
@@ -33,7 +33,7 @@ class TestRebuildIndexes:
         assert "5 domains" in data["message"]
 
     def test_rebuild_indexes_failure(self, client: TestClient):
-        with patch("routers.kb_admin.rebuild_bm25_all", side_effect=RuntimeError("disk error")):
+        with patch("app.routers.kb_admin.rebuild_bm25_all", side_effect=RuntimeError("disk error")):
             res = client.post("/admin/kb/rebuild-index")
         assert res.status_code == 500
         assert "disk error" in res.json()["detail"]
@@ -52,8 +52,8 @@ class TestRescore:
             "timestamp": "2026-03-09T00:00:00Z",
             "mode": "audit",
         }
-        with patch("routers.kb_admin.curate", new_callable=AsyncMock, return_value=mock_result):
-            with patch("routers.kb_admin.invalidate_cache_non_blocking", new_callable=AsyncMock):
+        with patch("app.routers.kb_admin.curate", new_callable=AsyncMock, return_value=mock_result):
+            with patch("app.routers.kb_admin.invalidate_cache_non_blocking", new_callable=AsyncMock):
                 res = client.post("/admin/kb/rescore")
         assert res.status_code == 200
         data = res.json()
@@ -72,8 +72,8 @@ class TestRescore:
             "timestamp": "2026-03-09T00:00:00Z",
             "mode": "audit",
         }
-        with patch("routers.kb_admin.curate", new_callable=AsyncMock, return_value=mock_result):
-            with patch("routers.kb_admin.invalidate_cache_non_blocking", new_callable=AsyncMock):
+        with patch("app.routers.kb_admin.curate", new_callable=AsyncMock, return_value=mock_result):
+            with patch("app.routers.kb_admin.invalidate_cache_non_blocking", new_callable=AsyncMock):
                 res = client.post(
                     "/admin/kb/rescore",
                     json={"domains": ["finance"], "max_artifacts": 50},
@@ -95,8 +95,8 @@ class TestRegenerateSummaries:
             "timestamp": "2026-03-09T00:00:00Z",
             "mode": "audit",
         }
-        with patch("routers.kb_admin.curate", new_callable=AsyncMock, return_value=mock_result):
-            with patch("routers.kb_admin.invalidate_cache_non_blocking", new_callable=AsyncMock):
+        with patch("app.routers.kb_admin.curate", new_callable=AsyncMock, return_value=mock_result):
+            with patch("app.routers.kb_admin.invalidate_cache_non_blocking", new_callable=AsyncMock):
                 res = client.post("/admin/kb/regenerate-summaries")
         assert res.status_code == 200
         data = res.json()
@@ -127,12 +127,12 @@ class TestClearDomain:
         delete_result = {"deleted": True, "artifact_id": "art-1", "domain": "code", "filename": "test.py", "chunk_ids": ["c1", "c2"]}
 
         with (
-            patch("routers.kb_admin.list_artifacts", return_value=mock_artifacts),
-            patch("routers.kb_admin.delete_artifact", return_value=delete_result),
-            patch("routers.kb_admin.invalidate_cache_non_blocking", new_callable=AsyncMock),
-            patch("routers.kb_admin.get_chroma"),
-            patch("routers.kb_admin.get_neo4j"),
-            patch("routers.kb_admin.config") as mock_config,
+            patch("app.routers.kb_admin.list_artifacts", return_value=mock_artifacts),
+            patch("app.routers.kb_admin.delete_artifact", return_value=delete_result),
+            patch("app.routers.kb_admin.invalidate_cache_non_blocking", new_callable=AsyncMock),
+            patch("app.routers.kb_admin.get_chroma"),
+            patch("app.routers.kb_admin.get_neo4j"),
+            patch("app.routers.kb_admin.config") as mock_config,
         ):
             mock_config.DOMAINS = ["code", "finance"]
             mock_config.collection_name.return_value = "domain_code"
@@ -150,9 +150,9 @@ class TestClearDomain:
 class TestDeleteArtifact:
     def test_delete_not_found(self, client: TestClient):
         with (
-            patch("routers.kb_admin.get_neo4j"),
-            patch("routers.kb_admin.get_chroma"),
-            patch("routers.kb_admin.delete_artifact", return_value={"deleted": False, "reason": "not_found"}),
+            patch("app.routers.kb_admin.get_neo4j"),
+            patch("app.routers.kb_admin.get_chroma"),
+            patch("app.routers.kb_admin.delete_artifact", return_value={"deleted": False, "reason": "not_found"}),
         ):
             res = client.delete("/admin/artifacts/nonexistent-id")
         assert res.status_code == 404
@@ -170,11 +170,11 @@ class TestDeleteArtifact:
         mock_chroma.get_collection.return_value = mock_collection
 
         with (
-            patch("routers.kb_admin.get_neo4j"),
-            patch("routers.kb_admin.get_chroma", return_value=mock_chroma),
-            patch("routers.kb_admin.delete_artifact", return_value=delete_result),
-            patch("routers.kb_admin.invalidate_cache_non_blocking", new_callable=AsyncMock),
-            patch("routers.kb_admin.config") as mock_config,
+            patch("app.routers.kb_admin.get_neo4j"),
+            patch("app.routers.kb_admin.get_chroma", return_value=mock_chroma),
+            patch("app.routers.kb_admin.delete_artifact", return_value=delete_result),
+            patch("app.routers.kb_admin.invalidate_cache_non_blocking", new_callable=AsyncMock),
+            patch("app.routers.kb_admin.config") as mock_config,
         ):
             mock_config.collection_name.return_value = "domain_code"
             res = client.delete("/admin/artifacts/art-123")
@@ -195,10 +195,10 @@ class TestKBStats:
         mock_collection.count.return_value = 10
 
         with (
-            patch("routers.kb_admin.get_neo4j"),
-            patch("routers.kb_admin.get_chroma") as mock_chroma_fn,
-            patch("routers.kb_admin.list_artifacts", return_value=mock_artifacts),
-            patch("routers.kb_admin.config") as mock_config,
+            patch("app.routers.kb_admin.get_neo4j"),
+            patch("app.routers.kb_admin.get_chroma") as mock_chroma_fn,
+            patch("app.routers.kb_admin.list_artifacts", return_value=mock_artifacts),
+            patch("app.routers.kb_admin.config") as mock_config,
         ):
             mock_config.DOMAINS = ["code"]
             mock_config.collection_name.return_value = "domain_code"

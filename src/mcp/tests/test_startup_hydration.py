@@ -26,7 +26,7 @@ def _write_settings(sync_dir: Path, settings: dict) -> None:
 
 def _import_hydrate():
     """Import _hydrate_settings_from_sync inside the test to avoid import-time side effects."""
-    from main import _hydrate_settings_from_sync
+    from app.main import _hydrate_settings_from_sync
     return _hydrate_settings_from_sync
 
 

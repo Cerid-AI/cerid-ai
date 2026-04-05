@@ -156,7 +156,7 @@ class TestFindStaleArtifacts:
 # ---------------------------------------------------------------------------
 
 class TestFindOrphanedChunks:
-    @patch("agents.rectify.config")
+    @patch("core.agents.rectify.config")
     def test_finds_orphans(self, mock_config, mock_neo4j, mock_chroma):
         mock_config.DOMAINS = ["coding"]
         mock_config.collection_name = lambda d: f"domain_{d}"
@@ -180,7 +180,7 @@ class TestFindOrphanedChunks:
         assert len(result["coding"]) == 1
         assert result["coding"][0]["artifact_id"] == "a2"
 
-    @patch("agents.rectify.config")
+    @patch("core.agents.rectify.config")
     def test_no_orphans(self, mock_config, mock_neo4j, mock_chroma):
         mock_config.DOMAINS = ["coding"]
         mock_config.collection_name = lambda d: f"domain_{d}"
@@ -243,7 +243,7 @@ class TestResolveDuplicates:
         ]
         session.run.return_value = iter(records)
 
-        with patch("agents.rectify.log_event") as mock_log:
+        with patch("core.agents.rectify.log_event") as mock_log:
             resolve_duplicates(driver, client, "hash", "keep", redis_client=redis)
             mock_log.assert_called_once()
 
@@ -265,7 +265,7 @@ class TestResolveDuplicates:
 # ---------------------------------------------------------------------------
 
 class TestCleanupOrphanedChunks:
-    @patch("agents.rectify.config")
+    @patch("core.agents.rectify.config")
     def test_cleans_orphans(self, mock_config, mock_chroma):
         mock_config.collection_name = lambda d: f"domain_{d}"
         client, collection = mock_chroma
@@ -281,13 +281,13 @@ class TestCleanupOrphanedChunks:
         assert result["coding"] == 2
         collection.delete.assert_called_once_with(ids=["c1", "c2"])
 
-    @patch("agents.rectify.config")
+    @patch("core.agents.rectify.config")
     def test_empty_orphans(self, mock_config, mock_chroma):
         client, collection = mock_chroma
         result = cleanup_orphaned_chunks(client, {})
         assert result == {}
 
-    @patch("agents.rectify.config")
+    @patch("core.agents.rectify.config")
     def test_error_returns_zero(self, mock_config, mock_chroma):
         mock_config.collection_name = lambda d: f"domain_{d}"
         client, collection = mock_chroma
@@ -303,7 +303,7 @@ class TestCleanupOrphanedChunks:
 # ---------------------------------------------------------------------------
 
 class TestAnalyzeDomainDistribution:
-    @patch("agents.rectify.config")
+    @patch("core.agents.rectify.config")
     def test_basic_distribution(self, mock_config, mock_neo4j):
         mock_config.DOMAINS = ["coding", "general"]
         driver, session = mock_neo4j
@@ -319,7 +319,7 @@ class TestAnalyzeDomainDistribution:
         assert result["total_chunks"] == 70
         assert result["distribution"]["coding"]["artifacts"] == 10
 
-    @patch("agents.rectify.config")
+    @patch("core.agents.rectify.config")
     def test_missing_domain_padded_with_zeros(self, mock_config, mock_neo4j):
         mock_config.DOMAINS = ["coding", "general", "finance"]
         driver, session = mock_neo4j
@@ -333,7 +333,7 @@ class TestAnalyzeDomainDistribution:
         assert result["distribution"]["finance"] == {"artifacts": 0, "chunks": 0}
         assert result["distribution"]["general"] == {"artifacts": 0, "chunks": 0}
 
-    @patch("agents.rectify.config")
+    @patch("core.agents.rectify.config")
     def test_null_chunk_count(self, mock_config, mock_neo4j):
         mock_config.DOMAINS = ["coding"]
         driver, session = mock_neo4j

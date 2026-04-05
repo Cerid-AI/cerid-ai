@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 
 
 def _make_app():
-    from routers.settings import router
+    from app.routers.settings import router
 
     app = FastAPI()
     app.include_router(router)

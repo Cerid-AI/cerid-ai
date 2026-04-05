@@ -313,15 +313,14 @@ class TestMemoryConsolidationIntegration:
     """Test consolidation integration in extract_and_store_memories."""
 
     @pytest.mark.asyncio
-    @patch("agents.memory.config")
-    @patch("agents.memory.extract_memories", new_callable=AsyncMock)
-    @patch("services.ingestion.ingest_content")
+    @patch("core.agents.memory.config")
+    @patch("core.agents.memory.extract_memories", new_callable=AsyncMock)
     @patch("config.features.FEATURE_TOGGLES", {
         "enable_memory_consolidation": True,
     })
     @patch("utils.memory_consolidation.classify_memory", new_callable=AsyncMock)
     async def test_noop_skips_storage(
-        self, mock_classify, mock_ingest, mock_extract, mock_config, mock_chroma
+        self, mock_classify, mock_extract, mock_config, mock_chroma
     ):
         """NOOP classification should skip storage and count as skipped."""
         mock_config.ENABLE_MEMORY_EXTRACTION = True
@@ -331,11 +330,13 @@ class TestMemoryConsolidationIntegration:
         mock_classify.return_value = MemoryAction(
             action="NOOP", reason="already stored"
         )
+        mock_ingest = MagicMock(return_value={"status": "success", "artifact_id": "art-1"})
 
         from agents.memory import extract_and_store_memories
         result = await extract_and_store_memories(
             "x" * 200, "conv-123", "claude",
             chroma_client=mock_chroma[0],
+            ingest_fn=mock_ingest,
         )
         assert result["memories_extracted"] == 1
         assert result["memories_stored"] == 0
@@ -343,16 +344,15 @@ class TestMemoryConsolidationIntegration:
         mock_ingest.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch("agents.memory.config")
-    @patch("agents.memory.extract_memories", new_callable=AsyncMock)
-    @patch("services.ingestion.ingest_content")
+    @patch("core.agents.memory.config")
+    @patch("core.agents.memory.extract_memories", new_callable=AsyncMock)
     @patch("config.features.FEATURE_TOGGLES", {
         "enable_memory_consolidation": True,
     })
     @patch("utils.memory_consolidation.classify_memory", new_callable=AsyncMock)
     @patch("utils.memory_consolidation.mark_superseded")
     async def test_update_stores_and_marks_superseded(
-        self, mock_mark, mock_classify, mock_ingest, mock_extract, mock_config,
+        self, mock_mark, mock_classify, mock_extract, mock_config,
         mock_chroma, mock_neo4j,
     ):
         """UPDATE should store new memory and mark old one superseded."""
@@ -363,39 +363,40 @@ class TestMemoryConsolidationIntegration:
         mock_classify.return_value = MemoryAction(
             action="UPDATE", target_id="art-old", reason="corrected"
         )
-        mock_ingest.return_value = {"status": "success", "artifact_id": "art-new"}
+        mock_ingest = MagicMock(return_value={"status": "success", "artifact_id": "art-new"})
 
         from agents.memory import extract_and_store_memories
         result = await extract_and_store_memories(
             "x" * 200, "conv-123", "claude",
             chroma_client=mock_chroma[0],
             neo4j_driver=mock_neo4j[0],
+            ingest_fn=mock_ingest,
         )
         assert result["memories_stored"] == 1
         assert result["results"][0]["consolidation_action"] == "UPDATE"
         mock_mark.assert_called_once_with(mock_neo4j[0], "art-old", "art-new")
 
     @pytest.mark.asyncio
-    @patch("agents.memory.config")
-    @patch("agents.memory.extract_memories", new_callable=AsyncMock)
-    @patch("services.ingestion.ingest_content")
+    @patch("core.agents.memory.config")
+    @patch("core.agents.memory.extract_memories", new_callable=AsyncMock)
     @patch("config.features.FEATURE_TOGGLES", {
         "enable_memory_consolidation": False,
     })
     async def test_consolidation_disabled_skips_classification(
-        self, mock_ingest, mock_extract, mock_config, mock_chroma,
+        self, mock_extract, mock_config, mock_chroma,
     ):
         """When consolidation is disabled, should proceed directly to storage."""
         mock_config.ENABLE_MEMORY_EXTRACTION = True
         mock_extract.return_value = [
             {"content": "some fact", "memory_type": "fact", "summary": "fact"},
         ]
-        mock_ingest.return_value = {"status": "success", "artifact_id": "art-1"}
+        mock_ingest = MagicMock(return_value={"status": "success", "artifact_id": "art-1"})
 
         from agents.memory import extract_and_store_memories
         result = await extract_and_store_memories(
             "x" * 200, "conv-123",
             chroma_client=mock_chroma[0],
+            ingest_fn=mock_ingest,
         )
         assert result["memories_stored"] == 1
         assert result["skipped_duplicates"] == 0

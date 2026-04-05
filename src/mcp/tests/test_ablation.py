@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from eval.ablation import (
+from app.eval.ablation import (
     _RAG_TOGGLES,
     PRESET_CONFIGS,
     AblationConfig,
@@ -119,7 +119,7 @@ class TestRunAblation:
         }
         with (
             patch("utils.features.set_toggle") as mock_set,
-            patch("agents.query_agent.agent_query", new_callable=AsyncMock, return_value=mock_result),
+            patch("core.agents.query_agent.agent_query", new_callable=AsyncMock, return_value=mock_result),
         ):
             configs = [
                 AblationConfig(name="off", toggles={t: False for t in _RAG_TOGGLES}),

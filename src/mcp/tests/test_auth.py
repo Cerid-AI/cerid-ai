@@ -20,7 +20,7 @@ class TestJWTHelpers:
     """Test JWT create/decode functions."""
 
     def test_create_and_decode_token(self):
-        from middleware.jwt_auth import create_access_token, decode_access_token
+        from app.middleware.jwt_auth import create_access_token, decode_access_token
 
         payload = {
             "sub": "user-123",
@@ -37,7 +37,7 @@ class TestJWTHelpers:
     def test_decode_invalid_token(self):
         import jwt as pyjwt
 
-        from middleware.jwt_auth import decode_access_token
+        from app.middleware.jwt_auth import decode_access_token
 
         with pytest.raises(pyjwt.PyJWTError):
             decode_access_token("not-a-valid-token", secret="test-secret")
@@ -45,7 +45,7 @@ class TestJWTHelpers:
     def test_decode_expired_token(self):
         import jwt as pyjwt
 
-        from middleware.jwt_auth import create_access_token, decode_access_token
+        from app.middleware.jwt_auth import create_access_token, decode_access_token
 
         payload = {
             "sub": "user-123",
@@ -59,7 +59,7 @@ class TestJWTHelpers:
     def test_decode_wrong_secret(self):
         import jwt as pyjwt
 
-        from middleware.jwt_auth import create_access_token, decode_access_token
+        from app.middleware.jwt_auth import create_access_token, decode_access_token
 
         payload = {"sub": "user-123"}
         token = create_access_token(payload, secret="test-secret")
@@ -76,7 +76,7 @@ class TestUserModel:
     """Test User and Tenant Pydantic models."""
 
     def test_user_model(self):
-        from models.user import User
+        from app.models.user import User
 
         user = User(
             id="u1",
@@ -90,7 +90,7 @@ class TestUserModel:
         assert user.display_name == ""
 
     def test_user_public_model(self):
-        from models.user import UserPublic
+        from app.models.user import UserPublic
 
         user = UserPublic(
             id="u1",
@@ -104,7 +104,7 @@ class TestUserModel:
         assert user.usage_queries == 0
 
     def test_tenant_model(self):
-        from models.user import Tenant
+        from app.models.user import Tenant
 
         tenant = Tenant(id="t1", name="Test Tenant")
         assert tenant.id == "t1"
@@ -124,7 +124,7 @@ class TestUserCRUD:
             "tenant": {"id": "t1", "name": "Test Tenant"},
         }
 
-        from db.neo4j.users import create_tenant
+        from app.db.neo4j.users import create_tenant
 
         result = create_tenant(driver, name="Test Tenant", tenant_id="t1")
         session.run.assert_called_once()
@@ -138,7 +138,7 @@ class TestUserCRUD:
             "tenant": {"id": "t1", "name": "Test"},
         }
 
-        from db.neo4j.users import get_tenant
+        from app.db.neo4j.users import get_tenant
         result = get_tenant(driver, "t1")
 
         assert result["id"] == "t1"
@@ -147,7 +147,7 @@ class TestUserCRUD:
         driver, session = mock_neo4j
         session.run.return_value.single.return_value = None
 
-        from db.neo4j.users import get_tenant
+        from app.db.neo4j.users import get_tenant
         result = get_tenant(driver, "nonexistent")
         assert result is None
 
@@ -157,7 +157,7 @@ class TestUserCRUD:
             "user": {"id": "auto-uuid", "email": "test@example.com"},
         }
 
-        from db.neo4j.users import create_user
+        from app.db.neo4j.users import create_user
 
         result = create_user(
             driver,
@@ -179,7 +179,7 @@ class TestUserCRUD:
             "user": {"id": "u1", "email": "test@example.com"},
         }
 
-        from db.neo4j.users import get_user_by_email
+        from app.db.neo4j.users import get_user_by_email
         result = get_user_by_email(driver, "test@example.com")
         assert result["id"] == "u1"
 
@@ -187,7 +187,7 @@ class TestUserCRUD:
         driver, session = mock_neo4j
         session.run.return_value.single.return_value = None
 
-        from db.neo4j.users import get_user_by_email
+        from app.db.neo4j.users import get_user_by_email
         result = get_user_by_email(driver, "nobody@example.com")
         assert result is None
 
@@ -197,7 +197,7 @@ class TestUserCRUD:
             "user": {"id": "u1", "email": "test@example.com"},
         }
 
-        from db.neo4j.users import get_user_by_id
+        from app.db.neo4j.users import get_user_by_id
         result = get_user_by_id(driver, "u1")
         assert result["email"] == "test@example.com"
 
@@ -207,7 +207,7 @@ class TestUserCRUD:
             "user": {"id": "u1", "display_name": "New Name"},
         }
 
-        from db.neo4j.users import update_user
+        from app.db.neo4j.users import update_user
 
         update_user(driver, "u1", display_name="New Name", role="admin")
         session.run.assert_called_once()
@@ -216,7 +216,7 @@ class TestUserCRUD:
 
     def test_update_last_login(self, mock_neo4j):
         driver, session = mock_neo4j
-        from db.neo4j.users import update_last_login
+        from app.db.neo4j.users import update_last_login
 
         update_last_login(driver, "u1")
         session.run.assert_called_once()
@@ -229,13 +229,13 @@ class TestUserCRUD:
         record2 = {"user": {"id": "u2"}}
         session.run.return_value = [record1, record2]
 
-        from db.neo4j.users import list_users
+        from app.db.neo4j.users import list_users
         result = list_users(driver, "t1")
         assert len(result) == 2
 
     def test_update_usage_counters(self, mock_neo4j):
         driver, session = mock_neo4j
-        from db.neo4j.users import update_usage_counters
+        from app.db.neo4j.users import update_usage_counters
 
         update_usage_counters(driver, "u1", queries=5, ingestions=3)
         session.run.assert_called_once()
@@ -248,7 +248,7 @@ class TestUserCRUD:
             "tenant": {"id": "default", "name": "Default"},
         }
 
-        from db.neo4j.users import ensure_default_tenant
+        from app.db.neo4j.users import ensure_default_tenant
 
         ensure_default_tenant(driver, "default")
         session.run.assert_called_once()
@@ -263,19 +263,19 @@ class TestTenantContext:
     """Test tenant context propagation."""
 
     def test_get_tenant_id_default(self):
-        from middleware.tenant_context import get_tenant_id
+        from app.middleware.tenant_context import get_tenant_id
         # Should return default when not in request context
         result = get_tenant_id()
         assert isinstance(result, str)
         assert len(result) > 0
 
     def test_get_user_id_default(self):
-        from middleware.tenant_context import get_user_id
+        from app.middleware.tenant_context import get_user_id
         result = get_user_id()
         assert result is None
 
     def test_contextvars_set_and_reset(self):
-        from middleware.tenant_context import (
+        from app.middleware.tenant_context import (
             get_tenant_id,
             get_user_id,
             tenant_id_var,
@@ -353,7 +353,7 @@ class TestPasswordHashing:
     """Test bcrypt password hashing and verification."""
 
     def test_hash_and_verify(self):
-        from routers.auth import _hash_password, _verify_password
+        from app.routers.auth import _hash_password, _verify_password
 
         hashed = _hash_password("my-secure-password")
         assert hashed != "my-secure-password"
@@ -362,7 +362,7 @@ class TestPasswordHashing:
         assert _verify_password("wrong-password", hashed) is False
 
     def test_different_hashes_same_password(self):
-        from routers.auth import _hash_password
+        from app.routers.auth import _hash_password
 
         h1 = _hash_password("test-password")
         h2 = _hash_password("test-password")
@@ -382,12 +382,12 @@ class TestAuthHelpers:
         # Patch create_access_token where _build_access_token references it
         # (routers.auth imports it at the top, so patch that reference)
         with patch(
-            "routers.auth.create_access_token",
+            "app.routers.auth.create_access_token",
             side_effect=lambda payload, secret="test-key": pyjwt.encode(
                 payload, "test-key", algorithm="HS256"
             ),
         ):
-            from routers.auth import _build_access_token
+            from app.routers.auth import _build_access_token
 
             token = _build_access_token("u1", "t1", "admin")
 
@@ -403,12 +403,12 @@ class TestAuthHelpers:
         import jwt as pyjwt
 
         with patch(
-            "routers.auth.create_access_token",
+            "app.routers.auth.create_access_token",
             side_effect=lambda payload, secret="test-key": pyjwt.encode(
                 payload, "test-key", algorithm="HS256"
             ),
         ):
-            from routers.auth import _build_refresh_token
+            from app.routers.auth import _build_refresh_token
 
             token = _build_refresh_token("u1")
 
@@ -419,7 +419,7 @@ class TestAuthHelpers:
         assert "jti" in payload
 
     def test_store_and_check_refresh_token(self, mock_redis):
-        from routers.auth import _is_refresh_valid, _store_refresh_token
+        from app.routers.auth import _is_refresh_valid, _store_refresh_token
 
         mock_redis.exists.return_value = 1
         _store_refresh_token(mock_redis, "jti-123", "user-1")
@@ -428,7 +428,7 @@ class TestAuthHelpers:
         assert _is_refresh_valid(mock_redis, "jti-123") is True
 
     def test_revoke_refresh_token(self, mock_redis):
-        from routers.auth import _revoke_refresh_token
+        from app.routers.auth import _revoke_refresh_token
 
         _revoke_refresh_token(mock_redis, "jti-123")
         mock_redis.delete.assert_called_once()
@@ -436,7 +436,7 @@ class TestAuthHelpers:
         assert "jti-123" in key
 
     def test_revoked_token_invalid(self, mock_redis):
-        from routers.auth import _is_refresh_valid
+        from app.routers.auth import _is_refresh_valid
 
         mock_redis.exists.return_value = 0
         assert _is_refresh_valid(mock_redis, "jti-revoked") is False
@@ -476,7 +476,7 @@ class TestChatApiKeyResolution:
     """Test per-user API key resolution in chat proxy."""
 
     def test_resolve_api_key_no_user(self):
-        from routers.chat import _resolve_api_key
+        from app.routers.chat import _resolve_api_key
 
         request = MagicMock()
         request.state = MagicMock(spec=[])  # No user_id attribute
@@ -487,7 +487,7 @@ class TestChatApiKeyResolution:
         assert isinstance(result, str)
 
     def test_resolve_api_key_with_user_no_key(self):
-        from routers.chat import _resolve_api_key
+        from app.routers.chat import _resolve_api_key
 
         request = MagicMock()
         request.state.user_id = "user-123"

@@ -126,17 +126,47 @@ def _reset_bifrost_client():
     Without this, get_bifrost_client() / _get_client() cache a client from the
     first test, preventing subsequent tests' patches from taking effect.
     Also clears the claim_cache L1 in-memory cache to prevent cross-test leakage.
+    Sets a dummy OPENROUTER_API_KEY so LLM calls use the direct OpenRouter code
+    path (where httpx.AsyncClient mocks take effect) instead of Bifrost fallback.
     """
+    import os
+
     import utils.bifrost as _bifrost_mod
     import utils.llm_client as _llm_mod
+    from core.utils.circuit_breaker import get_breaker
     from utils.claim_cache import clear_l1_cache
+
+    # Ensure LLM calls use the direct OpenRouter path (mockable via httpx.AsyncClient)
+    old_key = os.environ.get("OPENROUTER_API_KEY")
+    os.environ["OPENROUTER_API_KEY"] = "test-dummy-key"  # pragma: allowlist secret
+
+    # Also reset internal_llm client
+    try:
+        import core.utils.internal_llm as _internal_llm_mod
+        _internal_llm_mod._ollama_client = None
+    except Exception:
+        pass
+
     _bifrost_mod._client = None
     _llm_mod._client = None
     clear_l1_cache()
+    # Reset all circuit breakers to prevent cross-test state leakage
+    for name in (
+        "bifrost-rerank", "bifrost-claims", "bifrost-verify",
+        "bifrost-synopsis", "bifrost-memory", "bifrost-compress",
+        "bifrost-decompose", "web-search", "openrouter", "tavily",
+        "searxng", "ragas_eval", "neo4j", "ollama",
+    ):
+        get_breaker(name).reset()
     yield
     _bifrost_mod._client = None
     _llm_mod._client = None
     clear_l1_cache()
+    # Restore original API key state
+    if old_key is None:
+        os.environ.pop("OPENROUTER_API_KEY", None)
+    else:
+        os.environ["OPENROUTER_API_KEY"] = old_key
 
 
 @pytest.fixture

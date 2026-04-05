@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from db.neo4j.artifacts import (
+from app.db.neo4j.artifacts import (
     create_artifact,
     find_artifact_by_filename,
     get_artifact,
@@ -15,13 +15,13 @@ from db.neo4j.artifacts import (
     recategorize_artifact,
     update_artifact,
 )
-from db.neo4j.relationships import (
+from app.db.neo4j.relationships import (
     create_relationship,
     discover_relationships,
     find_related_artifacts,
 )
-from db.neo4j.schema import init_schema
-from db.neo4j.taxonomy import (
+from app.db.neo4j.schema import init_schema
+from app.db.neo4j.taxonomy import (
     create_domain,
     create_sub_category,
     get_taxonomy,
@@ -349,7 +349,7 @@ class TestRecategorizeArtifact:
 # ---------------------------------------------------------------------------
 
 class TestCreateRelationship:
-    @patch("db.neo4j.relationships.config")
+    @patch("app.db.neo4j.relationships.config")
     def test_valid_relationship(self, mock_config):
         mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO", "REFERENCES"]
         driver, session = _mock_driver()
@@ -359,7 +359,7 @@ class TestCreateRelationship:
         result = create_relationship(driver, "a1", "a2", "RELATES_TO")
         assert result is True
 
-    @patch("db.neo4j.relationships.config")
+    @patch("app.db.neo4j.relationships.config")
     def test_invalid_rel_type_returns_false(self, mock_config):
         mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO"]
         driver, session = _mock_driver()
@@ -368,7 +368,7 @@ class TestCreateRelationship:
         assert result is False
         session.run.assert_not_called()
 
-    @patch("db.neo4j.relationships.config")
+    @patch("app.db.neo4j.relationships.config")
     def test_self_reference_returns_false(self, mock_config):
         mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO"]
         driver, session = _mock_driver()
@@ -376,7 +376,7 @@ class TestCreateRelationship:
         result = create_relationship(driver, "same-id", "same-id", "RELATES_TO")
         assert result is False
 
-    @patch("db.neo4j.relationships.config")
+    @patch("app.db.neo4j.relationships.config")
     def test_existing_relationship_returns_false(self, mock_config):
         mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO"]
         driver, session = _mock_driver()
@@ -387,7 +387,7 @@ class TestCreateRelationship:
         result = create_relationship(driver, "a1", "a2", "RELATES_TO")
         assert result is False
 
-    @patch("db.neo4j.relationships.config")
+    @patch("app.db.neo4j.relationships.config")
     def test_properties_merged(self, mock_config):
         mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO"]
         driver, session = _mock_driver()
@@ -406,13 +406,13 @@ class TestCreateRelationship:
 # ---------------------------------------------------------------------------
 
 class TestFindRelatedArtifacts:
-    @patch("db.neo4j.relationships.config")
+    @patch("app.db.neo4j.relationships.config")
     def test_empty_artifact_ids(self, mock_config):
         driver, _ = _mock_driver()
         result = find_related_artifacts(driver, [])
         assert result == []
 
-    @patch("db.neo4j.relationships.config")
+    @patch("app.db.neo4j.relationships.config")
     def test_returns_related(self, mock_config):
         mock_config.GRAPH_TRAVERSAL_DEPTH = 2
         mock_config.GRAPH_MAX_RELATED = 10
@@ -431,7 +431,7 @@ class TestFindRelatedArtifacts:
         assert len(result) == 1
         assert result[0]["id"] == "related-1"
 
-    @patch("db.neo4j.relationships.config")
+    @patch("app.db.neo4j.relationships.config")
     def test_depth_clamped(self, mock_config):
         mock_config.GRAPH_TRAVERSAL_DEPTH = 2
         mock_config.GRAPH_MAX_RELATED = 10
@@ -445,7 +445,7 @@ class TestFindRelatedArtifacts:
         # Depth should be clamped to max 4
         assert "*1..4" in call_args.args[0]
 
-    @patch("db.neo4j.relationships.config")
+    @patch("app.db.neo4j.relationships.config")
     def test_invalid_rel_types_returns_empty(self, mock_config):
         mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO"]
 
@@ -459,8 +459,8 @@ class TestFindRelatedArtifacts:
 # ---------------------------------------------------------------------------
 
 class TestDiscoverRelationships:
-    @patch("db.neo4j.relationships.create_relationship")
-    @patch("db.neo4j.relationships.config")
+    @patch("app.db.neo4j.relationships.create_relationship")
+    @patch("app.db.neo4j.relationships.config")
     def test_same_directory_discovery(self, mock_config, mock_create_rel):
         mock_config.GRAPH_MIN_KEYWORD_OVERLAP = 2
         mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO", "REFERENCES"]
@@ -476,8 +476,8 @@ class TestDiscoverRelationships:
         assert count >= 1
         mock_create_rel.assert_called()
 
-    @patch("db.neo4j.relationships.create_relationship")
-    @patch("db.neo4j.relationships.config")
+    @patch("app.db.neo4j.relationships.create_relationship")
+    @patch("app.db.neo4j.relationships.config")
     def test_root_file_skips_directory_strategy(self, mock_config, mock_create_rel):
         mock_config.GRAPH_MIN_KEYWORD_OVERLAP = 2
 
@@ -490,8 +490,8 @@ class TestDiscoverRelationships:
         # Root file has no parent_dir — should skip directory strategy
         assert count == 0
 
-    @patch("db.neo4j.relationships.create_relationship")
-    @patch("db.neo4j.relationships.config")
+    @patch("app.db.neo4j.relationships.create_relationship")
+    @patch("app.db.neo4j.relationships.config")
     def test_keyword_overlap_discovery(self, mock_config, mock_create_rel):
         mock_config.GRAPH_MIN_KEYWORD_OVERLAP = 2
         mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO", "REFERENCES"]
@@ -509,8 +509,8 @@ class TestDiscoverRelationships:
         # python + fastapi overlap >= 2 → should create relationship
         assert count >= 1
 
-    @patch("db.neo4j.relationships.create_relationship")
-    @patch("db.neo4j.relationships.config")
+    @patch("app.db.neo4j.relationships.create_relationship")
+    @patch("app.db.neo4j.relationships.config")
     def test_content_reference_discovery(self, mock_config, mock_create_rel):
         mock_config.GRAPH_MIN_KEYWORD_OVERLAP = 100  # Disable keyword strategy
         mock_config.GRAPH_RELATIONSHIP_TYPES = ["RELATES_TO", "REFERENCES"]
@@ -526,8 +526,8 @@ class TestDiscoverRelationships:
         )
         assert count >= 1
 
-    @patch("db.neo4j.relationships.create_relationship")
-    @patch("db.neo4j.relationships.config")
+    @patch("app.db.neo4j.relationships.create_relationship")
+    @patch("app.db.neo4j.relationships.config")
     def test_no_content_skips_reference_strategy(self, mock_config, mock_create_rel):
         mock_config.GRAPH_MIN_KEYWORD_OVERLAP = 100
 

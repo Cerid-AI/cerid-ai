@@ -405,7 +405,7 @@ class TestTaxonomyRouter:
 
     def test_create_domain_request_model(self):
         """CreateDomainRequest has correct defaults."""
-        from routers.taxonomy import CreateDomainRequest
+        from app.routers.taxonomy import CreateDomainRequest
 
         req = CreateDomainRequest(name="test")
         assert req.name == "test"
@@ -414,7 +414,7 @@ class TestTaxonomyRouter:
 
     def test_create_subcategory_request_model(self):
         """CreateSubCategoryRequest requires domain and name."""
-        from routers.taxonomy import CreateSubCategoryRequest
+        from app.routers.taxonomy import CreateSubCategoryRequest
 
         req = CreateSubCategoryRequest(domain="coding", name="rust")
         assert req.domain == "coding"
@@ -422,7 +422,7 @@ class TestTaxonomyRouter:
 
     def test_update_artifact_taxonomy_request(self):
         """UpdateArtifactTaxonomyRequest handles optional fields."""
-        from routers.taxonomy import UpdateArtifactTaxonomyRequest
+        from app.routers.taxonomy import UpdateArtifactTaxonomyRequest
 
         req = UpdateArtifactTaxonomyRequest(
             artifact_id="abc-123",
@@ -435,7 +435,7 @@ class TestTaxonomyRouter:
 
     def test_update_artifact_taxonomy_request_partial(self):
         """UpdateArtifactTaxonomyRequest allows updating just sub_category or tags."""
-        from routers.taxonomy import UpdateArtifactTaxonomyRequest
+        from app.routers.taxonomy import UpdateArtifactTaxonomyRequest
 
         req_sub = UpdateArtifactTaxonomyRequest(
             artifact_id="abc-123", sub_category="devops"
@@ -451,7 +451,7 @@ class TestTaxonomyRouter:
 
     def test_merge_tags_request_model(self):
         """MergeTagsRequest requires source and target."""
-        from routers.taxonomy import MergeTagsRequest
+        from app.routers.taxonomy import MergeTagsRequest
 
         req = MergeTagsRequest(source_tag="py", target_tag="python")
         assert req.source_tag == "py"
@@ -464,7 +464,7 @@ class TestSuggestTagsEndpoint:
     @pytest.mark.asyncio
     async def test_suggest_tags_with_domain(self):
         """Suggest tags returns vocabulary tags for a specific domain."""
-        with patch("routers.taxonomy.get_neo4j") as mock_neo4j:
+        with patch("app.routers.taxonomy.get_neo4j") as mock_neo4j:
             mock_driver = MagicMock()
             mock_session = MagicMock()
             mock_result = MagicMock()
@@ -474,7 +474,7 @@ class TestSuggestTagsEndpoint:
             mock_driver.session.return_value.__exit__ = MagicMock(return_value=False)
             mock_neo4j.return_value = mock_driver
 
-            from routers.taxonomy import suggest_tags_endpoint
+            from app.routers.taxonomy import suggest_tags_endpoint
 
             result = await suggest_tags_endpoint(domain="coding", prefix="", limit=10)
             assert len(result) > 0
@@ -485,7 +485,7 @@ class TestSuggestTagsEndpoint:
     @pytest.mark.asyncio
     async def test_suggest_tags_with_prefix(self):
         """Suggest tags filters by prefix."""
-        with patch("routers.taxonomy.get_neo4j") as mock_neo4j:
+        with patch("app.routers.taxonomy.get_neo4j") as mock_neo4j:
             mock_driver = MagicMock()
             mock_session = MagicMock()
             mock_result = MagicMock()
@@ -495,7 +495,7 @@ class TestSuggestTagsEndpoint:
             mock_driver.session.return_value.__exit__ = MagicMock(return_value=False)
             mock_neo4j.return_value = mock_driver
 
-            from routers.taxonomy import suggest_tags_endpoint
+            from app.routers.taxonomy import suggest_tags_endpoint
 
             result = await suggest_tags_endpoint(domain="coding", prefix="py", limit=30)
             assert len(result) > 0
@@ -508,7 +508,7 @@ class TestIngestionWithTaxonomy:
     def test_ingest_file_request_has_sub_category(self):
         """IngestFileRequest model accepts sub_category."""
         try:
-            from routers.ingestion import IngestFileRequest
+            from app.routers.ingestion import IngestFileRequest
         except ImportError:
             pytest.skip("routers.ingestion not importable (missing host deps)")
             return
@@ -525,7 +525,7 @@ class TestIngestionWithTaxonomy:
     def test_recategorize_request_has_sub_category(self):
         """RecategorizeRequest model accepts sub_category."""
         try:
-            from routers.artifacts import RecategorizeRequest
+            from app.routers.artifacts import RecategorizeRequest
         except ImportError:
             pytest.skip("routers.artifacts not importable (missing host deps)")
             return

@@ -7,7 +7,7 @@ import asyncio
 import os
 from unittest.mock import patch
 
-from routers.upload import _archive_file, list_archive_files
+from app.routers.upload import _archive_file, list_archive_files
 
 # ---------------------------------------------------------------------------
 # Tests: _archive_file helper
@@ -22,7 +22,7 @@ class TestArchiveFile:
         archive = tmp_path / "archive"
         archive.mkdir()
 
-        with patch("routers.upload.config") as mock_config:
+        with patch("app.routers.upload.config") as mock_config:
             mock_config.ARCHIVE_PATH = str(archive)
             _archive_file(str(src), "test.txt", "coding")
 
@@ -37,7 +37,7 @@ class TestArchiveFile:
         archive = tmp_path / "archive"
         archive.mkdir()
 
-        with patch("routers.upload.config") as mock_config:
+        with patch("app.routers.upload.config") as mock_config:
             mock_config.ARCHIVE_PATH = str(archive)
             _archive_file(str(src), "file.txt", "newdomain")
 
@@ -51,7 +51,7 @@ class TestArchiveFile:
         (archive / "coding").mkdir(parents=True)
         (archive / "coding" / "test.txt").write_text("old content")
 
-        with patch("routers.upload.config") as mock_config:
+        with patch("app.routers.upload.config") as mock_config:
             mock_config.ARCHIVE_PATH = str(archive)
             _archive_file(str(src), "test.txt", "coding")
 
@@ -65,7 +65,7 @@ class TestArchiveFile:
         archive = tmp_path / "archive"
         archive.mkdir()
 
-        with patch("routers.upload.config") as mock_config:
+        with patch("app.routers.upload.config") as mock_config:
             mock_config.ARCHIVE_PATH = str(archive)
             # Should not raise — logs a warning
             _archive_file("/nonexistent/path.txt", "file.txt", "general")
@@ -81,7 +81,7 @@ class TestArchiveFilesEndpoint:
 
     def test_empty_archive(self, tmp_path):
         """An empty archive directory returns no files."""
-        with patch("routers.upload.config") as mock_config:
+        with patch("app.routers.upload.config") as mock_config:
             mock_config.ARCHIVE_PATH = str(tmp_path)
             mock_config.STORAGE_MODE = "extract_only"
             result = asyncio.get_event_loop().run_until_complete(
@@ -101,7 +101,7 @@ class TestArchiveFilesEndpoint:
         (tmp_path / "finance").mkdir()
         (tmp_path / "finance" / "budget.csv").write_text("a,b\n1,2")
 
-        with patch("routers.upload.config") as mock_config:
+        with patch("app.routers.upload.config") as mock_config:
             mock_config.ARCHIVE_PATH = str(tmp_path)
             mock_config.STORAGE_MODE = "archive"
             result = asyncio.get_event_loop().run_until_complete(
@@ -121,7 +121,7 @@ class TestArchiveFilesEndpoint:
         (tmp_path / "finance").mkdir()
         (tmp_path / "finance" / "budget.csv").write_text("y")
 
-        with patch("routers.upload.config") as mock_config:
+        with patch("app.routers.upload.config") as mock_config:
             mock_config.ARCHIVE_PATH = str(tmp_path)
             mock_config.STORAGE_MODE = "archive"
             result = asyncio.get_event_loop().run_until_complete(
@@ -141,7 +141,7 @@ class TestArchiveFilesEndpoint:
         (tmp_path / "coding").mkdir()
         (tmp_path / "coding" / "real.py").write_text("ok")
 
-        with patch("routers.upload.config") as mock_config:
+        with patch("app.routers.upload.config") as mock_config:
             mock_config.ARCHIVE_PATH = str(tmp_path)
             mock_config.STORAGE_MODE = "archive"
             result = asyncio.get_event_loop().run_until_complete(
@@ -156,7 +156,7 @@ class TestArchiveFilesEndpoint:
         (tmp_path / "general").mkdir()
         (tmp_path / "general" / "doc.txt").write_text("hello world")
 
-        with patch("routers.upload.config") as mock_config:
+        with patch("app.routers.upload.config") as mock_config:
             mock_config.ARCHIVE_PATH = str(tmp_path)
             mock_config.STORAGE_MODE = "archive"
             result = asyncio.get_event_loop().run_until_complete(

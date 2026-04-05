@@ -11,7 +11,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from middleware.request_id import RequestIDMiddleware
+from app.middleware.request_id import RequestIDMiddleware
 
 # ---------------------------------------------------------------------------
 # Helper: minimal ASGI app with request ID middleware

@@ -12,7 +12,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from middleware.rate_limit import RateLimitMiddleware, get_client_ip
+from app.middleware.rate_limit import RateLimitMiddleware, get_client_ip
 
 # ---------------------------------------------------------------------------
 # Helper: minimal ASGI app with rate limiter
@@ -226,14 +226,14 @@ class TestGetClientIP:
         request.client.host = "192.168.1.100"
         request.headers = {}
 
-        with patch("middleware.rate_limit.TRUSTED_PROXIES", []):
+        with patch("app.middleware.rate_limit.TRUSTED_PROXIES", []):
             assert get_client_ip(request) == "192.168.1.100"
 
     def test_unknown_client(self):
         request = MagicMock()
         request.client = None
 
-        with patch("middleware.rate_limit.TRUSTED_PROXIES", []):
+        with patch("app.middleware.rate_limit.TRUSTED_PROXIES", []):
             assert get_client_ip(request) == "unknown"
 
     def test_trusted_proxy_uses_forwarded(self):
@@ -244,7 +244,7 @@ class TestGetClientIP:
         request.headers = {"X-Forwarded-For": "203.0.113.50, 172.17.0.1"}
 
         trusted = [ipaddress.ip_network("172.17.0.0/16")]
-        with patch("middleware.rate_limit.TRUSTED_PROXIES", trusted):
+        with patch("app.middleware.rate_limit.TRUSTED_PROXIES", trusted):
             assert get_client_ip(request) == "203.0.113.50"
 
     def test_untrusted_proxy_ignores_forwarded(self):
@@ -255,7 +255,7 @@ class TestGetClientIP:
         request.headers = {"X-Forwarded-For": "203.0.113.50"}
 
         trusted = [ipaddress.ip_network("172.17.0.0/16")]
-        with patch("middleware.rate_limit.TRUSTED_PROXIES", trusted):
+        with patch("app.middleware.rate_limit.TRUSTED_PROXIES", trusted):
             # 10.0.0.5 is not in trusted range — ignore XFF
             assert get_client_ip(request) == "10.0.0.5"
 
@@ -267,7 +267,7 @@ class TestGetClientIP:
         request.headers = {"X-Forwarded-For": "203.0.113.10, 172.17.0.3, 172.17.0.2"}
 
         trusted = [ipaddress.ip_network("172.17.0.0/16")]
-        with patch("middleware.rate_limit.TRUSTED_PROXIES", trusted):
+        with patch("app.middleware.rate_limit.TRUSTED_PROXIES", trusted):
             # Walk right-to-left: 172.17.0.2 trusted, 172.17.0.3 trusted, 203.0.113.10 not → return it
             assert get_client_ip(request) == "203.0.113.10"
 
@@ -279,7 +279,7 @@ class TestGetClientIP:
         request.headers = {"X-Forwarded-For": "172.17.0.10, 172.17.0.3"}
 
         trusted = [ipaddress.ip_network("172.17.0.0/16")]
-        with patch("middleware.rate_limit.TRUSTED_PROXIES", trusted):
+        with patch("app.middleware.rate_limit.TRUSTED_PROXIES", trusted):
             # All IPs trusted — return leftmost as best guess
             assert get_client_ip(request) == "172.17.0.10"
 
