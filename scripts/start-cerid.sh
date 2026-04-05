@@ -192,6 +192,18 @@ OLLAMA_DEFAULT_MODEL="llama3.2:3b"
 # Source GPU detection
 source "$CERID_ROOT/scripts/detect-gpu.sh" 2>/dev/null || true
 
+# [0/4] Inference Sidecar — check if running
+SIDECAR_PORT="${CERID_SIDECAR_PORT:-8889}"
+SIDECAR_URL="${CERID_SIDECAR_URL:-http://localhost:$SIDECAR_PORT}"
+if curl -sf "$SIDECAR_URL/health" >/dev/null 2>&1; then
+    echo "[sidecar] FastEmbed sidecar detected at $SIDECAR_URL"
+    SIDECAR_HEALTH=$(curl -sf "$SIDECAR_URL/health" 2>/dev/null || echo "{}")
+    echo "[sidecar] $(echo "$SIDECAR_HEALTH" | grep -o '"platform":"[^"]*"' | head -1 || echo "running")"
+else
+    echo "[sidecar] No sidecar detected (optional — Docker CPU embeddings will be used)"
+    echo "[sidecar] Install with: bash scripts/install-sidecar.sh"
+fi
+
 # Check if Ollama is already configured
 OLLAMA_CONFIGURED=$(grep -s '^OLLAMA_ENABLED=' "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- || echo "")
 

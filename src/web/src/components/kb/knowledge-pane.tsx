@@ -111,6 +111,53 @@ function daysAgoISO(days: number): string {
   return d.toISOString()
 }
 
+/** Collapsible recent uploads list — shows 4 by default, expandable. */
+function RecentUploads({ entries }: { entries: Array<{ name: string; time: number; status: "success" | "error" }> }) {
+  const [expanded, setExpanded] = useState(false)
+  const visible = expanded ? entries : entries.slice(0, 4)
+  const hiddenCount = entries.length - 4
+
+  return (
+    <div className="space-y-0.5">
+      <div className="flex items-center gap-1">
+        <Clock className="h-2.5 w-2.5 text-muted-foreground" />
+        <span className="text-[10px] text-muted-foreground font-medium">Recent uploads</span>
+      </div>
+      <div className={cn("space-y-0.5 overflow-y-auto", expanded && "max-h-32")}>
+        {visible.map((entry) => (
+          <div key={`${entry.name}-${entry.time}`} className="flex items-center gap-1.5 text-[10px]">
+            {entry.status === "success" ? (
+              <CheckCircle className="h-2.5 w-2.5 shrink-0 text-green-500" />
+            ) : (
+              <AlertCircle className="h-2.5 w-2.5 shrink-0 text-destructive" />
+            )}
+            <span className="min-w-0 truncate text-muted-foreground">{entry.name}</span>
+            <span className="ml-auto shrink-0 text-muted-foreground">
+              {new Date(entry.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            </span>
+          </div>
+        ))}
+      </div>
+      {hiddenCount > 0 && !expanded && (
+        <button
+          className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+          onClick={() => setExpanded(true)}
+        >
+          Show {hiddenCount} more
+        </button>
+      )}
+      {expanded && entries.length > 4 && (
+        <button
+          className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+          onClick={() => setExpanded(false)}
+        >
+          Show less
+        </button>
+      )}
+    </div>
+  )
+}
+
 export function KnowledgePane() {
   const { injectResult, injectedContext } = useKBInjection()
   const [searchInput, setSearchInput] = useState("")
@@ -727,25 +774,7 @@ export function KnowledgePane() {
           <span className="text-xs">Drop files here or click to upload</span>
         </div>
         {ingestionLog.length > 0 && (
-          <div className="space-y-0.5">
-            <div className="flex items-center gap-1">
-              <Clock className="h-2.5 w-2.5 text-muted-foreground" />
-              <span className="text-[10px] text-muted-foreground font-medium">Recent uploads</span>
-            </div>
-            {ingestionLog.slice(0, 5).map((entry) => (
-              <div key={`${entry.name}-${entry.time}`} className="flex items-center gap-1.5 text-[10px]">
-                {entry.status === "success" ? (
-                  <CheckCircle className="h-2.5 w-2.5 shrink-0 text-green-500" />
-                ) : (
-                  <AlertCircle className="h-2.5 w-2.5 shrink-0 text-destructive" />
-                )}
-                <span className="min-w-0 truncate text-muted-foreground">{entry.name}</span>
-                <span className="ml-auto shrink-0 text-muted-foreground">
-                  {new Date(entry.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                </span>
-              </div>
-            ))}
-          </div>
+          <RecentUploads entries={ingestionLog} />
         )}
       </div>
 

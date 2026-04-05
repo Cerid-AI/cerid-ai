@@ -45,6 +45,9 @@ services:
       - ALLOW_RESET=false
       - IS_PERSISTENT=true
       - LOG_LEVEL=WARNING
+      # HNSW tuning for better recall (applies to new collections)
+      - CHROMA_HNSW_M=12
+      - CHROMA_HNSW_EF_CONSTRUCTION=400
     networks:
       - llm-network
     restart: unless-stopped

@@ -333,12 +333,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     except Exception as e:  # noqa: BLE001
         logger.debug("Pre-warm ChromaDB failed (lazy init on first use): %s", e)
 
-    # Pre-warm reranker ONNX model to avoid cold-start penalty on first query
-    try:
-        from utils.reranker import warmup as warmup_reranker
-        warmup_reranker()
-    except Exception as e:
-        logger.debug("Pre-warm reranker failed (lazy init on first use): %s", e)
+    # Pre-warm reranker ONNX model — gated behind RERANK_MODE
+    import config as _rerank_config
+    if getattr(_rerank_config, "RERANK_MODE", "cross_encoder") != "none":
+        try:
+            from utils.reranker import warmup as warmup_reranker
+            warmup_reranker()
+        except Exception as e:
+            logger.debug("Pre-warm reranker failed (lazy init on first use): %s", e)
+    else:
+        logger.info("Reranker warmup skipped (RERANK_MODE=none)")
 
     # Pre-warm LLM client pool (direct OpenRouter)
     try:
