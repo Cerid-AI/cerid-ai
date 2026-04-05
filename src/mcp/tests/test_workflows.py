@@ -3,6 +3,8 @@
 
 """Tests for routers/workflows.py — DAG composition and execution engine."""
 
+from __future__ import annotations
+
 import asyncio
 from collections import defaultdict
 from unittest.mock import MagicMock, patch

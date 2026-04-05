@@ -41,6 +41,31 @@ _LIGHT_PATTERNS = [
     re.compile(r"^(show|list|find)\s+(me\s+)?(the\s+)?\w+(\s+\w+){0,2}[.?]*$", re.IGNORECASE),
 ]
 
+# Technical *concepts* that upgrade a "light" query to "full" retrieval.
+# These are generic CS/engineering concepts (not specific product names like
+# "kubernetes" or "docker") where the user likely needs deeper KB context
+# beyond a simple one-line definition.
+_TECHNICAL_TERMS = {
+    "algorithm", "architecture", "authentication", "authorization",
+    "binary", "blockchain", "buffer", "cache", "callback",
+    "cipher", "compiler", "concurrency", "cryptography",
+    "database", "deadlock", "dependency", "deployment",
+    "encryption", "endpoint", "entropy",
+    "function", "gateway", "graph", "hash", "heap",
+    "index", "inference", "injection", "interface", "interpreter",
+    "kernel", "lambda", "latency",
+    "linker", "malloc", "microservice", "middleware",
+    "mutex", "namespace", "neural",
+    "orm", "parser", "pipeline", "pointer", "protocol", "proxy",
+    "query", "queue", "recursion", "regex",
+    "replication", "runtime", "schema", "semaphore",
+    "serialization", "sharding", "socket",
+    "stack", "state machine", "stream", "subnet",
+    "tensor", "thread", "token", "topology", "transformer",
+    "vector", "virtualization", "zero-copy",
+}
+
+
 # Patterns that indicate complex retrieval needed
 _FULL_PATTERNS = [
     re.compile(r"\b(compare|contrast|difference|versus|vs\.?)\b", re.IGNORECASE),
@@ -73,9 +98,18 @@ def classify_retrieval_need(query: str) -> RetrievalDecision:
         if pattern.search(q):
             return RetrievalDecision(action="full", top_k=10, reason="complex_query")
 
-    # Light patterns: simple lookups
+    # Light patterns: simple lookups — but upgrade to full if technical terms present
     for pattern in _LIGHT_PATTERNS:
         if pattern.search(q):
+            # Technical term upgrade: "What is the algorithm" → full
+            q_lower = q.lower()
+            for term in _TECHNICAL_TERMS:
+                if term in q_lower:
+                    return RetrievalDecision(
+                        action="full",
+                        top_k=10,
+                        reason="technical_term_upgrade",
+                    )
             return RetrievalDecision(
                 action="light",
                 top_k=ADAPTIVE_RETRIEVAL_LIGHT_TOP_K,

@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +24,8 @@ from app.sync._helpers import (
 )
 
 logger = logging.getLogger("ai-companion.sync")
+
+UTC = timezone.utc
 
 
 def record_tombstone(

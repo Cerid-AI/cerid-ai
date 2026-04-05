@@ -19,6 +19,7 @@ from typing import Any
 import httpx
 
 import config
+from config.settings import MEMORY_TYPE_MIGRATION
 from core.utils.cache import log_event
 from core.utils.circuit_breaker import CircuitOpenError
 from core.utils.internal_llm import call_internal_llm
@@ -78,8 +79,10 @@ async def extract_memories(
             if not isinstance(m, dict):
                 continue
             mem_type = m.get("memory_type", "fact")
-            if mem_type not in MEMORY_TYPES:
-                mem_type = "fact"
+            # Normalize legacy types (e.g. "fact" -> "empirical")
+            mem_type = MEMORY_TYPE_MIGRATION.get(mem_type, mem_type)
+            if mem_type not in config.MEMORY_TYPES:
+                mem_type = "empirical"
             valid.append({
                 "content": str(m.get("content", ""))[:2000],
                 "memory_type": mem_type,
@@ -90,7 +93,7 @@ async def extract_memories(
     except CircuitOpenError:
         logger.warning("Bifrost memory circuit open, skipping memory extraction")
         return []
-    except (httpx.HTTPStatusError, json.JSONDecodeError, KeyError) as e:
+    except Exception as e:
         logger.warning("Memory extraction LLM call failed: %s", e)
         return []
 

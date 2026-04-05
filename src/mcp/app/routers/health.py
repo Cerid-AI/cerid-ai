@@ -35,11 +35,14 @@ def health_check() -> dict:
         status["redis"] = f"error: {exc}"
     try:
         driver = get_neo4j()
-        # get_neo4j() validates auth on first connect, but verify on every
-        # health check by running a trivial query (catches stale sessions).
-        with driver.session() as session:
-            session.run("RETURN 1").consume()
-        status["neo4j"] = "connected"
+        if driver is None:
+            status["neo4j"] = "disabled (lightweight mode)"
+        else:
+            # get_neo4j() validates auth on first connect, but verify on every
+            # health check by running a trivial query (catches stale sessions).
+            with driver.session() as session:
+                session.run("RETURN 1").consume()
+            status["neo4j"] = "connected"
     except Exception as exc:
         status["neo4j"] = f"error: {exc}"
     # Circuit breaker states
@@ -115,6 +118,12 @@ def list_collections() -> dict:
     chroma = get_chroma()
     collections = chroma.list_collections()
     return {"total": len(collections), "collections": [c.name for c in collections]}
+
+
+@router.get("/health/live")
+def liveness_probe():
+    """Kubernetes-style liveness probe — always returns 200."""
+    return {"status": "alive"}
 
 
 @router.get("/health")

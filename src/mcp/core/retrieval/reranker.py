@@ -114,6 +114,21 @@ def _score_pairs(query: str, documents: list[str]) -> list[float]:
 # Public API
 # ---------------------------------------------------------------------------
 
+def warmup() -> None:
+    """Pre-load the reranker model so first query isn't slow.
+
+    Called during server startup.  Swallows all exceptions so a download
+    failure never prevents the server from starting.
+    """
+    global _session
+    if _session is not None:
+        return
+    try:
+        _load_model()
+    except Exception:
+        logger.warning("Reranker warmup failed — model will be loaded on first query")
+
+
 def rerank(
     query: str,
     results: list[dict[str, Any]],

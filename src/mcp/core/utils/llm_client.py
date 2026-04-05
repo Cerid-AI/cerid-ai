@@ -20,6 +20,7 @@ Usage::
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import TYPE_CHECKING
@@ -41,19 +42,27 @@ _logger = logging.getLogger("ai-companion.llm_client")
 _client: httpx.AsyncClient | None = None
 
 
-def _get_client() -> httpx.AsyncClient:
+_client_lock = asyncio.Lock()
+
+
+async def _get_client() -> httpx.AsyncClient:
     """Get or create the shared httpx client for direct OpenRouter calls.
 
     Connection pool is sized for concurrent verification workloads
     (up to 20 concurrent connections, 10 keep-alive).
+    Uses an asyncio.Lock to prevent duplicate client creation under
+    concurrent access.
     """
     global _client
-    if _client is None or _client.is_closed:
-        _client = httpx.AsyncClient(
-            base_url="https://openrouter.ai/api/v1",
-            timeout=httpx.Timeout(connect=10, read=60, write=10, pool=10),
-            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
-        )
+    if _client is not None and not _client.is_closed:
+        return _client
+    async with _client_lock:
+        if _client is None or _client.is_closed:
+            _client = httpx.AsyncClient(
+                base_url="https://openrouter.ai/api/v1",
+                timeout=httpx.Timeout(connect=10, read=60, write=10, pool=10),
+                limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+            )
     return _client
 
 
@@ -146,7 +155,7 @@ async def call_llm(
     breaker = get_breaker(breaker_name)
 
     async def _do_call() -> str:
-        client = _get_client()
+        client = await _get_client()
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -227,7 +236,7 @@ async def call_llm_raw(
     breaker = get_breaker(breaker_name)
 
     async def _do_call() -> dict:
-        client = _get_client()
+        client = await _get_client()
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",

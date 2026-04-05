@@ -105,6 +105,8 @@ class AsyncCircuitBreaker:
         except Exception as exc:
             if isinstance(exc, self.excluded_exceptions):
                 raise
+            if _is_client_error(exc):
+                raise
             await self._on_failure(exc)
             raise
         else:
@@ -113,9 +115,11 @@ class AsyncCircuitBreaker:
 
     async def _on_success(self) -> None:
         async with self._lock:
-            if self._state in (CircuitState.HALF_OPEN, CircuitState.CLOSED):
+            # Use the computed state (which derives HALF_OPEN from OPEN + elapsed time)
+            effective = self.state
+            if effective in (CircuitState.HALF_OPEN, CircuitState.CLOSED):
                 self._failure_count = 0
-                if self._state == CircuitState.HALF_OPEN:
+                if effective == CircuitState.HALF_OPEN:
                     logger.info("Circuit '%s' recovered → CLOSED", self.name)
                 self._state = CircuitState.CLOSED
 
@@ -250,7 +254,10 @@ def _is_client_error(exc: Exception) -> bool:
     return bool(re.search(r"\b4\d{2}\b", text))
 
 
+_chromadb = AsyncCircuitBreaker("chromadb", failure_threshold=5, recovery_timeout=30)
+
 _BREAKER_REGISTRY: dict[str, AsyncCircuitBreaker] = {
+    "chromadb": _chromadb,
     "bifrost-rerank": _bifrost_rerank,
     "bifrost-claims": _bifrost_claims,
     "bifrost-verify": _bifrost_verify,

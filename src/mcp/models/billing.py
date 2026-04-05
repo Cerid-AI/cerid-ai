@@ -4,10 +4,12 @@
 """Billing and subscription models — Stripe integration."""
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 from pydantic import BaseModel, Field
+
+UTC = timezone.utc
 
 
 # ---------------------------------------------------------------------------

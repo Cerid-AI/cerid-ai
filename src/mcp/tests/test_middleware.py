@@ -1,6 +1,8 @@
 # Copyright 2026 Cerid AI. Apache-2.0 license.
 """Tests for middleware: API key auth, rate limiter, request ID injection."""
 
+from __future__ import annotations
+
 import hashlib
 
 from starlette.applications import Starlette

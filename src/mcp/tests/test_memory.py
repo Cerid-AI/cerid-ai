@@ -47,17 +47,18 @@ class TestExtractMemories:
 
         result = await extract_memories("x" * 200, "conv-123")
         assert len(result) == 1
-        assert result[0]["memory_type"] == "fact"
+        # Legacy "fact" type is migrated to "empirical" at extraction time
+        assert result[0]["memory_type"] == "empirical"
         assert "GIL" in result[0]["content"]
 
     @pytest.mark.asyncio
     @patch("core.agents.memory.call_internal_llm", new_callable=AsyncMock)
     async def test_invalid_memory_type_defaults_to_fact(self, mock_llm):
-        """Unknown memory_type should default to 'fact'."""
+        """Unknown memory_type should default to 'empirical'."""
         mock_llm.return_value = '[{"content":"test","memory_type":"invalid_type","summary":"test"}]'
 
         result = await extract_memories("x" * 200, "conv-123")
-        assert result[0]["memory_type"] == "fact"
+        assert result[0]["memory_type"] == "empirical"
 
 
 class TestExtractAndStoreMemories:

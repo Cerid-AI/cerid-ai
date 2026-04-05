@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import bcrypt
 from fastapi import APIRouter, HTTPException, Request
@@ -35,6 +35,8 @@ from config.features import (
 from utils.encryption import encrypt_field
 
 logger = logging.getLogger("ai-companion.auth")
+
+UTC = timezone.utc
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 

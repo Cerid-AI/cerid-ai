@@ -10,6 +10,7 @@ reuse TCP connections instead of opening a new one per call.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -26,20 +27,26 @@ logger = logging.getLogger("ai-companion.bifrost")
 # ---------------------------------------------------------------------------
 
 _client: httpx.AsyncClient | None = None
+_client_lock = asyncio.Lock()
 
 
-def get_bifrost_client() -> httpx.AsyncClient:
+async def get_bifrost_client() -> httpx.AsyncClient:
     """Get or create the shared httpx client for Bifrost calls.
 
     Connection pool is sized for concurrent verification workloads
     (up to 20 concurrent connections, 10 keep-alive).
+    Uses an asyncio.Lock to prevent duplicate client creation under
+    concurrent access.
     """
     global _client
-    if _client is None or _client.is_closed:
-        _client = httpx.AsyncClient(
-            limits=httpx.Limits(max_connections=30, max_keepalive_connections=15),
-            timeout=config.BIFROST_TIMEOUT,
-        )
+    if _client is not None and not _client.is_closed:
+        return _client
+    async with _client_lock:
+        if _client is None or _client.is_closed:
+            _client = httpx.AsyncClient(
+                limits=httpx.Limits(max_connections=30, max_keepalive_connections=15),
+                timeout=config.BIFROST_TIMEOUT,
+            )
     return _client
 
 
@@ -85,7 +92,7 @@ async def call_bifrost(
         headers = tracing_headers()
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
-        client = get_bifrost_client()
+        client = await get_bifrost_client()
         resp = await client.post(
             f"{config.BIFROST_URL}/chat/completions",
             json=payload,

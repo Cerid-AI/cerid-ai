@@ -16,6 +16,7 @@ NOT used for verification (that uses dedicated VERIFICATION_MODEL).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 
@@ -28,15 +29,19 @@ logger = logging.getLogger("ai-companion.internal_llm")
 
 # Shared connection pool for Ollama calls (avoids per-request TCP handshake)
 _ollama_client: httpx.AsyncClient | None = None
+_ollama_client_lock = asyncio.Lock()
 
 
-def _get_ollama_client() -> httpx.AsyncClient:
+async def _get_ollama_client() -> httpx.AsyncClient:
     global _ollama_client
-    if _ollama_client is None or _ollama_client.is_closed:
-        _ollama_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(60.0, connect=5.0),
-            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
-        )
+    if _ollama_client is not None and not _ollama_client.is_closed:
+        return _ollama_client
+    async with _ollama_client_lock:
+        if _ollama_client is None or _ollama_client.is_closed:
+            _ollama_client = httpx.AsyncClient(
+                timeout=httpx.Timeout(60.0, connect=5.0),
+                limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+            )
     return _ollama_client
 
 
@@ -105,7 +110,7 @@ async def _call_ollama(
         if json_mode:
             payload["format"] = "json"
 
-        client = _get_ollama_client()
+        client = await _get_ollama_client()
         resp = await client.post(
             f"{ollama_url}/api/chat",
             json=payload,

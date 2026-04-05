@@ -3,6 +3,8 @@
 
 """Tests for middleware/auth.py — API key authentication middleware."""
 
+from __future__ import annotations
+
 import hashlib
 
 import pytest

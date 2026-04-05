@@ -259,7 +259,7 @@ async def lifespan(app: FastAPI):
     # Pre-warm LLM client pool (direct OpenRouter)
     try:
         from core.utils.llm_client import _get_client
-        _get_client()
+        await _get_client()
         logger.info("OpenRouter HTTP client pool pre-warmed")
     except Exception as e:
         logger.debug("Pre-warm OpenRouter client failed: %s", e)
@@ -269,7 +269,7 @@ async def lifespan(app: FastAPI):
     if getattr(_startup_config, "USE_BIFROST", False):
         try:
             from utils.bifrost import get_bifrost_client
-            get_bifrost_client()
+            await get_bifrost_client()
             logger.info("Bifrost HTTP client pool pre-warmed")
         except Exception as e:
             logger.debug("Pre-warm Bifrost client failed: %s", e)
