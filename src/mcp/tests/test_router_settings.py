@@ -124,8 +124,8 @@ class TestPatchSettings:
         response = client.patch("/settings", json={"auto_inject_threshold": 1.5})
         assert response.status_code == 422
 
-        # Valid low threshold (0.1) — accepted after bounds change
-        response = client.patch("/settings", json={"auto_inject_threshold": 0.1})
+        # Valid low threshold (0.5) — minimum accepted value
+        response = client.patch("/settings", json={"auto_inject_threshold": 0.5})
         assert response.status_code == 200
 
 

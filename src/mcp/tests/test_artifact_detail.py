@@ -161,8 +161,8 @@ class TestArtifactDetailEndpoint:
 
         data = response.json()
         assert data["chunks"] == []
-        # With no chunks, the endpoint falls back to the artifact's summary
-        assert data["total_content"] == "A sample artifact"
+        # With no chunks, total_content is empty (no fallback to summary)
+        assert data["total_content"] == ""
 
     @patch("app.routers.artifacts.get_redis")
     @patch("app.routers.artifacts.get_chroma")

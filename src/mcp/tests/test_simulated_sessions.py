@@ -208,7 +208,7 @@ class TestMultiTurnConversation:
 
         assert "MVCC" in query_result["context"]
 
-        with patch("core.agents.hallucination.verification.verify_claim",
+        with patch("agents.hallucination.verification.verify_claim",
                     new_callable=AsyncMock,
                     return_value=_make_verify_result("PostgreSQL uses MVCC")):
             from agents.hallucination.verification import verify_claim
@@ -297,7 +297,7 @@ class TestSyntheticKBInjection:
             "FFT was published by Cooley and Tukey in 1965",
         ]
 
-        with patch("core.agents.hallucination.verification.verify_claim",
+        with patch("agents.hallucination.verification.verify_claim",
                     new_callable=AsyncMock) as mock_vc:
             mock_vc.side_effect = [
                 _make_verify_result(c, "verified", 0.95) for c in correct_claims
@@ -320,7 +320,7 @@ class TestSyntheticKBInjection:
             ("Human Genome Project was declared complete in June 2000", "conflated_event"),
         ]
 
-        with patch("core.agents.hallucination.verification.verify_claim",
+        with patch("agents.hallucination.verification.verify_claim",
                     new_callable=AsyncMock) as mock_vc:
             mock_vc.side_effect = [
                 _make_verify_result(c, "unverified", 0.3) for c, _ in wrong_claims
@@ -602,7 +602,7 @@ class TestVerificationWithKBData:
     @pytest.mark.asyncio
     async def test_claim_verified_against_kb_content(self):
         """KB has 'Python created by Guido van Rossum in 1991' -> claim matches -> verified."""
-        with patch("core.agents.hallucination.verification.verify_claim",
+        with patch("agents.hallucination.verification.verify_claim",
                     new_callable=AsyncMock) as mock_vc:
             mock_vc.return_value = _make_verify_result(
                 "Python was created by Guido van Rossum in 1991",
@@ -618,7 +618,7 @@ class TestVerificationWithKBData:
     @pytest.mark.asyncio
     async def test_claim_contradicted_by_kb(self):
         """KB has revenue $847.3M, claim says $900M -> flagged."""
-        with patch("core.agents.hallucination.verification.verify_claim",
+        with patch("agents.hallucination.verification.verify_claim",
                     new_callable=AsyncMock) as mock_vc:
             mock_vc.return_value = _make_verify_result(
                 "Meridian revenue was $900M",
@@ -634,7 +634,7 @@ class TestVerificationWithKBData:
     @pytest.mark.asyncio
     async def test_numerical_claim_precision(self):
         """KB has '62% improvement'; exact match verified, wrong number flagged."""
-        with patch("core.agents.hallucination.verification.verify_claim",
+        with patch("agents.hallucination.verification.verify_claim",
                     new_callable=AsyncMock) as mock_vc:
             # Exact match
             mock_vc.return_value = _make_verify_result(
@@ -658,7 +658,7 @@ class TestVerificationWithKBData:
     @pytest.mark.asyncio
     async def test_verification_with_no_kb_match(self):
         """Claim about topic not in KB -> uncertain/external fallback."""
-        with patch("core.agents.hallucination.verification.verify_claim",
+        with patch("agents.hallucination.verification.verify_claim",
                     new_callable=AsyncMock) as mock_vc:
             mock_vc.return_value = _make_verify_result(
                 "The population of Mars colony is 50,000",

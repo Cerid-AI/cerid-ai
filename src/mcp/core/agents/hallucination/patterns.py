@@ -116,6 +116,7 @@ CURRENT_EVENT_PATTERNS = [
     re.compile(r"\b(?:202[4-9]|203\d)\b"),                      # recent/future years
     re.compile(r"\b(?:recently|just|newly|latest|current|now)\b", re.I),
     re.compile(r"\b(?:announced|launched|released|unveiled|introduced|updated)\b.*\b(?:202[4-9]|this year|last (?:month|week|year))\b", re.I),
+    re.compile(r"\b(?:202[4-9])\b.*\b(?:announced|launched|released|unveiled|introduced|updated)\b", re.I),
     re.compile(r"\b(?:this year|last year|this month|last month|this week|last week)\b", re.I),
     re.compile(r"\b(?:as of|since|starting|beginning|effective)\s+(?:202[4-9]|January|February|March|April|May|June|July|August|September|October|November|December)\b", re.I),
     re.compile(r"\b(?:trending|breaking|emerging|ongoing)\b", re.I),

@@ -259,7 +259,7 @@ class TestRoutingFunctions:
         assert should_continue_after_parse({"status": "error"}) == "error_end"
 
     def test_parse_ok_routes_to_scoring(self):
-        assert should_continue_after_parse({"status": "parsed"}) == "score_content"
+        assert should_continue_after_parse({"status": "parsed"}) == "route_categorization"
 
     def test_needs_ai_routes_to_categorize(self):
         assert should_categorize({"needs_ai_categorization": True}) == "categorize"

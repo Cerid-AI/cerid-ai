@@ -621,14 +621,14 @@ class TestFullUserJourney:
 
         mock_llm_response = json.dumps([
             {"content": "Chose PostgreSQL 15 for project database",
-             "type": "decision", "importance": 0.9},
+             "memory_type": "decision", "summary": "DB choice: PostgreSQL 15"},
             {"content": "Rejected MongoDB for lacking transactional guarantees",
-             "type": "decision", "importance": 0.8},
+             "memory_type": "decision", "summary": "Rejected MongoDB"},
             {"content": "Migration starts Monday",
-             "type": "temporal", "importance": 0.7},
+             "memory_type": "temporal", "summary": "Migration timeline"},
         ])
 
-        with patch("agents.memory.call_internal_llm",
+        with patch("core.agents.memory.call_internal_llm",
                     new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = mock_llm_response
             memories = await extract_memories(response_text,
