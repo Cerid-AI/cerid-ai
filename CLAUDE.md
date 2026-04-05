@@ -18,8 +18,8 @@ Cerid AI uses a two-repo open-core model:
 
 | Repo | Visibility | Location | Purpose |
 |------|-----------|----------|---------|
-| **cerid-ai-internal** (this repo) | Private | `~/Develop/cerid-ai` | Canonical development — all code, Pro/Enterprise plugins, full test harness, CI, internal docs |
-| **cerid-ai** (public) | Public | `~/Develop/cerid-ai-public` | Apache-2.0 distribution — core product, SDK, community plugins |
+| **cerid-ai-internal** (this repo) | Private | `~/Develop/cerid-ai-internal` | Canonical development — all code, Pro/Enterprise plugins, full test harness, CI, internal docs |
+| **cerid-ai** (public) | Private (GitHub) | `~/Develop/cerid-ai` | Apache-2.0 distribution — core product, SDK, community plugins |
 
 ### What's only in internal (not in public)
 
