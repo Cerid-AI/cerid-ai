@@ -5,7 +5,7 @@ import remarkGfm from "remark-gfm"
 import { lazy, Suspense, useState, useCallback, useMemo, useRef, useEffect, isValidElement, type ReactNode } from "react"
 
 import ReactMarkdown from "react-markdown"
-import { Copy, Check, User, Bot, ShieldCheck, ShieldAlert, Loader2, Pencil, Shield, ExternalLink, Sparkles, Globe } from "lucide-react"
+import { Copy, Check, User, Bot, ShieldCheck, ShieldAlert, Loader2, Pencil, Shield, ExternalLink, Sparkles, Globe, ThumbsUp, ThumbsDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn, formatCost } from "@/lib/utils"
@@ -347,6 +347,49 @@ function VerificationBadge({ status, onClick }: { status: MessageVerificationSta
   )
 }
 
+const MCP_BASE = import.meta.env.VITE_MCP_URL || "http://localhost:8888"
+
+/** Thumbs up/down feedback buttons for assistant messages. */
+function FeedbackButtons({ messageId }: { messageId: string }) {
+  const [feedback, setFeedback] = useState<"up" | "down" | null>(null)
+
+  const submit = useCallback(async (rating: "up" | "down") => {
+    setFeedback(rating)
+    try {
+      await fetch(`${MCP_BASE}/artifacts/${messageId}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Client-ID": "gui" },
+        body: JSON.stringify({ rating, source: "message_bubble" }),
+      })
+    } catch {
+      // Non-blocking — feedback is best-effort
+    }
+  }, [messageId])
+
+  return (
+    <>
+      <Button
+        variant="ghost"
+        size="icon"
+        className={cn("h-6 w-6", feedback === "up" && "text-green-500")}
+        aria-label="Good response"
+        onClick={() => submit("up")}
+      >
+        <ThumbsUp className="h-3 w-3" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className={cn("h-6 w-6", feedback === "down" && "text-destructive")}
+        aria-label="Bad response"
+        onClick={() => submit("down")}
+      >
+        <ThumbsDown className="h-3 w-3" />
+      </Button>
+    </>
+  )
+}
+
 interface MessageBubbleProps {
   message: ChatMessage
   verificationStatus?: MessageVerificationStatus
@@ -578,6 +621,7 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
                 </Tooltip>
               </TooltipProvider>
             )}
+            <FeedbackButtons messageId={message.id} />
           </div>
         )}
 
