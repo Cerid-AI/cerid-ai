@@ -151,7 +151,7 @@ async def sdk_ingest_file(req: dict):
     result = await ingest_file(
         req.get("file_path", ""),
         domain=req.get("domain", ""),
-        metadata={"tags": req.get("tags", "")},
+        tags=req.get("tags", ""),
     )
     return result
 

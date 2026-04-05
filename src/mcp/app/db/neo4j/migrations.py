@@ -36,3 +36,44 @@ def backfill_updated_at(driver) -> dict[str, Any]:
     if backfilled:
         logger.info("Migration: backfilled updated_at on %d artifacts", backfilled)
     return {"backfilled": backfilled}
+
+
+def migrate_memory_salience(driver) -> dict[str, Any]:
+    """
+    Migrate Memory nodes from legacy ``memory_type`` values to the current
+    ``MEMORY_TYPES`` enum defined in ``config/settings.py``.
+
+    Maps old types using ``MEMORY_TYPE_MIGRATION`` (e.g. ``fact`` -> ``empirical``).
+    Idempotent: skips nodes that already have a valid type.
+    """
+    from config.settings import MEMORY_TYPE_MIGRATION, MEMORY_TYPES
+
+    with driver.session() as session:
+        # Find Memory/Artifact nodes whose memory_type is NOT in the current enum
+        valid_types = list(MEMORY_TYPES)
+        records = list(
+            session.run(
+                "MATCH (a:Artifact) WHERE a.memory_type IS NOT NULL "
+                "AND NOT a.memory_type IN $valid_types "
+                "RETURN a.content_hash AS id, a.memory_type AS memory_type",
+                valid_types=valid_types,
+            )
+        )
+
+        migrated = 0
+        for record in records:
+            node_id = record["id"]
+            old_type = record["memory_type"]
+            new_type = MEMORY_TYPE_MIGRATION.get(old_type, old_type)
+            if new_type in MEMORY_TYPES:
+                session.run(
+                    "MATCH (a:Artifact {content_hash: $id}) "
+                    "SET a.memory_type = $mem_type",
+                    id=node_id,
+                    mem_type=new_type,
+                )
+                migrated += 1
+
+    if migrated:
+        logger.info("Migration: migrated memory_type on %d artifacts", migrated)
+    return {"migrated": migrated}
