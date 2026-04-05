@@ -27,22 +27,21 @@ _PROXIED = frozenset({
 })
 
 _this = sys.modules[__name__]
-_orig_class = type(_this)
 
 
-class _ProxyModule(_orig_class):
+class _ProxyModule(type(_this)):  # type: ignore[misc]
     """Module subclass that proxies attribute access for mutable state."""
 
-    def __getattr__(self, name: str):
+    def __getattr__(self, name: str):  # type: ignore[override]
         if name in _PROXIED:
             return getattr(_core_mod, name)
         raise AttributeError(f"module {self.__name__!r} has no attribute {name!r}")
 
-    def __setattr__(self, name: str, value):
+    def __setattr__(self, name: str, value):  # type: ignore[override]
         if name in _PROXIED:
             setattr(_core_mod, name, value)
         else:
             super().__setattr__(name, value)
 
 
-_this.__class__ = _ProxyModule
+_this.__class__ = _ProxyModule  # type: ignore[misc]

@@ -5,12 +5,13 @@ from core.retrieval.reranker import *  # noqa: F401,F403
 from core.retrieval.reranker import (
     _load_model,  # noqa: F401
     _session,  # noqa: F401
+    warmup as _core_warmup,  # noqa: F401
 )
 
 _logger = logging.getLogger("ai-companion.reranker")
 
 
-def warmup() -> None:  # noqa: F811
+def warmup() -> None:  # type: ignore[no-redef]  # noqa: F811
     """Pre-load the reranker model (bridge-local so patches on this module work)."""
     _mod = sys.modules[__name__]
     if getattr(_mod, "_session", None) is not None:
