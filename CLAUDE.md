@@ -32,6 +32,8 @@ Cerid AI uses a two-repo open-core model:
 - **Internal docs:** `docs/BRANDING.md`, `docs/MARKET_ANALYSIS.md`, `docs/COMPETITIVE_ANALYSIS_2026-04.md`
 - **Claude Code config:** `.claude/` directory (agents, commands, hooks, settings)
 - **Task tracking:** `tasks/todo.md`, `tasks/lessons.md`
+- **`structlog` dependency:** removed from public, kept here for trading agent tests
+- **`packages/desktop/`:** Electron app (removed from public to eliminate 26 Dependabot vulns)
 
 ### Syncing to public
 
@@ -192,6 +194,7 @@ Cross-service version constraints: see `docs/DEPENDENCY_COUPLING.md`.
 - `.env` (repo root) — All secrets. Encrypted as `.env.age` via `age`. Key at `~/.config/cerid/age-key.txt`
 - `src/mcp/config/settings.py` — Domains, tiers, URLs, sync, model IDs
 - `stacks/bifrost/config.yaml` — Intent classification, model routing, budget
+- `CERID_PRELOAD_MODELS` — Docker build ARG (default `true`). Set `false` for ~3GB smaller image at cost of slower first startup (models download on first use). Usage: `docker compose build --build-arg CERID_PRELOAD_MODELS=false mcp-server`
 
 ### Verification
 
@@ -250,6 +253,8 @@ See [`.claude/SETUP.md`](.claude/SETUP.md) for detailed Claude Code configuratio
 - All numeric constants live in `config/constants.py`. Import from there.
 - Every `except` block MUST either log + degrade or raise a typed error. Zero silent `pass` blocks.
 - HTTP client is `httpx` everywhere — `requests` is not a direct dependency.
+- Conversation grouping: ingestion checks for existing artifact with matching `conversation_id`. If found, appends as new chunk instead of creating separate artifact. See `services/ingestion.py` ~line 375.
+- Feedback buttons: thumbs up/down on assistant messages via `FeedbackButtons` component in `message-bubble.tsx`. Calls `POST /artifacts/{id}/feedback`. Opt-in per conversation, controlled via settings.
 
 ## Tiered Inference
 
@@ -326,6 +331,8 @@ pip install bcrypt PyJWT                # Multi-user JWT authentication
 
 **Sidecar runs outside Docker.** The FastEmbed sidecar needs host GPU access (Metal/CUDA), so it runs as a native process. `start-cerid.sh` auto-detects and auto-starts it.
 
+**Internal repo keeps structlog (trading agent tests need it). Public repo removed it. Don't sync that removal to internal.** The `structlog` dependency was removed from public requirements.txt and replaced with stdlib `logging` in `startup_self_test.py`. Internal keeps `structlog` because `test_trading_agent.py` imports it.
+
 ## Module Responsibility Map
 
 | Module | Responsibility | Key Classes/Functions |
@@ -357,6 +364,9 @@ pip install bcrypt PyJWT                # Multi-user JWT authentication
 | `utils/model_registry.py` | Dynamic model registry with OpenRouter validation | `ModelRegistry`, `validate_models()` |
 | `utils/query_classifier.py` | Query intent classification | `classify_query()` |
 | `utils/data_sources/` | Pluggable external data source framework | `DataSourceManager` |
+| `scripts/cerid-sidecar.py` | FastEmbed embedding/rerank server (runs on host, not Docker) | `/embed`, `/rerank`, `/health` |
+| `scripts/install-sidecar.sh` | Per-platform sidecar installer (CoreML/CUDA/ROCm/DirectML) | Auto-detects GPU |
+| `docs/FEEDBACK_LOOP_DESIGN.md` | Opt-in per-conversation feedback architecture | Design doc |
 
 ## Product Tiers
 
