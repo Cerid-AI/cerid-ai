@@ -45,8 +45,8 @@
 
 | Dependency | Version | Used By | Size Impact | Recommendation |
 |------------|---------|---------|-------------|----------------|
-| `langgraph` | >=0.3 | Only `agents/triage.py` (1 file) | ~50MB + langchain-core + langsmith | **HIGH PRIORITY** — replace with simple state machine. LangGraph pulls langchain-core, langsmith, orjson, opentelemetry. Only used for a single StateGraph. |
-| `pandas` | >=2.0 | Only `parsers/structured.py` (CSV/Excel parsing) | ~100MB + numpy | **MEDIUM** — could use `csv` stdlib + `openpyxl` directly. Pandas is heavy for just reading tabular files. |
+| `langgraph` | >=0.3 | `agents/triage.py` (469 lines, 16 functions) | ~50MB + langchain-core + langsmith | **KEEP** — triage.py builds a real conditional routing graph with error propagation and visualization. Reimplementing would lose graph execution semantics. Lazy-import is sufficient optimization. |
+| `pandas` | >=2.0 | `parsers/structured.py` (CSV/Excel parsing) | ~100MB + numpy | **KEEP** — uses pd.read_csv for auto-delimiter detection, encoding fallback, column type inference, df.describe() statistics, and schema summary. These enrich KB artifacts. Already lazy-imported at call site. |
 | `cryptography` | >=42 | Only `utils/encryption.py` (optional Fernet encryption) | ~15MB | **LOW** — only used when `CERID_ENCRYPTION_KEY` is set. Could lazy-import but it's a C extension so install cost is fixed. |
 | `sentry-sdk[fastapi]` | >=2.35 | Only `main.py` (opt-in telemetry) | ~10MB | **LOW** — already gated behind `ENABLE_SENTRY=true`. Could make it an optional install. |
 
@@ -69,8 +69,8 @@
 
 | Dependency | Current Use | Alternative | Savings |
 |------------|-------------|-------------|---------|
-| `langgraph` (50MB+) | Single StateGraph in triage.py | Plain Python dict + match/case | ~50MB + all langchain transitive deps |
-| `pandas` (100MB+) | CSV/Excel reading in 1 file | `csv` stdlib + `openpyxl` | ~100MB |
+| `langgraph` (50MB+) | **PROTECTED** — real conditional routing graph in triage.py (469 lines, 16 functions) | N/A — keep | 0 |
+| `pandas` (100MB+) | **PROTECTED** — auto-delimiter, encoding fallback, df.describe() stats | N/A — keep | 0 |
 | `requests` (5MB) | 4 CLI scripts | `httpx` (already installed) | ~5MB |
 | `structlog` (3MB) | 1 file | `logging` stdlib | ~3MB |
 | `jinja2` (3MB) | Model prompt templates (1 file) | f-strings or `string.Template` | ~3MB |
@@ -95,7 +95,7 @@
 
 | Dependency | Installed Size | Used By | Recommendation |
 |------------|---------------|---------|----------------|
-| `react-syntax-highlighter` | **8.7 MB** | Code blocks in chat | **REPLACE** — use `shiki` (~1MB) or `prism-react-renderer` (~500KB). RSH bundles ALL Prism/Highlight.js languages. |
+| `react-syntax-highlighter` | **8.7 MB** (installed) | Code blocks in chat | **KEEP** — already optimized: uses PrismLight with 25 registered languages (~200KB lazy chunk), not full Prism (~1.6MB). npm install size is large but runtime bundle is small via tree-shaking + Vite manual chunks. |
 | `recharts` | **8.4 MB** | Dashboard charts (metrics pane) | **EVALUATE** — if only simple line/bar charts, `lightweight-charts` or `chart.js` are 5-10x smaller. But recharts has good React integration. |
 | `react-markdown` | 2 MB | Chat message rendering | **KEEP** — core feature, well-optimized with manual chunking |
 | `geist` | 1.5 MB | Font family | **KEEP** — branding font |
@@ -161,12 +161,12 @@ nginx:alpine base + Vite build output. Nothing to optimize.
 
 | Action | Savings | Effort |
 |--------|---------|--------|
-| Replace `langgraph` with plain StateGraph | ~50 MB + langchain ecosystem | 2-3 hours |
-| Replace `pandas` with stdlib csv + openpyxl | ~100 MB | 1-2 hours |
-| Replace `react-syntax-highlighter` with shiki | ~7 MB (8.7 to 1.5) | 2-3 hours |
+| ~~Replace `langgraph`~~ | PROTECTED — real routing graph | N/A |
+| ~~Replace `pandas`~~ | PROTECTED — CSV enrichment pipeline | N/A |
+| `react-syntax-highlighter` | **PROTECTED** — PrismLight with 25 languages, runtime ~200KB | N/A — keep | 0 |
 | Stop pre-downloading ONNX models in Docker | ~3 GB image size | 30 min (add lazy-download logic) |
 
-**Impact: Saves ~150 MB Python deps + ~3 GB Docker image + ~7 MB frontend**
+**Impact: Saves ~3 GB Docker image (model preload toggle)**
 
 ### Tier 4: Aggressive Optimization (evaluate later)
 

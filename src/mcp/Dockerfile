@@ -14,15 +14,19 @@ COPY requirements.lock .
 RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 
 # Stage 2: Models — pre-download ONNX models into HuggingFace cache
+# Set CERID_PRELOAD_MODELS=false to skip (saves ~3GB, models download on first use)
 FROM builder AS models
 
-RUN python -c "\
+ARG CERID_PRELOAD_MODELS=true
+RUN if [ "$CERID_PRELOAD_MODELS" = "true" ]; then \
+    python -c "\
 from huggingface_hub import hf_hub_download; \
 hf_hub_download('cross-encoder/ms-marco-MiniLM-L-6-v2', 'onnx/model.onnx'); \
 hf_hub_download('cross-encoder/ms-marco-MiniLM-L-6-v2', 'onnx/model_quint8_avx2.onnx'); \
 hf_hub_download('cross-encoder/ms-marco-MiniLM-L-6-v2', 'tokenizer.json'); \
 hf_hub_download('Snowflake/snowflake-arctic-embed-m-v1.5', 'onnx/model.onnx'); \
-hf_hub_download('Snowflake/snowflake-arctic-embed-m-v1.5', 'tokenizer.json')"
+hf_hub_download('Snowflake/snowflake-arctic-embed-m-v1.5', 'tokenizer.json')"; \
+    else echo "Skipping model preload (CERID_PRELOAD_MODELS=false)"; fi
 
 # Stage 3: Runtime — slim image without build tools
 FROM python:3.11.14-slim
@@ -37,7 +41,9 @@ RUN useradd -m -u 1000 cerid
 
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
-COPY --from=models /root/.cache/huggingface /home/cerid/.cache/huggingface
+# Copy preloaded models if they exist (no-op if CERID_PRELOAD_MODELS=false)
+RUN mkdir -p /home/cerid/.cache/huggingface
+COPY --from=models /root/.cache/huggingface/ /home/cerid/.cache/huggingface/
 RUN chown -R cerid:cerid /home/cerid/.cache
 
 WORKDIR /app

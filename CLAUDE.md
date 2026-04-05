@@ -62,7 +62,7 @@ Internal uses 60% coverage floor; public uses 20% (fewer tests since internal-on
 
 Cerid AI is a self-hosted, privacy-first Personal AI Knowledge Companion. It unifies multi-domain knowledge bases (code, finance, projects, artifacts) into a context-aware LLM interface with RAG-powered retrieval and intelligent agents. Knowledge base stays local; LLM API calls send query context to the configured provider. Optional cloud sync (Dropbox) for cross-machine settings/conversations, encrypted when CERID_ENCRYPTION_KEY is set.
 
-**Status:** Version 0.80. See [`docs/COMPLETED_PHASES.md`](docs/COMPLETED_PHASES.md) for history.
+**Status:** Version 0.82. See [`docs/COMPLETED_PHASES.md`](docs/COMPLETED_PHASES.md) for history.
 
 **Next:** See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
@@ -300,6 +300,11 @@ pip install bcrypt PyJWT                # Multi-user JWT authentication
 **Docker image (~3.2 GB):** No tesseract-ocr or ffmpeg in base — Pro plugins install their own system deps. ONNX models pre-downloaded at build time.
 
 **Auth imports are graceful:** `routers/auth.py` and `middleware/jwt_auth.py` only loaded when `CERID_MULTI_USER=true` (conditional import in `main.py`).
+
+**Protected Dependencies (do NOT remove):**
+- `langgraph` — triage.py is 469 lines with 16 functions building a real conditional routing graph. Reimplementing would lose graph execution, error propagation, and routing visualization.
+- `pandas` — CSV parser uses pd.read_csv for auto-delimiter detection, encoding fallback, column type inference, df.describe() statistics. These enrich KB artifacts. Already lazy-imported.
+- `react-syntax-highlighter` — uses PrismLight with 25 registered languages (~200KB lazy chunk). npm install size is large but runtime bundle is small via tree-shaking + Vite manual chunks.
 
 **Public vs Internal deps:** `packages/desktop/` (Electron) exists only in internal. `stripe` exists only in internal. Everything else is shared.
 

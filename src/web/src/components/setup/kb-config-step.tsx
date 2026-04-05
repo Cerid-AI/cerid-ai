@@ -1,10 +1,12 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { useCallback } from "react"
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
-import { HardDrive, AlertTriangle } from "lucide-react"
+import { HardDrive, AlertTriangle, FolderOpen } from "lucide-react"
 
 interface KBConfigState {
   archivePath: string
@@ -18,6 +20,29 @@ interface KBConfigStepProps {
   onChange: (config: KBConfigState) => void
   lightweightRecommended: boolean
   ramGb: number
+}
+
+/** Browse button using the File System Access API (directory picker). */
+function BrowseButton({ onSelect }: { onSelect: (name: string) => void }) {
+  const handleBrowse = useCallback(async () => {
+    try {
+      // @ts-expect-error — showDirectoryPicker is not in all TS lib definitions
+      const dirHandle = await window.showDirectoryPicker({ mode: "read" })
+      onSelect(dirHandle.name)
+    } catch {
+      // User cancelled or API not supported — ignore
+    }
+  }, [onSelect])
+
+  // Only show if File System Access API is available (Chromium browsers)
+  if (typeof window === "undefined" || !("showDirectoryPicker" in window)) return null
+
+  return (
+    <Button variant="outline" size="sm" className="shrink-0 gap-1.5" onClick={handleBrowse}>
+      <FolderOpen className="h-3.5 w-3.5" />
+      Browse
+    </Button>
+  )
 }
 
 export function KBConfigStep({ config, onChange, lightweightRecommended, ramGb }: KBConfigStepProps) {
@@ -34,12 +59,15 @@ export function KBConfigStep({ config, onChange, lightweightRecommended, ramGb }
         {/* Archive Path */}
         <div className="space-y-2">
           <Label className="text-sm font-medium">Archive Folder</Label>
-          <Input
-            value={config.archivePath}
-            onChange={(e) => onChange({ ...config, archivePath: e.target.value })}
-            placeholder="~/cerid-archive"
-            className="font-mono text-xs"
-          />
+          <div className="flex gap-2">
+            <Input
+              value={config.archivePath}
+              onChange={(e) => onChange({ ...config, archivePath: e.target.value })}
+              placeholder="~/cerid-archive"
+              className="font-mono text-xs flex-1"
+            />
+            <BrowseButton onSelect={(name) => onChange({ ...config, archivePath: name })} />
+          </div>
           <p className="text-[11px] text-muted-foreground">
             Where Cerid stores and watches for your documents. Domain subfolders are created automatically.
           </p>
