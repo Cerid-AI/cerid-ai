@@ -226,6 +226,12 @@ jobs:
           CVE-2025-6021
           # jaraco.context path traversal via tar — build-time pip dependency, not runtime-exploitable
           CVE-2026-23949
+          # ncurses buffer overflow — no fix in Debian 13, container has no interactive terminals
+          CVE-2025-69720
+          # nghttp2 DoS via malformed HTTP/2 — internal container traffic only, no external exposure
+          CVE-2026-27135
+          # systemd arbitrary code execution — D-Bus not reachable in container context
+          CVE-2026-29111
           EOF
       - name: Scan MCP Docker image
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
