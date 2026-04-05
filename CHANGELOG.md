@@ -2,7 +2,19 @@
 
 All notable changes to cerid-ai are documented here.
 
-## v0.82 — Unified Implementation Plan (2026-04-05)
+## v0.82.0 — Unified Implementation Plan (2026-04-05)
+
+### Post-Phase: Dependency Cleanup + Remaining Items
+- **Dependency cleanup** — removed 8 unused deps (stripe/public, faster-whisper, requests, structlog/public, pytesseract, Pillow, bcrypt, PyJWT). Docker image 4.09→3.18 GB. Dependabot 33→2 vulns.
+- **packages/desktop/** removed from public repo (kept in internal)
+- **B31: Conversation grouping** — feedback from same conversation_id appends to existing KB artifact
+- **B33: Feedback buttons** — ThumbsUp/ThumbsDown on assistant messages (POST /artifacts/{id}/feedback)
+- **B35: Model compliance note** — footer in model selector about non-US model availability
+- **B36: File picker** — browse button on archive path using File System Access API
+- **Memory system fix** — get_collection → get_or_create_collection (fixes 500 on fresh installs)
+- **Configurable model preload** — `CERID_PRELOAD_MODELS=false` Dockerfile ARG for smaller images
+- **Startup prerequisites** — python3, curl, port availability, Docker memory checks
+- **CI fixes** — test mock targets (requests→httpx), import sorting (I001), BLE001 suppressions
 
 ### Phase 1: Tiered Inference Detection
 - **InferenceConfig singleton** — auto-detects platform (macOS ARM/Intel, Linux, Windows), GPU (Metal/CUDA/ROCm/DirectML), Ollama, and FastEmbed sidecar at startup

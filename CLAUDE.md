@@ -62,7 +62,7 @@ Internal uses 60% coverage floor; public uses 20% (fewer tests since internal-on
 
 Cerid AI is a self-hosted, privacy-first Personal AI Knowledge Companion. It unifies multi-domain knowledge bases (code, finance, projects, artifacts) into a context-aware LLM interface with RAG-powered retrieval and intelligent agents. Knowledge base stays local; LLM API calls send query context to the configured provider. Optional cloud sync (Dropbox) for cross-machine settings/conversations, encrypted when CERID_ENCRYPTION_KEY is set.
 
-**Status:** Version 0.82. See [`docs/COMPLETED_PHASES.md`](docs/COMPLETED_PHASES.md) for history.
+**Status:** Version 0.82.0. See [`docs/COMPLETED_PHASES.md`](docs/COMPLETED_PHASES.md) for history.
 
 **Next:** See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
@@ -307,6 +307,24 @@ pip install bcrypt PyJWT                # Multi-user JWT authentication
 - `react-syntax-highlighter` — uses PrismLight with 25 registered languages (~200KB lazy chunk). npm install size is large but runtime bundle is small via tree-shaking + Vite manual chunks.
 
 **Public vs Internal deps:** `packages/desktop/` (Electron) exists only in internal. `stripe` exists only in internal. Everything else is shared.
+
+## Developer Notes (v0.82 Sprint Lessons)
+
+**Live-test everything.** Never mark a task done based on code existing — test it with `curl` against running containers. The CI environment differs from Docker Desktop (Linux x86 vs macOS ARM).
+
+**Dependency removal requires lock regeneration.** The pre-commit hook blocks commits when `requirements.txt` changes without matching `requirements.lock`. Use `make lock-python` or the Docker pip-compile command.
+
+**Silent `except: pass` is a CI failure.** Ruff BLE001 + the custom "no silent except:pass" lint rule (threshold-based) catch bare exception handlers. Always add `logger.debug()` or use specific exception types.
+
+**Import ordering matters.** Ruff I001 catches unsorted import blocks. Conditional imports inside `if` blocks need `# noqa: I001` to suppress false positives.
+
+**Frontend test assertions must match UI text.** When changing visible text (e.g. "Install Ollama" → "All platforms"), update the corresponding test assertions in `src/web/src/__tests__/`.
+
+**ChromaDB collections must be get_or_create.** Memory recall and conversation features fail on fresh installs if collections don't exist. Always use `get_or_create_collection`, never `get_collection`.
+
+**Internal repo keeps structlog.** Public repo removed it (replaced with stdlib logging), but internal keeps it for trading agent tests. Don't sync that removal.
+
+**Sidecar runs outside Docker.** The FastEmbed sidecar needs host GPU access (Metal/CUDA), so it runs as a native process. `start-cerid.sh` auto-detects and auto-starts it.
 
 ## Module Responsibility Map
 
