@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
-import { Cpu, ExternalLink, Loader2, Check, Download, Star, HardDrive } from "lucide-react"
+import { Cpu, ExternalLink, Loader2, Check, Download, Star, HardDrive, Copy } from "lucide-react"
 import { pullOllamaModel, fetchOllamaRecommendations } from "@/lib/api"
 
 interface OllamaState {
@@ -132,6 +132,11 @@ export function OllamaStep({ ollamaDetected, ollamaModels, state, onChange }: Ol
                     <p className="font-medium truncate">{hardware.gpu || "—"}</p>
                   </div>
                 </div>
+                {!hardware.gpu?.includes("Metal") && !hardware.gpu?.includes("NVIDIA") && (
+                  <p className="mt-2 text-[9px] text-yellow-600 dark:text-yellow-400">
+                    CPU-only detected — inference will be slower. GPU acceleration available with Apple Silicon or NVIDIA.
+                  </p>
+                )}
               </div>
             )}
 
@@ -241,13 +246,43 @@ export function OllamaStep({ ollamaDetected, ollamaModels, state, onChange }: Ol
             </div>
           </>
         ) : (
-          /* Not detected */
+          /* Not detected — platform-specific install instructions */
           <div className="space-y-2">
             <div className="rounded-lg border bg-card p-3">
               <p className="text-xs text-muted-foreground">
-                Ollama is not running on this machine. You can install it now or enable it later
-                in Settings.
+                Ollama is not running on this machine. Install it to enable free local AI for
+                verification and extraction tasks.
               </p>
+            </div>
+            <div className="rounded-lg border bg-card p-3 space-y-2">
+              <p className="text-[11px] font-medium text-muted-foreground">Quick Install</p>
+              {navigator.platform?.includes("Mac") ? (
+                <div className="flex items-center gap-2 rounded bg-muted px-3 py-1.5 font-mono text-[10px]">
+                  <span className="flex-1 select-all">brew install ollama && ollama serve</span>
+                  <Button variant="ghost" size="sm" className="h-5 w-5 p-0 shrink-0"
+                    onClick={() => navigator.clipboard.writeText("brew install ollama && ollama serve")}>
+                    <Copy className="h-2.5 w-2.5" />
+                  </Button>
+                </div>
+              ) : navigator.platform?.includes("Linux") ? (
+                <div className="flex items-center gap-2 rounded bg-muted px-3 py-1.5 font-mono text-[10px]">
+                  <span className="flex-1 select-all">curl -fsSL https://ollama.com/install.sh | sh</span>
+                  <Button variant="ghost" size="sm" className="h-5 w-5 p-0 shrink-0"
+                    onClick={() => navigator.clipboard.writeText("curl -fsSL https://ollama.com/install.sh | sh")}>
+                    <Copy className="h-2.5 w-2.5" />
+                  </Button>
+                </div>
+              ) : (
+                <a
+                  href="https://ollama.com/download"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 rounded bg-muted px-3 py-1.5 text-[10px] font-medium text-brand hover:bg-brand/5"
+                >
+                  Download from ollama.com
+                  <ExternalLink className="h-2.5 w-2.5" />
+                </a>
+              )}
             </div>
             <a
               href="https://ollama.com/download"
@@ -255,7 +290,7 @@ export function OllamaStep({ ollamaDetected, ollamaModels, state, onChange }: Ol
               rel="noopener noreferrer"
               className="flex items-center justify-center gap-2 rounded-lg border bg-card p-3 text-xs font-medium text-brand hover:bg-brand/5"
             >
-              Install Ollama
+              All platforms
               <ExternalLink className="h-3 w-3" />
             </a>
           </div>
