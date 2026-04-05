@@ -310,6 +310,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             "Inference provider: %s (tier=%s, gpu=%s)",
             _inf_cfg.provider, _inf_cfg.tier.value, _inf_cfg.gpu_name or "none",
         )
+        # Start periodic recheck loop
+        import asyncio as _asyncio
+        from utils.inference_config import _inference_recheck_loop
+        _asyncio.ensure_future(_inference_recheck_loop())
     except Exception as e:  # noqa: BLE001
         logger.warning("Inference detection failed (using CPU defaults): %s", e)
 

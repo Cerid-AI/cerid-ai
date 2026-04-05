@@ -270,6 +270,63 @@ def detect_embedding_provider() -> InferenceConfig:
     return config
 
 
+async def _inference_recheck_loop() -> None:
+    """Background coroutine that re-checks inference providers periodically.
+
+    Detects upgrades (e.g. Ollama started mid-session) and downgrades
+    (e.g. sidecar stopped). Logs tier changes.
+    """
+    import asyncio
+
+    interval = int(os.getenv("INFERENCE_RECHECK_INTERVAL", "300"))
+    if interval <= 0:
+        logger.info("Inference recheck disabled (INFERENCE_RECHECK_INTERVAL=0)")
+        return
+
+    logger.info("Inference recheck loop started (every %ds)", interval)
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            old = get_inference_config()
+            old_provider = old.provider
+            old_tier = old.tier
+
+            new = detect_embedding_provider()
+
+            if new.provider != old_provider or new.tier != old_tier:
+                direction = "upgrade" if _tier_rank(new.tier) > _tier_rank(old_tier) else "downgrade"
+                logger.info(
+                    "Inference provider %s: %s (%s) -> %s (%s)",
+                    direction, old_provider, old_tier.value, new.provider, new.tier.value,
+                )
+                # Emit event for SSE subscribers
+                try:
+                    from events import event_bus
+                    event_bus.emit("inference_provider_changed", {
+                        "old_provider": old_provider,
+                        "old_tier": old_tier.value,
+                        "new_provider": new.provider,
+                        "new_tier": new.tier.value,
+                        "direction": direction,
+                    })
+                except (ImportError, AttributeError):
+                    pass
+            else:
+                logger.debug("Inference recheck: no change (%s/%s)", new.provider, new.tier.value)
+        except Exception:  # noqa: BLE001
+            logger.debug("Inference recheck failed, will retry next interval")
+
+
+def _tier_rank(tier: InferenceTier) -> int:
+    """Numeric rank for tier comparison (higher = better)."""
+    return {
+        InferenceTier.UNKNOWN: 0,
+        InferenceTier.DEGRADED: 1,
+        InferenceTier.GOOD: 2,
+        InferenceTier.OPTIMAL: 3,
+    }.get(tier, 0)
+
+
 def inference_health_payload() -> dict:
     """Return inference status for the /health endpoint."""
     cfg = get_inference_config()

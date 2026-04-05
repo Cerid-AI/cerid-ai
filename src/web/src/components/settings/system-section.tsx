@@ -45,6 +45,39 @@ function formatFlagName(flag: string): string {
   return flag.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
+const TIER_COLORS: Record<string, string> = {
+  optimal: "border-green-500/30 bg-green-500/10 text-green-600 dark:text-green-400",
+  good: "border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400",
+  degraded: "border-yellow-500/30 bg-yellow-500/10 text-yellow-600 dark:text-yellow-400",
+  unknown: "border-muted-foreground/30 bg-muted text-muted-foreground",
+}
+
+function InferenceTierRow() {
+  const { data: health } = useQuery<HealthStatusResponse>({
+    queryKey: ["health-status"],
+    queryFn: fetchHealthStatus,
+    refetchInterval: 30_000,
+    staleTime: 10_000,
+  })
+  const inf = health?.inference
+  if (!inf) return null
+
+  return (
+    <div className="flex items-center justify-between">
+      <LabelWithInfo
+        label="Inference Tier"
+        info={`${inf.message}. Provider: ${inf.provider}, Platform: ${inf.platform}${inf.gpu_name ? `, GPU: ${inf.gpu_name}` : ""}`}
+      />
+      <div className="flex items-center gap-2">
+        <Badge variant="outline" className={cn("text-[10px]", TIER_COLORS[inf.tier] ?? TIER_COLORS.unknown)}>
+          {inf.tier === "optimal" ? "Optimal (GPU)" : inf.tier === "good" ? "Good" : inf.tier === "degraded" ? "CPU Only" : "Unknown"}
+        </Badge>
+        <span className="text-[10px] text-muted-foreground">{inf.provider}</span>
+      </div>
+    </div>
+  )
+}
+
 interface SystemSectionProps {
   settings: ServerSettings
   sections: Record<SectionKey, boolean>
@@ -82,6 +115,8 @@ export function SystemSection({
                 {settings.feature_tier}
               </Badge>
             </div>
+            {/* Inference Tier */}
+            <InferenceTierRow />
             {/* Tier-gated capabilities grid */}
             <div className="mt-1 rounded border bg-muted/30 p-3">
               <p className="mb-2 text-[11px] font-medium text-muted-foreground">Platform Capabilities</p>
