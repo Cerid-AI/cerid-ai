@@ -59,20 +59,6 @@ make check-all
 make test-eval
 ```
 
-**Integration tests (requires running Docker stack):**
-```bash
-python -m pytest tests/test_e2e_integration.py
-```
-
-**RAG resilience testing:**
-```bash
-python -m pytest tests/test_rag_resilience.py -v
-```
-
-### Synthetic Test Fixtures
-
-Synthetic test data lives in `tests/fixtures/synthetic/`. These fixtures provide deterministic, reproducible test inputs for unit and integration tests without requiring a live knowledge base. Use them for testing retrieval pipelines, deduplication logic, and context assembly.
-
 ---
 
 ## Dependency Management
@@ -135,18 +121,16 @@ See `docs/CONTRIBUTING.md` for the full sync reference. Key points:
 
 ---
 
-## CI Pipeline (8 jobs)
+## CI Pipeline (6 jobs)
 
 | Job | What |
 |-----|------|
 | lint | `ruff check src/mcp/` |
 | typecheck | `mypy src/mcp/` |
-| test | pytest (70% coverage floor) + Codecov upload + license audit |
+| test | pytest (20% coverage floor) + Codecov upload + license audit |
 | security | detect-secrets + bandit + pip-audit + dlint ReDoS |
-| lock-sync | pip-compile lock file freshness check |
 | frontend | tsc + ESLint + Vitest + Vite build + bundle size check (800KB limit) |
 | docker | hadolint + `docker build` + Trivy scan |
-| frontend-desktop | npm ci + `npm run typecheck` |
 
 ## Platform Notes
 

@@ -45,6 +45,8 @@ test-eval:
 	cd src/mcp && python -m pytest tests/eval/ -v --tb=short
 
 # -- Combined --
+# Note: Python lint/typecheck/test run inside Docker (see DEVELOPMENT.md "Running Tests").
+# This target covers frontend checks only; use `make test` for Python tests via local install.
 check-all: deps-check lint-frontend typecheck-frontend test-frontend
 
 help:
@@ -61,4 +63,4 @@ help:
 	@echo "  test               Run unit + integration tests (skip eval)"
 	@echo "  test-all           Run ALL tests including eval"
 	@echo "  test-eval          Run evaluation harness only (Monte Carlo, RAGAS)"
-	@echo "  check-all          Run deps-check + lint + typecheck + test"
+	@echo "  check-all          Run deps-check + frontend lint + typecheck + test (Python checks require Docker)"

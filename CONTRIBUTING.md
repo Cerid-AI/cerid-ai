@@ -6,7 +6,7 @@ Thank you for your interest in contributing to Cerid AI!
 
 ### Prerequisites
 - Python 3.11+
-- Node.js 20+ (for React GUI development)
+- Node.js 22+ (for React GUI development)
 - Docker & Docker Compose V2
 
 ### Quick Start
@@ -33,12 +33,12 @@ docker network create llm-network
 ### Running Tests
 
 ```bash
-# Unit tests (backend, ~1941 tests)
+# Unit tests (backend, 25 test files)
 cd src/mcp
 pip install pytest pytest-asyncio httpx
 pytest tests/ -v
 
-# Frontend tests (~611 tests)
+# Frontend tests (61 test files)
 cd src/web && npx vitest run
 
 # All checks (lint + typecheck + tests)
@@ -47,11 +47,8 @@ make check-all
 # Monte Carlo retrieval evaluation
 make test-eval
 
-# E2E pipeline integration tests (requires running Docker stack)
-python -m pytest src/mcp/tests/
-
-# RAG resilience testing (circuit breakers, degradation paths)
-python -m pytest tests/test_rag_resilience.py -v
+# Integration tests (requires running Docker stack)
+cd src/mcp && python -m pytest tests/ -v
 ```
 
 ### Linting
@@ -99,7 +96,7 @@ src/mcp/
   utils/            — Shared utilities (graph, BM25, parsers, features, etc.)
   plugins/          — Plugin system (loader, base classes)
   middleware/       — Auth + rate limiting
-  tests/            — pytest test suite (~1941 tests)
+  tests/            — pytest test suite
 
 src/web/
   src/components/   — React components (layout, chat, kb, monitoring, audit, ui)
