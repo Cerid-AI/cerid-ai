@@ -45,11 +45,44 @@ else
     echo "=== Starting Cerid AI Stack ==="
 fi
 
-# Verify Docker Compose V2 is available
+# --- Prerequisites ---
+# Docker Compose V2
 if ! docker compose version >/dev/null 2>&1; then
     echo "Error: Docker Compose V2 is required (docker compose, not docker-compose)."
     echo "Install: https://docs.docker.com/compose/install/"
     exit 1
+fi
+
+# curl (used for health checks and sidecar detection)
+if ! command -v curl >/dev/null 2>&1; then
+    echo "Warning: curl not found — health checks and sidecar detection will be skipped."
+fi
+
+# python3 (needed for sidecar, optional)
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "Note: python3 not found on host — sidecar GPU acceleration unavailable."
+fi
+
+# Port availability check (non-blocking warnings)
+for PORT_CHECK in "${CERID_PORT_GUI:-3000}:GUI" "${CERID_PORT_MCP:-8888}:MCP"; do
+    _PORT="${PORT_CHECK%%:*}"
+    _NAME="${PORT_CHECK##*:}"
+    if command -v lsof >/dev/null 2>&1 && lsof -iTCP:"$_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+        echo "Warning: Port $_PORT ($_NAME) is already in use. Docker may fail to bind."
+    fi
+done
+
+# Docker Desktop memory check (macOS/Windows only)
+if [ "$(uname -s)" = "Darwin" ]; then
+    _DOCKER_MEM=$(docker info --format '{{.MemTotal}}' 2>/dev/null || echo "0")
+    _DOCKER_MEM_GB=$(( _DOCKER_MEM / 1073741824 ))
+    if [ "$_DOCKER_MEM_GB" -gt 0 ] && [ "$_DOCKER_MEM_GB" -lt 4 ]; then
+        echo ""
+        echo "Warning: Docker Desktop has only ${_DOCKER_MEM_GB}GB RAM allocated."
+        echo "  Cerid needs at least 4GB (8GB recommended)."
+        echo "  Increase via: Docker Desktop → Settings → Resources → Memory"
+        echo ""
+    fi
 fi
 
 # Auto-decrypt .env if missing but .env.age exists
