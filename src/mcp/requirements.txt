@@ -35,6 +35,9 @@ PyStemmer>=2.2
 # Scheduling
 apscheduler>=3.10,<4
 
+# Logging (used by trading agent + internal tests)
+structlog>=24,<26
+
 # Auth (optional — only needed for multi-user mode)
 # optional: PyJWT>=2.8,<3
 # optional: bcrypt>=4.0,<6
