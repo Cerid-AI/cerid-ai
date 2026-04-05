@@ -43,8 +43,13 @@ from app.routers.agents import (
     hallucination_check_endpoint,
     memory_extract_endpoint,
 )
-from app.routers.health import health_check
+from app.routers.health import degradation_status, health_check, list_collections
+from app.routers.plugins import list_plugins
+from app.routers.query import query_knowledge
+from app.services.ingestion import ingest_content, ingest_file
+from config.features import FEATURE_FLAGS, FEATURE_TIER
 from config.settings import CERID_BOARDROOM_ENABLED, CERID_TRADING_ENABLED
+from config.taxonomy import DOMAINS, TAXONOMY
 
 router = APIRouter(prefix="/sdk/v1", tags=["SDK"])
 
@@ -124,6 +129,73 @@ def sdk_health():
         "ollama_enabled": os.getenv("OLLAMA_ENABLED", "false").lower() in ("true", "1"),
     }
     return base
+
+
+# ---------------------------------------------------------------------------
+# Ingest endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.post("/ingest", summary="Ingest Text", responses={422: _422, 503: _503})
+def sdk_ingest(req: dict):
+    result = ingest_content(
+        req.get("content", ""),
+        domain=req.get("domain", "general"),
+        metadata={"tags": req.get("tags", "")},
+    )
+    return result
+
+
+@router.post("/ingest/file", summary="Ingest File", responses={422: _422, 503: _503})
+async def sdk_ingest_file(req: dict):
+    result = await ingest_file(
+        req.get("file_path", ""),
+        domain=req.get("domain", ""),
+        metadata={"tags": req.get("tags", "")},
+    )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Collections / Taxonomy / Search
+# ---------------------------------------------------------------------------
+
+
+@router.get("/collections", summary="List Collections")
+def sdk_collections():
+    return list_collections()
+
+
+@router.get("/taxonomy", summary="Domain Taxonomy")
+def sdk_taxonomy():
+    return {"domains": list(DOMAINS), "taxonomy": dict(TAXONOMY)}
+
+
+@router.get("/health/detailed", summary="Detailed Health")
+def sdk_health_detailed():
+    return degradation_status()
+
+
+@router.get("/settings", summary="SDK Settings")
+def sdk_settings():
+    return {"version": _VERSION, "tier": FEATURE_TIER, "features": dict(FEATURE_FLAGS)}
+
+
+@router.post("/search", summary="KB Search", responses={422: _422, 503: _503})
+def sdk_search(req: dict):
+    result = query_knowledge(
+        req.get("query", ""),
+        domain=req.get("domain", "general"),
+        top_k=req.get("top_k", 3),
+    )
+    sources = result.get("sources", [])
+    return {"results": sources, "total_results": len(sources), "confidence": result.get("confidence", 0.0)}
+
+
+@router.get("/plugins", summary="List Plugins")
+def sdk_plugins():
+    result = list_plugins()
+    return {"plugins": [p.model_dump() for p in result.plugins], "total": result.total}
 
 
 # ---------------------------------------------------------------------------

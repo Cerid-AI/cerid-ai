@@ -75,7 +75,7 @@ class TestClientSingletonLocking:
     @pytest.mark.asyncio
     async def test_llm_client_concurrent_init(self):
         """10 concurrent _get_client() calls create exactly 1 httpx.AsyncClient."""
-        import utils.llm_client as mod
+        import core.utils.llm_client as mod
 
         mod._client = None  # ensure clean state
 
@@ -88,7 +88,7 @@ class TestClientSingletonLocking:
             call_count += 1
             return mock_client
 
-        with patch("utils.llm_client.httpx") as mock_httpx:
+        with patch("core.utils.llm_client.httpx") as mock_httpx:
             mock_httpx.AsyncClient = fake_async_client
             mock_httpx.Timeout = MagicMock()
             mock_httpx.Limits = MagicMock()
@@ -103,7 +103,7 @@ class TestClientSingletonLocking:
     @pytest.mark.asyncio
     async def test_bifrost_client_concurrent_init(self):
         """10 concurrent get_bifrost_client() calls create exactly 1 client."""
-        import utils.bifrost as mod
+        import core.utils.bifrost as mod
 
         mod._client = None
 
@@ -116,7 +116,7 @@ class TestClientSingletonLocking:
             call_count += 1
             return mock_client
 
-        with patch("utils.bifrost.httpx") as mock_httpx:
+        with patch("core.utils.bifrost.httpx") as mock_httpx:
             mock_httpx.AsyncClient = fake_async_client
             mock_httpx.Limits = MagicMock()
 
@@ -130,7 +130,7 @@ class TestClientSingletonLocking:
     @pytest.mark.asyncio
     async def test_ollama_client_concurrent_init(self):
         """10 concurrent _get_ollama_client() calls create exactly 1 client."""
-        import utils.internal_llm as mod
+        import core.utils.internal_llm as mod
 
         mod._ollama_client = None
 
@@ -143,7 +143,7 @@ class TestClientSingletonLocking:
             call_count += 1
             return mock_client
 
-        with patch("utils.internal_llm.httpx") as mock_httpx:
+        with patch("core.utils.internal_llm.httpx") as mock_httpx:
             mock_httpx.AsyncClient = fake_async_client
             mock_httpx.Timeout = MagicMock()
             mock_httpx.Limits = MagicMock()
@@ -158,7 +158,7 @@ class TestClientSingletonLocking:
     @pytest.mark.asyncio
     async def test_client_recreated_after_close(self):
         """A closed client is replaced on next _get_client() call."""
-        import utils.llm_client as mod
+        import core.utils.llm_client as mod
 
         closed_client = MagicMock()
         closed_client.is_closed = True
@@ -167,7 +167,7 @@ class TestClientSingletonLocking:
         new_client = MagicMock()
         new_client.is_closed = False
 
-        with patch("utils.llm_client.httpx") as mock_httpx:
+        with patch("core.utils.llm_client.httpx") as mock_httpx:
             mock_httpx.AsyncClient = MagicMock(return_value=new_client)
             mock_httpx.Timeout = MagicMock()
             mock_httpx.Limits = MagicMock()

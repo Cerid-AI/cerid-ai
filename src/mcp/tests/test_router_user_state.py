@@ -25,7 +25,7 @@ def _mock_redis():
     mock_redis.get.return_value = None  # no private mode flag
     with patch("app.deps._redis", mock_redis), \
          patch("app.deps.get_redis", return_value=mock_redis), \
-         patch("app.utils.private_mode.get_private_mode_level", _private_mode_zero):
+         patch("utils.private_mode.get_private_mode_level", _private_mode_zero):
         yield
 
 

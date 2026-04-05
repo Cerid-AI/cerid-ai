@@ -79,7 +79,7 @@ def _make_verify_result(claim, status="verified", confidence=0.95, method="kb_cr
 
 # Ingestion patch stack — shared across all ingestion-dependent tests
 _INGEST_PATCHES = [
-    patch("app.routers.system_monitor.get_redis", return_value=MagicMock()),
+    patch("routers.system_monitor.get_redis", return_value=MagicMock()),
     patch("app.services.ingestion.cache"),
     patch("app.services.ingestion.get_redis", return_value=MagicMock()),
 ]
@@ -360,7 +360,7 @@ class TestSyntheticKBInjection:
 class TestDataIntegrity:
     """Verify data correctness throughout the ingestion pipeline."""
 
-    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
+    @patch("routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")
@@ -391,7 +391,7 @@ class TestDataIntegrity:
         assert r2["status"] == "duplicate"
         assert r2["artifact_id"] == r1["artifact_id"]
 
-    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
+    @patch("routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.cache")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
@@ -419,7 +419,7 @@ class TestDataIntegrity:
         assert result["domain"] == "coding"
         assert result["chunks"] > 0
 
-    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
+    @patch("routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.cache")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
@@ -444,7 +444,7 @@ class TestDataIntegrity:
         assert long_r["chunks"] > 1
         assert long_r["chunks"] > short["chunks"]
 
-    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
+    @patch("routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.cache")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
@@ -469,7 +469,7 @@ class TestDataIntegrity:
         assert call_kwargs.kwargs.get("domain") == "coding" or call_kwargs.args[2] == "coding" if len(call_kwargs.args) > 2 else True
         assert call_kwargs.kwargs.get("artifact_id") == result["artifact_id"]
 
-    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
+    @patch("routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.cache")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
@@ -511,7 +511,7 @@ class TestEdgeCases:
         assert result["confidence"] == 0.0
         assert result["total_results"] == 0
 
-    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
+    @patch("routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.cache")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
@@ -534,7 +534,7 @@ class TestEdgeCases:
         assert result["status"] == "success"
         assert result["chunks"] > 1
 
-    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
+    @patch("routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.cache")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")

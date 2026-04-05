@@ -96,7 +96,7 @@ def _seed_automation(store: dict, **overrides) -> dict:
 class TestListAutomations:
     def test_empty_list(self) -> None:
         redis, _ = _mock_redis()
-        with patch("routers.automations.get_redis", return_value=redis):
+        with patch("app.routers.automations.get_redis", return_value=redis):
             app = _make_app()
             client = TestClient(app)
             resp = client.get("/automations")
@@ -107,7 +107,7 @@ class TestListAutomations:
         redis, store = _mock_redis()
         _seed_automation(store, id="a1", name="First")
         _seed_automation(store, id="a2", name="Second")
-        with patch("routers.automations.get_redis", return_value=redis):
+        with patch("app.routers.automations.get_redis", return_value=redis):
             app = _make_app()
             client = TestClient(app)
             resp = client.get("/automations")
@@ -122,9 +122,9 @@ class TestCreateAutomation:
     def test_create_returns_201(self) -> None:
         redis, store = _mock_redis()
         with (
-            patch("routers.automations.get_redis", return_value=redis),
-            patch("routers.automations._validate_cron"),
-            patch("routers.automations._register_job"),
+            patch("app.routers.automations.get_redis", return_value=redis),
+            patch("app.routers.automations._validate_cron"),
+            patch("app.routers.automations._register_job"),
         ):
             app = _make_app()
             client = TestClient(app)
@@ -141,9 +141,9 @@ class TestCreateAutomation:
     def test_create_disabled_skips_register(self) -> None:
         redis, _ = _mock_redis()
         with (
-            patch("routers.automations.get_redis", return_value=redis),
-            patch("routers.automations._validate_cron"),
-            patch("routers.automations._register_job") as mock_reg,
+            patch("app.routers.automations.get_redis", return_value=redis),
+            patch("app.routers.automations._validate_cron"),
+            patch("app.routers.automations._register_job") as mock_reg,
         ):
             app = _make_app()
             client = TestClient(app)
@@ -159,8 +159,8 @@ class TestCreateAutomation:
             raise HTTPException(status_code=422, detail="Invalid cron expression")
 
         with (
-            patch("routers.automations.get_redis", return_value=redis),
-            patch("routers.automations._validate_cron", side_effect=_bad_cron),
+            patch("app.routers.automations.get_redis", return_value=redis),
+            patch("app.routers.automations._validate_cron", side_effect=_bad_cron),
         ):
             app = _make_app()
             client = TestClient(app)
@@ -169,7 +169,7 @@ class TestCreateAutomation:
 
     def test_create_missing_name_returns_422(self) -> None:
         redis, _ = _mock_redis()
-        with patch("routers.automations.get_redis", return_value=redis):
+        with patch("app.routers.automations.get_redis", return_value=redis):
             app = _make_app()
             client = TestClient(app)
             payload = _sample_create_payload()
@@ -182,7 +182,7 @@ class TestGetAutomation:
     def test_get_existing(self) -> None:
         redis, store = _mock_redis()
         _seed_automation(store, id="auto-get", name="Fetched")
-        with patch("routers.automations.get_redis", return_value=redis):
+        with patch("app.routers.automations.get_redis", return_value=redis):
             app = _make_app()
             client = TestClient(app)
             resp = client.get("/automations/auto-get")
@@ -191,7 +191,7 @@ class TestGetAutomation:
 
     def test_get_missing_returns_404(self) -> None:
         redis, _ = _mock_redis()
-        with patch("routers.automations.get_redis", return_value=redis):
+        with patch("app.routers.automations.get_redis", return_value=redis):
             app = _make_app()
             client = TestClient(app)
             resp = client.get("/automations/nonexistent")
@@ -203,8 +203,8 @@ class TestUpdateAutomation:
         redis, store = _mock_redis()
         _seed_automation(store, id="auto-upd", name="Old Name")
         with (
-            patch("routers.automations.get_redis", return_value=redis),
-            patch("routers.automations._register_job"),
+            patch("app.routers.automations.get_redis", return_value=redis),
+            patch("app.routers.automations._register_job"),
         ):
             app = _make_app()
             client = TestClient(app)
@@ -221,8 +221,8 @@ class TestUpdateAutomation:
             raise HTTPException(status_code=422, detail="Invalid cron expression")
 
         with (
-            patch("routers.automations.get_redis", return_value=redis),
-            patch("routers.automations._validate_cron", side_effect=_bad_cron),
+            patch("app.routers.automations.get_redis", return_value=redis),
+            patch("app.routers.automations._validate_cron", side_effect=_bad_cron),
         ):
             app = _make_app()
             client = TestClient(app)
@@ -231,7 +231,7 @@ class TestUpdateAutomation:
 
     def test_update_missing_returns_404(self) -> None:
         redis, _ = _mock_redis()
-        with patch("routers.automations.get_redis", return_value=redis):
+        with patch("app.routers.automations.get_redis", return_value=redis):
             app = _make_app()
             client = TestClient(app)
             resp = client.put("/automations/missing", json={"name": "x"})
@@ -241,8 +241,8 @@ class TestUpdateAutomation:
         redis, store = _mock_redis()
         _seed_automation(store, id="auto-dis", enabled=True)
         with (
-            patch("routers.automations.get_redis", return_value=redis),
-            patch("routers.automations._unregister_job") as mock_unreg,
+            patch("app.routers.automations.get_redis", return_value=redis),
+            patch("app.routers.automations._unregister_job") as mock_unreg,
         ):
             app = _make_app()
             client = TestClient(app)
@@ -257,8 +257,8 @@ class TestDeleteAutomation:
         redis, store = _mock_redis()
         _seed_automation(store, id="auto-del")
         with (
-            patch("routers.automations.get_redis", return_value=redis),
-            patch("routers.automations._unregister_job"),
+            patch("app.routers.automations.get_redis", return_value=redis),
+            patch("app.routers.automations._unregister_job"),
         ):
             app = _make_app()
             client = TestClient(app)
@@ -268,7 +268,7 @@ class TestDeleteAutomation:
 
     def test_delete_missing_returns_404(self) -> None:
         redis, _ = _mock_redis()
-        with patch("routers.automations.get_redis", return_value=redis):
+        with patch("app.routers.automations.get_redis", return_value=redis):
             app = _make_app()
             client = TestClient(app)
             resp = client.delete("/automations/ghost")
@@ -280,8 +280,8 @@ class TestEnableDisable:
         redis, store = _mock_redis()
         _seed_automation(store, id="auto-en", enabled=False)
         with (
-            patch("routers.automations.get_redis", return_value=redis),
-            patch("routers.automations._register_job") as mock_reg,
+            patch("app.routers.automations.get_redis", return_value=redis),
+            patch("app.routers.automations._register_job") as mock_reg,
         ):
             app = _make_app()
             client = TestClient(app)
@@ -294,8 +294,8 @@ class TestEnableDisable:
         redis, store = _mock_redis()
         _seed_automation(store, id="auto-dis2", enabled=True)
         with (
-            patch("routers.automations.get_redis", return_value=redis),
-            patch("routers.automations._unregister_job") as mock_unreg,
+            patch("app.routers.automations.get_redis", return_value=redis),
+            patch("app.routers.automations._unregister_job") as mock_unreg,
         ):
             app = _make_app()
             client = TestClient(app)
@@ -306,7 +306,7 @@ class TestEnableDisable:
 
     def test_enable_missing_returns_404(self) -> None:
         redis, _ = _mock_redis()
-        with patch("routers.automations.get_redis", return_value=redis):
+        with patch("app.routers.automations.get_redis", return_value=redis):
             app = _make_app()
             client = TestClient(app)
             resp = client.post("/automations/nope/enable")
@@ -325,8 +325,8 @@ class TestManualRun:
             status="success",
         )
         with (
-            patch("routers.automations.get_redis", return_value=redis),
-            patch("routers.automations.execute_automation", new_callable=AsyncMock, return_value=mock_run),
+            patch("app.routers.automations.get_redis", return_value=redis),
+            patch("app.routers.automations.execute_automation", new_callable=AsyncMock, return_value=mock_run),
         ):
             app = _make_app()
             client = TestClient(app)
@@ -338,7 +338,7 @@ class TestManualRun:
 
     def test_trigger_run_missing_returns_404(self) -> None:
         redis, _ = _mock_redis()
-        with patch("routers.automations.get_redis", return_value=redis):
+        with patch("app.routers.automations.get_redis", return_value=redis):
             app = _make_app()
             client = TestClient(app)
             resp = client.post("/automations/missing/run")
@@ -363,7 +363,7 @@ class TestHistory:
         store[run_key] = json.dumps(run_data)
         # Add to sorted-set index
         redis.zrevrange = MagicMock(return_value=["r1"])
-        with patch("routers.automations.get_redis", return_value=redis):
+        with patch("app.routers.automations.get_redis", return_value=redis):
             app = _make_app()
             client = TestClient(app)
             resp = client.get("/automations/auto-hist/history")
@@ -374,7 +374,7 @@ class TestHistory:
 
     def test_history_missing_automation_returns_404(self) -> None:
         redis, _ = _mock_redis()
-        with patch("routers.automations.get_redis", return_value=redis):
+        with patch("app.routers.automations.get_redis", return_value=redis):
             app = _make_app()
             client = TestClient(app)
             resp = client.get("/automations/missing/history")
@@ -413,7 +413,7 @@ class TestExecuteAutomation:
             "confidence": 0.85,
         }
         with (
-            patch("routers.automations.get_redis", return_value=redis),
+            patch("app.routers.automations.get_redis", return_value=redis),
             patch("agents.query_agent.agent_query", new_callable=AsyncMock, return_value=mock_result),
         ):
             run = await execute_automation(auto)
@@ -437,7 +437,7 @@ class TestExecuteAutomation:
             updated_at="2026-03-01T00:00:00+00:00",
         )
         with (
-            patch("routers.automations.get_redis", return_value=redis),
+            patch("app.routers.automations.get_redis", return_value=redis),
             patch("agents.query_agent.agent_query", new_callable=AsyncMock, side_effect=RuntimeError("boom")),
         ):
             run = await execute_automation(auto)

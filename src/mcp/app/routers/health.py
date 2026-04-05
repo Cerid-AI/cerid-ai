@@ -92,6 +92,24 @@ def health_check() -> dict:
     return result
 
 
+_start_time = time.time()
+
+
+def degradation_status() -> dict:
+    """Extended health check with degradation tier and uptime."""
+    base = health_check()
+    try:
+        from utils.degradation import DegradationManager
+        mgr = DegradationManager()
+        tier = mgr.current_tier().name
+    except Exception:
+        tier = "UNKNOWN"
+    base["degradation_tier"] = tier
+    base["uptime_seconds"] = int(time.time() - _start_time)
+    base.setdefault("features", {})
+    return base
+
+
 def list_collections() -> dict:
     """Public — also called by mcp_sse.py execute_tool."""
     chroma = get_chroma()
