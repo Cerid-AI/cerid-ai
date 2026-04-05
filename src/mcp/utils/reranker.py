@@ -54,10 +54,17 @@ def _load_model() -> tuple[ort.InferenceSession, Tokenizer]:
         sess_opts.inter_op_num_threads = 1
         sess_opts.intra_op_num_threads = min(4, os.cpu_count() or 1)
 
+        # Use dynamic ONNX providers from inference detection
+        try:
+            from utils.inference_config import get_inference_config
+            _providers = get_inference_config().onnx_providers
+        except Exception:
+            _providers = ["CPUExecutionProvider"]
+
         _session = ort.InferenceSession(
             model_path,
             sess_options=sess_opts,
-            providers=["CPUExecutionProvider"],
+            providers=_providers,
         )
         _tokenizer = Tokenizer.from_file(tok_path)
         _tokenizer.enable_truncation(max_length=512)
