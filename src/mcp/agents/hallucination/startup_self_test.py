@@ -12,9 +12,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
-
 import logging
+import time
 
 from errors import VerificationError
 
