@@ -1,6 +1,6 @@
 # Cerid AI -- Development Roadmap
 
-> **Last updated:** 2026-03-31
+> **Last updated:** 2026-04-05
 > **For completed work:** See `docs/COMPLETED_PHASES.md`
 
 ---

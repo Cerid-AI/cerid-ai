@@ -105,7 +105,8 @@ def _generate_contexts(
     try:
         # Route via internal LLM when configured (e.g. Ollama for free local inference)
         if config.INTERNAL_LLM_PROVIDER == "ollama":
-            import asyncio
+            import asyncio  # noqa: I001
+
             from utils.internal_llm import call_internal_llm
             content = asyncio.get_event_loop().run_until_complete(
                 call_internal_llm(

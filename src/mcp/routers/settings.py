@@ -24,7 +24,7 @@ router = APIRouter()
 logger = logging.getLogger("ai-companion.settings")
 
 # Version constant (single source of truth for the API)
-_VERSION = "0.8.0"
+_VERSION = "0.82.0"
 
 
 def _redact_url(url: str) -> str:
