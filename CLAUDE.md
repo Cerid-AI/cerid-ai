@@ -108,6 +108,11 @@ pip install bcrypt PyJWT                # Multi-user JWT authentication
 
 **Auth imports are graceful:** `routers/auth.py` and `middleware/jwt_auth.py` are only loaded when `CERID_MULTI_USER=true` (conditional import in `main.py`). Missing bcrypt/PyJWT won't crash the server.
 
+**Protected Dependencies (do NOT remove):**
+- `langgraph` — triage.py is 469 lines with 16 functions building a real conditional routing graph. Reimplementing would lose graph execution, error propagation, and routing visualization.
+- `pandas` — CSV parser uses pd.read_csv for auto-delimiter detection, encoding fallback, column type inference, df.describe() statistics. These enrich KB artifacts. Already lazy-imported.
+- `react-syntax-highlighter` — uses PrismLight with 25 registered languages (~200KB lazy chunk). npm install size is large but runtime bundle is small via tree-shaking + Vite manual chunks.
+
 **Embedding runs on Docker CPU by default** but auto-detects GPU acceleration:
 - Ollama on host → uses Ollama for LLM tasks
 - FastEmbed sidecar on host → native GPU embeddings (Metal/CUDA/ROCm)
