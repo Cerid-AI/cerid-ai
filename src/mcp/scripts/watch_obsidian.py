@@ -34,7 +34,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-import requests
+import httpx
 
 from errors import CeridError
 
@@ -248,7 +248,7 @@ def ingest_note(file_path: str, domain: str, mode: str):
     }
 
     try:
-        resp = requests.post(
+        resp = httpx.post(
             f"{MCP_URL}/ingest",
             json=payload,
             timeout=60,
@@ -267,7 +267,7 @@ def ingest_note(file_path: str, domain: str, mode: str):
         else:
             _log("ERROR", f"  ! {filename}: HTTP {resp.status_code} - {resp.text[:200]}")
             _schedule_retry(file_path, domain, mode)
-    except requests.RequestException as e:
+    except httpx.HTTPError as e:
         _log("ERROR", f"  ! {filename}: {e}")
         _schedule_retry(file_path, domain, mode)
 

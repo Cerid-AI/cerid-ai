@@ -14,11 +14,11 @@ import asyncio
 import json
 import time
 
-import structlog
+import logging
 
 from errors import VerificationError
 
-logger = structlog.get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 # A synthetic response with 3 obvious factual claims for extraction testing.
 _TEST_RESPONSE = (

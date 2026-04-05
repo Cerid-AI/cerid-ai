@@ -29,9 +29,9 @@ FROM python:3.11.14-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
-    tesseract-ocr \
-    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
+# Pro plugins requiring system packages (tesseract-ocr, ffmpeg) are installed
+# separately via plugin scripts — not included in the base image to reduce size.
 
 RUN useradd -m -u 1000 cerid
 

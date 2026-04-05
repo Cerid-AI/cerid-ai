@@ -28,7 +28,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-import requests
+import httpx
 
 # Add parent dir so we can import config
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -223,7 +223,7 @@ def _flush_batch():
     _log("INFO", f"Flushing batch: {len(batch_items)} file(s)")
 
     try:
-        resp = requests.post(
+        resp = httpx.post(
             f"{MCP_URL}/ingest_batch",
             json={"items": batch_items},
             timeout=120,  # longer timeout for batch
@@ -254,7 +254,7 @@ def _flush_batch():
             # Fall back to individual retry for all items
             for host_path, mode in items_to_send:
                 _schedule_retry(host_path, mode)
-    except requests.RequestException as e:
+    except httpx.HTTPError as e:
         _log("ERROR", f"  Batch request failed: {e}")
         # Fall back to individual retry for all items
         for host_path, mode in items_to_send:
