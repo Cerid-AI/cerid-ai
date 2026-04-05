@@ -103,25 +103,38 @@ def _generate_contexts(
     )
 
     try:
-        resp = httpx.post(
-            _BIFROST_URL,
-            json={
-                "model": config.CONTEXTUAL_CHUNKS_MODEL,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.0,
-                "max_tokens": 300,
-            },
-            timeout=_TIMEOUT,
-        )
-        resp.raise_for_status()
+        # Route via internal LLM when configured (e.g. Ollama for free local inference)
+        if config.INTERNAL_LLM_PROVIDER == "ollama":
+            import asyncio
+            from utils.internal_llm import call_internal_llm
+            content = asyncio.get_event_loop().run_until_complete(
+                call_internal_llm(
+                    [{"role": "user", "content": prompt}],
+                    temperature=0.0,
+                    max_tokens=300,
+                    stage="topic_extraction",
+                )
+            )
+        else:
+            resp = httpx.post(
+                _BIFROST_URL,
+                json={
+                    "model": config.CONTEXTUAL_CHUNKS_MODEL,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.0,
+                    "max_tokens": 300,
+                },
+                timeout=_TIMEOUT,
+            )
+            resp.raise_for_status()
 
-        data = resp.json()
-        content = (
-            data.get("choices", [{}])[0]
-            .get("message", {})
-            .get("content", "")
-            .strip()
-        )
+            data = resp.json()
+            content = (
+                data.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+                .strip()
+            )
 
         # Parse JSON array from response
         # Handle markdown code blocks
