@@ -99,6 +99,8 @@ The stable SDK lives at `/sdk/v1/` and provides a versioned contract for externa
 | `/sdk/v1/memory/extract` | POST | Extract facts and decisions from text |
 | `/sdk/v1/health` | GET | Service health and readiness |
 
+These are the 4 core endpoints. The full SDK exposes 12 endpoints (including ingest, search, collections, taxonomy, and more) -- see [docs/SDK_GUIDE.md](docs/SDK_GUIDE.md) for the complete reference.
+
 ### Example
 
 ```bash
@@ -112,7 +114,7 @@ For the full SDK guide, see [docs/SDK_GUIDE.md](docs/SDK_GUIDE.md).
 
 ### Plugins
 
-Cerid AI supports manifest-based plugins for extending functionality. Each plugin declares its capabilities and tier requirements in a `manifest.json`. See [plugins/README.md](plugins/README.md) for the plugin development guide.
+Cerid AI supports manifest-based plugins for extending functionality. Each plugin declares its capabilities and tier requirements in a `manifest.json`. See [docs/PLUGIN_DEVELOPMENT.md](docs/PLUGIN_DEVELOPMENT.md) for the plugin development guide.
 
 ---
 
