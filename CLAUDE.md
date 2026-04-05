@@ -239,12 +239,17 @@ See [`.claude/SETUP.md`](.claude/SETUP.md) for detailed Claude Code configuratio
 | External data sources | Pluggable data source framework | `utils/data_sources/` |
 | Redis client | `TypedRedis` wrapper (narrowed sync return types) | `utils/typed_redis.py` |
 | Response models | Pydantic `response_model=` on all user-facing endpoints | `models/*.py` |
+| Inference detection | `detect_embedding_provider()` | `utils/inference_config.py` |
+| Sidecar HTTP client | `sidecar_embed()` / `sidecar_rerank()` | `utils/inference_sidecar_client.py` |
+| Startup prereqs | Port checks, Docker memory, python3/curl | `scripts/start-cerid.sh` |
+| Sidecar auto-start | Detect installed → start in background | `scripts/start-cerid.sh` |
 
 **Rules:**
 - Typed errors (`CeridError` subclasses) are the ONLY way to signal failures. No `raise HTTPException` in business logic.
 - `@require_feature("feature_name")` is the ONLY tier gate. No inline `if FEATURE_TIER == "pro"` checks.
 - All numeric constants live in `config/constants.py`. Import from there.
 - Every `except` block MUST either log + degrade or raise a typed error. Zero silent `pass` blocks.
+- HTTP client is `httpx` everywhere — `requests` is not a direct dependency.
 
 ## Tiered Inference
 
@@ -271,6 +276,32 @@ python scripts/cerid-sidecar.py  # runs outside Docker
 Key files: `utils/inference_config.py` (detection), `utils/inference_sidecar_client.py` (HTTP client), `scripts/cerid-sidecar.py` (server).
 
 Re-check loop runs every 300s — auto-detects Ollama start/stop mid-session.
+
+## Dependency Strategy
+
+Direct dependencies are minimal — only what core functionality requires. See [`docs/DEPENDENCY_AUDIT_2026-04-05.md`](docs/DEPENDENCY_AUDIT_2026-04-05.md) for the full audit.
+
+**Core deps (14 direct in public, ~16 in internal):** fastapi, uvicorn, pydantic, httpx, chromadb, neo4j, redis, tiktoken, langgraph, pdfplumber, python-docx, openpyxl, pandas, apscheduler + utilities. Internal adds: stripe (billing).
+
+**What's NOT a direct dependency:**
+- `requests` — replaced with `httpx` everywhere (scripts, server, CLI tools)
+- `structlog` — replaced with stdlib `logging`
+- `faster-whisper` — audio plugin, optional install
+- `pytesseract` / `Pillow` — Pro OCR plugin, optional install
+- `bcrypt` / `PyJWT` — only for multi-user mode, optional install
+
+**Optional extras (install separately):**
+```bash
+pip install pytesseract Pillow          # OCR plugin (+ apt install tesseract-ocr)
+pip install faster-whisper              # Audio transcription (+ ffmpeg)
+pip install bcrypt PyJWT                # Multi-user JWT authentication
+```
+
+**Docker image (~3.2 GB):** No tesseract-ocr or ffmpeg in base — Pro plugins install their own system deps. ONNX models pre-downloaded at build time.
+
+**Auth imports are graceful:** `routers/auth.py` and `middleware/jwt_auth.py` only loaded when `CERID_MULTI_USER=true` (conditional import in `main.py`).
+
+**Public vs Internal deps:** `packages/desktop/` (Electron) exists only in internal. `stripe` exists only in internal. Everything else is shared.
 
 ## Module Responsibility Map
 
