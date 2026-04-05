@@ -364,6 +364,43 @@ def ingest_content(
     coll_name = config.collection_name(domain)
     collection = chroma.get_or_create_collection(name=coll_name)
 
+    # B31: Conversation grouping — append to existing artifact if same conversation
+    convo_id = (metadata or {}).get("conversation_id", "")
+    if convo_id and domain == "conversations":
+        try:
+            from db.neo4j.artifacts import list_artifacts
+            driver = get_neo4j()
+            if driver:
+                existing_convos = list_artifacts(driver, domain="conversations", limit=50)
+                for a in existing_convos:
+                    if a.get("conversation_id") == convo_id:
+                        # Append as new chunk to existing conversation artifact
+                        _ef = get_embedding_function()
+                        chunk_id = f"{a['id']}_chunk_{a.get('chunks', 1)}"
+                        collection.add(
+                            ids=[chunk_id],
+                            documents=[content],
+                            embeddings=_ef([content]) if _ef else None,
+                            metadatas=[{
+                                "artifact_id": a["id"],
+                                "chunk_index": a.get("chunks", 1),
+                                "domain": domain,
+                                "filename": a.get("filename", ""),
+                                "conversation_id": convo_id,
+                            }],
+                        )
+                        logger.info("Appended chunk to conversation artifact %s", a["id"])
+                        return {
+                            "status": "success",
+                            "artifact_id": a["id"],
+                            "domain": domain,
+                            "chunks": a.get("chunks", 1) + 1,
+                            "timestamp": utcnow_iso(),
+                            "appended": True,
+                        }
+        except (ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
+            logger.debug("Conversation grouping check failed (creating new): %s", e)
+
     artifact_id = str(uuid.uuid4())
     content_hash = _content_hash(content)
 
