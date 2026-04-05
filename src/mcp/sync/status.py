@@ -23,6 +23,7 @@ from sync._helpers import (
     _default_sync_dir,
 )
 from sync.manifest import read_manifest
+from utils.virtiofs_retry import virtiofs_retry
 
 logger = logging.getLogger("ai-companion.sync")
 
@@ -100,8 +101,12 @@ def compare_status(
     }
     manifest = None
 
+    @virtiofs_retry()
+    def _read_manifest_safe(sd):
+        return read_manifest(sd)
+
     try:
-        manifest = read_manifest(sync_dir)
+        manifest = _read_manifest_safe(sync_dir)
         files = manifest.get("files", {})
 
         def _manifest_count(rel: str) -> int:

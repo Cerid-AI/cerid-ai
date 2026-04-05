@@ -83,6 +83,7 @@ interface WizardState {
     skipped: boolean
   }
   selectedMode: "simple" | "advanced"
+  customProvider: { name: string; baseUrl: string; apiKey: string; modelId: string; valid: boolean } | null
 }
 
 type WizardAction =
@@ -100,6 +101,7 @@ type WizardAction =
   | { type: "SET_OLLAMA"; state: WizardState["ollama"] }
   | { type: "SET_FIRST_DOC"; state: WizardState["firstDoc"] }
   | { type: "SET_MODE"; mode: "simple" | "advanced" }
+  | { type: "SET_CUSTOM_PROVIDER"; provider: WizardState["customProvider"] }
 
 function createInitialState(): WizardState {
   return {
@@ -136,6 +138,7 @@ function createInitialState(): WizardState {
       skipped: false,
     },
     selectedMode: "simple",
+    customProvider: null,
   }
 }
 
@@ -190,6 +193,8 @@ function wizardReducer(state: WizardState, action: WizardAction): WizardState {
       return { ...state, firstDoc: action.state }
     case "SET_MODE":
       return { ...state, selectedMode: action.mode }
+    case "SET_CUSTOM_PROVIDER":
+      return { ...state, customProvider: action.provider }
     default:
       return state
   }
@@ -597,7 +602,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                       helpUrl="https://console.x.ai/api-keys"
                       onKeyValidated={handleKeyValidated("xai")}
                     />
-                    <CustomProviderInput onValidated={() => {}} />
+                    <CustomProviderInput onValidated={(cp) => dispatch({ type: "SET_CUSTOM_PROVIDER", provider: cp })} />
                   </div>
                 </div>
 

@@ -276,7 +276,7 @@ async def _query_memories(
                     "memory_source": True,
                 })
         return formatted
-    except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
+    except Exception as e:
         logger.debug("Memory query failed (non-blocking): %s", e)
         return []
 
@@ -1204,7 +1204,7 @@ async def verify_claim(
                 **_kb_source_fields(top_result),
             }
 
-    except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
+    except Exception as e:
         logger.warning("Claim verification failed for '%s...': %s", claim[:50], e)
         return {
             "claim": claim,
