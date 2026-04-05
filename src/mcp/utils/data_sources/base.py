@@ -81,16 +81,30 @@ class DataSourceRegistry:
 
         sources = self.get_enabled_sources(domain)
         if not sources:
+            logger.info(
+                "query_all: no enabled sources (domain=%s, registered=%d, enabled=%d, configured=%d)",
+                domain,
+                len(self._sources),
+                sum(1 for s in self._sources.values() if s.enabled),
+                sum(1 for s in self._sources.values() if s.enabled and s.is_configured()),
+            )
             return []
+
+        logger.info(
+            "query_all: querying %d sources for domain=%s: %s",
+            len(sources), domain, [s.name for s in sources],
+        )
 
         async def _guarded_query(source: DataSource) -> list[DataSourceResult]:
             breaker = get_breaker(f"datasource-{source.name}")
             try:
-                return await breaker.call(
+                results = await breaker.call(
                     lambda: asyncio.wait_for(source.query(query), timeout=timeout),
                 )
+                logger.info("Data source %s returned %d results", source.name, len(results))
+                return results
             except CircuitOpenError:
-                logger.debug("Data source %s circuit open, skipping", source.name)
+                logger.warning("Data source %s circuit OPEN — skipping (breaker tripped)", source.name)
                 return []
             except asyncio.TimeoutError:
                 logger.warning("Data source %s timed out after %.1fs", source.name, timeout)
@@ -99,11 +113,12 @@ class DataSourceRegistry:
         tasks = [_guarded_query(s) for s in sources]
         results_lists = await asyncio.gather(*tasks, return_exceptions=True)
         merged = []
-        for result_or_exc in results_lists:
+        for i, result_or_exc in enumerate(results_lists):
             if isinstance(result_or_exc, list):
                 merged.extend([r.to_dict() for r in result_or_exc])
             else:
-                logger.debug("Data source query failed: %s", result_or_exc)
+                logger.warning("Data source %s query failed: %s", sources[i].name, result_or_exc)
+        logger.info("query_all: merged %d results from %d sources", len(merged), len(sources))
         return merged
 
     def list_sources(self) -> list[dict]:
