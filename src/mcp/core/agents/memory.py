@@ -449,26 +449,69 @@ def calculate_memory_score(
     base_score: float,
     access_count: int,
     age_days: float,
+    stability_days: float | None = None,
+    *,
+    memory_type: str = "decision",
+    source_authority: float = 1.0,
+    access_ages: list[float] | None = None,
     half_life_days: float | None = None,
 ) -> float:
-    """Calculate memory relevance score with decay and reinforcement.
+    """Calculate memory relevance score with per-type decay and reinforcement.
 
-    Formula: base * (1 + log(1 + accesses)) * 2^(-age / half_life)
+    Decay curves vary by ``memory_type``:
 
-    - Memories decay exponentially over time (half-life = 30 days default)
-    - Frequent access reinforces the score logarithmically
-    - Base score comes from original extraction confidence
+    - **empirical**: No decay (permanent facts).
+    - **temporal**: Step function — full score before event (age <= 0),
+      0.1 residual after.
+    - **decision / preference**: Power-law decay ``(1 + t/(9*S))^(-0.5)``
+      for long-tail preservation.
+    - **project_context / conversational**: Exponential decay ``2^(-t/S)``.
+    - Unknown types fall through to exponential.
+
+    Reinforcement: ``min(1 + log2(1 + access_count), 5)`` — capped at 5x.
+    When *access_ages* is provided, recent accesses contribute more via
+    exponential weighting.
+
+    *source_authority* scales the final result (default 1.0).
 
     Returns a non-negative float.
     """
-    if half_life_days is None:
-        half_life_days = config.MEMORY_HALF_LIFE_DAYS
-    if half_life_days <= 0:
-        half_life_days = 30.0
+    # Resolve stability: explicit param > config lookup > legacy half_life > 30
+    if stability_days is None:
+        stability_days = config.MEMORY_TYPE_STABILITY.get(memory_type)
+    if stability_days is None:
+        stability_days = half_life_days if half_life_days is not None else config.MEMORY_HALF_LIFE_DAYS
+    # Guard against zero / negative stability for types that need it
+    if memory_type not in ("empirical", "temporal") and stability_days <= 0:
+        stability_days = 30.0
 
-    reinforcement = 1.0 + math.log(1.0 + max(0, access_count))
-    decay = 2.0 ** (-max(0.0, age_days) / half_life_days)
-    return max(0.0, base_score * reinforcement * decay)
+    age = max(0.0, age_days)
+
+    # --- Decay ---
+    if memory_type == "empirical":
+        decay = 1.0
+    elif memory_type == "temporal":
+        decay = 1.0 if age_days <= 0.0 else 0.1
+    elif memory_type in config.MEMORY_POWER_LAW_TYPES:
+        # Power-law: (1 + t / (9 * S))^(-0.5)
+        decay = (1.0 + age / (9.0 * stability_days)) ** (-0.5)
+    else:
+        # Exponential (project_context, conversational, unknown)
+        if stability_days <= 0:
+            stability_days = 30.0
+        decay = 2.0 ** (-age / stability_days)
+
+    # --- Reinforcement ---
+    if memory_type == "empirical":
+        reinforcement = 1.0
+    elif access_ages is not None and len(access_ages) > 0:
+        # Recency-weighted: recent accesses matter more
+        weights = [2.0 ** (-a / 30.0) for a in access_ages]
+        reinforcement = min(1.0 + math.log2(1.0 + sum(weights)), 5.0)
+    else:
+        reinforcement = min(1.0 + math.log2(1.0 + max(0, access_count)), 5.0)
+
+    return max(0.0, base_score * reinforcement * decay * source_authority)
 
 
 # ---------------------------------------------------------------------------

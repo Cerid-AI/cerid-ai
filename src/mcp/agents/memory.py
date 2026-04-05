@@ -16,6 +16,8 @@ from core.agents.memory import (  # noqa: F401
     MIN_RESPONSE_LENGTH,
     archive_old_memories,
     calculate_memory_score,
+    call_internal_llm,
+    config,
     detect_memory_conflict,
     extract_memories,
     recall_memories,

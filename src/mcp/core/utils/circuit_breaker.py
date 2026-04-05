@@ -250,25 +250,29 @@ def _is_client_error(exc: Exception) -> bool:
     return bool(re.search(r"\b4\d{2}\b", text))
 
 
+_BREAKER_REGISTRY: dict[str, AsyncCircuitBreaker] = {
+    "bifrost-rerank": _bifrost_rerank,
+    "bifrost-claims": _bifrost_claims,
+    "bifrost-verify": _bifrost_verify,
+    "bifrost-synopsis": _bifrost_synopsis,
+    "bifrost-memory": _bifrost_memory,
+    "bifrost-compress": _bifrost_compress,
+    "bifrost-decompose": _bifrost_decompose,
+    "web-search": _web_search,
+    "openrouter": _openrouter,
+    "tavily": _tavily,
+    "searxng": _searxng,
+    "ragas_eval": _ragas_eval,
+    "neo4j": _neo4j,
+    "ollama": _ollama,
+}
+
+
 def get_breaker(name: str) -> AsyncCircuitBreaker:
-    """Get a named circuit breaker instance."""
-    _breakers = {
-        "bifrost-rerank": _bifrost_rerank,
-        "bifrost-claims": _bifrost_claims,
-        "bifrost-verify": _bifrost_verify,
-        "bifrost-synopsis": _bifrost_synopsis,
-        "bifrost-memory": _bifrost_memory,
-        "bifrost-compress": _bifrost_compress,
-        "bifrost-decompose": _bifrost_decompose,
-        "web-search": _web_search,
-        "openrouter": _openrouter,
-        "tavily": _tavily,
-        "searxng": _searxng,
-        "ragas_eval": _ragas_eval,
-        "neo4j": _neo4j,
-        "ollama": _ollama,
-    }
-    breaker = _breakers.get(name)
+    """Get a named circuit breaker instance, auto-creating for unknown names."""
+    breaker = _BREAKER_REGISTRY.get(name)
     if breaker is None:
-        raise ValueError(f"Unknown circuit breaker: {name}")
+        breaker = AsyncCircuitBreaker(name, failure_threshold=3, recovery_timeout=60)
+        _BREAKER_REGISTRY[name] = breaker
+        logger.debug("Auto-created circuit breaker '%s' with default thresholds", name)
     return breaker

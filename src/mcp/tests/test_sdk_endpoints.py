@@ -27,7 +27,7 @@ def _make_app() -> FastAPI:
 class TestSDKQuery:
     """POST /sdk/v1/query delegates to agent_query_endpoint."""
 
-    @patch("routers.sdk.agent_query_endpoint", new_callable=AsyncMock)
+    @patch("app.routers.sdk.agent_query_endpoint", new_callable=AsyncMock)
     def test_query_success(self, mock_query):
         mock_query.return_value = {
             "results": [
@@ -55,7 +55,7 @@ class TestSDKQuery:
         assert len(data["results"]) == 1
         assert data["results"][0]["domain"] == "coding"
 
-    @patch("routers.sdk.agent_query_endpoint", new_callable=AsyncMock)
+    @patch("app.routers.sdk.agent_query_endpoint", new_callable=AsyncMock)
     def test_query_empty_results(self, mock_query):
         mock_query.return_value = {
             "results": [],
@@ -77,7 +77,7 @@ class TestSDKQuery:
 class TestSDKHallucination:
     """POST /sdk/v1/hallucination delegates to hallucination_check_endpoint."""
 
-    @patch("routers.sdk.hallucination_check_endpoint", new_callable=AsyncMock)
+    @patch("app.routers.sdk.hallucination_check_endpoint", new_callable=AsyncMock)
     def test_hallucination_verified(self, mock_hall):
         mock_hall.return_value = {
             "claims": [
@@ -99,7 +99,7 @@ class TestSDKHallucination:
         assert "claims" in data
         assert data["claims"][0]["status"] == "verified"
 
-    @patch("routers.sdk.hallucination_check_endpoint", new_callable=AsyncMock)
+    @patch("app.routers.sdk.hallucination_check_endpoint", new_callable=AsyncMock)
     def test_hallucination_unverified(self, mock_hall):
         mock_hall.return_value = {
             "claims": [
@@ -128,7 +128,7 @@ class TestSDKHallucination:
 class TestSDKMemoryExtract:
     """POST /sdk/v1/memory/extract delegates to memory_extract_endpoint."""
 
-    @patch("routers.sdk.memory_extract_endpoint", new_callable=AsyncMock)
+    @patch("app.routers.sdk.memory_extract_endpoint", new_callable=AsyncMock)
     def test_memory_extract_success(self, mock_mem):
         mock_mem.return_value = {
             "status": "success",
@@ -149,7 +149,7 @@ class TestSDKMemoryExtract:
         assert data["status"] == "success"
         assert data["memories_extracted"] == 2
 
-    @patch("routers.sdk.memory_extract_endpoint", new_callable=AsyncMock)
+    @patch("app.routers.sdk.memory_extract_endpoint", new_callable=AsyncMock)
     def test_memory_extract_no_memories(self, mock_mem):
         mock_mem.return_value = {
             "status": "success",
@@ -174,8 +174,8 @@ class TestSDKMemoryExtract:
 class TestSDKHealth:
     """GET /sdk/v1/health returns version, tier, services, and features."""
 
-    @patch("routers.sdk.health_check")
-    @patch("routers.sdk.config")
+    @patch("app.routers.sdk.health_check")
+    @patch("app.routers.sdk.config")
     def test_health_response_shape(self, mock_config, mock_health):
         mock_health.return_value = {
             "status": "healthy",
@@ -206,8 +206,8 @@ class TestSDKHealth:
         assert "services" in data
         assert isinstance(data["services"], dict)
 
-    @patch("routers.sdk.health_check")
-    @patch("routers.sdk.config")
+    @patch("app.routers.sdk.health_check")
+    @patch("app.routers.sdk.config")
     def test_health_includes_internal_llm(self, mock_config, mock_health):
         mock_health.return_value = {
             "status": "healthy",
@@ -236,7 +236,7 @@ class TestSDKHealth:
 class TestSDKIngest:
     """POST /sdk/v1/ingest delegates to services.ingestion.ingest_content."""
 
-    @patch("routers.sdk.ingest_content")
+    @patch("app.routers.sdk.ingest_content")
     def test_ingest_text_success(self, mock_ingest):
         mock_ingest.return_value = {
             "status": "success",
@@ -261,7 +261,7 @@ class TestSDKIngest:
         assert data["artifact_id"] == "art-200"
         assert data["chunks"] == 3
 
-    @patch("routers.sdk.ingest_content")
+    @patch("app.routers.sdk.ingest_content")
     def test_ingest_without_tags(self, mock_ingest):
         mock_ingest.return_value = {
             "status": "success",
@@ -287,7 +287,7 @@ class TestSDKIngest:
 class TestSDKIngestFile:
     """POST /sdk/v1/ingest/file delegates to services.ingestion.ingest_file."""
 
-    @patch("routers.sdk.ingest_file", new_callable=AsyncMock)
+    @patch("app.routers.sdk.ingest_file", new_callable=AsyncMock)
     def test_ingest_file_success(self, mock_ingest_file):
         mock_ingest_file.return_value = {
             "status": "success",
@@ -311,7 +311,7 @@ class TestSDKIngestFile:
         assert data["status"] == "success"
         assert data["chunks"] == 12
 
-    @patch("routers.sdk.ingest_file", new_callable=AsyncMock)
+    @patch("app.routers.sdk.ingest_file", new_callable=AsyncMock)
     def test_ingest_file_minimal(self, mock_ingest_file):
         mock_ingest_file.return_value = {
             "status": "success",
@@ -336,7 +336,7 @@ class TestSDKIngestFile:
 class TestSDKCollections:
     """GET /sdk/v1/collections delegates to routers.health.list_collections."""
 
-    @patch("routers.sdk.list_collections")
+    @patch("app.routers.sdk.list_collections")
     def test_collections_success(self, mock_list):
         mock_list.return_value = {
             "collections": ["coding", "finance"],
@@ -351,7 +351,7 @@ class TestSDKCollections:
         assert data["total"] == 2
         assert len(data["collections"]) == 2
 
-    @patch("routers.sdk.list_collections")
+    @patch("app.routers.sdk.list_collections")
     def test_collections_empty(self, mock_list):
         mock_list.return_value = {"collections": [], "total": 0}
 
@@ -369,8 +369,8 @@ class TestSDKCollections:
 class TestSDKTaxonomy:
     """GET /sdk/v1/taxonomy delegates to config.taxonomy.DOMAINS/TAXONOMY."""
 
-    @patch("routers.sdk.TAXONOMY", {"coding": {"tags": ["python", "rust"]}, "finance": {"tags": ["budget"]}})
-    @patch("routers.sdk.DOMAINS", ["coding", "finance", "general"])
+    @patch("app.routers.sdk.TAXONOMY", {"coding": {"tags": ["python", "rust"]}, "finance": {"tags": ["budget"]}})
+    @patch("app.routers.sdk.DOMAINS", ["coding", "finance", "general"])
     def test_taxonomy_success(self):
         client = TestClient(_make_app())
         resp = client.get("/sdk/v1/taxonomy")
@@ -381,8 +381,8 @@ class TestSDKTaxonomy:
         assert "coding" in data["domains"]
         assert isinstance(data["taxonomy"], dict)
 
-    @patch("routers.sdk.TAXONOMY", {})
-    @patch("routers.sdk.DOMAINS", [])
+    @patch("app.routers.sdk.TAXONOMY", {})
+    @patch("app.routers.sdk.DOMAINS", [])
     def test_taxonomy_empty(self):
         client = TestClient(_make_app())
         resp = client.get("/sdk/v1/taxonomy")
@@ -398,7 +398,7 @@ class TestSDKTaxonomy:
 class TestSDKHealthDetailed:
     """GET /sdk/v1/health/detailed delegates to routers.health.degradation_status."""
 
-    @patch("routers.sdk.degradation_status")
+    @patch("app.routers.sdk.degradation_status")
     def test_detailed_health_success(self, mock_degrad):
         mock_degrad.return_value = {
             "status": "healthy",
@@ -416,7 +416,7 @@ class TestSDKHealthDetailed:
         data = resp.json()
         assert "services" in data
 
-    @patch("routers.sdk.degradation_status")
+    @patch("app.routers.sdk.degradation_status")
     def test_detailed_health_degraded(self, mock_degrad):
         mock_degrad.return_value = {
             "status": "degraded",
@@ -441,8 +441,8 @@ class TestSDKHealthDetailed:
 class TestSDKSettings:
     """GET /sdk/v1/settings delegates to config.features.FEATURE_FLAGS/FEATURE_TIER."""
 
-    @patch("routers.sdk.FEATURE_TIER", "pro")
-    @patch("routers.sdk.FEATURE_FLAGS", {"hallucination_check": True, "workflow_engine": True})
+    @patch("app.routers.sdk.FEATURE_TIER", "pro")
+    @patch("app.routers.sdk.FEATURE_FLAGS", {"hallucination_check": True, "workflow_engine": True})
     def test_settings_success(self):
         client = TestClient(_make_app())
         resp = client.get("/sdk/v1/settings")
@@ -452,8 +452,8 @@ class TestSDKSettings:
         assert data["tier"] == "pro"
         assert isinstance(data["features"], dict)
 
-    @patch("routers.sdk.FEATURE_TIER", "community")
-    @patch("routers.sdk.FEATURE_FLAGS", {})
+    @patch("app.routers.sdk.FEATURE_TIER", "community")
+    @patch("app.routers.sdk.FEATURE_FLAGS", {})
     def test_settings_community_tier(self):
         client = TestClient(_make_app())
         resp = client.get("/sdk/v1/settings")
@@ -469,7 +469,7 @@ class TestSDKSettings:
 class TestSDKSearch:
     """POST /sdk/v1/search delegates to routers.query.query_knowledge."""
 
-    @patch("routers.sdk.query_knowledge")
+    @patch("app.routers.sdk.query_knowledge")
     def test_search_success(self, mock_qk):
         mock_qk.return_value = {
             "sources": [
@@ -489,7 +489,7 @@ class TestSDKSearch:
         assert "total_results" in data
         assert data["total_results"] == 1
 
-    @patch("routers.sdk.query_knowledge")
+    @patch("app.routers.sdk.query_knowledge")
     def test_search_no_results(self, mock_qk):
         mock_qk.return_value = {"sources": [], "confidence": 0.0}
 
@@ -510,7 +510,7 @@ class TestSDKSearch:
 class TestSDKPlugins:
     """GET /sdk/v1/plugins delegates to routers.plugins.list_plugins."""
 
-    @patch("routers.sdk.list_plugins")
+    @patch("app.routers.sdk.list_plugins")
     def test_plugins_success(self, mock_lp):
         from unittest.mock import MagicMock
 
@@ -529,7 +529,7 @@ class TestSDKPlugins:
         assert "plugins" in data
         assert data["total"] == 2
 
-    @patch("routers.sdk.list_plugins")
+    @patch("app.routers.sdk.list_plugins")
     def test_plugins_empty(self, mock_lp):
         from unittest.mock import MagicMock
 

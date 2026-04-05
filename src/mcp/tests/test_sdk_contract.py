@@ -22,8 +22,8 @@ def _make_app():
 class TestSDKHealth:
     """GET /sdk/v1/health should return version, tier, and service statuses."""
 
-    @patch("routers.sdk.health_check")
-    @patch("routers.sdk.config")
+    @patch("app.routers.sdk.health_check")
+    @patch("app.routers.sdk.config")
     def test_health_response_shape(self, mock_config, mock_health):
         mock_health.return_value = {
             "status": "healthy",
@@ -53,7 +53,7 @@ class TestSDKHealth:
 class TestSDKQuery:
     """POST /sdk/v1/query should return results list with metadata."""
 
-    @patch("routers.sdk.agent_query_endpoint", new_callable=AsyncMock)
+    @patch("app.routers.sdk.agent_query_endpoint", new_callable=AsyncMock)
     def test_query_response_shape(self, mock_agent_query):
         mock_agent_query.return_value = {
             "results": [
@@ -83,7 +83,7 @@ class TestSDKQuery:
 class TestSDKHallucination:
     """POST /sdk/v1/hallucination should return claims with verdicts."""
 
-    @patch("routers.sdk.hallucination_check_endpoint", new_callable=AsyncMock)
+    @patch("app.routers.sdk.hallucination_check_endpoint", new_callable=AsyncMock)
     def test_hallucination_response_shape(self, mock_hall):
         mock_hall.return_value = {
             "claims": [
@@ -105,7 +105,7 @@ class TestSDKHallucination:
 class TestSDKMemoryExtract:
     """POST /sdk/v1/memory/extract should return extraction results."""
 
-    @patch("routers.sdk.memory_extract_endpoint", new_callable=AsyncMock)
+    @patch("app.routers.sdk.memory_extract_endpoint", new_callable=AsyncMock)
     def test_memory_extract_response_shape(self, mock_mem):
         mock_mem.return_value = {
             "status": "success",

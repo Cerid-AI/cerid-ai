@@ -23,9 +23,9 @@ def _mock_redis():
     """Prevent accidental Redis connections and disable private mode."""
     mock_redis = MagicMock()
     mock_redis.get.return_value = None  # no private mode flag
-    with patch("deps._redis", mock_redis), \
-         patch("deps.get_redis", return_value=mock_redis), \
-         patch("utils.private_mode.get_private_mode_level", _private_mode_zero):
+    with patch("app.deps._redis", mock_redis), \
+         patch("app.deps.get_redis", return_value=mock_redis), \
+         patch("app.utils.private_mode.get_private_mode_level", _private_mode_zero):
         yield
 
 

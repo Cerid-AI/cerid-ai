@@ -79,9 +79,9 @@ def _make_verify_result(claim, status="verified", confidence=0.95, method="kb_cr
 
 # Ingestion patch stack — shared across all ingestion-dependent tests
 _INGEST_PATCHES = [
-    patch("routers.system_monitor.get_redis", return_value=MagicMock()),
-    patch("services.ingestion.cache"),
-    patch("services.ingestion.get_redis", return_value=MagicMock()),
+    patch("app.routers.system_monitor.get_redis", return_value=MagicMock()),
+    patch("app.services.ingestion.cache"),
+    patch("app.services.ingestion.get_redis", return_value=MagicMock()),
 ]
 
 
@@ -109,7 +109,7 @@ class TestMultiTurnConversation:
             "Migration uses Alembic and PgBouncer.",
         ]
 
-        with patch("agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
+        with patch("core.agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
             for i, (q, r) in enumerate(zip(queries, responses)):
                 mock_aq.return_value = _make_agent_query_result(r, [{"content": r, "relevance": 0.9}])
                 result = await mock_aq(q, conversation_messages=list(conversation_messages))
@@ -129,7 +129,7 @@ class TestMultiTurnConversation:
         kb_context = "PostgreSQL uses MVCC for concurrent access"
         source = {"content": kb_context, "relevance": 0.88, "domain": "coding", "artifact_id": "art-1"}
 
-        with patch("agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
+        with patch("core.agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
             mock_aq.return_value = _make_agent_query_result(kb_context, [source])
 
             turn1 = await mock_aq("What is MVCC?", domains=["coding"])
@@ -152,7 +152,7 @@ class TestMultiTurnConversation:
             {"content": "Migration starts Monday", "memory_type": "temporal", "summary": "Migration timeline"},
         ]
 
-        with patch("agents.memory.call_internal_llm", new_callable=AsyncMock) as mock_llm:
+        with patch("core.agents.memory.call_internal_llm", new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = json.dumps(mock_memories)
             from agents.memory import extract_memories
             memories = await extract_memories(response_text, conversation_id="conv-session-1")
@@ -163,7 +163,7 @@ class TestMultiTurnConversation:
 
         # Turn 2: query includes recalled memories in context
         recalled_context = "Memory: " + memories[0]["content"]
-        with patch("agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
+        with patch("core.agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
             mock_aq.return_value = _make_agent_query_result(
                 recalled_context, [{"content": recalled_context, "relevance": 0.7}])
             turn2 = await mock_aq("What database are we using?")
@@ -172,7 +172,7 @@ class TestMultiTurnConversation:
     @pytest.mark.asyncio
     async def test_conversation_maintains_domain_focus(self):
         """Queries in 'coding' domain stay routed to coding."""
-        with patch("agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
+        with patch("core.agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
             mock_aq.return_value = _make_agent_query_result(
                 "Python async patterns", [{"content": "async/await", "relevance": 0.8}],
                 domains=["coding"])
@@ -186,7 +186,7 @@ class TestMultiTurnConversation:
     @pytest.mark.asyncio
     async def test_model_switch_mid_conversation(self):
         """Switching model between turns changes routing."""
-        with patch("agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
+        with patch("core.agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
             mock_aq.return_value = _make_agent_query_result("answer", [])
 
             await mock_aq("question 1", model="openai/gpt-4o")
@@ -200,7 +200,7 @@ class TestMultiTurnConversation:
     @pytest.mark.asyncio
     async def test_conversation_with_verification(self):
         """Send message -> get response -> verify claims -> results fed back."""
-        with patch("agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
+        with patch("core.agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
             mock_aq.return_value = _make_agent_query_result(
                 "PostgreSQL uses MVCC",
                 [{"content": "PostgreSQL uses MVCC", "relevance": 0.9}])
@@ -208,7 +208,7 @@ class TestMultiTurnConversation:
 
         assert "MVCC" in query_result["context"]
 
-        with patch("agents.hallucination.verification.verify_claim",
+        with patch("core.agents.hallucination.verification.verify_claim",
                     new_callable=AsyncMock,
                     return_value=_make_verify_result("PostgreSQL uses MVCC")):
             from agents.hallucination.verification import verify_claim
@@ -230,7 +230,7 @@ class TestSyntheticKBInjection:
         """Quantum doc ingested; query for Shor's returns correct complexity."""
         kb_chunk = ("Shor's algorithm factors large integers in polynomial time "
                     "O((log N)^2 * (log log N) * (log log log N))")
-        with patch("agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
+        with patch("core.agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
             mock_aq.return_value = _make_agent_query_result(
                 kb_chunk, [{"content": kb_chunk, "relevance": 0.92, "domain": "science"}])
             result = await mock_aq("What is Shor's algorithm complexity?", domains=["science"])
@@ -242,7 +242,7 @@ class TestSyntheticKBInjection:
     async def test_ingest_financial_doc_verify_numbers(self):
         """Financial report; query for Meridian revenue returns $847.3M."""
         kb_chunk = "Meridian Technologies Q3 2025 total revenue was $847.3M, up 12.4% YoY"
-        with patch("agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
+        with patch("core.agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
             mock_aq.return_value = _make_agent_query_result(
                 kb_chunk, [{"content": kb_chunk, "relevance": 0.95, "domain": "finance"}],
                 domains=["finance"])
@@ -254,7 +254,7 @@ class TestSyntheticKBInjection:
     async def test_ingest_api_doc_verify_endpoints(self):
         """API docs; query for rate limit returns 1,000 req/min."""
         kb_chunk = "Professional tier rate limit is 1,000 requests per minute"
-        with patch("agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
+        with patch("core.agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
             mock_aq.return_value = _make_agent_query_result(
                 kb_chunk, [{"content": kb_chunk, "relevance": 0.90, "domain": "coding"}])
             result = await mock_aq("What is the rate limit?", domains=["coding"])
@@ -265,7 +265,7 @@ class TestSyntheticKBInjection:
     async def test_ingest_medical_doc_verify_stats(self):
         """CLARITY-7 trial; query for Nexoril returns 62% improvement."""
         kb_chunk = "Responder rate: 62% Nexoril vs 34% placebo (p < 0.001)"
-        with patch("agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
+        with patch("core.agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
             mock_aq.return_value = _make_agent_query_result(
                 kb_chunk, [{"content": kb_chunk, "relevance": 0.93, "domain": "medical"}],
                 domains=["medical"])
@@ -277,7 +277,7 @@ class TestSyntheticKBInjection:
     async def test_ingest_project_doc_verify_dates(self):
         """Project notes; query Sprint 14 returns April 15, 2026."""
         kb_chunk = "Sprint 14 ends April 15, 2026. Backend migration is 78% complete."
-        with patch("agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
+        with patch("core.agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
             mock_aq.return_value = _make_agent_query_result(
                 kb_chunk, [{"content": kb_chunk, "relevance": 0.88, "domain": "general"}])
             result = await mock_aq("When does Sprint 14 end?")
@@ -297,7 +297,7 @@ class TestSyntheticKBInjection:
             "FFT was published by Cooley and Tukey in 1965",
         ]
 
-        with patch("agents.hallucination.verification.verify_claim",
+        with patch("core.agents.hallucination.verification.verify_claim",
                     new_callable=AsyncMock) as mock_vc:
             mock_vc.side_effect = [
                 _make_verify_result(c, "verified", 0.95) for c in correct_claims
@@ -320,7 +320,7 @@ class TestSyntheticKBInjection:
             ("Human Genome Project was declared complete in June 2000", "conflated_event"),
         ]
 
-        with patch("agents.hallucination.verification.verify_claim",
+        with patch("core.agents.hallucination.verification.verify_claim",
                     new_callable=AsyncMock) as mock_vc:
             mock_vc.side_effect = [
                 _make_verify_result(c, "unverified", 0.3) for c, _ in wrong_claims
@@ -340,7 +340,7 @@ class TestSyntheticKBInjection:
         coding_src = {"content": "Python async API calls", "relevance": 0.85, "domain": "coding"}
         finance_src = {"content": "API rate limiting affects trading latency", "relevance": 0.80, "domain": "finance"}
 
-        with patch("agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
+        with patch("core.agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
             mock_aq.return_value = _make_agent_query_result(
                 "Python async API calls\n\nAPI rate limiting affects trading latency",
                 [coding_src, finance_src],
@@ -360,10 +360,10 @@ class TestSyntheticKBInjection:
 class TestDataIntegrity:
     """Verify data correctness throughout the ingestion pipeline."""
 
-    @patch("routers.system_monitor.get_redis", return_value=MagicMock())
-    @patch("services.ingestion.get_redis", return_value=MagicMock())
-    @patch("services.ingestion.get_neo4j")
-    @patch("services.ingestion.get_chroma")
+    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
     def test_content_hash_dedup_exact_match(self, mock_chroma_fn, mock_neo4j_fn,
                                              mock_redis_fn, _mock_monitor):
         """Ingest same content twice; second returns duplicate with matching hash."""
@@ -374,8 +374,8 @@ class TestDataIntegrity:
 
         # First ingest: no duplicate
         session.run.return_value.single.return_value = None
-        with patch("services.ingestion.cache"), \
-             patch("services.ingestion.graph") as g:
+        with patch("app.services.ingestion.cache"), \
+             patch("app.services.ingestion.graph") as g:
             g.find_artifact_by_filename.return_value = None
             g.create_artifact.return_value = None
             g.discover_relationships.return_value = 0
@@ -391,11 +391,11 @@ class TestDataIntegrity:
         assert r2["status"] == "duplicate"
         assert r2["artifact_id"] == r1["artifact_id"]
 
-    @patch("routers.system_monitor.get_redis", return_value=MagicMock())
-    @patch("services.ingestion.cache")
-    @patch("services.ingestion.get_redis", return_value=MagicMock())
-    @patch("services.ingestion.get_neo4j")
-    @patch("services.ingestion.get_chroma")
+    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.cache")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
     def test_metadata_fields_complete(self, mock_chroma_fn, mock_neo4j_fn,
                                        mock_redis_fn, mock_cache, _mock_monitor):
         """Ingest a doc and verify all metadata fields are present."""
@@ -403,7 +403,7 @@ class TestDataIntegrity:
         mock_chroma_fn.return_value = client
         mock_neo4j_fn.return_value = driver
 
-        with patch("services.ingestion.graph") as g:
+        with patch("app.services.ingestion.graph") as g:
             g.find_artifact_by_filename.return_value = None
             g.create_artifact.return_value = None
             g.discover_relationships.return_value = 0
@@ -419,11 +419,11 @@ class TestDataIntegrity:
         assert result["domain"] == "coding"
         assert result["chunks"] > 0
 
-    @patch("routers.system_monitor.get_redis", return_value=MagicMock())
-    @patch("services.ingestion.cache")
-    @patch("services.ingestion.get_redis", return_value=MagicMock())
-    @patch("services.ingestion.get_neo4j")
-    @patch("services.ingestion.get_chroma")
+    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.cache")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
     def test_chunk_count_matches_content_length(self, mock_chroma_fn, mock_neo4j_fn,
                                                   mock_redis_fn, mock_cache, _mock_monitor):
         """Short content -> 1 chunk; long content -> multiple chunks."""
@@ -431,7 +431,7 @@ class TestDataIntegrity:
         mock_chroma_fn.return_value = client
         mock_neo4j_fn.return_value = driver
 
-        with patch("services.ingestion.graph") as g:
+        with patch("app.services.ingestion.graph") as g:
             g.find_artifact_by_filename.return_value = None
             g.create_artifact.return_value = None
             g.discover_relationships.return_value = 0
@@ -444,11 +444,11 @@ class TestDataIntegrity:
         assert long_r["chunks"] > 1
         assert long_r["chunks"] > short["chunks"]
 
-    @patch("routers.system_monitor.get_redis", return_value=MagicMock())
-    @patch("services.ingestion.cache")
-    @patch("services.ingestion.get_redis", return_value=MagicMock())
-    @patch("services.ingestion.get_neo4j")
-    @patch("services.ingestion.get_chroma")
+    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.cache")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
     def test_neo4j_artifact_node_created(self, mock_chroma_fn, mock_neo4j_fn,
                                           mock_redis_fn, mock_cache, _mock_monitor):
         """Verify graph.create_artifact is called with correct properties."""
@@ -456,7 +456,7 @@ class TestDataIntegrity:
         mock_chroma_fn.return_value = client
         mock_neo4j_fn.return_value = driver
 
-        with patch("services.ingestion.graph") as g:
+        with patch("app.services.ingestion.graph") as g:
             g.find_artifact_by_filename.return_value = None
             g.create_artifact.return_value = None
             g.discover_relationships.return_value = 0
@@ -469,11 +469,11 @@ class TestDataIntegrity:
         assert call_kwargs.kwargs.get("domain") == "coding" or call_kwargs.args[2] == "coding" if len(call_kwargs.args) > 2 else True
         assert call_kwargs.kwargs.get("artifact_id") == result["artifact_id"]
 
-    @patch("routers.system_monitor.get_redis", return_value=MagicMock())
-    @patch("services.ingestion.cache")
-    @patch("services.ingestion.get_redis", return_value=MagicMock())
-    @patch("services.ingestion.get_neo4j")
-    @patch("services.ingestion.get_chroma")
+    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.cache")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
     def test_relationship_discovery_called(self, mock_chroma_fn, mock_neo4j_fn,
                                             mock_redis_fn, mock_cache, _mock_monitor):
         """Verify graph.discover_relationships is called after successful ingestion."""
@@ -481,7 +481,7 @@ class TestDataIntegrity:
         mock_chroma_fn.return_value = client
         mock_neo4j_fn.return_value = driver
 
-        with patch("services.ingestion.graph") as g:
+        with patch("app.services.ingestion.graph") as g:
             g.find_artifact_by_filename.return_value = None
             g.create_artifact.return_value = None
             g.discover_relationships.return_value = 3
@@ -503,7 +503,7 @@ class TestEdgeCases:
     @pytest.mark.asyncio
     async def test_empty_kb_query_returns_gracefully(self):
         """Query with empty KB returns empty context and 0 confidence."""
-        with patch("agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
+        with patch("core.agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
             mock_aq.return_value = _make_agent_query_result("", [], confidence=0.0)
             result = await mock_aq("What is anything?", domains=["coding"])
 
@@ -511,11 +511,11 @@ class TestEdgeCases:
         assert result["confidence"] == 0.0
         assert result["total_results"] == 0
 
-    @patch("routers.system_monitor.get_redis", return_value=MagicMock())
-    @patch("services.ingestion.cache")
-    @patch("services.ingestion.get_redis", return_value=MagicMock())
-    @patch("services.ingestion.get_neo4j")
-    @patch("services.ingestion.get_chroma")
+    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.cache")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
     def test_oversized_content_chunked_correctly(self, mock_chroma_fn, mock_neo4j_fn,
                                                    mock_redis_fn, mock_cache, _mock_monitor):
         """50KB content produces multiple chunks (not rejected)."""
@@ -525,7 +525,7 @@ class TestEdgeCases:
 
         big_content = "Software engineering best practices include testing. " * 1000  # ~50KB
 
-        with patch("services.ingestion.graph") as g:
+        with patch("app.services.ingestion.graph") as g:
             g.find_artifact_by_filename.return_value = None
             g.create_artifact.return_value = None
             g.discover_relationships.return_value = 0
@@ -534,11 +534,11 @@ class TestEdgeCases:
         assert result["status"] == "success"
         assert result["chunks"] > 1
 
-    @patch("routers.system_monitor.get_redis", return_value=MagicMock())
-    @patch("services.ingestion.cache")
-    @patch("services.ingestion.get_redis", return_value=MagicMock())
-    @patch("services.ingestion.get_neo4j")
-    @patch("services.ingestion.get_chroma")
+    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.cache")
+    @patch("app.services.ingestion.get_redis", return_value=MagicMock())
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
     def test_unicode_content_handled(self, mock_chroma_fn, mock_neo4j_fn,
                                       mock_redis_fn, mock_cache, _mock_monitor):
         """Content with emojis, CJK characters, and special symbols ingests cleanly."""
@@ -553,7 +553,7 @@ class TestEdgeCases:
             "Arabic: \u0627\u0644\u062a\u0639\u0644\u0645 \u0627\u0644\u0622\u0644\u064a. Cyrillic: \u041c\u0430\u0448\u0438\u043d\u043d\u043e\u0435 \u043e\u0431\u0443\u0447\u0435\u043d\u0438\u0435.\n"
         )
 
-        with patch("services.ingestion.graph") as g:
+        with patch("app.services.ingestion.graph") as g:
             g.find_artifact_by_filename.return_value = None
             g.create_artifact.return_value = None
             g.discover_relationships.return_value = 0
@@ -568,7 +568,7 @@ class TestEdgeCases:
         """5 queries in quick succession all return valid results."""
         queries = [f"Query number {i}" for i in range(5)]
 
-        with patch("agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
+        with patch("core.agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
             mock_aq.return_value = _make_agent_query_result(
                 "answer", [{"content": "answer", "relevance": 0.7}])
 
@@ -582,7 +582,7 @@ class TestEdgeCases:
     @pytest.mark.asyncio
     async def test_query_nonexistent_domain(self):
         """Query domain 'nonexistent' returns empty results, no crash."""
-        with patch("agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
+        with patch("core.agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
             mock_aq.return_value = _make_agent_query_result(
                 "", [], confidence=0.0, domains=["nonexistent"])
             result = await mock_aq("anything", domains=["nonexistent"])
@@ -602,7 +602,7 @@ class TestVerificationWithKBData:
     @pytest.mark.asyncio
     async def test_claim_verified_against_kb_content(self):
         """KB has 'Python created by Guido van Rossum in 1991' -> claim matches -> verified."""
-        with patch("agents.hallucination.verification.verify_claim",
+        with patch("core.agents.hallucination.verification.verify_claim",
                     new_callable=AsyncMock) as mock_vc:
             mock_vc.return_value = _make_verify_result(
                 "Python was created by Guido van Rossum in 1991",
@@ -618,7 +618,7 @@ class TestVerificationWithKBData:
     @pytest.mark.asyncio
     async def test_claim_contradicted_by_kb(self):
         """KB has revenue $847.3M, claim says $900M -> flagged."""
-        with patch("agents.hallucination.verification.verify_claim",
+        with patch("core.agents.hallucination.verification.verify_claim",
                     new_callable=AsyncMock) as mock_vc:
             mock_vc.return_value = _make_verify_result(
                 "Meridian revenue was $900M",
@@ -634,7 +634,7 @@ class TestVerificationWithKBData:
     @pytest.mark.asyncio
     async def test_numerical_claim_precision(self):
         """KB has '62% improvement'; exact match verified, wrong number flagged."""
-        with patch("agents.hallucination.verification.verify_claim",
+        with patch("core.agents.hallucination.verification.verify_claim",
                     new_callable=AsyncMock) as mock_vc:
             # Exact match
             mock_vc.return_value = _make_verify_result(
@@ -658,7 +658,7 @@ class TestVerificationWithKBData:
     @pytest.mark.asyncio
     async def test_verification_with_no_kb_match(self):
         """Claim about topic not in KB -> uncertain/external fallback."""
-        with patch("agents.hallucination.verification.verify_claim",
+        with patch("core.agents.hallucination.verification.verify_claim",
                     new_callable=AsyncMock) as mock_vc:
             mock_vc.return_value = _make_verify_result(
                 "The population of Mars colony is 50,000",

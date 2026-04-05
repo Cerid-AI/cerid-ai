@@ -275,7 +275,7 @@ Frontend tests: `cd src/web && npx vitest run`
 - **Workflow engine (`routers/workflows.py`):** DAG validation via Kahn's algorithm (rejects cycles). Topological execution order. 4 built-in templates (research, ingest, verify, custom). Nodes are typed (query, ingest, verify, transform, notify). SVG canvas for visual editing. BSL-1.1 pro-tier via `plugins/workflow/`.
 - **Observability (`routers/observability.py`):** `MetricsCollector` writes 8 Redis time-series metrics (latency, cost, NDCG, cache hit rate, verification accuracy, error rate, throughput, memory usage). Health score computed as weighted A-F grade. Dashboard endpoint returns sparkline data for configurable time windows.
 - **A2A Protocol (`routers/a2a.py`):** Agent Card served at `/.well-known/agent.json`. Task lifecycle: create → status → cancel with Redis-backed storage. A2A client (`utils/a2a_client.py`) discovers remote agents and invokes tasks. Cerid is the first personal KB with dual MCP + A2A protocol support.
-- **Ollama Add-On (optional):** Local LLM for pipeline intelligence (claim extraction, query decomposition, memory resolution, topic extraction, LLM reranking). Default model: `qwen2.5:1.5b` (1.5B params, ~1GB). Enable via `OLLAMA_ENABLED=true` + `INTERNAL_LLM_PROVIDER=ollama` (set by `start-cerid.sh` on first run). Docker profile: `--profile ollama`. macOS Apple Silicon: runs natively for Metal acceleration. Circuit breaker: `"ollama"` in `circuit_breaker.py`. Fallback: automatic to OpenRouter when Ollama unavailable. Cost: $0 (local inference). Hardware detection: `scripts/detect-gpu.sh` (NVIDIA/AMD ROCm/macOS Metal/CPU). Status: `/health` reports Ollama reachability when enabled. Config: `/providers/ollama/status`, `/providers/ollama/enable`, `/providers/ollama/disable`.
+- **Ollama Add-On (optional):** Local LLM for pipeline intelligence (claim extraction, query decomposition, memory resolution, topic extraction, LLM reranking). Default model: `llama3.2:3b` (3B params, ~2GB). Enable via `OLLAMA_ENABLED=true` + `INTERNAL_LLM_PROVIDER=ollama` (set by `start-cerid.sh` on first run). Docker profile: `--profile ollama`. macOS Apple Silicon: runs natively for Metal acceleration. Circuit breaker: `"ollama"` in `circuit_breaker.py`. Fallback: automatic to OpenRouter when Ollama unavailable. Cost: $0 (local inference). Hardware detection: `scripts/detect-gpu.sh` (NVIDIA/AMD ROCm/macOS Metal/CPU). Status: `/health` reports Ollama reachability when enabled. Config: `/providers/ollama/status`, `/providers/ollama/enable`, `/providers/ollama/disable`.
 
 ## Dependency Sync Guide
 
@@ -292,7 +292,7 @@ See [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) for the full developer refere
 
 **Version coupling:** Python 3.11 (Dockerfile + CI + pyproject.toml), Node 22 (.nvmrc + Dockerfile), ChromaDB client >=0.5,<0.6 must match server 0.5.23.
 
-## CI Pipeline (9 jobs)
+## CI Pipeline (8 jobs)
 
 | Job | What |
 |-----|------|
@@ -303,10 +303,9 @@ See [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) for the full developer refere
 | lock-sync | pip-compile lock file freshness check |
 | frontend | tsc + ESLint + Vitest + Vite build + bundle size check (800KB limit) + npm audit + license audit |
 | docker | hadolint (mcp + web Dockerfiles) + `docker build` + Trivy CRITICAL/HIGH scan |
-| frontend-marketing | tsc + ESLint + `next build` (uploads Sentry source maps via `SENTRY_AUTH_TOKEN`) |
 | frontend-desktop | npm ci + `npm run typecheck` |
 
-Docker gates on all 8 prior jobs. Trivy CVE ignore list is in `.github/workflows/ci.yml` with inline rationale for each ignored CVE.
+Docker gates on all 7 prior jobs. Trivy CVE ignore list is in `.github/workflows/ci.yml` with inline rationale for each ignored CVE.
 
 ## Sentry
 

@@ -336,7 +336,7 @@ class TestWatcherBatchQueue:
             "failed": 0,
         }
 
-        with patch("scripts.watch_ingest.requests.post", return_value=mock_resp) as mock_post:
+        with patch("scripts.watch_ingest.httpx.post", return_value=mock_resp) as mock_post:
             watcher._flush_batch()
 
         mock_post.assert_called_once()
@@ -360,7 +360,7 @@ class TestWatcherBatchQueue:
             "failed": 0,
         }
 
-        with patch("scripts.watch_ingest.requests.post", return_value=mock_resp):
+        with patch("scripts.watch_ingest.httpx.post", return_value=mock_resp):
             watcher._flush_batch()
 
         assert len(watcher._pending_queue) == 0
@@ -377,7 +377,7 @@ class TestWatcherBatchQueue:
         mock_resp.status_code = 500
         mock_resp.text = "Internal Server Error"
 
-        with patch("scripts.watch_ingest.requests.post", return_value=mock_resp):
+        with patch("scripts.watch_ingest.httpx.post", return_value=mock_resp):
             watcher._flush_batch()
 
         # Should have scheduled a retry
@@ -393,7 +393,7 @@ class TestWatcherBatchQueue:
 
         watcher._pending_queue.clear()
 
-        with patch("scripts.watch_ingest.requests.post") as mock_post:
+        with patch("scripts.watch_ingest.httpx.post") as mock_post:
             watcher._flush_batch()
 
         mock_post.assert_not_called()
@@ -415,7 +415,7 @@ class TestWatcherBatchQueue:
 
         with patch.object(watcher, "_should_process", return_value=True), \
              patch.object(watcher, "_wait_for_stable", return_value=True), \
-             patch("scripts.watch_ingest.requests.post", return_value=mock_resp) as mock_post:
+             patch("scripts.watch_ingest.httpx.post", return_value=mock_resp) as mock_post:
 
             for i in range(watcher.BATCH_MAX):
                 watcher._queue_for_batch(f"/archive/file_{i}.txt", "smart")
