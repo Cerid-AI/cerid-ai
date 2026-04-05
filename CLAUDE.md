@@ -1,21 +1,12 @@
 # CLAUDE.md - Cerid AI (Open Source)
 
-## Global Configuration (REQUIRED)
-
-This repo's Claude Code sessions **MUST** also load the global orchestrator config:
-→ **https://github.com/sunrunnerfire/dotfiles/blob/main/claude.md**
-
-Load both this file AND the global config at session start. The global config contains lead orchestrator/agent parameters that govern all Cerid development sessions.
-
----
-
 ## Project Overview
 
 Cerid AI is a self-hosted, privacy-first AI Knowledge Companion. RAG-powered retrieval, intelligent agents, and an extensible SDK. Apache-2.0 licensed.
 
-**Status:** v0.82 | **Docs:** [`docs/`](docs/) | **SDK:** [`docs/SDK_GUIDE.md`](docs/SDK_GUIDE.md)
+**Version:** 0.82.0 | **Docs:** [`docs/`](docs/) | **SDK:** [`docs/SDK_GUIDE.md`](docs/SDK_GUIDE.md)
 
-## Quick Reference
+## Quick Start
 
 ```bash
 cp .env.example .env                        # configure (set OPENROUTER_API_KEY)
@@ -43,11 +34,8 @@ curl http://localhost:8888/health/ready      # verify
 | Feature gating | `@require_feature()` | `config/features.py` |
 | Circuit breakers | `circuit_breaker(name)` | `utils/circuit_breaker.py` |
 | Graceful degradation | `DegradationManager` | `utils/degradation.py` |
-
 | Inference detection | `detect_embedding_provider()` | `utils/inference_config.py` |
-| Sidecar HTTP client | `sidecar_embed()` / `sidecar_rerank()` | `utils/inference_sidecar_client.py` |
-| Startup prereqs | Port checks, Docker memory, python3/curl | `scripts/start-cerid.sh` |
-| Sidecar auto-start | Detect installed → start in background | `scripts/start-cerid.sh` |
+| Sidecar client | `sidecar_embed()` / `sidecar_rerank()` | `utils/inference_sidecar_client.py` |
 
 **Rules:**
 - Typed errors only (`CeridError` subclasses). No `raise HTTPException` in business logic.
@@ -58,7 +46,7 @@ curl http://localhost:8888/health/ready      # verify
 
 ## Tiered Inference
 
-GPU-aware embedding/reranking provider detection. Auto-selects the best backend at startup:
+GPU-aware embedding/reranking. Auto-selects the best backend at startup:
 
 | Tier | Provider | When |
 |------|----------|------|
@@ -67,56 +55,29 @@ GPU-aware embedding/reranking provider detection. Auto-selects the best backend 
 | Degraded | `onnx-cpu` | Docker CPU (default) |
 
 ```bash
-# Check current inference tier
-curl http://localhost:8888/health | jq .inference
-
-# Override manually
-INFERENCE_MODE=onnx-cpu  # or: onnx-gpu, ollama, fastembed-sidecar
-
-# Install sidecar for native GPU acceleration
-bash scripts/install-sidecar.sh
-python scripts/cerid-sidecar.py  # runs outside Docker
+curl http://localhost:8888/health | jq .inference     # check tier
+bash scripts/install-sidecar.sh                        # install GPU sidecar
+python scripts/cerid-sidecar.py                        # run sidecar (outside Docker)
 ```
-
-Key files: `utils/inference_config.py` (detection), `utils/inference_sidecar_client.py` (HTTP client), `scripts/cerid-sidecar.py` (server).
 
 Re-check loop runs every 300s — auto-detects Ollama start/stop mid-session.
 
 ## Dependency Strategy
 
-The public repo keeps direct dependencies minimal for attack surface and image size. See [`docs/DEPENDENCY_AUDIT_2026-04-05.md`](docs/DEPENDENCY_AUDIT_2026-04-05.md) for the full audit.
+Direct dependencies are minimal (14 core). See [`docs/DEPENDENCY_AUDIT_2026-04-05.md`](docs/DEPENDENCY_AUDIT_2026-04-05.md).
 
-**Core deps (14 direct):** fastapi, uvicorn, pydantic, httpx, chromadb, neo4j, redis, tiktoken, langgraph, pdfplumber, python-docx, openpyxl, pandas, apscheduler + utilities (cryptography, jinja2, mcp, python-multipart, bm25s, PyStemmer, sentry-sdk).
-
-**What's NOT a direct dependency:**
-- `requests` — replaced with `httpx` everywhere (scripts, server, CLI tools)
-- `structlog` — replaced with stdlib `logging`
-- `stripe` — internal-only (billing), not in public repo
-- `faster-whisper` — internal-only (audio plugin), not in public repo
-- `pytesseract` / `Pillow` — Pro-only OCR plugin, optional install
-- `bcrypt` / `PyJWT` — only for multi-user mode (`CERID_MULTI_USER=true`), optional install
-
-**Optional extras (install separately):**
+**Optional extras (not installed by default):**
 ```bash
-pip install pytesseract Pillow          # OCR plugin (+ apt install tesseract-ocr)
-pip install faster-whisper              # Audio transcription plugin (+ ffmpeg)
-pip install stripe                      # Billing/subscription management
-pip install bcrypt PyJWT                # Multi-user JWT authentication
+pip install pytesseract Pillow    # OCR plugin (+ apt install tesseract-ocr)
+pip install bcrypt PyJWT          # Multi-user JWT auth (CERID_MULTI_USER=true)
 ```
 
-**Docker image (3.18 GB):** Base image has no tesseract-ocr or ffmpeg — Pro plugins install their own system deps. ONNX models are pre-downloaded at build time for fast cold starts.
+**Protected dependencies (do NOT remove):**
+- `langgraph` — real conditional routing graph in triage.py (469 lines, 16 functions)
+- `pandas` — CSV enrichment with auto-delimiter, encoding fallback, df.describe()
+- `react-syntax-highlighter` — PrismLight with 25 languages (~200KB runtime chunk)
 
-**Auth imports are graceful:** `routers/auth.py` and `middleware/jwt_auth.py` are only loaded when `CERID_MULTI_USER=true` (conditional import in `main.py`). Missing bcrypt/PyJWT won't crash the server.
-
-**Protected Dependencies (do NOT remove):**
-- `langgraph` — triage.py is 469 lines with 16 functions building a real conditional routing graph. Reimplementing would lose graph execution, error propagation, and routing visualization.
-- `pandas` — CSV parser uses pd.read_csv for auto-delimiter detection, encoding fallback, column type inference, df.describe() statistics. These enrich KB artifacts. Already lazy-imported.
-- `react-syntax-highlighter` — uses PrismLight with 25 registered languages (~200KB lazy chunk). npm install size is large but runtime bundle is small via tree-shaking + Vite manual chunks.
-
-**Embedding runs on Docker CPU by default** but auto-detects GPU acceleration:
-- Ollama on host → uses Ollama for LLM tasks
-- FastEmbed sidecar on host → native GPU embeddings (Metal/CUDA/ROCm)
-- See [Tiered Inference](#tiered-inference) section above
+**Docker image (3.18 GB):** No tesseract/ffmpeg in base. Set `CERID_PRELOAD_MODELS=false` at build time for ~500MB image (models download on first use).
 
 ## SDK (12 endpoints at /sdk/v1/)
 
@@ -124,9 +85,7 @@ See [`docs/SDK_GUIDE.md`](docs/SDK_GUIDE.md). Core: query, hallucination, memory
 
 ## Plugin System (5 types)
 
-See [`docs/PLUGIN_DEVELOPMENT.md`](docs/PLUGIN_DEVELOPMENT.md) and [`plugins/README.md`](plugins/README.md).
-
-Types: `parser`, `agent`, `tool`, `connector`, `sync`. Community plugins loaded from `CERID_PLUGIN_DIR` or `plugins/` directory.
+See [`docs/PLUGIN_DEVELOPMENT.md`](docs/PLUGIN_DEVELOPMENT.md). Types: `parser`, `agent`, `tool`, `connector`, `sync`.
 
 ## Tests
 
@@ -155,4 +114,4 @@ No Chinese-origin AI models (USG alignment). Approved: OpenAI, Anthropic, Google
 
 ## CI (6 jobs)
 
-lint, typecheck, test (60% floor), security, frontend, docker.
+lint, typecheck, test (20% floor), security, frontend, docker.
