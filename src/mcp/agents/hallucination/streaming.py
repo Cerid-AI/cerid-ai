@@ -377,7 +377,7 @@ async def verify_response_streaming(
         batch_kb_context = await lightweight_kb_query(
             batch_query, chroma_client=chroma_client, top_k=15,
         )
-    except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as kb_exc:
+    except Exception as kb_exc:
         logger.debug("Batch KB pre-fetch failed (non-blocking): %s", kb_exc)
 
     # Build a set of claim indices where KB confidence is very high (>0.85),
@@ -553,7 +553,7 @@ async def verify_response_streaming(
                 completed = verified_count + unverified_count + uncertain_count
                 uncertain_count += len(claims) - completed
                 break
-            except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as task_exc:
+            except Exception as task_exc:
                 logger.warning("Verification task failed: %s", task_exc)
                 try:
                     from utils.cache import log_verification_error
@@ -627,7 +627,7 @@ async def verify_response_streaming(
                     "message": "OpenRouter credits exhausted. Add credits at https://openrouter.ai/settings/credits",
                     "provider": "openrouter",
                 }
-    except (VerificationError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as loop_exc:
+    except Exception as loop_exc:
         logger.error(
             "Verification loop interrupted after %d/%d claims: %s",
             verified_count + unverified_count + uncertain_count,

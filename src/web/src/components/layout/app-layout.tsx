@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import { Sidebar, type Pane } from "./sidebar"
 import { StatusBar } from "./status-bar"
 import { AgentConsole } from "@/components/console/AgentConsole"
@@ -44,6 +44,13 @@ export function AppLayout({ children, featureTier, onCycleTier }: AppLayoutProps
     if (consoleOpen) resetUnread()
   }, [consoleOpen, resetUnread])
 
+  // Activity LED: show pulsing dot on panes with background activity
+  const activePanes = useMemo(() => {
+    const s = new Set<Pane>()
+    if (connected && unreadCount > 0) s.add("agents")
+    return s
+  }, [connected, unreadCount])
+
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 1024px)")
     const handler = (e: MediaQueryListEvent) => setSidebarCollapsed(e.matches)
@@ -63,6 +70,7 @@ export function AppLayout({ children, featureTier, onCycleTier }: AppLayoutProps
           onToggleTheme={toggleTheme}
           featureTier={featureTier}
           onCycleTier={onCycleTier}
+          activePanes={activePanes}
         />
         <main key={activePane} className="flex-1 animate-in fade-in duration-200 overflow-hidden">{children(activePane)}</main>
       </div>
