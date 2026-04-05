@@ -18,13 +18,13 @@ from pathlib import Path
 from typing import Any
 
 import config
-from utils.embeddings import get_embedding_function
 from db import neo4j as graph
 from deps import get_chroma, get_neo4j, get_redis
 from errors import CeridError, IngestionError
 from parsers import parse_file
 from utils import cache
 from utils.chunker import PARENT_CHILD_ENABLED, chunk_text, make_context_header
+from utils.embeddings import get_embedding_function
 from utils.metadata import ai_categorize, extract_metadata
 from utils.time import utcnow_iso
 
