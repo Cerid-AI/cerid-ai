@@ -78,7 +78,7 @@ describe("OllamaStep", () => {
         onChange={onChange}
       />,
     )
-    const installLink = screen.getByText("Install Ollama")
+    const installLink = screen.getByText("All platforms")
     expect(installLink).toBeInTheDocument()
     expect(installLink.closest("a")).toHaveAttribute("href", "https://ollama.com/download")
   })
@@ -118,6 +118,6 @@ describe("OllamaStep", () => {
         onChange={onChange}
       />,
     )
-    expect(screen.queryByText("Install Ollama")).not.toBeInTheDocument()
+    expect(screen.queryByText("All platforms")).not.toBeInTheDocument()
   })
 })
