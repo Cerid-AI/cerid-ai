@@ -192,16 +192,76 @@ OLLAMA_DEFAULT_MODEL="llama3.2:3b"
 # Source GPU detection
 source "$CERID_ROOT/scripts/detect-gpu.sh" 2>/dev/null || true
 
-# [0/4] Inference Sidecar — check if running
+# [0/4] Inference Sidecar — detect, auto-start, or offer install
 SIDECAR_PORT="${CERID_SIDECAR_PORT:-8889}"
 SIDECAR_URL="${CERID_SIDECAR_URL:-http://localhost:$SIDECAR_PORT}"
+SIDECAR_INSTALLED=false
+
+# Check if sidecar dependencies are installed (fastembed or onnxruntime + fastapi)
+if python3 -c "import onnxruntime; import fastapi" 2>/dev/null; then
+    SIDECAR_INSTALLED=true
+fi
+
 if curl -sf "$SIDECAR_URL/health" >/dev/null 2>&1; then
+    # Sidecar already running
     echo "[sidecar] FastEmbed sidecar detected at $SIDECAR_URL"
     SIDECAR_HEALTH=$(curl -sf "$SIDECAR_URL/health" 2>/dev/null || echo "{}")
     echo "[sidecar] $(echo "$SIDECAR_HEALTH" | grep -o '"platform":"[^"]*"' | head -1 || echo "running")"
+elif [ "$SIDECAR_INSTALLED" = "true" ]; then
+    # Sidecar installed but not running — auto-start in background
+    echo "[sidecar] Sidecar installed but not running — starting in background..."
+    CERID_SIDECAR_PORT="$SIDECAR_PORT" nohup python3 "$CERID_ROOT/scripts/cerid-sidecar.py" \
+        > "$CERID_ROOT/logs/sidecar.log" 2>&1 &
+    SIDECAR_PID=$!
+    echo "[sidecar] Started (PID $SIDECAR_PID, log: logs/sidecar.log)"
+    # Give it a moment to start
+    sleep 2
+    if curl -sf "$SIDECAR_URL/health" >/dev/null 2>&1; then
+        echo "[sidecar] Health check passed"
+    else
+        echo "[sidecar] Warning: sidecar started but not yet healthy (may still be loading models)"
+    fi
 else
-    echo "[sidecar] No sidecar detected (optional — Docker CPU embeddings will be used)"
-    echo "[sidecar] Install with: bash scripts/install-sidecar.sh"
+    # Not installed — check if GPU acceleration would help
+    OLLAMA_REACHABLE=false
+    if curl -sf "http://localhost:11434/api/tags" >/dev/null 2>&1 || \
+       curl -sf "http://host.docker.internal:11434/api/tags" >/dev/null 2>&1; then
+        OLLAMA_REACHABLE=true
+    fi
+
+    if [ "$OLLAMA_REACHABLE" = "false" ] && [ "${FORCE_FLAG:-}" != "1" ]; then
+        echo ""
+        echo "[sidecar] No GPU acceleration detected (no sidecar, no Ollama)"
+        echo "  The embedding sidecar runs natively and uses your GPU for faster ingestion."
+        echo "  Hardware: ${CERID_GPU_LABEL:-Unknown}"
+        echo ""
+        read -r -p "  Install embedding sidecar for faster ingestion? [Y/n]: " SIDECAR_ANSWER </dev/tty 2>/dev/null || SIDECAR_ANSWER="n"
+        if [ "${SIDECAR_ANSWER,,}" != "n" ]; then
+            echo "[sidecar] Installing..."
+            bash "$CERID_ROOT/scripts/install-sidecar.sh"
+            # Start sidecar in background
+            mkdir -p "$CERID_ROOT/logs"
+            CERID_SIDECAR_PORT="$SIDECAR_PORT" nohup python3 "$CERID_ROOT/scripts/cerid-sidecar.py" \
+                > "$CERID_ROOT/logs/sidecar.log" 2>&1 &
+            echo "[sidecar] Started in background (PID $!, log: logs/sidecar.log)"
+            sleep 3
+            if curl -sf "$SIDECAR_URL/health" >/dev/null 2>&1; then
+                echo "[sidecar] Health check passed"
+            else
+                echo "[sidecar] Warning: still loading models — will be detected on next health check"
+            fi
+        else
+            echo "[sidecar] Skipped (Docker CPU embeddings will be used)"
+            echo "[sidecar] Install later: bash scripts/install-sidecar.sh"
+        fi
+    else
+        if [ "$OLLAMA_REACHABLE" = "true" ]; then
+            echo "[sidecar] Ollama detected — using Ollama for LLM tasks (sidecar optional)"
+        else
+            echo "[sidecar] No sidecar detected (optional — Docker CPU embeddings will be used)"
+        fi
+        echo "[sidecar] Install with: bash scripts/install-sidecar.sh"
+    fi
 fi
 
 # Check if Ollama is already configured
