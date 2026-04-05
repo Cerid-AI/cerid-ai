@@ -505,7 +505,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                   provider="openrouter"
                   label="OpenRouter API Key"
                   required
-                  preconfigured={state.keys.openrouter.key === "(configured)"}
+                  preconfigured={state.keys.openrouter.key === "(configured)" || state.keys.openrouter.key === "(from .env)"}
                   placeholder="sk-or-v1-..."
                   helpUrl="https://openrouter.ai/keys"
                   onKeyValidated={handleKeyValidated("openrouter")}
@@ -576,7 +576,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                     <ApiKeyInput
                       provider="openai"
                       label="OpenAI API Key"
-                      preconfigured={state.keys.openai.key === "(configured)"}
+                      preconfigured={state.keys.openai.key === "(configured)" || state.keys.openai.key === "(from .env)"}
                       placeholder="sk-proj-..."
                       helpUrl="https://platform.openai.com/api-keys"
                       onKeyValidated={handleKeyValidated("openai")}
@@ -584,7 +584,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                     <ApiKeyInput
                       provider="anthropic"
                       label="Anthropic API Key"
-                      preconfigured={state.keys.anthropic.key === "(configured)"}
+                      preconfigured={state.keys.anthropic.key === "(configured)" || state.keys.anthropic.key === "(from .env)"}
                       placeholder="sk-ant-api03-..."
                       helpUrl="https://console.anthropic.com/settings/keys"
                       onKeyValidated={handleKeyValidated("anthropic")}
@@ -592,7 +592,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                     <ApiKeyInput
                       provider="xai"
                       label="xAI (Grok) API Key"
-                      preconfigured={state.keys.xai.key === "(configured)"}
+                      preconfigured={state.keys.xai.key === "(configured)" || state.keys.xai.key === "(from .env)"}
                       placeholder="xai-..."
                       helpUrl="https://console.x.ai/api-keys"
                       onKeyValidated={handleKeyValidated("xai")}
