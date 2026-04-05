@@ -6,4 +6,5 @@ from core.agents.hallucination import *  # noqa: F401,F403
 from core.agents.hallucination import (  # noqa: F401
     _check_numeric_alignment,
     _compute_adjusted_confidence,
+    _detect_evasion,
 )

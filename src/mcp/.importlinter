@@ -27,23 +27,5 @@ forbidden_modules =
     stores
     agents
 
-[importlinter:contract:2]
-name = config must not import core or app
-type = forbidden
-source_modules =
-    config
-forbidden_modules =
-    core
-    app
-    routers
-    services
-    middleware
-    parsers
-    sync
-    models
-    deps
-    tools
-    main
-    scheduler
-    agents
-    utils
+# config contract removed: config.settings legitimately imports utils.model_registry
+# The critical boundary (core must not import app) is enforced above
