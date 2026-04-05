@@ -34,7 +34,7 @@ import sys
 import time
 from pathlib import Path
 
-import requests
+import httpx
 
 from errors import CeridError
 
@@ -111,7 +111,7 @@ def ingest_via_api(host_path: str, domain: str, sub_category: str) -> dict:
         # Try /ingest_file first (works on Linux Docker, native installs)
         container_path = translate_path(host_path)
         try:
-            resp = requests.post(
+            resp = httpx.post(
                 f"{MCP_URL}/ingest_file",
                 json={"file_path": container_path, "domain": domain or "", "sub_category": sub_category or "", "categorize_mode": "smart"},
                 headers=headers,
@@ -119,7 +119,7 @@ def ingest_via_api(host_path: str, domain: str, sub_category: str) -> dict:
             )
             resp.raise_for_status()
             return resp.json()
-        except (requests.ConnectionError, requests.HTTPError):
+        except (httpx.ConnectError, httpx.HTTPStatusError):
             pass
 
     # Read file on host and send content via /ingest
@@ -139,7 +139,7 @@ def ingest_via_api(host_path: str, domain: str, sub_category: str) -> dict:
         except (CeridError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
             text = content.decode("latin-1", errors="replace")
 
-        resp = requests.post(
+        resp = httpx.post(
             f"{MCP_URL}/ingest",
             json={"content": text, "filename": filename, "domain": domain or "", "tags": [], "sub_category": sub_category or ""},
             headers=headers,
@@ -149,7 +149,7 @@ def ingest_via_api(host_path: str, domain: str, sub_category: str) -> dict:
         return resp.json()
 
     # For binary files (PDF, DOCX, EPUB), use multipart /upload endpoint
-    resp = requests.post(
+    resp = httpx.post(
         f"{MCP_URL}/upload",
         files={"file": (filename, content)},
         data={"domain": domain or "", "sub_category": sub_category or ""},
@@ -262,11 +262,11 @@ def scan_directory(
                     "artifact_id": result.get("artifact_id", ""),
                     "chunks": result.get("chunks", 0),
                 })
-            except requests.HTTPError as e:
+            except httpx.HTTPStatusError as e:
                 stats["errors"] += 1
                 print(f"  ERROR: {fname} → {e.response.status_code}: {e.response.text[:200]}")
                 stats["results"].append({"path": fpath, "status": "error", "error": str(e)})
-            except (requests.ConnectionError, requests.exceptions.ChunkedEncodingError):
+            except (httpx.ConnectError, httpx.ReadError):
                 stats["errors"] += 1
                 print(f"  ERROR: {fname} → MCP connection lost (PDF may be too complex)")
                 # Wait for MCP to recover from potential OOM restart
@@ -275,10 +275,10 @@ def scan_directory(
                 # Verify MCP is back
                 for attempt in range(5):
                     try:
-                        requests.get(f"{MCP_URL}/health", timeout=5)
+                        httpx.get(f"{MCP_URL}/health", timeout=5)
                         print("  MCP recovered. Continuing scan.")
                         break
-                    except requests.ConnectionError:
+                    except httpx.ConnectError:
                         time.sleep(10)
                 else:
                     print("\nERROR: MCP did not recover after 80s. Aborting scan.")

@@ -26,7 +26,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from threading import Lock
 
-import requests
+import httpx
 
 from errors import CeridError
 
@@ -109,7 +109,7 @@ def _ingest_one(
 
     try:
         time.sleep(REQUEST_DELAY)  # avoid hammering the server
-        resp = requests.post(
+        resp = httpx.post(
             f"{MCP_URL}/ingest_file",
             headers=REQUEST_HEADERS,
             json={
@@ -147,13 +147,13 @@ def _ingest_one(
             result["error_type"] = f"HTTP {resp.status_code}"
             with _print_lock:
                 print(f"  [{index}/{total}] {filename:40s} FAILED ({result['error']})")
-    except requests.Timeout:
+    except httpx.TimeoutException:
         result["status"] = "failed"
         result["error"] = "Request timed out (120s)"
         result["error_type"] = "timeout"
         with _print_lock:
             print(f"  [{index}/{total}] {filename:40s} FAILED (timeout)")
-    except requests.RequestException as e:
+    except httpx.HTTPError as e:
         result["status"] = "failed"
         result["error"] = str(e)
         result["error_type"] = "network"
