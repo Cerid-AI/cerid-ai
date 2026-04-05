@@ -237,6 +237,19 @@ _searxng = AsyncCircuitBreaker("searxng", failure_threshold=3, recovery_timeout=
 _ragas_eval = AsyncCircuitBreaker("ragas_eval", failure_threshold=3, recovery_timeout=60)
 
 
+def _is_client_error(exc: Exception) -> bool:
+    """Return True when the exception looks like an HTTP 4xx client error.
+
+    Checks the string representation for common 4xx status codes so the
+    circuit breaker can distinguish client errors (which shouldn't count
+    toward the failure threshold) from server errors.
+    """
+    import re
+
+    text = str(exc)
+    return bool(re.search(r"\b4\d{2}\b", text))
+
+
 def get_breaker(name: str) -> AsyncCircuitBreaker:
     """Get a named circuit breaker instance."""
     _breakers = {

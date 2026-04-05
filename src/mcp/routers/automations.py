@@ -3,3 +3,4 @@
 
 # Re-export bridge — see app/routers/automations.py for implementation.
 from app.routers.automations import *  # noqa: F401,F403
+from app.routers.automations import _auto_key  # noqa: F401

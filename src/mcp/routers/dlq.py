@@ -14,10 +14,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from config.features import CERID_MULTI_USER
 from deps import get_redis
-from utils.typed_redis import TypedRedis
 from errors import IngestionError
 from utils.dlq import MAX_ATTEMPTS, clear_dlq_entry, dlq_count, list_dlq, push_to_dlq
 from utils.error_handler import handle_errors
+from utils.typed_redis import TypedRedis
 
 logger = logging.getLogger("ai-companion.dlq-admin")
 
