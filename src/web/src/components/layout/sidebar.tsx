@@ -30,6 +30,8 @@ interface SidebarProps {
   onToggleTheme: () => void
   featureTier?: string
   onCycleTier?: () => void
+  /** Panes with active background operations (shows pulsing LED dot) */
+  activePanes?: Set<Pane>
 }
 
 const NAV_ITEMS: { pane: Pane; icon: typeof MessageSquare; label: string }[] = [
@@ -59,7 +61,7 @@ const TIER_CONFIG: Record<string, { label: string; wordmark: string; tierWord: s
 const TIER_LABELS: Record<string, string> = { community: "Core", pro: "Pro", enterprise: "Vault" }
 const TIER_COLORS: Record<string, string> = { community: "text-muted-foreground", pro: "text-brand", enterprise: "text-gold" }
 
-export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse, theme, onToggleTheme, featureTier, onCycleTier }: SidebarProps) {
+export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse, theme, onToggleTheme, featureTier, onCycleTier, activePanes }: SidebarProps) {
   const {
     visibleConversations, activeId, setActiveId, create, remove, rename,
     archive, unarchive, showArchived, toggleShowArchived, archivedCount,
@@ -148,6 +150,9 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
                         <span className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-teal-500 text-[8px] font-bold text-white">
                           {updateCount > 9 ? "9+" : updateCount}
                         </span>
+                      )}
+                      {activePanes?.has(pane) && !showBadge && (
+                        <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-brand animate-pulse" />
                       )}
                     </span>
                     {!collapsed && (
