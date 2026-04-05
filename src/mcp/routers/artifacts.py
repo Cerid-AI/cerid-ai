@@ -264,6 +264,55 @@ async def update_artifact_fields(artifact_id: str, body: ArtifactUpdateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/artifacts/regenerate-all-synopses")
+async def regenerate_all_synopses(
+    model: str | None = Query(None, description="LLM model for synopsis generation"),
+    domains: str | None = Query(None, description="Comma-separated domain filter"),
+    force: bool = Query(False, description="Regenerate even if synopsis exists"),
+):
+    """Queue AI synopsis regeneration for all artifacts missing synopses.
+
+    Returns progress info. Uses Bifrost LLM to generate concise summaries
+    for artifacts that have truncated or missing summaries.
+    """
+    import asyncio
+
+    try:
+        from agents.curator import curate, estimate_synopsis_run
+        from deps import get_chroma
+
+        driver = get_neo4j()
+        chroma = get_chroma()
+        domain_list = [d.strip() for d in domains.split(",")] if domains else None
+        synopsis_model = model or "openrouter/meta-llama/llama-3.2-3b-instruct:free"
+
+        # Estimate first
+        estimate = estimate_synopsis_run(driver, chroma, synopsis_model, domain_list)
+
+        # Run curation with synopsis generation in background
+        async def _run():
+            return await curate(
+                driver,
+                mode="audit",
+                domains=domain_list,
+                chroma_client=chroma,
+                generate_synopses=True,
+                synopsis_model=synopsis_model,
+                force_synopses=force,
+            )
+
+        asyncio.ensure_future(_run())
+
+        return {
+            "status": "started",
+            "estimate": estimate,
+            "message": f"Regenerating synopses for {estimate['candidate_count']} artifacts",
+        }
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
+        logger.error(f"Synopsis regeneration error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.patch("/artifacts/{artifact_id}/star")
 async def toggle_artifact_star(artifact_id: str):
     """Toggle the starred flag on an artifact."""

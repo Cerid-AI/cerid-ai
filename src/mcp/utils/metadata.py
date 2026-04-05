@@ -230,21 +230,31 @@ async def ai_categorize(
     )
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                f"{config.BIFROST_URL}/chat/completions",
-                json={
-                    "model": model_id,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.1,
-                    "max_tokens": 200,
-                    "response_format": {"type": "json_object"},
-                },
+        # Route via internal LLM when configured (e.g. Ollama for free local inference)
+        if config.INTERNAL_LLM_PROVIDER == "ollama":
+            from utils.internal_llm import call_internal_llm
+            content = await call_internal_llm(
+                [{"role": "user", "content": prompt}],
+                temperature=0.1,
+                max_tokens=200,
+                response_format={"type": "json_object"},
+                stage="topic_extraction",
             )
-            resp.raise_for_status()
-            data = resp.json()
-
-        content = data["choices"][0]["message"]["content"]
+        else:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    f"{config.BIFROST_URL}/chat/completions",
+                    json={
+                        "model": model_id,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.1,
+                        "max_tokens": 200,
+                        "response_format": {"type": "json_object"},
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            content = data["choices"][0]["message"]["content"]
         from utils.llm_parsing import parse_llm_json
         result = parse_llm_json(content)
         suggested = result.get("domain", "").lower().strip()
