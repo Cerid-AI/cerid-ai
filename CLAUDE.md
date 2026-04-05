@@ -13,7 +13,7 @@ Load both this file AND the global config at session start. The global config co
 
 Cerid AI is a self-hosted, privacy-first AI Knowledge Companion. RAG-powered retrieval, intelligent agents, and an extensible SDK. Apache-2.0 licensed.
 
-**Status:** v0.80 | **Docs:** [`docs/`](docs/) | **SDK:** [`docs/SDK_GUIDE.md`](docs/SDK_GUIDE.md)
+**Status:** v0.82 | **Docs:** [`docs/`](docs/) | **SDK:** [`docs/SDK_GUIDE.md`](docs/SDK_GUIDE.md)
 
 ## Quick Reference
 
@@ -44,11 +44,17 @@ curl http://localhost:8888/health/ready      # verify
 | Circuit breakers | `circuit_breaker(name)` | `utils/circuit_breaker.py` |
 | Graceful degradation | `DegradationManager` | `utils/degradation.py` |
 
+| Inference detection | `detect_embedding_provider()` | `utils/inference_config.py` |
+| Sidecar HTTP client | `sidecar_embed()` / `sidecar_rerank()` | `utils/inference_sidecar_client.py` |
+| Startup prereqs | Port checks, Docker memory, python3/curl | `scripts/start-cerid.sh` |
+| Sidecar auto-start | Detect installed → start in background | `scripts/start-cerid.sh` |
+
 **Rules:**
 - Typed errors only (`CeridError` subclasses). No `raise HTTPException` in business logic.
 - `@require_feature()` is the only tier gate. No inline tier checks.
 - Constants in `config/constants.py`. No magic numbers.
 - Every `except` must log + degrade or raise typed error.
+- HTTP client is `httpx` everywhere — `requests` is not a dependency.
 
 ## Tiered Inference
 
@@ -75,6 +81,37 @@ python scripts/cerid-sidecar.py  # runs outside Docker
 Key files: `utils/inference_config.py` (detection), `utils/inference_sidecar_client.py` (HTTP client), `scripts/cerid-sidecar.py` (server).
 
 Re-check loop runs every 300s — auto-detects Ollama start/stop mid-session.
+
+## Dependency Strategy
+
+The public repo keeps direct dependencies minimal for attack surface and image size. See [`docs/DEPENDENCY_AUDIT_2026-04-05.md`](docs/DEPENDENCY_AUDIT_2026-04-05.md) for the full audit.
+
+**Core deps (14 direct):** fastapi, uvicorn, pydantic, httpx, chromadb, neo4j, redis, tiktoken, langgraph, pdfplumber, python-docx, openpyxl, pandas, apscheduler + utilities (cryptography, jinja2, mcp, python-multipart, bm25s, PyStemmer, sentry-sdk).
+
+**What's NOT a direct dependency:**
+- `requests` — replaced with `httpx` everywhere (scripts, server, CLI tools)
+- `structlog` — replaced with stdlib `logging`
+- `stripe` — internal-only (billing), not in public repo
+- `faster-whisper` — internal-only (audio plugin), not in public repo
+- `pytesseract` / `Pillow` — Pro-only OCR plugin, optional install
+- `bcrypt` / `PyJWT` — only for multi-user mode (`CERID_MULTI_USER=true`), optional install
+
+**Optional extras (install separately):**
+```bash
+pip install pytesseract Pillow          # OCR plugin (+ apt install tesseract-ocr)
+pip install faster-whisper              # Audio transcription plugin (+ ffmpeg)
+pip install stripe                      # Billing/subscription management
+pip install bcrypt PyJWT                # Multi-user JWT authentication
+```
+
+**Docker image (3.18 GB):** Base image has no tesseract-ocr or ffmpeg — Pro plugins install their own system deps. ONNX models are pre-downloaded at build time for fast cold starts.
+
+**Auth imports are graceful:** `routers/auth.py` and `middleware/jwt_auth.py` are only loaded when `CERID_MULTI_USER=true` (conditional import in `main.py`). Missing bcrypt/PyJWT won't crash the server.
+
+**Embedding runs on Docker CPU by default** but auto-detects GPU acceleration:
+- Ollama on host → uses Ollama for LLM tasks
+- FastEmbed sidecar on host → native GPU embeddings (Metal/CUDA/ROCm)
+- See [Tiered Inference](#tiered-inference) section above
 
 ## SDK (12 endpoints at /sdk/v1/)
 
