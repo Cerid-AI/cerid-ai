@@ -139,7 +139,7 @@ def _probe_ollama() -> bool:
         import httpx
         resp = httpx.get(f"{ollama_url}/api/tags", timeout=2)
         return resp.status_code == 200
-    except Exception:
+    except (httpx.HTTPError, OSError, ValueError):  # noqa: BLE001
         pass
     # Fallback: try localhost
     if "host.docker.internal" in ollama_url:
@@ -147,7 +147,7 @@ def _probe_ollama() -> bool:
             import httpx
             resp = httpx.get("http://localhost:11434/api/tags", timeout=2)
             return resp.status_code == 200
-        except Exception:
+        except (httpx.HTTPError, OSError, ValueError):  # noqa: BLE001
             pass
     return False
 
@@ -161,7 +161,7 @@ def _probe_sidecar() -> tuple[bool, str]:
         resp = httpx.get(f"{url}/health", timeout=2)
         if resp.status_code == 200:
             return True, url
-    except Exception:
+    except (httpx.HTTPError, OSError, ValueError):  # noqa: BLE001
         pass
     return False, url
 

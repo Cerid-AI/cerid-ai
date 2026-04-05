@@ -94,7 +94,7 @@ class OnnxEmbeddingFunction:
             try:
                 from utils.inference_config import get_inference_config
                 _providers = get_inference_config().onnx_providers
-            except Exception:
+            except Exception:  # noqa: BLE001
                 _providers = ["CPUExecutionProvider"]
 
             self._session = ort.InferenceSession(

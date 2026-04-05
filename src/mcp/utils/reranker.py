@@ -58,7 +58,7 @@ def _load_model() -> tuple[ort.InferenceSession, Tokenizer]:
         try:
             from utils.inference_config import get_inference_config
             _providers = get_inference_config().onnx_providers
-        except Exception:
+        except Exception:  # noqa: BLE001
             _providers = ["CPUExecutionProvider"]
 
         _session = ort.InferenceSession(
