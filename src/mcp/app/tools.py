@@ -8,6 +8,7 @@ protocol layer and tools are testable independently.
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import config
@@ -721,15 +722,15 @@ MCP_TOOLS = [
 async def execute_tool(name: str, arguments: dict) -> Any:
     """Dispatch a tool call by name. Raises ValueError for unknown tools."""
     if name == "pkb_query":
-        return query_knowledge(**arguments)
+        return await asyncio.to_thread(query_knowledge, **arguments)
     elif name == "pkb_ingest":
-        return ingest_content(arguments.get("content", ""), arguments.get("domain", "general"))
+        return await asyncio.to_thread(ingest_content, arguments.get("content", ""), arguments.get("domain", "general"))
     elif name == "pkb_ingest_file":
         return await ingest_file(**arguments)
     elif name == "pkb_health":
-        return health_check()
+        return await asyncio.to_thread(health_check)
     elif name == "pkb_collections":
-        return list_collections()
+        return await asyncio.to_thread(list_collections)
     elif name == "pkb_agent_query":
         from agents.query_agent import agent_query
         return await agent_query(
@@ -745,9 +746,10 @@ async def execute_tool(name: str, arguments: dict) -> Any:
         domain = arguments.get("domain", "") or None
         limit = arguments.get("limit", 50)
         driver = get_neo4j()
-        return graph.list_artifacts(driver, domain=domain, limit=limit)
+        return await asyncio.to_thread(graph.list_artifacts, driver, domain=domain, limit=limit)
     elif name == "pkb_recategorize":
-        return recategorize(
+        return await asyncio.to_thread(
+            recategorize,
             artifact_id=arguments["artifact_id"],
             new_domain=arguments["new_domain"],
             tags=arguments.get("tags", ""),
@@ -761,7 +763,8 @@ async def execute_tool(name: str, arguments: dict) -> Any:
         )
         if triage_result.get("status") == "error":
             return {"status": "error", "error": triage_result.get("error", "Unknown error")}
-        result = ingest_content(
+        result = await asyncio.to_thread(
+            ingest_content,
             triage_result["parsed_text"],
             triage_result["domain"],
             metadata=triage_result["metadata"],

@@ -78,8 +78,21 @@ async def sidecar_embed(
     except Exception as exc:  # noqa: BLE001
         logger.debug("Latency tracking failed: %s", exc)
 
+    embeddings = data["embeddings"]
+
+    # Dimension validation: ChromaDB requires consistent 768-dim vectors
+    if embeddings:
+        from config.settings import EMBEDDING_DIMENSIONS
+        expected = EMBEDDING_DIMENSIONS if EMBEDDING_DIMENSIONS > 0 else 768
+        actual = len(embeddings[0])
+        if actual != expected:
+            raise ValueError(
+                f"Sidecar embedding dimension mismatch: expected {expected}, got {actual}. "
+                "Check sidecar model configuration."
+            )
+
     logger.debug("Sidecar embed: %d texts in %.1fms", len(texts), latency_ms)
-    return data["embeddings"]
+    return embeddings
 
 
 async def sidecar_rerank(

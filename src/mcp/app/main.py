@@ -279,7 +279,10 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown: stop scheduler, flush caches, close connections, clear MCP sessions
-    stop_scheduler()
+    try:
+        stop_scheduler()
+    except Exception as exc:
+        logger.warning("Scheduler shutdown failed: %s", exc)
     try:
         from utils.llm_client import close_client
         await close_client()
@@ -431,6 +434,46 @@ if CERID_TRADING_ENABLED:
 if os.getenv("CERID_EVAL_ENABLED", "").lower() in ("1", "true", "yes"):
     from app.routers import eval as eval_router
     app.include_router(eval_router.router)
+
+# Routers from bridge layer (not yet extracted to app/routers/ — Phase C follow-up)
+from routers import (  # noqa: E402,I001
+    agent_console,
+    custom_agents,
+    data_sources,
+    dlq,
+    mcp_client,
+    plugin_registry,
+    sdk_openapi,
+    system_monitor,
+    watched_folders,
+    webhook_subscriptions,
+    widget,
+)
+
+_bridge_routers = [
+    data_sources.router,
+    watched_folders.router,
+    system_monitor.router,
+    dlq.router,
+    webhook_subscriptions.router,
+    agent_console.router,
+    custom_agents.router,
+    mcp_client.router,
+    plugin_registry.router,
+    widget.router,
+]
+for r in _bridge_routers:
+    app.include_router(r)
+    app.include_router(r, prefix="/api/v1")
+
+# SDK OpenAPI spec (serves at /sdk/v1/openapi.json — no versioned prefix needed)
+app.include_router(sdk_openapi.router)
+
+# Billing (Pro tier only)
+if os.getenv("CERID_TIER", "community") in ("pro", "enterprise"):
+    from routers import billing  # noqa: E402
+    app.include_router(billing.router)
+    app.include_router(billing.router, prefix="/api/v1")
 
 
 @app.get("/")

@@ -119,10 +119,23 @@ def get_user_by_id(driver, user_id: str) -> dict | None:
         return record["user"] if record else None
 
 
+_ALLOWED_USER_FIELDS: frozenset[str] = frozenset({
+    "display_name",
+    "hashed_password",
+    "role",
+    "api_key_encrypted",
+    "api_key_prefix",
+})
+
+
 def update_user(driver, user_id: str, **updates) -> dict | None:
     """Update user fields. Returns updated user or None if not found."""
     if not updates:
         return get_user_by_id(driver, user_id)
+
+    disallowed = set(updates) - _ALLOWED_USER_FIELDS
+    if disallowed:
+        raise ValueError(f"update_user: disallowed fields: {disallowed}")
 
     set_clauses = ", ".join(f"u.{k} = ${k}" for k in updates)
     updates["updated_at"] = utcnow_iso()
