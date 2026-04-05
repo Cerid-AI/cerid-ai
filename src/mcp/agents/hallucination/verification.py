@@ -276,7 +276,7 @@ async def _query_memories(
                     "memory_source": True,
                 })
         return formatted
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — must catch ChromaDB InvalidCollectionException
         logger.debug("Memory query failed (non-blocking): %s", e)
         return []
 
@@ -1204,7 +1204,7 @@ async def verify_claim(
                 **_kb_source_fields(top_result),
             }
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — must catch ChromaDB InvalidCollectionException
         logger.warning("Claim verification failed for '%s...': %s", claim[:50], e)
         return {
             "claim": claim,
