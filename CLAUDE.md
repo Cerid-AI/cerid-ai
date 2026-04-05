@@ -50,6 +50,32 @@ curl http://localhost:8888/health/ready      # verify
 - Constants in `config/constants.py`. No magic numbers.
 - Every `except` must log + degrade or raise typed error.
 
+## Tiered Inference
+
+GPU-aware embedding/reranking provider detection. Auto-selects the best backend at startup:
+
+| Tier | Provider | When |
+|------|----------|------|
+| Optimal | `fastembed-sidecar` or `onnx-gpu` | GPU available (Metal/CUDA/ROCm) |
+| Good | `ollama` or CPU sidecar | Ollama running or native sidecar without GPU |
+| Degraded | `onnx-cpu` | Docker CPU (default) |
+
+```bash
+# Check current inference tier
+curl http://localhost:8888/health | jq .inference
+
+# Override manually
+INFERENCE_MODE=onnx-cpu  # or: onnx-gpu, ollama, fastembed-sidecar
+
+# Install sidecar for native GPU acceleration
+bash scripts/install-sidecar.sh
+python scripts/cerid-sidecar.py  # runs outside Docker
+```
+
+Key files: `utils/inference_config.py` (detection), `utils/inference_sidecar_client.py` (HTTP client), `scripts/cerid-sidecar.py` (server).
+
+Re-check loop runs every 300s — auto-detects Ollama start/stop mid-session.
+
 ## SDK (12 endpoints at /sdk/v1/)
 
 See [`docs/SDK_GUIDE.md`](docs/SDK_GUIDE.md). Core: query, hallucination, memory/extract, health, ingest, search, collections, taxonomy, settings, plugins, health/detailed, ingest/file.
