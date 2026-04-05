@@ -3,4 +3,7 @@
 
 # Re-export bridge — see core/agents/hallucination/ for implementation.
 from core.agents.hallucination import *  # noqa: F401,F403
-from core.agents.hallucination import _check_numeric_alignment  # noqa: F401
+from core.agents.hallucination import (  # noqa: F401
+    _check_numeric_alignment,
+    _compute_adjusted_confidence,
+)

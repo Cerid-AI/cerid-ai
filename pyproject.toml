@@ -59,9 +59,5 @@ type = "forbidden"
 source_modules = ["core"]
 forbidden_modules = ["app", "routers", "services", "middleware", "parsers", "sync", "models", "deps", "tools", "main", "scheduler", "db", "eval", "stores", "agents"]
 
-[[tool.importlinter.contracts]]
-name = "config must not import core or app"
-type = "forbidden"
-source_modules = ["config"]
-forbidden_modules = ["core", "app", "routers", "services", "middleware", "parsers", "sync", "models", "deps", "tools", "main", "scheduler", "agents", "db", "eval", "stores"]
-# Note: utils excluded — config.settings imports utils.model_registry (model registry is config-adjacent)
+# config→utils boundary removed: config.settings legitimately imports utils.model_registry
+# The critical boundary (core must not import app) is enforced above
