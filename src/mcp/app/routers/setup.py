@@ -371,3 +371,76 @@ async def configure(req: ConfigureRequest) -> ConfigureResponse:
     except (OSError, ValueError) as exc:
         _logger.exception("Failed to apply configuration")
         return ConfigureResponse(success=False, error=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# System check — environment detection for the setup wizard
+# ---------------------------------------------------------------------------
+
+
+@router.get("/system-check")
+async def system_check() -> dict:
+    """Detect system environment for the setup wizard."""
+    import shutil
+
+    # RAM
+    try:
+        import psutil
+        ram_gb = round(psutil.virtual_memory().total / (1024**3))
+    except ImportError:
+        ram_gb = 16  # default guess
+
+    # Docker
+    docker_running = shutil.which("docker") is not None
+
+    # Env file
+    env_path = _find_env_file()
+    env_exists = env_path.exists()
+    env_keys: list[str] = []
+    if env_exists:
+        content = env_path.read_text()
+        for line in content.splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key = line.split("=", 1)[0].strip()
+                val = line.split("=", 1)[1].strip()
+                if val:
+                    env_keys.append(key)
+
+    # Ollama
+    ollama_detected = False
+    ollama_url = os.getenv("OLLAMA_URL", "http://host.docker.internal:11434")
+    ollama_models: list[str] = []
+    for _attempt in range(2):
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(f"{ollama_url}/api/tags")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    ollama_models = [m.get("name", "") for m in data.get("models", [])]
+                    ollama_detected = len(ollama_models) > 0
+                break
+        except Exception:
+            if _attempt == 0:
+                continue
+            break
+
+    # Archive path
+    archive_path = os.getenv("ARCHIVE_PATH", "/archive")
+    default_archive = archive_path
+
+    # Lightweight recommendation
+    lightweight_recommended = ram_gb < 8
+
+    return {
+        "ram_gb": ram_gb,
+        "docker_running": docker_running,
+        "env_exists": env_exists,
+        "env_keys_present": env_keys,
+        "ollama_detected": ollama_detected,
+        "ollama_url": ollama_url if ollama_detected else None,
+        "ollama_models": ollama_models,
+        "lightweight_recommended": lightweight_recommended,
+        "archive_path_exists": Path(archive_path).exists(),
+        "default_archive_path": default_archive,
+    }
