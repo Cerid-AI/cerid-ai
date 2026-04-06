@@ -279,7 +279,7 @@ async def verify_response_streaming(
 
     # Extraction with timeout — if Bifrost hangs or crashes, the generator
     # must still yield a summary instead of dying with an unhandled exception.
-    EXTRACTION_TIMEOUT = 30  # seconds — Bifrost default is 20s
+    EXTRACTION_TIMEOUT = 60  # seconds — Ollama 8B takes ~25s, needs headroom for longer responses
     try:
         claims, method = await asyncio.wait_for(
             extract_claims(response_text, user_query=user_query),
