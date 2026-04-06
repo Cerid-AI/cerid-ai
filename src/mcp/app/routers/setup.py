@@ -391,11 +391,47 @@ async def configure(req: ConfigureRequest) -> ConfigureResponse:
             ", ".join(updates.keys()),
         )
 
-        return ConfigureResponse(success=True, restart_required=True)
+        # Re-run pre-warms now that API keys are available
+        import asyncio
+        asyncio.ensure_future(_post_configure_warmup())
+
+        return ConfigureResponse(success=True, restart_required=False)
 
     except (OSError, ValueError) as exc:
         _logger.exception("Failed to apply configuration")
         return ConfigureResponse(success=False, error=str(exc))
+
+
+async def _post_configure_warmup() -> None:
+    """Re-warm connections and models after Apply Configuration."""
+    _logger.info("Post-configure warmup starting...")
+    try:
+        from core.utils.llm_client import _get_client
+        await _get_client()
+        _logger.info("Post-configure: OpenRouter client pre-warmed")
+    except Exception as e:
+        _logger.debug("Post-configure: OpenRouter warmup failed: %s", e)
+    try:
+        from core.utils.internal_llm import _get_ollama_client
+        await _get_ollama_client()
+        _logger.info("Post-configure: Ollama client pre-warmed")
+    except Exception as e:
+        _logger.debug("Post-configure: Ollama warmup failed: %s", e)
+    try:
+        from utils.reranker import warmup as reranker_warmup
+        reranker_warmup()
+        _logger.info("Post-configure: Reranker pre-warmed")
+    except Exception as e:
+        _logger.debug("Post-configure: Reranker warmup failed: %s", e)
+    try:
+        from core.utils.embeddings import get_embedding_function
+        ef = get_embedding_function()
+        if ef:
+            ef(["warmup"])
+            _logger.info("Post-configure: Embedding model pre-warmed")
+    except Exception as e:
+        _logger.debug("Post-configure: Embedding warmup failed: %s", e)
+    _logger.info("Post-configure warmup complete")
 
 
 # ---------------------------------------------------------------------------

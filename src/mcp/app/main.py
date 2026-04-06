@@ -273,6 +273,33 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Bifrost disabled (CERID_USE_BIFROST=false) — LLM calls route directly to OpenRouter")
 
+    # Pre-warm Ollama client pool (for pipeline tasks)
+    if getattr(_startup_config, "OLLAMA_ENABLED", False):
+        try:
+            from core.utils.internal_llm import _get_ollama_client
+            await _get_ollama_client()
+            logger.info("Ollama HTTP client pool pre-warmed")
+        except Exception as e:
+            logger.debug("Pre-warm Ollama client failed: %s", e)
+
+    # Pre-warm reranker ONNX model (avoids 2-3s delay on first query)
+    try:
+        from utils.reranker import warmup as reranker_warmup
+        reranker_warmup()
+        logger.info("Reranker ONNX model pre-warmed")
+    except Exception as e:
+        logger.debug("Pre-warm reranker failed (will load on first use): %s", e)
+
+    # Pre-warm embedding model (ONNX inference session)
+    try:
+        from core.utils.embeddings import get_embedding_function
+        ef = get_embedding_function()
+        if ef:
+            ef(["warmup"])  # trigger lazy model load
+            logger.info("Embedding ONNX model pre-warmed")
+    except Exception as e:
+        logger.debug("Pre-warm embedding model failed: %s", e)
+
     yield
 
     # Shutdown: stop scheduler, flush caches, close connections, clear MCP sessions
