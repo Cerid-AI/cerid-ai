@@ -16,7 +16,7 @@ export const PRESETS: Record<string, SettingsPreset> = {
     values: {
       enable_self_rag: true,
       enable_hallucination_check: true,
-      enable_auto_inject: false,
+      enable_auto_inject: true,
       enable_adaptive_retrieval: true,
       enable_query_decomposition: true,
       enable_mmr_diversity: true,

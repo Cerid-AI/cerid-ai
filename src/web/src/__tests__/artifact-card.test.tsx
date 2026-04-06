@@ -7,6 +7,9 @@ import userEvent from "@testing-library/user-event"
 import { ArtifactCard } from "@/components/kb/artifact-card"
 import type { KBQueryResult } from "@/lib/types"
 
+// jsdom doesn't implement scrollIntoView
+Element.prototype.scrollIntoView = vi.fn()
+
 const makeResult = (overrides: Partial<KBQueryResult> = {}): KBQueryResult => ({
   content: "This is some test content from the knowledge base.",
   relevance: 0.85,
