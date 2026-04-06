@@ -247,10 +247,9 @@ async def lifespan(app: FastAPI):
         from app.deps import get_chroma
         from config.taxonomy import DOMAINS, collection_name
         chroma = get_chroma()
-        _first_domain = DOMAINS[0] if DOMAINS else None
-        if _first_domain:
-            chroma.get_or_create_collection(name=collection_name(_first_domain))
-        logger.info("ChromaDB + embedding model pre-warmed")
+        for domain in DOMAINS:
+            chroma.get_or_create_collection(name=collection_name(domain))
+        logger.info("ChromaDB + embedding model pre-warmed (%d domain collections)", len(DOMAINS))
     except Exception as e:
         logger.debug("Pre-warm ChromaDB failed (lazy init on first use): %s", e)
 
