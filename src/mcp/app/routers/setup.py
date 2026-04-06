@@ -280,7 +280,23 @@ async def validate_key(req: KeyValidationRequest) -> KeyValidationResponse:
     try:
         from config.providers import validate_provider_key
 
-        valid, message = await validate_provider_key(req.provider, req.api_key)
+        # Resolve env-configured key when frontend sends "__env__" sentinel
+        api_key = req.api_key
+        if api_key == "__env__":
+            env_map = {
+                "openrouter": "OPENROUTER_API_KEY",
+                "openai": "OPENAI_API_KEY",
+                "anthropic": "ANTHROPIC_API_KEY",
+                "xai": "XAI_API_KEY",
+            }
+            env_var = env_map.get(req.provider.lower(), "")
+            api_key = os.getenv(env_var, "")
+            if not api_key:
+                return KeyValidationResponse(
+                    valid=False, error=f"No {env_var} found in environment"
+                )
+
+        valid, message = await validate_provider_key(req.provider, api_key)
         return KeyValidationResponse(valid=valid, error=message if not valid else None)
     except ImportError:
         _logger.warning("config.providers not available, falling back to basic validation")

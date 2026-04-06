@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useCallback, useRef } from "react"
+import { useState, useCallback, useRef, useEffect } from "react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -33,13 +33,21 @@ export function ApiKeyInput({
   const [value, setValue] = useState("")
   const [visible, setVisible] = useState(false)
   const [status, setStatus] = useState<ValidationStatus>(preconfigured ? "valid" : "idle")
+
+  // Auto-test preconfigured keys on mount
+  useEffect(() => {
+    if (preconfigured && status === "valid") {
+      handleTest()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [error, setError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
   const handleTest = useCallback(async () => {
-    // For preconfigured keys, send empty string — backend tests the env-var key
-    const keyToTest = value.trim()
-    if (!keyToTest && !preconfigured) return
+    // For preconfigured keys, send "__env__" sentinel — backend tests the env-var key
+    const keyToTest = value.trim() || (preconfigured ? "__env__" : "")
+    if (!keyToTest) return
 
     // Cancel any in-flight validation
     abortRef.current?.abort()
