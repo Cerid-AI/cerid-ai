@@ -220,8 +220,9 @@ export async function fetchSetupHealth(): Promise<SetupHealth> {
 }
 
 export async function fetchSystemCheck(): Promise<SystemCheckResponse> {
-  const res = await fetch(`${MCP_BASE}/setup/system-check`, {
+  const res = await fetch(`${MCP_BASE}/setup/system-check?_t=${Date.now()}`, {
     headers: mcpHeaders(),
+    cache: "no-store",
   })
   if (!res.ok) throw new Error("System check failed")
   return res.json()

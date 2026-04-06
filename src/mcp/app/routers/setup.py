@@ -16,7 +16,7 @@ import secrets
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
 
 _logger = logging.getLogger("ai-companion.setup")
@@ -379,8 +379,10 @@ async def configure(req: ConfigureRequest) -> ConfigureResponse:
 
 
 @router.get("/system-check")
-async def system_check() -> dict:
+async def system_check(response: Response) -> dict:
     """Detect system environment for the setup wizard."""
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
     import shutil
 
     # RAM
@@ -390,22 +392,23 @@ async def system_check() -> dict:
     except ImportError:
         ram_gb = 16  # default guess
 
-    # Docker
-    docker_running = shutil.which("docker") is not None
+    # Docker — if we're running inside a container, Docker is clearly available
+    docker_running = (
+        shutil.which("docker") is not None
+        or Path("/.dockerenv").exists()
+        or os.getenv("container") is not None
+    )
 
-    # Env file
-    env_path = _find_env_file()
-    env_exists = env_path.exists()
-    env_keys: list[str] = []
-    if env_exists:
-        content = env_path.read_text()
-        for line in content.splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                key = line.split("=", 1)[0].strip()
-                val = line.split("=", 1)[1].strip()
-                if val:
-                    env_keys.append(key)
+    # Env keys — check OS environment for known Cerid config keys (works inside Docker
+    # where env_file passes host .env values as env vars)
+    _KNOWN_KEYS = [
+        "OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY",
+        "NEO4J_PASSWORD", "REDIS_PASSWORD", "OLLAMA_ENABLED", "CERID_API_KEY",
+        "CERID_MULTI_USER", "CERID_JWT_SECRET", "CERID_TIER", "TAVILY_API_KEY",
+        "CERID_TRADING_ENABLED", "SENTRY_DSN_MCP",
+    ]
+    env_keys: list[str] = [k for k in _KNOWN_KEYS if os.getenv(k)]
+    env_exists = len(env_keys) > 0
 
     # Ollama
     ollama_detected = False
