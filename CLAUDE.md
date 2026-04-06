@@ -112,6 +112,6 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`DEVELOPMENT.md`](DEVELOPMENT.md).
 
 No Chinese-origin AI models (USG alignment). Approved: OpenAI, Anthropic, Google, xAI, Meta, Microsoft, Mistral.
 
-## CI (6 jobs)
+## CI (7 jobs)
 
-lint, typecheck, test (20% floor), security, frontend, docker.
+lint, typecheck, test (20% floor), security, lock-sync, frontend, docker.

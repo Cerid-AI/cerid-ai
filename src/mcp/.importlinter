@@ -1,0 +1,31 @@
+[importlinter]
+root_packages =
+    core
+    app
+    config
+include_external_packages = true
+
+[importlinter:contract:1]
+name = core must not import app
+type = forbidden
+source_modules =
+    core
+forbidden_modules =
+    app
+    routers
+    services
+    middleware
+    parsers
+    sync
+    models
+    deps
+    tools
+    main
+    scheduler
+    db
+    eval
+    stores
+    agents
+
+# config contract removed: config.settings legitimately imports utils.model_registry
+# The critical boundary (core must not import app) is enforced above

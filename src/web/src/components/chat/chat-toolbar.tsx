@@ -32,7 +32,6 @@ function MenuItem({ children, onClick, className }: { children: React.ReactNode;
       className={cn(
         "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none",
         "hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent",
-        "transition-colors",
         className,
       )}
       onClick={onClick}

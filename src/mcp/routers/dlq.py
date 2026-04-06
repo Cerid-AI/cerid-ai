@@ -17,6 +17,7 @@ from deps import get_redis
 from errors import IngestionError
 from utils.dlq import MAX_ATTEMPTS, clear_dlq_entry, dlq_count, list_dlq, push_to_dlq
 from utils.error_handler import handle_errors
+from utils.typed_redis import TypedRedis
 
 logger = logging.getLogger("ai-companion.dlq-admin")
 
@@ -44,7 +45,7 @@ async def get_dlq_entries(
     offset: int = 0,
 ) -> dict[str, Any]:
     """List DLQ entries with pagination."""
-    redis_client = get_redis()
+    redis_client = TypedRedis(get_redis())
     entries = await list_dlq(redis_client, limit=limit, offset=offset)
     total = await dlq_count(redis_client)
     return {
@@ -66,7 +67,7 @@ async def retry_dlq_entry(entry_id: str) -> dict[str, Any]:
     """
     import asyncio
 
-    redis_client = get_redis()
+    redis_client = TypedRedis(get_redis())
 
     # Find the specific entry
     entries = await list_dlq(redis_client, limit=500, offset=0)
@@ -144,7 +145,7 @@ async def retry_dlq_entry(entry_id: str) -> dict[str, Any]:
 @handle_errors()
 async def discard_dlq_entry(entry_id: str) -> dict[str, Any]:
     """Discard a DLQ entry without retrying."""
-    redis_client = get_redis()
+    redis_client = TypedRedis(get_redis())
     removed = await clear_dlq_entry(redis_client, entry_id)
     if not removed:
         raise HTTPException(status_code=404, detail=f"DLQ entry {entry_id} not found")

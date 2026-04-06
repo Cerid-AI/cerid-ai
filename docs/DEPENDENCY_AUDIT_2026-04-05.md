@@ -166,7 +166,7 @@ nginx:alpine base + Vite build output. Nothing to optimize.
 | `react-syntax-highlighter` | **PROTECTED** — PrismLight with 25 languages, runtime ~200KB | N/A — keep | 0 |
 | Stop pre-downloading ONNX models in Docker | ~3 GB image size | 30 min (add lazy-download logic) |
 
-**Impact: Saves ~150 MB Python deps + ~3 GB Docker image + ~7 MB frontend**
+**Impact: Saves ~3 GB Docker image (model preload toggle)**
 
 ### Tier 4: Aggressive Optimization (evaluate later)
 

@@ -7,7 +7,7 @@ License keys are validated locally (offline-first) using HMAC signatures.
 Format: CERID-PRO-XXXX-XXXX-XXXX-XXXX-XXXX (base32-encoded, 5 groups of 4).
 
 This module is the canonical location for key generation and validation.
-License validation functions for tier enforcement.
+The billing router delegates to these functions for license operations.
 """
 from __future__ import annotations
 
@@ -62,9 +62,10 @@ def validate_license_key(key: str) -> dict[str, bool | str | None]:
         return {"valid": False, "tier": "community", "error": "Invalid key format"}
 
     # If LICENSE_SECRET is set, verify HMAC (production path)
-    # Note: Cryptographic HMAC verification requires the original payload
-    # structure.  This function provides format-only validation suitable
-    # for the frontend activation flow's first-pass check.
+    # Note: Cryptographic HMAC verification is delegated to the billing
+    # router's _validate_license_key() which has access to the original
+    # payload structure.  This function provides format-only validation
+    # suitable for the frontend activation flow's first-pass check.
 
     return {"valid": True, "tier": "pro", "error": None}
 

@@ -9,9 +9,11 @@ Counters use keys like ``cerid:usage:{user_id}:queries:2026-03`` for monthly rol
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger("ai-companion.usage")
+
+UTC = timezone.utc
 
 
 def _month_key() -> str:
