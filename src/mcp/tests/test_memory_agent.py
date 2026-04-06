@@ -31,7 +31,7 @@ class TestExtractMemories:
         assert result == []
 
     @pytest.mark.asyncio
-    @patch("agents.memory.call_internal_llm", new_callable=AsyncMock)
+    @patch("core.agents.memory.call_internal_llm", new_callable=AsyncMock)
     async def test_successful_extraction(self, mock_llm):
         """Valid LLM response should parse into memory list."""
         mock_llm.return_value = '[{"content":"Python uses GIL","memory_type":"fact","summary":"Python GIL"}]'
@@ -43,7 +43,7 @@ class TestExtractMemories:
         assert "GIL" in result[0]["content"]
 
     @pytest.mark.asyncio
-    @patch("agents.memory.call_internal_llm", new_callable=AsyncMock)
+    @patch("core.agents.memory.call_internal_llm", new_callable=AsyncMock)
     async def test_invalid_memory_type_defaults_to_empirical(self, mock_llm):
         """Unknown memory_type should default to 'empirical'."""
         mock_llm.return_value = '[{"content":"test","memory_type":"invalid_type","summary":"test"}]'
@@ -52,7 +52,7 @@ class TestExtractMemories:
         assert result[0]["memory_type"] == "empirical"
 
     @pytest.mark.asyncio
-    @patch("agents.memory.call_internal_llm", new_callable=AsyncMock)
+    @patch("core.agents.memory.call_internal_llm", new_callable=AsyncMock)
     async def test_llm_returns_empty_json(self, mock_llm):
         """LLM returning empty array should return empty list."""
         mock_llm.return_value = "[]"
@@ -61,10 +61,13 @@ class TestExtractMemories:
         assert result == []
 
     @pytest.mark.asyncio
-    @patch("agents.memory.call_internal_llm", new_callable=AsyncMock)
+    @patch("core.agents.memory.call_internal_llm", new_callable=AsyncMock)
     async def test_llm_failure_returns_empty(self, mock_llm):
         """LLM failure should return empty list gracefully."""
-        mock_llm.side_effect = Exception("LLM unavailable")
+        async def _raise(*args, **kwargs):
+            raise Exception("LLM unavailable")  # noqa: TRY002
+
+        mock_llm.side_effect = _raise
 
         result = await extract_memories("x" * 200, "conv-123")
         assert result == []
@@ -76,7 +79,7 @@ class TestExtractMemories:
 
 class TestExtractAndStoreMemories:
     @pytest.mark.asyncio
-    @patch("agents.memory.config")
+    @patch("core.agents.memory.config")
     async def test_disabled_returns_skipped(self, mock_config):
         """Should skip when ENABLE_MEMORY_EXTRACTION is False."""
         from agents.memory import extract_and_store_memories
@@ -86,8 +89,8 @@ class TestExtractAndStoreMemories:
         assert result["status"] == "skipped"
 
     @pytest.mark.asyncio
-    @patch("agents.memory.config")
-    @patch("agents.memory.extract_memories", new_callable=AsyncMock)
+    @patch("core.agents.memory.config")
+    @patch("core.agents.memory.extract_memories", new_callable=AsyncMock)
     async def test_no_memories_extracted(self, mock_extract, mock_config):
         """When no memories are extracted, should report zero."""
         from agents.memory import extract_and_store_memories

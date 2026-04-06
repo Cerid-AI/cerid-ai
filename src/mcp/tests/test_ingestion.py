@@ -12,7 +12,7 @@ from services.ingestion import validate_file_path
 # ---------------------------------------------------------------------------
 
 class TestValidateFilePath:
-    @patch("services.ingestion.config")
+    @patch("app.services.ingestion.config")
     def test_valid_path_within_archive(self, mock_config, tmp_path):
         """Paths within the archive root are accepted."""
         archive = tmp_path / "archive"
@@ -24,7 +24,7 @@ class TestValidateFilePath:
         result = validate_file_path(str(test_file))
         assert result.name == "test.txt"
 
-    @patch("services.ingestion.config")
+    @patch("app.services.ingestion.config")
     def test_path_traversal_rejected(self, mock_config, tmp_path):
         """Directory traversal attempts should be rejected."""
         archive = tmp_path / "archive"
@@ -43,17 +43,15 @@ class TestValidateFilePath:
 # ---------------------------------------------------------------------------
 
 class TestIngestContent:
-    @patch("deps.get_redis")
-    @patch("services.ingestion.get_redis")
-    @patch("services.ingestion.get_neo4j")
-    @patch("services.ingestion.get_chroma")
-    @patch("services.ingestion.extract_metadata", new_callable=AsyncMock)
-    @patch("services.ingestion.ai_categorize", new_callable=AsyncMock)
+    @patch("app.services.ingestion.get_redis")
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
+    @patch("app.services.ingestion.extract_metadata", new_callable=AsyncMock)
+    @patch("app.services.ingestion.ai_categorize", new_callable=AsyncMock)
     def test_ingest_content_creates_artifact(
-        self, mock_categorize, mock_metadata, mock_chroma, mock_neo4j, mock_redis, mock_deps_redis
+        self, mock_categorize, mock_metadata, mock_chroma, mock_neo4j, mock_redis
     ):
         """ingest_content should create ChromaDB + Neo4j entries."""
-        mock_deps_redis.return_value = MagicMock()
         mock_categorize.return_value = {"domain": "coding", "keywords": []}
         mock_metadata.return_value = {"title": "Test", "summary": "A test doc"}
 
@@ -85,10 +83,10 @@ class TestIngestContent:
 
 
 class TestIngestFile:
-    @patch("services.ingestion.parse_file")
-    @patch("services.ingestion.get_redis")
-    @patch("services.ingestion.get_neo4j")
-    @patch("services.ingestion.get_chroma")
+    @patch("app.services.ingestion.parse_file")
+    @patch("app.services.ingestion.get_redis")
+    @patch("app.services.ingestion.get_neo4j")
+    @patch("app.services.ingestion.get_chroma")
     def test_ingest_file_calls_parser(self, mock_chroma, mock_neo4j, mock_redis, mock_parse, tmp_path):
         """ingest_file should call the parser for the given file."""
         mock_parse.return_value = "parsed content here"
@@ -102,16 +100,16 @@ class TestIngestFile:
         test_file = tmp_path / "test.txt"
         test_file.write_text("hello world")
 
-        with patch("services.ingestion.config") as mock_config:
+        with patch("app.services.ingestion.config") as mock_config:
             mock_config.ARCHIVE_PATH = str(tmp_path)
             mock_config.DOMAINS = ["coding"]
             mock_config.DEFAULT_DOMAIN = "coding"
+            import asyncio
             try:
-                import asyncio
                 asyncio.get_event_loop().run_until_complete(
                     ingest_file(str(test_file), domain="coding")
                 )
-            except Exception:
-                pass  # Mocking is incomplete — we just verify no import errors
+            except (AttributeError, TypeError, KeyError):
+                pass  # Expected — mocking is incomplete for full pipeline
 
         mock_parse.assert_called_once()
