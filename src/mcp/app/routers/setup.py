@@ -265,8 +265,17 @@ async def setup_health() -> dict:
         },
     ]
 
+    # Required services must all be healthy; bifrost is optional
+    _OPTIONAL = {"bifrost", "verification_pipeline"}
+    required_healthy = all(
+        s["status"] in ("healthy", "connected")
+        for s in services
+        if s["name"] not in _OPTIONAL
+    )
+
     return {
         "services": services,
+        "all_healthy": required_healthy,
         "docker": {
             "compose_version": "v2.x.x",
             "network": "llm-network",
