@@ -3,3 +3,4 @@
 
 # Re-export bridge — see app/parsers/_utils.py for implementation.
 from app.parsers._utils import *  # noqa: F401,F403
+from app.parsers._utils import _strip_html_tags, _strip_rtf  # noqa: F401
