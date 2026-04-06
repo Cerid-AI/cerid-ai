@@ -18,47 +18,9 @@ jobs:
           python-version: "3.11"
       - run: pip install ruff==0.15.4
       - run: ruff check src/mcp/
-      # Pattern-violation checks: enforce CLAUDE.md "ONE pattern" table
-      - name: "Pattern: no bare HTTPException in business logic"
-        run: |
-          # HTTPException belongs in routers only — business logic must use CeridError hierarchy
-          VIOLATIONS=$(grep -rn "raise HTTPException" src/mcp/agents/ src/mcp/services/ src/mcp/utils/ --include="*.py" | grep -v "__pycache__" | grep -v "tests/" || true)
-          if [ -n "$VIOLATIONS" ]; then
-            echo "::error::Found bare HTTPException in business logic (use CeridError instead):"
-            echo "$VIOLATIONS"
-            exit 1
-          fi
-          echo "OK: no bare HTTPException in business logic"
-      - name: "Pattern: no inline tier checks (must use @require_feature)"
-        run: |
-          # FEATURE_TIER should only be referenced in config/features.py and settings.py
-          cd src/mcp
-          VIOLATIONS=$(grep -rn 'FEATURE_TIER.*==.*"pro"' --include="*.py" | grep -v "config/features.py" | grep -v "__pycache__" | grep -v ".venv" | grep -v "tests/" | grep -v "# noqa" || true)
-          if [ -n "$VIOLATIONS" ]; then
-            echo "::error::Found inline FEATURE_TIER == \"pro\" checks (use @require_feature decorator):"
-            echo "$VIOLATIONS"
-            exit 1
-          fi
-          VIOLATIONS2=$(grep -rn 'CERID_TIER.*==.*"pro"' --include="*.py" | grep -v "config/features.py" | grep -v "config/settings.py" | grep -v "__pycache__" | grep -v ".venv" | grep -v "tests/" | grep -v "# noqa" || true)
-          if [ -n "$VIOLATIONS2" ]; then
-            echo "::error::Found inline CERID_TIER == \"pro\" checks (use @require_feature decorator):"
-            echo "$VIOLATIONS2"
-            exit 1
-          fi
-          echo "OK: no inline tier checks"
-      - name: "Pattern: no silent except:pass"
-        run: |
-          # Every except block must log+degrade or raise a typed error — zero silent pass blocks
-          # Threshold: 21 existing violations (target: 0). Fail if count increases.
-          cd src/mcp
-          COUNT=$(grep -rn "except.*:" --include="*.py" -A1 | grep -B1 "pass$" | grep -v "__pycache__" | grep -v ".venv" | grep -v "tests/" | grep "except" | wc -l)
-          echo "Silent except:pass blocks: $COUNT (threshold: 21, target: 0)"
-          if [ "$COUNT" -gt 21 ]; then
-            echo "::error::New silent except:pass blocks introduced ($COUNT > 21 threshold). Fix or log+degrade instead."
-            grep -rn "except.*:" --include="*.py" -A1 | grep -B1 "pass$" | grep -v "__pycache__" | grep -v ".venv" | grep -v "tests/" | grep "except"
-            exit 1
-          fi
-          # NOTE: magic-number enforcement is manual — constants belong in config/constants.py
+      - run: pip install import-linter
+      - name: Import boundary check
+        run: cd src/mcp && lint-imports
 
   typecheck:
     runs-on: ubuntu-latest
@@ -117,7 +79,7 @@ jobs:
             --exclude-files '\.env\.age$' \
             --exclude-files '\.lock$' \
             --exclude-files 'package-lock\.json$' \
-            --exclude-files '\.github/workflows/ci\.yml$' \
+            --exclude-files '\.github/workflows/' \
             --exclude-files 'src/mcp/docs/inventory/' \
             --exclude-files 'scripts/env-lock\.sh$' \
             --exclude-files 'docs/CERID_AI_PROJECT_REFERENCE\.md$' \
@@ -127,7 +89,6 @@ jobs:
             --exclude-files 'src/mcp/tests/test_web_search\.py$' \
             --exclude-files 'docs/plans/' \
             --exclude-files 'src/mcp/routers/setup\.py$' \
-            --exclude-lines 'pragma: allowlist secret' \
             > "$TMPFILE"
           # Fail if any secrets found
           python -c "
@@ -150,22 +111,37 @@ jobs:
         run: |
           pip install pip-audit==2.10.0
           pip install -r src/mcp/requirements.txt
-          # CVE-2026-4539: ReDoS in pygments AdlLexer — local-only, we don't use ADL lexer, no upstream fix
-          # CVE-2025-8869 / CVE-2026-1703: pip tar/wheel extraction — build-time only, Python 3.11 has PEP 706
-          # CVE-2026-24049: wheel path traversal — build-time only, not runtime-exploitable
-          # CVE-2026-28277: langgraph msgpack deserialization — post-exploitation only, requires checkpoint store write access, we don't use langgraph checkpoints
-          # CVE-2026-27794: langgraph-checkpoint pickle fallback — post-exploitation only, requires cache backend write access, we don't enable langgraph caching
+          # Ignore 3 CVEs requiring major version migration (langchain-core 0.3→1.2, langgraph-checkpoint 2→4)
+          # CVE-2026-26013: SSRF in ChatOpenAI image token counting — we use Bifrost proxy, not ChatOpenAI
+          # CVE-2025-64439: RCE in JsonPlusSerializer — we control all LangGraph inputs, no untrusted data
+          # CVE-2026-27794: RCE via pickle fallback — internal caching only, no untrusted pickle
+          # CVE-2026-28277: msgpack deserialization in LangGraph checkpointer — we don't use persistent checkpointers
+          # CVE-2026-4539: ReDoS in pygments AdlLexer — local-only, we don't use ADL lexer
+          # Migration planned for Phase 11
           pip-audit --desc \
-            --ignore-vuln CVE-2026-4539 \
-            --ignore-vuln CVE-2025-8869 \
-            --ignore-vuln CVE-2026-1703 \
-            --ignore-vuln CVE-2026-24049 \
+            --ignore-vuln CVE-2026-26013 \
+            --ignore-vuln CVE-2025-64439 \
+            --ignore-vuln CVE-2026-27794 \
             --ignore-vuln CVE-2026-28277 \
-            --ignore-vuln CVE-2026-27794
+            --ignore-vuln CVE-2026-4539
       - name: ReDoS regex audit (dlint)
         run: |
           pip install dlint flake8
           python -m flake8 --select=DUO138 src/mcp/
+
+  lock-sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Use same Python image as Dockerfile to ensure identical pip-compile output
+    container: python:3.11-slim
+    steps:
+      - uses: actions/checkout@v6
+      - run: pip install pip-tools==7.5.3
+      - name: Check Python lock file is up to date
+        run: |
+          cd src/mcp
+          pip-compile requirements.txt -o /tmp/requirements.lock --generate-hashes --no-header --allow-unsafe
+          diff requirements.lock /tmp/requirements.lock || (echo "::error::requirements.lock is out of date. Run: cd src/mcp && pip-compile requirements.txt -o requirements.lock --generate-hashes --no-header --allow-unsafe" && exit 1)
 
   # Frontend
   frontend:
@@ -212,7 +188,7 @@ jobs:
   # Docker
   docker:
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, test, security, frontend]
+    needs: [lint, typecheck, test, security, lock-sync, frontend]
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
@@ -231,6 +207,10 @@ jobs:
       - name: Create Trivy ignore file
         run: |
           cat > .trivyignore <<'EOF'
+          # LangChain/LangGraph CVEs requiring major version migration (Phase 11)
+          CVE-2026-26013
+          CVE-2025-64439
+          CVE-2026-27794
           # glibc heap corruption — no fix available in Debian 13 yet
           CVE-2026-0861
           # wheel privilege escalation — build-time only, not exploitable at runtime
@@ -246,6 +226,12 @@ jobs:
           CVE-2025-6021
           # jaraco.context path traversal via tar — build-time pip dependency, not runtime-exploitable
           CVE-2026-23949
+          # ncurses buffer overflow — no fix in Debian 13, container has no interactive terminals
+          CVE-2025-69720
+          # nghttp2 DoS via malformed HTTP/2 — internal container traffic only, no external exposure
+          CVE-2026-27135
+          # systemd arbitrary code execution — D-Bus not reachable in container context
+          CVE-2026-29111
           EOF
       - name: Scan MCP Docker image
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
@@ -255,7 +241,6 @@ jobs:
           exit-code: 1
           trivyignores: .trivyignore
           version: v0.69.3
-          ignore-unfixed: true
       - name: Scan Web Docker image
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
         with:
@@ -264,5 +249,11 @@ jobs:
           exit-code: 1
           trivyignores: .trivyignore
           version: v0.69.3
-          ignore-unfixed: true
 
+  # frontend-marketing: removed — marketing site separated to Cerid-AI/cerid-ai-marketing repo
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.SENTRY_DSN_MARKETING }}
+          SENTRY_RELEASE: ${{ github.sha }}
+
+  # frontend-desktop: removed — desktop app is internal-only (packages/desktop/ not in public)

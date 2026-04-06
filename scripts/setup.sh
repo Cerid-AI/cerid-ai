@@ -70,14 +70,6 @@ if [ -t 0 ]; then
         echo "  Generated NEO4J_PASSWORD (random)"
     fi
 
-    # Auto-generate REDIS_PASSWORD if empty
-    redis_pass=$(grep "^REDIS_PASSWORD=" "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- | tr -d ' ' || echo "")
-    if [ -z "$redis_pass" ]; then
-        redis_pass=$(openssl rand -hex 12 2>/dev/null || head -c 24 /dev/urandom | base64 | tr -d '/+=' | head -c 24)
-        sed "s|^REDIS_PASSWORD=.*|REDIS_PASSWORD=$redis_pass|" "$ENV_FILE" > "$ENV_FILE.tmp" && mv "$ENV_FILE.tmp" "$ENV_FILE"
-        echo "  Generated REDIS_PASSWORD (random)"
-    fi
-
     # Prompt for OpenRouter API key if empty
     or_key=$(grep "^OPENROUTER_API_KEY=" "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- || echo "")
     if [ -z "$or_key" ]; then

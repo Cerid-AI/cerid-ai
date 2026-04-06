@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging as _logging
 import os
+import re as _re
 
 from config.constants import CHUNK_MAX_TOKENS  # noqa: F401  # re-exported
 from utils.model_registry import get_model
@@ -189,6 +190,10 @@ GRAPH_RELATIONSHIP_TYPES = [
     "SUPERSEDES",       # re-ingested file replacing an older version
     "REFERENCES",       # explicit filename mention in content
 ]
+
+# Validate relationship type names are safe for Cypher injection
+for _rt in GRAPH_RELATIONSHIP_TYPES:
+    assert _re.fullmatch(r"[A-Z_]+", _rt), f"Invalid GRAPH_RELATIONSHIP_TYPE: {_rt!r} — must match ^[A-Z_]+$"
 
 # ---------------------------------------------------------------------------
 # Embedding Model
@@ -488,8 +493,8 @@ SMART_ROUTING_ENABLED = os.getenv("SMART_ROUTING_ENABLED", "true").lower() == "t
 
 # Internal LLM: model to use for pipeline intelligence operations
 # (categorization, decomposition, contextual chunks, claim extraction)
-# Options: "bifrost" (default, uses Bifrost routing), "ollama" (local), or specific model ID
-INTERNAL_LLM_PROVIDER = os.getenv("INTERNAL_LLM_PROVIDER", "bifrost")
+# Options: "openrouter" (default, direct calls), "ollama" (local, the special case), or specific model ID
+INTERNAL_LLM_PROVIDER = os.getenv("INTERNAL_LLM_PROVIDER", "openrouter")
 INTERNAL_LLM_MODEL = os.getenv("INTERNAL_LLM_MODEL", "")  # empty = provider default
 
 # Default Ollama model for pipeline tasks — lightweight, runs on CPU or GPU
@@ -505,7 +510,7 @@ INTELLIGENCE_MODEL = os.getenv("INTELLIGENCE_MODEL", "")  # empty = auto-select
 #   Override per-stage via env vars: PROVIDER_CLAIM_EXTRACTION=bifrost
 #   Backward compat: INTERNAL_LLM_PROVIDER=ollama sets ALL stages to ollama.
 # ---------------------------------------------------------------------------
-_global_provider = os.getenv("INTERNAL_LLM_PROVIDER", "bifrost")
+_global_provider = os.getenv("INTERNAL_LLM_PROVIDER", "openrouter")
 
 # ---------------------------------------------------------------------------
 # Inference Detection
@@ -538,6 +543,12 @@ def get_stage_provider(stage: str) -> str:
     return PIPELINE_PROVIDERS.get(stage, "bifrost")
 
 # ---------------------------------------------------------------------------
+# Trading Agent Integration
+# ---------------------------------------------------------------------------
+CERID_TRADING_ENABLED = os.getenv("CERID_TRADING_ENABLED", "false").lower() in ("true", "1")
+TRADING_AGENT_URL = os.getenv("TRADING_AGENT_URL", "http://localhost:8090")
+
+# ---------------------------------------------------------------------------
 # Email IMAP Poller
 # ---------------------------------------------------------------------------
 CERID_EMAIL_IMAP_HOST = os.getenv("CERID_EMAIL_IMAP_HOST", "")
@@ -551,6 +562,12 @@ CERID_EMAIL_POLL_INTERVAL = int(os.getenv("CERID_EMAIL_POLL_INTERVAL", "15"))  #
 # RSS/Atom Feed Poller
 # ---------------------------------------------------------------------------
 CERID_RSS_POLL_INTERVAL = int(os.getenv("CERID_RSS_POLL_INTERVAL", "30"))  # minutes
+
+# ---------------------------------------------------------------------------
+# Boardroom Integration
+# ---------------------------------------------------------------------------
+CERID_BOARDROOM_ENABLED = os.getenv("CERID_BOARDROOM_ENABLED", "false").lower() in ("true", "1")
+CERID_BOARDROOM_TIER = os.getenv("CERID_BOARDROOM_TIER", "foundation")
 
 # ---------------------------------------------------------------------------
 # Webhooks
@@ -647,6 +664,17 @@ CONSUMER_REGISTRY: dict[str, dict] = {
         "allowed_domains": None,     # Full access to all domains
         "strict_domains": False,     # Cross-domain affinity enabled
     },
+    "trading-agent": {
+        "rate_limits": {
+            # Worst-case burst: 5 sessions × (3 oracle + 2 memory) = 67.5 calls/min.
+            # 80/min gives 12.5/min headroom; client pools (50 oracle + 20 memory)
+            # are the actual binding constraints, so this is defense-in-depth.
+            "/agent/": (80, 60),
+            "/sdk/": (80, 60),
+        },
+        "allowed_domains": ["trading", "finance"],  # Scoped: no access to personal/coding/etc.
+        "strict_domains": True,      # No cross-domain bleed into personal data
+    },
     "cli-ingest": {
         "rate_limits": {
             "/ingest": (60, 60),
@@ -654,6 +682,19 @@ CONSUMER_REGISTRY: dict[str, dict] = {
         },
         "allowed_domains": None,     # Ingest into any domain
         "strict_domains": False,
+    },
+    "boardroom-agent": {
+        "description": "Cerid Boardroom business operations agent",
+        "rate_limits": {
+            # 4 client-side pools: strategy (40), research (30), analytics (20), ingest (15)
+            # Server-side: 40/min foundation → 100/min boardroom (tier-dependent)
+            "/agent/": (40, 60),
+            "/sdk/": (40, 60),
+            "/ingest": (20, 60),
+        },
+        "allowed_domains": ["strategy", "competitive_intel", "marketing", "advertising",
+                            "finance", "operations", "audit", "general"],
+        "strict_domains": True,      # No bleed into personal/conversations/coding
     },
     "a2a-agent": {
         "rate_limits": {
@@ -670,7 +711,7 @@ CONSUMER_REGISTRY: dict[str, dict] = {
             "/sdk/": (40, 60),
         },
         "allowed_domains": ["finance", "strategy", "general"],
-        "strict_domains": True,      # No bleed into personal/coding data
+        "strict_domains": True,      # No bleed into personal/trading/coding data
     },
     "folder_scanner": {
         "rate_limits": {
@@ -703,6 +744,41 @@ CONSUMER_REGISTRY: dict[str, dict] = {
 CLIENT_RATE_LIMITS: dict[str, dict[str, tuple[int, int]]] = {
     k: v["rate_limits"] for k, v in CONSUMER_REGISTRY.items()
 }
+
+# ---------------------------------------------------------------------------
+# Alerting
+# ---------------------------------------------------------------------------
+ALERT_CHECK_INTERVAL_S: int = 60
+ALERT_MAX_PER_METRIC: int = 5
+ALERT_WEBHOOK_TIMEOUT_S: int = 10
+ALERT_EVENTS_MAX: int = 1000  # Max stored alert events
+
+# ---------------------------------------------------------------------------
+# Eval Harness
+# ---------------------------------------------------------------------------
+EVAL_RAGAS_MODEL: str = os.getenv("CERID_EVAL_RAGAS_MODEL", "")
+EVAL_LEADERBOARD_MAX: int = 50
+EVAL_DEFAULT_BENCHMARK: str = "beir_subset.jsonl"
+
+# ---------------------------------------------------------------------------
+# Enterprise Features
+# ---------------------------------------------------------------------------
+CERID_ENTERPRISE = os.getenv("CERID_ENTERPRISE", "false").lower() in ("1", "true")
+ABAC_POLICY_KEY = "cerid:enterprise:abac_policy"
+SSO_PROVIDER = os.getenv("CERID_SSO_PROVIDER", "")  # saml | oidc
+SSO_METADATA_URL = os.getenv("CERID_SSO_METADATA_URL", "")
+CLASSIFICATION_ENABLED = os.getenv("CERID_CLASSIFICATION", "false").lower() in ("1", "true")
+AUDIT_STREAM_KEY = "cerid:audit:stream"
+AUDIT_RETENTION_DAYS = int(os.getenv("CERID_AUDIT_RETENTION_DAYS", "365"))
+
+# ---------------------------------------------------------------------------
+# WebSocket Sync
+# ---------------------------------------------------------------------------
+WS_SYNC_ENABLED = os.getenv("CERID_WS_SYNC", "false").lower() in ("1", "true")
+WS_HEARTBEAT_INTERVAL_S = 30
+WS_PRESENCE_TIMEOUT_S = 90
+WS_MAX_CONNECTIONS = 50
+SYNC_CRDT_ENABLED = True
 
 if not NEO4J_PASSWORD:
     _config_logger.warning(

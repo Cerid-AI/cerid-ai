@@ -89,6 +89,9 @@ class SettingsResponse(BaseModel):
     enable_semantic_cache: bool = False
     semantic_cache_threshold: float = 0.85
 
+    # Trading agent
+    trading_enabled: bool = False
+
     # Ollama
     ollama_enabled: bool = False
     ollama_url: str = ""
