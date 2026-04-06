@@ -28,13 +28,21 @@ from app.models.sdk import (
     SDKQueryResponse,
     SDKTradingSignalResponse,
 )
-from app.models.trading import (
-    CascadeConfirmRequest,
-    HerdDetectRequest,
-    KellySizeRequest,
-    LongshotSurfaceRequest,
-    TradingSignalRequest,
-)
+try:
+    from app.models.trading import (
+        CascadeConfirmRequest,
+        HerdDetectRequest,
+        KellySizeRequest,
+        LongshotSurfaceRequest,
+        TradingSignalRequest,
+    )
+except ImportError:
+    # Trading models not available in public distro
+    CascadeConfirmRequest = None  # type: ignore[assignment,misc]
+    HerdDetectRequest = None  # type: ignore[assignment,misc]
+    KellySizeRequest = None  # type: ignore[assignment,misc]
+    LongshotSurfaceRequest = None  # type: ignore[assignment,misc]
+    TradingSignalRequest = None  # type: ignore[assignment,misc]
 from app.routers.agents import (
     AgentQueryRequest,
     HallucinationCheckRequest,
