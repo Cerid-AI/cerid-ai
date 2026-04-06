@@ -28,6 +28,8 @@ from app.models.sdk import (
     SDKQueryResponse,
     SDKTradingSignalResponse,
 )
+
+# isort: split
 try:
     from app.models.trading import (
         CascadeConfirmRequest,
