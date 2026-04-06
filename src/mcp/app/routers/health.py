@@ -110,6 +110,21 @@ def degradation_status() -> dict:
     base["degradation_tier"] = tier
     base["uptime_seconds"] = int(time.time() - _start_time)
     base.setdefault("features", {})
+
+    # Pipeline provider routing — tells the frontend which tasks use local models
+    import config
+    provider = getattr(config, "INTERNAL_LLM_PROVIDER", "openrouter")
+    ollama_reachable = base.get("ollama", {}).get("reachable", False)
+    is_local = provider == "ollama" and ollama_reachable
+    base["pipeline_providers"] = {
+        "claim_extraction": provider if is_local else "openrouter",
+        "query_decomposition": provider if is_local else "openrouter",
+        "topic_extraction": provider if is_local else "openrouter",
+        "memory_resolution": provider if is_local else "openrouter",
+        "reranking": provider if is_local else "openrouter",
+    }
+    base["can_verify"] = True  # verification always available (uses cloud models)
+
     return base
 
 
