@@ -1,10 +1,12 @@
-# Copyright 2026 Cerid AI. Apache-2.0 license.
-"""Shared test fixtures and dependency stubs for cerid-ai public tests."""
+# Copyright (c) 2026 Cerid AI. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Shared test fixtures and dependency stubs for cerid-ai tests."""
 
 import sys
 from pathlib import Path
 from types import ModuleType
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -43,10 +45,13 @@ def pytest_configure(config):
     class _AsyncClient:
         def __init__(self, **kwargs):
             pass
+
         async def __aenter__(self):
             return self
+
         async def __aexit__(self, *args):
             pass
+
         async def post(self, *args, **kwargs):
             return MagicMock()
 
@@ -89,78 +94,102 @@ def pytest_configure(config):
     # docx
     _ensure_stub("docx", ModuleType("docx"))
 
-    # apscheduler
+    # apscheduler (for scheduler.py)
     _apscheduler = ModuleType("apscheduler")
     _apscheduler_schedulers = ModuleType("apscheduler.schedulers")
     _apscheduler_asyncio = ModuleType("apscheduler.schedulers.asyncio")
     _apscheduler_asyncio.AsyncIOScheduler = MagicMock
+    _apscheduler_triggers = ModuleType("apscheduler.triggers")
+    _apscheduler_cron = ModuleType("apscheduler.triggers.cron")
+    _cron_trigger = MagicMock()
+    _cron_trigger.from_crontab = MagicMock(return_value=MagicMock())
+    _apscheduler_cron.CronTrigger = _cron_trigger
     _apscheduler.schedulers = _apscheduler_schedulers
     _apscheduler_schedulers.asyncio = _apscheduler_asyncio
+    _apscheduler.triggers = _apscheduler_triggers
+    _apscheduler_triggers.cron = _apscheduler_cron
     _ensure_stub("apscheduler", _apscheduler)
     _ensure_stub("apscheduler.schedulers", _apscheduler_schedulers)
     _ensure_stub("apscheduler.schedulers.asyncio", _apscheduler_asyncio)
-
-    # sentry_sdk
-    _sentry = ModuleType("sentry_sdk")
-    _sentry.init = MagicMock()
-    _ensure_stub("sentry_sdk", _sentry)
+    _ensure_stub("apscheduler.triggers", _apscheduler_triggers)
+    _ensure_stub("apscheduler.triggers.cron", _apscheduler_cron)
 
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
 
-@pytest.fixture
-def mock_chromadb():
-    """Mocked ChromaDB client with a default collection."""
-    client = MagicMock()
-    collection = MagicMock()
-    collection.query.return_value = {
-        "ids": [["doc-1"]],
-        "documents": [["Sample document text"]],
-        "metadatas": [[{"domain": "coding", "filename": "test.py"}]],
-        "distances": [[0.15]],
-    }
-    collection.count.return_value = 10
-    client.get_or_create_collection.return_value = collection
-    client.get_collection.return_value = collection
-    return client
+@pytest.fixture(autouse=True)
+def _reset_bifrost_client():
+    """Reset the shared Bifrost and LLM httpx.AsyncClient singletons between tests.
+
+    Without this, get_bifrost_client() / _get_client() cache a client from the
+    first test, preventing subsequent tests' patches from taking effect.
+    Also clears the claim_cache L1 in-memory cache to prevent cross-test leakage.
+    Sets a dummy OPENROUTER_API_KEY so LLM calls use the direct OpenRouter code
+    path (where httpx.AsyncClient mocks take effect) instead of Bifrost fallback.
+    """
+    import os
+
+    import utils.bifrost as _bifrost_mod
+    import utils.llm_client as _llm_mod
+    from core.utils.circuit_breaker import get_breaker
+    from utils.claim_cache import clear_l1_cache
+
+    # Ensure LLM calls use the direct OpenRouter path (mockable via httpx.AsyncClient)
+    old_key = os.environ.get("OPENROUTER_API_KEY")
+    os.environ["OPENROUTER_API_KEY"] = "test-dummy-key"  # pragma: allowlist secret
+
+    # Also reset internal_llm client
+    try:
+        import core.utils.internal_llm as _internal_llm_mod
+        _internal_llm_mod._ollama_client = None
+    except Exception:
+        pass
+
+    _bifrost_mod._client = None
+    _llm_mod._client = None
+    clear_l1_cache()
+    # Reset all circuit breakers to prevent cross-test state leakage
+    for name in (
+        "bifrost-rerank", "bifrost-claims", "bifrost-verify",
+        "bifrost-synopsis", "bifrost-memory", "bifrost-compress",
+        "bifrost-decompose", "web-search", "openrouter", "tavily",
+        "searxng", "ragas_eval", "neo4j", "ollama",
+    ):
+        get_breaker(name).reset()
+    yield
+    _bifrost_mod._client = None
+    _llm_mod._client = None
+    clear_l1_cache()
+    # Restore original API key state
+    if old_key is None:
+        os.environ.pop("OPENROUTER_API_KEY", None)
+    else:
+        os.environ["OPENROUTER_API_KEY"] = old_key
 
 
 @pytest.fixture
 def mock_neo4j():
-    """Mocked Neo4j driver + session."""
+    """Mock Neo4j driver with session context manager."""
     driver = MagicMock()
     session = MagicMock()
-    result = MagicMock()
-    result.data.return_value = []
-    result.single.return_value = None
-    result.consume.return_value = MagicMock()
-    session.run.return_value = result
-    session.__enter__ = MagicMock(return_value=session)
-    session.__exit__ = MagicMock(return_value=False)
-    driver.session.return_value = session
+    driver.session.return_value.__enter__ = MagicMock(return_value=session)
+    driver.session.return_value.__exit__ = MagicMock(return_value=False)
     return driver, session
 
 
 @pytest.fixture
-def mock_redis():
-    """Mocked Redis client."""
+def mock_chroma():
+    """Mock ChromaDB client."""
     client = MagicMock()
-    client.get.return_value = None
-    client.set.return_value = True
-    client.delete.return_value = 1
-    client.exists.return_value = 0
-    client.pipeline.return_value = MagicMock(
-        __enter__=MagicMock(return_value=MagicMock()),
-        __exit__=MagicMock(return_value=False),
-    )
-    return client
+    collection = MagicMock()
+    client.get_or_create_collection.return_value = collection
+    client.get_collection.return_value = collection
+    return client, collection
 
 
 @pytest.fixture
-def mock_llm():
-    """Mocked LLM call function returning canned responses."""
-    async_mock = AsyncMock()
-    async_mock.return_value = "This is a canned LLM response."
-    return async_mock
+def mock_redis():
+    """Mock Redis client."""
+    return MagicMock()

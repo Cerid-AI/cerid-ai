@@ -20,9 +20,9 @@ def _make_app():
 class TestHealthCheckFunction:
     """Test the health_check() function directly."""
 
-    @patch("routers.health.get_redis")
-    @patch("routers.health.get_neo4j")
-    @patch("routers.health.get_chroma")
+    @patch("app.routers.health.get_redis")
+    @patch("app.routers.health.get_neo4j")
+    @patch("app.routers.health.get_chroma")
     def test_all_connected(self, mock_chroma, mock_neo4j, mock_redis):
         """All services connected returns healthy status."""
         mock_chroma.return_value = MagicMock()
@@ -39,9 +39,9 @@ class TestHealthCheckFunction:
         assert result["services"]["redis"] == "connected"
         assert result["services"]["neo4j"] == "connected"
 
-    @patch("routers.health.get_redis")
-    @patch("routers.health.get_neo4j")
-    @patch("routers.health.get_chroma")
+    @patch("app.routers.health.get_redis")
+    @patch("app.routers.health.get_neo4j")
+    @patch("app.routers.health.get_chroma")
     def test_chroma_down(self, mock_chroma, mock_neo4j, mock_redis):
         """ChromaDB failure should report error, not crash."""
         mock_chroma.side_effect = RuntimeError("connection refused")
@@ -52,9 +52,9 @@ class TestHealthCheckFunction:
         assert "error" in result["services"]["chromadb"]
         assert result["services"]["redis"] == "connected"
 
-    @patch("routers.health.get_redis")
-    @patch("routers.health.get_neo4j")
-    @patch("routers.health.get_chroma")
+    @patch("app.routers.health.get_redis")
+    @patch("app.routers.health.get_neo4j")
+    @patch("app.routers.health.get_chroma")
     def test_neo4j_disabled(self, mock_chroma, mock_neo4j, mock_redis):
         """None driver means lightweight mode."""
         mock_chroma.return_value = MagicMock()
@@ -68,9 +68,9 @@ class TestHealthCheckFunction:
 class TestHealthEndpoints:
     """Test HTTP endpoints via TestClient."""
 
-    @patch("routers.health.get_redis")
-    @patch("routers.health.get_neo4j")
-    @patch("routers.health.get_chroma")
+    @patch("app.routers.health.get_redis")
+    @patch("app.routers.health.get_neo4j")
+    @patch("app.routers.health.get_chroma")
     def test_health_live_always_200(self, mock_chroma, mock_neo4j, mock_redis):
         """Liveness probe should always return 200."""
         mock_chroma.return_value = MagicMock()
@@ -83,9 +83,9 @@ class TestHealthEndpoints:
         data = resp.json()
         assert data["status"] == "alive"
 
-    @patch("routers.health.get_redis")
-    @patch("routers.health.get_neo4j")
-    @patch("routers.health.get_chroma")
+    @patch("app.routers.health.get_redis")
+    @patch("app.routers.health.get_neo4j")
+    @patch("app.routers.health.get_chroma")
     def test_health_endpoint_returns_json(self, mock_chroma, mock_neo4j, mock_redis):
         """Main /health returns JSON with service statuses."""
         mock_chroma.return_value = MagicMock()

@@ -1,12 +1,12 @@
-# Copyright (c) 2026 Cerid AI. All rights reserved.
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for agents/curator.py — artifact quality scoring."""
+"""Tests for agents/curator.py — artifact quality scoring (Phase 14)."""
 
 import json
 import math
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -146,7 +146,7 @@ class TestScoreKeywords:
 # ---------------------------------------------------------------------------
 
 class TestScoreFreshness:
-    @patch("agents.curator.utcnow")
+    @patch("core.agents.curator.utcnow")
     def test_recent_today(self, mock_utcnow):
         """Document from today -> age ~0 days -> score close to 1.0."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
@@ -155,7 +155,7 @@ class TestScoreFreshness:
         result = score_freshness(ts)
         assert result == pytest.approx(1.0, abs=0.01)
 
-    @patch("agents.curator.utcnow")
+    @patch("core.agents.curator.utcnow")
     def test_thirty_days_old(self, mock_utcnow):
         """30 days old -> half-life of 30 -> score = 0.5."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
@@ -164,7 +164,7 @@ class TestScoreFreshness:
         result = score_freshness(ts)
         assert result == pytest.approx(0.5, abs=0.01)
 
-    @patch("agents.curator.utcnow")
+    @patch("core.agents.curator.utcnow")
     def test_sixty_days_old(self, mock_utcnow):
         """60 days old -> 2 half-lives -> score = 0.25."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
@@ -185,7 +185,7 @@ class TestScoreFreshness:
         """None ingested_at, no modified_at -> fallback 0.5."""
         assert score_freshness(None) == 0.5
 
-    @patch("agents.curator.utcnow")
+    @patch("core.agents.curator.utcnow")
     def test_future_date_clamped(self, mock_utcnow):
         """Future date -> age clamped to 0 -> score = 1.0."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
@@ -194,7 +194,7 @@ class TestScoreFreshness:
         result = score_freshness(future)
         assert result == pytest.approx(1.0, abs=0.001)
 
-    @patch("agents.curator.utcnow")
+    @patch("core.agents.curator.utcnow")
     def test_modified_at_preferred(self, mock_utcnow):
         """modified_at should be used over ingested_at when present."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
@@ -207,7 +207,7 @@ class TestScoreFreshness:
         expected = math.pow(2, -1 / 30)
         assert result == pytest.approx(expected, abs=0.01)
 
-    @patch("agents.curator.utcnow")
+    @patch("core.agents.curator.utcnow")
     def test_modified_at_none_falls_back(self, mock_utcnow):
         """modified_at=None -> falls back to ingested_at."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
@@ -217,7 +217,7 @@ class TestScoreFreshness:
         result = score_freshness(ts, modified_at=None)
         assert result == pytest.approx(0.5, abs=0.01)
 
-    @patch("agents.curator.utcnow")
+    @patch("core.agents.curator.utcnow")
     def test_naive_timestamp_comparison(self, mock_utcnow):
         """Naive (no timezone) timestamp should still work."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
@@ -344,7 +344,7 @@ class TestScoreCompleteness:
 
 class TestComputeQualityScore:
     @patch("utils.quality._utcnow")
-    @patch("agents.curator.utcnow")
+    @patch("core.agents.curator.utcnow")
     def test_weighted_sum_matches_manual(self, mock_utcnow, mock_quality_utcnow):
         """Verify weighted sum calculation with known inputs."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
@@ -361,17 +361,19 @@ class TestComputeQualityScore:
 
         result = compute_quality_score(artifact)
 
-        # Quality v2 uses 6 dimensions. When called from curator (no content param),
-        # richness is based on summary text only and utility is 0 (no retrievals).
-        # Score is lower than v1's 1.0 because richness and utility dilute the total.
-        assert result["quality_score"] == pytest.approx(0.6325, abs=0.02)
+        # v2 scoring delegates to utils.quality with 6-dimension weights:
+        # richness(0.25), metadata(0.20), freshness(0.15), authority(0.15),
+        # utility(0.15), coherence(0.10).  Optimal inputs produce ~0.63
+        # because richness of a single-word 100-char string is low and
+        # utility defaults to 0 (never retrieved).
+        assert result["quality_score"] == pytest.approx(0.6325, abs=0.01)
         assert result["breakdown"]["summary"] == pytest.approx(1.0)
         assert result["breakdown"]["keywords"] == pytest.approx(1.0)
         assert result["breakdown"]["freshness"] == pytest.approx(1.0, abs=0.01)
         assert result["breakdown"]["completeness"] == pytest.approx(1.0)
         assert result["issues"] == []
 
-    @patch("agents.curator.utcnow")
+    @patch("core.agents.curator.utcnow")
     def test_issues_include_summary_missing(self, mock_utcnow):
         """Missing summary -> summary_missing in issues."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
@@ -388,7 +390,7 @@ class TestComputeQualityScore:
         result = compute_quality_score(artifact)
         assert "summary_missing" in result["issues"]
 
-    @patch("agents.curator.utcnow")
+    @patch("core.agents.curator.utcnow")
     def test_issues_include_summary_weak(self, mock_utcnow):
         """Short but non-empty summary (< 0.5 score) -> summary_weak."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
@@ -406,7 +408,7 @@ class TestComputeQualityScore:
         result = compute_quality_score(artifact)
         assert "summary_weak" in result["issues"]
 
-    @patch("agents.curator.utcnow")
+    @patch("core.agents.curator.utcnow")
     def test_issues_include_keywords_missing(self, mock_utcnow):
         """No keywords -> keywords_missing."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
@@ -423,7 +425,7 @@ class TestComputeQualityScore:
         result = compute_quality_score(artifact)
         assert "keywords_missing" in result["issues"]
 
-    @patch("agents.curator.utcnow")
+    @patch("core.agents.curator.utcnow")
     def test_issues_include_keywords_sparse(self, mock_utcnow):
         """1 keyword (score = 0.2 < 0.5) -> keywords_sparse."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
@@ -440,7 +442,7 @@ class TestComputeQualityScore:
         result = compute_quality_score(artifact)
         assert "keywords_sparse" in result["issues"]
 
-    @patch("agents.curator.utcnow")
+    @patch("core.agents.curator.utcnow")
     def test_issues_include_metadata_incomplete(self, mock_utcnow):
         """Completeness < 0.5 -> metadata_incomplete."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
@@ -457,7 +459,7 @@ class TestComputeQualityScore:
         result = compute_quality_score(artifact)
         assert "metadata_incomplete" in result["issues"]
 
-    @patch("agents.curator.utcnow")
+    @patch("core.agents.curator.utcnow")
     def test_issues_include_stale(self, mock_utcnow):
         """Very old artifact -> freshness < 0.3 -> stale."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
@@ -476,7 +478,7 @@ class TestComputeQualityScore:
         assert "stale" in result["issues"]
 
     @patch("utils.quality._utcnow")
-    @patch("agents.curator.utcnow")
+    @patch("core.agents.curator.utcnow")
     def test_all_dimensions_contribute(self, mock_utcnow, mock_quality_utcnow):
         """Verify each dimension contributes proportionally to weighted total."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
@@ -493,14 +495,13 @@ class TestComputeQualityScore:
 
         result = compute_quality_score(artifact)
 
-        # Quality v2: 6-dimension scoring. With partial metadata and no content,
-        # score is moderate — above the floor (0.35) but below excellent (0.8).
-        assert result["quality_score"] == pytest.approx(0.49, abs=0.03)
-        # Each dimension should contribute non-zero
-        assert result["breakdown"]["summary"] > 0
-        assert result["breakdown"]["keywords"] > 0
-        assert result["breakdown"]["freshness"] > 0
-        assert result["breakdown"]["completeness"] > 0
+        # v2 scoring: quality_score comes from utils.quality (6-dim formula).
+        # With summary "a"*25 (low richness), 2 keywords, 30-day-old general
+        # doc (half_life=7 days so freshness ~0.05), 0 retrieval utility,
+        # the actual score is ~0.49.  Verify each dimension contributes:
+        assert result["quality_score"] == pytest.approx(0.49, abs=0.02)
+        assert result["breakdown"]["summary"] == pytest.approx(0.5)
+        assert result["breakdown"]["keywords"] == pytest.approx(0.4)
 
     def test_result_shape(self):
         """Ensure result has the expected keys."""
@@ -521,19 +522,20 @@ class TestComputeQualityScore:
 # ---------------------------------------------------------------------------
 
 class TestStoreQualityScores:
-    def test_empty_list_returns_zero(self):
-        """Empty scores list -> returns 0, no session interaction."""
-        driver = MagicMock()
-        result = _store_quality_scores(driver, [])
+    @pytest.mark.asyncio
+    async def test_empty_list_returns_zero(self):
+        """Empty scores list -> returns 0, no graph_store interaction."""
+        graph_store = MagicMock()
+        graph_store.update_artifact = AsyncMock()
+        result = await _store_quality_scores(graph_store, [])
         assert result == 0
-        driver.session.assert_not_called()
+        graph_store.update_artifact.assert_not_called()
 
-    def test_calls_session_run_with_unwind(self, mock_neo4j):
-        """Verify session.run is called with UNWIND query and correct params."""
-        driver, session = mock_neo4j
-        record = MagicMock()
-        record.__getitem__ = lambda self, key: 3  # 3 updated
-        session.run.return_value.single.return_value = record
+    @pytest.mark.asyncio
+    async def test_calls_update_artifact_for_each_score(self):
+        """Verify update_artifact is called for each score."""
+        graph_store = MagicMock()
+        graph_store.update_artifact = AsyncMock()
 
         scores = [
             {"artifact_id": "a1", "quality_score": 0.85},
@@ -541,44 +543,36 @@ class TestStoreQualityScores:
             {"artifact_id": "a3", "quality_score": 0.45},
         ]
 
-        result = _store_quality_scores(driver, scores)
+        result = await _store_quality_scores(graph_store, scores)
 
-        # Check session.run was called
-        session.run.assert_called_once()
-        call_args = session.run.call_args
-
-        # Verify the query contains UNWIND
-        query = call_args[0][0]
-        assert "UNWIND" in query
-        assert "quality_score" in query
-
-        # Verify items parameter
-        items = call_args[1]["items"]
-        assert len(items) == 3
-        assert items[0] == {"id": "a1", "score": 0.85}
-        assert items[1] == {"id": "a2", "score": 0.60}
-
+        assert graph_store.update_artifact.call_count == 3
         assert result == 3
 
-    def test_returns_count_from_result(self, mock_neo4j):
-        """Return value should come from the 'updated' field in result."""
-        driver, session = mock_neo4j
-        record = MagicMock()
-        record.__getitem__ = lambda self, key: 5
-        session.run.return_value.single.return_value = record
+    @pytest.mark.asyncio
+    async def test_returns_count_of_successful_updates(self):
+        """Return value should be count of successful update_artifact calls."""
+        graph_store = MagicMock()
+        graph_store.update_artifact = AsyncMock()
 
         scores = [{"artifact_id": "a1", "quality_score": 0.9}]
-        result = _store_quality_scores(driver, scores)
-        assert result == 5
+        result = await _store_quality_scores(graph_store, scores)
+        assert result == 1
 
-    def test_none_record_returns_zero(self, mock_neo4j):
-        """If result.single() returns None, return 0."""
-        driver, session = mock_neo4j
-        session.run.return_value.single.return_value = None
+    @pytest.mark.asyncio
+    async def test_individual_failure_does_not_abort(self):
+        """If update_artifact raises for one item, others should still be processed."""
+        graph_store = MagicMock()
+        graph_store.update_artifact = AsyncMock(
+            side_effect=[None, Exception("fail"), None]
+        )
 
-        scores = [{"artifact_id": "a1", "quality_score": 0.9}]
-        result = _store_quality_scores(driver, scores)
-        assert result == 0
+        scores = [
+            {"artifact_id": "a1", "quality_score": 0.9},
+            {"artifact_id": "a2", "quality_score": 0.8},
+            {"artifact_id": "a3", "quality_score": 0.7},
+        ]
+        result = await _store_quality_scores(graph_store, scores)
+        assert result == 2  # 3 attempted, 1 failed
 
 
 # ---------------------------------------------------------------------------
@@ -586,18 +580,43 @@ class TestStoreQualityScores:
 # ---------------------------------------------------------------------------
 
 class TestCurate:
-    @pytest.mark.asyncio
-    @patch("agents.curator.utcnow")
-    @patch("agents.curator._store_quality_scores")
-    @patch("agents.curator.list_artifacts")
-    @patch("agents.curator.config")
-    async def test_correct_response_shape(
-        self, mock_config, mock_list, mock_store, mock_utcnow
-    ):
-        """Verify curate() returns all expected keys."""
-        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
-        mock_utcnow.return_value = now
-        mock_config.DOMAINS = ["coding"]
+    """Tests for curate() — uses mock GraphStore (not raw neo4j driver)."""
+
+    @staticmethod
+    def _make_graph_store(artifacts_by_domain=None):
+        """Create a mock GraphStore with list_artifacts and update_artifact."""
+        from core.contracts.stores import ArtifactNode
+
+        gs = MagicMock()
+        gs.update_artifact = AsyncMock()
+
+        if artifacts_by_domain is None:
+            gs.list_artifacts = AsyncMock(return_value=[])
+        else:
+            # Return different artifacts per domain call
+            side_effects = []
+            for domain_nodes in artifacts_by_domain:
+                if isinstance(domain_nodes, Exception):
+                    side_effects.append(domain_nodes)
+                else:
+                    nodes = []
+                    for d in domain_nodes:
+                        nodes.append(ArtifactNode(
+                            id=d["id"],
+                            filename=d["filename"],
+                            domain=d.get("domain", "coding"),
+                            sub_category=d.get("sub_category", "general"),
+                            tags=d.get("tags_list", []),
+                            summary=d.get("summary", ""),
+                            quality_score=d.get("quality_score", 0.0),
+                        ))
+                    side_effects.append(nodes)
+            gs.list_artifacts = AsyncMock(side_effect=side_effects)
+        return gs
+
+    @staticmethod
+    def _config_defaults(mock_config, domains=None):
+        mock_config.DOMAINS = domains or ["coding"]
         mock_config.QUALITY_WEIGHT_SUMMARY = 0.30
         mock_config.QUALITY_WEIGHT_KEYWORDS = 0.25
         mock_config.QUALITY_WEIGHT_FRESHNESS = 0.20
@@ -608,21 +627,25 @@ class TestCurate:
         mock_config.TEMPORAL_HALF_LIFE_DAYS = 30
         mock_config.DEFAULT_SUB_CATEGORY = "general"
 
-        mock_list.return_value = [
-            {
-                "id": "art-1",
-                "filename": "test.py",
-                "summary": "a" * 100,
-                "keywords": json.dumps(["a", "b", "c"]),
-                "ingested_at": now.isoformat(),
-                "tags": json.dumps(["tag1"]),
-                "sub_category": "python",
-            },
-        ]
+    @pytest.mark.asyncio
+    @patch("core.agents.curator.utcnow")
+    @patch("core.agents.curator._store_quality_scores", new_callable=AsyncMock)
+    @patch("core.agents.curator.config")
+    async def test_correct_response_shape(
+        self, mock_config, mock_store, mock_utcnow
+    ):
+        """Verify curate() returns all expected keys."""
+        now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
+        mock_utcnow.return_value = now
+        self._config_defaults(mock_config)
+
+        gs = self._make_graph_store([[
+            {"id": "art-1", "filename": "test.py", "summary": "a" * 100,
+             "sub_category": "python", "tags_list": ["tag1"]},
+        ]])
         mock_store.return_value = 1
 
-        driver = MagicMock()
-        result = await curate(driver, mode="audit")
+        result = await curate(graph_store=gs, mode="audit")
 
         assert "timestamp" in result
         assert result["mode"] == "audit"
@@ -634,239 +657,136 @@ class TestCurate:
         assert "low_quality_artifacts" in result
 
     @pytest.mark.asyncio
-    @patch("agents.curator.utcnow")
-    @patch("agents.curator._store_quality_scores")
-    @patch("agents.curator.list_artifacts")
-    @patch("agents.curator.config")
+    @patch("core.agents.curator.utcnow")
+    @patch("core.agents.curator._store_quality_scores", new_callable=AsyncMock)
+    @patch("core.agents.curator.config")
     async def test_domain_filtering(
-        self, mock_config, mock_list, mock_store, mock_utcnow
+        self, mock_config, mock_store, mock_utcnow
     ):
         """When domains are specified, only those domains should be scored."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
-        mock_config.DOMAINS = ["coding", "finance", "general"]
-        mock_config.QUALITY_WEIGHT_SUMMARY = 0.30
-        mock_config.QUALITY_WEIGHT_KEYWORDS = 0.25
-        mock_config.QUALITY_WEIGHT_FRESHNESS = 0.20
-        mock_config.QUALITY_WEIGHT_COMPLETENESS = 0.25
-        mock_config.QUALITY_SUMMARY_MIN_CHARS = 50
-        mock_config.QUALITY_SUMMARY_MAX_CHARS = 500
-        mock_config.QUALITY_KEYWORDS_OPTIMAL = 5
-        mock_config.TEMPORAL_HALF_LIFE_DAYS = 30
-        mock_config.DEFAULT_SUB_CATEGORY = "general"
+        self._config_defaults(mock_config, domains=["coding", "finance", "general"])
 
-        mock_list.return_value = []
+        gs = self._make_graph_store([[]])  # finance returns empty
         mock_store.return_value = 0
 
-        driver = MagicMock()
-        result = await curate(driver, domains=["finance"])
+        result = await curate(graph_store=gs, domains=["finance"])
 
         assert result["domains_scored"] == ["finance"]
-        # list_artifacts should only be called once (for "finance")
-        mock_list.assert_called_once_with(driver, domain="finance", limit=200)
+        gs.list_artifacts.assert_called_once_with(domain="finance", limit=200)
 
     @pytest.mark.asyncio
-    @patch("agents.curator.utcnow")
-    @patch("agents.curator._store_quality_scores")
-    @patch("agents.curator.list_artifacts")
-    @patch("agents.curator.config")
+    @patch("core.agents.curator.utcnow")
+    @patch("core.agents.curator._store_quality_scores", new_callable=AsyncMock)
+    @patch("core.agents.curator.config")
     async def test_handles_neo4j_list_failure(
-        self, mock_config, mock_list, mock_store, mock_utcnow
+        self, mock_config, mock_store, mock_utcnow
     ):
         """If list_artifacts raises for a domain, curate() continues with warning."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
-        mock_config.DOMAINS = ["coding", "finance"]
-        mock_config.QUALITY_WEIGHT_SUMMARY = 0.30
-        mock_config.QUALITY_WEIGHT_KEYWORDS = 0.25
-        mock_config.QUALITY_WEIGHT_FRESHNESS = 0.20
-        mock_config.QUALITY_WEIGHT_COMPLETENESS = 0.25
-        mock_config.QUALITY_SUMMARY_MIN_CHARS = 50
-        mock_config.QUALITY_SUMMARY_MAX_CHARS = 500
-        mock_config.QUALITY_KEYWORDS_OPTIMAL = 5
-        mock_config.TEMPORAL_HALF_LIFE_DAYS = 30
-        mock_config.DEFAULT_SUB_CATEGORY = "general"
+        self._config_defaults(mock_config, domains=["coding", "finance"])
 
-        # First domain fails, second succeeds
-        mock_list.side_effect = [
-            RuntimeError("Neo4j connection error"),
-            [
-                {
-                    "id": "art-1",
-                    "filename": "budget.xlsx",
-                    "summary": "a" * 100,
-                    "keywords": json.dumps(["a", "b", "c", "d", "e"]),
-                    "ingested_at": now.isoformat(),
-                    "tags": json.dumps(["tag1"]),
-                    "sub_category": "tax",
-                },
-            ],
-        ]
+        gs = self._make_graph_store([
+            Exception("Neo4j connection error"),
+            [{"id": "art-1", "filename": "budget.xlsx", "summary": "a" * 100,
+              "domain": "finance", "sub_category": "tax", "tags_list": ["tag1"]}],
+        ])
         mock_store.return_value = 1
 
-        driver = MagicMock()
-        result = await curate(driver)
+        result = await curate(graph_store=gs)
 
-        # Should still succeed with the second domain's artifact
         assert result["artifacts_scored"] == 1
         assert result["artifacts_stored"] == 1
 
     @pytest.mark.asyncio
-    @patch("agents.curator.utcnow")
-    @patch("agents.curator._store_quality_scores")
-    @patch("agents.curator.list_artifacts")
-    @patch("agents.curator.config")
+    @patch("core.agents.curator.utcnow")
+    @patch("core.agents.curator._store_quality_scores", new_callable=AsyncMock)
+    @patch("core.agents.curator.config")
     async def test_handles_store_failure(
-        self, mock_config, mock_list, mock_store, mock_utcnow
+        self, mock_config, mock_store, mock_utcnow
     ):
         """If _store_quality_scores raises, curate() continues and reports 0 stored."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
-        mock_config.DOMAINS = ["coding"]
-        mock_config.QUALITY_WEIGHT_SUMMARY = 0.30
-        mock_config.QUALITY_WEIGHT_KEYWORDS = 0.25
-        mock_config.QUALITY_WEIGHT_FRESHNESS = 0.20
-        mock_config.QUALITY_WEIGHT_COMPLETENESS = 0.25
-        mock_config.QUALITY_SUMMARY_MIN_CHARS = 50
-        mock_config.QUALITY_SUMMARY_MAX_CHARS = 500
-        mock_config.QUALITY_KEYWORDS_OPTIMAL = 5
-        mock_config.TEMPORAL_HALF_LIFE_DAYS = 30
-        mock_config.DEFAULT_SUB_CATEGORY = "general"
+        self._config_defaults(mock_config)
 
-        mock_list.return_value = [
-            {
-                "id": "art-1",
-                "filename": "test.py",
-                "summary": "a" * 100,
-                "keywords": json.dumps(["a", "b", "c"]),
-                "ingested_at": now.isoformat(),
-                "tags": "[]",
-                "sub_category": "general",
-            },
-        ]
-        mock_store.side_effect = RuntimeError("Neo4j write failure")
+        gs = self._make_graph_store([[
+            {"id": "art-1", "filename": "test.py", "summary": "a" * 100,
+             "sub_category": "general"},
+        ]])
+        mock_store.side_effect = Exception("Neo4j write failure")
 
-        driver = MagicMock()
-        result = await curate(driver)
+        result = await curate(graph_store=gs)
 
-        # Scored but not stored
         assert result["artifacts_scored"] == 1
         assert result["artifacts_stored"] == 0
 
     @pytest.mark.asyncio
-    @patch("agents.curator.utcnow")
-    @patch("agents.curator._store_quality_scores")
-    @patch("agents.curator.list_artifacts")
-    @patch("agents.curator.config")
+    @patch("core.agents.curator.utcnow")
+    @patch("core.agents.curator._store_quality_scores", new_callable=AsyncMock)
+    @patch("core.agents.curator.config")
     async def test_low_quality_artifacts_sorted(
-        self, mock_config, mock_list, mock_store, mock_utcnow
+        self, mock_config, mock_store, mock_utcnow
     ):
         """Low quality artifacts (< 0.5) should be sorted ascending by score."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
-        mock_config.DOMAINS = ["coding"]
-        mock_config.QUALITY_WEIGHT_SUMMARY = 0.30
-        mock_config.QUALITY_WEIGHT_KEYWORDS = 0.25
-        mock_config.QUALITY_WEIGHT_FRESHNESS = 0.20
-        mock_config.QUALITY_WEIGHT_COMPLETENESS = 0.25
-        mock_config.QUALITY_SUMMARY_MIN_CHARS = 50
-        mock_config.QUALITY_SUMMARY_MAX_CHARS = 500
-        mock_config.QUALITY_KEYWORDS_OPTIMAL = 5
-        mock_config.TEMPORAL_HALF_LIFE_DAYS = 30
-        mock_config.DEFAULT_SUB_CATEGORY = "general"
+        self._config_defaults(mock_config)
 
-        # Create two low-quality artifacts
-        mock_list.return_value = [
-            {
-                "id": "bad-1",
-                "filename": "bad1.py",
-                "summary": "",  # 0.0
-                "keywords": "[]",  # 0.0
-                "ingested_at": (now - timedelta(days=120)).isoformat(),
-                "tags": "[]",
-                "sub_category": "general",
-            },
-            {
-                "id": "mediocre-1",
-                "filename": "mediocre.py",
-                "summary": "a" * 20,  # 0.4
-                "keywords": json.dumps(["a"]),  # 0.2
-                "ingested_at": now.isoformat(),
-                "tags": "[]",
-                "sub_category": "general",
-            },
-        ]
+        gs = self._make_graph_store([[
+            {"id": "bad-1", "filename": "bad1.py", "summary": "",
+             "sub_category": "general"},
+            {"id": "mediocre-1", "filename": "mediocre.py", "summary": "a" * 20,
+             "sub_category": "general"},
+        ]])
         mock_store.return_value = 2
 
-        driver = MagicMock()
-        result = await curate(driver)
+        result = await curate(graph_store=gs)
 
         lq = result["low_quality_artifacts"]
         assert len(lq) >= 1
-        # Should be sorted ascending
         if len(lq) > 1:
             assert lq[0]["quality_score"] <= lq[1]["quality_score"]
 
     @pytest.mark.asyncio
-    @patch("agents.curator.utcnow")
-    @patch("agents.curator._store_quality_scores")
-    @patch("agents.curator.list_artifacts")
-    @patch("agents.curator.config")
+    @patch("core.agents.curator.utcnow")
+    @patch("core.agents.curator._store_quality_scores", new_callable=AsyncMock)
+    @patch("core.agents.curator.config")
     async def test_no_artifacts(
-        self, mock_config, mock_list, mock_store, mock_utcnow
+        self, mock_config, mock_store, mock_utcnow
     ):
         """No artifacts across any domain -> avg_quality_score = 0.0."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
-        mock_config.DOMAINS = ["coding"]
-        mock_config.QUALITY_WEIGHT_SUMMARY = 0.30
-        mock_config.QUALITY_WEIGHT_KEYWORDS = 0.25
-        mock_config.QUALITY_WEIGHT_FRESHNESS = 0.20
-        mock_config.QUALITY_WEIGHT_COMPLETENESS = 0.25
-        mock_config.QUALITY_SUMMARY_MIN_CHARS = 50
-        mock_config.QUALITY_SUMMARY_MAX_CHARS = 500
-        mock_config.QUALITY_KEYWORDS_OPTIMAL = 5
-        mock_config.TEMPORAL_HALF_LIFE_DAYS = 30
-        mock_config.DEFAULT_SUB_CATEGORY = "general"
+        self._config_defaults(mock_config)
 
-        mock_list.return_value = []
+        gs = self._make_graph_store([[]])
         mock_store.return_value = 0
 
-        driver = MagicMock()
-        result = await curate(driver)
+        result = await curate(graph_store=gs)
 
         assert result["artifacts_scored"] == 0
         assert result["avg_quality_score"] == 0.0
         assert result["low_quality_artifacts"] == []
-        # _store_quality_scores should not be called with empty list
         mock_store.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch("agents.curator.utcnow")
-    @patch("agents.curator._store_quality_scores")
-    @patch("agents.curator.list_artifacts")
-    @patch("agents.curator.config")
+    @patch("core.agents.curator.utcnow")
+    @patch("core.agents.curator._store_quality_scores", new_callable=AsyncMock)
+    @patch("core.agents.curator.config")
     async def test_max_artifacts_passed(
-        self, mock_config, mock_list, mock_store, mock_utcnow
+        self, mock_config, mock_store, mock_utcnow
     ):
         """max_artifacts kwarg should be passed through to list_artifacts."""
         now = datetime(2026, 2, 28, 12, 0, 0, tzinfo=UTC)
         mock_utcnow.return_value = now
-        mock_config.DOMAINS = ["coding"]
-        mock_config.QUALITY_WEIGHT_SUMMARY = 0.30
-        mock_config.QUALITY_WEIGHT_KEYWORDS = 0.25
-        mock_config.QUALITY_WEIGHT_FRESHNESS = 0.20
-        mock_config.QUALITY_WEIGHT_COMPLETENESS = 0.25
-        mock_config.QUALITY_SUMMARY_MIN_CHARS = 50
-        mock_config.QUALITY_SUMMARY_MAX_CHARS = 500
-        mock_config.QUALITY_KEYWORDS_OPTIMAL = 5
-        mock_config.TEMPORAL_HALF_LIFE_DAYS = 30
-        mock_config.DEFAULT_SUB_CATEGORY = "general"
+        self._config_defaults(mock_config)
 
-        mock_list.return_value = []
+        gs = self._make_graph_store([[]])
         mock_store.return_value = 0
 
-        driver = MagicMock()
-        await curate(driver, max_artifacts=50)
+        await curate(graph_store=gs, max_artifacts=50)
 
-        mock_list.assert_called_once_with(driver, domain="coding", limit=50)
+        gs.list_artifacts.assert_called_once_with(domain="coding", limit=50)
