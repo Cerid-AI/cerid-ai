@@ -693,9 +693,9 @@ langgraph-sdk==0.2.15 \
     --hash=sha256:746566a5d89aa47160eccc17d71682a78771c754126f6c235a68353d61ed7462 \
     --hash=sha256:8faaafe2c1193b89f782dd66c591060cd67862aa6aaf283749b7846f331d5334
     # via langgraph
-langsmith==0.7.25 \
-    --hash=sha256:55ecc24c547f6c79b5a684ff8685c669eec34e52fcac5d2c0af7d613aef5a632 \
-    --hash=sha256:d17da71f156ca69eafd28ac9627c8e0e93170260ec37cd27cedc83205a067598
+langsmith==0.7.26 \
+    --hash=sha256:a3e06f3d689ce7195717aa6b8f91082319819ec7ea9b9a62cdcd3d9dc25bfc7b \
+    --hash=sha256:fe5c877972cea450c1c48251c8fae0f18543c8d19dfdb9ff9a9c4263763dde4e
     # via langchain-core
 lxml==6.0.2 \
     --hash=sha256:058027e261afed589eddcfe530fcc6f3402d7fd7e89bfd0532df82ebc1563dba \
@@ -2485,9 +2485,9 @@ uuid-utils==0.14.1 \
     # via
     #   langchain-core
     #   langsmith
-uvicorn[standard]==0.43.0 \
-    --hash=sha256:46fac64f487fd968cd999e5e49efbbe64bd231b5bd8b4a0b482a23ebce499620 \
-    --hash=sha256:ab1652d2fb23abf124f36ccc399828558880def222c3cb3d98d24021520dc6e8
+uvicorn[standard]==0.44.0 \
+    --hash=sha256:6c942071b68f07e178264b9152f1f16dfac5da85880c4ce06366a96d70d4f31e \
+    --hash=sha256:ce937c99a2cc70279556967274414c087888e8cec9f9c94644dfca11bd3ced89
     # via
     #   -r requirements.txt
     #   chromadb
