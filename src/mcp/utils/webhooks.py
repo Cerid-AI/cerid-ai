@@ -10,8 +10,11 @@ Events: ingestion.complete, health.warning, digest.ready, rectify.findings
 
 from __future__ import annotations
 
+import ipaddress
 import logging
+import socket
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -20,6 +23,23 @@ from errors import CeridError
 from utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.webhooks")
+
+
+def _validate_webhook_url(url: str) -> None:
+    """Reject webhook URLs targeting internal/private networks (SSRF prevention)."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("https", "http"):
+        raise ValueError(f"Webhook URL must use http(s): {url}")
+    hostname = parsed.hostname or ""
+    if not hostname:
+        raise ValueError(f"Webhook URL has no hostname: {url}")
+    try:
+        for info in socket.getaddrinfo(hostname, None):
+            addr = ipaddress.ip_address(info[4][0])
+            if addr.is_private or addr.is_loopback or addr.is_link_local:
+                raise ValueError(f"Webhook URL resolves to private/internal IP: {hostname}")
+    except socket.gaierror:
+        pass  # DNS resolution failure handled at POST time
 
 
 async def fire_event(
@@ -55,6 +75,12 @@ async def fire_event(
                 continue
             # Filter by event type if events list is specified
             if events and event_type not in events:
+                continue
+            # SSRF prevention: validate webhook URL before sending
+            try:
+                _validate_webhook_url(url)
+            except ValueError as exc:
+                logger.warning("Webhook URL validation failed: %s", exc)
                 continue
             try:
                 resp = await client.post(

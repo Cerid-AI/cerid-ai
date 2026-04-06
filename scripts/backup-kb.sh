@@ -51,7 +51,7 @@ echo "  ✅ ChromaDB backed up ($(du -sh "$BACKUP_DIR/chroma" | awk '{print $1}'
 
 # --- Redis ---
 echo "[3/3] Backing up Redis..."
-docker exec ai-companion-redis redis-cli -a "${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}" BGSAVE 2>/dev/null || echo "  (redis exec failed — copying as-is)"
+docker exec ai-companion-redis redis-cli -a "${REDIS_PASSWORD:-cerid-dev}" BGSAVE 2>/dev/null || echo "  (redis exec failed — copying as-is)"
 sleep 2
 cp -r "$INFRA_DATA/redis" "$BACKUP_DIR/redis"
 echo "  ✅ Redis backed up ($(du -sh "$BACKUP_DIR/redis" | awk '{print $1}'))"

@@ -49,6 +49,13 @@
 - `POST /agent/memory/archive` — Archive old conversation memories
 - `POST /agent/curate` — Score artifact quality across the KB- `POST /agent/curate/estimate` — Estimate synopsis generation cost before running
 
+**Trading agent KB enrichment endpoints (gated by `CERID_TRADING_ENABLED`):**
+- `POST /agent/trading/signal` — Enrich a trading signal with KB context
+- `POST /agent/trading/herd-detect` — Detect herd behavior via correlation graph violations
+- `POST /agent/trading/kelly-size` — Query historical CV_edge for Kelly criterion position sizing
+- `POST /agent/trading/cascade-confirm` — Confirm cascade liquidation pattern against historical data
+- `POST /agent/trading/longshot-surface` — Query stored calibration surface for longshot probability estimates
+
 **Auth endpoints (conditional on `CERID_MULTI_USER=true`):**
 - `POST /auth/register` — Create new user account (returns JWT tokens)
 - `POST /auth/login` — Authenticate with email/password (returns JWT tokens)
@@ -136,7 +143,7 @@
 - `POST /mcp/sse` — SSE stream (POST variant)
 - `POST /mcp/messages?sessionId=X` — JSON-RPC handler
 
-### MCP Tools (21 total)
+### MCP Tools (26 total)
 
 **Core tools (19):**
 - `pkb_query` — Single-domain query
@@ -154,23 +161,39 @@
 - `pkb_curate` — Score artifact quality across the knowledge base- `pkb_digest` — Summary of recent KB activity, connections, and health status
 - `pkb_scheduler_status` — Get status of scheduled maintenance jobs
 - `pkb_check_hallucinations` — Verify LLM claims against KB- `pkb_memory_extract` — Extract memories from conversations- `pkb_memory_archive` — Archive old conversation memories- `pkb_ingest_multimodal` — Multi-modal ingestion (OCR, audio, vision)
+**Trading tools (5, gated by `CERID_TRADING_ENABLED`):**
+- `pkb_trading_signal` — Trading signal enrichment via KB
+- `pkb_herd_detect` — Herd behavior detection
+- `pkb_kelly_size` — Kelly criterion position sizing
+- `pkb_cascade_confirm` — Cascade liquidation confirmation
+- `pkb_longshot_surface` — Longshot opportunity surfacing
+
 **Additional tools:**
 - `pkb_web_search` — Agentic web search with verification- `pkb_memory_recall` — Context-aware memory retrieval with decay scoring
 ### SDK Router (`/sdk/v1/`) — Stable External API
 
-Versioned facade for external consumers. Delegates to existing agent endpoints but provides a stable contract that survives internal refactoring.
+Versioned facade for cerid-series consumers (trading-agent, future projects). Delegates to existing agent endpoints but provides a stable contract that survives internal refactoring.
 
 - `POST /sdk/v1/query` — KB query with reranking and RAG modes (delegates to `/agent/query`, supports `rag_mode` and `source_config`)
 - `POST /sdk/v1/hallucination` — Hallucination detection (delegates to `/agent/hallucination`)
 - `POST /sdk/v1/memory/extract` — Memory extraction (delegates to `/agent/memory/extract`)
 - `GET /sdk/v1/health` — Health check with `version`, `services`, `features` (subset of feature toggles relevant to consumers), and `internal_llm` (current internal LLM provider and model)
 
+**SDK Trading endpoints (gated by `CERID_TRADING_ENABLED`):**
+- `POST /sdk/v1/trading/signal` — Trading signal enrichment via KB (delegates to `/agent/trading/signal`)
+- `POST /sdk/v1/trading/herd-detect` — Herd behavior detection (delegates to `/agent/trading/herd-detect`)
+- `POST /sdk/v1/trading/kelly-size` — Kelly criterion position sizing (delegates to `/agent/trading/kelly-size`)
+- `POST /sdk/v1/trading/cascade-confirm` — Cascade liquidation confirmation (delegates to `/agent/trading/cascade-confirm`)
+- `POST /sdk/v1/trading/longshot-surface` — Longshot opportunity surfacing (delegates to `/agent/trading/longshot-surface`)
+
 **Client identification:** Send `X-Client-ID` header to get per-client rate limiting. Each client ID gets an independent rate budget:
 
 | Client ID | `/agent/` & `/sdk/` | `/ingest` | `/recategorize` |
 |-----------|---------------------|-----------|-----------------|
 | `gui` (default) | 20 req/min | 10 req/min | 10 req/min |
+| `trading-agent` | 80 req/min | — | — |
 | `_default` (unknown) | 10 req/min | 5 req/min | 5 req/min |
+| `boardroom-agent` | 60 req/min | — | — |
 
 Configured in `CONSUMER_REGISTRY` in `config/settings.py`. Rate limits are auto-derived from the registry.
 
@@ -523,8 +546,9 @@ make deps-check
 
 ### Setup & Configuration
 - `GET /setup/status` — Check if system is configured
+- `GET /setup/system-check` — Auto-detect system capabilities (RAM, Docker, .env keys, Ollama, archive path)
 - `POST /setup/validate-key` — Test an API key
-- `POST /setup/configure` — Apply initial configuration
+- `POST /setup/configure` — Apply initial configuration (API keys + KB config + Ollama settings)
 - `GET /setup/health` — Service health dashboard
 
 ### Providers (BYOK)
@@ -578,6 +602,52 @@ make deps-check
 - `GET /plugins/{name}/config` — Get plugin configuration
 - `PUT /plugins/{name}/config` — Update plugin configuration
 - `POST /plugins/scan` — Scan for new plugins
+
+### Custom Agents
+
+User-defined custom agents with CRUD operations and template support.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/custom-agents/templates` | List built-in agent templates |
+| `POST` | `/custom-agents/from-template/{template_id}` | Create agent from template with optional overrides |
+| `GET` | `/custom-agents` | List custom agents (pagination: `offset`, `limit`) |
+| `POST` | `/custom-agents` | Create a new custom agent |
+| `GET` | `/custom-agents/{agent_id}` | Get agent details |
+| `PATCH` | `/custom-agents/{agent_id}` | Partially update an agent |
+| `DELETE` | `/custom-agents/{agent_id}` | Delete an agent |
+| `POST` | `/custom-agents/{agent_id}/query` | Execute query using agent's config (domains, model, returns `agent_config` with system_prompt, temperature) |
+
+### Plugin Registry (Community)
+
+Browse and search community plugins from the external registry.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/plugin-registry` | Search/list community plugins (query: `q`, `type`) |
+| `GET` | `/plugin-registry/{name}` | Get community plugin details by name |
+
+### System Monitor
+
+Storage metrics and ingestion history.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/system/storage` | Aggregated storage metrics across ChromaDB, Neo4j, Redis, BM25 (cached 60s). Returns status: healthy/warning/critical |
+| `GET` | `/admin/ingest-history` | Recent ingestion events from Redis stream (pagination: `limit`, `offset` as stream cursor) |
+
+### Webhook Subscriptions
+
+Subscribe to events and receive webhook notifications.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/webhooks` | List all webhook subscriptions |
+| `POST` | `/webhooks` | Create a webhook subscription |
+| `GET` | `/webhooks/{sub_id}` | Get subscription details |
+| `PATCH` | `/webhooks/{sub_id}` | Update a subscription |
+| `DELETE` | `/webhooks/{sub_id}` | Delete a subscription |
+| `GET` | `/webhooks/{sub_id}/deliveries` | List delivery history for a subscription |
 
 ### Workflows
 - `GET /workflows` — List workflows
@@ -634,6 +704,9 @@ Model can be changed post-setup via Settings UI → Ollama → Change button.
 **Cost:** $0 for all internal LLM calls when using Ollama. Falls back to OpenRouter (paid) when Ollama is unavailable.
 
 ### Billing & Licensing
+
+> **Internal** — These endpoints are defined but not yet registered in the API. They require Stripe integration and are not accessible via the default server configuration.
+
 - `POST /billing/create-checkout` — Create Stripe Checkout session for Pro tier upgrade
 - `POST /billing/webhook` — Stripe webhook handler (checkout.session.completed, invoice.payment_succeeded, customer.subscription.deleted)
 - `GET /billing/status` — Current license/subscription status

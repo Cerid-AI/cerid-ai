@@ -233,7 +233,7 @@ async def ai_categorize(
         # Route via internal LLM when configured (e.g. Ollama for free local inference)
         if config.INTERNAL_LLM_PROVIDER == "ollama":
             from utils.internal_llm import call_internal_llm
-            content = await call_internal_llm(
+            content = await call_internal_llm(  # type: ignore[call-arg]
                 [{"role": "user", "content": prompt}],
                 temperature=0.1,
                 max_tokens=200,

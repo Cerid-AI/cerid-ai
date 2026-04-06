@@ -11,14 +11,17 @@ HTML="/usr/share/nginx/html/index.html"
 ENV_JS="/usr/share/nginx/html/env-config.js"
 VERSION_JS="/usr/share/nginx/html/version.json"
 
-# Write env config
-cat > "$ENV_JS" <<EOF
-window.__ENV__ = {
-  VITE_MCP_URL: "${VITE_MCP_URL:-/api/mcp}",
-  VITE_BIFROST_URL: "${VITE_BIFROST_URL:-/api/bifrost}",
-  VITE_CERID_API_KEY: "${VITE_CERID_API_KEY:-}"
-};
-EOF
+# Write env config — JSON-encode values to prevent XSS via env vars
+python3 -c "
+import json, os
+vals = {
+    'VITE_MCP_URL': os.environ.get('VITE_MCP_URL', '/api/mcp'),
+    'VITE_BIFROST_URL': os.environ.get('VITE_BIFROST_URL', '/api/bifrost'),
+    'VITE_CERID_API_KEY': os.environ.get('VITE_CERID_API_KEY', ''),
+}
+pairs = ', '.join(f'{k}: {json.dumps(v)}' for k, v in vals.items())
+print(f'window.__ENV__ = {{{pairs}}};')
+" > "$ENV_JS"
 
 # Write version manifest (used by stale-cache detection)
 cat > "$VERSION_JS" <<EOF

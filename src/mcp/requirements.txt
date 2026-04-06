@@ -4,11 +4,11 @@ sentry-sdk[fastapi]>=2.35.0
 uvicorn[standard]>=0.20,<1
 pydantic>=2.0,<3
 
+# MCP protocol
+mcp>=1.0,<2
+
 # HTTP client
 httpx>=0.24,<0.29
-
-# MCP client — consume external MCP servers as tools
-mcp>=1.0,<2
 
 # Templating (Bifrost config generation)
 jinja2>=3.1,<4
@@ -35,16 +35,20 @@ PyStemmer>=2.2
 # Scheduling
 apscheduler>=3.10,<4
 
-# Auth (optional — only needed for CERID_MULTI_USER=true)
-# PyJWT>=2.8,<3
-# bcrypt>=4.0,<6
+# Logging (used by trading agent + internal tests)
+
+# Auth (optional — only needed for multi-user mode)
+# optional: PyJWT>=2.8,<3
+# optional: bcrypt>=4.0,<6
 
 # Utilities
 cryptography>=42,<47
 python-multipart>=0.0.9,<1
 
-# Optional extras — install separately for specific features:
-#   pip install pytesseract Pillow          # OCR plugin (+ apt install tesseract-ocr)
-#   pip install faster-whisper              # Audio transcription plugin (+ apt install ffmpeg)
-#   pip install stripe                      # Billing/subscription management
-#   pip install bcrypt PyJWT                # Multi-user JWT authentication
+# Plugins (Pro tier — system deps: tesseract-ocr, ffmpeg in Dockerfile)
+# optional (Pro OCR plugin): pytesseract>=0.3.10
+# optional (Pro OCR plugin): Pillow>=10.0
+# Vision: uses httpx (already in core) + Bifrost/OpenRouter — no extra deps
+
+# Billing (Stripe — optional, only needed for Pro tier purchase flow)
+stripe>=8.0
