@@ -181,6 +181,7 @@ function wizardReducer(state: WizardState, action: WizardAction): WizardState {
         ollama: {
           ...state.ollama,
           detected: result.ollama_detected,
+          enabled: result.ollama_detected,  // auto-enable when Ollama is available
           model: result.ollama_models.length > 0 ? result.ollama_models[0] : null,
         },
       }
