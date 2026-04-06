@@ -6,8 +6,8 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Eye, EyeOff, Check, X, Loader2, ExternalLink } from "lucide-react"
-import { validateProviderKey } from "@/lib/api"
 import { cn } from "@/lib/utils"
+import { validateProviderKey } from "@/lib/api/settings"
 
 type ValidationStatus = "idle" | "checking" | "valid" | "invalid"
 
@@ -32,24 +32,14 @@ export function ApiKeyInput({
 }: ApiKeyInputProps) {
   const [value, setValue] = useState("")
   const [visible, setVisible] = useState(false)
-  const [status, setStatus] = useState<ValidationStatus>(preconfigured ? "valid" : "idle")
-
-  // Auto-test preconfigured keys on mount
-  useEffect(() => {
-    if (preconfigured && status === "valid") {
-      handleTest()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  const [status, setStatus] = useState<ValidationStatus>("idle")
   const [error, setError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const mountedRef = useRef(false)
 
-  const handleTest = useCallback(async () => {
-    // For preconfigured keys, send "__env__" sentinel — backend tests the env-var key
-    const keyToTest = value.trim() || (preconfigured ? "__env__" : "")
+  const runValidation = useCallback(async (keyToTest: string) => {
     if (!keyToTest) return
 
-    // Cancel any in-flight validation
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
@@ -57,7 +47,6 @@ export function ApiKeyInput({
     setStatus("checking")
     setError(null)
 
-    // 5s timeout
     const timeout = setTimeout(() => controller.abort(), 5000)
 
     try {
@@ -66,7 +55,7 @@ export function ApiKeyInput({
       clearTimeout(timeout)
       if (result.valid) {
         setStatus("valid")
-        onKeyValidated(keyToTest || "(from .env)", true)
+        onKeyValidated(keyToTest === "__env__" ? "(from .env)" : keyToTest, true)
       } else {
         setStatus("invalid")
         setError(result.suggestion ?? result.error ?? "Invalid API key")
@@ -84,11 +73,23 @@ export function ApiKeyInput({
       setError("Connection failed — is the backend running?")
       onKeyValidated(keyToTest, false)
     }
-  }, [value, provider, preconfigured, onKeyValidated])
+  }, [provider, onKeyValidated])
+
+  const handleTest = useCallback(() => {
+    const keyToTest = value.trim() || (preconfigured ? "__env__" : "")
+    runValidation(keyToTest)
+  }, [value, preconfigured, runValidation])
+
+  // Auto-test preconfigured keys on mount
+  useEffect(() => {
+    if (preconfigured && !mountedRef.current) {
+      mountedRef.current = true
+      runValidation("__env__")
+    }
+  }, [preconfigured, runValidation])
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setValue(e.target.value)
-    // Reset validation when key changes
     if (status !== "idle") {
       setStatus("idle")
       setError(null)
@@ -165,13 +166,10 @@ export function ApiKeyInput({
         <p className="text-xs text-destructive">{error}</p>
       )}
       {status === "valid" && preconfigured && !value && (
-        <p className="text-xs text-green-600 dark:text-green-400">
-          <Check className="mr-1 inline h-3 w-3" />
+        <p className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
+          <Check className="h-3 w-3" />
           Already configured in environment
         </p>
-      )}
-      {status === "valid" && !(preconfigured && !value) && (
-        <p className="text-xs text-green-600 dark:text-green-400">Key validated successfully</p>
       )}
     </div>
   )
