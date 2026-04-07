@@ -453,12 +453,12 @@ export function KnowledgeConsole({
         </ScrollArea>
       )}
 
-      {/* Footer — confidence + source summary */}
+      {/* Footer — relevance + source summary */}
       {hasQueried && totalSources > 0 && (
         <div className="border-t bg-muted/30 px-3 py-2">
-          {/* Confidence bar */}
+          {/* Relevance bar */}
           <div className="flex items-center gap-2 mb-1.5">
-            <span className="text-[11px] text-muted-foreground">Confidence</span>
+            <span className="text-[11px] text-muted-foreground">Relevance</span>
             <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
               <div
                 className="h-full rounded-full bg-primary transition-all"
