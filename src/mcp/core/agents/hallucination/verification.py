@@ -1323,9 +1323,12 @@ async def verify_claim(
         all_results.sort(key=lambda x: x.get("relevance", 0.0), reverse=True)
 
         # --- Fallback 1: No KB results at all → try external verification ---
+        # Only force web search for claims that genuinely need current data.
+        # Historical/established facts (pre-2024) can be verified via cross-model.
         if not all_results:
+            needs_web = _is_current_event_claim(claim) or _is_recency_claim(claim)
             ext_result = await _verify_claim_externally(
-                claim, model, force_web_search=True, streaming=streaming,
+                claim, model, force_web_search=needs_web, streaming=streaming,
                 expert_mode=expert_mode, response_context=response_context,
             )
             return await _cache_result({
