@@ -245,15 +245,33 @@ async def update_assignments(body: ModelAssignments):
 
 @router.get("/updates")
 async def list_model_updates():
-    """List pending model updates."""
-    return {"updates": [], "last_checked": None}
+    """List pending model updates.
+
+    Returns both the flat ``updates`` list (ModelUpdatesFullResponse) and the
+    categorised ``new``/``deprecated`` buckets (ModelUpdatesResponse) so both
+    frontend callers get the shape they expect.
+    """
+    return {
+        "updates": [],
+        "new": [],
+        "deprecated": [],
+        "last_checked": None,
+        "catalog_size": 0,
+    }
 
 
 @router.post("/updates/check")
 async def check_model_updates():
     """Trigger a model update check against OpenRouter."""
     # Future: compare local model registry against OpenRouter /api/v1/models
-    return {"checked": True, "new_updates": 0}
+    return {
+        "checked": True,
+        "success": True,
+        "new_updates": 0,
+        "new_count": 0,
+        "deprecated_count": 0,
+        "last_checked": None,
+    }
 
 
 @router.post("/updates/dismiss/{update_id}")
