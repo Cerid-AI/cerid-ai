@@ -181,6 +181,7 @@ function wizardReducer(state: WizardState, action: WizardAction): WizardState {
         ollama: {
           ...state.ollama,
           detected: result.ollama_detected,
+          enabled: result.ollama_detected,  // auto-enable when Ollama is available
           model: result.ollama_models.length > 0 ? result.ollama_models[0] : null,
         },
       }
@@ -255,13 +256,30 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   const healthTimerRef = useRef<ReturnType<typeof setTimeout>>(null)
   const { setMode } = useUIMode()
 
-  // Check for saved progress on mount
+  // Check for saved progress on mount — but only if backend hasn't been reset
   useEffect(() => {
-    const saved = loadProgress()
-    if (saved && saved.step > 0) {
-      setResumeStep(saved.step)
-      setShowResumePrompt(true)
-    }
+    fetchSetupStatus()
+      .then((status) => {
+        // If setup_required is true AND we have saved progress with applied=true,
+        // the system was reset — clear stale wizard state
+        const saved = loadProgress()
+        if (saved && saved.applied && status.setup_required) {
+          localStorage.removeItem(STORAGE_KEY)
+          return // fresh start
+        }
+        if (saved && saved.step > 0) {
+          setResumeStep(saved.step)
+          setShowResumePrompt(true)
+        }
+      })
+      .catch(() => {
+        // If backend unreachable, still allow resume from local state
+        const saved = loadProgress()
+        if (saved && saved.step > 0) {
+          setResumeStep(saved.step)
+          setShowResumePrompt(true)
+        }
+      })
   }, [])
 
   // Detect pre-configured keys from backend (e.g. already in .env)

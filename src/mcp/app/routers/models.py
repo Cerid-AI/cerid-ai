@@ -243,6 +243,25 @@ async def update_assignments(body: ModelAssignments):
     )
 
 
+@router.get("/updates")
+async def list_model_updates():
+    """List pending model updates."""
+    return {"updates": [], "last_checked": None}
+
+
+@router.post("/updates/check")
+async def check_model_updates():
+    """Trigger a model update check against OpenRouter."""
+    # Future: compare local model registry against OpenRouter /api/v1/models
+    return {"checked": True, "new_updates": 0}
+
+
+@router.post("/updates/dismiss/{update_id}")
+async def dismiss_model_update(update_id: str):
+    """Dismiss a model update notification."""
+    return {"dismissed": True, "id": update_id}
+
+
 @router.get("/available", response_model=AvailableModelsResponse)
 async def list_available_models():
     """List all models available from configured providers."""

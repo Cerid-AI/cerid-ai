@@ -19,9 +19,20 @@ import time
 from typing import Any
 
 import config
-from core.agents.hallucination.extraction import _reclassify_recency, extract_claims
+from core.agents.hallucination.extraction import (
+    _detect_evasion,
+    _extract_citation_claims,
+    _extract_claims_heuristic,
+    _extract_claims_llm,
+    _extract_ignorance_claims,
+    _merge_special_claims,
+    _reclassify_recency,
+    _resolve_pronouns_heuristic,
+    extract_claims,
+)
 from core.agents.hallucination.patterns import (
     _get_claim_verify_semaphore,
+    _is_current_event_claim,
     _is_ignorance_admission,
     _is_recency_claim,
 )
@@ -277,27 +288,41 @@ async def verify_response_streaming(
         }
         return
 
-    # Extraction with timeout — if Bifrost hangs or crashes, the generator
-    # must still yield a summary instead of dying with an unhandled exception.
-    EXTRACTION_TIMEOUT = 30  # seconds — Bifrost default is 20s
-    try:
-        claims, method = await asyncio.wait_for(
-            extract_claims(response_text, user_query=user_query),
-            timeout=EXTRACTION_TIMEOUT,
-        )
-    except TimeoutError:
-        logger.error(
-            "Claim extraction timed out after %ds for conversation %s",
-            EXTRACTION_TIMEOUT, conversation_id,
-        )
-        claims, method = [], "timeout"
-    except Exception as extraction_exc:
-        logger.error(
-            "Claim extraction failed for conversation %s: %s",
-            conversation_id, extraction_exc,
-        )
-        claims, method = [], "error"
+    # ── Stage 1: Synchronous heuristic extraction (<5ms) ──────────────
+    max_claims = config.HALLUCINATION_MAX_CLAIMS
+    ignorance_claims = _extract_ignorance_claims(response_text)
+    evasion_claims = _detect_evasion(response_text, user_query) if user_query else []
+    citation_claims = _extract_citation_claims(response_text)
+    heuristic_raw = _extract_claims_heuristic(response_text)
+    heuristic_claims = _resolve_pronouns_heuristic(heuristic_raw, response_text, user_query)
+    initial_claims = _merge_special_claims(
+        heuristic_claims, ignorance_claims, evasion_claims, citation_claims, max_claims,
+    )
 
+    # ── Stage 2: Decision ─────────────────────────────────────────────
+    # If heuristic found claims → use them immediately (zero LLM wait).
+    # If heuristic found nothing → fall back to LLM extraction (complex/conversational response).
+    if initial_claims:
+        method = "heuristic"
+    else:
+        # No heuristic claims — must wait for LLM
+        try:
+            llm_result = await asyncio.wait_for(
+                _extract_claims_llm(response_text, max_claims, user_query=user_query),
+                timeout=30,
+            )
+            initial_claims = _merge_special_claims(
+                llm_result or [], ignorance_claims, evasion_claims, citation_claims, max_claims,
+            )
+            method = "llm" if llm_result else "none"
+        except TimeoutError:
+            logger.error("Claim extraction timed out for conversation %s", conversation_id)
+            method = "timeout"
+        except Exception as exc:
+            logger.error("Claim extraction failed for %s: %s", conversation_id, exc)
+            method = "error"
+
+    claims = initial_claims
     if not claims:
         yield {
             "type": "summary",
@@ -314,12 +339,20 @@ async def verify_response_streaming(
         return
 
     # Build topic context for claim verification (prevents ambiguous claims).
-    # When user_query is provided, the heuristic is fast and sufficient —
-    # skip the LLM call to save 500ms–2s off the critical path.
     if user_query:
         response_context = _heuristic_response_context(response_text, user_query)
     else:
         response_context = await _extract_response_context(response_text, user_query)
+
+    # Enrich context with the full claim list — when verifying "red: 620-750nm",
+    # the verifier needs to know the response listed ALL wavelengths in a table.
+    # This prevents false refutations on decontextualized numeric claims.
+    if claims and len(claims) > 1:
+        claim_list_ctx = " | ".join(c[:80] for c in claims[:10])
+        response_context = (
+            f"{response_context or ''}\n"
+            f"Other claims in the same response: {claim_list_ctx}"
+        ).strip()
 
     # Classify each claim's type for frontend display
     def _claim_type(claim_text: str) -> str:
@@ -374,7 +407,6 @@ async def verify_response_streaming(
     # Group time-sensitive claims (prices, recency) going to the same web-search
     # model and verify them in a single LLM call instead of N individual calls.
     # This reduces API round-trips, avoids rate limits, and prevents timeouts.
-    from core.agents.hallucination.patterns import _is_current_event_claim
     from core.agents.hallucination.verification import verify_claims_batch_external
 
     batch_results: dict[int, dict[str, Any]] = {}
@@ -443,6 +475,18 @@ async def verify_response_streaming(
     for idx, result in batch_results.items():
         collected_results[idx] = result
 
+    def _extract_claim_context(claim_text: str) -> str | None:
+        """Extract 1-2 sentences before and after the claim in the original response."""
+        # Find the claim in the response text
+        claim_start = response_text.find(claim_text[:40])
+        if claim_start < 0:
+            return None
+        # Get ~200 chars before and after for surrounding context
+        ctx_start = max(0, claim_start - 200)
+        ctx_end = min(len(response_text), claim_start + len(claim_text) + 200)
+        surrounding = response_text[ctx_start:ctx_end].strip()
+        return surrounding if len(surrounding) > len(claim_text) + 20 else None
+
     async def _verify_indexed(idx: int, claim_text: str) -> tuple[int, dict[str, Any]]:
         """Verify a single claim with a per-claim timeout and concurrency limit."""
         # For batch candidates, wait briefly for the concurrent batch task
@@ -457,13 +501,21 @@ async def verify_response_streaming(
 
         await _wait_for_memory(config.VERIFY_MEMORY_FLOOR_MB, f"claim-{idx}")
         sem = _get_claim_verify_semaphore()
-        # Use extended timeout for expert mode (Grok 4 + :online web search)
-        # and current-event claims that require web search + reasoning
-        claim_timeout = (
-            config.STREAMING_EXPERT_CLAIM_TIMEOUT
-            if expert_mode or _claim_type(claim_text) == "recency"
-            else config.STREAMING_PER_CLAIM_TIMEOUT
+        # Adaptive timeout based on verification strategy:
+        #   - Expert mode (Grok 4 + web search): longest (30s)
+        #   - Web search claims (temporal, current-event, citation): medium (25s)
+        #   - Cross-model (general factual): fastest (12s)
+        ct = _claim_type(claim_text)
+        needs_web = (
+            ct in ("recency", "evasion", "citation", "ignorance")
+            or _is_current_event_claim(claim_text)
         )
+        if expert_mode:
+            claim_timeout = config.STREAMING_EXPERT_CLAIM_TIMEOUT  # 30s
+        elif needs_web:
+            claim_timeout = 25.0  # web search + reasoning
+        else:
+            claim_timeout = 12.0  # cross-model is fast
         try:
             async with sem:
                 result = await asyncio.wait_for(
@@ -473,6 +525,7 @@ async def verify_response_streaming(
                         expert_mode=expert_mode,
                         source_artifact_ids=source_artifact_ids,
                         response_context=response_context,
+                        claim_context=_extract_claim_context(claim_text),
                     ),
                     timeout=claim_timeout,
                 )

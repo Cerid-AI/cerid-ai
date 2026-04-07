@@ -14,13 +14,23 @@ from pydantic import BaseModel, Field
 
 import config
 from app.deps import get_chroma, get_neo4j, get_redis
-from app.models.trading import (
-    CascadeConfirmRequest,
-    HerdDetectRequest,
-    KellySizeRequest,
-    LongshotSurfaceRequest,
-    TradingSignalRequest,
-)
+
+# isort: split
+try:
+    from app.models.trading import (
+        CascadeConfirmRequest,
+        HerdDetectRequest,
+        KellySizeRequest,
+        LongshotSurfaceRequest,
+        TradingSignalRequest,
+    )
+except ImportError:
+    # Trading models not available in public distro
+    CascadeConfirmRequest = None  # type: ignore[assignment,misc]
+    HerdDetectRequest = None  # type: ignore[assignment,misc]
+    KellySizeRequest = None  # type: ignore[assignment,misc]
+    LongshotSurfaceRequest = None  # type: ignore[assignment,misc]
+    TradingSignalRequest = None  # type: ignore[assignment,misc]
 from app.services.ingestion import ingest_content, validate_file_path
 
 router = APIRouter()
@@ -37,6 +47,8 @@ class AgentQueryRequest(BaseModel):
     model: str | None = Field(None, description="Generating model (for Self-RAG metadata)")
     enable_self_rag: bool | None = Field(None, description="Override Self-RAG toggle (None = use server config)")
     strict_domains: bool | None = Field(None, description="When True, disables cross-domain affinity bleed. None = use consumer default.")
+    rag_mode: str = Field("manual", description="Retrieval mode: manual | smart | custom_smart")
+    source_config: dict | None = Field(None, description="Source weights/toggles for custom_smart mode")
 
 
 class TriageFileRequest(BaseModel):
@@ -169,21 +181,40 @@ async def agent_query_endpoint(req: AgentQueryRequest, request: Request):
         consumer_strict = consumer.get("strict_domains", False)
         strict_domains = req.strict_domains if req.strict_domains else consumer_strict
 
-        from agents.query_agent import agent_query
-        result = await agent_query(
-            query=req.query,
-            domains=req.domains,
-            top_k=req.top_k,
-            use_reranking=req.use_reranking,
-            conversation_messages=req.conversation_messages,
-            chroma_client=get_chroma(),
-            redis_client=get_redis(),
-            neo4j_driver=get_neo4j(),
-            debug_timing=debug_timing,
-            allowed_domains=allowed_domains,
-            strict_domains=strict_domains,
-            model=req.model,
-        )
+        if req.rag_mode in ("smart", "custom_smart"):
+            from agents.retrieval_orchestrator import orchestrated_query
+            result = await orchestrated_query(
+                query=req.query,
+                rag_mode=req.rag_mode,
+                domains=req.domains,
+                top_k=req.top_k,
+                use_reranking=req.use_reranking,
+                conversation_messages=req.conversation_messages,
+                chroma_client=get_chroma(),
+                redis_client=get_redis(),
+                neo4j_driver=get_neo4j(),
+                source_config=req.source_config,
+                debug_timing=debug_timing,
+                allowed_domains=allowed_domains,
+                strict_domains=strict_domains,
+                model=req.model,
+            )
+        else:
+            from agents.query_agent import agent_query
+            result = await agent_query(
+                query=req.query,
+                domains=req.domains,
+                top_k=req.top_k,
+                use_reranking=req.use_reranking,
+                conversation_messages=req.conversation_messages,
+                chroma_client=get_chroma(),
+                redis_client=get_redis(),
+                neo4j_driver=get_neo4j(),
+                debug_timing=debug_timing,
+                allowed_domains=allowed_domains,
+                strict_domains=strict_domains,
+                model=req.model,
+            )
 
         # Self-RAG: validate claims and refine retrieval if enabled
         use_self_rag = req.enable_self_rag if req.enable_self_rag is not None else config.ENABLE_SELF_RAG
@@ -391,6 +422,30 @@ async def memory_archive_endpoint(req: MemoryArchiveRequest):
     except Exception as e:
         logger.error(f"Memory archive error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class MemoryRecallRequest(BaseModel):
+    query: str
+    top_k: int = 5
+    min_score: float = 0.4
+
+
+@router.post("/agent/memory/recall")
+async def memory_recall_endpoint(req: MemoryRecallRequest):
+    """Recall memories relevant to a query."""
+    try:
+        from agents.memory import recall_memories
+        results = await recall_memories(
+            query=req.query,
+            chroma_client=get_chroma(),
+            neo4j_driver=get_neo4j(),
+            top_k=req.top_k,
+        )
+        # Filter by min_score and return
+        return [r for r in (results or []) if r.get("adjusted_score", r.get("score", 0)) >= req.min_score]
+    except Exception as e:
+        logger.error(f"Memory recall error: {e}")
+        return []  # graceful degradation — empty recall, not 500
 
 
 class VerifyStreamRequest(BaseModel):

@@ -124,6 +124,9 @@ class SettingsUpdateRequest(BaseModel):
     enable_context_compression: bool | None = Field(
         None, description="Enable LLM-based conversation context compression"
     )
+    rag_mode: str | None = Field(
+        None, description="RAG mode: smart, always, or off"
+    )
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -198,6 +201,7 @@ async def get_settings_endpoint():
         "ollama_url": os.getenv("OLLAMA_URL", "http://localhost:11434"),
         "internal_llm_provider": config.INTERNAL_LLM_PROVIDER,
         "internal_llm_model": config.INTERNAL_LLM_MODEL or config.OLLAMA_DEFAULT_MODEL,
+        "rag_mode": getattr(config, "RAG_MODE", "smart"),
     }
 
 
@@ -354,6 +358,16 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
     if req.enable_context_compression is not None:
         set_toggle("enable_context_compression", req.enable_context_compression)
         updated["enable_context_compression"] = req.enable_context_compression
+
+    if req.rag_mode is not None:
+        valid_rag_modes = ("smart", "always", "off")
+        if req.rag_mode not in valid_rag_modes:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid rag_mode: '{req.rag_mode}'. Must be one of {valid_rag_modes}",
+            )
+        config.RAG_MODE = req.rag_mode
+        updated["rag_mode"] = req.rag_mode
 
     if not updated:
         raise HTTPException(

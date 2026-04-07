@@ -136,8 +136,8 @@ export function KBContextPanel({
       {/* Header */}
       <div className="flex items-center gap-2 border-b px-3 py-2">
         <span className="flex-1 text-sm font-medium">Knowledge Context</span>
-        {totalResults > 0 && (
-          <span className="text-xs text-muted-foreground">{totalResults} results</span>
+        {results.length > 0 && (
+          <span className="text-xs text-muted-foreground">{results.length} results</span>
         )}
         <TooltipProvider delayDuration={0}>
           <Tooltip>
@@ -190,13 +190,13 @@ export function KBContextPanel({
         </div>
       </div>
 
-      {/* Confidence bar */}
-      {totalResults > 0 && (
+      {/* Relevance bar — only show when there are visible results */}
+      {results.length > 0 && (
         <TooltipProvider delayDuration={0}>
           <Tooltip>
             <TooltipTrigger asChild>
               <div className="flex items-center gap-2 px-3 py-1.5">
-                <span className="text-xs text-muted-foreground">Confidence</span>
+                <span className="text-xs text-muted-foreground">Relevance</span>
                 <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
                   <div
                     className="h-full rounded-full bg-primary transition-all"
@@ -206,7 +206,7 @@ export function KBContextPanel({
                 <span className="text-xs font-medium tabular-nums">{confidencePct}%</span>
               </div>
             </TooltipTrigger>
-            <TooltipContent>Confidence: {confidencePct}% retrieval confidence</TooltipContent>
+            <TooltipContent>Relevance: {confidencePct}% match to your query</TooltipContent>
           </Tooltip>
         </TooltipProvider>
       )}

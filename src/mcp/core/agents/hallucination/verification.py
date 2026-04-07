@@ -722,6 +722,7 @@ async def _verify_claim_externally(
     streaming: bool = False,
     expert_mode: bool = False,
     fast_mode: bool = False,
+    claim_context: str | None = None,
     response_context: str | None = None,
 ) -> dict[str, Any]:
     """Direct structured cross-model verification for a single claim.
@@ -921,9 +922,15 @@ async def _verify_claim_externally(
                     f"{context_line}{model_context}\n\n{_json_response_fmt}"
                 )
             else:
+                # Include surrounding text so the verifier understands the framing
+                # (e.g., a wavelength table where each row is a separate claim)
+                ctx_block = (
+                    f"\n\nSurrounding text from the response:\n\"{claim_context}\"\n"
+                    if claim_context else ""
+                )
                 user_prompt = (
                     f"Assess this claim for factual accuracy:\n\n"
-                    f"\"{claim}\"{context_line}{model_context}\n\n{_json_response_fmt}"
+                    f"\"{claim}\"{ctx_block}{context_line}{model_context}\n\n{_json_response_fmt}"
                 )
 
             messages = [
@@ -1218,8 +1225,13 @@ async def verify_claim(
     expert_mode: bool = False,
     source_artifact_ids: list[str] | None = None,
     response_context: str | None = None,
+    claim_context: str | None = None,
 ) -> dict[str, Any]:
     """Verify a single claim against the knowledge base and user memories.
+
+    When ``claim_context`` is provided, the surrounding text from the original
+    response is included in the verification prompt so the verifier understands
+    the framing (e.g., a table listing wavelengths for all colors).
 
     When ``response_context`` is provided, it is prepended to external
     verification prompts so the verifier knows the topic being discussed
@@ -1322,11 +1334,34 @@ async def verify_claim(
         # Sort by relevance descending
         all_results.sort(key=lambda x: x.get("relevance", 0.0), reverse=True)
 
+        # --- Heuristic sanity filter: drop KB results with low term overlap ---
+        # Vector similarity can return false matches (e.g., a cabin project doc
+        # matching a claim about light wavelengths). Free check — regex only.
+        claim_lower = claim.lower()
+        claim_terms = set(re.findall(r"\b[a-z]{4,}\b|\b\d[\d.,%]+\b", claim_lower))
+        if claim_terms:
+            filtered: list[dict[str, Any]] = []
+            for r in all_results:
+                src_text = r.get("content", "")[:300].lower()
+                src_terms = set(re.findall(r"\b[a-z]{4,}\b|\b\d[\d.,%]+\b", src_text))
+                overlap = len(claim_terms & src_terms) / len(claim_terms)
+                if overlap >= 0.25:
+                    filtered.append(r)
+                else:
+                    logger.debug(
+                        "KB result filtered (%.0f%% term overlap): '%s…' vs claim '%s…'",
+                        overlap * 100, src_text[:40], claim[:40],
+                    )
+            all_results = filtered
+
         # --- Fallback 1: No KB results at all → try external verification ---
+        # Only force web search for claims that genuinely need current data.
+        # Historical/established facts (pre-2024) can be verified via cross-model.
         if not all_results:
+            needs_web = _is_current_event_claim(claim) or _is_recency_claim(claim)
             ext_result = await _verify_claim_externally(
-                claim, model, force_web_search=True, streaming=streaming,
-                expert_mode=expert_mode, response_context=response_context,
+                claim, model, force_web_search=needs_web, streaming=streaming,
+                expert_mode=expert_mode, response_context=response_context, claim_context=claim_context,
             )
             return await _cache_result({
                 "claim": claim,
@@ -1359,7 +1394,7 @@ async def verify_claim(
             )
             ext_result = await _verify_claim_externally(
                 claim, model, streaming=streaming,
-                expert_mode=expert_mode, response_context=response_context,
+                expert_mode=expert_mode, response_context=response_context, claim_context=claim_context,
             )
             return await _cache_result({
                 "claim": claim,
@@ -1377,7 +1412,7 @@ async def verify_claim(
         if escalation_similarity < ext_kb_threshold:
             ext_result = await _verify_claim_externally(
                 claim, model, streaming=streaming,
-                expert_mode=expert_mode, response_context=response_context,
+                expert_mode=expert_mode, response_context=response_context, claim_context=claim_context,
             )
             # Use external result if it provides a stronger signal than KB
             if ext_result["confidence"] > raw_similarity:
@@ -1397,6 +1432,7 @@ async def verify_claim(
         details = _build_verification_details(claim, top_results)
 
         if similarity >= threshold:
+            # Spurious matches already filtered by the term-overlap check above.
             return await _cache_result({
                 "claim": claim,
                 "status": "verified",
@@ -1414,7 +1450,7 @@ async def verify_claim(
             # --- Fallback 3: KB says "unverified" → try external ---
             ext_result = await _verify_claim_externally(
                 claim, model, streaming=streaming,
-                expert_mode=expert_mode, response_context=response_context,
+                expert_mode=expert_mode, response_context=response_context, claim_context=claim_context,
             )
             if ext_result.get("status") in ("verified", "unverified"):
                 return await _cache_result({
@@ -1441,7 +1477,7 @@ async def verify_claim(
             # definitive answer before falling back to KB-only uncertain ---
             ext_result = await _verify_claim_externally(
                 claim, model, streaming=streaming,
-                expert_mode=expert_mode, response_context=response_context,
+                expert_mode=expert_mode, response_context=response_context, claim_context=claim_context,
             )
             if ext_result.get("status") in ("verified", "unverified"):
                 return await _cache_result({
@@ -1463,7 +1499,7 @@ async def verify_claim(
             ):
                 web_result = await _verify_claim_externally(
                     claim, model, force_web_search=True,
-                    expert_mode=expert_mode, response_context=response_context,
+                    expert_mode=expert_mode, response_context=response_context, claim_context=claim_context,
                 )
                 if web_result.get("status") in ("verified", "unverified"):
                     return await _cache_result({

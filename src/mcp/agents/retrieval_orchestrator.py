@@ -85,7 +85,7 @@ async def orchestrated_query(
     source_status: dict[str, str] = {"kb": "ok", "memory": "ok", "external": "ok"}
     timings: dict[str, float] = {}
 
-    # Run KB query and memory recall in parallel to save ~200ms
+    # Run KB query, memory recall, and external sources in parallel
     parallel_start = _time.monotonic()
 
     kb_task = asyncio.create_task(agent_query(
@@ -107,9 +107,14 @@ async def orchestrated_query(
         min_score=memory_min_score,
         timeout_ms=MEMORY_RECALL_TIMEOUT_MS,
     ))
+    external_task = asyncio.create_task(_query_external_sources(
+        query=query,
+        domain=domains[0] if domains else None,
+        timeout=5.0,
+    ))
 
-    kb_result, memory_results = await asyncio.gather(
-        kb_task, memory_task, return_exceptions=True,
+    kb_result, memory_results, external_results = await asyncio.gather(
+        kb_task, memory_task, external_task, return_exceptions=True,
     )
 
     timings["parallel_kb_memory_ms"] = round(
@@ -133,7 +138,13 @@ async def orchestrated_query(
         memory_results = []
         source_status["memory"] = "error"
 
-    # Separate external results from KB results
+    # Handle external source exceptions (fire-and-forget — never block KB)
+    if isinstance(external_results, BaseException):
+        logger.warning("External source query failed: %s", external_results)
+        external_results = []
+        source_status["external"] = "error"
+
+    # Separate any legacy external-tagged KB results and merge with real external
     ext_start = _time.monotonic()
     kb_sources = []
     external_sources = []
@@ -142,6 +153,17 @@ async def orchestrated_query(
             external_sources.append(r)
         else:
             kb_sources.append(r)
+
+    # Normalize real external results to match frontend ExternalSourceResult shape
+    for raw in external_results:
+        external_sources.append({
+            "content": raw.get("content", ""),
+            "relevance": raw.get("confidence", raw.get("relevance", 0.0)),
+            "source_url": raw.get("source_url", ""),
+            "source_name": raw.get("source_name", raw.get("title", "")),
+            "source_type": "external",
+        })
+
     timings["external_ms"] = round((_time.monotonic() - ext_start) * 1000, 1)
     if not external_sources:
         source_status["external"] = "no_results"
@@ -192,6 +214,31 @@ async def orchestrated_query(
             kb_result["context"] = memory_context
 
     return kb_result
+
+
+async def _query_external_sources(
+    query: str,
+    domain: str | None = None,
+    timeout: float = 5.0,
+) -> list[dict]:
+    """Query all enabled external data sources with a hard timeout.
+
+    Returns empty list on any failure — external sources must never block
+    the main KB retrieval pipeline.
+    """
+    try:
+        from utils.data_sources import registry
+
+        return await asyncio.wait_for(
+            registry.query_all(query, domain=domain, timeout=timeout),
+            timeout=timeout + 1.0,  # outer guard above per-source timeout
+        )
+    except asyncio.TimeoutError:
+        logger.warning("External source query timed out after %.1fs", timeout)
+        return []
+    except Exception as e:  # noqa: BLE001 — graceful degradation
+        logger.warning("External source query failed: %s", e)
+        return []
 
 
 async def _recall_with_timeout(

@@ -251,6 +251,8 @@ async def lifespan(app: FastAPI):
         chroma = get_chroma()
         for domain in DOMAINS:
             chroma.get_or_create_collection(name=collection_name(domain))
+        # Also pre-warm conversations collection (used by memory recall)
+        chroma.get_or_create_collection(name="domain_conversations")
         logger.info("ChromaDB + embedding model pre-warmed (%d domain collections)", len(DOMAINS))
     except Exception as e:
         logger.debug("Pre-warm ChromaDB failed (lazy init on first use): %s", e)
@@ -274,6 +276,33 @@ async def lifespan(app: FastAPI):
             logger.debug("Pre-warm Bifrost client failed: %s", e)
     else:
         logger.info("Bifrost disabled (CERID_USE_BIFROST=false) — LLM calls route directly to OpenRouter")
+
+    # Pre-warm Ollama client pool (for pipeline tasks)
+    if getattr(_startup_config, "OLLAMA_ENABLED", False):
+        try:
+            from core.utils.internal_llm import _get_ollama_client
+            await _get_ollama_client()
+            logger.info("Ollama HTTP client pool pre-warmed")
+        except Exception as e:
+            logger.debug("Pre-warm Ollama client failed: %s", e)
+
+    # Pre-warm reranker ONNX model (avoids 2-3s delay on first query)
+    try:
+        from utils.reranker import warmup as reranker_warmup
+        reranker_warmup()
+        logger.info("Reranker ONNX model pre-warmed")
+    except Exception as e:
+        logger.debug("Pre-warm reranker failed (will load on first use): %s", e)
+
+    # Pre-warm embedding model (ONNX inference session)
+    try:
+        from core.utils.embeddings import get_embedding_function
+        ef = get_embedding_function()
+        if ef:
+            ef(["warmup"])  # trigger lazy model load
+            logger.info("Embedding ONNX model pre-warmed")
+    except Exception as e:
+        logger.debug("Pre-warm embedding model failed: %s", e)
 
     yield
 
@@ -302,7 +331,7 @@ async def lifespan(app: FastAPI):
         await close_ollama_client()
     except Exception as exc:
         logger.warning("Ollama client shutdown failed: %s", exc)
-    # Close trading proxy connection pool
+    # Close trading proxy
     if CERID_TRADING_ENABLED:
         try:
             from app.routers.trading_proxy import close_trading_proxy_client
@@ -394,15 +423,15 @@ app.include_router(models.router, prefix="/api/v1")
 app.include_router(observability.router)
 app.include_router(observability.router, prefix="/api/v1")
 
-# Alerting API (threshold-based metric alerts with webhook notifications)
+# Alerting API
 app.include_router(alerts.router)
 app.include_router(alerts.router, prefix="/api/v1")
 
-# Migration API (Notion/Obsidian importers)
+# Migration API
 app.include_router(migration.router)
 app.include_router(migration.router, prefix="/api/v1")
 
-# WebSocket sync (real-time collaborative memory; gated on WS_SYNC_ENABLED)
+# WebSocket sync
 app.include_router(ws_sync.router)
 
 # Ollama local LLM proxy (always registered; endpoints gate on OLLAMA_ENABLED)
@@ -424,12 +453,12 @@ if CERID_MULTI_USER:
     app.include_router(auth_router.router)
     app.include_router(auth_router.router, prefix="/api/v1")
 
-# Trading proxy (only when trading agent integration is enabled)
+# Trading proxy
 if CERID_TRADING_ENABLED:
     from app.routers import trading_proxy
     app.include_router(trading_proxy.router)
 
-# Eval harness API (only when explicitly enabled)
+# Eval harness API
 if os.getenv("CERID_EVAL_ENABLED", "").lower() in ("1", "true", "yes"):
     from app.routers import eval as eval_router
     app.include_router(eval_router.router)

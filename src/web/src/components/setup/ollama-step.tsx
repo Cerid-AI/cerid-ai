@@ -236,7 +236,7 @@ export function OllamaStep({ ollamaDetected, ollamaModels, state, onChange }: Ol
               <div>
                 <Label className="text-xs font-medium">Enable for pipeline tasks</Label>
                 <p className="text-[10px] text-muted-foreground">
-                  Verification, routing, claim extraction
+                  Query routing, claim extraction, topic detection (not full verification)
                 </p>
               </div>
               <Switch
