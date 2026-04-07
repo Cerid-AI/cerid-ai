@@ -339,12 +339,20 @@ async def verify_response_streaming(
         return
 
     # Build topic context for claim verification (prevents ambiguous claims).
-    # When user_query is provided, the heuristic is fast and sufficient —
-    # skip the LLM call to save 500ms–2s off the critical path.
     if user_query:
         response_context = _heuristic_response_context(response_text, user_query)
     else:
         response_context = await _extract_response_context(response_text, user_query)
+
+    # Enrich context with the full claim list — when verifying "red: 620-750nm",
+    # the verifier needs to know the response listed ALL wavelengths in a table.
+    # This prevents false refutations on decontextualized numeric claims.
+    if claims and len(claims) > 1:
+        claim_list_ctx = " | ".join(c[:80] for c in claims[:10])
+        response_context = (
+            f"{response_context or ''}\n"
+            f"Other claims in the same response: {claim_list_ctx}"
+        ).strip()
 
     # Classify each claim's type for frontend display
     def _claim_type(claim_text: str) -> str:
@@ -467,6 +475,18 @@ async def verify_response_streaming(
     for idx, result in batch_results.items():
         collected_results[idx] = result
 
+    def _extract_claim_context(claim_text: str) -> str | None:
+        """Extract 1-2 sentences before and after the claim in the original response."""
+        # Find the claim in the response text
+        claim_start = response_text.find(claim_text[:40])
+        if claim_start < 0:
+            return None
+        # Get ~200 chars before and after for surrounding context
+        ctx_start = max(0, claim_start - 200)
+        ctx_end = min(len(response_text), claim_start + len(claim_text) + 200)
+        surrounding = response_text[ctx_start:ctx_end].strip()
+        return surrounding if len(surrounding) > len(claim_text) + 20 else None
+
     async def _verify_indexed(idx: int, claim_text: str) -> tuple[int, dict[str, Any]]:
         """Verify a single claim with a per-claim timeout and concurrency limit."""
         # For batch candidates, wait briefly for the concurrent batch task
@@ -505,6 +525,7 @@ async def verify_response_streaming(
                         expert_mode=expert_mode,
                         source_artifact_ids=source_artifact_ids,
                         response_context=response_context,
+                        claim_context=_extract_claim_context(claim_text),
                     ),
                     timeout=claim_timeout,
                 )
