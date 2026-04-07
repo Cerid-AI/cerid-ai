@@ -57,6 +57,40 @@ async def disable_source(name: str):
     return {"error": f"Source '{name}' not found"}
 
 
+# ── Query all enabled sources ────────────────────────────────────────────────
+
+
+class DataSourceQueryRequest(BaseModel):
+    """Request body for querying all enabled external data sources."""
+
+    query: str
+    domain: str | None = None
+    timeout: float = 5.0
+
+
+@router.post("/data-sources/query")
+@handle_errors(fallback={"results": [], "count": 0})
+async def query_data_sources(body: DataSourceQueryRequest):
+    """Query all enabled external data sources in parallel."""
+    from utils.data_sources import registry
+
+    results = await registry.query_all(
+        body.query, domain=body.domain, timeout=body.timeout,
+    )
+    # Normalize to match frontend ExternalSourceResult shape
+    normalized = [
+        {
+            "content": r.get("content", ""),
+            "relevance": r.get("confidence", r.get("relevance", 0.0)),
+            "source_url": r.get("source_url", ""),
+            "source_name": r.get("source_name", r.get("title", "")),
+            "source_type": "external",
+        }
+        for r in results
+    ]
+    return {"results": normalized, "count": len(normalized)}
+
+
 # ── Bookmark importer endpoints ──────────────────────────────────────────────
 
 
