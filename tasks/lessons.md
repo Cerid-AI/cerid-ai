@@ -340,6 +340,21 @@
 
 ### Security Audit Patterns
 - Path traversal: always `resolve()` + `is_relative_to()` on user-supplied paths
+
+---
+
+## Session 2026-04-06 — Beta Test Performance
+
+### Never increase timeouts to fix performance problems
+- **Problem:** Verification pipeline took 8-25s. I increased timeouts 3 times (10→20→60s) instead of investigating WHY extraction was slow.
+- **Root cause:** `extract_claims()` always called LLM first (Ollama 8-25s), only fell back to <50ms heuristic if LLM returned empty. Heuristic handles 80%+ of responses.
+- **Fix:** Reverse extraction order — heuristic first, LLM only as fallback. First event now <1.2s.
+- **Rule:** If something is slow, profile it and find the bottleneck. Increasing timeouts is a band-aid that masks the real problem. Ask: "What would a senior dev say about increasing a timeout as a fix?"
+
+### System-check endpoint runs inside Docker container, not on the host
+- **Problem:** `shutil.which("docker")` returns None inside a container. `.env` file doesn't exist inside the container.
+- **Fix:** Use `Path("/.dockerenv").exists()` for Docker detection. Read env vars (`os.getenv()`) for config keys (Docker passes them via `env_file`).
+- **Rule:** When building system-check endpoints, think about WHERE the code runs. Container-resident code can't see host filesystem or binaries.
 - SSRF: validate token endpoints from OIDC discovery docs (attacker controls the discovery JSON)
 - XSS in entrypoints: JSON-encode env vars before writing to JS files
 - Dict iteration: `list(dict.items())` to snapshot before async iteration
