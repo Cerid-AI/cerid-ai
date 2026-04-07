@@ -47,6 +47,8 @@ class AgentQueryRequest(BaseModel):
     model: str | None = Field(None, description="Generating model (for Self-RAG metadata)")
     enable_self_rag: bool | None = Field(None, description="Override Self-RAG toggle (None = use server config)")
     strict_domains: bool | None = Field(None, description="When True, disables cross-domain affinity bleed. None = use consumer default.")
+    rag_mode: str = Field("manual", description="Retrieval mode: manual | smart | custom_smart")
+    source_config: dict | None = Field(None, description="Source weights/toggles for custom_smart mode")
 
 
 class TriageFileRequest(BaseModel):
@@ -179,21 +181,40 @@ async def agent_query_endpoint(req: AgentQueryRequest, request: Request):
         consumer_strict = consumer.get("strict_domains", False)
         strict_domains = req.strict_domains if req.strict_domains else consumer_strict
 
-        from agents.query_agent import agent_query
-        result = await agent_query(
-            query=req.query,
-            domains=req.domains,
-            top_k=req.top_k,
-            use_reranking=req.use_reranking,
-            conversation_messages=req.conversation_messages,
-            chroma_client=get_chroma(),
-            redis_client=get_redis(),
-            neo4j_driver=get_neo4j(),
-            debug_timing=debug_timing,
-            allowed_domains=allowed_domains,
-            strict_domains=strict_domains,
-            model=req.model,
-        )
+        if req.rag_mode in ("smart", "custom_smart"):
+            from agents.retrieval_orchestrator import orchestrated_query
+            result = await orchestrated_query(
+                query=req.query,
+                rag_mode=req.rag_mode,
+                domains=req.domains,
+                top_k=req.top_k,
+                use_reranking=req.use_reranking,
+                conversation_messages=req.conversation_messages,
+                chroma_client=get_chroma(),
+                redis_client=get_redis(),
+                neo4j_driver=get_neo4j(),
+                source_config=req.source_config,
+                debug_timing=debug_timing,
+                allowed_domains=allowed_domains,
+                strict_domains=strict_domains,
+                model=req.model,
+            )
+        else:
+            from agents.query_agent import agent_query
+            result = await agent_query(
+                query=req.query,
+                domains=req.domains,
+                top_k=req.top_k,
+                use_reranking=req.use_reranking,
+                conversation_messages=req.conversation_messages,
+                chroma_client=get_chroma(),
+                redis_client=get_redis(),
+                neo4j_driver=get_neo4j(),
+                debug_timing=debug_timing,
+                allowed_domains=allowed_domains,
+                strict_domains=strict_domains,
+                model=req.model,
+            )
 
         # Self-RAG: validate claims and refine retrieval if enabled
         use_self_rag = req.enable_self_rag if req.enable_self_rag is not None else config.ENABLE_SELF_RAG
