@@ -1412,6 +1412,38 @@ async def verify_claim(
         details = _build_verification_details(claim, top_results)
 
         if similarity >= threshold:
+            # Heuristic sanity check: verify the KB source actually supports
+            # the claim. Vector similarity can produce false matches (e.g.,
+            # a document about "red cars" matching a claim about "red light").
+            # Check if key terms from the claim appear in the source snippet.
+            source_snippet = top_result.get("content", "")[:300].lower()
+            claim_lower = claim.lower()
+            # Extract key terms (nouns/numbers) from the claim
+            claim_terms = set(re.findall(r"\b[a-z]{4,}\b|\b\d[\d.,%]+\b", claim_lower))
+            source_terms = set(re.findall(r"\b[a-z]{4,}\b|\b\d[\d.,%]+\b", source_snippet))
+            overlap = claim_terms & source_terms
+            overlap_ratio = len(overlap) / max(len(claim_terms), 1)
+
+            if overlap_ratio < 0.3:
+                # KB match is likely spurious — escalate to external verification
+                logger.info(
+                    "KB match rejected (%.0f%% term overlap) for '%s…' — escalating",
+                    overlap_ratio * 100, claim[:50],
+                )
+                ext_result = await _verify_claim_externally(
+                    claim, model, streaming=streaming,
+                    expert_mode=expert_mode, response_context=response_context, claim_context=claim_context,
+                )
+                return await _cache_result({
+                    "claim": claim,
+                    "status": ext_result["status"],
+                    "similarity": ext_result["confidence"],
+                    "reason": ext_result["reason"],
+                    "verification_method": ext_result.get("verification_method", "none"),
+                    "verification_model": ext_result.get("verification_model"),
+                    "source_urls": ext_result.get("source_urls", []),
+                })
+
             return await _cache_result({
                 "claim": claim,
                 "status": "verified",
@@ -1419,7 +1451,7 @@ async def verify_claim(
                 "source_artifact_id": top_result.get("artifact_id", ""),
                 "source_filename": top_result.get("filename", ""),
                 "source_domain": top_result.get("domain", ""),
-                "source_snippet": top_result.get("content", "")[:200],
+                "source_snippet": source_snippet[:200],
                 "memory_source": bool(top_result.get("memory_source")),
                 "verification_details": details,
                 "verification_method": "kb",
