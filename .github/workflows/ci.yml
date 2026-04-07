@@ -251,9 +251,5 @@ jobs:
           version: v0.69.3
 
   # frontend-marketing: removed — marketing site separated to Cerid-AI/cerid-ai-marketing repo
-        env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.SENTRY_DSN_MARKETING }}
-          SENTRY_RELEASE: ${{ github.sha }}
 
   # frontend-desktop: removed — desktop app is internal-only (packages/desktop/ not in public)

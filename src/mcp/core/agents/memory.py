@@ -347,7 +347,7 @@ async def detect_memory_conflict(
 
     try:
         coll_name = config.collection_name("conversations")
-        collection = chroma_client.get_collection(name=coll_name)
+        collection = chroma_client.get_or_create_collection(name=coll_name)
         results = collection.query(
             query_texts=[new_memory_text],
             n_results=5,
@@ -546,7 +546,7 @@ async def recall_memories(
     # Step 1: Vector search
     try:
         coll_name = config.collection_name("conversations")
-        collection = chroma_client.get_collection(name=coll_name)
+        collection = chroma_client.get_or_create_collection(name=coll_name)
         results = collection.query(
             query_texts=[query],
             n_results=top_k * 3,  # over-fetch to compensate for decay filtering

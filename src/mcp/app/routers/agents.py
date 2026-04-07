@@ -421,7 +421,7 @@ async def memory_recall_endpoint(req: MemoryRecallRequest):
             top_k=req.top_k,
         )
         # Filter by min_score and return
-        return [r for r in (results or []) if r.get("score", 0) >= req.min_score]
+        return [r for r in (results or []) if r.get("adjusted_score", r.get("score", 0)) >= req.min_score]
     except Exception as e:
         logger.error(f"Memory recall error: {e}")
         return []  # graceful degradation — empty recall, not 500

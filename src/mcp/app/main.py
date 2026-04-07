@@ -249,6 +249,8 @@ async def lifespan(app: FastAPI):
         chroma = get_chroma()
         for domain in DOMAINS:
             chroma.get_or_create_collection(name=collection_name(domain))
+        # Also pre-warm conversations collection (used by memory recall)
+        chroma.get_or_create_collection(name="domain_conversations")
         logger.info("ChromaDB + embedding model pre-warmed (%d domain collections)", len(DOMAINS))
     except Exception as e:
         logger.debug("Pre-warm ChromaDB failed (lazy init on first use): %s", e)

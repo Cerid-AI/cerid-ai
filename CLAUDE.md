@@ -40,7 +40,7 @@ curl http://localhost:8888/health/ready      # verify
 **Rules:**
 - Typed errors only (`CeridError` subclasses). No `raise HTTPException` in business logic.
 - `@require_feature()` is the only tier gate. No inline tier checks.
-- Constants in `config/constants.py`. No magic numbers.
+- Constants in `config/settings.py`. No magic numbers.
 - Every `except` must log + degrade or raise typed error.
 - HTTP client is `httpx` everywhere — `requests` is not a dependency.
 
