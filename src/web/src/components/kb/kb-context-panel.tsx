@@ -136,8 +136,8 @@ export function KBContextPanel({
       {/* Header */}
       <div className="flex items-center gap-2 border-b px-3 py-2">
         <span className="flex-1 text-sm font-medium">Knowledge Context</span>
-        {totalResults > 0 && (
-          <span className="text-xs text-muted-foreground">{totalResults} results</span>
+        {results.length > 0 && (
+          <span className="text-xs text-muted-foreground">{results.length} results</span>
         )}
         <TooltipProvider delayDuration={0}>
           <Tooltip>
@@ -190,8 +190,8 @@ export function KBContextPanel({
         </div>
       </div>
 
-      {/* Confidence bar */}
-      {totalResults > 0 && (
+      {/* Confidence bar — only show when there are visible results */}
+      {results.length > 0 && (
         <TooltipProvider delayDuration={0}>
           <Tooltip>
             <TooltipTrigger asChild>
