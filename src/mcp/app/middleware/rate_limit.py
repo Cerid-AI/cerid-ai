@@ -5,7 +5,7 @@
 In-memory sliding window rate limiter with per-client isolation.
 
 Each ``X-Client-ID`` value gets its own independent rate bucket so that
-one consumer (e.g. the GUI) cannot starve another (e.g. trading-agent).
+one consumer (e.g. the GUI) cannot starve another (e.g. cli-ingest).
 
 Limits are configured in ``config.settings.CLIENT_RATE_LIMITS``.
 Supports X-Forwarded-For behind trusted proxies (TRUSTED_PROXIES env var).

@@ -201,7 +201,7 @@ async def list_artifacts_endpoint(
     domain: str | None = Query(None, description="Filter by domain"),
     sub_category: str | None = Query(None, description="Filter by sub-category"),
     tag: str | None = Query(None, description="Filter by tag"),
-    client_source: str | None = Query(None, description="Filter by ingestion client (e.g. 'gui', 'trading-agent')"),
+    client_source: str | None = Query(None, description="Filter by ingestion client (e.g. 'gui', 'cli-ingest')"),
     since: str | None = Query(None, description="ISO date — only return artifacts ingested after this date"),
     min_quality: float | None = Query(None, ge=0, le=1, description="Minimum quality score (0-1)"),
     offset: int = Query(0, ge=0, description="Pagination offset"),

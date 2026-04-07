@@ -26,7 +26,6 @@ __all__ = [
     "MemoryItem",
     "MemoryRecallResponse",
     "StatusResponse",
-    "TradingResponse",
     "TriageBatchResponse",
     "TriageResponse",
     "VerificationReportResponse",
@@ -217,16 +216,3 @@ class VerificationReportResponse(_AgentResponseBase):
     created_at: str = Field(default="", description="ISO 8601 creation timestamp")
 
 
-# ---------------------------------------------------------------------------
-# Trading endpoints (generic — all 5 share a similar shape)
-# ---------------------------------------------------------------------------
-
-
-class TradingResponse(_AgentResponseBase):
-    """Generic response for ``POST /agent/trading/*`` endpoints.
-
-    Trading agent functions return varied dicts; this model captures the
-    common ``result`` envelope while allowing extra fields to pass through.
-    """
-
-    result: dict[str, Any] | None = Field(default=None, description="Trading enrichment result")

@@ -86,9 +86,6 @@ class TestTaxonomyConfig:
         expected = {
             "coding", "finance", "projects", "personal", "general",
             "conversations", "trading",
-            # Boardroom domains
-            "strategy", "competitive_intel", "marketing", "advertising",
-            "operations", "audit",
         }
         assert expected == set(config.TAXONOMY.keys())
 

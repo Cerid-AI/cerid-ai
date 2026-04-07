@@ -466,7 +466,7 @@ async def system_check(response: Response) -> dict:
         "OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY",
         "NEO4J_PASSWORD", "REDIS_PASSWORD", "OLLAMA_ENABLED", "CERID_API_KEY",
         "CERID_MULTI_USER", "CERID_JWT_SECRET", "CERID_TIER", "TAVILY_API_KEY",
-        "CERID_TRADING_ENABLED", "SENTRY_DSN_MCP",
+        "SENTRY_DSN_MCP",
     ]
     env_keys: list[str] = [k for k in _KNOWN_KEYS if os.getenv(k)]
     env_exists = len(env_keys) > 0

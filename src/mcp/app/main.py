@@ -65,8 +65,6 @@ from app.routers import (
 from app.scheduler import start_scheduler, stop_scheduler
 from config.features import CERID_MULTI_USER
 
-# CERID_TRADING_ENABLED not used in public distro
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",

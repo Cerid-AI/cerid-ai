@@ -668,9 +668,9 @@ kubernetes==35.0.0 \
     --hash=sha256:39e2b33b46e5834ef6c3985ebfe2047ab39135d41de51ce7641a7ca5b372a13d \
     --hash=sha256:3d00d344944239821458b9efd484d6df9f011da367ecb155dadf9513f05f09ee
     # via chromadb
-langchain-core==1.2.26 \
-    --hash=sha256:3d0a3913dff77a930b017a05afe979e4959d27bec0c77ee51f9a100754510509 \
-    --hash=sha256:ba025ec70e19b56467f46b9109de19d30d169d328a174986b353cb23fd0ff0fe
+langchain-core==1.2.27 \
+    --hash=sha256:9ecd6b0393b969fe88f6b9b309367134080ab095946d79e6937dd3911aa42bd5 \
+    --hash=sha256:c18372e4c4c1454d49bf23a2e484431e71bd39b64173a0f621f0fc283d7183a4
     # via
     #   langgraph
     #   langgraph-checkpoint
@@ -1526,9 +1526,9 @@ pillow==12.2.0 \
     --hash=sha256:fb043ee2f06b41473269765c2feae53fc2e2fbf96e5e22ca94fb5ad677856f06 \
     --hash=sha256:fc3d34d4a8fbec3e88a79b92e5465e0f9b842b628675850d860b8bd300b159f5
     # via pdfplumber
-posthog==7.9.12 \
-    --hash=sha256:7175bd1698a566bfea98a016c64e3456399f8046aeeca8f1d04ae5bf6c5a38d0 \
-    --hash=sha256:ebabf2eb2e1c1fbf22b0759df4644623fa43cc6c9dcbe9fd429b7937d14251ec
+posthog==7.10.0 \
+    --hash=sha256:2f71a2ece4115bd9e4ee510749ed8f2d2930e8abd94963a48fce85f42fb4008c \
+    --hash=sha256:559f1dfc8e5c4eedf2a2f6d7e35b30427a7246153d0d665fc841bed0d8765862
     # via chromadb
 protobuf==6.33.6 \
     --hash=sha256:0cd27b587afca21b7cfa59a74dcbd48a50f0a6400cfb59391340ad729d91d326 \
