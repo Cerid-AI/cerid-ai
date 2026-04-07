@@ -29,7 +29,6 @@ interface KBContextPanelProps extends UseKBContextReturn {
 export function KBContextPanel({
   results,
   confidence,
-  totalResults: _totalResults,
   isLoading,
   error,
   isError,
