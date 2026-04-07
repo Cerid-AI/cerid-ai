@@ -124,10 +124,24 @@ class _HNSWIndex:
         every ``_SAVE_INTERVAL`` inserts to avoid synchronous disk I/O on
         every single cache store.  Call :meth:`flush` during shutdown to
         persist any remaining dirty entries.
+
+        If the index has reached its maximum capacity, it is automatically
+        resized (doubled) before inserting.
         """
         with self._lock:
             label = self._next_label
             self._next_label += 1
+
+            # Resize proactively when the index is full to avoid hnswlib
+            # raising "The number of elements exceeds the specified limit".
+            if self._idx.get_current_count() >= self._max_elements:
+                new_max = self._max_elements * 2
+                logger.info(
+                    "HNSW index at capacity (%d) — resizing to %d",
+                    self._max_elements, new_max,
+                )
+                self._idx.resize_index(new_max)
+                self._max_elements = new_max
 
             emb = embedding.reshape(1, -1).astype(np.float32)
             self._idx.add_items(emb, np.array([label]))

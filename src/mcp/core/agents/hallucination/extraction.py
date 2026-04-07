@@ -383,7 +383,7 @@ async def _extract_claims_llm(
     fallback_models = [
         config.LLM_INTERNAL_MODEL,                            # Free tier (Llama 3.3 70B)
         config.VERIFICATION_MODEL,                             # Paid (GPT-4o-mini)
-        "openrouter/google/gemini-2.5-flash-preview-05-20",   # Free fallback
+        "openrouter/google/gemini-2.5-flash",                  # Free fallback
     ]
     # Deduplicate while preserving order
     seen_models: set[str] = set()
@@ -406,7 +406,15 @@ async def _extract_claims_llm(
         )
         raw = parse_llm_json(content)
         if isinstance(raw, dict):
-            raw = raw.get("claims", raw.get("results", raw.get("data", [])))
+            extracted = raw.get("claims", raw.get("results", raw.get("data", None)))
+            if extracted is None:
+                for v in raw.values():
+                    if isinstance(v, list):
+                        extracted = v
+                        break
+                else:
+                    extracted = []
+            raw = extracted
         if isinstance(raw, list):
             claims_internal: list[str] = []
             for item in raw[:max_claims]:
@@ -432,8 +440,23 @@ async def _extract_claims_llm(
             )
             raw = parse_llm_json(content)
             # response_format: json_object may wrap array in {"claims": [...]}
+            # LLMs may return {"claims": [...]}, {"results": [...]}, or
+            # a bare [...] array.  Handle all shapes gracefully.
             if isinstance(raw, dict):
-                raw = raw.get("claims", raw.get("results", raw.get("data", [])))
+                extracted = raw.get(
+                    "claims",
+                    raw.get("results", raw.get("data", None)),
+                )
+                # Fallback: if none of the known keys matched, use the
+                # first list-valued entry in the dict.
+                if extracted is None:
+                    for v in raw.values():
+                        if isinstance(v, list):
+                            extracted = v
+                            break
+                    else:
+                        extracted = []
+                raw = extracted
             if isinstance(raw, list):
                 claims: list[str] = []
                 for item in raw[:max_claims]:
@@ -444,7 +467,9 @@ async def _extract_claims_llm(
                 if claims:
                     logger.info("LLM claim extraction succeeded with model=%s (%d claims)", model, len(claims))
                     return claims
-            logger.warning("LLM claim extraction returned unexpected shape from %s: %s", model, type(raw).__name__)
+                logger.debug("LLM claim extraction returned empty list from %s", model)
+            else:
+                logger.warning("LLM claim extraction returned unexpected shape from %s: %s", model, type(raw).__name__)
         except CircuitOpenError:
             logger.warning("Bifrost claims circuit open for %s, trying next model", model)
         except (httpx.TimeoutException, httpx.ConnectError) as e:
