@@ -3,6 +3,7 @@
 
 """Tests for hallucination detection agent (Phase 7A)."""
 
+import contextlib
 import json
 import sys
 from types import ModuleType
@@ -52,6 +53,39 @@ from core.agents.hallucination import (
     _query_memories,
     _verify_claim_externally,
 )
+
+# ---------------------------------------------------------------------------
+# Helper: mock the individual extraction functions that verify_response_streaming
+# now calls directly (instead of the top-level extract_claims wrapper).
+# ---------------------------------------------------------------------------
+_STREAMING_MOD = "core.agents.hallucination.streaming"
+
+
+@contextlib.contextmanager
+def _mock_streaming_extraction(claims: list[str], method: str = "heuristic"):
+    """Patch the individual extraction helpers so verify_response_streaming
+    produces exactly *claims* with the given *method*.
+
+    For ``method="heuristic"``: ``_extract_claims_heuristic`` returns the claims.
+    For ``method="llm"``: heuristic returns ``[]`` and ``_extract_claims_llm``
+    returns the claims.
+    For ``method="none"`` or empty claims with heuristic: heuristic returns ``[]``
+    and LLM returns ``None``.
+    """
+    heuristic_rv = claims if (method == "heuristic" and claims) else []
+    llm_rv: list[str] | None = claims if method == "llm" else None
+    if method == "none":
+        llm_rv = None
+
+    with (
+        patch(f"{_STREAMING_MOD}._extract_claims_heuristic", return_value=heuristic_rv),
+        patch(f"{_STREAMING_MOD}._detect_evasion", return_value=[]),
+        patch(f"{_STREAMING_MOD}._extract_citation_claims", return_value=[]),
+        patch(f"{_STREAMING_MOD}._extract_ignorance_claims", return_value=[]),
+        patch(f"{_STREAMING_MOD}._resolve_pronouns_heuristic", side_effect=lambda c, *a, **kw: c),
+        patch(f"{_STREAMING_MOD}._extract_claims_llm", new_callable=AsyncMock, return_value=llm_rv),
+    ):
+        yield
 
 
 class TestExtractClaims:
@@ -324,7 +358,7 @@ class TestVerifyClaim:
     @patch("core.agents.query_agent.lightweight_kb_query", new_callable=AsyncMock)
     async def test_verified_claim(self, mock_query, _mock_mem, mock_chroma, mock_neo4j, mock_redis):
         """High-similarity result should mark claim as verified."""
-        mock_query.return_value = [{"relevance": 0.85, "artifact_id": "abc", "filename": "doc.pdf", "domain": "general", "content": "matching text"}]
+        mock_query.return_value = [{"relevance": 0.85, "artifact_id": "abc", "filename": "doc.pdf", "domain": "general", "content": "this test claim is correct"}]
         result = await verify_claim("test claim", mock_chroma[0], mock_neo4j[0], mock_redis)
         assert result["status"] == "verified"
         assert result["source_artifact_id"] == "abc"
@@ -336,7 +370,7 @@ class TestVerifyClaim:
     @patch("core.agents.query_agent.lightweight_kb_query", new_callable=AsyncMock)
     async def test_unverified_claim(self, mock_query, _mock_mem, mock_ext, mock_chroma, mock_neo4j, mock_redis):
         """Low similarity (below escalation threshold) should mark claim as unverified when external also fails."""
-        mock_query.return_value = [{"relevance": 0.4, "content": "unrelated"}]
+        mock_query.return_value = [{"relevance": 0.4, "content": "this test claim is unrelated"}]
         mock_ext.return_value = {
             "status": "uncertain", "confidence": 0.1, "reason": "No signal",
             "verification_method": "cross_model_failed",
@@ -526,11 +560,9 @@ class TestStreamingSourceAttribution:
     """Test that streaming verification yields full source attribution."""
 
     @pytest.mark.asyncio
-    @patch("core.agents.hallucination.streaming.extract_claims", new_callable=AsyncMock)
     @patch("core.agents.hallucination.streaming.verify_claim", new_callable=AsyncMock)
-    async def test_claim_verified_includes_source_fields(self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis):
+    async def test_claim_verified_includes_source_fields(self, mock_verify, mock_chroma, mock_neo4j, mock_redis):
         """claim_verified events should include source_artifact_id, source_domain, source_snippet."""
-        mock_extract.return_value = (["Python was created in 1991"], "heuristic")
         mock_verify.return_value = {
             "claim": "Python was created in 1991",
             "status": "verified",
@@ -542,11 +574,12 @@ class TestStreamingSourceAttribution:
         }
 
         events = []
-        async for event in verify_response_streaming(
-            "x" * 200, "conv-stream-1",
-            mock_chroma[0], mock_neo4j[0], mock_redis,
-        ):
-            events.append(event)
+        with _mock_streaming_extraction(["Python was created in 1991"], "heuristic"):
+            async for event in verify_response_streaming(
+                "x" * 200, "conv-stream-1",
+                mock_chroma[0], mock_neo4j[0], mock_redis,
+            ):
+                events.append(event)
 
         # Find the claim_verified event
         verified_events = [e for e in events if e.get("type") == "claim_verified"]
@@ -562,22 +595,21 @@ class TestStreamingPersistence:
     """Test that streaming path persists results to Redis."""
 
     @pytest.mark.asyncio
-    @patch("core.agents.hallucination.streaming.extract_claims", new_callable=AsyncMock)
     @patch("core.agents.hallucination.streaming.verify_claim", new_callable=AsyncMock)
-    async def test_persists_to_redis(self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis):
+    async def test_persists_to_redis(self, mock_verify, mock_chroma, mock_neo4j, mock_redis):
         """After streaming completes, report should be stored in Redis."""
-        mock_extract.return_value = (["claim 1", "claim 2"], "heuristic")
         mock_verify.side_effect = [
             {"claim": "claim 1", "status": "verified", "similarity": 0.85},
             {"claim": "claim 2", "status": "unverified", "similarity": 0.2},
         ]
 
         events = []
-        async for event in verify_response_streaming(
-            "x" * 200, "conv-persist-1",
-            mock_chroma[0], mock_neo4j[0], mock_redis,
-        ):
-            events.append(event)
+        with _mock_streaming_extraction(["claim 1", "claim 2"], "heuristic"):
+            async for event in verify_response_streaming(
+                "x" * 200, "conv-persist-1",
+                mock_chroma[0], mock_neo4j[0], mock_redis,
+            ):
+                events.append(event)
 
         # Verify Redis was called with setex
         mock_redis.setex.assert_called_once()
@@ -595,38 +627,36 @@ class TestStreamingPersistence:
         assert len(stored["claims"]) == 2
 
     @pytest.mark.asyncio
-    @patch("core.agents.hallucination.streaming.extract_claims", new_callable=AsyncMock)
     @patch("core.agents.hallucination.streaming.verify_claim", new_callable=AsyncMock)
-    async def test_summary_includes_extraction_method(self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis):
+    async def test_summary_includes_extraction_method(self, mock_verify, mock_chroma, mock_neo4j, mock_redis):
         """Summary event should include extraction_method."""
-        mock_extract.return_value = (["claim 1"], "heuristic")
         mock_verify.return_value = {"claim": "claim 1", "status": "verified", "similarity": 0.9}
 
         events = []
-        async for event in verify_response_streaming(
-            "x" * 200, "conv-method-1",
-            mock_chroma[0], mock_neo4j[0], mock_redis,
-        ):
-            events.append(event)
+        with _mock_streaming_extraction(["claim 1"], "heuristic"):
+            async for event in verify_response_streaming(
+                "x" * 200, "conv-method-1",
+                mock_chroma[0], mock_neo4j[0], mock_redis,
+            ):
+                events.append(event)
 
         summary = [e for e in events if e.get("type") == "summary"][0]
         assert summary["extraction_method"] == "heuristic"
 
     @pytest.mark.asyncio
-    @patch("core.agents.hallucination.streaming.extract_claims", new_callable=AsyncMock)
     @patch("core.agents.hallucination.streaming.verify_claim", new_callable=AsyncMock)
-    async def test_stores_model_in_report(self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis):
+    async def test_stores_model_in_report(self, mock_verify, mock_chroma, mock_neo4j, mock_redis):
         """Persisted report should include the model parameter."""
-        mock_extract.return_value = (["claim 1"], "llm")
         mock_verify.return_value = {"claim": "claim 1", "status": "verified", "similarity": 0.9}
 
         events = []
-        async for event in verify_response_streaming(
-            "x" * 200, "conv-model-stream",
-            mock_chroma[0], mock_neo4j[0], mock_redis,
-            model="openrouter/openai/gpt-4o",
-        ):
-            events.append(event)
+        with _mock_streaming_extraction(["claim 1"], "llm"):
+            async for event in verify_response_streaming(
+                "x" * 200, "conv-model-stream",
+                mock_chroma[0], mock_neo4j[0], mock_redis,
+                model="openrouter/openai/gpt-4o",
+            ):
+                events.append(event)
 
         stored_json = mock_redis.setex.call_args[0][2]
         stored = json.loads(stored_json)
@@ -989,7 +1019,7 @@ class TestVerifyClaimWithExternalFallback:
     @patch("core.agents.query_agent.lightweight_kb_query", new_callable=AsyncMock)
     async def test_strong_kb_skips_external(self, mock_query, _mock_mem, mock_ext, mock_chroma, mock_neo4j, mock_redis):
         """When KB returns a strong match, should NOT call external verification."""
-        mock_query.return_value = [{"relevance": 0.85, "artifact_id": "abc", "filename": "doc.pdf", "domain": "general", "content": "matching text"}]
+        mock_query.return_value = [{"relevance": 0.85, "artifact_id": "abc", "filename": "doc.pdf", "domain": "general", "content": "this test claim is correct"}]
 
         result = await verify_claim(
             "test claim",
@@ -2095,12 +2125,10 @@ class TestVerifyStreamConversationHistory:
     @pytest.mark.asyncio
     @patch("core.agents.hallucination.streaming._check_history_consistency", new_callable=AsyncMock)
     @patch("core.agents.hallucination.streaming.verify_claim", new_callable=AsyncMock)
-    @patch("core.agents.hallucination.streaming.extract_claims", new_callable=AsyncMock)
     async def test_consistency_check_called_with_history(
-        self, mock_extract, mock_verify, mock_consistency,
+        self, mock_verify, mock_consistency,
     ):
         """Consistency check should be called when conversation_history is provided."""
-        mock_extract.return_value = (["Claim 1", "Claim 2"], "llm")
         mock_verify.return_value = {
             "status": "verified",
             "similarity": 0.9,
@@ -2113,18 +2141,19 @@ class TestVerifyStreamConversationHistory:
         mock_redis = MagicMock()
 
         events = []
-        async for event in verify_response_streaming(
-            response_text="x" * 100,
-            conversation_id="test-123",
-            chroma_client=mock_chroma,
-            neo4j_driver=mock_neo4j,
-            redis_client=mock_redis,
-            model="openrouter/openai/gpt-4o",
-            conversation_history=[
-                {"role": "assistant", "content": "Prior response content."},
-            ],
-        ):
-            events.append(event)
+        with _mock_streaming_extraction(["Claim 1", "Claim 2"], "llm"):
+            async for event in verify_response_streaming(
+                response_text="x" * 100,
+                conversation_id="test-123",
+                chroma_client=mock_chroma,
+                neo4j_driver=mock_neo4j,
+                redis_client=mock_redis,
+                model="openrouter/openai/gpt-4o",
+                conversation_history=[
+                    {"role": "assistant", "content": "Prior response content."},
+                ],
+            ):
+                events.append(event)
 
         mock_consistency.assert_called_once()
         call_args = mock_consistency.call_args
@@ -2138,12 +2167,10 @@ class TestVerifyStreamConversationHistory:
     @pytest.mark.asyncio
     @patch("core.agents.hallucination.streaming._check_history_consistency", new_callable=AsyncMock)
     @patch("core.agents.hallucination.streaming.verify_claim", new_callable=AsyncMock)
-    @patch("core.agents.hallucination.streaming.extract_claims", new_callable=AsyncMock)
     async def test_consistency_issues_emitted_as_event(
-        self, mock_extract, mock_verify, mock_consistency,
+        self, mock_verify, mock_consistency,
     ):
         """Consistency issues should be emitted as a consistency_check SSE event."""
-        mock_extract.return_value = (["Claim 1", "Claim 2"], "llm")
         mock_verify.return_value = {
             "status": "verified",
             "similarity": 0.9,
@@ -2158,17 +2185,18 @@ class TestVerifyStreamConversationHistory:
         mock_redis = MagicMock()
 
         events = []
-        async for event in verify_response_streaming(
-            response_text="x" * 100,
-            conversation_id="test-123",
-            chroma_client=mock_chroma,
-            neo4j_driver=mock_neo4j,
-            redis_client=mock_redis,
-            conversation_history=[
-                {"role": "assistant", "content": "Prior content."},
-            ],
-        ):
-            events.append(event)
+        with _mock_streaming_extraction(["Claim 1", "Claim 2"], "llm"):
+            async for event in verify_response_streaming(
+                response_text="x" * 100,
+                conversation_id="test-123",
+                chroma_client=mock_chroma,
+                neo4j_driver=mock_neo4j,
+                redis_client=mock_redis,
+                conversation_history=[
+                    {"role": "assistant", "content": "Prior content."},
+                ],
+            ):
+                events.append(event)
 
         consistency_events = [e for e in events if e.get("type") == "consistency_check"]
         assert len(consistency_events) == 1
@@ -2241,16 +2269,11 @@ class TestStreamingGuaranteedSummary:
     """
 
     @pytest.mark.asyncio
-    @patch("core.agents.hallucination.streaming.extract_claims")
     @patch("core.agents.hallucination.streaming.verify_claim")
     async def test_summary_emitted_on_success(
-        self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis
+        self, mock_verify, mock_chroma, mock_neo4j, mock_redis
     ):
         """Happy path: all claims verify successfully → summary emitted."""
-        mock_extract.return_value = (
-            ["The sky is blue", "Water boils at 100 degrees Celsius"],
-            "heuristic",
-        )
         mock_verify.return_value = {
             "status": "verified",
             "similarity": 0.9,
@@ -2266,14 +2289,17 @@ class TestStreamingGuaranteedSummary:
         }
 
         events = []
-        async for event in verify_response_streaming(
-            response_text="The sky is blue. Water boils at 100 degrees Celsius. " * 5,
-            conversation_id="test-conv-1",
-            chroma_client=mock_chroma,
-            neo4j_driver=mock_neo4j,
-            redis_client=mock_redis,
+        with _mock_streaming_extraction(
+            ["The sky is blue", "Water boils at 100 degrees Celsius"], "heuristic"
         ):
-            events.append(event)
+            async for event in verify_response_streaming(
+                response_text="The sky is blue. Water boils at 100 degrees Celsius. " * 5,
+                conversation_id="test-conv-1",
+                chroma_client=mock_chroma,
+                neo4j_driver=mock_neo4j,
+                redis_client=mock_redis,
+            ):
+                events.append(event)
 
         types = [e["type"] for e in events]
         assert "summary" in types, "Summary event must always be emitted"
@@ -2283,16 +2309,11 @@ class TestStreamingGuaranteedSummary:
         assert "interrupted" not in summary
 
     @pytest.mark.asyncio
-    @patch("core.agents.hallucination.streaming.extract_claims")
     @patch("core.agents.hallucination.streaming.verify_claim")
     async def test_summary_emitted_on_partial_failure(
-        self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis
+        self, mock_verify, mock_chroma, mock_neo4j, mock_redis
     ):
         """When some verification tasks fail, summary is still emitted."""
-        mock_extract.return_value = (
-            ["Claim A is true", "Claim B is true", "Claim C is true"],
-            "heuristic",
-        )
         # First call succeeds, second raises, third succeeds
         call_count = 0
 
@@ -2316,14 +2337,17 @@ class TestStreamingGuaranteedSummary:
         mock_verify.side_effect = side_effect_verify
 
         events = []
-        async for event in verify_response_streaming(
-            response_text="Claim A is true. Claim B is true. Claim C is true. " * 5,
-            conversation_id="test-conv-2",
-            chroma_client=mock_chroma,
-            neo4j_driver=mock_neo4j,
-            redis_client=mock_redis,
+        with _mock_streaming_extraction(
+            ["Claim A is true", "Claim B is true", "Claim C is true"], "heuristic"
         ):
-            events.append(event)
+            async for event in verify_response_streaming(
+                response_text="Claim A is true. Claim B is true. Claim C is true. " * 5,
+                conversation_id="test-conv-2",
+                chroma_client=mock_chroma,
+                neo4j_driver=mock_neo4j,
+                redis_client=mock_redis,
+            ):
+                events.append(event)
 
         types = [e["type"] for e in events]
         assert "summary" in types, "Summary must be emitted even with failures"
@@ -2352,22 +2376,20 @@ class TestStreamingGuaranteedSummary:
         assert events[0]["skipped"] is True
 
     @pytest.mark.asyncio
-    @patch("core.agents.hallucination.streaming.extract_claims")
     async def test_no_claims_emits_skipped_summary(
-        self, mock_extract, mock_chroma, mock_neo4j, mock_redis
+        self, mock_chroma, mock_neo4j, mock_redis
     ):
         """When extraction finds no claims, a skipped summary is emitted."""
-        mock_extract.return_value = ([], "heuristic")
-
         events = []
-        async for event in verify_response_streaming(
-            response_text="This is a long enough response with no factual claims. " * 10,
-            conversation_id="test-conv-4",
-            chroma_client=mock_chroma,
-            neo4j_driver=mock_neo4j,
-            redis_client=mock_redis,
-        ):
-            events.append(event)
+        with _mock_streaming_extraction([], "none"):
+            async for event in verify_response_streaming(
+                response_text="This is a long enough response with no factual claims. " * 10,
+                conversation_id="test-conv-4",
+                chroma_client=mock_chroma,
+                neo4j_driver=mock_neo4j,
+                redis_client=mock_redis,
+            ):
+                events.append(event)
 
         assert len(events) == 1
         assert events[0]["type"] == "summary"
@@ -2414,16 +2436,11 @@ class TestStreamingGuaranteedSummary:
         assert types[-1] == "summary"
 
     @pytest.mark.asyncio
-    @patch("core.agents.hallucination.streaming.extract_claims")
     @patch("core.agents.hallucination.streaming.verify_claim")
     async def test_mixed_statuses_in_summary(
-        self, mock_verify, mock_extract, mock_chroma, mock_neo4j, mock_redis
+        self, mock_verify, mock_chroma, mock_neo4j, mock_redis
     ):
         """Summary correctly counts verified, unverified, and uncertain claims."""
-        mock_extract.return_value = (
-            ["Claim verified", "Claim unverified", "Claim uncertain"],
-            "heuristic",
-        )
         results = [
             {"status": "verified", "similarity": 0.9, "source_filename": "", "source_artifact_id": "",
              "source_domain": "", "source_snippet": "", "reason": "", "verification_method": "kb", "source_urls": []},
@@ -2443,14 +2460,17 @@ class TestStreamingGuaranteedSummary:
         mock_verify.side_effect = side_effect
 
         events = []
-        async for event in verify_response_streaming(
-            response_text="Claim verified. Claim unverified. Claim uncertain. " * 5,
-            conversation_id="test-conv-6",
-            chroma_client=mock_chroma,
-            neo4j_driver=mock_neo4j,
-            redis_client=mock_redis,
+        with _mock_streaming_extraction(
+            ["Claim verified", "Claim unverified", "Claim uncertain"], "heuristic"
         ):
-            events.append(event)
+            async for event in verify_response_streaming(
+                response_text="Claim verified. Claim unverified. Claim uncertain. " * 5,
+                conversation_id="test-conv-6",
+                chroma_client=mock_chroma,
+                neo4j_driver=mock_neo4j,
+                redis_client=mock_redis,
+            ):
+                events.append(event)
 
         summary = next(e for e in events if e["type"] == "summary")
         assert summary["verified"] == 1
