@@ -19,7 +19,17 @@ import time
 from typing import Any
 
 import config
-from core.agents.hallucination.extraction import _reclassify_recency, extract_claims
+from core.agents.hallucination.extraction import (
+    _detect_evasion,
+    _extract_citation_claims,
+    _extract_claims_heuristic,
+    _extract_claims_llm,
+    _extract_ignorance_claims,
+    _merge_special_claims,
+    _reclassify_recency,
+    _resolve_pronouns_heuristic,
+    extract_claims,
+)
 from core.agents.hallucination.patterns import (
     _get_claim_verify_semaphore,
     _is_ignorance_admission,
@@ -277,27 +287,41 @@ async def verify_response_streaming(
         }
         return
 
-    # Extraction with timeout — if Bifrost hangs or crashes, the generator
-    # must still yield a summary instead of dying with an unhandled exception.
-    EXTRACTION_TIMEOUT = 60  # seconds — Ollama 8B takes ~25s, needs headroom for longer responses
-    try:
-        claims, method = await asyncio.wait_for(
-            extract_claims(response_text, user_query=user_query),
-            timeout=EXTRACTION_TIMEOUT,
-        )
-    except TimeoutError:
-        logger.error(
-            "Claim extraction timed out after %ds for conversation %s",
-            EXTRACTION_TIMEOUT, conversation_id,
-        )
-        claims, method = [], "timeout"
-    except Exception as extraction_exc:
-        logger.error(
-            "Claim extraction failed for conversation %s: %s",
-            conversation_id, extraction_exc,
-        )
-        claims, method = [], "error"
+    # ── Stage 1: Synchronous heuristic extraction (<5ms) ──────────────
+    max_claims = config.HALLUCINATION_MAX_CLAIMS
+    ignorance_claims = _extract_ignorance_claims(response_text)
+    evasion_claims = _detect_evasion(response_text, user_query) if user_query else []
+    citation_claims = _extract_citation_claims(response_text)
+    heuristic_raw = _extract_claims_heuristic(response_text)
+    heuristic_claims = _resolve_pronouns_heuristic(heuristic_raw, response_text, user_query)
+    initial_claims = _merge_special_claims(
+        heuristic_claims, ignorance_claims, evasion_claims, citation_claims, max_claims,
+    )
 
+    # ── Stage 2: Decision ─────────────────────────────────────────────
+    # If heuristic found claims → use them immediately (zero LLM wait).
+    # If heuristic found nothing → fall back to LLM extraction (complex/conversational response).
+    if initial_claims:
+        method = "heuristic"
+    else:
+        # No heuristic claims — must wait for LLM
+        try:
+            llm_result = await asyncio.wait_for(
+                _extract_claims_llm(response_text, max_claims, user_query=user_query),
+                timeout=30,
+            )
+            initial_claims = _merge_special_claims(
+                llm_result or [], ignorance_claims, evasion_claims, citation_claims, max_claims,
+            )
+            method = "llm" if llm_result else "none"
+        except TimeoutError:
+            logger.error("Claim extraction timed out for conversation %s", conversation_id)
+            method = "timeout"
+        except Exception as exc:
+            logger.error("Claim extraction failed for %s: %s", conversation_id, exc)
+            method = "error"
+
+    claims = initial_claims
     if not claims:
         yield {
             "type": "summary",

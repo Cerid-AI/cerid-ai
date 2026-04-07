@@ -286,15 +286,12 @@ VERIFICATION_MIN_RELEVANCE = float(os.getenv("VERIFICATION_MIN_RELEVANCE", "0.35
 # ---------------------------------------------------------------------------
 # Per-claim timeout: max time for any single claim's full verification
 # (including KB lookup, external calls, and all fallbacks).
-# Per-claim timeout — OpenRouter routing can add 5-10s latency on top of model inference.
-# 20s gives enough headroom for slow routing + cold starts.
-STREAMING_PER_CLAIM_TIMEOUT = float(os.getenv("STREAMING_PER_CLAIM_TIMEOUT", "20"))
+# Per-claim verification timeout (KB lookup + optional LLM verification).
+STREAMING_PER_CLAIM_TIMEOUT = float(os.getenv("STREAMING_PER_CLAIM_TIMEOUT", "15"))
 # Extended timeout for expert-tier models (Grok 4 with :online web search)
-# and current-event claims that require web search + reasoning
-STREAMING_EXPERT_CLAIM_TIMEOUT = float(os.getenv("STREAMING_EXPERT_CLAIM_TIMEOUT", "45"))
+STREAMING_EXPERT_CLAIM_TIMEOUT = float(os.getenv("STREAMING_EXPERT_CLAIM_TIMEOUT", "30"))
 # Total deadline for the entire streaming verification loop (all claims).
-# 120s handles responses with 8+ claims going through OpenRouter.
-STREAMING_TOTAL_TIMEOUT = float(os.getenv("STREAMING_TOTAL_TIMEOUT", "120"))
+STREAMING_TOTAL_TIMEOUT = float(os.getenv("STREAMING_TOTAL_TIMEOUT", "90"))
 # Fewer LLM retries on 429 during streaming to avoid compounding delays
 STREAMING_RETRY_ATTEMPTS = int(os.getenv("STREAMING_RETRY_ATTEMPTS", "1"))
 

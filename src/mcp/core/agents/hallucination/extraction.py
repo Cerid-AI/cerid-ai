@@ -461,6 +461,29 @@ async def _extract_claims_llm(
 
 
 # ---------------------------------------------------------------------------
+# Merge helper (importable by streaming.py for heuristic-first pipeline)
+# ---------------------------------------------------------------------------
+
+
+def _merge_special_claims(
+    primary: list[str],
+    ignorance: list[str],
+    evasion: list[str],
+    citation: list[str],
+    max_claims: int,
+) -> list[str]:
+    """Merge special claim types into a primary claim list, deduplicating."""
+    merged = list(primary)
+    merged_set = {c.lower() for c in primary}
+    for extra in (ignorance, evasion, citation):
+        for c in extra:
+            if c.lower() not in merged_set:
+                merged.append(c)
+                merged_set.add(c.lower())
+    return merged[:max_claims]
+
+
+# ---------------------------------------------------------------------------
 # Main extraction orchestrator
 # ---------------------------------------------------------------------------
 
@@ -494,16 +517,9 @@ async def extract_claims(
     # Pre-extraction: detect cited sources for fabrication checking
     citation_claims = _extract_citation_claims(response_text)
 
-    # Helper to merge special claims into a primary claim list
+    # Merge helper (calls module-level function with captured special claims)
     def _merge_special(primary: list[str]) -> list[str]:
-        merged = list(primary)
-        merged_set = {c.lower() for c in primary}
-        for extra in (ignorance_claims, evasion_claims, citation_claims):
-            for c in extra:
-                if c.lower() not in merged_set:
-                    merged.append(c)
-                    merged_set.add(c.lower())
-        return merged[:max_claims]
+        return _merge_special_claims(primary, ignorance_claims, evasion_claims, citation_claims, max_claims)
 
     # Try LLM extraction first
     llm_claims = await _extract_claims_llm(response_text, max_claims, user_query=user_query)
@@ -514,17 +530,15 @@ async def extract_claims(
     logger.info("LLM claim extraction returned empty — falling back to heuristic")
     heuristic_claims = _extract_claims_heuristic(response_text)
     if heuristic_claims:
-        # Heuristic claims may contain unresolved pronouns — resolve them
         heuristic_claims = _resolve_pronouns_heuristic(
             heuristic_claims, response_text, user_query,
         )
         return _merge_special(heuristic_claims), "heuristic"
 
-    # Evasion claims alone are high priority — model refused to answer
+    # Evasion claims alone are high priority
     if evasion_claims:
         return _merge_special(evasion_claims), "evasion"
 
-    # Last resort: ignorance or citation claims alone
     if ignorance_claims or citation_claims:
         combined = ignorance_claims + citation_claims
         return combined[:max_claims], "ignorance" if ignorance_claims else "citation"
