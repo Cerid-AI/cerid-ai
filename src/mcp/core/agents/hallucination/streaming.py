@@ -32,6 +32,7 @@ from core.agents.hallucination.extraction import (
 )
 from core.agents.hallucination.patterns import (
     _get_claim_verify_semaphore,
+    _is_current_event_claim,
     _is_ignorance_admission,
     _is_recency_claim,
 )
@@ -398,7 +399,6 @@ async def verify_response_streaming(
     # Group time-sensitive claims (prices, recency) going to the same web-search
     # model and verify them in a single LLM call instead of N individual calls.
     # This reduces API round-trips, avoids rate limits, and prevents timeouts.
-    from core.agents.hallucination.patterns import _is_current_event_claim
     from core.agents.hallucination.verification import verify_claims_batch_external
 
     batch_results: dict[int, dict[str, Any]] = {}
@@ -481,13 +481,21 @@ async def verify_response_streaming(
 
         await _wait_for_memory(config.VERIFY_MEMORY_FLOOR_MB, f"claim-{idx}")
         sem = _get_claim_verify_semaphore()
-        # Use extended timeout for expert mode (Grok 4 + :online web search)
-        # and current-event claims that require web search + reasoning
-        claim_timeout = (
-            config.STREAMING_EXPERT_CLAIM_TIMEOUT
-            if expert_mode or _claim_type(claim_text) == "recency"
-            else config.STREAMING_PER_CLAIM_TIMEOUT
+        # Adaptive timeout based on verification strategy:
+        #   - Expert mode (Grok 4 + web search): longest (30s)
+        #   - Web search claims (temporal, current-event, citation): medium (25s)
+        #   - Cross-model (general factual): fastest (12s)
+        ct = _claim_type(claim_text)
+        needs_web = (
+            ct in ("recency", "evasion", "citation", "ignorance")
+            or _is_current_event_claim(claim_text)
         )
+        if expert_mode:
+            claim_timeout = config.STREAMING_EXPERT_CLAIM_TIMEOUT  # 30s
+        elif needs_web:
+            claim_timeout = 25.0  # web search + reasoning
+        else:
+            claim_timeout = 12.0  # cross-model is fast
         try:
             async with sem:
                 result = await asyncio.wait_for(
