@@ -403,6 +403,30 @@ async def memory_archive_endpoint(req: MemoryArchiveRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class MemoryRecallRequest(BaseModel):
+    query: str
+    top_k: int = 5
+    min_score: float = 0.4
+
+
+@router.post("/agent/memory/recall")
+async def memory_recall_endpoint(req: MemoryRecallRequest):
+    """Recall memories relevant to a query."""
+    try:
+        from agents.memory import recall_memories
+        results = await recall_memories(
+            query=req.query,
+            chroma_client=get_chroma(),
+            neo4j_driver=get_neo4j(),
+            top_k=req.top_k,
+        )
+        # Filter by min_score and return
+        return [r for r in (results or []) if r.get("score", 0) >= req.min_score]
+    except Exception as e:
+        logger.error(f"Memory recall error: {e}")
+        return []  # graceful degradation — empty recall, not 500
+
+
 class VerifyStreamRequest(BaseModel):
     response_text: str
     conversation_id: str
