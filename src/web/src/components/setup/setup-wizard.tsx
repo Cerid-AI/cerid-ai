@@ -220,7 +220,7 @@ function saveProgress(state: WizardState) {
   } catch { /* noop */ }
 }
 
-function loadProgress(): { step: number; skippedSteps: number[] } | null {
+function loadProgress(): { step: number; skippedSteps: number[]; applied?: boolean } | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return null
