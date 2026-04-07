@@ -1334,6 +1334,26 @@ async def verify_claim(
         # Sort by relevance descending
         all_results.sort(key=lambda x: x.get("relevance", 0.0), reverse=True)
 
+        # --- Heuristic sanity filter: drop KB results with low term overlap ---
+        # Vector similarity can return false matches (e.g., a cabin project doc
+        # matching a claim about light wavelengths). Free check — regex only.
+        claim_lower = claim.lower()
+        claim_terms = set(re.findall(r"\b[a-z]{4,}\b|\b\d[\d.,%]+\b", claim_lower))
+        if claim_terms:
+            filtered: list[dict[str, Any]] = []
+            for r in all_results:
+                src_text = r.get("content", "")[:300].lower()
+                src_terms = set(re.findall(r"\b[a-z]{4,}\b|\b\d[\d.,%]+\b", src_text))
+                overlap = len(claim_terms & src_terms) / len(claim_terms)
+                if overlap >= 0.25:
+                    filtered.append(r)
+                else:
+                    logger.debug(
+                        "KB result filtered (%.0f%% term overlap): '%s…' vs claim '%s…'",
+                        overlap * 100, src_text[:40], claim[:40],
+                    )
+            all_results = filtered
+
         # --- Fallback 1: No KB results at all → try external verification ---
         # Only force web search for claims that genuinely need current data.
         # Historical/established facts (pre-2024) can be verified via cross-model.
@@ -1412,38 +1432,7 @@ async def verify_claim(
         details = _build_verification_details(claim, top_results)
 
         if similarity >= threshold:
-            # Heuristic sanity check: verify the KB source actually supports
-            # the claim. Vector similarity can produce false matches (e.g.,
-            # a document about "red cars" matching a claim about "red light").
-            # Check if key terms from the claim appear in the source snippet.
-            source_snippet = top_result.get("content", "")[:300].lower()
-            claim_lower = claim.lower()
-            # Extract key terms (nouns/numbers) from the claim
-            claim_terms = set(re.findall(r"\b[a-z]{4,}\b|\b\d[\d.,%]+\b", claim_lower))
-            source_terms = set(re.findall(r"\b[a-z]{4,}\b|\b\d[\d.,%]+\b", source_snippet))
-            overlap = claim_terms & source_terms
-            overlap_ratio = len(overlap) / max(len(claim_terms), 1)
-
-            if overlap_ratio < 0.3:
-                # KB match is likely spurious — escalate to external verification
-                logger.info(
-                    "KB match rejected (%.0f%% term overlap) for '%s…' — escalating",
-                    overlap_ratio * 100, claim[:50],
-                )
-                ext_result = await _verify_claim_externally(
-                    claim, model, streaming=streaming,
-                    expert_mode=expert_mode, response_context=response_context, claim_context=claim_context,
-                )
-                return await _cache_result({
-                    "claim": claim,
-                    "status": ext_result["status"],
-                    "similarity": ext_result["confidence"],
-                    "reason": ext_result["reason"],
-                    "verification_method": ext_result.get("verification_method", "none"),
-                    "verification_model": ext_result.get("verification_model"),
-                    "source_urls": ext_result.get("source_urls", []),
-                })
-
+            # Spurious matches already filtered by the term-overlap check above.
             return await _cache_result({
                 "claim": claim,
                 "status": "verified",
@@ -1451,7 +1440,7 @@ async def verify_claim(
                 "source_artifact_id": top_result.get("artifact_id", ""),
                 "source_filename": top_result.get("filename", ""),
                 "source_domain": top_result.get("domain", ""),
-                "source_snippet": source_snippet[:200],
+                "source_snippet": top_result.get("content", "")[:200],
                 "memory_source": bool(top_result.get("memory_source")),
                 "verification_details": details,
                 "verification_method": "kb",
