@@ -340,10 +340,13 @@ class TestParallelExecution:
 
         # agent_query is imported lazily inside orchestrated_query, so
         # we patch at the source module where it's defined.
+        # Also mock external source query to avoid network overhead.
         with patch("agents.query_agent.agent_query",
                     new=AsyncMock(side_effect=slow_agent_query)), \
              patch("agents.memory.recall_memories",
-                    new=AsyncMock(side_effect=slow_recall)):
+                    new=AsyncMock(side_effect=slow_recall)), \
+             patch("agents.retrieval_orchestrator._query_external_sources",
+                    new=AsyncMock(return_value=[])):
             from agents.retrieval_orchestrator import orchestrated_query
 
             start = time.monotonic()

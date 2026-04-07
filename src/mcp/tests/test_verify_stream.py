@@ -12,11 +12,45 @@ Also validates streaming timeout behavior (per-claim and total deadlines).
 """
 
 import asyncio
-from unittest.mock import patch
+import contextlib
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from app.routers.agents import _STREAM_END, _safe_anext
+
+# ---------------------------------------------------------------------------
+# Helper: mock the individual extraction functions that verify_response_streaming
+# now calls directly (instead of the top-level extract_claims wrapper).
+# ---------------------------------------------------------------------------
+_STREAMING_MOD = "core.agents.hallucination.streaming"
+
+
+@contextlib.contextmanager
+def _mock_streaming_extraction(claims: list[str], method: str = "heuristic"):
+    """Patch the individual extraction helpers so verify_response_streaming
+    produces exactly *claims* with the given *method*.
+
+    For ``method="heuristic"``: ``_extract_claims_heuristic`` returns the claims.
+    For ``method="llm"``: heuristic returns ``[]`` and ``_extract_claims_llm``
+    returns the claims.
+    For ``method="none"`` or empty claims with heuristic: heuristic returns ``[]``
+    and LLM returns ``None``.
+    """
+    heuristic_rv = claims if (method == "heuristic" and claims) else []
+    llm_rv: list[str] | None = claims if method == "llm" else None
+    if method == "none":
+        llm_rv = None
+
+    with (
+        patch(f"{_STREAMING_MOD}._extract_claims_heuristic", return_value=heuristic_rv),
+        patch(f"{_STREAMING_MOD}._detect_evasion", return_value=[]),
+        patch(f"{_STREAMING_MOD}._extract_citation_claims", return_value=[]),
+        patch(f"{_STREAMING_MOD}._extract_ignorance_claims", return_value=[]),
+        patch(f"{_STREAMING_MOD}._resolve_pronouns_heuristic", side_effect=lambda c, *a, **kw: c),
+        patch(f"{_STREAMING_MOD}._extract_claims_llm", new_callable=AsyncMock, return_value=llm_rv),
+    ):
+        yield
 
 # ---------------------------------------------------------------------------
 # Helpers — synthetic async generators for testing
@@ -209,20 +243,21 @@ class TestStreamingTimeouts:
         from agents.hallucination import verify_response_streaming
 
         async def _mock_verify_claim(*args, **kwargs):
-            """Simulate a claim that hangs for 10s (will be killed by timeout)."""
-            await asyncio.sleep(10)
-            return {"status": "verified", "similarity": 0.9}
+            """Raise TimeoutError directly — simulates what asyncio.wait_for
+            does when verify_claim exceeds the adaptive per-claim timeout.
+            The _verify_indexed handler catches this and converts it to an
+            'uncertain' result with a 'timed out' reason."""
+            raise TimeoutError("per-claim timeout")
 
-        # Patch verify_claim and extract_claims with fast fakes, and set
-        # very short per-claim timeout (0.1s) so the test doesn't wait long.
+        # Patch verify_claim and individual extraction helpers with fast fakes.
+        # The streaming path now uses adaptive per-claim timeouts (12s for
+        # non-web claims) instead of the old config.STREAMING_PER_CLAIM_TIMEOUT.
+        # Raising TimeoutError directly from verify_claim is equivalent to
+        # asyncio.wait_for raising it, and avoids waiting the full 12s.
         with (
+            _mock_streaming_extraction(["Paris is the capital of France."], method="heuristic"),
             patch("core.agents.hallucination.streaming.verify_claim", side_effect=_mock_verify_claim),
-            patch(
-                "core.agents.hallucination.streaming.extract_claims",
-                return_value=(["Paris is the capital of France."], "heuristic"),
-            ),
-            patch("config.STREAMING_PER_CLAIM_TIMEOUT", 0.1),
-            patch("config.STREAMING_TOTAL_TIMEOUT", 5),
+            patch("config.STREAMING_TOTAL_TIMEOUT", 10),
             patch("config.HALLUCINATION_MIN_RESPONSE_LENGTH", 10),
         ):
             events = []
@@ -261,14 +296,8 @@ class TestStreamingTimeouts:
             return {"status": "verified", "similarity": 0.9}
 
         with (
+            _mock_streaming_extraction(["Claim 1.", "Claim 2.", "Claim 3."], method="heuristic"),
             patch("core.agents.hallucination.streaming.verify_claim", side_effect=_mock_verify_claim),
-            patch(
-                "core.agents.hallucination.streaming.extract_claims",
-                return_value=(
-                    ["Claim 1.", "Claim 2.", "Claim 3."],
-                    "heuristic",
-                ),
-            ),
             patch("config.STREAMING_PER_CLAIM_TIMEOUT", 5),  # High so per-claim doesn't trigger first
             patch("config.STREAMING_TOTAL_TIMEOUT", 0.3),  # Low total timeout
             patch("config.HALLUCINATION_MIN_RESPONSE_LENGTH", 10),
@@ -321,16 +350,21 @@ class TestStreamingTimeouts:
 
         external_calls = []
 
+        # Claim and KB content must share enough terms (>= 25% overlap)
+        # to survive the heuristic term-overlap filter that precedes
+        # fallback scoring.  Use matching words so the result lands in
+        # the "uncertain" band (fallback 4), not fallback 1 (no results).
+        claim_text = "The capital city of France is Paris."
         async def _mock_lightweight_kb_query(query, domains=None, top_k=5, chroma_client=None):
             return [{
                 "relevance": 0.55,  # Between unverified_threshold and threshold → uncertain
-                "content": "Some KB content",
+                "content": "France is a country in Europe with capital Paris",
                 "artifact_id": "a1",
                 "filename": "test.txt",
                 "domain": "general",
             }]
 
-        async def _mock_external(claim, model=None, force_web_search=False, streaming=False, expert_mode=False, fast_mode=False, response_context=None):
+        async def _mock_external(claim, model=None, force_web_search=False, streaming=False, expert_mode=False, fast_mode=False, response_context=None, claim_context=None):
             external_calls.append({"force_web_search": force_web_search, "streaming": streaming})
             return {
                 "status": "uncertain",
@@ -350,12 +384,12 @@ class TestStreamingTimeouts:
         ):
             # Non-streaming: should make 2 external calls (cross-model + web escalation)
             external_calls.clear()
-            await verify_claim("Test claim.", None, None, None, streaming=False)
+            await verify_claim(claim_text, None, None, None, streaming=False)
             non_streaming_count = len(external_calls)
 
             # Streaming: should make only 1 external call (skip web escalation)
             external_calls.clear()
-            await verify_claim("Test claim.", None, None, None, streaming=True)
+            await verify_claim(claim_text, None, None, None, streaming=True)
             streaming_count = len(external_calls)
 
         # Non-streaming makes 2 calls (fallback 4 + web escalation)
@@ -399,14 +433,22 @@ class TestExtractionErrorHandling:
 
     @pytest.mark.asyncio
     async def test_streaming_extraction_crash_yields_summary(self):
-        """When extract_claims crashes, streaming should still emit a summary."""
+        """When extraction crashes, streaming should still emit a summary."""
         from agents.hallucination import verify_response_streaming
 
-        async def _crash_extract(*args, **kwargs):
+        # The streaming path calls individual extraction functions directly.
+        # When heuristic returns nothing and LLM extraction crashes, the
+        # except block sets method="error" and emits a summary.
+        async def _crash_llm(*args, **kwargs):
             raise RuntimeError("Bifrost is down")
 
         with (
-            patch("core.agents.hallucination.streaming.extract_claims", side_effect=_crash_extract),
+            patch(f"{_STREAMING_MOD}._extract_claims_heuristic", return_value=[]),
+            patch(f"{_STREAMING_MOD}._detect_evasion", return_value=[]),
+            patch(f"{_STREAMING_MOD}._extract_citation_claims", return_value=[]),
+            patch(f"{_STREAMING_MOD}._extract_ignorance_claims", return_value=[]),
+            patch(f"{_STREAMING_MOD}._resolve_pronouns_heuristic", side_effect=lambda c, *a, **kw: c),
+            patch(f"{_STREAMING_MOD}._extract_claims_llm", new_callable=AsyncMock, side_effect=_crash_llm),
             patch("config.HALLUCINATION_MIN_RESPONSE_LENGTH", 10),
         ):
             events = []
@@ -426,17 +468,25 @@ class TestExtractionErrorHandling:
 
     @pytest.mark.asyncio
     async def test_streaming_extraction_timeout_yields_summary(self):
-        """When extract_claims hangs, the asyncio.wait_for timeout catches it
-        and the generator still produces a summary event."""
+        """When LLM extraction hangs (heuristic found nothing), the
+        asyncio.wait_for timeout catches it and the generator still
+        produces a summary event with extraction_method='timeout'."""
         from agents.hallucination import verify_response_streaming
 
-        async def _timeout_extract(*args, **kwargs):
-            """Simulate what asyncio.wait_for does when the coroutine exceeds
-            EXTRACTION_TIMEOUT — it raises TimeoutError."""
+        async def _timeout_llm(*args, **kwargs):
+            """Simulate what asyncio.wait_for does when _extract_claims_llm
+            exceeds the 30s timeout — it raises TimeoutError."""
             raise TimeoutError("simulated extraction timeout")
 
+        # Heuristic returns nothing so the streaming path falls through to
+        # the LLM branch, which we make timeout.
         with (
-            patch("core.agents.hallucination.streaming.extract_claims", side_effect=_timeout_extract),
+            patch(f"{_STREAMING_MOD}._extract_claims_heuristic", return_value=[]),
+            patch(f"{_STREAMING_MOD}._detect_evasion", return_value=[]),
+            patch(f"{_STREAMING_MOD}._extract_citation_claims", return_value=[]),
+            patch(f"{_STREAMING_MOD}._extract_ignorance_claims", return_value=[]),
+            patch(f"{_STREAMING_MOD}._resolve_pronouns_heuristic", side_effect=lambda c, *a, **kw: c),
+            patch(f"{_STREAMING_MOD}._extract_claims_llm", new_callable=AsyncMock, side_effect=_timeout_llm),
             patch("config.HALLUCINATION_MIN_RESPONSE_LENGTH", 10),
         ):
             events = []
