@@ -26,6 +26,16 @@ curl http://localhost:8888/health/ready      # verify
 | Redis | 6379 | `stacks/infrastructure/` |
 | React GUI | 3000 | `src/web/` |
 
+## Phase C Architecture (core/app split)
+
+The `src/mcp/` codebase is split into three layers:
+
+- **`core/`** — Portable orchestration logic: agents, retrieval (BM25, reranker, semantic cache), routing (smart router, model providers), and contracts (ABCs for VectorStore, GraphStore, CacheStore, LLMClient). Zero FastAPI dependencies. Apache-2.0.
+- **`app/`** — Concrete implementations: FastAPI routers, stores, parsers, middleware, sync, eval.
+- **Bridge modules** (`agents/`, `utils/`, `services/` at root) — Re-export from `core/` and `app/` for backward compatibility.
+
+import-linter enforces boundaries: `core/` must not import `app/`.
+
 ## Key Patterns
 
 | Concern | Pattern | Location |

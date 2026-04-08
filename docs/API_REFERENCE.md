@@ -705,10 +705,8 @@ Model can be changed post-setup via Settings UI → Ollama → Change button.
 
 ### Billing & Licensing
 
-> **Internal** — These endpoints are defined but not yet registered in the API. They require Stripe integration and are not accessible via the default server configuration.
+Pro tier features are available via the Cerid Pro upgrade path.
 
-- `POST /billing/create-checkout` — Create Stripe Checkout session for Pro tier upgrade
-- `POST /billing/webhook` — Stripe webhook handler (checkout.session.completed, invoice.payment_succeeded, customer.subscription.deleted)
 - `GET /billing/status` — Current license/subscription status
 - `POST /billing/validate-key` — Validate a manually-entered license key for offline Pro activation
 
