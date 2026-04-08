@@ -50,7 +50,7 @@ jobs:
         run: cd src/mcp && python -m pytest tests/ -v --tb=short --cov=. --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=20
       - name: Upload coverage to Codecov
         if: success()
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           files: src/mcp/coverage.xml
           fail_ci_if_error: false
