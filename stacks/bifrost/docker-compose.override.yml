@@ -1,0 +1,6 @@
+services:
+  bifrost:
+    volumes:
+      - ./extra-configs:/app/extra-configs:ro  # example future mount
+    environment:
+      - BIFROST_LOG_LEVEL=debug  # example extra env
