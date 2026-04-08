@@ -1,0 +1,117 @@
+# Secrets & keys
+.env
+.env.age
+.env.local
+.env*.local
+!.env.example
+*.key
+OPENROUTER_API_KEY*
+OPENAI_API_KEY*
+
+# Environment dumps & inventory
+src/mcp/docs/inventory/
+
+# SQLite databases
+*.db
+*.db-shm
+*.db-wal
+*.db.backup
+*.db.latest
+*.db.new
+stacks/bifrost/config.db.*
+
+# Runtime data & volumes
+data/
+src/mcp/data/
+# Bifrost provider config is safe to commit (uses env.OPENROUTER_API_KEY, no secrets)
+!stacks/bifrost/data/
+stacks/bifrost/data/*
+!stacks/bifrost/data/config.json
+uploads/
+logs/
+/neo4j/
+/chroma/
+/redis/
+stacks/infrastructure/data/
+artifacts/
+artifacts
+data
+
+# Node
+node_modules/
+
+# Next.js / Vercel build artifacts
+.next/
+.vercel/
+
+# Python / build
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+env/
+venv/
+.venv/
+
+# macOS / temp
+.DS_Store
+*.swp
+*~
+Thumbs.db
+
+# Runtime logs
+**/*.log
+**/diagnostic.data/
+**/journal/
+
+# User documents - never commit
+*.pdf
+*.docx
+*.xlsx
+*.csv
+archive/
+cerid-archive/
+inbox/
+.worktrees/
+backups/
+
+# Electron build output
+packages/desktop/out/
+packages/desktop/release/
+
+# AI assistant artifacts
+.superpowers/
+.internal/
+tests/beta/reports/
+tests/beta/eval/reports/
+
+# Internal task tracking & plans (not for public repo)
+tasks/
+.claude/plans/
+
+# Runtime log artifacts
+src/mcp/rag-api-logs.txt
+
+# Working documents (not for public repo)
+tests/BUG_REPORT.md
+
+# Dev artifacts
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+*.pyc
+__pycache__/
+.env
+.env.age
+.mcp.json
+stacks/infrastructure/data/
+src/web/dist/
+src/web/node_modules/
+node_modules/

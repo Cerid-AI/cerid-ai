@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cerid-cli"
+version = "0.1.0"
+description = "Cerid AI CLI — plugin scaffolding, testing, and configuration"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "Apache-2.0"}
+dependencies = [
+    "click>=8.0",
+    "httpx>=0.25",
+    "jinja2>=3.0",
+]
+
+[project.urls]
+"Homepage" = "https://cerid.ai"
+"Repository" = "https://github.com/Cerid-AI/cerid-ai"
+"Bug Tracker" = "https://github.com/Cerid-AI/cerid-ai/issues"
+
+[project.scripts]
+cerid = "cerid_cli.main:cli"
+
+[tool.setuptools.packages.find]
+where = ["src"]
