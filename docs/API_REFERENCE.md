@@ -49,13 +49,6 @@
 - `POST /agent/memory/archive` — Archive old conversation memories
 - `POST /agent/curate` — Score artifact quality across the KB- `POST /agent/curate/estimate` — Estimate synopsis generation cost before running
 
-**Trading agent KB enrichment endpoints (gated by `CERID_TRADING_ENABLED`):**
-- `POST /agent/trading/signal` — Enrich a trading signal with KB context
-- `POST /agent/trading/herd-detect` — Detect herd behavior via correlation graph violations
-- `POST /agent/trading/kelly-size` — Query historical CV_edge for Kelly criterion position sizing
-- `POST /agent/trading/cascade-confirm` — Confirm cascade liquidation pattern against historical data
-- `POST /agent/trading/longshot-surface` — Query stored calibration surface for longshot probability estimates
-
 **Auth endpoints (conditional on `CERID_MULTI_USER=true`):**
 - `POST /auth/register` — Create new user account (returns JWT tokens)
 - `POST /auth/login` — Authenticate with email/password (returns JWT tokens)
@@ -161,39 +154,24 @@
 - `pkb_curate` — Score artifact quality across the knowledge base- `pkb_digest` — Summary of recent KB activity, connections, and health status
 - `pkb_scheduler_status` — Get status of scheduled maintenance jobs
 - `pkb_check_hallucinations` — Verify LLM claims against KB- `pkb_memory_extract` — Extract memories from conversations- `pkb_memory_archive` — Archive old conversation memories- `pkb_ingest_multimodal` — Multi-modal ingestion (OCR, audio, vision)
-**Trading tools (5, gated by `CERID_TRADING_ENABLED`):**
-- `pkb_trading_signal` — Trading signal enrichment via KB
-- `pkb_herd_detect` — Herd behavior detection
-- `pkb_kelly_size` — Kelly criterion position sizing
-- `pkb_cascade_confirm` — Cascade liquidation confirmation
-- `pkb_longshot_surface` — Longshot opportunity surfacing
 
 **Additional tools:**
 - `pkb_web_search` — Agentic web search with verification- `pkb_memory_recall` — Context-aware memory retrieval with decay scoring
 ### SDK Router (`/sdk/v1/`) — Stable External API
 
-Versioned facade for cerid-series consumers (trading-agent, future projects). Delegates to existing agent endpoints but provides a stable contract that survives internal refactoring.
+Versioned facade for external consumers. Delegates to existing agent endpoints but provides a stable contract that survives internal refactoring.
 
 - `POST /sdk/v1/query` — KB query with reranking and RAG modes (delegates to `/agent/query`, supports `rag_mode` and `source_config`)
 - `POST /sdk/v1/hallucination` — Hallucination detection (delegates to `/agent/hallucination`)
 - `POST /sdk/v1/memory/extract` — Memory extraction (delegates to `/agent/memory/extract`)
 - `GET /sdk/v1/health` — Health check with `version`, `services`, `features` (subset of feature toggles relevant to consumers), and `internal_llm` (current internal LLM provider and model)
 
-**SDK Trading endpoints (gated by `CERID_TRADING_ENABLED`):**
-- `POST /sdk/v1/trading/signal` — Trading signal enrichment via KB (delegates to `/agent/trading/signal`)
-- `POST /sdk/v1/trading/herd-detect` — Herd behavior detection (delegates to `/agent/trading/herd-detect`)
-- `POST /sdk/v1/trading/kelly-size` — Kelly criterion position sizing (delegates to `/agent/trading/kelly-size`)
-- `POST /sdk/v1/trading/cascade-confirm` — Cascade liquidation confirmation (delegates to `/agent/trading/cascade-confirm`)
-- `POST /sdk/v1/trading/longshot-surface` — Longshot opportunity surfacing (delegates to `/agent/trading/longshot-surface`)
-
 **Client identification:** Send `X-Client-ID` header to get per-client rate limiting. Each client ID gets an independent rate budget:
 
 | Client ID | `/agent/` & `/sdk/` | `/ingest` | `/recategorize` |
 |-----------|---------------------|-----------|-----------------|
 | `gui` (default) | 20 req/min | 10 req/min | 10 req/min |
-| `trading-agent` | 80 req/min | — | — |
 | `_default` (unknown) | 10 req/min | 5 req/min | 5 req/min |
-| `boardroom-agent` | 60 req/min | — | — |
 
 Configured in `CONSUMER_REGISTRY` in `config/settings.py`. Rate limits are auto-derived from the registry.
 

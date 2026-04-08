@@ -40,8 +40,7 @@ class VerifyResource:
             claims: Pre-extracted claims to verify (skips extraction step).
         """
         body = self._client._build_json(
-            response=response,
-            context=context,
+            response_text=response,
             conversation_id=conversation_id,
             claims=claims,
         )
@@ -67,8 +66,7 @@ class AsyncVerifyResource:
     ) -> HallucinationResponse:
         """Verify factual claims in a response against the KB."""
         body = self._client._build_json(
-            response=response,
-            context=context,
+            response_text=response,
             conversation_id=conversation_id,
             claims=claims,
         )

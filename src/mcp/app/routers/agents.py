@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Agent endpoints — thin wrappers over agent modules."""
@@ -81,7 +81,7 @@ class MaintenanceRequest(BaseModel):
 
 
 class CurateRequest(BaseModel):
-    mode: str = Field("audit", pattern="^(audit)$")
+    mode: str = Field("audit", pattern="^(audit|trim|prune)$")
     domains: list[str] | None = None
     max_artifacts: int = Field(200, ge=1, le=1000)
     generate_synopses: bool = False

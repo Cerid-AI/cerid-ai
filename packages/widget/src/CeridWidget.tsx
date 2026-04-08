@@ -65,11 +65,6 @@ export function CeridWidget({ config, fullPage, onClose }: CeridWidgetProps) {
     apiRef.current = api;
     setMessages(api.getMessages());
 
-    // Show initial message if configured and no history
-    if (config.initialMessage && api.getMessages().length === 0) {
-      // Don't actually persist this — it's a greeting, not a real conversation turn
-    }
-
     return () => {
       api.abort();
     };

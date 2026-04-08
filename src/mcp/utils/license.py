@@ -20,7 +20,7 @@ LICENSE_SECRET = os.getenv("CERID_LICENSE_SECRET", "")
 
 
 def generate_license_key(email: str, tier: str = "pro") -> str:
-    """Generate a license key (server-side only, for future Stripe webhook).
+    """Generate a license key (server-side only, for license activation).
 
     Parameters
     ----------

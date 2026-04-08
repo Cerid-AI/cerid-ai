@@ -1,12 +1,4 @@
-# CLAUDE.md - Cerid AI (Open Source)
-
-## ⚠️ This is the PUBLIC distribution repo
-
-This repo is a lean Apache-2.0 distribution of Cerid AI Core. Development happens in the internal repo (`Cerid-AI/cerid-ai-internal`), then applicable changes are synced here.
-
-**This repo must NOT contain:** trading agent endpoints/tools/models, boardroom endpoints/domains, billing/Stripe code, enterprise overlay, `structlog` dependency, desktop app (`packages/desktop/`), or any internal-only documentation.
-
-**When syncing FROM internal:** never bulk-copy `config/settings.py`, `app/routers/agents.py`, `app/routers/sdk.py`, `app/main.py`, or `config/taxonomy.py` — these files have internal-only content that must not be in this repo. Copy individual changes, not whole files.
+# CLAUDE.md - Cerid AI
 
 ## Project Overview
 
@@ -125,10 +117,6 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`DEVELOPMENT.md`](DEVELOPMENT.md).
 - New endpoint → `main.py` + `docs/API_REFERENCE.md`
 - New env var → `settings.py` + `.env.example`
 - Python deps → `requirements.txt` then `make lock-python`
-
-## Compliance
-
-No Chinese-origin AI models (USG alignment). Approved: OpenAI, Anthropic, Google, xAI, Meta, Microsoft, Mistral.
 
 ## CI (7 jobs)
 

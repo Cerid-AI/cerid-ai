@@ -15,6 +15,11 @@ dependencies = [
     "jinja2>=3.0",
 ]
 
+[project.urls]
+"Homepage" = "https://cerid.ai"
+"Repository" = "https://github.com/Cerid-AI/cerid-ai"
+"Bug Tracker" = "https://github.com/Cerid-AI/cerid-ai/issues"
+
 [project.scripts]
 cerid = "cerid_cli.main:cli"
 

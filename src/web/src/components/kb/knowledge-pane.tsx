@@ -40,7 +40,6 @@ const PAGE_SIZE = 50
 const CLIENT_SOURCE_OPTIONS = [
   { value: "all", label: "All sources" },
   { value: "gui", label: "Personal" },
-  { value: "trading-agent", label: "Trading Agent" },
   { value: "external", label: "External" },
 ] as const
 

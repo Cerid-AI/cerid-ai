@@ -5,12 +5,24 @@
 
 from cerid._async_client import AsyncCeridClient
 from cerid.client import CeridClient
-from cerid.errors import CeridSDKError
+from cerid.errors import (
+    AuthenticationError,
+    CeridSDKError,
+    NotFoundError,
+    RateLimitError,
+    ServiceUnavailableError,
+    ValidationError,
+)
 
 __all__ = [
     "CeridClient",
     "AsyncCeridClient",
     "CeridSDKError",
+    "AuthenticationError",
+    "NotFoundError",
+    "RateLimitError",
+    "ServiceUnavailableError",
+    "ValidationError",
 ]
 
 __version__ = "0.1.0"

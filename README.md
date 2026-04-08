@@ -22,7 +22,6 @@ Cerid AI is a self-hosted knowledge base that combines RAG-powered retrieval, in
 - **Extensible SDK** at `/sdk/v1/` for building custom clients and integrations
 - **Plugin system** for community extensions (BSL-1.1 licensed plugins ship separately)
 - **React GUI** with streaming chat, knowledge browser, monitoring dashboards, and audit views
-- **Electron desktop app** for macOS and Windows with Docker lifecycle management
 - **Ollama support** for fully local LLM inference -- no external API calls required
 - **Streaming verification** with real-time claim extraction and hallucination detection against your knowledge base
 - **Multi-domain knowledge organization** with hierarchical taxonomy, auto-categorization, and cross-domain connections

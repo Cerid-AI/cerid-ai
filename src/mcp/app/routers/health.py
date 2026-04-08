@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Health check and collection listing endpoints."""
@@ -82,7 +82,7 @@ def health_check() -> dict:
 
     result: dict = {
         "status": "healthy" if all(v == "connected" for v in status.values()) else "degraded",
-        "version": "1.0.0",
+        "version": "0.82.0",
         "services": status,
         "circuit_breakers": {
             "bifrost": bifrost_cb_state,

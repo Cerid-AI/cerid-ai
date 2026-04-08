@@ -22,7 +22,7 @@ function generateId(): string {
 /**
  * Lightweight API client for communicating with the Cerid MCP server.
  *
- * - Sends queries via POST to `/agent/query`
+ * - Sends queries via POST to `/sdk/v1/query`
  * - Streams responses via SSE (Server-Sent Events)
  * - Persists session ID and message history in localStorage
  */
@@ -166,7 +166,7 @@ export class CeridChatAPI {
         headers["X-API-Key"] = this.apiKey;
       }
 
-      const response = await fetch(`${this.apiUrl}/agent/query`, {
+      const response = await fetch(`${this.apiUrl}/sdk/v1/query`, {
         method: "POST",
         headers,
         body: JSON.stringify({

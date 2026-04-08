@@ -147,11 +147,6 @@ Cerid AI supports plugins for extending functionality. See `src/mcp/plugins/base
 4. Update documentation if adding new endpoints, MCP tools, or plugins
 5. Open a PR with a clear description of what and why
 
-### Compliance Check
-- [ ] No Chinese-origin AI models referenced (DeepSeek, Qwen, Alibaba, etc.)
-- [ ] Default Ollama model is `llama3.2:3b` (Meta) — not Qwen
-- [ ] Run: `grep -rn "deepseek\|qwen\|alibaba" src/ --include="*.py" --include="*.ts"` → 0 results
-
 ## License
 
 By contributing, you agree that your contributions will be licensed under the Apache License 2.0.

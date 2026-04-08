@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """First-run configuration wizard endpoints.
@@ -358,6 +358,12 @@ async def _fallback_validate(provider: str, api_key: str) -> KeyValidationRespon
 @router.post("/configure", response_model=ConfigureResponse)
 async def configure(req: ConfigureRequest) -> ConfigureResponse:
     """Apply first-run configuration by writing API keys to the .env file."""
+    if _is_configured():
+        return ConfigureResponse(
+            success=False,
+            error="Already configured. To reconfigure, update .env directly and restart.",
+        )
+
     try:
         updates: dict[str, str] = {}
 

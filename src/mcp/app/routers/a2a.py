@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """A2A (Agent-to-Agent) Protocol — Phase 45.
@@ -19,7 +19,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.deps import get_chroma, get_neo4j, get_redis
@@ -67,15 +67,18 @@ class A2ATaskHistory(BaseModel):
 
 
 @router.get("/.well-known/agent.json")
-async def agent_card():
+async def agent_card(request: Request):
     """A2A Agent Card — advertises cerid's capabilities to other agents."""
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or f"localhost:{os.getenv('CERID_PORT_MCP', '8888')}"
+    scheme = request.headers.get("x-forwarded-proto", "http")
+    base_url = f"{scheme}://{host}"
     return {
         "name": "Cerid AI",
         "description": (
             "Privacy-first Personal AI Knowledge Companion with RAG, "
             "verification, and multi-domain knowledge management"
         ),
-        "url": f"http://localhost:{os.getenv('CERID_PORT_MCP', '8888')}",
+        "url": base_url,
         "version": "2.0.0",
         "capabilities": {
             "streaming": True,

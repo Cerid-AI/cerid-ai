@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """
@@ -14,16 +14,17 @@ from contextlib import asynccontextmanager
 
 import sentry_sdk
 
-sentry_sdk.init(
-    dsn=os.environ.get("SENTRY_DSN_MCP"),
-    environment=os.environ.get("SENTRY_ENVIRONMENT", "development"),
-    release=os.environ.get("SENTRY_RELEASE"),
-    send_default_pii=False,  # Privacy-first: don't send API keys, IPs, or request bodies
-    traces_sample_rate=0.1,
-    profile_session_sample_rate=1.0,
-    profile_lifecycle="trace",
-    enable_logs=True,
-)
+if os.environ.get("SENTRY_DSN_MCP"):
+    sentry_sdk.init(
+        dsn=os.environ["SENTRY_DSN_MCP"],
+        environment=os.environ.get("SENTRY_ENVIRONMENT", "development"),
+        release=os.environ.get("SENTRY_RELEASE"),
+        send_default_pii=False,  # Privacy-first: don't send API keys, IPs, or request bodies
+        traces_sample_rate=0.1,
+        profile_session_sample_rate=1.0,
+        profile_lifecycle="trace",
+        enable_logs=True,
+    )
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -342,7 +343,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="AI Companion MCP Server",
-    version="1.0.0",
+    version="0.82.0",
     lifespan=lifespan,
 )
 

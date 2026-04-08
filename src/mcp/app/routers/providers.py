@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Provider management endpoints — BYOK provider listing, key validation, and model config."""
@@ -101,7 +101,8 @@ async def get_internal_provider():
     try:
         import httpx
         ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
-        resp = httpx.get(f"{ollama_url}/api/tags", timeout=3)
+        async with httpx.AsyncClient(timeout=3) as client:
+            resp = await client.get(f"{ollama_url}/api/tags")
         ollama_available = resp.status_code == 200
     except Exception:
         pass

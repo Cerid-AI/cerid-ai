@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Ingestion REST endpoints.
@@ -222,12 +222,6 @@ async def ingest_feedback_endpoint(req: FeedbackIngestRequest):
     except Exception as e:
         logger.error(f"Feedback ingest error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/ingestion/progress")
-async def ingestion_progress():
-    """Return current ingestion queue status (stub for upload progress UI)."""
-    return {"active": False, "queue": [], "completed": 0}
 
 
 @router.get("/ingest_log")

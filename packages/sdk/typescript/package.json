@@ -5,6 +5,15 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Cerid-AI/cerid-ai.git",
+    "directory": "packages/sdk/typescript"
+  },
+  "bugs": {
+    "url": "https://github.com/Cerid-AI/cerid-ai/issues"
+  },
+  "homepage": "https://cerid.ai",
   "exports": {
     ".": {
       "import": "./dist/index.js",

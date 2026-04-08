@@ -35,8 +35,6 @@ PyStemmer>=2.2
 # Scheduling
 apscheduler>=3.10,<4
 
-# Logging (used by trading agent + internal tests)
-
 # Auth (optional — only needed for multi-user mode)
 # optional: PyJWT>=2.8,<3
 # optional: bcrypt>=4.0,<6
@@ -49,6 +47,3 @@ python-multipart>=0.0.9,<1
 # optional (Pro OCR plugin): pytesseract>=0.3.10
 # optional (Pro OCR plugin): Pillow>=10.0
 # Vision: uses httpx (already in core) + Bifrost/OpenRouter — no extra deps
-
-# Billing (Stripe — optional, only needed for Pro tier purchase flow)
-stripe>=8.0

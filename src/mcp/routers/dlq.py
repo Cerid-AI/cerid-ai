@@ -70,7 +70,7 @@ async def retry_dlq_entry(entry_id: str) -> dict[str, Any]:
     redis_client = TypedRedis(get_redis())
 
     # Find the specific entry
-    entries = await list_dlq(redis_client, limit=500, offset=0)
+    entries = await list_dlq(redis_client, limit=5000, offset=0)
     target = next((e for e in entries if e["entry_id"] == entry_id), None)
     if target is None:
         raise HTTPException(status_code=404, detail=f"DLQ entry {entry_id} not found")

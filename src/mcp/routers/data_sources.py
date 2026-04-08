@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from models.data_sources import (
@@ -43,7 +43,7 @@ async def enable_source(name: str):
         if s.name == name:
             s.enabled = True
             return {"status": "enabled", "name": name}
-    return {"error": f"Source '{name}' not found"}
+    raise HTTPException(status_code=404, detail=f"Source '{name}' not found")
 
 
 @router.post("/data-sources/{name}/disable", response_model=DataSourceToggleResponse)
@@ -54,7 +54,7 @@ async def disable_source(name: str):
         if s.name == name:
             s.enabled = False
             return {"status": "disabled", "name": name}
-    return {"error": f"Source '{name}' not found"}
+    raise HTTPException(status_code=404, detail=f"Source '{name}' not found")
 
 
 # ── Query all enabled sources ────────────────────────────────────────────────
@@ -216,7 +216,7 @@ async def add_rss_feed(body: AddFeedRequest):
 
     ok, message = validate_feed_url(body.url)
     if not ok:
-        return {"error": f"Feed validation failed: {message}", "url": body.url}
+        raise HTTPException(status_code=422, detail=f"Feed validation failed: {message}")
 
     feed = add_feed(url=body.url, name=body.name, domain=body.domain)
     return {"status": "added", "feed": feed, "validation": message}
@@ -240,7 +240,7 @@ async def delete_rss_feed(feed_id: str):
 
     removed = remove_feed(feed_id)
     if not removed:
-        return {"error": f"Feed '{feed_id}' not found"}
+        raise HTTPException(status_code=404, detail=f"Feed '{feed_id}' not found")
     return {"status": "removed", "feed_id": feed_id}
 
 
@@ -252,7 +252,7 @@ async def fetch_rss_feed_now(feed_id: str):
 
     feed = get_feed(feed_id)
     if feed is None:
-        return {"error": f"Feed '{feed_id}' not found"}
+        raise HTTPException(status_code=404, detail=f"Feed '{feed_id}' not found")
     result = await poll_feed(feed)
     return {"status": "polled", "result": result}
 

@@ -5,6 +5,7 @@ import remarkGfm from "remark-gfm"
 import { lazy, Suspense, useState, useCallback, useMemo, useRef, useEffect, isValidElement, type ReactNode } from "react"
 
 import ReactMarkdown from "react-markdown"
+import type { Components, ExtraProps } from "react-markdown"
 import { Copy, Check, User, Bot, ShieldCheck, ShieldAlert, Loader2, Pencil, Shield, ExternalLink, Sparkles, Globe, ThumbsUp, ThumbsDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -135,9 +136,8 @@ function MessageTOC({ headings }: { headings: TOCEntry[] }) {
 }
 
 /** Module-level markdown components — avoids recreation on every render */
-const MD_COMPONENTS: Record<string, React.ComponentType<Record<string, unknown>>> = {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  code({ className, children, ...props }: any) {
+const MD_COMPONENTS: Components = {
+  code({ className, children, ...props }: React.JSX.IntrinsicElements["code"] & ExtraProps) {
     const match = /language-(\w+)/.exec(className ?? "")
     const codeString = String(children).replace(/\n$/, "")
 
@@ -170,8 +170,7 @@ const MD_COMPONENTS: Record<string, React.ComponentType<Record<string, unknown>>
       </code>
     )
   },
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  a({ href, children, ...props }: any) {
+  a({ href, children, ...props }: React.JSX.IntrinsicElements["a"] & ExtraProps) {
     const isExternal = href?.startsWith("http")
     return (
       <a
@@ -188,75 +187,61 @@ const MD_COMPONENTS: Record<string, React.ComponentType<Record<string, unknown>>
       </a>
     )
   },
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  table({ children }: any) {
+  table({ children }: React.JSX.IntrinsicElements["table"] & ExtraProps) {
     return (
       <div className="my-2 overflow-x-auto rounded-lg border">
         <table className="min-w-full text-sm">{children}</table>
       </div>
     )
   },
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  thead({ children }: any) {
+  thead({ children }: React.JSX.IntrinsicElements["thead"] & ExtraProps) {
     return <thead className="border-b bg-muted/50">{children}</thead>
   },
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  tr({ children }: any) {
+  tr({ children }: React.JSX.IntrinsicElements["tr"] & ExtraProps) {
     return <tr className="border-b last:border-b-0 even:bg-muted/20">{children}</tr>
   },
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  th({ children }: any) {
+  th({ children }: React.JSX.IntrinsicElements["th"] & ExtraProps) {
     return <th className="px-3 py-2 text-left font-medium">{children}</th>
   },
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  td({ children }: any) {
+  td({ children }: React.JSX.IntrinsicElements["td"] & ExtraProps) {
     return <td className="px-3 py-2">{children}</td>
   },
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  blockquote({ children }: any) {
+  blockquote({ children }: React.JSX.IntrinsicElements["blockquote"] & ExtraProps) {
     return (
       <blockquote className="my-2 border-l-4 border-primary/30 bg-muted/30 py-1 pl-4 pr-2 text-muted-foreground [&>p]:my-1">
         {children}
       </blockquote>
     )
   },
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  h1({ children }: any) {
+  h1({ children }: React.JSX.IntrinsicElements["h1"] & ExtraProps) {
     const id = slugify(extractText(children))
     return <h1 id={id} className="mb-3 mt-5 border-b border-border pb-1 text-xl font-semibold first:mt-0">{children}</h1>
   },
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  h2({ children }: any) {
+  h2({ children }: React.JSX.IntrinsicElements["h2"] & ExtraProps) {
     const id = slugify(extractText(children))
     return <h2 id={id} className="mb-2 mt-4 border-b border-border/50 pb-1 text-lg font-semibold first:mt-0">{children}</h2>
   },
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  h3({ children }: any) {
+  h3({ children }: React.JSX.IntrinsicElements["h3"] & ExtraProps) {
     const id = slugify(extractText(children))
     return <h3 id={id} className="mb-1.5 mt-3 text-base font-semibold first:mt-0">{children}</h3>
   },
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  h4({ children }: any) {
+  h4({ children }: React.JSX.IntrinsicElements["h4"] & ExtraProps) {
     const id = slugify(extractText(children))
     return <h4 id={id} className="mb-1 mt-2.5 text-sm font-semibold first:mt-0">{children}</h4>
   },
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ul({ children }: any) {
+  ul({ children }: React.JSX.IntrinsicElements["ul"] & ExtraProps) {
     return <ul className="my-1.5 list-disc space-y-0.5 pl-5 marker:text-muted-foreground">{children}</ul>
   },
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ol({ children }: any) {
+  ol({ children }: React.JSX.IntrinsicElements["ol"] & ExtraProps) {
     return <ol className="my-1.5 list-decimal space-y-0.5 pl-5 marker:text-muted-foreground">{children}</ol>
   },
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  li({ children }: any) {
+  li({ children }: React.JSX.IntrinsicElements["li"] & ExtraProps) {
     return <li className="leading-relaxed">{children}</li>
   },
   hr() {
     return <hr className="my-4 border-border" />
   },
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  img({ src, alt }: any) {
+  img({ src, alt }: React.JSX.IntrinsicElements["img"] & ExtraProps) {
     const safeSrc =
       typeof src === "string" && /^(https?:|data:image\/)/.test(src) ? src : undefined
     if (!safeSrc) return null

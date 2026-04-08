@@ -227,7 +227,6 @@ async def widget_page(request: Request) -> HTMLResponse:
     return HTMLResponse(
         content=html,
         headers={
-            "X-Frame-Options": "ALLOWALL",
             "Content-Security-Policy": (
                 "frame-ancestors *; "
                 f"script-src 'self' 'unsafe-inline' {api_url}; "

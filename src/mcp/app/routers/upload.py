@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """File upload endpoint for GUI-based ingestion."""
@@ -173,6 +173,7 @@ def _archive_file(tmp_path: str, original_filename: str, domain: str) -> None:
     archive_root = Path(config.ARCHIVE_PATH)
     dest_dir = archive_root / domain
     dest_dir.mkdir(parents=True, exist_ok=True)
+    original_filename = Path(original_filename).name  # Strip directory components (path traversal prevention)
     dest = dest_dir / original_filename
 
     # Avoid overwriting — add numeric suffix if file exists
