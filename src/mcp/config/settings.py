@@ -540,12 +540,6 @@ def get_stage_provider(stage: str) -> str:
     return PIPELINE_PROVIDERS.get(stage, "bifrost")
 
 # ---------------------------------------------------------------------------
-# Trading Agent Integration
-# ---------------------------------------------------------------------------
-CERID_TRADING_ENABLED = os.getenv("CERID_TRADING_ENABLED", "false").lower() in ("true", "1")
-TRADING_AGENT_URL = os.getenv("TRADING_AGENT_URL", "http://localhost:8090")
-
-# ---------------------------------------------------------------------------
 # Email IMAP Poller
 # ---------------------------------------------------------------------------
 CERID_EMAIL_IMAP_HOST = os.getenv("CERID_EMAIL_IMAP_HOST", "")
@@ -559,12 +553,6 @@ CERID_EMAIL_POLL_INTERVAL = int(os.getenv("CERID_EMAIL_POLL_INTERVAL", "15"))  #
 # RSS/Atom Feed Poller
 # ---------------------------------------------------------------------------
 CERID_RSS_POLL_INTERVAL = int(os.getenv("CERID_RSS_POLL_INTERVAL", "30"))  # minutes
-
-# ---------------------------------------------------------------------------
-# Boardroom Integration
-# ---------------------------------------------------------------------------
-CERID_BOARDROOM_ENABLED = os.getenv("CERID_BOARDROOM_ENABLED", "false").lower() in ("true", "1")
-CERID_BOARDROOM_TIER = os.getenv("CERID_BOARDROOM_TIER", "foundation")
 
 # ---------------------------------------------------------------------------
 # Webhooks
@@ -661,17 +649,6 @@ CONSUMER_REGISTRY: dict[str, dict] = {
         "allowed_domains": None,     # Full access to all domains
         "strict_domains": False,     # Cross-domain affinity enabled
     },
-    "trading-agent": {
-        "rate_limits": {
-            # Worst-case burst: 5 sessions × (3 oracle + 2 memory) = 67.5 calls/min.
-            # 80/min gives 12.5/min headroom; client pools (50 oracle + 20 memory)
-            # are the actual binding constraints, so this is defense-in-depth.
-            "/agent/": (80, 60),
-            "/sdk/": (80, 60),
-        },
-        "allowed_domains": ["trading", "finance"],  # Scoped: no access to personal/coding/etc.
-        "strict_domains": True,      # No cross-domain bleed into personal data
-    },
     "cli-ingest": {
         "rate_limits": {
             "/ingest": (60, 60),
@@ -679,19 +656,6 @@ CONSUMER_REGISTRY: dict[str, dict] = {
         },
         "allowed_domains": None,     # Ingest into any domain
         "strict_domains": False,
-    },
-    "boardroom-agent": {
-        "description": "Cerid Boardroom business operations agent",
-        "rate_limits": {
-            # 4 client-side pools: strategy (40), research (30), analytics (20), ingest (15)
-            # Server-side: 40/min foundation → 100/min boardroom (tier-dependent)
-            "/agent/": (40, 60),
-            "/sdk/": (40, 60),
-            "/ingest": (20, 60),
-        },
-        "allowed_domains": ["strategy", "competitive_intel", "marketing", "advertising",
-                            "finance", "operations", "audit", "general"],
-        "strict_domains": True,      # No bleed into personal/conversations/coding
     },
     "a2a-agent": {
         "rate_limits": {
@@ -707,7 +671,7 @@ CONSUMER_REGISTRY: dict[str, dict] = {
             "/agent/": (40, 60),     # 40 req/min — dashboard + AI chat
             "/sdk/": (40, 60),
         },
-        "allowed_domains": ["finance", "strategy", "general"],
+        "allowed_domains": ["finance", "general"],
         "strict_domains": True,      # No bleed into personal/trading/coding data
     },
     "folder_scanner": {
@@ -727,10 +691,10 @@ CONSUMER_REGISTRY: dict[str, dict] = {
     },
     "_default": {
         "rate_limits": {
-            "/agent/": (10, 60),
-            "/sdk/": (10, 60),
-            "/ingest": (5, 60),
-            "/recategorize": (5, 60),
+            "/agent/": (30, 60),
+            "/sdk/": (30, 60),
+            "/ingest": (10, 60),
+            "/recategorize": (10, 60),
         },
         "allowed_domains": None,
         "strict_domains": False,
