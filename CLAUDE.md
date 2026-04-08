@@ -3,6 +3,33 @@
 > **Extends:** `sunrunnerfire/dotfiles` — all global workflow orchestration, core principles,
 > commit policy, and task management rules apply here. This file adds only project-specific context.
 
+## ⚠️ Two-Repo Architecture — Read Before ANY Sync
+
+This is the **internal** canonical development repo. The **public** repo (`Cerid-AI/cerid-ai`) is a lean Apache-2.0 distribution. They are NOT mirrors.
+
+**NEVER copy files wholesale from one repo to the other.** Each repo has files that must only exist in that repo. When syncing changes:
+
+1. **Internal → Public:** Cherry-pick individual commits or copy specific files. ALWAYS check each file against the exclusion list below before copying.
+2. **Public → Internal:** Same discipline. The public repo has trading/boardroom/billing code REMOVED. Copying `settings.py`, `agents.py`, `sdk.py`, `main.py`, or `taxonomy.py` from public to internal will DELETE internal-only config (trading, boardroom, billing, enterprise).
+3. **NEVER rsync or bulk-copy** `src/mcp/config/`, `src/mcp/app/routers/`, or `src/mcp/app/main.py` between repos without reviewing every file.
+
+**Files that DIFFER between repos (internal has MORE):**
+
+| File | Internal-only content |
+|------|----------------------|
+| `config/settings.py` | `CERID_TRADING_ENABLED`, `TRADING_AGENT_URL`, `CERID_BOARDROOM_ENABLED`, trading/boardroom consumer registry entries |
+| `config/taxonomy.py` | 6 boardroom domains (strategy, competitive_intel, marketing, advertising, operations, audit) + affinities + tag vocabularies |
+| `app/routers/agents.py` | 5 trading endpoints (`/agent/trading/*`), trading model imports |
+| `app/routers/sdk.py` | 5 trading SDK endpoints, 4 boardroom ops endpoints, trading/boardroom response models |
+| `app/main.py` | alerts, migration, ws_sync, trading_proxy, eval router imports + registrations; trading proxy shutdown; billing router |
+| `app/tools.py` | 5 trading MCP tools (`pkb_trading_signal` etc.) |
+| `app/scheduler.py` | 3 trading scheduler jobs |
+| `app/models/sdk.py` | 5 trading SDK response models |
+| `.github/workflows/ci.yml` | `frontend-desktop` job; `docker` needs `frontend-desktop` |
+| `CLAUDE.md` | Full architecture docs, sync protocol, session learnings |
+
+**If a sync breaks CI** with `Module has no attribute "CERID_TRADING_ENABLED"` or similar — the public `settings.py` was copied over the internal one. Restore the internal-only config from git history.
+
 ## Session Start (Required)
 
 Before beginning any development work in this repo, if not already done in this session:
@@ -11,6 +38,7 @@ Before beginning any development work in this repo, if not already done in this 
    - `sunrunnerfire/dotfiles` → `CLAUDE.md` (workflow principles, commit policy)
    - `sunrunnerfire/dotfiles` → `CLAUDE_CODE_SETUP.md` (plugins, MCP servers)
 2. Never add AI attribution to commits — see dotfiles `CLAUDE.md` commit policy.
+3. Read the sync warning above before ANY cross-repo operation.
 
 ---
 

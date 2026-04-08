@@ -411,3 +411,10 @@
 - 47 public commits and 524 internal commits had `Co-Authored-By: Claude` in body.
 - Fixed with `git filter-repo --message-callback` + force push.
 - **Rule:** Never include AI attribution in commits. This is in dotfiles/CLAUDE.md but was not followed.
+
+### NEVER bulk-copy files between internal and public repos
+- **Problem:** Copying `settings.py` from public to internal deleted `CERID_TRADING_ENABLED`, `TRADING_AGENT_URL`, `CERID_BOARDROOM_ENABLED`, and consumer registry entries. Broke internal CI.
+- **Problem:** Copying `agents.py` from public to internal deleted 5 trading endpoints. Copying `main.py` deleted alert/migration/ws_sync/trading/eval/billing router registrations.
+- **Rule:** NEVER use `cp`, `rsync`, or bulk file operations between repos. Cherry-pick individual changes. ALWAYS diff each file before committing a sync.
+- **Key files that DIFFER:** `config/settings.py`, `config/taxonomy.py`, `app/routers/agents.py`, `app/routers/sdk.py`, `app/main.py`, `app/tools.py`, `app/scheduler.py`, `.github/workflows/ci.yml`, `CLAUDE.md`
+- **Recovery:** When internal CI fails with `Module has no attribute "CERID_TRADING_ENABLED"`, the public settings.py was copied over. Restore from `git show HEAD~1:src/mcp/config/settings.py`.
