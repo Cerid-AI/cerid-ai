@@ -358,3 +358,56 @@
 - SSRF: validate token endpoints from OIDC discovery docs (attacker controls the discovery JSON)
 - XSS in entrypoints: JSON-encode env vars before writing to JS files
 - Dict iteration: `list(dict.items())` to snapshot before async iteration
+
+---
+
+## Session 2026-04-07 — Beta Test, Performance, Wiring Sprint
+
+### Increasing timeouts is not a fix for slow code
+- **Problem:** Verification pipeline took 8-25s. Increased timeouts 3 times (10→20→60s).
+- **Root cause:** `extract_claims()` always called LLM first, heuristic regex was only fallback.
+- **Fix:** Reverse extraction order — heuristic first (<5ms), LLM only when heuristic finds nothing.
+- **Rule:** Profile before patching. If something is slow, find WHY. Timeouts are band-aids.
+
+### System-check endpoints run inside Docker, not on host
+- `shutil.which("docker")` returns None inside containers. Use `Path("/.dockerenv").exists()`.
+- `.env` file doesn't exist inside container. Read `os.getenv()` for config keys.
+
+### Chrome aggressively caches localhost
+- `no-store` headers don't prevent Chrome disk cache on localhost for initial responses.
+- Old JS bundles cached even after rebuilds. Fix: nginx `/assets/` returns 404 on miss instead of index.html fallback.
+- Always add `?_t=${Date.now()}` cache buster to dynamic API calls in fetchSystemCheck.
+
+### Bridge module `import *` skips private names
+- Python's star import excludes `_` prefixed names. Tests that mock `_extract_claims_heuristic` through bridge fail.
+- 20+ private functions needed explicit re-exports across 12 bridge modules.
+- **Rule:** When adding any `_private` function to core/, immediately add explicit re-export to the bridge.
+
+### Trading/boardroom/finance are SDK clients, not core features
+- Client repos connect via `/sdk/v1/` endpoints. Client-specific endpoints, models, scheduler jobs, and MCP tools belong in internal repo only.
+- Public core repo should have ZERO client-specific code — only the SDK framework.
+- **Cleaned:** 1107 lines of trading/boardroom contamination removed from public.
+
+### KB verification false matches need term-overlap sanity check
+- Vector similarity produces false matches (e.g., cabin project docs matching light wavelength claims).
+- Fix: regex term extraction (<1ms), require 25% overlap between claim terms and source snippet.
+- Applied before ALL fallback paths, not just the verified threshold.
+
+### Verification routing should match training data cutoff
+- Pre-2024 facts → cross-model (GPT-4o-mini, 5-7s). Post-2024 current events → web search (Grok :online, 15-18s).
+- Empty KB caused ALL claims to force web_search. Fixed by checking `_is_current_event_claim()` before forcing.
+
+### "Confidence" in KB panel means relevance, not correctness
+- Backend `confidence` field = mean KB retrieval relevance. Not verification confidence.
+- Renamed to "Relevance" in UI to prevent confusion.
+- Bar only shows when results.length > 0 (post-filter), not totalResults > 0 (pre-filter).
+
+### External data sources exist but were never wired
+- 9 sources registered (Wikipedia, DuckDuckGo, etc.) but `registry.query_all()` never called from query pipeline.
+- `orchestrated_query()` existed as dead code — never invoked from HTTP route.
+- Fixed: added `rag_mode` to `AgentQueryRequest`, wired orchestrator + external sources.
+
+### Commit attribution policy enforcement
+- 47 public commits and 524 internal commits had `Co-Authored-By: Claude` in body.
+- Fixed with `git filter-repo --message-callback` + force push.
+- **Rule:** Never include AI attribution in commits. This is in dotfiles/CLAUDE.md but was not followed.
