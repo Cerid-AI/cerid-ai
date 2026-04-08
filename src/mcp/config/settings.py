@@ -550,6 +550,18 @@ CERID_EMAIL_FOLDER = os.getenv("CERID_EMAIL_FOLDER", "INBOX")
 CERID_EMAIL_POLL_INTERVAL = int(os.getenv("CERID_EMAIL_POLL_INTERVAL", "15"))  # minutes
 
 # ---------------------------------------------------------------------------
+# Trading Agent Integration (internal only — not in public distro)
+# ---------------------------------------------------------------------------
+CERID_TRADING_ENABLED = os.getenv("CERID_TRADING_ENABLED", "false").lower() in ("true", "1")
+TRADING_AGENT_URL = os.getenv("TRADING_AGENT_URL", "http://localhost:8090")
+
+# ---------------------------------------------------------------------------
+# Boardroom Agent Integration (internal only — not in public distro)
+# ---------------------------------------------------------------------------
+CERID_BOARDROOM_ENABLED = os.getenv("CERID_BOARDROOM_ENABLED", "false").lower() in ("true", "1")
+CERID_BOARDROOM_TIER = os.getenv("CERID_BOARDROOM_TIER", "foundation")
+
+# ---------------------------------------------------------------------------
 # RSS/Atom Feed Poller
 # ---------------------------------------------------------------------------
 CERID_RSS_POLL_INTERVAL = int(os.getenv("CERID_RSS_POLL_INTERVAL", "30"))  # minutes
@@ -688,6 +700,22 @@ CONSUMER_REGISTRY: dict[str, dict] = {
         },
         "allowed_domains": None,     # Webhooks can target any domain
         "strict_domains": False,
+    },
+    "trading-agent": {
+        "rate_limits": {
+            "/sdk/": (80, 60),       # 80 req/min — 5-session burst of 67.5/min
+            "/agent/": (80, 60),
+        },
+        "allowed_domains": ["trading"],
+        "strict_domains": True,
+    },
+    "boardroom-agent": {
+        "rate_limits": {
+            "/sdk/": (40, 60),
+            "/agent/": (40, 60),
+        },
+        "allowed_domains": ["strategy", "competitive_intel", "marketing", "advertising", "operations", "audit"],
+        "strict_domains": True,
     },
     "_default": {
         "rate_limits": {
