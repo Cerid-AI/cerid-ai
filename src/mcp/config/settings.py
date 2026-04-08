@@ -691,10 +691,10 @@ CONSUMER_REGISTRY: dict[str, dict] = {
     },
     "_default": {
         "rate_limits": {
-            "/agent/": (10, 60),
-            "/sdk/": (10, 60),
-            "/ingest": (5, 60),
-            "/recategorize": (5, 60),
+            "/agent/": (30, 60),
+            "/sdk/": (30, 60),
+            "/ingest": (10, 60),
+            "/recategorize": (10, 60),
         },
         "allowed_domains": None,
         "strict_domains": False,

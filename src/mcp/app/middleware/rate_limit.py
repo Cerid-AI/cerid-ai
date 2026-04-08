@@ -81,6 +81,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if method == "GET":
             return await call_next(request)
 
+        # MCP SSE transport and health paths are internal — exempt
+        if path.startswith(("/mcp/", "/health", "/setup/")):
+            return await call_next(request)
+
         # Per-client isolation via X-Client-ID (set by RequestIDMiddleware)
         client_id = request.headers.get("x-client-id", "gui")
         client_limits = CLIENT_RATE_LIMITS.get(
