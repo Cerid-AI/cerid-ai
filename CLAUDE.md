@@ -1,5 +1,13 @@
 # CLAUDE.md - Cerid AI (Open Source)
 
+## ⚠️ This is the PUBLIC distribution repo
+
+This repo is a lean Apache-2.0 distribution of Cerid AI Core. Development happens in the internal repo (`Cerid-AI/cerid-ai-internal`), then applicable changes are synced here.
+
+**This repo must NOT contain:** trading agent endpoints/tools/models, boardroom endpoints/domains, billing/Stripe code, enterprise overlay, `structlog` dependency, desktop app (`packages/desktop/`), or any internal-only documentation.
+
+**When syncing FROM internal:** never bulk-copy `config/settings.py`, `app/routers/agents.py`, `app/routers/sdk.py`, `app/main.py`, or `config/taxonomy.py` — these files have internal-only content that must not be in this repo. Copy individual changes, not whole files.
+
 ## Project Overview
 
 Cerid AI is a self-hosted, privacy-first AI Knowledge Companion. RAG-powered retrieval, intelligent agents, and an extensible SDK. Apache-2.0 licensed.
