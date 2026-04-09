@@ -297,14 +297,15 @@ async def get_ollama_recommendations():
 
     models = []
     for m in _MODELS:
-        compatible = ram_gb >= m["min_ram_gb"]
+        min_ram: int = m["min_ram_gb"]  # type: ignore[assignment]
+        compatible = ram_gb >= min_ram
         models.append({**m, "compatible": compatible, "recommended": False})
 
     # Pick the best compatible model as recommended
     recommended_id = "llama3.2:3b"  # fallback
     for m in reversed(models):
         if m["compatible"]:
-            recommended_id = m["id"]
+            recommended_id = str(m["id"])
             break
 
     # Mark the recommended model

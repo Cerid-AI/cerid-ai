@@ -3,6 +3,7 @@
 
 """Tests for utils/embeddings.py and deps._EmbeddingAwareClient."""
 
+import math
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -189,8 +190,6 @@ class TestEmbeddingAwareClient:
 # ---------------------------------------------------------------------------
 # l2_distance_to_relevance unit tests
 # ---------------------------------------------------------------------------
-
-import math
 
 
 class TestL2DistanceToRelevance:

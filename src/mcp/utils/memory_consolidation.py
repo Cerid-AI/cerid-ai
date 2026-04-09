@@ -19,11 +19,11 @@ from typing import Any, Literal
 import httpx
 
 import config
+from core.utils.embeddings import l2_distance_to_relevance
 from errors import RetrievalError
 from utils.circuit_breaker import CircuitOpenError
 from utils.internal_llm import call_internal_llm
 from utils.llm_parsing import parse_llm_json
-from core.utils.embeddings import l2_distance_to_relevance
 from utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.memory_consolidation")
