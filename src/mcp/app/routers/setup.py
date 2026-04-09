@@ -84,6 +84,12 @@ class ConfigureRequest(BaseModel):
     anthropic_api_key: str | None = None
     xai_api_key: str | None = None
     neo4j_password: str | None = None
+    # KB / environment fields sent by the setup wizard
+    archive_path: str | None = None
+    lightweight_mode: bool | None = None
+    watch_folder: bool | None = None
+    ollama_enabled: bool | None = None
+    ollama_model: str | None = None
 
 
 class ConfigureResponse(BaseModel):
@@ -167,6 +173,33 @@ def _read_env_file() -> str:
     if _ENV_FILE.exists():
         return _ENV_FILE.read_text(encoding="utf-8")
     return ""
+
+
+def _sanitize_archive_path(raw: str) -> str:
+    """Validate and normalise an archive path before writing to .env.
+
+    Raises ``ValueError`` for clearly invalid input:
+    - contains newlines or null bytes (would corrupt the .env file)
+    - empty after stripping whitespace
+
+    Normalisation:
+    - strips whitespace
+    - expands ``~`` to the real home directory
+    - resolves ``..`` so the canonical path is stored
+    """
+    path = raw.strip()
+    if not path:
+        raise ValueError("Archive path must not be empty")
+
+    # Characters that would corrupt a .env file or enable injection
+    if "\n" in path or "\r" in path or "\0" in path:
+        raise ValueError("Archive path contains invalid characters")
+
+    # Expand ~ and resolve to canonical absolute path
+    path = os.path.expanduser(path)
+    path = os.path.realpath(path)
+
+    return path
 
 
 def _update_env_file(updates: dict[str, str]) -> None:
@@ -357,12 +390,7 @@ async def _fallback_validate(provider: str, api_key: str) -> KeyValidationRespon
 
 @router.post("/configure", response_model=ConfigureResponse)
 async def configure(req: ConfigureRequest) -> ConfigureResponse:
-    """Apply first-run configuration by writing API keys to the .env file."""
-    if _is_configured():
-        return ConfigureResponse(
-            success=False,
-            error="Already configured. To reconfigure, update .env directly and restart.",
-        )
+    """Apply configuration by writing API keys to the .env file."""
 
     try:
         updates: dict[str, str] = {}
@@ -382,8 +410,20 @@ async def configure(req: ConfigureRequest) -> ConfigureResponse:
             else:
                 updates["NEO4J_PASSWORD"] = req.neo4j_password
 
+        # KB / environment fields from the setup wizard
+        if req.archive_path is not None:
+            updates["ARCHIVE_PATH"] = _sanitize_archive_path(req.archive_path)
+        if req.lightweight_mode is not None:
+            updates["CERID_LIGHTWEIGHT"] = "true" if req.lightweight_mode else ""
+        if req.watch_folder is not None:
+            updates["WATCH_FOLDER"] = "true" if req.watch_folder else ""
+        if req.ollama_enabled is not None:
+            updates["OLLAMA_ENABLED"] = "true" if req.ollama_enabled else "false"
+        if req.ollama_model is not None:
+            updates["OLLAMA_DEFAULT_MODEL"] = req.ollama_model
+
         if not updates:
-            return ConfigureResponse(success=False, error="No keys provided")
+            return ConfigureResponse(success=False, error="No configuration provided")
 
         _update_env_file(updates)
 
@@ -452,12 +492,9 @@ async def system_check(response: Response) -> dict:
     response.headers["Pragma"] = "no-cache"
     import shutil
 
-    # RAM
-    try:
-        import psutil
-        ram_gb = round(psutil.virtual_memory().total / (1024**3))
-    except ImportError:
-        ram_gb = 16  # default guess
+    from utils.host_info import get_host_hardware
+
+    hw = get_host_hardware()
 
     # Docker — if we're running inside a container, Docker is clearly available
     docker_running = (
@@ -500,10 +537,15 @@ async def system_check(response: Response) -> dict:
     default_archive = archive_path
 
     # Lightweight recommendation
-    lightweight_recommended = ram_gb < 8
+    lightweight_recommended = hw.ram_gb < 8
 
     return {
-        "ram_gb": ram_gb,
+        "ram_gb": hw.ram_gb,
+        "os": hw.os,
+        "cpu": hw.cpu,
+        "cpu_cores": hw.cpu_cores,
+        "gpu": hw.gpu,
+        "gpu_acceleration": hw.gpu_acceleration,
         "docker_running": docker_running,
         "env_exists": env_exists,
         "env_keys_present": env_keys,

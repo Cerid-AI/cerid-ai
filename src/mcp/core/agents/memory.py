@@ -24,6 +24,7 @@ from core.utils.cache import log_event
 from core.utils.circuit_breaker import CircuitOpenError
 from core.utils.internal_llm import call_internal_llm
 from core.utils.llm_parsing import parse_llm_json
+from core.utils.embeddings import l2_distance_to_relevance
 from core.utils.time import utcnow, utcnow_iso
 
 logger = logging.getLogger("ai-companion.memory")
@@ -363,7 +364,7 @@ async def detect_memory_conflict(
 
     for i, chunk_id in enumerate(results["ids"][0]):
         distance = results["distances"][0][i] if results["distances"] else 1.0
-        similarity = max(0.0, 1.0 - distance)
+        similarity = l2_distance_to_relevance(distance)
         if similarity >= similarity_threshold:
             metadata = results["metadatas"][0][i] if results["metadatas"] else {}
             conflicts.append({
@@ -564,7 +565,7 @@ async def recall_memories(
 
     for i, chunk_id in enumerate(results["ids"][0]):
         distance = results["distances"][0][i] if results["distances"] else 1.0
-        base_similarity = max(0.0, 1.0 - distance)
+        base_similarity = l2_distance_to_relevance(distance)
         metadata = results["metadatas"][0][i] if results["metadatas"] else {}
 
         # Compute age in days

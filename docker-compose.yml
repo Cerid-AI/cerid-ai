@@ -184,6 +184,11 @@ services:
       - INTERNAL_LLM_PROVIDER=${INTERNAL_LLM_PROVIDER:-bifrost}
       - INTERNAL_LLM_MODEL=${INTERNAL_LLM_MODEL:-openrouter/openai/gpt-4o-mini}
       - HOST_MEMORY_GB=${HOST_MEMORY_GB:-}
+      - HOST_OS=${HOST_OS:-}
+      - HOST_CPU=${HOST_CPU:-}
+      - HOST_CPU_CORES=${HOST_CPU_CORES:-}
+      - HOST_GPU=${HOST_GPU:-}
+      - HOST_GPU_ACCEL=${HOST_GPU_ACCEL:-}
     depends_on:
       neo4j:
         condition: service_healthy

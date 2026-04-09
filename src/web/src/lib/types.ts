@@ -360,17 +360,20 @@ export interface SourceBreakdown {
 }
 
 export interface AgentQueryResponse {
-  query: string
-  domains_queried: string[]
-  total_results: number
-  deduplicated_results: number
-  results: KBQueryResult[]
+  context?: string
+  sources?: SourceRef[]
   confidence: number
-  reranking_used: boolean
-  execution_time_ms: number
-  timestamp: string
+  domains_searched?: string[]
+  total_results: number
+  token_budget_used?: number
+  graph_results?: number
+  results: KBQueryResult[]
+  /** Elapsed wall-clock time for the query pipeline (ms). */
+  execution_time_ms?: number
   source_breakdown?: SourceBreakdown
   rag_mode?: RagMode
+  /** Timing breakdown (only present when X-Debug-Timing header is sent). */
+  _timings?: Record<string, number>
 }
 
 export interface RelatedArtifact {
@@ -1001,6 +1004,11 @@ export interface SystemCheckResponse {
   lightweight_recommended: boolean
   archive_path_exists: boolean
   default_archive_path: string
+  os: string
+  cpu: string
+  cpu_cores: number | null
+  gpu: string
+  gpu_acceleration: string
 }
 
 export interface SetupServiceHealth {

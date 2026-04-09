@@ -23,6 +23,7 @@ from errors import RetrievalError
 from utils.circuit_breaker import CircuitOpenError
 from utils.internal_llm import call_internal_llm
 from utils.llm_parsing import parse_llm_json
+from core.utils.embeddings import l2_distance_to_relevance
 from utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.memory_consolidation")
@@ -73,7 +74,7 @@ async def classify_memory(
     if results["ids"] and results["ids"][0]:
         for i, chunk_id in enumerate(results["ids"][0]):
             distance = results["distances"][0][i] if results["distances"] else 1.0
-            similarity = max(0.0, 1.0 - distance)
+            similarity = l2_distance_to_relevance(distance)
             if similarity >= SIMILARITY_THRESHOLD:
                 metadata = results["metadatas"][0][i] if results["metadatas"] else {}
                 candidates.append({

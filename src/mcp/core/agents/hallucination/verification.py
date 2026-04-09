@@ -35,6 +35,7 @@ from core.agents.hallucination.patterns import (
 )
 from core.utils.circuit_breaker import CircuitOpenError, NonTransientError
 from core.utils.claim_cache import cache_verdict, get_cached_verdict
+from core.utils.embeddings import l2_distance_to_relevance
 from core.utils.llm_parsing import parse_llm_json
 
 
@@ -566,7 +567,7 @@ async def _query_memories(
         if results["ids"] and results["ids"][0]:
             for i, _chunk_id in enumerate(results["ids"][0]):
                 distance = results["distances"][0][i] if results["distances"] else 1.0
-                relevance = max(0.0, min(1.0, 1.0 - distance))
+                relevance = l2_distance_to_relevance(distance)
                 metadata = results["metadatas"][0][i] if results["metadatas"] else {}
                 formatted.append({
                     "relevance": round(relevance, 4),

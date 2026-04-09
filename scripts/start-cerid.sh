@@ -118,6 +118,64 @@ if [ -z "${HOST_MEMORY_GB:-}" ]; then
 fi
 export HOST_MEMORY_GB="${HOST_MEMORY_GB:-}"
 
+# Auto-detect host hardware (OS, CPU, GPU) for setup wizard system check.
+# Container can only see Linux kernel — these env vars pass real host info.
+if [ -z "${HOST_OS:-}" ]; then
+    case "$(uname -s)" in
+        Darwin)
+            HOST_OS="macOS $(sw_vers -productVersion 2>/dev/null || echo '')"
+            HOST_CPU="$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo 'Unknown')"
+            HOST_CPU_CORES="$(sysctl -n hw.ncpu 2>/dev/null || echo '')"
+            HOST_GPU="$(system_profiler SPDisplaysDataType 2>/dev/null | grep 'Chipset Model' | head -1 | sed 's/.*: //' || echo 'Unknown')"
+            # Detect Apple Silicon vs Intel
+            if sysctl -n machdep.cpu.brand_string 2>/dev/null | grep -q "Apple"; then
+                HOST_GPU_ACCEL="metal"
+            else
+                HOST_GPU_ACCEL="none"
+            fi
+            ;;
+        Linux)
+            HOST_OS="Linux $(uname -r 2>/dev/null)"
+            HOST_CPU="$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | sed 's/.*: //' || echo 'Unknown')"
+            HOST_CPU_CORES="$(nproc 2>/dev/null || echo '')"
+            if command -v nvidia-smi &>/dev/null; then
+                HOST_GPU="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || echo 'Unknown')"
+                HOST_GPU_ACCEL="cuda"
+            elif [ -d /dev/kfd ]; then
+                HOST_GPU_ACCEL="rocm"
+                HOST_GPU="AMD GPU (ROCm)"
+            else
+                HOST_GPU="None detected"
+                HOST_GPU_ACCEL="none"
+            fi
+            ;;
+    esac
+fi
+export HOST_OS="${HOST_OS:-}"
+export HOST_CPU="${HOST_CPU:-}"
+export HOST_CPU_CORES="${HOST_CPU_CORES:-}"
+export HOST_GPU="${HOST_GPU:-}"
+export HOST_GPU_ACCEL="${HOST_GPU_ACCEL:-}"
+
+# Persist HOST_* values to .env so `docker compose up` without start-cerid.sh
+# still passes real host hardware info into containers.
+# Uses delete+append (not sed substitution) to safely handle special chars
+# in hardware strings like "Intel(R) Core(TM) i9-13900K @ 3.00GHz".
+_persist_host_var() {
+    local key="$1" val="$2"
+    [ -z "$val" ] && return
+    # Remove existing line (if any), then append the new value
+    grep -v "^${key}=" "$ENV_FILE" > "${ENV_FILE}.tmp" 2>/dev/null || true
+    echo "${key}=${val}" >> "${ENV_FILE}.tmp"
+    mv "${ENV_FILE}.tmp" "$ENV_FILE"
+}
+_persist_host_var HOST_MEMORY_GB "$HOST_MEMORY_GB"
+_persist_host_var HOST_OS "$HOST_OS"
+_persist_host_var HOST_CPU "$HOST_CPU"
+_persist_host_var HOST_CPU_CORES "$HOST_CPU_CORES"
+_persist_host_var HOST_GPU "$HOST_GPU"
+_persist_host_var HOST_GPU_ACCEL "$HOST_GPU_ACCEL"
+
 # Platform-aware Ollama URL default (Section 4: Multi-OS)
 # macOS/Windows Docker Desktop: host.docker.internal
 # Linux Docker Engine: localhost (host network accessible)
@@ -444,6 +502,11 @@ services:
         condition: service_healthy
 LEOF
 fi
+
+# Ensure Docker bind-mount directories exist on the host.
+# If these are missing, Docker creates them as root-owned dirs and services
+# (especially ChromaDB's SQLite) fail with write permission errors.
+mkdir -p "$CERID_ROOT/stacks/infrastructure/data/"{chroma,neo4j,neo4j-logs,redis}
 
 if [ -z "$LEGACY_FLAG" ] && [ -f "$UNIFIED_COMPOSE" ]; then
     COMPOSE_FILES="-f $UNIFIED_COMPOSE"

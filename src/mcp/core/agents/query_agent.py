@@ -21,6 +21,7 @@ from config import DOMAINS
 from core.contracts.stores import GraphStore
 from core.utils.cache import log_event
 from core.utils.circuit_breaker import CircuitOpenError
+from core.utils.embeddings import l2_distance_to_relevance
 from core.utils.llm_parsing import parse_llm_json
 from core.utils.text import STOPWORDS as _STOPWORDS
 from core.utils.text import WORD_RE as _WORD_RE
@@ -64,6 +65,7 @@ class StepTimer:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _format_chroma_result(
     content: str,
@@ -236,7 +238,7 @@ async def multi_domain_query(
             if results["ids"] and results["ids"][0]:
                 for i, chunk_id in enumerate(results["ids"][0]):
                     distance = results["distances"][0][i] if results["distances"] else 1.0
-                    relevance = max(0.0, min(1.0, 1.0 - distance))
+                    relevance = l2_distance_to_relevance(distance)
                     metadata = results["metadatas"][0][i] if results["metadatas"] else {}
 
                     formatted.append(_format_chroma_result(
@@ -413,7 +415,7 @@ async def graph_expand_results(
         chunks: list[dict[str, Any]] = []
         for i, chunk_id in enumerate(fetched["ids"][0]):
             distance = fetched["distances"][0][i] if fetched["distances"] else 1.0
-            raw_relevance = max(0.0, min(1.0, 1.0 - distance))
+            raw_relevance = l2_distance_to_relevance(distance)
             depth_penalty = 1.0 / (1.0 + rel_artifact.get("relationship_depth", 1))
             relevance = round(
                 raw_relevance * config.GRAPH_RELATED_SCORE_FACTOR * depth_penalty, 4
