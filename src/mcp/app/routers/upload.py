@@ -4,6 +4,7 @@
 """File upload endpoint for GUI-based ingestion."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import shutil
@@ -68,12 +69,14 @@ async def upload_file_endpoint(
 
         logger.info(f"Upload received: {file.filename} ({len(content)} bytes) -> {tmp_path}")
 
-        # Parse file from /tmp, then ingest the extracted text content
-        # (bypasses archive path validation which requires files under ARCHIVE_PATH)
+        # Parse file from /tmp, then ingest the extracted text content.
+        # Both _parse_file and ingest_content are blocking I/O — offload to
+        # a thread so the async event loop stays responsive for healthchecks
+        # and concurrent requests (mirrors ingest_file in ingestion.py).
         from app.parsers import parse_file as _parse_file
         from app.services.ingestion import ingest_content
 
-        parsed = _parse_file(tmp_path)
+        parsed = await asyncio.to_thread(_parse_file, tmp_path)
         text = parsed.get("text", "")
         if not text.strip():
             raise ValueError(f"No text extracted from '{file.filename}'")
@@ -89,7 +92,8 @@ async def upload_file_endpoint(
             val = parsed.get(key)
             if val is not None:
                 metadata[key] = val
-        result = ingest_content(
+        result = await asyncio.to_thread(
+            ingest_content,
             text,
             domain or "general",
             metadata,
@@ -102,8 +106,6 @@ async def upload_file_endpoint(
 
         # Invalidate query cache so subsequent queries hit fresh data
         # (mirrors the pattern in ingestion.py)
-        import asyncio
-
         from utils.query_cache import invalidate_cache_non_blocking
         asyncio.get_running_loop().create_task(invalidate_cache_non_blocking())
 

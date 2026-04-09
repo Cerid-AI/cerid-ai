@@ -352,13 +352,20 @@ export async function uploadFile(
   if (opts.skipQuality) params.set("skip_quality", "true")
   if (opts.skipMetadata) params.set("skip_metadata", "true")
 
-  const res = await fetch(`${MCP_BASE}/upload?${params}`, {
-    method: "POST",
-    headers: mcpHeaders(),
-    body: formData,
-  })
-  if (!res.ok) throw new Error(await extractError(res, `Upload failed: ${res.status}`))
-  return res.json()
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 120_000) // 2 min timeout for large files
+  try {
+    const res = await fetch(`${MCP_BASE}/upload?${params}`, {
+      method: "POST",
+      headers: mcpHeaders(),
+      body: formData,
+      signal: controller.signal,
+    })
+    if (!res.ok) throw new Error(await extractError(res, `Upload failed: ${res.status}`))
+    return res.json()
+  } finally {
+    clearTimeout(timeout)
+  }
 }
 
 // -- Sync API ----------------------------------------------------------------
