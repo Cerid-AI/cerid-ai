@@ -1,0 +1,97 @@
+# Sync manifest for cerid-ai-internal <-> cerid-ai (public) repo sync.
+# Used by scripts/sync-repos.py to automate bidirectional sync.
+
+# Files/patterns that exist ONLY in internal repo (never copied to public)
+internal_only:
+  # Internal extension files (the *_internal.py/ts files)
+  - src/mcp/config/settings_internal.py
+  - src/mcp/config/taxonomy_internal.py
+  - src/mcp/app/routers/agents_internal.py
+  - src/mcp/app/routers/sdk_internal.py
+  - src/mcp/app/main_internal.py
+  - src/mcp/app/tools_internal.py
+  - src/mcp/app/scheduler_internal.py
+  - src/mcp/app/models/sdk_internal.py
+  - src/web/src/lib/types_internal.ts
+  # Enterprise module
+  - src/mcp/enterprise/**
+  # Internal-only routers
+  - src/mcp/app/routers/trading_proxy.py
+  - src/mcp/app/routers/alerts.py
+  - src/mcp/app/routers/migration.py
+  - src/mcp/app/routers/ws_sync.py
+  - src/mcp/app/routers/billing.py
+  - src/mcp/app/routers/eval.py
+  # Internal-only models
+  - src/mcp/app/models/trading.py
+  - src/mcp/app/models/billing.py
+  # Internal-only agents
+  - src/mcp/agents/trading_agent.py
+  - src/mcp/core/agents/trading_agent.py
+  - src/mcp/app/agents/trading_scheduler_jobs.py
+  # Internal-only stores
+  - src/mcp/app/stores/**
+  # Internal-only scripts
+  - src/mcp/scripts/rewrite_imports.py
+  # Desktop app
+  - packages/desktop/**
+  # Internal-only tests
+  - src/mcp/tests/test_trading_*.py
+  - src/mcp/tests/test_enterprise_*.py
+  - src/mcp/tests/test_eval_*.py
+  - src/mcp/tests/test_auth_*.py
+  - src/mcp/tests/test_smart_router_*.py
+  - src/mcp/tests/test_bifrost_*.py
+  - src/mcp/tests/test_sync_*.py
+  - src/mcp/tests/test_middleware_*.py
+  # Sync tooling
+  - .sync-manifest.yaml
+  - scripts/sync-repos.py
+  # Internal docs
+  - docs/superpowers/**
+
+# Files where internal version = public version + appended hook block.
+# The sync script truncates at hook_marker for to-public, appends for from-public.
+mixed_files:
+  - path: src/mcp/app/main.py
+    hook_marker: "# -- Internal feature bootstrap"
+  - path: src/mcp/app/routers/agents.py
+    hook_marker: "# -- Trading endpoints"
+  - path: src/mcp/app/routers/sdk.py
+    hook_marker: "# -- Internal SDK endpoints"
+  - path: src/mcp/app/tools.py
+    hook_marker: "# -- Trading tools"
+  - path: src/mcp/app/scheduler.py
+    hook_marker: null  # No hook marker yet — handled manually
+  - path: src/mcp/config/settings.py
+    hook_marker: "# -- Internal settings"
+  - path: src/mcp/config/taxonomy.py
+    hook_marker: "# -- Internal taxonomy"
+  - path: src/web/src/lib/types.ts
+    hook_marker: "// -- Internal types"
+  - path: .github/workflows/ci.yml
+    hook_marker: null  # No hook marker yet — handled manually
+  - path: src/mcp/requirements.txt
+    hook_marker: null  # Internal deps stripped by keyword (structlog, stripe)
+  - path: src/mcp/requirements.lock
+    hook_marker: null  # Lock file handled separately (regenerated)
+  - path: src/web/src/components/settings/plugins-section.tsx
+    hook_marker: null  # Internal import differs
+
+# Strings that must NEVER appear in the public repo (leak detection)
+forbidden_in_public:
+  - CERID_TRADING_ENABLED
+  - CERID_BOARDROOM_ENABLED
+  - TRADING_AGENT_URL
+  - trading_proxy
+  - pkb_trading_signal
+  - pkb_herd_detect
+  - pkb_kelly_size
+  - pkb_cascade_confirm
+  - pkb_longshot_surface
+  - structlog
+  - stripe
+  - boardroom
+  - _internal
+  - trading_agent
+  - enterprise
