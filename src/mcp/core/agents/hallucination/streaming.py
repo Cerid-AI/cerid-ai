@@ -390,6 +390,24 @@ async def verify_response_streaming(
     except Exception as kb_exc:
         logger.debug("Batch KB pre-fetch failed (non-blocking): %s", kb_exc)
 
+    # Populate _claim_evidence from batch KB pre-fetch so that timeout
+    # fallback can use KB-only verdicts for claims that gathered evidence.
+    if batch_kb_context:
+        for idx, claim_text in enumerate(claims):
+            claim_lower = claim_text.lower()
+            matching_results = [
+                r for r in batch_kb_context
+                if claim_lower[:40] in (r.get("content", "") or "").lower()
+            ]
+            if matching_results:
+                best_quality = max(
+                    (r.get("relevance", 0.0) for r in matching_results), default=0.0,
+                )
+                _claim_evidence[idx] = {
+                    "kb_results": matching_results[:5],
+                    "kb_quality": best_quality,
+                }
+
     # Map claim indices to their best-matching KB result when confidence is
     # very high (>0.85 relevance AND content overlap).  Pre-resolving these
     # as "verified" avoids the full verify_claim pipeline (KB re-query,
@@ -484,6 +502,12 @@ async def verify_response_streaming(
     credit_exhausted = False
     credit_error_emitted = False
 
+    # Track verification progress per claim for graceful timeout handling.
+    # When the total deadline fires, claims that completed KB evidence gathering
+    # (Phase 2) but were waiting for external verdict (Phase 3) can use their
+    # KB-only result as a fallback instead of blanket "uncertain".
+    _claim_evidence: dict[int, dict] = {}  # {claim_index: {"kb_results": [...], "kb_quality": float}}
+
     # Pre-fill collected_results with cached batch results (non-async, immediate)
     for idx, result in batch_results.items():
         collected_results[idx] = result
@@ -536,11 +560,14 @@ async def verify_response_streaming(
             or _is_current_event_claim(claim_text)
         )
         if expert_mode:
-            claim_timeout = config.STREAMING_EXPERT_CLAIM_TIMEOUT  # 30s
+            per_claim_timeout = config.STREAMING_EXPERT_CLAIM_TIMEOUT  # 30s
         elif needs_web:
-            claim_timeout = 25.0  # web search + reasoning
+            per_claim_timeout = 25.0  # web search + reasoning
         else:
-            claim_timeout = 12.0  # cross-model is fast
+            per_claim_timeout = 12.0  # cross-model is fast
+        # Cap per-claim timeout to remaining global budget (leave 2s buffer for summary)
+        remaining = stream_deadline - time.monotonic()
+        claim_timeout = min(per_claim_timeout, max(remaining - 2.0, 3.0))
         try:
             async with sem:
                 result = await asyncio.wait_for(
@@ -592,9 +619,49 @@ async def verify_response_streaming(
                     len(claims),
                 )
                 stream_interrupted = True
-                # Count remaining uncompleted claims as uncertain
-                completed = verified_count + unverified_count + uncertain_count
-                uncertain_count += len(claims) - completed
+                # Phase-aware fallback: use KB-only verdict for claims with evidence
+                completed_indices: set[int] = {
+                    j for j in range(len(claims)) if collected_results[j] is not None
+                }
+                for j in range(len(claims)):
+                    if j in completed_indices:
+                        continue  # Already has a verdict
+                    evidence = _claim_evidence.get(j)
+                    if evidence and evidence["kb_quality"] >= 0.35:
+                        # Phase 2 completed — use KB-only verdict
+                        kb_status = "verified" if evidence["kb_quality"] >= 0.65 else "uncertain"
+                        yield {
+                            "type": "claim_verified",
+                            "index": j,
+                            "claim": claims[j],
+                            "verdict": {
+                                "status": kb_status,
+                                "confidence": evidence["kb_quality"],
+                                "reason": "KB-only verdict (verification timeout)",
+                                "sources": [
+                                    r.get("source", "") for r in evidence["kb_results"][:3]
+                                    if r.get("source")
+                                ],
+                            },
+                            "source": "kb_only_timeout",
+                        }
+                        if kb_status == "verified":
+                            verified_count += 1
+                        else:
+                            uncertain_count += 1
+                    else:
+                        uncertain_count += 1
+                        yield {
+                            "type": "claim_verified",
+                            "index": j,
+                            "claim": claims[j],
+                            "verdict": {
+                                "status": "uncertain",
+                                "confidence": 0.0,
+                                "reason": "Verification timeout — insufficient evidence",
+                            },
+                            "source": "timeout",
+                        }
                 break
             try:
                 i, result = await asyncio.wait_for(coro, timeout=remaining)
@@ -604,8 +671,48 @@ async def verify_response_streaming(
                     "(%ds total)", config.STREAMING_TOTAL_TIMEOUT,
                 )
                 stream_interrupted = True
-                completed = verified_count + unverified_count + uncertain_count
-                uncertain_count += len(claims) - completed
+                # Phase-aware fallback: use KB-only verdict for claims with evidence
+                completed_indices_2: set[int] = {
+                    j for j in range(len(claims)) if collected_results[j] is not None
+                }
+                for j in range(len(claims)):
+                    if j in completed_indices_2:
+                        continue
+                    evidence = _claim_evidence.get(j)
+                    if evidence and evidence["kb_quality"] >= 0.35:
+                        kb_status = "verified" if evidence["kb_quality"] >= 0.65 else "uncertain"
+                        yield {
+                            "type": "claim_verified",
+                            "index": j,
+                            "claim": claims[j],
+                            "verdict": {
+                                "status": kb_status,
+                                "confidence": evidence["kb_quality"],
+                                "reason": "KB-only verdict (verification timeout)",
+                                "sources": [
+                                    r.get("source", "") for r in evidence["kb_results"][:3]
+                                    if r.get("source")
+                                ],
+                            },
+                            "source": "kb_only_timeout",
+                        }
+                        if kb_status == "verified":
+                            verified_count += 1
+                        else:
+                            uncertain_count += 1
+                    else:
+                        uncertain_count += 1
+                        yield {
+                            "type": "claim_verified",
+                            "index": j,
+                            "claim": claims[j],
+                            "verdict": {
+                                "status": "uncertain",
+                                "confidence": 0.0,
+                                "reason": "Verification timeout — insufficient evidence",
+                            },
+                            "source": "timeout",
+                        }
                 break
             except Exception as task_exc:
                 logger.warning("Verification task failed: %s", task_exc)
