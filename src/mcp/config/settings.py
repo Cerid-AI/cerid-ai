@@ -549,17 +549,11 @@ CERID_EMAIL_IMAP_PASSWORD = os.getenv("CERID_EMAIL_IMAP_PASSWORD", "")
 CERID_EMAIL_FOLDER = os.getenv("CERID_EMAIL_FOLDER", "INBOX")
 CERID_EMAIL_POLL_INTERVAL = int(os.getenv("CERID_EMAIL_POLL_INTERVAL", "15"))  # minutes
 
-# ---------------------------------------------------------------------------
-# Trading Agent Integration (internal only — not in public distro)
-# ---------------------------------------------------------------------------
-CERID_TRADING_ENABLED = os.getenv("CERID_TRADING_ENABLED", "false").lower() in ("true", "1")
-TRADING_AGENT_URL = os.getenv("TRADING_AGENT_URL", "http://localhost:8090")
-
-# ---------------------------------------------------------------------------
-# Boardroom Agent Integration (internal only — not in public distro)
-# ---------------------------------------------------------------------------
-CERID_BOARDROOM_ENABLED = os.getenv("CERID_BOARDROOM_ENABLED", "false").lower() in ("true", "1")
-CERID_BOARDROOM_TIER = os.getenv("CERID_BOARDROOM_TIER", "foundation")
+# Trading/boardroom config injected at runtime by config.settings_internal
+CERID_TRADING_ENABLED: bool = False
+TRADING_AGENT_URL: str = ""
+CERID_BOARDROOM_ENABLED: bool = False
+CERID_BOARDROOM_TIER: str = "foundation"
 
 # ---------------------------------------------------------------------------
 # RSS/Atom Feed Poller
@@ -701,22 +695,6 @@ CONSUMER_REGISTRY: dict[str, dict] = {
         "allowed_domains": None,     # Webhooks can target any domain
         "strict_domains": False,
     },
-    "trading-agent": {
-        "rate_limits": {
-            "/sdk/": (80, 60),       # 80 req/min — 5-session burst of 67.5/min
-            "/agent/": (80, 60),
-        },
-        "allowed_domains": ["trading"],
-        "strict_domains": True,
-    },
-    "boardroom-agent": {
-        "rate_limits": {
-            "/sdk/": (40, 60),
-            "/agent/": (40, 60),
-        },
-        "allowed_domains": ["strategy", "competitive_intel", "marketing", "advertising", "operations", "audit"],
-        "strict_domains": True,
-    },
     "_default": {
         "rate_limits": {
             "/agent/": (30, 60),
@@ -774,3 +752,6 @@ if not NEO4J_PASSWORD:
         "NEO4J_PASSWORD is empty — Neo4j queries will fail with auth errors. "
         "Check that .env is loaded (env_file in docker-compose.yml)."
     )
+
+# -- Internal settings -------------------------------------------------------
+# Below this line: internal-only bootstrap (stripped for public distribution)
