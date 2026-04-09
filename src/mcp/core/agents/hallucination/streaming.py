@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Hallucination detection — streaming orchestration and batch verification.
@@ -390,9 +390,12 @@ async def verify_response_streaming(
     except Exception as kb_exc:
         logger.debug("Batch KB pre-fetch failed (non-blocking): %s", kb_exc)
 
-    # Build a set of claim indices where KB confidence is very high (>0.85),
-    # allowing us to skip expensive external verification for those claims.
-    high_confidence_kb_claims: set[int] = set()
+    # Map claim indices to their best-matching KB result when confidence is
+    # very high (>0.85 relevance AND content overlap).  Pre-resolving these
+    # as "verified" avoids the full verify_claim pipeline (KB re-query,
+    # confidence calibration, external fallback) — a significant speedup
+    # when the batch pre-fetch already found strong evidence.
+    high_confidence_kb_claims: dict[int, dict[str, Any]] = {}
     if batch_kb_context:
         for idx, claim_text in enumerate(claims):
             claim_lower = claim_text.lower()
@@ -400,7 +403,17 @@ async def verify_response_streaming(
                 relevance = kb_result.get("relevance", 0.0)
                 content = (kb_result.get("content", "") or "").lower()
                 if relevance > 0.85 and claim_lower[:60] in content:
-                    high_confidence_kb_claims.add(idx)
+                    high_confidence_kb_claims[idx] = {
+                        "claim": claim_text,
+                        "status": "verified",
+                        "similarity": round(relevance, 3),
+                        "source_artifact_id": kb_result.get("artifact_id", ""),
+                        "source_filename": kb_result.get("filename", ""),
+                        "source_domain": kb_result.get("domain", ""),
+                        "source_snippet": (kb_result.get("content", "") or "")[:200],
+                        "verification_method": "kb_batch",
+                        "memory_source": bool(kb_result.get("memory_source")),
+                    }
                     break
 
     # --- Batch pre-verification for current-event claims ---
@@ -474,6 +487,18 @@ async def verify_response_streaming(
     # Pre-fill collected_results with cached batch results (non-async, immediate)
     for idx, result in batch_results.items():
         collected_results[idx] = result
+
+    # Pre-fill high-confidence KB claims — these skip the full verify_claim
+    # pipeline entirely because the batch pre-fetch already found strong
+    # evidence (>0.85 relevance + content overlap).
+    for idx, result in high_confidence_kb_claims.items():
+        if collected_results[idx] is None:  # Don't overwrite batch verdicts
+            collected_results[idx] = result
+    if high_confidence_kb_claims:
+        logger.info(
+            "Pre-resolved %d/%d claims via high-confidence KB batch",
+            len(high_confidence_kb_claims), len(claims),
+        )
 
     def _extract_claim_context(claim_text: str) -> str | None:
         """Extract 1-2 sentences before and after the claim in the original response."""

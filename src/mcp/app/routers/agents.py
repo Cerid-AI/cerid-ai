@@ -47,7 +47,22 @@ class AgentQueryRequest(BaseModel):
     response_text: str | None = Field(None, description="LLM response text for Self-RAG validation")
     model: str | None = Field(None, description="Generating model (for Self-RAG metadata)")
     enable_self_rag: bool | None = Field(None, description="Override Self-RAG toggle (None = use server config)")
+    # --- Query scope (high-level intent) ---
+    # "document" = single-file focus, "domain" = single-domain, "kb" = whole KB (default)
+    # Expands into strict_domains / skip_cache / metadata_filter automatically.
+    # Individual flags below still work for power users and override scope defaults.
+    query_scope: str | None = Field(None, description="Query scope: document | domain | kb (None = kb)")
+    scope_ref: str | None = Field(None, description="Scope reference — filename for 'document' scope")
+    # --- Individual overrides (set by scope expansion or directly) ---
     strict_domains: bool | None = Field(None, description="When True, disables cross-domain affinity bleed. None = use consumer default.")
+    skip_cache: bool = Field(False, description="Bypass semantic cache and query cache (for fresh-data scenarios like setup wizard)")
+    metadata_filter: dict | None = Field(None, description="ChromaDB where-clause for metadata filtering (e.g. {\"filename\": \"report.pdf\"})")
+    # --- Context source gates (absolute on/off per source) ---
+    context_sources: dict | None = Field(
+        None,
+        description="Source gates: {kb: bool, memory: bool, external: bool}. "
+                    "None = all enabled. Disabled sources skip retrieval entirely.",
+    )
     rag_mode: str = Field("manual", description="Retrieval mode: manual | smart | custom_smart")
     source_config: dict | None = Field(None, description="Source weights/toggles for custom_smart mode")
 
@@ -99,7 +114,7 @@ class MaintenanceRequest(BaseModel):
 
 
 class CurateRequest(BaseModel):
-    mode: str = Field("audit", pattern="^(audit)$")
+    mode: str = Field("audit", pattern="^(audit|trim|prune)$")
     domains: list[str] | None = None
     max_artifacts: int = Field(200, ge=1, le=1000)
     generate_synopses: bool = False
@@ -162,11 +177,25 @@ async def compress_history_endpoint(req: CompressRequest):
 @router.post("/agent/query")
 async def agent_query_endpoint(req: AgentQueryRequest, request: Request):
     try:
+        # ── Scope expansion ─────────────────────────────────────────────
+        # Expand query_scope into individual flags (only sets defaults;
+        # explicit per-field values always win).
+        if req.query_scope == "document":
+            if req.strict_domains is None:
+                req.strict_domains = True
+            if not req.skip_cache:
+                req.skip_cache = True
+            if req.metadata_filter is None and req.scope_ref:
+                req.metadata_filter = {"filename": req.scope_ref}
+        elif req.query_scope == "domain":
+            if req.strict_domains is None:
+                req.strict_domains = True
+
         from utils.query_cache import get_cached, set_cached
 
         has_context = bool(req.conversation_messages)
         domain_key = f"{','.join(sorted(req.domains)) if req.domains else 'all'}|rerank={req.use_reranking}"
-        if not has_context:
+        if not has_context and not req.skip_cache:
             cached = get_cached(req.query, domain_key, req.top_k)
             if cached:
                 return cached
@@ -195,27 +224,41 @@ async def agent_query_endpoint(req: AgentQueryRequest, request: Request):
                 redis_client=get_redis(),
                 neo4j_driver=get_neo4j(),
                 source_config=req.source_config,
+                context_sources=req.context_sources,
                 debug_timing=debug_timing,
                 allowed_domains=allowed_domains,
                 strict_domains=strict_domains,
                 model=req.model,
             )
         else:
-            from agents.query_agent import agent_query
-            result = await agent_query(
-                query=req.query,
-                domains=req.domains,
-                top_k=req.top_k,
-                use_reranking=req.use_reranking,
-                conversation_messages=req.conversation_messages,
-                chroma_client=get_chroma(),
-                redis_client=get_redis(),
-                neo4j_driver=get_neo4j(),
-                debug_timing=debug_timing,
-                allowed_domains=allowed_domains,
-                strict_domains=strict_domains,
-                model=req.model,
-            )
+            # Manual mode: KB gate check — if context_sources disables KB, skip retrieval
+            _cs = req.context_sources or {}
+            if _cs.get("kb", True) is False:
+                result = {
+                    "context": "", "sources": [], "confidence": 0.0,
+                    "domains_searched": [], "total_results": 0,
+                    "token_budget_used": 0, "graph_results": 0, "results": [],
+                    "strategy": "conversation_only",
+                    "source_status": {"kb": "disabled"},
+                }
+            else:
+                from agents.query_agent import agent_query
+                result = await agent_query(
+                    query=req.query,
+                    domains=req.domains,
+                    top_k=req.top_k,
+                    use_reranking=req.use_reranking,
+                    conversation_messages=req.conversation_messages,
+                    chroma_client=get_chroma(),
+                    redis_client=get_redis(),
+                    neo4j_driver=get_neo4j(),
+                    debug_timing=debug_timing,
+                    allowed_domains=allowed_domains,
+                    strict_domains=strict_domains,
+                    model=req.model,
+                    skip_cache=req.skip_cache,
+                    metadata_filter=req.metadata_filter,
+                )
 
         # Self-RAG: validate claims and refine retrieval if enabled
         use_self_rag = req.enable_self_rag if req.enable_self_rag is not None else config.ENABLE_SELF_RAG
@@ -230,7 +273,7 @@ async def agent_query_endpoint(req: AgentQueryRequest, request: Request):
                 model=req.model,
             )
 
-        if not has_context:
+        if not has_context and not req.skip_cache:
             set_cached(req.query, domain_key, req.top_k, result)
         return result
     except ValueError as e:

@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Hallucination detection — claim verification against KB and cross-model LLM.
@@ -35,6 +35,7 @@ from core.agents.hallucination.patterns import (
 )
 from core.utils.circuit_breaker import CircuitOpenError, NonTransientError
 from core.utils.claim_cache import cache_verdict, get_cached_verdict
+from core.utils.embeddings import l2_distance_to_relevance
 from core.utils.llm_parsing import parse_llm_json
 
 
@@ -566,7 +567,7 @@ async def _query_memories(
         if results["ids"] and results["ids"][0]:
             for i, _chunk_id in enumerate(results["ids"][0]):
                 distance = results["distances"][0][i] if results["distances"] else 1.0
-                relevance = max(0.0, min(1.0, 1.0 - distance))
+                relevance = l2_distance_to_relevance(distance)
                 metadata = results["metadatas"][0][i] if results["metadatas"] else {}
                 formatted.append({
                     "relevance": round(relevance, 4),
@@ -724,6 +725,7 @@ async def _verify_claim_externally(
     fast_mode: bool = False,
     claim_context: str | None = None,
     response_context: str | None = None,
+    kb_snippet: str | None = None,
 ) -> dict[str, Any]:
     """Direct structured cross-model verification for a single claim.
 
@@ -877,6 +879,14 @@ async def _verify_claim_externally(
                 if response_context else ""
             )
 
+            # Build surrounding-text block once — used across all prompt paths
+            # to give the verifier full context (e.g. a table row that only
+            # makes sense with the preceding header).
+            ctx_block = (
+                f"\n\nSurrounding text from the response:\n\"{claim_context}\"\n"
+                if claim_context else ""
+            )
+
             if is_evasion:
                 # Extract the user's original question from the evasion claim
                 q_match = re.search(r'The user asked: "(.+?)"', claim)
@@ -909,7 +919,7 @@ async def _verify_claim_externally(
                     f"superseded by newer data. If the claim contains specific "
                     f"numbers, dates, or facts, find the latest available data "
                     f"and compare."
-                    f"{context_line}{model_context}\n\n{_json_response_fmt}"
+                    f"{ctx_block}{context_line}{model_context}\n\n{_json_response_fmt}"
                 )
             elif is_ignorance:
                 # Reframed prompt: check underlying facts, not the model's honesty
@@ -919,18 +929,20 @@ async def _verify_claim_externally(
                     f"Do NOT evaluate whether the model is honest about its "
                     f"limitations. Instead, search for and verify whether the "
                     f"underlying facts, events, or information actually exist."
-                    f"{context_line}{model_context}\n\n{_json_response_fmt}"
+                    f"{ctx_block}{context_line}{model_context}\n\n{_json_response_fmt}"
                 )
             else:
-                # Include surrounding text so the verifier understands the framing
-                # (e.g., a wavelength table where each row is a separate claim)
-                ctx_block = (
-                    f"\n\nSurrounding text from the response:\n\"{claim_context}\"\n"
-                    if claim_context else ""
+                # Include KB snippet when available — gives the verifier
+                # partial evidence from the user's knowledge base to
+                # triangulate against, reducing false "uncertain" verdicts.
+                kb_block = (
+                    f"\n\nPartial evidence from the user's knowledge base "
+                    f"(may or may not support the claim):\n\"{kb_snippet}\"\n"
+                    if kb_snippet else ""
                 )
                 user_prompt = (
                     f"Assess this claim for factual accuracy:\n\n"
-                    f"\"{claim}\"{ctx_block}{context_line}{model_context}\n\n{_json_response_fmt}"
+                    f"\"{claim}\"{ctx_block}{kb_block}{context_line}{model_context}\n\n{_json_response_fmt}"
                 )
 
             messages = [
@@ -1026,6 +1038,7 @@ async def _verify_claim_externally(
                 return await _verify_claim_externally(
                     claim, generating_model, force_web_search=True,
                     response_context=response_context,
+                    claim_context=claim_context,
                 )
 
             return {
@@ -1187,7 +1200,7 @@ async def verify_claims_batch_external(
                 json.dumps(item) if isinstance(item, dict) else str(item)
             )
             status = verdict_obj.get("status", "uncertain")
-            confidence = verdict_obj.get("similarity", 0.5)
+            confidence = verdict_obj.get("confidence", 0.5)
             reason = verdict_obj.get("reason", "")[:200]
 
             results[original_idx] = {
@@ -1286,11 +1299,22 @@ async def verify_claim(
         # Exclude 'conversations' domain from general KB query to avoid
         # self-verification against feedback-ingested LLM responses.
         verification_domains = [d for d in config.DOMAINS if d != "conversations"]
+        # Build an enriched query: the bare claim text is often too terse
+        # for vector search (e.g. "it uses 768 dimensions" without context).
+        # Prepending the response_context topic gives the embedding model
+        # enough signal to retrieve relevant KB chunks.
+        enriched_query = claim
+        if response_context:
+            # Use the topic summary (first line) — not the full multi-claim
+            # enrichment which adds noise to the embedding.
+            topic = response_context.split("\n")[0].strip()
+            if topic and len(topic) > 10:
+                enriched_query = f"{topic}: {claim}"
         # Use lightweight retrieval (vector + BM25 hybrid only) — skips graph
         # expansion, cross-encoder, quality boost, MMR, and context assembly
         # for significantly faster per-claim verification.
         kb_results = await lightweight_kb_query(
-            query=claim,
+            query=enriched_query,
             domains=verification_domains,
             top_k=5,
             chroma_client=chroma_client,
@@ -1318,6 +1342,11 @@ async def verify_claim(
         # --- Anti-circularity: penalise KB results that were injected into
         # the LLM prompt.  These cannot independently verify a claim because
         # the response was *derived* from them — matching is expected.
+        # Penalty is 0.15 (not 0.30): the old 0.30 was too aggressive — it
+        # pushed genuine supporting docs from 0.65 to 0.35, right at the
+        # discard threshold, causing false "uncertain" verdicts when the KB
+        # actually contained the answer.
+        _CIRCULAR_PENALTY = 0.15
         if source_artifact_ids:
             _src_set = set(source_artifact_ids)
             for r in all_results:
@@ -1325,7 +1354,7 @@ async def verify_claim(
                 if aid and aid in _src_set:
                     original_rel = r.get("relevance", 0.0)
                     r["_circular"] = True
-                    r["relevance"] = max(0.0, round(original_rel - 0.3, 4))
+                    r["relevance"] = max(0.0, round(original_rel - _CIRCULAR_PENALTY, 4))
                     logger.info(
                         "Anti-circular penalty: artifact=%s relevance %.3f → %.3f",
                         aid[:8], original_rel, r["relevance"],
@@ -1381,6 +1410,11 @@ async def verify_claim(
         # so the +0.15 authority boost doesn't mask low KB evidence.
         escalation_similarity = top_result.get("_raw_relevance", raw_similarity)
 
+        # Extract top KB snippet to pass as partial evidence to external
+        # verification.  Truncate to 300 chars — enough for the verifier
+        # to triangulate without overwhelming the prompt.
+        _top_snippet = (top_result.get("content", "") or "")[:300] or None
+
         # --- Anti-circularity escalation: if ALL top results are circular
         # (derived from the same KB artifacts injected into the LLM prompt),
         # the KB cannot independently verify the claim — escalate externally.
@@ -1394,7 +1428,8 @@ async def verify_claim(
             )
             ext_result = await _verify_claim_externally(
                 claim, model, streaming=streaming,
-                expert_mode=expert_mode, response_context=response_context, claim_context=claim_context,
+                expert_mode=expert_mode, response_context=response_context,
+                claim_context=claim_context, kb_snippet=_top_snippet,
             )
             return await _cache_result({
                 "claim": claim,
@@ -1412,7 +1447,8 @@ async def verify_claim(
         if escalation_similarity < ext_kb_threshold:
             ext_result = await _verify_claim_externally(
                 claim, model, streaming=streaming,
-                expert_mode=expert_mode, response_context=response_context, claim_context=claim_context,
+                expert_mode=expert_mode, response_context=response_context,
+                claim_context=claim_context, kb_snippet=_top_snippet,
             )
             # Use external result if it provides a stronger signal than KB
             if ext_result["confidence"] > raw_similarity:
@@ -1450,7 +1486,8 @@ async def verify_claim(
             # --- Fallback 3: KB says "unverified" → try external ---
             ext_result = await _verify_claim_externally(
                 claim, model, streaming=streaming,
-                expert_mode=expert_mode, response_context=response_context, claim_context=claim_context,
+                expert_mode=expert_mode, response_context=response_context,
+                claim_context=claim_context, kb_snippet=_top_snippet,
             )
             if ext_result.get("status") in ("verified", "unverified"):
                 return await _cache_result({
@@ -1477,7 +1514,8 @@ async def verify_claim(
             # definitive answer before falling back to KB-only uncertain ---
             ext_result = await _verify_claim_externally(
                 claim, model, streaming=streaming,
-                expert_mode=expert_mode, response_context=response_context, claim_context=claim_context,
+                expert_mode=expert_mode, response_context=response_context,
+                claim_context=claim_context, kb_snippet=_top_snippet,
             )
             if ext_result.get("status") in ("verified", "unverified"):
                 return await _cache_result({
@@ -1499,7 +1537,8 @@ async def verify_claim(
             ):
                 web_result = await _verify_claim_externally(
                     claim, model, force_web_search=True,
-                    expert_mode=expert_mode, response_context=response_context, claim_context=claim_context,
+                    expert_mode=expert_mode, response_context=response_context,
+                    claim_context=claim_context, kb_snippet=_top_snippet,
                 )
                 if web_result.get("status") in ("verified", "unverified"):
                     return await _cache_result({

@@ -14,16 +14,17 @@ from contextlib import asynccontextmanager
 
 import sentry_sdk
 
-sentry_sdk.init(
-    dsn=os.environ.get("SENTRY_DSN_MCP"),
-    environment=os.environ.get("SENTRY_ENVIRONMENT", "development"),
-    release=os.environ.get("SENTRY_RELEASE"),
-    send_default_pii=False,  # Privacy-first: don't send API keys, IPs, or request bodies
-    traces_sample_rate=0.1,
-    profile_session_sample_rate=1.0,
-    profile_lifecycle="trace",
-    enable_logs=True,
-)
+if os.environ.get("SENTRY_DSN_MCP"):
+    sentry_sdk.init(
+        dsn=os.environ["SENTRY_DSN_MCP"],
+        environment=os.environ.get("SENTRY_ENVIRONMENT", "development"),
+        release=os.environ.get("SENTRY_RELEASE"),
+        send_default_pii=False,  # Privacy-first: don't send API keys, IPs, or request bodies
+        traces_sample_rate=0.1,
+        profile_session_sample_rate=1.0,
+        profile_lifecycle="trace",
+        enable_logs=True,
+    )
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -188,8 +189,9 @@ async def lifespan(app: FastAPI):
     try:
         driver = get_neo4j()
         graph.init_schema(driver)
-        from app.db.neo4j.migrations import backfill_updated_at
+        from app.db.neo4j.migrations import backfill_updated_at, register_recategorized_at
         backfill_updated_at(driver)
+        register_recategorized_at(driver)
     except Exception as e:
         logger.warning(f"Neo4j schema init failed (will retry on first use): {e}")
 
@@ -344,7 +346,7 @@ async def lifespan(app: FastAPI):
         from utils.semantic_cache import flush_cache
         flush_cache(get_redis())
     except Exception:
-        pass
+        logger.debug("Semantic cache flush skipped during shutdown")
     close_neo4j()
     close_chroma()
     close_redis()

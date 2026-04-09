@@ -21,6 +21,7 @@
 - `POST /ingest_file` — Ingest a file with parsing, metadata, optional AI categorization
 - `POST /ingest_batch` — Batch ingest multiple text items
 - `POST /ingest/feedback` — Submit ingestion quality feedback
+- `GET /ingestion/progress` — Live ingestion pipeline state (active/completed/errored files)
 - `POST /recategorize` — Move artifact between domains (moves chunks between collections)
 - `GET /artifacts` — List ingested artifacts (filter by domain)
 - `GET /artifacts/{artifact_id}` — Full artifact detail (Neo4j metadata + reassembled ChromaDB chunks)
@@ -48,13 +49,6 @@
 - `POST /agent/memory/extract` — Extract and store memories from conversation
 - `POST /agent/memory/archive` — Archive old conversation memories
 - `POST /agent/curate` — Score artifact quality across the KB- `POST /agent/curate/estimate` — Estimate synopsis generation cost before running
-
-**Trading agent KB enrichment endpoints (gated by `CERID_TRADING_ENABLED`):**
-- `POST /agent/trading/signal` — Enrich a trading signal with KB context
-- `POST /agent/trading/herd-detect` — Detect herd behavior via correlation graph violations
-- `POST /agent/trading/kelly-size` — Query historical CV_edge for Kelly criterion position sizing
-- `POST /agent/trading/cascade-confirm` — Confirm cascade liquidation pattern against historical data
-- `POST /agent/trading/longshot-surface` — Query stored calibration surface for longshot probability estimates
 
 **Auth endpoints (conditional on `CERID_MULTI_USER=true`):**
 - `POST /auth/register` — Create new user account (returns JWT tokens)
@@ -161,39 +155,24 @@
 - `pkb_curate` — Score artifact quality across the knowledge base- `pkb_digest` — Summary of recent KB activity, connections, and health status
 - `pkb_scheduler_status` — Get status of scheduled maintenance jobs
 - `pkb_check_hallucinations` — Verify LLM claims against KB- `pkb_memory_extract` — Extract memories from conversations- `pkb_memory_archive` — Archive old conversation memories- `pkb_ingest_multimodal` — Multi-modal ingestion (OCR, audio, vision)
-**Trading tools (5, gated by `CERID_TRADING_ENABLED`):**
-- `pkb_trading_signal` — Trading signal enrichment via KB
-- `pkb_herd_detect` — Herd behavior detection
-- `pkb_kelly_size` — Kelly criterion position sizing
-- `pkb_cascade_confirm` — Cascade liquidation confirmation
-- `pkb_longshot_surface` — Longshot opportunity surfacing
 
 **Additional tools:**
 - `pkb_web_search` — Agentic web search with verification- `pkb_memory_recall` — Context-aware memory retrieval with decay scoring
 ### SDK Router (`/sdk/v1/`) — Stable External API
 
-Versioned facade for cerid-series consumers (trading-agent, future projects). Delegates to existing agent endpoints but provides a stable contract that survives internal refactoring.
+Versioned facade for external consumers. Delegates to existing agent endpoints but provides a stable contract that survives internal refactoring.
 
 - `POST /sdk/v1/query` — KB query with reranking and RAG modes (delegates to `/agent/query`, supports `rag_mode` and `source_config`)
 - `POST /sdk/v1/hallucination` — Hallucination detection (delegates to `/agent/hallucination`)
 - `POST /sdk/v1/memory/extract` — Memory extraction (delegates to `/agent/memory/extract`)
 - `GET /sdk/v1/health` — Health check with `version`, `services`, `features` (subset of feature toggles relevant to consumers), and `internal_llm` (current internal LLM provider and model)
 
-**SDK Trading endpoints (gated by `CERID_TRADING_ENABLED`):**
-- `POST /sdk/v1/trading/signal` — Trading signal enrichment via KB (delegates to `/agent/trading/signal`)
-- `POST /sdk/v1/trading/herd-detect` — Herd behavior detection (delegates to `/agent/trading/herd-detect`)
-- `POST /sdk/v1/trading/kelly-size` — Kelly criterion position sizing (delegates to `/agent/trading/kelly-size`)
-- `POST /sdk/v1/trading/cascade-confirm` — Cascade liquidation confirmation (delegates to `/agent/trading/cascade-confirm`)
-- `POST /sdk/v1/trading/longshot-surface` — Longshot opportunity surfacing (delegates to `/agent/trading/longshot-surface`)
-
 **Client identification:** Send `X-Client-ID` header to get per-client rate limiting. Each client ID gets an independent rate budget:
 
 | Client ID | `/agent/` & `/sdk/` | `/ingest` | `/recategorize` |
 |-----------|---------------------|-----------|-----------------|
 | `gui` (default) | 20 req/min | 10 req/min | 10 req/min |
-| `trading-agent` | 80 req/min | — | — |
 | `_default` (unknown) | 10 req/min | 5 req/min | 5 req/min |
-| `boardroom-agent` | 60 req/min | — | — |
 
 Configured in `CONSUMER_REGISTRY` in `config/settings.py`. Rate limits are auto-derived from the registry.
 
@@ -676,17 +655,17 @@ Subscribe to events and receive webhook notifications.
 
 **Configuration & management (under `/providers/` router):**
 - `GET /providers/ollama/status` — Ollama status: `{ enabled, url, reachable, models[], default_model, default_model_installed }`
-- `GET /providers/ollama/recommendations` — Hardware-aware model recommendations: `{ hardware: { ram_gb, cpu, gpu, platform }, models: [{ id, name, origin, size_gb, min_ram_gb, description, strengths, tier, compatible, recommended }], recommended }`
+- `GET /providers/ollama/recommendations` — Hardware-aware model recommendations: `{ hardware: { ram_gb, cpu, gpu, platform }, models: [{ id, name, size_gb, min_ram_gb, description, strengths, tier, compatible, recommended }], recommended }`
 - `POST /providers/ollama/enable` — Enable Ollama as internal LLM provider. Optional body: `{ "model": "llama3.1:8b" }` to override the default model. Checks connectivity, updates runtime config.
 - `POST /providers/ollama/disable` — Disable Ollama, fall back to OpenRouter
 
 **Model selection:** Configurable via `OLLAMA_DEFAULT_MODEL` env var or the setup wizard UI. The setup wizard detects system RAM/CPU/GPU and recommends from 3 tiers:
 
-| Tier | Model | Size | Min RAM | Origin |
-|------|-------|------|---------|--------|
-| Lightweight | Llama 3.2 3B | 2.0GB | 8GB | Meta (US) |
-| Balanced | Llama 3.1 8B | 4.7GB | 16GB | Meta (US) |
-| Performance | Phi-4 14B | 9.1GB | 32GB | Microsoft (US) |
+| Tier | Model | Size | Min RAM |
+|------|-------|------|---------|
+| Lightweight | Llama 3.2 3B | 2.0GB | 8GB |
+| Balanced | Llama 3.1 8B | 4.7GB | 16GB |
+| Performance | Phi-4 14B | 9.1GB | 32GB |
 
 Model can be changed post-setup via Settings UI → Ollama → Change button.
 
@@ -702,15 +681,6 @@ Model can be changed post-setup via Settings UI → Ollama → Change button.
 **Hardware detection:** `scripts/detect-gpu.sh` auto-detects NVIDIA GPU, AMD ROCm, macOS Metal, or CPU fallback. The `/providers/ollama/recommendations` endpoint detects RAM, CPU, and GPU at runtime for model recommendations. Docker Compose profile `ollama` starts the container with GPU passthrough when available. macOS Apple Silicon: runs natively for Metal acceleration.
 
 **Cost:** $0 for all internal LLM calls when using Ollama. Falls back to OpenRouter (paid) when Ollama is unavailable.
-
-### Billing & Licensing
-
-> **Internal** — These endpoints are defined but not yet registered in the API. They require Stripe integration and are not accessible via the default server configuration.
-
-- `POST /billing/create-checkout` — Create Stripe Checkout session for Pro tier upgrade
-- `POST /billing/webhook` — Stripe webhook handler (checkout.session.completed, invoice.payment_succeeded, customer.subscription.deleted)
-- `GET /billing/status` — Current license/subscription status
-- `POST /billing/validate-key` — Validate a manually-entered license key for offline Pro activation
 
 ### Model Updates
 - `GET /models/updates` — New and deprecated models since last catalog check (populated by scheduled job)

@@ -12,6 +12,13 @@ export interface ChatMessage {
 
 export type RagMode = "manual" | "smart" | "custom_smart"
 
+/** Absolute on/off gates for each context source. Disabled sources skip retrieval entirely. */
+export interface ContextSources {
+  kb: boolean
+  memory: boolean
+  external: boolean
+}
+
 export interface SourceRef {
   artifact_id: string
   filename: string
@@ -112,6 +119,8 @@ export interface HealthResponse {
     neo4j: "connected" | "error"
   }
   openrouter_credits_exhausted?: boolean
+  openrouter_auth_ok?: boolean | null
+  circuit_breakers?: Record<string, string>
 }
 
 // ---------------------------------------------------------------------------
@@ -360,17 +369,20 @@ export interface SourceBreakdown {
 }
 
 export interface AgentQueryResponse {
-  query: string
-  domains_queried: string[]
-  total_results: number
-  deduplicated_results: number
-  results: KBQueryResult[]
+  context?: string
+  sources?: SourceRef[]
   confidence: number
-  reranking_used: boolean
-  execution_time_ms: number
-  timestamp: string
+  domains_searched?: string[]
+  total_results: number
+  token_budget_used?: number
+  graph_results?: number
+  results: KBQueryResult[]
+  /** Elapsed wall-clock time for the query pipeline (ms). */
+  execution_time_ms?: number
   source_breakdown?: SourceBreakdown
   rag_mode?: RagMode
+  /** Timing breakdown (only present when X-Debug-Timing header is sent). */
+  _timings?: Record<string, number>
 }
 
 export interface RelatedArtifact {
@@ -717,6 +729,8 @@ export interface ServerSettings {
   enable_context_compression?: boolean
   // Trading agent integration
   trading_enabled?: boolean
+  // Context source gates
+  context_sources?: ContextSources
   // Ollama add-on (local LLM for pipeline tasks)
   pipeline_providers?: PipelineProviders
   ollama_enabled?: boolean
@@ -793,6 +807,8 @@ export interface SettingsUpdate {
   enable_memory_consolidation?: boolean
   enable_context_compression?: boolean
   rag_mode?: string  // KB injection mode in SettingsUpdate
+  // Context source gates
+  context_sources?: ContextSources
   // Ollama add-on
   internal_llm_provider?: string
   internal_llm_model?: string
@@ -1003,6 +1019,11 @@ export interface SystemCheckResponse {
   lightweight_recommended: boolean
   archive_path_exists: boolean
   default_archive_path: string
+  os: string
+  cpu: string
+  cpu_cores: number | null
+  gpu: string
+  gpu_acceleration: string
 }
 
 export interface SetupServiceHealth {

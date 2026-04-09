@@ -63,7 +63,7 @@ class TestClassifyMemoryNoMatches:
             "ids": [["chunk_1"]],
             "documents": [["some old fact"]],
             "metadatas": [[{"artifact_id": "art-old"}]],
-            "distances": [[0.5]],  # similarity = 0.5 < 0.85
+            "distances": [[0.7]],  # l2_distance_to_relevance(0.7) = 0.755 < 0.85
         }
         result = await classify_memory("somewhat related fact", chroma_client=client)
         assert result.action == "ADD"
@@ -229,7 +229,7 @@ class TestClassifyMemoryMultipleCandidates:
             "ids": [["chunk_1", "chunk_2"]],
             "documents": [["close match", "distant match"]],
             "metadatas": [[{"artifact_id": "art-1"}, {"artifact_id": "art-2"}]],
-            "distances": [[0.05, 0.5]],  # only first is above threshold
+            "distances": [[0.05, 0.7]],  # l2_distance_to_relevance: 0.999 (above) and 0.755 (below 0.85)
         }
         mock_llm.return_value = '{"action":"NOOP","reason":"duplicate"}'
         result = await classify_memory("close match variant", chroma_client=client)

@@ -49,6 +49,7 @@ async def orchestrated_query(
     memory_top_k: int | None = None,
     memory_min_score: float | None = None,
     source_config: dict | None = None,
+    context_sources: dict | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
     """Unified retrieval across KB, memories, and external sources.
@@ -56,6 +57,10 @@ async def orchestrated_query(
     In manual mode, this is a pure pass-through to ``agent_query()``.
     In smart/custom_smart modes, memory recall runs in parallel with the
     KB query and results are grouped into a ``source_breakdown``.
+
+    ``context_sources`` is an absolute gate: ``{kb: bool, memory: bool,
+    external: bool}``.  ``None`` or missing keys default to ``True``.
+    Disabled sources are never queried (saves latency).
     """
     from agents.query_agent import agent_query
 
@@ -64,8 +69,22 @@ async def orchestrated_query(
     if memory_min_score is None:
         memory_min_score = MEMORY_RECALL_MIN_SCORE
 
-    # --- Manual mode: pure pass-through ---
+    # Parse source gates — default all ON
+    _cs = context_sources or {}
+    _kb_on = _cs.get("kb", True)
+    _mem_on = _cs.get("memory", True)
+    _ext_on = _cs.get("external", True)
+
+    # --- Manual mode: pass-through to KB pipeline ---
     if rag_mode == "manual":
+        if not _kb_on:
+            return {
+                "context": "", "sources": [], "confidence": 0.0,
+                "domains_searched": [], "total_results": 0,
+                "token_budget_used": 0, "graph_results": 0, "results": [],
+                "strategy": "conversation_only",
+                "source_status": {"kb": "disabled"},
+            }
         result = await agent_query(
             query=query,
             domains=domains,
@@ -82,10 +101,14 @@ async def orchestrated_query(
     # --- Smart / Custom Smart: parallel KB + memory recall ---
     import time as _time
 
-    source_status: dict[str, str] = {"kb": "ok", "memory": "ok", "external": "ok"}
+    source_status: dict[str, str] = {
+        "kb": "ok" if _kb_on else "disabled",
+        "memory": "ok" if _mem_on else "disabled",
+        "external": "ok" if _ext_on else "disabled",
+    }
     timings: dict[str, float] = {}
 
-    # Run KB query, memory recall, and external sources in parallel
+    # Only create tasks for enabled sources
     parallel_start = _time.monotonic()
 
     kb_task = asyncio.create_task(agent_query(
@@ -98,7 +121,8 @@ async def orchestrated_query(
         redis_client=redis_client,
         neo4j_driver=neo4j_driver,
         **kwargs,
-    ))
+    )) if _kb_on else None
+
     memory_task = asyncio.create_task(_recall_with_timeout(
         query=query,
         chroma_client=chroma_client,
@@ -106,16 +130,23 @@ async def orchestrated_query(
         top_k=memory_top_k,
         min_score=memory_min_score,
         timeout_ms=MEMORY_RECALL_TIMEOUT_MS,
-    ))
+    )) if _mem_on else None
+
     external_task = asyncio.create_task(_query_external_sources(
         query=query,
         domain=domains[0] if domains else None,
         timeout=5.0,
-    ))
+    )) if _ext_on else None
 
-    kb_result, memory_results, external_results = await asyncio.gather(
-        kb_task, memory_task, external_task, return_exceptions=True,
-    )
+    # Gather only enabled tasks
+    _tasks = [t for t in (kb_task, memory_task, external_task) if t is not None]
+    _raw = await asyncio.gather(*_tasks, return_exceptions=True) if _tasks else []
+    _raw_iter = iter(_raw)
+
+    _empty_kb: dict[str, Any] = {"results": [], "context": "", "strategy": "disabled"}
+    kb_result: Any = next(_raw_iter) if kb_task else _empty_kb
+    memory_results: Any = next(_raw_iter) if memory_task else []
+    external_results: Any = next(_raw_iter) if external_task else []
 
     timings["parallel_kb_memory_ms"] = round(
         (_time.monotonic() - parallel_start) * 1000, 1,
@@ -154,18 +185,22 @@ async def orchestrated_query(
         else:
             kb_sources.append(r)
 
-    # Normalize real external results to match frontend ExternalSourceResult shape
+    # Normalize real external results to match frontend ExternalSourceResult shape.
+    # External sources use hardcoded confidence (not semantic similarity), so
+    # discount them to prevent book-metadata noise from outranking KB results.
+    _EXTERNAL_RELEVANCE_DISCOUNT = 0.6
     for raw in external_results:
+        raw_confidence = raw.get("confidence", raw.get("relevance", 0.0))
         external_sources.append({
             "content": raw.get("content", ""),
-            "relevance": raw.get("confidence", raw.get("relevance", 0.0)),
+            "relevance": round(raw_confidence * _EXTERNAL_RELEVANCE_DISCOUNT, 3),
             "source_url": raw.get("source_url", ""),
             "source_name": raw.get("source_name", raw.get("title", "")),
             "source_type": "external",
         })
 
     timings["external_ms"] = round((_time.monotonic() - ext_start) * 1000, 1)
-    if not external_sources:
+    if not external_sources and source_status["external"] != "disabled":
         source_status["external"] = "no_results"
 
     # Format memory results for source_breakdown

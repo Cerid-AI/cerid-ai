@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Tests for agents/query_agent.py — multi-domain search with reranking."""
@@ -228,7 +228,7 @@ class TestMultiDomainQuery:
         assert len(results) == 1
         assert results[0]["domain"] == "coding"
         assert results[0]["content"] == "test content"
-        assert results[0]["relevance"] == 0.8  # 1.0 - 0.2
+        assert results[0]["relevance"] == 0.98  # l2_distance_to_relevance(0.2) = 1 - 0.04/2
 
     @patch("core.agents.query_agent.config")
     def test_domain_error_returns_empty(self, mock_config):

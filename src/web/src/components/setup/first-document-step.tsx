@@ -104,19 +104,20 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
     setResponse(null)
 
     try {
-      // Retry with exponential backoff — ChromaDB may not have flushed yet
-      let result = await queryKB(text.trim())
+      // Scope query to the just-uploaded document only
+      const wizardOpts = { queryScope: "document" as const, scopeRef: fileName ?? undefined }
+      let result = await queryKB(text.trim(), ["general"], 10, undefined, wizardOpts)
       if (!result.results?.length) {
         for (const delay of [500, 1000, 2000]) {
           await new Promise((r) => setTimeout(r, delay))
-          result = await queryKB(text.trim())
+          result = await queryKB(text.trim(), ["general"], 10, undefined, wizardOpts)
           if (result.results?.length) break
         }
       }
       const topResult = result.results?.[0]
       setResponse(
         topResult?.content
-          ?? `Found ${result.total_results} result(s) across ${result.domains_queried.join(", ")}.`,
+          ?? `Found ${result.total_results} result(s) across ${(result.domains_searched ?? []).join(", ") || "all domains"}.`,
       )
       onChange({ ...state, ingested: true, queried: true })
       setPhase("done")
@@ -125,7 +126,7 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
     } finally {
       setQueryLoading(false)
     }
-  }, [state, onChange])
+  }, [state, onChange, fileName])
 
   const onFilesDropped = useCallback(
     (files: File[]) => {

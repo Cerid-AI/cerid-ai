@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Ingestion REST endpoints.
@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from threading import Lock as _TLock
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -25,6 +27,44 @@ logger = logging.getLogger("ai-companion")
 
 # Concurrency limiter for ingestion
 _ingest_semaphore = asyncio.Semaphore(3)
+
+# ── In-flight progress tracking ───────────────────────────────────────────────
+
+_progress_lock = _TLock()
+_active_jobs: dict[str, dict] = {}
+_PRUNE_TTL = 30  # seconds to keep completed/errored entries
+
+
+def _register_job(filename: str) -> None:
+    with _progress_lock:
+        _active_jobs[filename] = {
+            "filename": filename,
+            "step": "parsing",
+            "progress": 0,
+            "status": "processing",
+            "error": None,
+            "_ts": time.monotonic(),
+        }
+
+
+def _complete_job(filename: str, *, error: str | None = None) -> None:
+    with _progress_lock:
+        if filename in _active_jobs:
+            _active_jobs[filename]["status"] = "error" if error else "done"
+            _active_jobs[filename]["progress"] = 0 if error else 100
+            if error:
+                _active_jobs[filename]["error"] = error
+            _active_jobs[filename]["_ts"] = time.monotonic()
+
+
+def _prune_stale() -> None:
+    now = time.monotonic()
+    stale = [
+        k for k, v in _active_jobs.items()
+        if v["status"] in ("done", "error") and now - v["_ts"] > _PRUNE_TTL
+    ]
+    for k in stale:
+        del _active_jobs[k]
 
 
 # ── Pydantic models ────────────────────────────────────────────────────────────
@@ -67,6 +107,16 @@ class BatchIngestRequest(BaseModel):
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
+@router.get("/ingestion/progress")
+def ingestion_progress_endpoint():
+    """Return current ingestion pipeline state for the progress UI."""
+    with _progress_lock:
+        _prune_stale()
+        files = [{k: v for k, v in job.items() if k != "_ts"} for job in _active_jobs.values()]
+    completed = sum(1 for f in files if f["status"] == "done")
+    return {"files": files, "total_files": len(files), "completed_files": completed}
+
+
 @router.post("/ingest")
 async def ingest_endpoint(req: IngestRequest, request: Request):
     client_source = request.headers.get("X-Client-ID", "")
@@ -83,6 +133,8 @@ async def ingest_endpoint(req: IngestRequest, request: Request):
 
 @router.post("/ingest_file")
 async def ingest_file_endpoint(req: IngestFileRequest, request: Request):
+    filename = req.file_path.rsplit("/", 1)[-1] if "/" in req.file_path else req.file_path
+    _register_job(filename)
     try:
         async with _ingest_semaphore:
             result = await ingest_file(
@@ -93,6 +145,7 @@ async def ingest_file_endpoint(req: IngestFileRequest, request: Request):
                 categorize_mode=req.categorize_mode,
                 client_source=request.headers.get("X-Client-ID", ""),
             )
+        _complete_job(filename)
         try:
             from utils.query_cache import invalidate_all
             invalidate_all()
@@ -100,10 +153,13 @@ async def ingest_file_endpoint(req: IngestFileRequest, request: Request):
             logger.debug(f"Cache invalidation failed (non-blocking): {e}")
         return result
     except FileNotFoundError as e:
+        _complete_job(filename, error=str(e))
         raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
+        _complete_job(filename, error=str(e))
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        _complete_job(filename, error=str(e))
         logger.error(f"Ingest file error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -125,8 +181,19 @@ async def ingest_batch_endpoint(req: BatchIngestRequest):
                     detail=f"Item {i}: must have either 'content' or 'file_path'",
                 )
 
+        # Register all file-based items for progress tracking
+        filenames: list[str] = []
+        for item in req.items:
+            if item.file_path:
+                fn = item.file_path.rsplit("/", 1)[-1] if "/" in item.file_path else item.file_path
+                _register_job(fn)
+                filenames.append(fn)
+
         items = [item.model_dump() for item in req.items]
         result = await ingest_batch(items)
+
+        for fn in filenames:
+            _complete_job(fn)
 
         try:
             from utils.query_cache import invalidate_all
@@ -136,10 +203,14 @@ async def ingest_batch_endpoint(req: BatchIngestRequest):
 
         return result
     except ValueError as e:
+        for fn in filenames:
+            _complete_job(fn, error=str(e))
         raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:
+        for fn in filenames:
+            _complete_job(fn, error=str(e))
         logger.error(f"Batch ingest error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -222,12 +293,6 @@ async def ingest_feedback_endpoint(req: FeedbackIngestRequest):
     except Exception as e:
         logger.error(f"Feedback ingest error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/ingestion/progress")
-async def ingestion_progress():
-    """Return current ingestion queue status (stub for upload progress UI)."""
-    return {"active": False, "queue": [], "completed": 0}
 
 
 @router.get("/ingest_log")

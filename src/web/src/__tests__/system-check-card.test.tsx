@@ -15,6 +15,11 @@ import { SystemCheckCard } from "@/components/setup/system-check-card"
 
 const HEALTHY_RESULT: SystemCheckResponse = {
   ram_gb: 16,
+  os: "macOS 26.4",
+  cpu: "Apple M2 Max",
+  cpu_cores: 12,
+  gpu: "Apple M2 Max",
+  gpu_acceleration: "metal",
   docker_running: true,
   env_exists: true,
   env_keys_present: ["OPENROUTER_API_KEY"],

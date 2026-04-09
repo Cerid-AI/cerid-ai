@@ -136,6 +136,38 @@ export function StatusBar({ consoleOpen, onToggleConsole, consoleUnreadCount = 0
           </div>
         )}
 
+        {/* OpenRouter status indicator */}
+        {health?.openrouter_auth_ok === false && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="flex items-center gap-1 rounded bg-red-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-red-400 animate-pulse">
+                <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
+                OpenRouter: Auth Error
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="space-y-1">
+              <p className="font-medium text-red-400">OpenRouter Authentication Failed</p>
+              <p className="text-muted-foreground">API key may be invalid or expired. Verification and external LLM calls will fall back to Bifrost.</p>
+              <p className="text-muted-foreground">Check your OPENROUTER_API_KEY in .env</p>
+            </TooltipContent>
+          </Tooltip>
+        )}
+
+        {health?.circuit_breakers?.openrouter === "open" && health?.openrouter_auth_ok !== false && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="flex items-center gap-1 rounded bg-orange-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-orange-400">
+                <span className="h-1.5 w-1.5 rounded-full bg-orange-500" />
+                OpenRouter: Circuit Open
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="space-y-1">
+              <p className="font-medium text-orange-400">OpenRouter Circuit Breaker Open</p>
+              <p className="text-muted-foreground">Too many consecutive failures. Calls are being routed through Bifrost until the circuit resets.</p>
+            </TooltipContent>
+          </Tooltip>
+        )}
+
         {/* Ollama / pipeline indicator */}
         {health?.pipeline_providers && (() => {
           const localCount = Object.values(health.pipeline_providers).filter(p => p === "ollama").length
@@ -198,7 +230,7 @@ export function StatusBar({ consoleOpen, onToggleConsole, consoleUnreadCount = 0
         )}
 
         {/* Credits indicator — pushed to the right */}
-        {credits?.configured && credits.balance != null && (
+        {credits?.configured && (
           <div className="ml-auto">
             <Tooltip>
               <TooltipTrigger asChild>
@@ -211,13 +243,15 @@ export function StatusBar({ consoleOpen, onToggleConsole, consoleUnreadCount = 0
                     credits.status === "ok" && "text-green-600 dark:text-green-400",
                     credits.status === "low" && "text-yellow-600 dark:text-yellow-400",
                     credits.status === "exhausted" && "text-red-600 dark:text-red-400",
-                    credits.status === "error" && "text-muted-foreground",
+                    (credits.status === "error" || credits.balance == null) && "text-muted-foreground",
                   )}
                 >
                   {credits.status === "exhausted" ? (
                     "Credits exhausted"
-                  ) : (
+                  ) : credits.balance != null ? (
                     `$${credits.balance.toFixed(2)}`
+                  ) : (
+                    "Credits: —"
                   )}
                 </a>
               </TooltipTrigger>

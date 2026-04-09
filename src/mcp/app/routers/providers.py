@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Provider management endpoints — BYOK provider listing, key validation, and model config."""
@@ -101,7 +101,8 @@ async def get_internal_provider():
     try:
         import httpx
         ollama_url = os.getenv("OLLAMA_URL", "http://localhost:11434")
-        resp = httpx.get(f"{ollama_url}/api/tags", timeout=3)
+        async with httpx.AsyncClient(timeout=3) as client:
+            resp = await client.get(f"{ollama_url}/api/tags")
         ollama_available = resp.status_code == 200
     except Exception:
         pass
@@ -208,6 +209,116 @@ async def disable_ollama():
     """Disable Ollama — fall back to Bifrost/OpenRouter for pipeline tasks."""
     config.INTERNAL_LLM_PROVIDER = "bifrost"
     return {"status": "disabled", "provider": "bifrost"}
+
+
+@router.get("/ollama/recommendations")
+async def get_ollama_recommendations():
+    """Return hardware-aware model recommendations for the setup wizard.
+
+    Response shape matches the frontend ``OllamaRecommendations`` interface:
+    ``{ hardware, models, recommended }``.
+    """
+    # --- hardware info (prefer HOST_* env vars set by start-cerid.sh) --------
+    from utils.host_info import get_host_hardware
+
+    hw = get_host_hardware()
+    ram_gb = hw.ram_gb  # used by model compatibility checks below
+
+    hardware = {
+        "ram_gb": hw.ram_gb,
+        "cpu": hw.cpu,
+        "gpu": hw.gpu,
+        "platform": hw.os,
+    }
+
+    # --- model catalogue with RAM-based compatibility -----------------------
+    _MODELS = [
+        {
+            "id": "llama3.2:1b",
+            "name": "Llama 3.2 1B",
+            "origin": "meta",
+            "size_gb": 1.3,
+            "min_ram_gb": 4,
+            "description": "Ultra-light model for basic tasks",
+            "strengths": "Fast responses, minimal resource usage",
+            "tier": "lightweight",
+        },
+        {
+            "id": "llama3.2:3b",
+            "name": "Llama 3.2 3B",
+            "origin": "meta",
+            "size_gb": 2.0,
+            "min_ram_gb": 6,
+            "description": "Compact model with good general capability",
+            "strengths": "Balanced speed and quality for pipeline tasks",
+            "tier": "lightweight",
+        },
+        {
+            "id": "llama3.1:8b",
+            "name": "Llama 3.1 8B",
+            "origin": "meta",
+            "size_gb": 4.7,
+            "min_ram_gb": 10,
+            "description": "Strong general-purpose model",
+            "strengths": "High quality reasoning and instruction following",
+            "tier": "balanced",
+        },
+        {
+            "id": "mistral:7b",
+            "name": "Mistral 7B",
+            "origin": "mistral",
+            "size_gb": 4.1,
+            "min_ram_gb": 10,
+            "description": "Efficient 7B model with strong performance",
+            "strengths": "Fast inference, good at structured output",
+            "tier": "balanced",
+        },
+        {
+            "id": "qwen2.5:14b",
+            "name": "Qwen 2.5 14B",
+            "origin": "alibaba",
+            "size_gb": 9.0,
+            "min_ram_gb": 18,
+            "description": "Large model for demanding tasks",
+            "strengths": "Excellent reasoning, multilingual support",
+            "tier": "performance",
+        },
+        {
+            "id": "llama3.3:70b",
+            "name": "Llama 3.3 70B",
+            "origin": "meta",
+            "size_gb": 40.0,
+            "min_ram_gb": 48,
+            "description": "Flagship model for maximum quality",
+            "strengths": "Near-frontier reasoning and knowledge",
+            "tier": "performance",
+        },
+    ]
+
+    models = []
+    for m in _MODELS:
+        min_ram: int = m["min_ram_gb"]  # type: ignore[assignment]
+        compatible = ram_gb >= min_ram
+        models.append({**m, "compatible": compatible, "recommended": False})
+
+    # Pick the best compatible model as recommended
+    recommended_id = "llama3.2:3b"  # fallback
+    for m in reversed(models):
+        if m["compatible"]:
+            recommended_id = str(m["id"])
+            break
+
+    # Mark the recommended model
+    for m in models:
+        if m["id"] == recommended_id:
+            m["recommended"] = True
+            break
+
+    return {
+        "hardware": hardware,
+        "models": models,
+        "recommended": recommended_id,
+    }
 
 
 @router.get("/credits")

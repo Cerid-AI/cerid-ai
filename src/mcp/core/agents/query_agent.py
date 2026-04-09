@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Multi-domain knowledge base search with LLM reranking."""
@@ -21,6 +21,7 @@ from config import DOMAINS
 from core.contracts.stores import GraphStore
 from core.utils.cache import log_event
 from core.utils.circuit_breaker import CircuitOpenError
+from core.utils.embeddings import l2_distance_to_relevance
 from core.utils.llm_parsing import parse_llm_json
 from core.utils.text import STOPWORDS as _STOPWORDS
 from core.utils.text import WORD_RE as _WORD_RE
@@ -64,6 +65,7 @@ class StepTimer:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _format_chroma_result(
     content: str,
@@ -198,7 +200,8 @@ async def multi_domain_query(
     query: str,
     domains: list[str] | None = None,
     top_k: int = 10,
-    chroma_client: Any | None = None
+    chroma_client: Any | None = None,
+    metadata_filter: dict | None = None,
 ) -> list[dict[str, Any]]:
     """Query multiple ChromaDB collections in parallel and aggregate results."""
     if domains is None:
@@ -225,18 +228,21 @@ async def multi_domain_query(
         try:
             collection = chroma_client.get_collection(name=col_name)
 
-            results = collection.query(
-                query_texts=[query],
-                n_results=top_k,
-                include=["documents", "metadatas", "distances"]
-            )
+            query_kwargs: dict[str, Any] = {
+                "query_texts": [query],
+                "n_results": top_k,
+                "include": ["documents", "metadatas", "distances"],
+            }
+            if metadata_filter:
+                query_kwargs["where"] = metadata_filter
+            results = collection.query(**query_kwargs)
 
             formatted = []
             seen_ids: set = set()
             if results["ids"] and results["ids"][0]:
                 for i, chunk_id in enumerate(results["ids"][0]):
                     distance = results["distances"][0][i] if results["distances"] else 1.0
-                    relevance = max(0.0, min(1.0, 1.0 - distance))
+                    relevance = l2_distance_to_relevance(distance)
                     metadata = results["metadatas"][0][i] if results["metadatas"] else {}
 
                     formatted.append(_format_chroma_result(
@@ -274,6 +280,11 @@ async def multi_domain_query(
                                 if cid in seen_ids:
                                     continue
                                 meta = fetched["metadatas"][j] if fetched["metadatas"] else {}
+                                # Enforce metadata_filter on BM25-only results too
+                                if metadata_filter and not all(
+                                    meta.get(k) == v for k, v in metadata_filter.items()
+                                ):
+                                    continue
                                 formatted.append(_format_chroma_result(
                                     content=fetched["documents"][j],
                                     relevance=config.HYBRID_KEYWORD_WEIGHT * bm25_map[cid],
@@ -339,6 +350,10 @@ async def lightweight_kb_query(
         query, domains=domains, top_k=top_k, chroma_client=chroma_client,
     )
     results = deduplicate_results(results)
+    # Filter out noise — verification operates on these results directly
+    # and low-relevance hits degrade claim verification accuracy.
+    min_rel = config.VERIFICATION_MIN_RELEVANCE
+    results = [r for r in results if r.get("relevance", 0.0) >= min_rel]
     results.sort(key=lambda x: x.get("relevance", 0.0), reverse=True)
     return results[:top_k]
 
@@ -413,7 +428,7 @@ async def graph_expand_results(
         chunks: list[dict[str, Any]] = []
         for i, chunk_id in enumerate(fetched["ids"][0]):
             distance = fetched["distances"][0][i] if fetched["distances"] else 1.0
-            raw_relevance = max(0.0, min(1.0, 1.0 - distance))
+            raw_relevance = l2_distance_to_relevance(distance)
             depth_penalty = 1.0 / (1.0 + rel_artifact.get("relationship_depth", 1))
             relevance = round(
                 raw_relevance * config.GRAPH_RELATED_SCORE_FACTOR * depth_penalty, 4
@@ -872,6 +887,8 @@ async def agent_query(
     strict_domains: bool = False,
     model: str | None = None,
     graph_store: GraphStore | None = None,
+    skip_cache: bool = False,
+    metadata_filter: dict | None = None,
 ) -> dict[str, Any]:
     """Execute multi-domain query with reranking, graph expansion, and context assembly."""
     timer = StepTimer(enabled=debug_timing)
@@ -887,7 +904,7 @@ async def agent_query(
     # Semantic cache early-return — check before any retrieval work
     _query_embedding: np.ndarray | None = None
     with timer.step("semantic_cache_lookup"):
-        if ENABLE_SEMANTIC_CACHE and redis_client:
+        if ENABLE_SEMANTIC_CACHE and redis_client and not skip_cache:
             try:
                 from core.retrieval.semantic_cache import cache_lookup
                 from core.utils.embeddings import get_embedding_function
@@ -975,6 +992,7 @@ async def agent_query(
                         return await multi_domain_query(
                             query=sq, domains=effective_domains,
                             top_k=effective_top_k, chroma_client=chroma_client,
+                            metadata_filter=metadata_filter,
                         )
 
                     results = await parallel_retrieve(sub_queries, _retrieve_sub)
@@ -986,6 +1004,7 @@ async def agent_query(
                 domains=effective_domains,
                 top_k=effective_top_k,
                 chroma_client=chroma_client,
+                metadata_filter=metadata_filter,
             )
 
     # Search adjacent domains at reduced weight when specific domains are requested.
@@ -1090,7 +1109,10 @@ async def agent_query(
                 logger.warning("MMR diversity reordering failed: %s", e)
 
     # Step 5.7: Filter low-relevance results below minimum threshold
-    results = [r for r in results if r["relevance"] >= config.QUALITY_MIN_RELEVANCE_THRESHOLD]
+    # When metadata_filter is set, the caller explicitly scoped to a file —
+    # use a relaxed threshold so generic questions still return results.
+    _min_rel = 0.05 if metadata_filter else config.QUALITY_MIN_RELEVANCE_THRESHOLD
+    results = [r for r in results if r["relevance"] >= _min_rel]
 
     # Step 6: Assemble context
     with timer.step("context_assembly"):

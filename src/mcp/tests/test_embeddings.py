@@ -3,6 +3,7 @@
 
 """Tests for utils/embeddings.py and deps._EmbeddingAwareClient."""
 
+import math
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -184,3 +185,70 @@ class TestEmbeddingAwareClient:
 
         call_kwargs = mock_client.get_collection.call_args[1]
         assert call_kwargs["embedding_function"] is fake_ef
+
+
+# ---------------------------------------------------------------------------
+# l2_distance_to_relevance unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestL2DistanceToRelevance:
+    """Direct tests for the L2→cosine-similarity conversion function.
+
+    Formula: relevance = clamp(1 − d²/2, 0, 1)
+
+    Valid for unit-norm embeddings where L2² = 2·(1 − cos_sim).
+    """
+
+    def _fn(self, distance: float) -> float:
+        from core.utils.embeddings import l2_distance_to_relevance
+        return l2_distance_to_relevance(distance)
+
+    def test_identical_vectors(self):
+        """Distance 0 → relevance 1.0 (cosine similarity = 1)."""
+        assert self._fn(0.0) == 1.0
+
+    def test_orthogonal_vectors(self):
+        """Distance √2 → relevance 0.0 (cosine similarity = 0)."""
+        assert self._fn(math.sqrt(2)) == pytest.approx(0.0, abs=1e-9)
+
+    def test_opposite_vectors(self):
+        """Distance 2.0 → clamped to 0.0 (cosine similarity = −1)."""
+        assert self._fn(2.0) == 0.0
+
+    def test_high_similarity(self):
+        """Distance 0.2 → 0.98 (used in test_query_agent mock)."""
+        assert self._fn(0.2) == pytest.approx(0.98, abs=1e-9)
+
+    def test_moderate_similarity(self):
+        """Distance 1.0 → 0.5 (cosine similarity = 0.5)."""
+        assert self._fn(1.0) == pytest.approx(0.5, abs=1e-9)
+
+    def test_low_similarity(self):
+        """Distance 1.2 → 0.28 (the range that was broken before the fix)."""
+        assert self._fn(1.2) == pytest.approx(0.28, abs=1e-9)
+
+    def test_typical_chroma_distances(self):
+        """Real-world ChromaDB distances that were being zeroed out."""
+        assert self._fn(1.1183) == pytest.approx(0.3747, abs=0.001)
+        assert self._fn(1.1768) == pytest.approx(0.3076, abs=0.001)
+        assert self._fn(1.2089) == pytest.approx(0.2693, abs=0.001)
+
+    def test_negative_distance_clamped(self):
+        """Negative input (invalid) is clamped to max 1.0."""
+        assert self._fn(-0.1) <= 1.0
+
+    def test_very_large_distance_clamped(self):
+        """Distances beyond 2.0 clamp to 0.0."""
+        assert self._fn(3.0) == 0.0
+        assert self._fn(100.0) == 0.0
+
+    def test_monotonically_decreasing(self):
+        """Relevance decreases as distance increases (in valid range)."""
+        distances = [0.0, 0.2, 0.5, 0.8, 1.0, 1.2, 1.414]
+        relevances = [self._fn(d) for d in distances]
+        for i in range(len(relevances) - 1):
+            assert relevances[i] >= relevances[i + 1], (
+                f"Not monotonic: rel({distances[i]})={relevances[i]} < "
+                f"rel({distances[i+1]})={relevances[i+1]}"
+            )

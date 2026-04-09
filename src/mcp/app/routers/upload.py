@@ -1,9 +1,10 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """File upload endpoint for GUI-based ingestion."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import shutil
@@ -68,12 +69,14 @@ async def upload_file_endpoint(
 
         logger.info(f"Upload received: {file.filename} ({len(content)} bytes) -> {tmp_path}")
 
-        # Parse file from /tmp, then ingest the extracted text content
-        # (bypasses archive path validation which requires files under ARCHIVE_PATH)
+        # Parse file from /tmp, then ingest the extracted text content.
+        # Both _parse_file and ingest_content are blocking I/O — offload to
+        # a thread so the async event loop stays responsive for healthchecks
+        # and concurrent requests (mirrors ingest_file in ingestion.py).
         from app.parsers import parse_file as _parse_file
         from app.services.ingestion import ingest_content
 
-        parsed = _parse_file(tmp_path)
+        parsed = await asyncio.to_thread(_parse_file, tmp_path)
         text = parsed.get("text", "")
         if not text.strip():
             raise ValueError(f"No text extracted from '{file.filename}'")
@@ -89,7 +92,8 @@ async def upload_file_endpoint(
             val = parsed.get(key)
             if val is not None:
                 metadata[key] = val
-        result = ingest_content(
+        result = await asyncio.to_thread(
+            ingest_content,
             text,
             domain or "general",
             metadata,
@@ -99,6 +103,11 @@ async def upload_file_endpoint(
 
         # Override filename in result with the original upload name
         result["filename"] = file.filename
+
+        # Invalidate query cache so subsequent queries hit fresh data
+        # (mirrors the pattern in ingestion.py)
+        from utils.query_cache import invalidate_cache_non_blocking
+        asyncio.get_running_loop().create_task(invalidate_cache_non_blocking())
 
         # Archive mode: copy the file to archive/{domain}/ for Dropbox sync
         if config.STORAGE_MODE == "archive" and tmp_path:
@@ -173,6 +182,7 @@ def _archive_file(tmp_path: str, original_filename: str, domain: str) -> None:
     archive_root = Path(config.ARCHIVE_PATH)
     dest_dir = archive_root / domain
     dest_dir.mkdir(parents=True, exist_ok=True)
+    original_filename = Path(original_filename).name  # Strip directory components (path traversal prevention)
     dest = dest_dir / original_filename
 
     # Avoid overwriting — add numeric suffix if file exists

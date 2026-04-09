@@ -116,7 +116,12 @@ export function IngestionProgress({ className }: IngestionProgressProps) {
   const { data, isLoading } = useQuery({
     queryKey: ["ingestion-progress"],
     queryFn: fetchIngestionProgress,
-    refetchInterval: 2000, // Poll every 2 seconds while visible
+    refetchInterval: (query) => {
+      const d = query.state.data
+      if (!d || d.total_files === 0) return 10_000 // idle: slow poll
+      const hasActive = d.files.some((f) => f.status === "processing" || f.status === "pending")
+      return hasActive ? 2_000 : 10_000 // active: fast poll
+    },
     staleTime: 1000,
   })
 

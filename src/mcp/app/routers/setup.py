@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """First-run configuration wizard endpoints.
@@ -16,7 +16,7 @@ import secrets
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
 
 _logger = logging.getLogger("ai-companion.setup")
@@ -84,6 +84,12 @@ class ConfigureRequest(BaseModel):
     anthropic_api_key: str | None = None
     xai_api_key: str | None = None
     neo4j_password: str | None = None
+    # KB / environment fields sent by the setup wizard
+    archive_path: str | None = None
+    lightweight_mode: bool | None = None
+    watch_folder: bool | None = None
+    ollama_enabled: bool | None = None
+    ollama_model: str | None = None
 
 
 class ConfigureResponse(BaseModel):
@@ -167,6 +173,33 @@ def _read_env_file() -> str:
     if _ENV_FILE.exists():
         return _ENV_FILE.read_text(encoding="utf-8")
     return ""
+
+
+def _sanitize_archive_path(raw: str) -> str:
+    """Validate and normalise an archive path before writing to .env.
+
+    Raises ``ValueError`` for clearly invalid input:
+    - contains newlines or null bytes (would corrupt the .env file)
+    - empty after stripping whitespace
+
+    Normalisation:
+    - strips whitespace
+    - expands ``~`` to the real home directory
+    - resolves ``..`` so the canonical path is stored
+    """
+    path = raw.strip()
+    if not path:
+        raise ValueError("Archive path must not be empty")
+
+    # Characters that would corrupt a .env file or enable injection
+    if "\n" in path or "\r" in path or "\0" in path:
+        raise ValueError("Archive path contains invalid characters")
+
+    # Expand ~ and resolve to canonical absolute path
+    path = os.path.expanduser(path)
+    path = os.path.realpath(path)
+
+    return path
 
 
 def _update_env_file(updates: dict[str, str]) -> None:
@@ -265,8 +298,17 @@ async def setup_health() -> dict:
         },
     ]
 
+    # Required services must all be healthy; bifrost is optional
+    _OPTIONAL = {"bifrost", "verification_pipeline"}
+    required_healthy = all(
+        s["status"] in ("healthy", "connected")
+        for s in services
+        if s["name"] not in _OPTIONAL
+    )
+
     return {
         "services": services,
+        "all_healthy": required_healthy,
         "docker": {
             "compose_version": "v2.x.x",
             "network": "llm-network",
@@ -280,7 +322,23 @@ async def validate_key(req: KeyValidationRequest) -> KeyValidationResponse:
     try:
         from config.providers import validate_provider_key
 
-        valid, message = await validate_provider_key(req.provider, req.api_key)
+        # Resolve env-configured key when frontend sends "__env__" sentinel
+        api_key = req.api_key
+        if api_key == "__env__":
+            env_map = {
+                "openrouter": "OPENROUTER_API_KEY",
+                "openai": "OPENAI_API_KEY",
+                "anthropic": "ANTHROPIC_API_KEY",
+                "xai": "XAI_API_KEY",
+            }
+            env_var = env_map.get(req.provider.lower(), "")
+            api_key = os.getenv(env_var, "")
+            if not api_key:
+                return KeyValidationResponse(
+                    valid=False, error=f"No {env_var} found in environment"
+                )
+
+        valid, message = await validate_provider_key(req.provider, api_key)
         return KeyValidationResponse(valid=valid, error=message if not valid else None)
     except ImportError:
         _logger.warning("config.providers not available, falling back to basic validation")
@@ -332,7 +390,8 @@ async def _fallback_validate(provider: str, api_key: str) -> KeyValidationRespon
 
 @router.post("/configure", response_model=ConfigureResponse)
 async def configure(req: ConfigureRequest) -> ConfigureResponse:
-    """Apply first-run configuration by writing API keys to the .env file."""
+    """Apply configuration by writing API keys to the .env file."""
+
     try:
         updates: dict[str, str] = {}
 
@@ -351,8 +410,20 @@ async def configure(req: ConfigureRequest) -> ConfigureResponse:
             else:
                 updates["NEO4J_PASSWORD"] = req.neo4j_password
 
+        # KB / environment fields from the setup wizard
+        if req.archive_path is not None:
+            updates["ARCHIVE_PATH"] = _sanitize_archive_path(req.archive_path)
+        if req.lightweight_mode is not None:
+            updates["CERID_LIGHTWEIGHT"] = "true" if req.lightweight_mode else ""
+        if req.watch_folder is not None:
+            updates["WATCH_FOLDER"] = "true" if req.watch_folder else ""
+        if req.ollama_enabled is not None:
+            updates["OLLAMA_ENABLED"] = "true" if req.ollama_enabled else "false"
+        if req.ollama_model is not None:
+            updates["OLLAMA_DEFAULT_MODEL"] = req.ollama_model
+
         if not updates:
-            return ConfigureResponse(success=False, error="No keys provided")
+            return ConfigureResponse(success=False, error="No configuration provided")
 
         _update_env_file(updates)
 
@@ -366,11 +437,47 @@ async def configure(req: ConfigureRequest) -> ConfigureResponse:
             ", ".join(updates.keys()),
         )
 
-        return ConfigureResponse(success=True, restart_required=True)
+        # Re-run pre-warms now that API keys are available
+        import asyncio
+        asyncio.ensure_future(_post_configure_warmup())
+
+        return ConfigureResponse(success=True, restart_required=False)
 
     except (OSError, ValueError) as exc:
         _logger.exception("Failed to apply configuration")
         return ConfigureResponse(success=False, error=str(exc))
+
+
+async def _post_configure_warmup() -> None:
+    """Re-warm connections and models after Apply Configuration."""
+    _logger.info("Post-configure warmup starting...")
+    try:
+        from core.utils.llm_client import _get_client
+        await _get_client()
+        _logger.info("Post-configure: OpenRouter client pre-warmed")
+    except Exception as e:
+        _logger.debug("Post-configure: OpenRouter warmup failed: %s", e)
+    try:
+        from core.utils.internal_llm import _get_ollama_client
+        await _get_ollama_client()
+        _logger.info("Post-configure: Ollama client pre-warmed")
+    except Exception as e:
+        _logger.debug("Post-configure: Ollama warmup failed: %s", e)
+    try:
+        from utils.reranker import warmup as reranker_warmup
+        reranker_warmup()
+        _logger.info("Post-configure: Reranker pre-warmed")
+    except Exception as e:
+        _logger.debug("Post-configure: Reranker warmup failed: %s", e)
+    try:
+        from core.utils.embeddings import get_embedding_function
+        ef = get_embedding_function()
+        if ef:
+            ef(["warmup"])
+            _logger.info("Post-configure: Embedding model pre-warmed")
+    except Exception as e:
+        _logger.debug("Post-configure: Embedding warmup failed: %s", e)
+    _logger.info("Post-configure warmup complete")
 
 
 # ---------------------------------------------------------------------------
@@ -379,33 +486,33 @@ async def configure(req: ConfigureRequest) -> ConfigureResponse:
 
 
 @router.get("/system-check")
-async def system_check() -> dict:
+async def system_check(response: Response) -> dict:
     """Detect system environment for the setup wizard."""
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
     import shutil
 
-    # RAM
-    try:
-        import psutil
-        ram_gb = round(psutil.virtual_memory().total / (1024**3))
-    except ImportError:
-        ram_gb = 16  # default guess
+    from utils.host_info import get_host_hardware
 
-    # Docker
-    docker_running = shutil.which("docker") is not None
+    hw = get_host_hardware()
 
-    # Env file
-    env_path = _find_env_file()
-    env_exists = env_path.exists()
-    env_keys: list[str] = []
-    if env_exists:
-        content = env_path.read_text()
-        for line in content.splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                key = line.split("=", 1)[0].strip()
-                val = line.split("=", 1)[1].strip()
-                if val:
-                    env_keys.append(key)
+    # Docker — if we're running inside a container, Docker is clearly available
+    docker_running = (
+        shutil.which("docker") is not None
+        or Path("/.dockerenv").exists()
+        or os.getenv("container") is not None
+    )
+
+    # Env keys — check OS environment for known Cerid config keys (works inside Docker
+    # where env_file passes host .env values as env vars)
+    _KNOWN_KEYS = [
+        "OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "XAI_API_KEY",
+        "NEO4J_PASSWORD", "REDIS_PASSWORD", "OLLAMA_ENABLED", "CERID_API_KEY",
+        "CERID_MULTI_USER", "CERID_JWT_SECRET", "CERID_TIER", "TAVILY_API_KEY",
+        "SENTRY_DSN_MCP",
+    ]
+    env_keys: list[str] = [k for k in _KNOWN_KEYS if os.getenv(k)]
+    env_exists = len(env_keys) > 0
 
     # Ollama
     ollama_detected = False
@@ -430,10 +537,15 @@ async def system_check() -> dict:
     default_archive = archive_path
 
     # Lightweight recommendation
-    lightweight_recommended = ram_gb < 8
+    lightweight_recommended = hw.ram_gb < 8
 
     return {
-        "ram_gb": ram_gb,
+        "ram_gb": hw.ram_gb,
+        "os": hw.os,
+        "cpu": hw.cpu,
+        "cpu_cores": hw.cpu_cores,
+        "gpu": hw.gpu,
+        "gpu_acceleration": hw.gpu_acceleration,
         "docker_running": docker_running,
         "env_exists": env_exists,
         "env_keys_present": env_keys,

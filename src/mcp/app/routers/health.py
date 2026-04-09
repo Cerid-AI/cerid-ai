@@ -1,10 +1,11 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Health check and collection listing endpoints."""
 from __future__ import annotations
 
 import logging
+import os
 import time
 
 from fastapi import APIRouter
@@ -58,6 +59,13 @@ def health_check() -> dict:
     except (ValueError, ImportError):
         ollama_cb_state = "unknown"
 
+    # OpenRouter circuit breaker — covers verification and LLM calls
+    try:
+        from utils.circuit_breaker import get_breaker as _gb2
+        openrouter_cb_state = _gb2("openrouter").state.value
+    except (ValueError, ImportError):
+        openrouter_cb_state = "unknown"
+
     # OpenRouter credit exhaustion flag (set by bifrost.py on 402)
     credits_exhausted = False
     try:
@@ -82,11 +90,12 @@ def health_check() -> dict:
 
     result: dict = {
         "status": "healthy" if all(v == "connected" for v in status.values()) else "degraded",
-        "version": "1.0.0",
+        "version": "0.82.0",
         "services": status,
         "circuit_breakers": {
             "bifrost": bifrost_cb_state,
             "ollama": ollama_cb_state,
+            "openrouter": openrouter_cb_state,
         },
         "openrouter_credits_exhausted": credits_exhausted,
     }
@@ -97,6 +106,10 @@ def health_check() -> dict:
 
 _start_time = time.time()
 
+# Cached OpenRouter auth probe result (refreshed every 30s in degradation_status)
+_openrouter_auth_cache: bool | None = None
+_openrouter_auth_cache_ts: float = 0.0
+
 
 def degradation_status() -> dict:
     """Extended health check with degradation tier and uptime."""
@@ -104,12 +117,63 @@ def degradation_status() -> dict:
     try:
         from utils.degradation import DegradationManager
         mgr = DegradationManager()
-        tier = mgr.current_tier().name
+        tier = mgr.current_tier().value  # .value → lowercase ("full"), not .name ("FULL")
     except Exception:
-        tier = "UNKNOWN"
+        tier = "unknown"
     base["degradation_tier"] = tier
     base["uptime_seconds"] = int(time.time() - _start_time)
     base.setdefault("features", {})
+
+    # Pipeline provider routing — tells the frontend which tasks use local models
+    import config
+    provider = getattr(config, "INTERNAL_LLM_PROVIDER", "openrouter")
+    ollama_reachable = base.get("ollama", {}).get("reachable", False)
+    is_local = provider == "ollama" and ollama_reachable
+    base["pipeline_providers"] = {
+        "claim_extraction": provider if is_local else "openrouter",
+        "query_decomposition": provider if is_local else "openrouter",
+        "topic_extraction": provider if is_local else "openrouter",
+        "memory_resolution": provider if is_local else "openrouter",
+        "reranking": provider if is_local else "openrouter",
+    }
+    try:
+        base["can_retrieve"] = mgr.can_retrieve()
+        base["can_verify"] = mgr.can_verify()
+        base["can_generate"] = mgr.can_generate()
+    except Exception:
+        base["can_retrieve"] = True
+        base["can_verify"] = True
+        base["can_generate"] = True
+
+    # Inference tier — provider, GPU, latencies
+    try:
+        from utils.inference_config import inference_health_payload
+        base["inference"] = inference_health_payload()
+    except Exception:
+        pass
+
+    # OpenRouter auth probe — runs on extended health only (15s poll interval)
+    # Cached for 30s to avoid hammering the OpenRouter auth endpoint.
+    global _openrouter_auth_cache, _openrouter_auth_cache_ts
+    now = time.monotonic()
+    if now - _openrouter_auth_cache_ts > 30.0:
+        try:
+            import httpx
+            api_key = os.getenv("OPENROUTER_API_KEY", "")
+            if api_key:
+                resp = httpx.get(
+                    "https://openrouter.ai/api/v1/auth/key",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    timeout=3,
+                )
+                _openrouter_auth_cache = resp.status_code == 200
+            else:
+                _openrouter_auth_cache = None  # no key configured
+        except Exception:
+            _openrouter_auth_cache = False
+        _openrouter_auth_cache_ts = now
+    base["openrouter_auth_ok"] = _openrouter_auth_cache
+
     return base
 
 

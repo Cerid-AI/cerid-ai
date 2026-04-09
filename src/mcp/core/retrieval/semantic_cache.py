@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Justin Michaels. All rights reserved.
+# Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Semantic query cache — HNSW-indexed similarity cache.
@@ -74,7 +74,12 @@ class _HNSWIndex:
     def load_from_redis(self, redis_client: Any) -> bool:
         """Load index from Redis.  Returns True if loaded, False if not found."""
         try:
-            data = redis_client.get(_HNSW_KEY)
+            # Use the raw (non-decoding) Redis client for binary I/O.
+            # TypedRedis wraps a decode_responses=True client which attempts
+            # UTF-8 decode on all GET results — the HNSW binary blob is not
+            # valid UTF-8, so we bypass decoding via the underlying client.
+            raw = getattr(redis_client, "_r", redis_client)
+            data = raw.get(_HNSW_KEY)
             if not data:
                 return False
 
@@ -111,7 +116,8 @@ class _HNSWIndex:
                 self._idx.save_index(tmp_path)
                 with open(tmp_path, "rb") as f:
                     data = f.read()
-                redis_client.set(_HNSW_KEY, data)
+                raw = getattr(redis_client, "_r", redis_client)
+                raw.set(_HNSW_KEY, data)
             finally:
                 os.unlink(tmp_path)
         except Exception as e:

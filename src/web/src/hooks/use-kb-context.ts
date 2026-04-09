@@ -109,7 +109,7 @@ export function useKBContext(
   }, [])
 
   // Client-side relevance + tag filtering
-  const MIN_RELEVANCE = 0.35
+  const MIN_RELEVANCE = 0.45
   const filteredResults = useMemo(() => {
     const rawResults = data?.results ?? []
     let results = rawResults
