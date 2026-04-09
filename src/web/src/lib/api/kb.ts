@@ -23,6 +23,7 @@ import type {
   ParserCapability,
   ArtifactFilterParams,
   RagMode,
+  ContextSources,
   MemoryRecallResult,
   IngestionProgress,
   DuplicatesResponse,
@@ -30,11 +31,25 @@ import type {
 
 // --- Knowledge Base ---
 
+export type QueryScope = "document" | "domain" | "kb"
+
+export interface QueryOpts {
+  /** High-level scope: "document" (single file), "domain", or "kb" (default) */
+  queryScope?: QueryScope
+  /** Reference for scope — filename when queryScope is "document" */
+  scopeRef?: string
+  /** Low-level overrides (usually set automatically by scope) */
+  strictDomains?: boolean
+  skipCache?: boolean
+  metadataFilter?: Record<string, string>
+}
+
 export async function queryKB(
   query: string,
   domains?: string[],
   topK = 10,
   conversationMessages?: { role: string; content: string }[],
+  opts?: QueryOpts,
 ): Promise<AgentQueryResponse> {
   const res = await fetch(`${MCP_BASE}/agent/query`, {
     method: "POST",
@@ -45,6 +60,11 @@ export async function queryKB(
       top_k: topK,
       use_reranking: true,
       conversation_messages: conversationMessages ?? null,
+      ...(opts?.queryScope != null && { query_scope: opts.queryScope }),
+      ...(opts?.scopeRef != null && { scope_ref: opts.scopeRef }),
+      ...(opts?.strictDomains != null && { strict_domains: opts.strictDomains }),
+      ...(opts?.skipCache != null && { skip_cache: opts.skipCache }),
+      ...(opts?.metadataFilter != null && { metadata_filter: opts.metadataFilter }),
     }),
   })
   if (!res.ok) throw new Error(await extractError(res, `KB query failed: ${res.status}`))
@@ -58,6 +78,7 @@ export async function queryKBOrchestrated(
   topK = 10,
   conversationMessages?: { role: string; content: string }[],
   sourceConfig?: Record<string, unknown>,
+  contextSources?: ContextSources,
 ): Promise<AgentQueryResponse> {
   const res = await fetch(`${MCP_BASE}/agent/query`, {
     method: "POST",
@@ -70,6 +91,7 @@ export async function queryKBOrchestrated(
       use_reranking: true,
       conversation_messages: conversationMessages ?? null,
       source_config: sourceConfig ?? null,
+      ...(contextSources != null && { context_sources: contextSources }),
     }),
   })
   if (!res.ok) throw new Error(await extractError(res, `KB query failed: ${res.status}`))

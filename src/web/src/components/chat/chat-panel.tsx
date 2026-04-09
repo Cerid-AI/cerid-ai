@@ -25,6 +25,7 @@ import { useChatSend } from "@/hooks/use-chat-send"
 import { useConversationsContext } from "@/contexts/conversations-context"
 import { useKBContext } from "@/hooks/use-kb-context"
 import { useOrchestratedQuery } from "@/hooks/use-orchestrated-query"
+import { useContextSources } from "@/hooks/use-context-sources"
 import { useSettings } from "@/hooks/use-settings"
 import { useModelRouter } from "@/hooks/use-model-router"
 import { useModelSwitch } from "@/hooks/use-model-switch"
@@ -270,7 +271,8 @@ export function ChatPanel() {
   }, [messages])
 
   const kbContext = useKBContext(latestUserMessage, recentMessages)
-  const orchestratedContext = useOrchestratedQuery(latestUserMessage, ragMode, recentMessages)
+  const { sources: contextSources, toggleSource } = useContextSources()
+  const orchestratedContext = useOrchestratedQuery(latestUserMessage, ragMode, recentMessages, contextSources)
   const { injectedContext, clearInjected } = kbContext
 
   // Merge orchestrated results into KB results pool for auto-inject.
@@ -869,7 +871,15 @@ export function ChatPanel() {
         {ragMode === "manual" ? (
           <KBContextPanel {...kbContext} onClose={() => setShowKB(false)} />
         ) : (
-          <KnowledgeConsole {...orchestratedContext} ragMode={ragMode} onRagModeChange={setRagMode} onClose={() => setShowKB(false)} />
+          <KnowledgeConsole
+            {...orchestratedContext}
+            toggleKB={() => toggleSource("kb")}
+            toggleMemory={() => toggleSource("memory")}
+            toggleExternal={() => toggleSource("external")}
+            ragMode={ragMode}
+            onRagModeChange={setRagMode}
+            onClose={() => setShowKB(false)}
+          />
         )}
       </Panel>
     </Group>
