@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Cerid AI. All rights reserved.
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """
@@ -71,6 +71,9 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger("ai-companion")
+
+# Extension hooks — populated by bootstrap (internal features, plugins, etc.)
+_shutdown_hooks: list = []
 
 
 def _hydrate_settings_from_sync() -> None:
@@ -329,6 +332,12 @@ async def lifespan(app: FastAPI):
         await close_ollama_client()
     except Exception as exc:
         logger.warning("Ollama client shutdown failed: %s", exc)
+    # Extension shutdown hooks (registered by bootstrap)
+    for _hook in _shutdown_hooks:
+        try:
+            await _hook()
+        except Exception as exc:
+            logger.warning("Extension shutdown hook failed: %s", exc)
     # Flush semantic cache HNSW index to Redis before closing Redis
     try:
         from app.deps import get_redis
@@ -344,7 +353,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="AI Companion MCP Server",
-    version="0.82.0",
+    version="1.0.0",
     lifespan=lifespan,
 )
 
@@ -470,4 +479,4 @@ app.include_router(sdk_openapi.router)
 
 @app.get("/")
 def root():
-    return {"service": "AI Companion MCP Server", "version": "0.82.0", "status": "running"}
+    return {"service": "AI Companion MCP Server", "version": "1.0.0", "status": "running"}

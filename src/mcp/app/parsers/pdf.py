@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Cerid AI. All rights reserved.
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """PDF parser — memory-safe, chunked page-by-page extraction with table support.
@@ -35,7 +35,7 @@ def _get_memory_mb() -> float:
         if hasattr(ru, "ru_maxrss"):
             return ru.ru_maxrss / (1024 * 1024) if os.uname().sysname == "Darwin" else ru.ru_maxrss / 1024
     except Exception:
-        pass  # returns 0.0 fallback
+        pass
     return 0.0
 
 

@@ -1,7 +1,7 @@
 # Cerid AI — Dependency Audit
 
 **Date:** 2026-04-05
-**Repo:** cerid-ai (v0.82.0)
+**Repo:** cerid-ai-public (v0.82.0)
 **MCP Docker Image:** 3.18 GB (was 4.09 GB before Tier 1+2 cleanup) | **Web Docker Image:** 98.7 MB
 
 ---
@@ -54,8 +54,10 @@
 
 | Dependency | Version | Used By | Size Impact | Recommendation |
 |------------|---------|---------|-------------|----------------|
+| `stripe` | >=8.0 | **Zero imports in public repo** | ~5MB | **REMOVE** — billing is internal-only, not in public repo |
 | `pytesseract` | >=0.3.10 | Only `plugins/ocr/plugin.py` (Pro tier) | ~2MB (but tesseract-ocr system pkg is 2.7MB) | **REMOVE from requirements** — OCR is Pro-only plugin, should be plugin-level dep |
 | `Pillow` | >=10.0 | Only `plugins/ocr/plugin.py` | ~10MB | **REMOVE from requirements** — same as pytesseract, Pro plugin dep |
+| `faster-whisper` | >=1.0.0 | **Zero imports in public repo** | ~50MB + ctranslate2 | **REMOVE** — audio transcription plugin not in public repo |
 | `requests` | >=2.28 | Only CLI scripts (watch_obsidian, watch_ingest, ingest_cli, scan_ingest) | ~5MB | **REMOVE** — scripts already have httpx available; requests is redundant |
 | `bcrypt` | >=4.0 | Only `routers/auth.py` (multi-user auth) | ~2MB | **CONDITIONAL** — only needed when CERID_MULTI_USER=true. Move to optional extras. |
 | `PyJWT` | >=2.8 | Only `middleware/jwt_auth.py` | ~1MB | **CONDITIONAL** — same as bcrypt, only for multi-user mode |
@@ -138,8 +140,8 @@ nginx:alpine base + Vite build output. Nothing to optimize.
 | Action | Savings | Risk |
 |--------|---------|------|
 | Remove `packages/desktop/` from repo | Eliminates 26/33 Dependabot vulns | Zero — desktop app is unused |
-| Remove `stripe` from requirements.txt | ~5 MB, 0 imports | Zero — unused, no imports found |
-| Remove `faster-whisper` from requirements.txt | ~50 MB | Zero — unused, no imports found |
+| Remove `stripe` from requirements.txt | ~5 MB, 0 imports | Zero — not used in public repo |
+| Remove `faster-whisper` from requirements.txt | ~50 MB | Zero — not used in public repo |
 | Remove `requests` from requirements.txt | ~5 MB | Near-zero — only CLI scripts, can use httpx |
 
 **Impact: Eliminates 26 vulnerabilities, saves ~60 MB**

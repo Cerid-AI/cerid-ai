@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Cerid AI. All rights reserved.
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """MCP tool registry — schemas and execute_tool() dispatcher.
@@ -18,6 +18,9 @@ from app.routers.artifacts import recategorize
 from app.routers.health import health_check, list_collections
 from app.routers.query import query_knowledge
 from app.services.ingestion import ingest_content, ingest_file
+
+# Extension hooks — populated by bootstrap (internal tools, plugins, etc.)
+_tool_dispatchers: list = []
 
 # ── MCP Tool Definitions ─────────────────────────────────────────────────────
 
@@ -754,4 +757,9 @@ async def execute_tool(name: str, arguments: dict) -> Any:
             tags=arguments.get("tags", ""),
             plugin_override=arguments.get("plugin", ""),
         )
+    # Try extension tool dispatchers (registered by bootstrap)
+    for _dispatcher in _tool_dispatchers:
+        result = await _dispatcher(name, arguments)
+        if result is not None:
+            return result
     raise ValueError(f"Unknown tool: {name}")

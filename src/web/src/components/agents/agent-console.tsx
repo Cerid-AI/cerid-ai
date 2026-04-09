@@ -38,7 +38,7 @@ export default function AgentConsole() {
       esRef.current.close()
     }
 
-    const url = `${MCP_BASE}/agent-console/stream`
+    const url = `${MCP_BASE}/agents/activity/stream`
     const es = new EventSource(url)
     esRef.current = es
 

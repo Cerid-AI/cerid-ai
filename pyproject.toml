@@ -4,14 +4,6 @@ version = "0.82.0"
 description = "Privacy-first Personal AI Knowledge Companion"
 requires-python = ">=3.11"
 license = "Apache-2.0"
-authors = [{name = "Cerid AI", email = "dev@cerid.ai"}]
-keywords = ["rag", "knowledge-base", "ai", "mcp", "self-hosted", "privacy"]
-
-[project.urls]
-Homepage = "https://cerid.ai"
-Repository = "https://github.com/Cerid-AI/cerid-ai"
-Documentation = "https://github.com/Cerid-AI/cerid-ai/tree/main/docs"
-"Bug Tracker" = "https://github.com/Cerid-AI/cerid-ai/issues"
 
 [tool.ruff]
 target-version = "py311"

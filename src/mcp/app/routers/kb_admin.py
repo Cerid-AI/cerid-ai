@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Cerid AI. All rights reserved.
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """KB Administration endpoints — rebuild indexes, rescore, regenerate summaries, clear domains, delete artifacts."""

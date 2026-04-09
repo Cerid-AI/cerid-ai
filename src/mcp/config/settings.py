@@ -549,6 +549,12 @@ CERID_EMAIL_IMAP_PASSWORD = os.getenv("CERID_EMAIL_IMAP_PASSWORD", "")
 CERID_EMAIL_FOLDER = os.getenv("CERID_EMAIL_FOLDER", "INBOX")
 CERID_EMAIL_POLL_INTERVAL = int(os.getenv("CERID_EMAIL_POLL_INTERVAL", "15"))  # minutes
 
+# Trading/boardroom config — stubs (overridden at runtime when enabled)
+CERID_TRADING_ENABLED: bool = False
+TRADING_AGENT_URL: str = ""
+CERID_BOARDROOM_ENABLED: bool = False
+CERID_BOARDROOM_TIER: str = "foundation"
+
 # ---------------------------------------------------------------------------
 # RSS/Atom Feed Poller
 # ---------------------------------------------------------------------------
@@ -664,6 +670,15 @@ CONSUMER_REGISTRY: dict[str, dict] = {
         },
         "allowed_domains": None,     # A2A peers get full domain access
         "strict_domains": False,
+    },
+    "cerid-finance": {
+        "description": "Cerid Finance personal finance dashboard",
+        "rate_limits": {
+            "/agent/": (40, 60),     # 40 req/min — dashboard + AI chat
+            "/sdk/": (40, 60),
+        },
+        "allowed_domains": ["finance", "general"],
+        "strict_domains": True,      # No bleed into personal/trading/coding data
     },
     "folder_scanner": {
         "rate_limits": {

@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Cerid AI. All rights reserved.
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Artifact listing and recategorization endpoints."""
@@ -201,7 +201,7 @@ async def list_artifacts_endpoint(
     domain: str | None = Query(None, description="Filter by domain"),
     sub_category: str | None = Query(None, description="Filter by sub-category"),
     tag: str | None = Query(None, description="Filter by tag"),
-    client_source: str | None = Query(None, description="Filter by ingestion client (e.g. 'gui', 'cli-ingest')"),
+    client_source: str | None = Query(None, description="Filter by ingestion client (e.g. 'gui', 'trading-agent')"),
     since: str | None = Query(None, description="ISO date — only return artifacts ingested after this date"),
     min_quality: float | None = Query(None, ge=0, le=1, description="Minimum quality score (0-1)"),
     offset: int = Query(0, ge=0, description="Pagination offset"),

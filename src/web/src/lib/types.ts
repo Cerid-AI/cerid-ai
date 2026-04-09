@@ -1127,9 +1127,7 @@ export interface QualityMetricsResponse {
 
 // ── Plugins ──────────────────────────────────────────────────────────────────
 
-export type PluginStatus = "installed" | "active" | "error" | "disabled" | "requires_pro" | "requires_enterprise"
-
-export type FeatureTier = "community" | "pro" | "enterprise"
+export type PluginStatus = "installed" | "active" | "error" | "disabled"
 
 export interface Plugin {
   name: string
@@ -1350,4 +1348,3 @@ export interface PrivateModeStatus {
   enabled: boolean
   level: 1 | 2 | 3 | 4
 }
-

@@ -1,6 +1,8 @@
 # Copyright (c) 2026 Cerid AI. Apache-2.0 license.
 """Tests for ToolPlugin — custom MCP tool registration via plugins."""
 
+from __future__ import annotations
+
 import logging
 from unittest.mock import AsyncMock
 

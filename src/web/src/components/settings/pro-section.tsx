@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -11,6 +11,7 @@ import {
   X,
   Key,
   Loader2,
+  Mail,
   ShieldCheck,
   ShieldOff,
 } from "lucide-react"
@@ -20,6 +21,14 @@ interface ProSectionProps {
   featureTier: string
   featureFlags: Record<string, boolean>
   onRefresh?: () => void
+}
+
+interface BillingStatus {
+  active: boolean
+  tier: string
+  source?: string
+  activated_at?: number
+  key_masked?: string
 }
 
 const PRO_FEATURES = [
@@ -43,11 +52,24 @@ const ENTERPRISE_FEATURES = [
 ] as const
 
 export function ProSection({ featureTier, featureFlags, onRefresh }: ProSectionProps) {
+  const [billingStatus, setBillingStatus] = useState<BillingStatus | null>(null)
   const [licenseKey, setLicenseKey] = useState("")
   const [keyError, setKeyError] = useState("")
   const [keySuccess, setKeySuccess] = useState("")
   const [validating, setValidating] = useState(false)
   const [deactivating, setDeactivating] = useState(false)
+
+  // Waitlist state
+  const [waitlistEmail, setWaitlistEmail] = useState("")
+  const [waitlistSubmitting, setWaitlistSubmitting] = useState(false)
+  const [waitlistResult, setWaitlistResult] = useState<{ status: string; position?: number } | null>(null)
+
+  useEffect(() => {
+    fetch(`${MCP_BASE}/billing/status`, { headers: mcpHeaders() })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data) setBillingStatus(data) })
+      .catch(() => {})
+  }, [])
 
   const handleValidateKey = useCallback(async () => {
     if (!licenseKey.trim()) return
@@ -56,7 +78,7 @@ export function ProSection({ featureTier, featureFlags, onRefresh }: ProSectionP
     setKeySuccess("")
 
     try {
-      const res = await fetch(`${MCP_BASE}/settings/license`, {
+      const res = await fetch(`${MCP_BASE}/billing/validate-key`, {
         method: "POST",
         headers: mcpHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ key: licenseKey.trim() }),
@@ -64,6 +86,7 @@ export function ProSection({ featureTier, featureFlags, onRefresh }: ProSectionP
       if (res.ok) {
         const data = await res.json()
         setKeySuccess(data.message || "License activated")
+        setBillingStatus({ active: true, tier: "pro", source: "manual", key_masked: undefined })
         setLicenseKey("")
         onRefresh?.()
       } else {
@@ -80,11 +103,12 @@ export function ProSection({ featureTier, featureFlags, onRefresh }: ProSectionP
   const handleDeactivate = useCallback(async () => {
     setDeactivating(true)
     try {
-      const res = await fetch(`${MCP_BASE}/settings/license`, {
+      const res = await fetch(`${MCP_BASE}/billing/license`, {
         method: "DELETE",
         headers: mcpHeaders(),
       })
       if (res.ok) {
+        setBillingStatus({ active: false, tier: "community", source: "default" })
         onRefresh?.()
       }
     } catch {
@@ -93,6 +117,48 @@ export function ProSection({ featureTier, featureFlags, onRefresh }: ProSectionP
       setDeactivating(false)
     }
   }, [onRefresh])
+
+  const handleUpgrade = useCallback(async () => {
+    try {
+      const res = await fetch(`${MCP_BASE}/billing/create-checkout`, {
+        method: "POST",
+        headers: mcpHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({}),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (data.checkout_url) {
+          window.open(data.checkout_url, "_blank")
+        }
+      }
+    } catch {
+      // Stripe not configured — license key entry is the fallback
+    }
+  }, [])
+
+  const handleWaitlist = useCallback(async () => {
+    if (!waitlistEmail.trim()) return
+    setWaitlistSubmitting(true)
+    setWaitlistResult(null)
+    try {
+      const res = await fetch(`${MCP_BASE}/billing/waitlist`, {
+        method: "POST",
+        headers: mcpHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ email: waitlistEmail.trim() }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setWaitlistResult({ status: "joined", position: data.position })
+        setWaitlistEmail("")
+      } else {
+        setWaitlistResult({ status: "error" })
+      }
+    } catch {
+      setWaitlistResult({ status: "error" })
+    } finally {
+      setWaitlistSubmitting(false)
+    }
+  }, [waitlistEmail])
 
   const isPro = featureTier === "pro" || featureTier === "enterprise"
 
@@ -103,10 +169,17 @@ export function ProSection({ featureTier, featureFlags, onRefresh }: ProSectionP
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Crown className={isPro ? "h-5 w-5 text-amber-500" : "h-5 w-5 text-muted-foreground"} />
-            <h3 className="text-sm font-semibold">
-              Current Plan:{" "}
-              {featureTier === "enterprise" ? "Vault" : featureTier === "pro" ? "Pro" : "Core"}
-            </h3>
+            <div>
+              <h3 className="text-sm font-semibold">
+                Current Plan:{" "}
+                {featureTier === "enterprise" ? "Vault" : featureTier === "pro" ? "Pro" : "Core"}
+              </h3>
+              {billingStatus?.source && (
+                <p className="text-xs text-muted-foreground">
+                  Activated via {billingStatus.source}
+                </p>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-2">
             {isPro ? (
@@ -115,16 +188,21 @@ export function ProSection({ featureTier, featureFlags, onRefresh }: ProSectionP
                 Pro Active
               </Badge>
             ) : (
-              <Badge variant="outline" className="border-muted-foreground/30 text-muted-foreground">
-                <ShieldOff className="mr-1 h-3 w-3" />
-                Core
-              </Badge>
+              <Button size="sm" onClick={handleUpgrade} className="bg-amber-600 hover:bg-amber-700">
+                <Crown className="mr-1 h-3 w-3" />
+                Upgrade to Pro
+              </Button>
             )}
           </div>
         </div>
 
-        {isPro && (
-          <div className="mt-3 flex items-center justify-end">
+        {/* Masked key display when Pro */}
+        {isPro && billingStatus?.key_masked && (
+          <div className="mt-3 flex items-center justify-between rounded border border-muted bg-muted/30 px-3 py-2">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Key className="h-3 w-3" />
+              <span className="font-mono">{billingStatus.key_masked}</span>
+            </div>
             <Button
               size="sm"
               variant="ghost"
@@ -171,6 +249,44 @@ export function ProSection({ featureTier, featureFlags, onRefresh }: ProSectionP
           </div>
           {keyError && <p className="text-xs text-destructive">{keyError}</p>}
           {keySuccess && <p className="text-xs text-green-600 dark:text-green-400">{keySuccess}</p>}
+        </div>
+      )}
+
+      {/* Waitlist (Community only, interim before Stripe) */}
+      {!isPro && (
+        <div className="rounded-lg border bg-card p-4 space-y-3">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <Mail className="h-4 w-4" />
+            Join the Pro Waitlist
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Get notified when Cerid Pro is available for purchase.
+          </p>
+          <div className="flex gap-2">
+            <Input
+              type="email"
+              placeholder="you@example.com"
+              value={waitlistEmail}
+              onChange={(e) => setWaitlistEmail(e.target.value)}
+              className="text-sm"
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleWaitlist}
+              disabled={waitlistSubmitting || !waitlistEmail.trim()}
+            >
+              {waitlistSubmitting ? <Loader2 className="h-3 w-3 animate-spin" /> : "Join"}
+            </Button>
+          </div>
+          {waitlistResult?.status === "joined" && (
+            <p className="text-xs text-green-600 dark:text-green-400">
+              You're on the list! Position #{waitlistResult.position}
+            </p>
+          )}
+          {waitlistResult?.status === "error" && (
+            <p className="text-xs text-destructive">Failed to join waitlist. Try again.</p>
+          )}
         </div>
       )}
 

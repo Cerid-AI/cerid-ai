@@ -164,7 +164,7 @@ Latency (P50/P95), LLM cost, NDCG retrieval quality, cache hit rate, verificatio
 
 ## Pro Upgrade Path
 
-Pro features (audio transcription, OCR, vision, metamorphic verification, visual workflows) can be activated via **Settings > Pro tab**. The upgrade flow is self-serve within the running application — no external portal required.
+Pro features (audio transcription, OCR, vision, metamorphic verification, visual workflows) can be activated via **Settings > Pro tab** using a license key or Stripe checkout. The upgrade flow is self-serve within the running application — no external portal required.
 
 ---
 

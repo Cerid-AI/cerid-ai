@@ -31,7 +31,7 @@ routers/agents.py → agents/hallucination/streaming.py (SSE orchestrator)
   └── hallucination/metamorphic.py     (perturbation-based, Pro tier)
 ```
 
-## Agents (9)
+## Agents (10)
 
 | Agent | File | Responsibility |
 |-------|------|----------------|
@@ -45,8 +45,9 @@ routers/agents.py → agents/hallucination/streaming.py (SSE orchestrator)
 | Maintenance | `maintenance.py` | Scheduled KB cleanup tasks |
 | Memory | `memory.py` | Conversation memory extraction/recall |
 | Self-RAG | `self_rag.py` | Self-reflective retrieval-augmented generation |
+| Trading | `trading_agent.py` | Trading signal integration (gated) |
 
-## Routers (28)
+## Routers (29)
 
 | Router | Prefix | Responsibility |
 |--------|--------|----------------|
@@ -75,6 +76,7 @@ routers/agents.py → agents/hallucination/streaming.py (SSE orchestrator)
 | `workflows.py` | `/workflows` | Workflow engine |
 | `automations.py` | `/automations` | Automation rules |
 | `a2a.py` | `/a2a` | Agent-to-Agent protocol |
+| `trading_proxy.py` | `/trading` | Trading agent proxy (gated) |
 | `ollama_proxy.py` | `/ollama` | Local Ollama proxy |
 | `mcp_sse.py` | `/mcp` | MCP SSE transport |
 | `observability.py` | `/observability` | Metrics/tracing |

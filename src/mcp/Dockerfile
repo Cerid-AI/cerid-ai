@@ -31,11 +31,11 @@ hf_hub_download('Snowflake/snowflake-arctic-embed-m-v1.5', 'tokenizer.json')"; \
 # Stage 3: Runtime — slim image without build tools
 FROM python:3.11.14-slim
 
+# Pro plugins requiring tesseract-ocr and ffmpeg should install them in a
+# plugin-specific layer or via the sidecar.  Core image stays minimal.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
-# Pro plugins requiring system packages (tesseract-ocr, ffmpeg) are installed
-# separately via plugin scripts — not included in the base image to reduce size.
 
 RUN useradd -m -u 1000 cerid
 
@@ -51,4 +51,4 @@ COPY --chown=cerid:cerid . .
 
 USER cerid
 EXPOSE 8888
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8888"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8888"]

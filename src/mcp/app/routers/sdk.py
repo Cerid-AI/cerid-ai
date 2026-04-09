@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Cerid AI. All rights reserved.
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Stable SDK endpoints for external cerid-series consumers.
@@ -15,8 +15,8 @@ adding new cerid-series consumers.
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
-from pydantic import BaseModel, Field
 
+import config
 from app.models.sdk import (
     SDKHallucinationResponse,
     SDKHealthResponse,
@@ -40,28 +40,10 @@ from config.taxonomy import DOMAINS, TAXONOMY
 
 router = APIRouter(prefix="/sdk/v1", tags=["SDK"])
 
-_VERSION = "0.82.0"  # Phase 41: typed response models, consumer domain isolation
+_VERSION = "1.1.0"  # Phase 41: typed response models, consumer domain isolation
 
 _503 = {"description": "One or more backend services unavailable"}
 _422 = {"description": "Invalid request parameters"}
-
-
-class SDKIngestRequest(BaseModel):
-    content: str
-    domain: str = "general"
-    tags: str = ""
-
-
-class SDKIngestFileRequest(BaseModel):
-    file_path: str
-    domain: str = ""
-    tags: str = ""
-
-
-class SDKSearchRequest(BaseModel):
-    query: str
-    domain: str = "general"
-    top_k: int = Field(3, ge=1, le=20)
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +108,13 @@ def sdk_health():
             "enable_memory_extraction",
         )
     }
+    # Expose internal LLM provider info for SDK consumers
+    import os
+    base["internal_llm"] = {
+        "provider": config.INTERNAL_LLM_PROVIDER,
+        "model": config.INTERNAL_LLM_MODEL or config.OLLAMA_DEFAULT_MODEL,
+        "ollama_enabled": os.getenv("OLLAMA_ENABLED", "false").lower() in ("true", "1"),
+    }
     return base
 
 
@@ -135,23 +124,21 @@ def sdk_health():
 
 
 @router.post("/ingest", summary="Ingest Text", responses={422: _422, 503: _503})
-async def sdk_ingest(req: SDKIngestRequest):
-    import asyncio
-    result = await asyncio.to_thread(
-        ingest_content,
-        req.content,
-        domain=req.domain,
-        metadata={"tags": req.tags},
+def sdk_ingest(req: dict):
+    result = ingest_content(
+        req.get("content", ""),
+        domain=req.get("domain", "general"),
+        metadata={"tags": req.get("tags", "")},
     )
     return result
 
 
 @router.post("/ingest/file", summary="Ingest File", responses={422: _422, 503: _503})
-async def sdk_ingest_file(req: SDKIngestFileRequest):
+async def sdk_ingest_file(req: dict):
     result = await ingest_file(
-        req.file_path,
-        domain=req.domain,
-        tags=req.tags,
+        req.get("file_path", ""),
+        domain=req.get("domain", ""),
+        tags=req.get("tags", ""),
     )
     return result
 
@@ -182,18 +169,11 @@ def sdk_settings():
 
 
 @router.post("/search", summary="KB Search", responses={422: _422, 503: _503})
-def sdk_search(req: SDKSearchRequest, request: Request):
-    from config.settings import CONSUMER_REGISTRY
-    client_id = request.headers.get("x-client-id", "gui")
-    consumer = CONSUMER_REGISTRY.get(client_id, CONSUMER_REGISTRY.get("_default", {}))
-    allowed_domains = consumer.get("allowed_domains")
-    domain = req.domain
-    if allowed_domains and domain not in allowed_domains:
-        domain = allowed_domains[0]
+def sdk_search(req: dict):
     result = query_knowledge(
-        req.query,
-        domain=domain,
-        top_k=req.top_k,
+        req.get("query", ""),
+        domain=req.get("domain", "general"),
+        top_k=req.get("top_k", 3),
     )
     sources = result.get("sources", [])
     return {"results": sources, "total_results": len(sources), "confidence": result.get("confidence", 0.0)}

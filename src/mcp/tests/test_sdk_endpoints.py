@@ -175,7 +175,8 @@ class TestSDKHealth:
     """GET /sdk/v1/health returns version, tier, services, and features."""
 
     @patch("app.routers.sdk.health_check")
-    def test_health_response_shape(self, mock_health):
+    @patch("app.routers.sdk.config")
+    def test_health_response_shape(self, mock_config, mock_health):
         mock_health.return_value = {
             "status": "healthy",
             "tier": "community",
@@ -185,6 +186,9 @@ class TestSDKHealth:
                 "neo4j": "connected",
             },
         }
+        mock_config.INTERNAL_LLM_PROVIDER = "openrouter"
+        mock_config.INTERNAL_LLM_MODEL = "anthropic/claude-sonnet-4"
+        mock_config.OLLAMA_DEFAULT_MODEL = "llama3.2:3b"
 
         with patch("config.features.FEATURE_TOGGLES", {
             "enable_hallucination_check": True,
@@ -201,7 +205,27 @@ class TestSDKHealth:
         assert "version" in data
         assert "services" in data
         assert isinstance(data["services"], dict)
-        assert "internal_llm" not in data
+
+    @patch("app.routers.sdk.health_check")
+    @patch("app.routers.sdk.config")
+    def test_health_includes_internal_llm(self, mock_config, mock_health):
+        mock_health.return_value = {
+            "status": "healthy",
+            "tier": "community",
+            "services": {},
+        }
+        mock_config.INTERNAL_LLM_PROVIDER = "ollama"
+        mock_config.INTERNAL_LLM_MODEL = ""
+        mock_config.OLLAMA_DEFAULT_MODEL = "llama3.2:3b"
+
+        with patch("config.features.FEATURE_TOGGLES", {}):
+            client = TestClient(_make_app())
+            resp = client.get("/sdk/v1/health")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "internal_llm" in data
+        assert data["internal_llm"]["provider"] == "ollama"
 
 
 # ---------------------------------------------------------------------------
@@ -378,7 +402,7 @@ class TestSDKHealthDetailed:
     def test_detailed_health_success(self, mock_degrad):
         mock_degrad.return_value = {
             "status": "healthy",
-            "version": "0.82.0",
+            "version": "1.1.0",
             "services": {"chromadb": "up", "neo4j": "up", "redis": "up"},
             "features": {},
             "circuit_breakers": {"chromadb": "closed", "neo4j": "closed"},
@@ -396,7 +420,7 @@ class TestSDKHealthDetailed:
     def test_detailed_health_degraded(self, mock_degrad):
         mock_degrad.return_value = {
             "status": "degraded",
-            "version": "0.82.0",
+            "version": "1.1.0",
             "services": {"chromadb": "down", "neo4j": "up", "redis": "up"},
             "features": {},
             "circuit_breakers": {"chromadb": "open"},
@@ -424,7 +448,7 @@ class TestSDKSettings:
         resp = client.get("/sdk/v1/settings")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["version"] == "0.82.0"
+        assert data["version"] == "1.1.0"
         assert data["tier"] == "pro"
         assert isinstance(data["features"], dict)
 
