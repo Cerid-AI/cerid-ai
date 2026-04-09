@@ -38,7 +38,6 @@ from app.middleware.tenant_context import TenantContextMiddleware
 from app.routers import (
     a2a,
     agents,
-    alerts,
     artifacts,
     automations,
     chat,
@@ -48,7 +47,6 @@ from app.routers import (
     kb_admin,
     mcp_sse,
     memories,
-    migration,
     models,
     observability,
     ollama_proxy,
@@ -64,11 +62,9 @@ from app.routers import (
     upload,
     user_state,
     workflows,
-    ws_sync,
 )
 from app.scheduler import start_scheduler, stop_scheduler
 from config.features import CERID_MULTI_USER
-from config.settings import CERID_TRADING_ENABLED
 
 logging.basicConfig(
     level=logging.INFO,
@@ -333,13 +329,12 @@ async def lifespan(app: FastAPI):
         await close_ollama_client()
     except Exception as exc:
         logger.warning("Ollama client shutdown failed: %s", exc)
-    # Close trading proxy
-    if CERID_TRADING_ENABLED:
-        try:
-            from app.routers.trading_proxy import close_trading_proxy_client
-            await close_trading_proxy_client()
-        except Exception as exc:
-            logger.warning("Trading proxy shutdown failed: %s", exc)
+    # Internal-only shutdown hooks (trading proxy, etc.)
+    try:
+        from app.main_internal import shutdown_internal
+        await shutdown_internal()
+    except ImportError:
+        pass
     # Flush semantic cache HNSW index to Redis before closing Redis
     try:
         from app.deps import get_redis
@@ -425,17 +420,6 @@ app.include_router(models.router, prefix="/api/v1")
 app.include_router(observability.router)
 app.include_router(observability.router, prefix="/api/v1")
 
-# Alerting API
-app.include_router(alerts.router)
-app.include_router(alerts.router, prefix="/api/v1")
-
-# Migration API
-app.include_router(migration.router)
-app.include_router(migration.router, prefix="/api/v1")
-
-# WebSocket sync
-app.include_router(ws_sync.router)
-
 # Ollama local LLM proxy (always registered; endpoints gate on OLLAMA_ENABLED)
 app.include_router(ollama_proxy.router)
 app.include_router(ollama_proxy.router, prefix="/api/v1")
@@ -454,16 +438,6 @@ if CERID_MULTI_USER:
     from app.routers import auth as auth_router
     app.include_router(auth_router.router)
     app.include_router(auth_router.router, prefix="/api/v1")
-
-# Trading proxy
-if CERID_TRADING_ENABLED:
-    from app.routers import trading_proxy
-    app.include_router(trading_proxy.router)
-
-# Eval harness API
-if os.getenv("CERID_EVAL_ENABLED", "").lower() in ("1", "true", "yes"):
-    from app.routers import eval as eval_router
-    app.include_router(eval_router.router)
 
 # Routers from bridge layer (not yet extracted to app/routers/ — Phase C follow-up)
 from routers import (  # noqa: E402,I001
@@ -499,13 +473,16 @@ for r in _bridge_routers:
 # SDK OpenAPI spec (serves at /sdk/v1/openapi.json — no versioned prefix needed)
 app.include_router(sdk_openapi.router)
 
-# Billing (Pro tier only)
-if os.getenv("CERID_TIER", "community") in ("pro", "enterprise"):
-    from routers import billing  # noqa: E402
-    app.include_router(billing.router)
-    app.include_router(billing.router, prefix="/api/v1")
-
 
 @app.get("/")
 def root():
     return {"service": "AI Companion MCP Server", "version": "1.0.0", "status": "running"}
+
+
+# -- Internal feature bootstrap -----------------------------------------------
+# Below this line: internal-only bootstrap (stripped for public distribution)
+try:
+    from app.main_internal import bootstrap_internal
+    bootstrap_internal(app)
+except ImportError:
+    pass
