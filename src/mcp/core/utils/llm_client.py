@@ -186,6 +186,23 @@ async def call_llm(
             response_format=response_format,
             extra_payload=extra_payload,
         )
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code in (401, 403):
+            _logger.warning(
+                "OpenRouter auth failed (%d), falling back to Bifrost",
+                exc.response.status_code,
+            )
+            return await _bifrost_fallback(
+                messages,
+                breaker_name=breaker_name,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout=timeout,
+                response_format=response_format,
+                extra_payload=extra_payload,
+            )
+        raise
 
 
 async def call_llm_raw(
@@ -269,6 +286,23 @@ async def call_llm_raw(
             response_format=response_format,
             extra_payload=extra_payload,
         )
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code in (401, 403):
+            _logger.warning(
+                "OpenRouter auth failed (%d), falling back to Bifrost (raw)",
+                exc.response.status_code,
+            )
+            return await _bifrost_fallback_raw(
+                messages,
+                breaker_name=breaker_name,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout=timeout,
+                response_format=response_format,
+                extra_payload=extra_payload,
+            )
+        raise
 
 
 # ---------------------------------------------------------------------------
