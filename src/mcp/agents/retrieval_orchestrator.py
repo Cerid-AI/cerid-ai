@@ -143,9 +143,10 @@ async def orchestrated_query(
     _raw = await asyncio.gather(*_tasks, return_exceptions=True) if _tasks else []
     _raw_iter = iter(_raw)
 
-    kb_result = next(_raw_iter) if kb_task else {"results": [], "context": "", "strategy": "disabled"}
-    memory_results = next(_raw_iter) if memory_task else []
-    external_results = next(_raw_iter) if external_task else []
+    _empty_kb: dict[str, Any] = {"results": [], "context": "", "strategy": "disabled"}
+    kb_result: Any = next(_raw_iter) if kb_task else _empty_kb
+    memory_results: Any = next(_raw_iter) if memory_task else []
+    external_results: Any = next(_raw_iter) if external_task else []
 
     timings["parallel_kb_memory_ms"] = round(
         (_time.monotonic() - parallel_start) * 1000, 1,
