@@ -19,7 +19,10 @@ class WikipediaSource(DataSource):
 
     async def query(self, query: str, **kwargs) -> list[DataSourceResult]:
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with httpx.AsyncClient(
+                timeout=5.0,
+                headers={"User-Agent": "CeridAI/0.82 (https://github.com/Cerid-AI/cerid-ai)"},
+            ) as client:
                 resp = await client.get(
                     "https://en.wikipedia.org/w/api.php",
                     params={"action": "query", "list": "search", "srsearch": query,

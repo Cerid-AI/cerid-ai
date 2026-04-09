@@ -112,6 +112,8 @@ export interface HealthResponse {
     neo4j: "connected" | "error"
   }
   openrouter_credits_exhausted?: boolean
+  openrouter_auth_ok?: boolean | null
+  circuit_breakers?: Record<string, string>
 }
 
 // ---------------------------------------------------------------------------

@@ -52,7 +52,7 @@ class OpenLibrarySource(DataSource):
                         content=" | ".join(parts),
                         source_url=f"https://openlibrary.org{key}" if key else "",
                         source_name="Open Library",
-                        confidence=0.75,
+                        confidence=0.40,  # book metadata is weakly relevant to factual queries
                     ))
 
                 return results

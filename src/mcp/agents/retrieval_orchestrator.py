@@ -154,11 +154,15 @@ async def orchestrated_query(
         else:
             kb_sources.append(r)
 
-    # Normalize real external results to match frontend ExternalSourceResult shape
+    # Normalize real external results to match frontend ExternalSourceResult shape.
+    # External sources use hardcoded confidence (not semantic similarity), so
+    # discount them to prevent book-metadata noise from outranking KB results.
+    _EXTERNAL_RELEVANCE_DISCOUNT = 0.6
     for raw in external_results:
+        raw_confidence = raw.get("confidence", raw.get("relevance", 0.0))
         external_sources.append({
             "content": raw.get("content", ""),
-            "relevance": raw.get("confidence", raw.get("relevance", 0.0)),
+            "relevance": round(raw_confidence * _EXTERNAL_RELEVANCE_DISCOUNT, 3),
             "source_url": raw.get("source_url", ""),
             "source_name": raw.get("source_name", raw.get("title", "")),
             "source_type": "external",

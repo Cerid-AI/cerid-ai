@@ -46,6 +46,7 @@ function SourceSection({
   enabled,
   onToggle,
   color,
+  defaultExpanded = true,
   children,
 }: {
   title: string
@@ -54,9 +55,10 @@ function SourceSection({
   enabled: boolean
   onToggle: () => void
   color: string
+  defaultExpanded?: boolean
   children: React.ReactNode
 }) {
-  const [expanded, setExpanded] = useState(true)
+  const [expanded, setExpanded] = useState(defaultExpanded)
 
   return (
     <div className="border-b last:border-b-0">
@@ -427,6 +429,7 @@ export function KnowledgeConsole({
                 enabled={externalEnabled}
                 onToggle={toggleExternal}
                 color="bg-green-500/10 text-green-500"
+                defaultExpanded={false}
               >
                 {externalSources.length === 0 ? (
                   <p className="text-[11px] text-muted-foreground py-1">No external results</p>
