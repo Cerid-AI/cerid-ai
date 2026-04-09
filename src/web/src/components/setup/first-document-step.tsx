@@ -126,7 +126,7 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
     } finally {
       setQueryLoading(false)
     }
-  }, [state, onChange])
+  }, [state, onChange, fileName])
 
   const onFilesDropped = useCallback(
     (files: File[]) => {
