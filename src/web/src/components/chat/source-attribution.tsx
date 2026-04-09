@@ -33,10 +33,16 @@ function deduplicateByArtifact(sources: SourceRef[]): SourceRef[] {
   return [...map.values()]
 }
 
+/** Minimum relevance score for a source to appear in the chat bubble.
+ *  Matches the Knowledge Console's MIN_RELEVANCE threshold.
+ *  Sources below this are too noisy to surface to the user. */
+const MIN_DISPLAY_RELEVANCE = 0.35
+
 export function SourceAttribution({ sources }: SourceAttributionProps) {
   const [open, setOpen] = useState(false)
 
   const dedupedSources = deduplicateByArtifact(sources)
+    .filter((s) => s.relevance >= MIN_DISPLAY_RELEVANCE)
 
   if (dedupedSources.length === 0) return null
 
