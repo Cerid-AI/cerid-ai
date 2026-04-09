@@ -77,9 +77,8 @@ class SDKHealthResponse(_SDKBase):
     features: dict[str, bool] = Field(default_factory=dict, description="Consumer-relevant feature toggles")
 
 
-# ---------------------------------------------------------------------------
-# Trading endpoints
-# ---------------------------------------------------------------------------
+# -- Trading SDK models -------------------------------------------------------
+# Below this line: internal-only models (stripped for public distribution)
 
 
 class SDKTradingSignalResponse(_SDKBase):

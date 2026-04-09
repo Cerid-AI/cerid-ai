@@ -88,6 +88,8 @@ mixed_files:
     hook_marker: "# -- Trading endpoints"
   - path: src/mcp/app/routers/sdk.py
     hook_marker: "# -- Internal SDK endpoints"
+  - path: src/mcp/app/models/sdk.py
+    hook_marker: "# -- Trading SDK models"
   - path: src/mcp/app/tools.py
     hook_marker: "# -- Trading tools"
   - path: src/mcp/app/scheduler.py

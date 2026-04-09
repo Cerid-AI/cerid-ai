@@ -26,6 +26,13 @@ from app.models.trading import (
     TradingSignalRequest,
 )
 from app.routers.agents import AgentQueryRequest, agent_query_endpoint
+from app.routers.agents_internal import (
+    trading_cascade_confirm_endpoint,
+    trading_herd_detect_endpoint,
+    trading_kelly_size_endpoint,
+    trading_longshot_surface_endpoint,
+    trading_signal_endpoint,
+)
 from config.settings import CERID_BOARDROOM_ENABLED, CERID_TRADING_ENABLED
 
 _503 = {"description": "One or more backend services unavailable"}
@@ -52,13 +59,6 @@ def register_internal_sdk_endpoints(router: APIRouter) -> None:
     # -------------------------------------------------------------------
 
     if CERID_TRADING_ENABLED:
-        from app.routers.agents import (
-            trading_cascade_confirm_endpoint,
-            trading_herd_detect_endpoint,
-            trading_kelly_size_endpoint,
-            trading_longshot_surface_endpoint,
-            trading_signal_endpoint,
-        )
 
         @router.post(
             "/trading/signal",
