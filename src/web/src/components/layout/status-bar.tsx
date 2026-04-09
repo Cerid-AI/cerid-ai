@@ -198,7 +198,7 @@ export function StatusBar({ consoleOpen, onToggleConsole, consoleUnreadCount = 0
         )}
 
         {/* Credits indicator — pushed to the right */}
-        {credits?.configured && credits.balance != null && (
+        {credits?.configured && (
           <div className="ml-auto">
             <Tooltip>
               <TooltipTrigger asChild>
@@ -211,13 +211,15 @@ export function StatusBar({ consoleOpen, onToggleConsole, consoleUnreadCount = 0
                     credits.status === "ok" && "text-green-600 dark:text-green-400",
                     credits.status === "low" && "text-yellow-600 dark:text-yellow-400",
                     credits.status === "exhausted" && "text-red-600 dark:text-red-400",
-                    credits.status === "error" && "text-muted-foreground",
+                    (credits.status === "error" || credits.balance == null) && "text-muted-foreground",
                   )}
                 >
                   {credits.status === "exhausted" ? (
                     "Credits exhausted"
-                  ) : (
+                  ) : credits.balance != null ? (
                     `$${credits.balance.toFixed(2)}`
+                  ) : (
+                    "Credits: —"
                   )}
                 </a>
               </TooltipTrigger>

@@ -104,9 +104,9 @@ def degradation_status() -> dict:
     try:
         from utils.degradation import DegradationManager
         mgr = DegradationManager()
-        tier = mgr.current_tier().name
+        tier = mgr.current_tier().value  # .value → lowercase ("full"), not .name ("FULL")
     except Exception:
-        tier = "UNKNOWN"
+        tier = "unknown"
     base["degradation_tier"] = tier
     base["uptime_seconds"] = int(time.time() - _start_time)
     base.setdefault("features", {})
@@ -123,7 +123,21 @@ def degradation_status() -> dict:
         "memory_resolution": provider if is_local else "openrouter",
         "reranking": provider if is_local else "openrouter",
     }
-    base["can_verify"] = True  # verification always available (uses cloud models)
+    try:
+        base["can_retrieve"] = mgr.can_retrieve()
+        base["can_verify"] = mgr.can_verify()
+        base["can_generate"] = mgr.can_generate()
+    except Exception:
+        base["can_retrieve"] = True
+        base["can_verify"] = True
+        base["can_generate"] = True
+
+    # Inference tier — provider, GPU, latencies
+    try:
+        from utils.inference_config import inference_health_payload
+        base["inference"] = inference_health_payload()
+    except Exception:
+        pass
 
     return base
 
