@@ -78,20 +78,33 @@ mixed_files:
   - path: src/web/src/components/settings/plugins-section.tsx
     hook_marker: null  # Internal import differs
 
-# Strings that must NEVER appear in the public repo (leak detection)
+# Strings that must NEVER appear in the public repo (leak detection).
+# These are precise patterns — avoid overly broad matches like "_internal"
+# which hits legitimate code (_internal_llm, etc.).
 forbidden_in_public:
   - CERID_TRADING_ENABLED
   - CERID_BOARDROOM_ENABLED
   - TRADING_AGENT_URL
+  - CERID_BOARDROOM_TIER
   - trading_proxy
   - pkb_trading_signal
   - pkb_herd_detect
   - pkb_kelly_size
   - pkb_cascade_confirm
   - pkb_longshot_surface
-  - structlog
-  - stripe
-  - boardroom
-  - _internal
+  - settings_internal
+  - taxonomy_internal
+  - agents_internal
+  - sdk_internal
+  - main_internal
+  - tools_internal
+  - scheduler_internal
+  - types_internal
   - trading_agent
-  - enterprise
+  - trading_scheduler_jobs
+  - boardroom-agent
+  - register_trading_endpoints
+  - register_internal_sdk_endpoints
+  - bootstrap_internal
+  - extend_settings
+  - extend_taxonomy
