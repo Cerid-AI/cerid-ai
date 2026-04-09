@@ -21,6 +21,7 @@
 - `POST /ingest_file` — Ingest a file with parsing, metadata, optional AI categorization
 - `POST /ingest_batch` — Batch ingest multiple text items
 - `POST /ingest/feedback` — Submit ingestion quality feedback
+- `GET /ingestion/progress` — Live ingestion pipeline state (active/completed/errored files)
 - `POST /recategorize` — Move artifact between domains (moves chunks between collections)
 - `GET /artifacts` — List ingested artifacts (filter by domain)
 - `GET /artifacts/{artifact_id}` — Full artifact detail (Neo4j metadata + reassembled ChromaDB chunks)

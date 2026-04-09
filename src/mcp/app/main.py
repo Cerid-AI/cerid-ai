@@ -185,8 +185,9 @@ async def lifespan(app: FastAPI):
     try:
         driver = get_neo4j()
         graph.init_schema(driver)
-        from app.db.neo4j.migrations import backfill_updated_at
+        from app.db.neo4j.migrations import backfill_updated_at, register_recategorized_at
         backfill_updated_at(driver)
+        register_recategorized_at(driver)
     except Exception as e:
         logger.warning(f"Neo4j schema init failed (will retry on first use): {e}")
 

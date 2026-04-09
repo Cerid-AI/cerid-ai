@@ -38,6 +38,23 @@ def backfill_updated_at(driver) -> dict[str, Any]:
     return {"backfilled": backfilled}
 
 
+def register_recategorized_at(driver) -> dict[str, Any]:
+    """Register ``recategorized_at`` property key in Neo4j schema.
+
+    Creates an index so Neo4j recognizes the property key, silencing
+    the UnknownPropertyKeyWarning emitted by the rectify agent's
+    stale-artifact query on installations where no artifact has been
+    recategorized yet.  Idempotent (IF NOT EXISTS).
+    """
+    with driver.session() as session:
+        session.run(
+            "CREATE INDEX artifact_recategorized_at_idx IF NOT EXISTS "
+            "FOR (a:Artifact) ON (a.recategorized_at)"
+        )
+    logger.info("Migration: registered recategorized_at index")
+    return {"status": "index_created"}
+
+
 def migrate_memory_salience(driver) -> dict[str, Any]:
     """
     Migrate Memory nodes from legacy ``memory_type`` values to the current
