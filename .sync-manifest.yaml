@@ -61,6 +61,23 @@ internal_only:
   - src/mcp/routers/trading_proxy.py
   - src/mcp/tests/test_router_sdk.py
   - tests/test_e2e_integration.py
+  # Bridge-layer copies of internal-only modules
+  - src/mcp/routers/trading_proxy.py
+  - src/mcp/routers/alerts.py
+  - src/mcp/routers/billing.py
+  - src/mcp/routers/migration.py
+  - src/mcp/routers/ws_sync.py
+  - src/mcp/routers/eval.py
+  - src/mcp/models/trading.py
+  - src/mcp/models/billing.py
+  - src/mcp/stores/**
+  - src/mcp/eval/**
+  - src/mcp/app/eval/**
+  - src/mcp/tests/test_enterprise.py
+  - src/mcp/tests/test_auth.py
+  - src/mcp/tests/test_smart_router.py
+  - src/mcp/tests/test_sync.py
+  - src/mcp/tests/eval/**
 
 # Files where internal version = public version + appended hook block.
 # The sync script truncates at hook_marker for to-public, appends for from-public.
