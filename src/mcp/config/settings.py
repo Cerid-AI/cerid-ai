@@ -340,7 +340,7 @@ QUALITY_BOOST_BASE = 0.8            # base multiplier (score=0 → 0.8x, score=0
 QUALITY_METADATA_TAG_BOOST = 0.05   # per-matching-tag relevance boost
 QUALITY_METADATA_SUBCAT_BOOST = 0.08  # sub_category match relevance boost
 QUALITY_METADATA_MAX_BOOST = 0.15   # cap on total metadata boost
-QUALITY_MIN_RELEVANCE_THRESHOLD = float(os.getenv("QUALITY_MIN_RELEVANCE_THRESHOLD", "0.15"))
+QUALITY_MIN_RELEVANCE_THRESHOLD = float(os.getenv("QUALITY_MIN_RELEVANCE_THRESHOLD", "0.35"))
 
 # ---------------------------------------------------------------------------
 # Conversation Context Alignment

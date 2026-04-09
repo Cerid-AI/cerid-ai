@@ -553,6 +553,6 @@ describe("Model Receives Context Seamlessly", () => {
 
     const sysMsg = sentMessages(opts._sendSpy).find((m) => m.role === "system")
     expect(sysMsg).toBeDefined()
-    expect(sysMsg!.content).toMatch(/^You have access to the user's personal knowledge base/)
+    expect(sysMsg!.content).toMatch(/^The user has a personal knowledge base/)
   })
 })

@@ -1200,7 +1200,7 @@ async def verify_claims_batch_external(
                 json.dumps(item) if isinstance(item, dict) else str(item)
             )
             status = verdict_obj.get("status", "uncertain")
-            confidence = verdict_obj.get("similarity", 0.5)
+            confidence = verdict_obj.get("confidence", 0.5)
             reason = verdict_obj.get("reason", "")[:200]
 
             results[original_idx] = {

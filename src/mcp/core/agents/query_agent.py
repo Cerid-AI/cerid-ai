@@ -341,6 +341,10 @@ async def lightweight_kb_query(
         query, domains=domains, top_k=top_k, chroma_client=chroma_client,
     )
     results = deduplicate_results(results)
+    # Filter out noise — verification operates on these results directly
+    # and low-relevance hits degrade claim verification accuracy.
+    min_rel = config.VERIFICATION_MIN_RELEVANCE
+    results = [r for r in results if r.get("relevance", 0.0) >= min_rel]
     results.sort(key=lambda x: x.get("relevance", 0.0), reverse=True)
     return results[:top_k]
 

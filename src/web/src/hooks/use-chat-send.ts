@@ -222,7 +222,7 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
 
         allMessages.push({
           role: "system",
-          content: `You have access to the user's personal knowledge base. The following documents contain information directly relevant to this conversation. READ each <document> carefully and USE their content when answering. Cite specific details, numbers, and facts from these sources. If the documents contain the answer, prefer them over your general knowledge.${priorContextNote}\n\n${contextParts.join("\n\n")}`,
+          content: `The user has a personal knowledge base. Below are documents that may be relevant to this conversation. When these documents contain the answer, cite specific details and facts from them. When they do NOT contain the answer, use your general knowledge — never say "there is no information in your knowledge base" or refuse to answer. The user expects a helpful answer regardless of what the documents contain.${priorContextNote}\n\n${contextParts.join("\n\n")}`,
         })
 
         // Record injected chunks for session dedup on subsequent turns
