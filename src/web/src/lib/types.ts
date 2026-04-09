@@ -12,6 +12,13 @@ export interface ChatMessage {
 
 export type RagMode = "manual" | "smart" | "custom_smart"
 
+/** Absolute on/off gates for each context source. Disabled sources skip retrieval entirely. */
+export interface ContextSources {
+  kb: boolean
+  memory: boolean
+  external: boolean
+}
+
 export interface SourceRef {
   artifact_id: string
   filename: string
@@ -720,6 +727,8 @@ export interface ServerSettings {
   semantic_cache_threshold?: number
   enable_memory_consolidation?: boolean
   enable_context_compression?: boolean
+  // Context source gates
+  context_sources?: ContextSources
   // Ollama add-on (local LLM for pipeline tasks)
   pipeline_providers?: PipelineProviders
   ollama_enabled?: boolean
@@ -796,6 +805,8 @@ export interface SettingsUpdate {
   enable_memory_consolidation?: boolean
   enable_context_compression?: boolean
   rag_mode?: string  // KB injection mode in SettingsUpdate
+  // Context source gates
+  context_sources?: ContextSources
   // Ollama add-on
   internal_llm_provider?: string
   internal_llm_model?: string

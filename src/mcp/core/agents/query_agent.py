@@ -200,7 +200,8 @@ async def multi_domain_query(
     query: str,
     domains: list[str] | None = None,
     top_k: int = 10,
-    chroma_client: Any | None = None
+    chroma_client: Any | None = None,
+    metadata_filter: dict | None = None,
 ) -> list[dict[str, Any]]:
     """Query multiple ChromaDB collections in parallel and aggregate results."""
     if domains is None:
@@ -227,11 +228,14 @@ async def multi_domain_query(
         try:
             collection = chroma_client.get_collection(name=col_name)
 
-            results = collection.query(
-                query_texts=[query],
-                n_results=top_k,
-                include=["documents", "metadatas", "distances"]
-            )
+            query_kwargs: dict[str, Any] = {
+                "query_texts": [query],
+                "n_results": top_k,
+                "include": ["documents", "metadatas", "distances"],
+            }
+            if metadata_filter:
+                query_kwargs["where"] = metadata_filter
+            results = collection.query(**query_kwargs)
 
             formatted = []
             seen_ids: set = set()
@@ -276,6 +280,11 @@ async def multi_domain_query(
                                 if cid in seen_ids:
                                     continue
                                 meta = fetched["metadatas"][j] if fetched["metadatas"] else {}
+                                # Enforce metadata_filter on BM25-only results too
+                                if metadata_filter and not all(
+                                    meta.get(k) == v for k, v in metadata_filter.items()
+                                ):
+                                    continue
                                 formatted.append(_format_chroma_result(
                                     content=fetched["documents"][j],
                                     relevance=config.HYBRID_KEYWORD_WEIGHT * bm25_map[cid],
@@ -878,6 +887,8 @@ async def agent_query(
     strict_domains: bool = False,
     model: str | None = None,
     graph_store: GraphStore | None = None,
+    skip_cache: bool = False,
+    metadata_filter: dict | None = None,
 ) -> dict[str, Any]:
     """Execute multi-domain query with reranking, graph expansion, and context assembly."""
     timer = StepTimer(enabled=debug_timing)
@@ -893,7 +904,7 @@ async def agent_query(
     # Semantic cache early-return — check before any retrieval work
     _query_embedding: np.ndarray | None = None
     with timer.step("semantic_cache_lookup"):
-        if ENABLE_SEMANTIC_CACHE and redis_client:
+        if ENABLE_SEMANTIC_CACHE and redis_client and not skip_cache:
             try:
                 from core.retrieval.semantic_cache import cache_lookup
                 from core.utils.embeddings import get_embedding_function
@@ -981,6 +992,7 @@ async def agent_query(
                         return await multi_domain_query(
                             query=sq, domains=effective_domains,
                             top_k=effective_top_k, chroma_client=chroma_client,
+                            metadata_filter=metadata_filter,
                         )
 
                     results = await parallel_retrieve(sub_queries, _retrieve_sub)
@@ -992,6 +1004,7 @@ async def agent_query(
                 domains=effective_domains,
                 top_k=effective_top_k,
                 chroma_client=chroma_client,
+                metadata_filter=metadata_filter,
             )
 
     # Search adjacent domains at reduced weight when specific domains are requested.
@@ -1096,7 +1109,10 @@ async def agent_query(
                 logger.warning("MMR diversity reordering failed: %s", e)
 
     # Step 5.7: Filter low-relevance results below minimum threshold
-    results = [r for r in results if r["relevance"] >= config.QUALITY_MIN_RELEVANCE_THRESHOLD]
+    # When metadata_filter is set, the caller explicitly scoped to a file —
+    # use a relaxed threshold so generic questions still return results.
+    _min_rel = 0.05 if metadata_filter else config.QUALITY_MIN_RELEVANCE_THRESHOLD
+    results = [r for r in results if r["relevance"] >= _min_rel]
 
     # Step 6: Assemble context
     with timer.step("context_assembly"):

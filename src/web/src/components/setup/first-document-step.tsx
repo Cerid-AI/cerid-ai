@@ -104,14 +104,13 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
     setResponse(null)
 
     try {
-      // Scope to "general" domain where the wizard ingested the document.
-      // Searching all domains could return unrelated results from other collections.
-      // Retry with exponential backoff — ChromaDB may not have flushed yet.
-      let result = await queryKB(text.trim(), ["general"])
+      // Scope query to the just-uploaded document only
+      const wizardOpts = { queryScope: "document" as const, scopeRef: fileName ?? undefined }
+      let result = await queryKB(text.trim(), ["general"], 10, undefined, wizardOpts)
       if (!result.results?.length) {
         for (const delay of [500, 1000, 2000]) {
           await new Promise((r) => setTimeout(r, delay))
-          result = await queryKB(text.trim(), ["general"])
+          result = await queryKB(text.trim(), ["general"], 10, undefined, wizardOpts)
           if (result.results?.length) break
         }
       }
