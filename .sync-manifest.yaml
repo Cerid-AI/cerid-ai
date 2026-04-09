@@ -47,8 +47,15 @@ internal_only:
   # Sync tooling
   - .sync-manifest.yaml
   - scripts/sync-repos.py
-  # Internal docs
+  # Internal docs (each repo has its own versions)
   - docs/superpowers/**
+  - CLAUDE.md
+  - README.md
+  - docs/ARCHITECTURE_MAP.md
+  - docs/CONTRIBUTING.md
+  - docs/DEPENDENCY_COUPLING.md
+  - docs/INTEGRATION_GUIDE.md
+  - docs/COMPLETED_PHASES.md
 
 # Files where internal version = public version + appended hook block.
 # The sync script truncates at hook_marker for to-public, appends for from-public.
