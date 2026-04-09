@@ -549,7 +549,7 @@ CERID_EMAIL_IMAP_PASSWORD = os.getenv("CERID_EMAIL_IMAP_PASSWORD", "")
 CERID_EMAIL_FOLDER = os.getenv("CERID_EMAIL_FOLDER", "INBOX")
 CERID_EMAIL_POLL_INTERVAL = int(os.getenv("CERID_EMAIL_POLL_INTERVAL", "15"))  # minutes
 
-# Trading/boardroom config injected at runtime by config.settings_internal
+# Trading/boardroom config — stubs (overridden at runtime when enabled)
 CERID_TRADING_ENABLED: bool = False
 TRADING_AGENT_URL: str = ""
 CERID_BOARDROOM_ENABLED: bool = False
