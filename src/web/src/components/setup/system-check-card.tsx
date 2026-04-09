@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useEffect, useState } from "react"
-import { Check, X, Minus, Loader2, MemoryStick, Container, FileText, Bot, ExternalLink } from "lucide-react"
+import { Check, X, Minus, Loader2, MemoryStick, Container, FileText, Bot, ExternalLink, Monitor, Cpu, Zap } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { fetchSystemCheck } from "@/lib/api"
 import type { SystemCheckResponse } from "@/lib/types"
@@ -42,6 +42,7 @@ export function SystemCheckCard({ onCheckComplete }: SystemCheckCardProps) {
     { label: "Configuration", icon: FileText, status: "checking", detail: "Detecting..." },
     { label: "Ollama", icon: Bot, status: "checking", detail: "Detecting..." },
   ])
+  const [hardware, setHardware] = useState<{ os: string; cpu: string; cpuCores: number | null; gpu: string; gpuAcceleration: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [dockerMissing, setDockerMissing] = useState(false)
 
@@ -93,6 +94,13 @@ export function SystemCheckCard({ onCheckComplete }: SystemCheckCardProps) {
         ]
 
         setChecks(newChecks)
+        setHardware({
+          os: result.os,
+          cpu: result.cpu,
+          cpuCores: result.cpu_cores,
+          gpu: result.gpu,
+          gpuAcceleration: result.gpu_acceleration,
+        })
         setDockerMissing(!result.docker_running)
         onCheckComplete(result)
       })
@@ -135,6 +143,34 @@ export function SystemCheckCard({ onCheckComplete }: SystemCheckCardProps) {
           )
         })}
       </div>
+      {hardware && (
+        <div className="border-t">
+          <div className="px-3 py-1.5">
+            <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">Hardware Detected</p>
+          </div>
+          <div className="divide-y">
+            <div className="flex items-center gap-3 px-3 py-1.5">
+              <Monitor className="h-3 w-3 shrink-0 text-muted-foreground/70" />
+              <span className="flex-1 text-[11px] text-muted-foreground">OS</span>
+              <span className="text-[11px] text-muted-foreground">{hardware.os}</span>
+            </div>
+            <div className="flex items-center gap-3 px-3 py-1.5">
+              <Cpu className="h-3 w-3 shrink-0 text-muted-foreground/70" />
+              <span className="flex-1 text-[11px] text-muted-foreground">CPU</span>
+              <span className="text-[11px] text-muted-foreground">
+                {hardware.cpu}{hardware.cpuCores != null ? ` (${hardware.cpuCores} cores)` : ""}
+              </span>
+            </div>
+            <div className="flex items-center gap-3 px-3 py-1.5">
+              <Zap className="h-3 w-3 shrink-0 text-muted-foreground/70" />
+              <span className="flex-1 text-[11px] text-muted-foreground">GPU</span>
+              <span className="text-[11px] text-muted-foreground">
+                {hardware.gpu}{hardware.gpuAcceleration && hardware.gpuAcceleration !== "none" ? ` (${hardware.gpuAcceleration})` : ""}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
       {error && (
         <div className="border-t px-3 py-2">
           <p className="text-xs text-destructive">{error}</p>

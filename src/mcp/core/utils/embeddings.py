@@ -27,6 +27,28 @@ import config
 
 logger = logging.getLogger("ai-companion.embeddings")
 
+
+# ---------------------------------------------------------------------------
+# Distance → relevance conversion
+# ---------------------------------------------------------------------------
+
+
+def l2_distance_to_relevance(distance: float) -> float:
+    """Convert ChromaDB L2 distance to a [0, 1] relevance score.
+
+    ChromaDB defaults to L2 (Euclidean) distance.  For unit-norm embeddings
+    (which Snowflake arctic-embed and most modern models produce), the
+    relationship is:
+
+        L2² = 2 · (1 − cosine_similarity)
+
+    So: ``cosine_sim = 1 − distance² / 2``.
+
+    The naive ``1 − distance`` formula clips to 0 whenever distance > 1
+    (cosine_sim < 0.5), silently dropping moderately relevant results.
+    """
+    return max(0.0, min(1.0, 1.0 - distance * distance / 2.0))
+
 # ChromaDB's built-in default — when this is the configured model we skip
 # client-side embedding and let the server handle it (zero-migration path).
 _SERVER_DEFAULT_MODEL = "all-MiniLM-L6-v2"

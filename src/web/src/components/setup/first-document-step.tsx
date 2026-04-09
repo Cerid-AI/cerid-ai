@@ -116,7 +116,7 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
       const topResult = result.results?.[0]
       setResponse(
         topResult?.content
-          ?? `Found ${result.total_results} result(s) across ${result.domains_queried.join(", ")}.`,
+          ?? `Found ${result.total_results} result(s) across ${(result.domains_searched ?? []).join(", ") || "all domains"}.`,
       )
       onChange({ ...state, ingested: true, queried: true })
       setPhase("done")

@@ -470,7 +470,7 @@ class TestQueryMemories:
         results = await _query_memories("Python creation", mock_chroma[0], top_k=2)
         assert len(results) == 2
         assert results[0]["memory_source"] is True
-        assert results[0]["relevance"] == pytest.approx(0.7, abs=0.01)
+        assert results[0]["relevance"] == pytest.approx(0.955, abs=0.01)  # l2_distance_to_relevance(0.3)
         assert results[0]["domain"] == "conversations"
 
     @pytest.mark.asyncio
