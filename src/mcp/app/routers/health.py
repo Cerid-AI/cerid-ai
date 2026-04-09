@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 
 from fastapi import APIRouter
@@ -58,6 +59,13 @@ def health_check() -> dict:
     except (ValueError, ImportError):
         ollama_cb_state = "unknown"
 
+    # OpenRouter circuit breaker — covers verification and LLM calls
+    try:
+        from utils.circuit_breaker import get_breaker as _gb2
+        openrouter_cb_state = _gb2("openrouter").state.value
+    except (ValueError, ImportError):
+        openrouter_cb_state = "unknown"
+
     # OpenRouter credit exhaustion flag (set by bifrost.py on 402)
     credits_exhausted = False
     try:
@@ -87,6 +95,7 @@ def health_check() -> dict:
         "circuit_breakers": {
             "bifrost": bifrost_cb_state,
             "ollama": ollama_cb_state,
+            "openrouter": openrouter_cb_state,
         },
         "openrouter_credits_exhausted": credits_exhausted,
     }
@@ -96,6 +105,10 @@ def health_check() -> dict:
 
 
 _start_time = time.time()
+
+# Cached OpenRouter auth probe result (refreshed every 30s in degradation_status)
+_openrouter_auth_cache: bool | None = None
+_openrouter_auth_cache_ts: float = 0.0
 
 
 def degradation_status() -> dict:
@@ -138,6 +151,28 @@ def degradation_status() -> dict:
         base["inference"] = inference_health_payload()
     except Exception:
         pass
+
+    # OpenRouter auth probe — runs on extended health only (15s poll interval)
+    # Cached for 30s to avoid hammering the OpenRouter auth endpoint.
+    global _openrouter_auth_cache, _openrouter_auth_cache_ts
+    now = time.monotonic()
+    if now - _openrouter_auth_cache_ts > 30.0:
+        try:
+            import httpx
+            api_key = os.getenv("OPENROUTER_API_KEY", "")
+            if api_key:
+                resp = httpx.get(
+                    "https://openrouter.ai/api/v1/auth/key",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    timeout=3,
+                )
+                _openrouter_auth_cache = resp.status_code == 200
+            else:
+                _openrouter_auth_cache = None  # no key configured
+        except Exception:
+            _openrouter_auth_cache = False
+        _openrouter_auth_cache_ts = now
+    base["openrouter_auth_ok"] = _openrouter_auth_cache
 
     return base
 
