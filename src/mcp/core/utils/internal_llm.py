@@ -130,7 +130,15 @@ async def _call_ollama(
     except httpx.HTTPStatusError as e:
         logger.warning("Ollama HTTP %d — falling back to OpenRouter", e.response.status_code)
 
+    # Explicitly use a known-valid OpenRouter model for fallback —
+    # INTERNAL_LLM_MODEL may hold an Ollama-native name (e.g. "llama3.2:3b")
+    # that OpenRouter rejects with 400.  Also forward json_mode so callers
+    # like memory extraction that request structured JSON get it on fallback.
     from core.utils.llm_client import call_llm
     return await call_llm(
-        messages, temperature=temperature, max_tokens=max_tokens,
+        messages,
+        model="openai/gpt-4o-mini",
+        temperature=temperature,
+        max_tokens=max_tokens,
+        response_format={"type": "json_object"} if json_mode else None,
     )
