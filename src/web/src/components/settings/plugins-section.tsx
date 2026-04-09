@@ -28,7 +28,8 @@ import {
   updatePluginConfig,
   scanPlugins,
 } from "@/lib/api"
-import type { Plugin, PluginConfig, PluginStatus } from "@/lib/types"
+import type { Plugin, PluginConfig } from "@/lib/types"
+import type { PluginStatus } from "@/lib/types_internal"
 
 const STATUS_BADGE: Record<PluginStatus, { label: string; className: string }> = {
   active: { label: "Active", className: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30" },
@@ -71,7 +72,7 @@ function PluginCard({ plugin, onToggle, toggling }: PluginCardProps) {
 
   const badge = STATUS_BADGE[plugin.status] ?? STATUS_BADGE.disabled
   const Icon = pluginIconByName(plugin.name, plugin.capabilities)
-  const isProLocked = plugin.status === "requires_pro"
+  const isProLocked = (plugin.status as PluginStatus) === "requires_pro"
 
   const loadConfig = useCallback(async () => {
     if (config !== null) return

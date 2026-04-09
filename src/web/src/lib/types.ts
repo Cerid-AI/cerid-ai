@@ -727,8 +727,6 @@ export interface ServerSettings {
   semantic_cache_threshold?: number
   enable_memory_consolidation?: boolean
   enable_context_compression?: boolean
-  // Trading agent integration
-  trading_enabled?: boolean
   // Context source gates
   context_sources?: ContextSources
   // Ollama add-on (local LLM for pipeline tasks)
@@ -1129,9 +1127,7 @@ export interface QualityMetricsResponse {
 
 // ── Plugins ──────────────────────────────────────────────────────────────────
 
-export type PluginStatus = "installed" | "active" | "error" | "disabled" | "requires_pro" | "requires_enterprise"
-
-export type FeatureTier = "community" | "pro" | "enterprise"
+export type PluginStatus = "installed" | "active" | "error" | "disabled"
 
 export interface Plugin {
   name: string
@@ -1352,4 +1348,7 @@ export interface PrivateModeStatus {
   enabled: boolean
   level: 1 | 2 | 3 | 4
 }
+
+// -- Internal types -----------------------------------------------------------
+// Below this line: internal-only bootstrap (stripped for public distribution)
 
