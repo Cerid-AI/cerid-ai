@@ -15,10 +15,10 @@ from typing import Any
 
 import config
 from config import DOMAINS
+from core.utils.embeddings import l2_distance_to_relevance
 from deps import get_chroma
 from errors import RetrievalError
 from utils.circuit_breaker import get_breaker
-from core.utils.embeddings import l2_distance_to_relevance
 from utils.text import STOPWORDS as _STOPWORDS
 from utils.text import WORD_RE as _WORD_RE
 

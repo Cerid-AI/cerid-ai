@@ -22,9 +22,9 @@ import config
 from config.settings import MEMORY_TYPE_MIGRATION
 from core.utils.cache import log_event
 from core.utils.circuit_breaker import CircuitOpenError
+from core.utils.embeddings import l2_distance_to_relevance
 from core.utils.internal_llm import call_internal_llm
 from core.utils.llm_parsing import parse_llm_json
-from core.utils.embeddings import l2_distance_to_relevance
 from core.utils.time import utcnow, utcnow_iso
 
 logger = logging.getLogger("ai-companion.memory")

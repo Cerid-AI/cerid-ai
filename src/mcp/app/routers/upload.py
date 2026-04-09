@@ -103,6 +103,7 @@ async def upload_file_endpoint(
         # Invalidate query cache so subsequent queries hit fresh data
         # (mirrors the pattern in ingestion.py)
         import asyncio
+
         from utils.query_cache import invalidate_cache_non_blocking
         asyncio.get_running_loop().create_task(invalidate_cache_non_blocking())
 
