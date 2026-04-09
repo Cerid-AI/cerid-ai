@@ -104,12 +104,14 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
     setResponse(null)
 
     try {
-      // Retry with exponential backoff — ChromaDB may not have flushed yet
-      let result = await queryKB(text.trim())
+      // Scope to "general" domain where the wizard ingested the document.
+      // Searching all domains could return unrelated results from other collections.
+      // Retry with exponential backoff — ChromaDB may not have flushed yet.
+      let result = await queryKB(text.trim(), ["general"])
       if (!result.results?.length) {
         for (const delay of [500, 1000, 2000]) {
           await new Promise((r) => setTimeout(r, delay))
-          result = await queryKB(text.trim())
+          result = await queryKB(text.trim(), ["general"])
           if (result.results?.length) break
         }
       }
