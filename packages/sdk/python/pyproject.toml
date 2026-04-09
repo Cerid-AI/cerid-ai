@@ -23,11 +23,6 @@ dependencies = [
     "pydantic>=2.0",
 ]
 
-[project.urls]
-"Homepage" = "https://cerid.ai"
-"Repository" = "https://github.com/Cerid-AI/cerid-ai"
-"Bug Tracker" = "https://github.com/Cerid-AI/cerid-ai/issues"
-
 [project.optional-dependencies]
 async = ["httpx[http2]"]
 

@@ -2,44 +2,62 @@
 
 All notable changes to cerid-ai are documented here.
 
-## v0.82.0 (2026-04-05)
+## v0.82.0 — Unified Implementation Plan (2026-04-05)
 
-### GPU-Accelerated Inference
-- **Auto-detection** — detects platform (macOS ARM/Intel, Linux, Windows), GPU (Metal/CUDA/ROCm), Ollama, and FastEmbed sidecar at startup
-- **FastEmbed sidecar** — native GPU-accelerated embeddings outside Docker (`scripts/install-sidecar.sh`)
-- **Dynamic ONNX providers** — uses GPU execution providers when available instead of CPU-only
-- **Inference tier in health** — `/health` includes provider, tier, GPU status, latency
-- **Settings UI** — inference tier badge (green/blue/yellow) in Settings panel
-- **Auto-switch** — background re-check every 300s detects Ollama start/stop
+### Post-Phase: Dependency Cleanup + Remaining Items
+- **Dependency cleanup** — removed 8 unused deps (stripe/public, faster-whisper, requests, structlog/public, pytesseract, Pillow, bcrypt, PyJWT). Docker image 4.09→3.18 GB. Dependabot 33→2 vulns.
+- **packages/desktop/** removed from public repo (kept in internal)
+- **B31: Conversation grouping** — feedback from same conversation_id appends to existing KB artifact
+- **B33: Feedback buttons** — ThumbsUp/ThumbsDown on assistant messages (POST /artifacts/{id}/feedback)
+- **B35: Model compliance note** — footer in model selector about non-US model availability
+- **B36: File picker** — browse button on archive path using File System Access API
+- **Memory system fix** — get_collection → get_or_create_collection (fixes 500 on fresh installs)
+- **Configurable model preload** — `CERID_PRELOAD_MODELS=false` Dockerfile ARG for smaller images
+- **Startup prerequisites** — python3, curl, port availability, Docker memory checks
+- **CI fixes** — test mock targets (requests→httpx), import sorting (I001), BLE001 suppressions
 
-### UX Improvements
-- **Health dashboard** — grouped by Infrastructure / AI Pipeline / Optional with auto-refresh
-- **Toolbar menus** — consistent padding, font weights, and separator spacing
-- **Recent uploads** — collapsible list (4 visible, "Show N more" to expand)
-- **Ollama wizard** — hardware detection, CPU-only warning, platform-specific install commands
-- **Model selector** — compliance note for non-US model availability
-- **KB title editing** — inline rename with double-click on artifact cards
-- **File picker** — browse button for archive path (File System Access API)
-- **Feedback buttons** — thumbs up/down on assistant messages
+### Phase 1: Tiered Inference Detection
+- **InferenceConfig singleton** — auto-detects platform (macOS ARM/Intel, Linux, Windows), GPU (Metal/CUDA/ROCm/DirectML), Ollama, and FastEmbed sidecar at startup
+- **Dynamic ONNX providers** — embeddings.py and reranker.py use detected GPU providers instead of hardcoded CPU
+- **Health endpoint** — `/health` now includes `inference` field with provider, tier, GPU, latency
+- **Performance baseline** — documented in `docs/PERF_BASELINE_2026-04-05.md`
 
-### Performance
-- **ChromaDB HNSW tuning** — M=12, EF_CONSTRUCTION=400 for better recall
-- **Reranker warmup gating** — skipped when disabled (~1s faster startup)
-- **Ollama connection pool** — keep-alive increased 5→8
-- **Configurable model preload** — `CERID_PRELOAD_MODELS=false` for smaller Docker images
+### Phase 2: FastEmbed Sidecar + UX Polish
+- **Sidecar server** — `scripts/cerid-sidecar.py` wraps ONNX embed/rerank with native GPU acceleration
+- **Sidecar installer** — `scripts/install-sidecar.sh` auto-detects platform and GPU for correct onnxruntime variant
+- **Sidecar HTTP client** — `utils/inference_sidecar_client.py` with circuit breaker and latency tracking
+- **B18: Sub-menu formatting** — consistent padding (p-2), font-weight, separator spacing across all toolbar popovers
+- **B23: Recent imports scroll** — collapsible list, 4 default visible, "Show N more" expandable
+- **B26: Health dashboard** — grouped by Infrastructure / AI Pipeline / Optional with section headers and auto-refresh
+- **B30: External search debugging** — structured logging in `DataSourceRegistry.query_all()`
+- **HNSW tuning** — ChromaDB M=12, EF_CONSTRUCTION=400 for better recall on new collections
+- **Reranker warmup gating** — skipped when RERANK_MODE=none (~1s faster startup)
+- **Ollama pool** — keep-alive connections increased 5→8
 
-### Backend
-- **Ollama LLM routing** — ai_categorize and contextualize_chunks route through local Ollama when configured
-- **Synopsis regeneration** — `POST /artifacts/regenerate-all-synopses` with background processing
-- **Conversation grouping** — feedback from same conversation appends to existing KB artifact
-- **Memory system fix** — collections auto-created on first access
-- **Data source logging** — structured query diagnostics in external search pipeline
+### Phase 3: GUI Integration + Recheck Loop
+- **Inference tier in Settings** — green/blue/yellow badge showing optimal/good/degraded with provider name
+- **Periodic re-check** — background loop every 300s detects Ollama start/stop, emits SSE event
+- **Ollama wizard UX** — CPU-only warning, platform-specific install commands (brew/curl), copy buttons
 
-### Dependency Cleanup
-- Removed 8 unused dependencies (stripe, faster-whisper, requests, structlog, pytesseract, Pillow, bcrypt, PyJWT)
-- Docker image: 4.09 GB → 3.18 GB (-22%)
-- Dependabot vulnerabilities: 33 → 2 (-94%)
-- Startup prerequisites: checks for python3, curl, port availability, Docker memory
+### Phase 4: Ollama LLM Routing + B-LOW Items
+- **ai_categorize() routing** — routes through `call_internal_llm()` when INTERNAL_LLM_PROVIDER=ollama
+- **contextualize_chunks() routing** — same internal LLM routing for free local inference
+- **B32: Synopsis regeneration** — `POST /artifacts/regenerate-all-synopses` with background processing
+- **B33: Feedback loop design** — `docs/FEEDBACK_LOOP_DESIGN.md` (opt-in per conversation, quality gates)
+- **B41: KB title editing** — already implemented (inline-editable with double-click + PATCH)
+
+### Phase 5: Wiring Checks + Final Audit
+- All 8 subsystem wiring checks passed (setup, chat, KB, external API, settings, health, memory, analytics)
+- USG compliance verified (no Chinese-origin AI references)
+- Documentation updated (CLAUDE.md, CHANGELOG.md)
+
+### New Files
+- `src/mcp/utils/inference_config.py` — tiered inference detection
+- `src/mcp/utils/inference_sidecar_client.py` — sidecar HTTP client
+- `scripts/cerid-sidecar.py` — FastEmbed sidecar server
+- `scripts/install-sidecar.sh` — platform-aware installer
+- `docs/PERF_BASELINE_2026-04-05.md` — performance baseline
+- `docs/FEEDBACK_LOOP_DESIGN.md` — feedback loop design doc
 
 ## v0.81 — Beta Test Implementation (2026-04-04)
 
@@ -72,21 +90,35 @@ All notable changes to cerid-ai are documented here.
 ## [0.81] - 2026-04-03
 
 ### Features
-- **Typed Redis wrapper** — `utils/typed_redis.py` provides properly narrowed return types for sync `redis.Redis`, eliminating mypy `Awaitable|Any` errors (`c23c261`)
-- **Response model annotations** — 77 endpoints across 15 routers now have `response_model=` for proper OpenAPI schema generation. 13 new Pydantic model files under `models/` (`93bc8b1`)
-- **Code AST parser activated** — `parsers/code_ast.py` `@register_parser` decorators now fire via `__init__.py` import (`c23c261`)
-- **Setup wizard** — 8-step onboarding with provider routing intelligence, degradation awareness, and health dashboard (`ee1a264`, `6ba6aa3`, `3c1b96e`)
+- **Eval router wired up** — `POST /api/eval/run` and `GET /api/eval/benchmarks` now registered in main.py (self-gated by `CERID_EVAL_ENABLED`) (`f5bfc28`)
+- **Typed Redis wrapper** — `utils/typed_redis.py` provides properly narrowed return types for sync `redis.Redis`, eliminating 57 mypy errors in one place (`4400bdf`)
+- **Response model annotations** — 77 endpoints across 15 routers now have `response_model=` for proper OpenAPI schema generation. 13 new Pydantic model files under `models/` (`05b84ec`, `e3a3988`)
+- **Code AST parser activated** — `parsers/code_ast.py` `@register_parser` decorators now fire via `__init__.py` import (`1cdc94d`)
+- **Setup wizard** — 8-step onboarding with provider routing intelligence, degradation awareness, and health dashboard (`07a64a6`, `c09d2f6`, `b3fc202`)
 
 ### Bug Fixes
-- **Duplicate endpoint removal** — removed `POST /chat/compress` from `chat.py` (duplicate with incompatible response key) and `GET /plugins` from `health.py` (shadowed by `plugins.py`) (`3319e26`)
-- **Frontend API bugs** — `fetchOpenRouterCredits` fixed to call `/providers/credits` (was 404), `toggleAutomation` fixed to use `/enable`/`disable` endpoints (was 404) (`3319e26`)
-- **error_handler.py** — bare `except: pass` replaced with debug logging for circuit breaker failures (`c23c261`)
-- **main.py webhook bridge** — bare `except: pass` replaced with debug logging (`3cb45dd`)
-- **Docker deployment** — resolved crashes when running without Bifrost (`6863e7b`)
+- **custom_agents pagination** — `total` field now returns actual DB count via `count_agents()` Cypher, not page size (`7aa7059`)
+- **custom_agents query delegation** — passes `model_override`, `top_k`, returns `agent_config` with system_prompt/temperature/rag_mode/tools (`7aa7059`)
+- **Duplicate endpoint removal** — removed `POST /chat/compress` from `chat.py` (duplicate with incompatible response key) and `GET /plugins` from `health.py` (shadowed by `plugins.py`) (`ef8489c`)
+- **Frontend API bugs** — `fetchOpenRouterCredits` fixed to call `/providers/credits` (was 404), `toggleAutomation` fixed to use `/enable`/`disable` endpoints (was 404) (`ef8489c`)
+- **error_handler.py** — bare `except: pass` replaced with debug logging for circuit breaker failures (`1cdc94d`)
+- **test_ingestion.py** — narrowed bare `except Exception: pass` to specific expected exceptions (`1cdc94d`)
+- **Trading mock paths** — 5 stale mock paths in `test_router_sdk.py` updated from `routers.sdk` to `routers.agents` (`77669a0`)
+- **TOC test** — updated for `queueMicrotask`-based heading scan (`b36f490`)
+- **Docker deployment** — resolved crashes when running without Bifrost (`02e979d`)
 
 ### Code Quality
-- **ESLint warnings** — resolved all 28 warnings across 24 frontend files: 12 set-state-in-effect, 7 only-export-components, 5 exhaustive-deps, plus purity/ref/directive fixes (`571328f`)
-- **Dead code removed** — `utils/a2a_client.py`, `utils/agent_activity.py`, `utils/content_filter.py`, `tokenize_lower()` from `text.py` (`c23c261`)
+- **ESLint warnings** — resolved all 28 warnings across 24 frontend files: 12 set-state-in-effect, 7 only-export-components, 5 exhaustive-deps, plus purity/ref/directive fixes (`2229d7e`)
+- **Mypy errors** — 59 → 2 (only unrelated `multimodal.py` stubs remain) via `TypedRedis` wrapper (`4400bdf`)
+- **Ruff lint** — 0 errors across 199+ Python files (maintained)
+- **Dead code removed** — `utils/a2a_client.py`, `utils/agent_activity.py`, `utils/content_filter.py`, `tokenize_lower()` from `text.py` (`ad1ff81`)
+
+### Documentation
+- **CLAUDE.md** — CI jobs 8→6, coverage 70%→60%, test counts updated, agent list completed (`06b950a`)
+- **API_Reference.md** — removed 10 phantom endpoints (trading proxy, boardroom SDK), added 18 real endpoints (custom agents, plugin registry, system monitor, webhooks), marked billing as internal (`56515ef`)
+
+### Infrastructure
+- **CI fixes** — multiple rounds of lint, typecheck, and test stabilization after setup wizard merge (`fa9b9df`, `9d354dd`, `9ff9ea0`, `e496922`, `98dc16e`, `bb0a981`)
 
 ### New Files
 - `src/mcp/utils/typed_redis.py` — typed Redis facade (35 methods)

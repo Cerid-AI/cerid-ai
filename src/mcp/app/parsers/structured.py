@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Cerid AI. All rights reserved.
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Structured data and text parsers — CSV/TSV, HTML, plain text."""
@@ -32,7 +32,7 @@ def parse_csv(file_path: str) -> dict[str, Any]:
         except csv_module.Error:
             pass  # keep default
     except Exception:
-        logger.debug("CSV dialect sniffing failed, using default delimiter")
+        pass
 
     try:
         try:

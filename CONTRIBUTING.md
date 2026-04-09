@@ -6,14 +6,14 @@ Thank you for your interest in contributing to Cerid AI!
 
 ### Prerequisites
 - Python 3.11+
-- Node.js 22+ (for React GUI development)
+- Node.js 20+ (for React GUI development)
 - Docker & Docker Compose V2
 
 ### Quick Start
 
 ```bash
 # Clone and set up
-git clone https://github.com/<your-username>/cerid-ai.git
+git clone https://github.com/YOUR_USERNAME/cerid-ai.git
 cd cerid-ai
 
 # One-command bootstrap (creates network, copies .env, starts services)
@@ -33,12 +33,12 @@ docker network create llm-network
 ### Running Tests
 
 ```bash
-# Unit tests (backend, 25 test files)
+# Unit tests (backend, ~1941 tests)
 cd src/mcp
 pip install pytest pytest-asyncio httpx
 pytest tests/ -v
 
-# Frontend tests (61 test files)
+# Frontend tests (~611 tests)
 cd src/web && npx vitest run
 
 # All checks (lint + typecheck + tests)
@@ -47,9 +47,14 @@ make check-all
 # Monte Carlo retrieval evaluation
 make test-eval
 
-# Integration tests (requires running Docker stack)
-cd src/mcp && python -m pytest tests/ -v
+# E2E pipeline integration tests (requires running Docker stack)
+python -m pytest tests/test_e2e_integration.py
+
+# RAG resilience testing (circuit breakers, degradation paths)
+python -m pytest tests/test_rag_resilience.py -v
 ```
+
+Synthetic test fixture data lives in `tests/fixtures/synthetic/` and provides deterministic inputs for unit and integration tests.
 
 ### Linting
 
@@ -96,7 +101,7 @@ src/mcp/
   utils/            — Shared utilities (graph, BM25, parsers, features, etc.)
   plugins/          — Plugin system (loader, base classes)
   middleware/       — Auth + rate limiting
-  tests/            — pytest test suite
+  tests/            — pytest test suite (~1941 tests)
 
 src/web/
   src/components/   — React components (layout, chat, kb, monitoring, audit, ui)
@@ -146,6 +151,11 @@ Cerid AI supports plugins for extending functionality. See `src/mcp/plugins/base
 3. Ensure tests pass (`pytest`) and linting is clean (`ruff check`, `tsc --noEmit`)
 4. Update documentation if adding new endpoints, MCP tools, or plugins
 5. Open a PR with a clear description of what and why
+
+### Compliance Check
+- [ ] No Chinese-origin AI models referenced (DeepSeek, Qwen, Alibaba, etc.)
+- [ ] Default Ollama model is `llama3.2:3b` (Meta) — not Qwen
+- [ ] Run: `grep -rn "deepseek\|qwen\|alibaba" src/ --include="*.py" --include="*.ts"` → 0 results
 
 ## License
 

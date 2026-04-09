@@ -100,18 +100,3 @@ src/mcp/rag-api-logs.txt
 
 # Working documents (not for public repo)
 tests/BUG_REPORT.md
-
-# Dev artifacts
-.venv/
-.mypy_cache/
-.pytest_cache/
-.ruff_cache/
-*.pyc
-__pycache__/
-.env
-.env.age
-.mcp.json
-stacks/infrastructure/data/
-src/web/dist/
-src/web/node_modules/
-node_modules/

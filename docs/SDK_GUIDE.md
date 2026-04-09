@@ -97,7 +97,7 @@ console.log(health.version, health.services);
 
 // Ingest a file
 const resp = await client.ingestFile("/data/report.pdf", {
-  domain: "general",
+  domain: "finance",
   tags: ["quarterly"],
 });
 console.log(resp.artifactId, resp.chunks);
@@ -169,8 +169,9 @@ Default limits:
 
 | Consumer | Requests/min |
 |----------|-------------|
-| custom-client | 60 |
-| gui | 200 |
+| trading-agent | 80 |
+| finance-dashboard | 40 |
+| gui (internal) | 200 |
 | Default (unregistered) | 30 |
 
 ## Error Handling
@@ -209,10 +210,15 @@ Each entry defines:
 
 ```python
 CONSUMER_REGISTRY = {
-    "custom-client": {
-        "rate_limit": 60,
-        "allowed_domains": None,
-        "description": "Custom application",
+    "trading-agent": {
+        "rate_limit": 80,
+        "allowed_domains": ["trading", "finance", "general"],
+        "description": "DeFi trading agent",
+    },
+    "finance-dashboard": {
+        "rate_limit": 40,
+        "allowed_domains": ["finance", "general"],
+        "description": "Personal finance dashboard",
     },
 }
 ```

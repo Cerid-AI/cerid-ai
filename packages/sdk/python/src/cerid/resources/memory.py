@@ -36,7 +36,7 @@ class MemoryResource:
             conversation_id: Optional conversation identifier.
         """
         body = self._client._build_json(
-            response_text=text,
+            text=text,
             conversation_id=conversation_id,
         )
         resp = self._http.post(self._client._url("/memory/extract"), json=body)
@@ -59,7 +59,7 @@ class AsyncMemoryResource:
     ) -> MemoryExtractResponse:
         """Extract facts, decisions, and preferences from text and store in KB."""
         body = self._client._build_json(
-            response_text=text,
+            text=text,
             conversation_id=conversation_id,
         )
         resp = await self._http.post(self._client._url("/memory/extract"), json=body)

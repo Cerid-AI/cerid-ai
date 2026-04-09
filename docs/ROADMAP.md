@@ -49,7 +49,7 @@ _All P0 items completed._
 - Cost comparison view: current model vs alternatives
 
 ### Pro Tier Purchase Path
-- Pro tier activation and licensing
+- Stripe integration for Pro tier licensing
 - License key validation endpoint
 - Self-serve upgrade flow Core -> Pro in Settings
 - **Pro anchor feature:** Audio transcription (meeting notes, interviews, lectures)

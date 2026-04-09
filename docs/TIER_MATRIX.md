@@ -9,7 +9,7 @@
 |------|---------|--------|-------|
 | **Cerid Core** | Apache-2.0 | Developers, researchers, personal use | Free |
 | **Cerid Pro** | BSL-1.1 | Business, intelligence analysts, security teams | Paid |
-| **Cerid Enterprise** | Commercial | Government, large organizations | Contact |
+| **Cerid Enterprise** | Commercial | IC, USG, large organizations | Contact |
 
 ## Feature Matrix
 

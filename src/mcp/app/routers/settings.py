@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Cerid AI. All rights reserved.
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Settings endpoints — expose server configuration to the GUI."""
@@ -194,6 +194,8 @@ async def get_settings_endpoint():
         "late_interaction_blend_weight": features_mod.LATE_INTERACTION_BLEND_WEIGHT,
         "enable_semantic_cache": features_mod.ENABLE_SEMANTIC_CACHE,
         "semantic_cache_threshold": features_mod.SEMANTIC_CACHE_THRESHOLD,
+        # Trading agent integration
+        "trading_enabled": config.CERID_TRADING_ENABLED,
         # Ollama add-on
         "ollama_enabled": os.getenv("OLLAMA_ENABLED", "false").lower() in ("true", "1"),
         "ollama_url": os.getenv("OLLAMA_URL", "http://localhost:11434"),

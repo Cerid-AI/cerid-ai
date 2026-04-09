@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Cerid AI. All rights reserved.
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Observability API — aggregated metrics, health score, cost breakdown, quality.
@@ -327,6 +327,7 @@ def get_claim_accuracy(
             "recency": avg,
             "ignorance": avg,
         },
+        "note": "Per-type breakdown pending — currently shows overall average for each type",
         "sample_count": verif.get("count", 0),
         "timestamp": _iso_now(),
     }

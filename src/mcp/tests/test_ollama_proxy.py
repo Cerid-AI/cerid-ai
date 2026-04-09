@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Cerid AI. All rights reserved.
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """Tests for the Ollama local LLM proxy router."""
@@ -328,6 +328,7 @@ class TestProviderValidation:
         assert "codellama" in models
         assert "gemma2" in models
         assert "phi3" in models
+        # qwen2.5 removed per USG compliance (Chinese-origin model)
 
     def test_ollama_base_url_default(self):
         """Ollama base_url should default to localhost:11434."""

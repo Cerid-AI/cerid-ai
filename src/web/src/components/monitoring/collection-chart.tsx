@@ -13,6 +13,7 @@ const DOMAIN_COLORS: Record<string, string> = {
   research: "hsl(var(--chart-3))",
   personal: "hsl(var(--chart-4))",
   general: "hsl(var(--chart-5))",
+  trading: "hsl(142 76% 36%)",
   conversations: "hsl(215 20% 65%)",
 }
 
