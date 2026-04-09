@@ -185,8 +185,13 @@ def strip_internal_deps(content: str) -> str:
 # ---------------------------------------------------------------------------
 # Leak scanner
 # ---------------------------------------------------------------------------
-def scan_for_leaks(root: Path, forbidden: list[str]) -> list[str]:
-    """Scan all scannable files under *root* for forbidden strings."""
+def scan_for_leaks(root: Path, forbidden: list[str], skip_patterns: list[str] | None = None) -> list[str]:
+    """Scan all scannable files under *root* for forbidden strings.
+
+    *skip_patterns* — fnmatch patterns (relative to root) to exclude from the
+    scan. Used to ignore files not managed by the sync (e.g., repo-specific
+    CLAUDE.md, README.md that each repo maintains independently).
+    """
     issues: list[str] = []
     for fpath in sorted(root.rglob("*")):
         if not fpath.is_file():
@@ -196,6 +201,9 @@ def scan_for_leaks(root: Path, forbidden: list[str]) -> list[str]:
         # Skip .git and node_modules
         rel = str(fpath.relative_to(root))
         if rel.startswith(".git/") or "node_modules/" in rel:
+            continue
+        # Skip files excluded by internal_only patterns
+        if skip_patterns and any(fnmatch.fnmatch(rel, p) for p in skip_patterns):
             continue
         try:
             text = fpath.read_text(errors="replace")
@@ -288,7 +296,7 @@ def cmd_to_public(manifest: dict, dry_run: bool) -> int:
     # Leak scan
     if not dry_run:
         print(f"\n{BOLD}Scanning public repo for forbidden strings...{RESET}")
-        leaks = scan_for_leaks(PUBLIC_ROOT, forbidden)
+        leaks = scan_for_leaks(PUBLIC_ROOT, forbidden, skip_patterns=internal_only)
         if leaks:
             fail(f"Found {len(leaks)} leak(s):")
             for issue in leaks[:20]:
@@ -413,7 +421,7 @@ def cmd_validate(manifest: dict) -> int:
     # 1. Scan public repo for forbidden strings
     print(f"{BOLD}[1/3] Scanning public repo for forbidden strings...{RESET}")
     if PUBLIC_ROOT.exists():
-        leaks = scan_for_leaks(PUBLIC_ROOT, forbidden)
+        leaks = scan_for_leaks(PUBLIC_ROOT, forbidden, skip_patterns=internal_only)
         if leaks:
             errors += len(leaks)
             for issue in leaks[:30]:

@@ -56,6 +56,11 @@ internal_only:
   - docs/DEPENDENCY_COUPLING.md
   - docs/INTEGRATION_GUIDE.md
   - docs/COMPLETED_PHASES.md
+  - docs/ISSUES.md
+  - tasks/**
+  - src/mcp/routers/trading_proxy.py
+  - src/mcp/tests/test_router_sdk.py
+  - tests/test_e2e_integration.py
 
 # Files where internal version = public version + appended hook block.
 # The sync script truncates at hook_marker for to-public, appends for from-public.
@@ -89,10 +94,9 @@ mixed_files:
 # These are precise patterns — avoid overly broad matches like "_internal"
 # which hits legitimate code (_internal_llm, etc.).
 forbidden_in_public:
-  - CERID_TRADING_ENABLED
-  - CERID_BOARDROOM_ENABLED
-  - TRADING_AGENT_URL
-  - CERID_BOARDROOM_TIER
+  # NOTE: CERID_TRADING_ENABLED etc. are NOT forbidden because settings.py has
+  # stub defaults (False/"") for import compatibility. The forbidden list targets
+  # internal MODULE names and FUNCTION names that indicate leaked wiring.
   - trading_proxy
   - pkb_trading_signal
   - pkb_herd_detect

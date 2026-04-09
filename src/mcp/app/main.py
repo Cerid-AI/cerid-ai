@@ -72,6 +72,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("ai-companion")
 
+# Extension hooks — populated by bootstrap (internal features, plugins, etc.)
+_shutdown_hooks: list = []
+
 
 def _hydrate_settings_from_sync() -> None:
     """Apply user settings from the sync directory to runtime config.
@@ -329,12 +332,12 @@ async def lifespan(app: FastAPI):
         await close_ollama_client()
     except Exception as exc:
         logger.warning("Ollama client shutdown failed: %s", exc)
-    # Internal-only shutdown hooks (trading proxy, etc.)
-    try:
-        from app.main_internal import shutdown_internal
-        await shutdown_internal()
-    except ImportError:
-        pass
+    # Extension shutdown hooks (registered by bootstrap)
+    for _hook in _shutdown_hooks:
+        try:
+            await _hook()
+        except Exception as exc:
+            logger.warning("Extension shutdown hook failed: %s", exc)
     # Flush semantic cache HNSW index to Redis before closing Redis
     try:
         from app.deps import get_redis

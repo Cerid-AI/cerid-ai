@@ -19,6 +19,9 @@ from app.routers.health import health_check, list_collections
 from app.routers.query import query_knowledge
 from app.services.ingestion import ingest_content, ingest_file
 
+# Extension hooks — populated by bootstrap (internal tools, plugins, etc.)
+_tool_dispatchers: list = []
+
 # ── MCP Tool Definitions ─────────────────────────────────────────────────────
 
 MCP_TOOLS = [
@@ -754,21 +757,19 @@ async def execute_tool(name: str, arguments: dict) -> Any:
             tags=arguments.get("tags", ""),
             plugin_override=arguments.get("plugin", ""),
         )
-    # Try internal-only tools (trading, etc.)
-    try:
-        from app.tools_internal import dispatch_trading_tool
-        result = await dispatch_trading_tool(name, arguments)
+    # Try extension tool dispatchers (registered by bootstrap)
+    for _dispatcher in _tool_dispatchers:
+        result = await _dispatcher(name, arguments)
         if result is not None:
             return result
-    except ImportError:
-        pass
     raise ValueError(f"Unknown tool: {name}")
 
 
 # -- Trading tools ------------------------------------------------------------
 # Below this line: internal-only bootstrap (stripped for public distribution)
 try:
-    from app.tools_internal import get_trading_tools
+    from app.tools_internal import get_trading_tools, dispatch_trading_tool
     MCP_TOOLS.extend(get_trading_tools())
+    _tool_dispatchers.append(dispatch_trading_tool)
 except ImportError:
     pass

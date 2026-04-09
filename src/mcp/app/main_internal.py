@@ -54,13 +54,14 @@ def bootstrap_internal(app) -> None:
         app.include_router(billing.router, prefix="/api/v1")
         logger.info("Billing router registered (tier=%s)", os.getenv("CERID_TIER"))
 
-
-async def shutdown_internal() -> None:
-    """Run internal-only shutdown hooks (trading proxy client close)."""
+    # 4. Register shutdown hooks via the public callback list
+    from app.main import _shutdown_hooks
     from config.settings import CERID_TRADING_ENABLED
     if CERID_TRADING_ENABLED:
-        try:
-            from app.routers.trading_proxy import close_trading_proxy_client
-            await close_trading_proxy_client()
-        except Exception as exc:
-            logger.warning("Trading proxy shutdown failed: %s", exc)
+        async def _close_trading_proxy() -> None:
+            try:
+                from app.routers.trading_proxy import close_trading_proxy_client
+                await close_trading_proxy_client()
+            except Exception as exc:
+                logger.warning("Trading proxy shutdown failed: %s", exc)
+        _shutdown_hooks.append(_close_trading_proxy)
