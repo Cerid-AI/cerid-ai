@@ -62,3 +62,6 @@
 - [ ] Address 117 failing Python tests (38 in hallucination, 12 in ingestion — see tests/BUG_REPORT.md)
 - [ ] Merge or close dependabot branches (3 active)
 - [ ] Clean stale branches after leapfrog merge: `phase-c-core-extraction`, `sync/unified-plan`
+
+## Future Sprint Ideas
+- [ ] **Knowledge Packs**: Downloadable curated fact packs (Wikidata structured facts subset, ~50K core facts). Useful for air-gapped/offline deployments, demo scenarios, and speed (local KB <10ms vs 2-5s API). Design: SPARQL query pulls core facts → markdown → user downloads in Settings. Low priority since cross-model verification handles general knowledge already.
