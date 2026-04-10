@@ -139,7 +139,7 @@
 
 ### MCP Tools (26 total)
 
-**Core tools (19):**
+**Core tools (21):**
 - `pkb_query` — Single-domain query
 - `pkb_ingest` — Ingest raw text
 - `pkb_ingest_file` — Ingest a file with parsing and metadata

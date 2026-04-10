@@ -120,7 +120,7 @@ React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly
 │   │   ├── sync/                # CRDT, export, import, manifest, status
 │   │   ├── models/              # Pydantic schemas
 │   │   ├── main.py              # Entry point
-│   │   └── tools.py             # MCP tool registry + dispatcher (27 tools)
+│   │   └── tools.py             # MCP tool registry + dispatcher (21 core + 5 trading)
 │   ├── enterprise/              # Enterprise overlay (ABAC, SSO, classification, immutable audit)
 │   ├── config/                  # settings.py, taxonomy.py, features.py, providers.py
 │   ├── agents/                  # Bridge modules (re-export from core.agents)
