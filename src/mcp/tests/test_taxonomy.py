@@ -82,7 +82,7 @@ class TestTaxonomyConfig:
     def test_taxonomy_has_all_domains(self):
         """TAXONOMY contains at least all required public domains.
 
-        Note: in the internal repo, bootstrap_internal() may extend TAXONOMY
+        Note: in the internal repo, the internal bootstrap() may extend TAXONOMY
         with trading + boardroom domains if another test triggered app.main
         import earlier in the session. We assert SUPERSET, not exact match.
         """
@@ -98,7 +98,7 @@ class TestTaxonomyConfig:
         """DOMAINS list contains at least the base public domains."""
         import config
 
-        # In CI, bootstrap_internal may extend TAXONOMY and DOMAINS if
+        # In CI, the internal bootstrap may extend TAXONOMY and DOMAINS if
         # another test imported app.main first. Assert minimum set present.
         required = {"coding", "finance", "projects", "personal", "general", "conversations"}
         assert required.issubset(set(config.DOMAINS))
