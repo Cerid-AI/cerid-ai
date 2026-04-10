@@ -579,12 +579,15 @@ export interface BaseClaim {
   source_snippet?: string
   source_urls?: string[]
   reason?: string
-  verification_method?: "kb" | "cross_model" | "cross_model_failed" | "web_search" | "web_search_failed" | "none"
+  verification_method?: "kb" | "cross_model" | "cross_model_failed" | "web_search" | "web_search_failed" | "kb_nli" | "timeout" | "kb_only_timeout" | "none"
   verification_model?: string
   verification_answer?: string
   consistency_issue?: string
   /** True when the claim was verified against KB artifacts that were injected into the LLM prompt (circular evidence). */
   circular_source?: boolean
+  nli_entailment?: number      // NLI entailment score (0-1)
+  nli_contradiction?: number   // NLI contradiction score (0-1)
+  memory_source?: boolean      // Whether verified against user memory
 }
 
 export interface HallucinationClaim extends BaseClaim {
