@@ -88,6 +88,7 @@ def _format_chroma_result(
         "sub_category": metadata.get("sub_category", ""),
         "tags_json": metadata.get("tags_json", "[]"),
         "keywords": metadata.get("keywords", "[]"),
+        "memory_type": metadata.get("memory_type", ""),
     }
 
 
@@ -1027,6 +1028,22 @@ async def agent_query(
             results.extend(cross_results)
 
     results = deduplicate_results(results)
+
+    # ── Source authority: demote raw chat transcripts ────────────────────
+    # Raw conversations (filename starts with "chat_") are prior LLM
+    # responses — NOT authoritative sources.  Using them as evidence
+    # creates circular self-verification.  Extracted memories
+    # (filename starts with "memory_") are user-confirmed and keep
+    # full relevance.
+    _CHAT_TRANSCRIPT_DISCOUNT = 0.35
+    for r in results:
+        if r.get("domain") == "conversations":
+            _fn = r.get("filename", "")
+            if _fn.startswith("chat_"):
+                r["relevance"] = round(r["relevance"] * _CHAT_TRANSCRIPT_DISCOUNT, 4)
+                r["source_authority"] = "chat_transcript"
+            elif _fn.startswith("memory_"):
+                r["source_authority"] = "user_memory"
 
     with timer.step("graph_expansion"):
         graph_count_before = len(results)
