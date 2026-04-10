@@ -184,10 +184,35 @@ async def _assess_claims(
                 chroma_client=chroma_client,
             )
             max_sim = max((r.get("relevance", 0.0) for r in results), default=0.0)
+
+            # NLI entailment check — replaces pure similarity coverage
+            best_nli = {"entailment": 0.0, "contradiction": 0.0, "neutral": 1.0, "label": "neutral"}
+            try:
+                from core.utils.nli import nli_score
+                for r in results[:3]:
+                    r_content = r.get("content", "")[:512]
+                    if not r_content:
+                        continue
+                    nli = nli_score(r_content, claim)
+                    if nli["entailment"] > best_nli["entailment"]:
+                        best_nli = nli
+            except Exception:
+                logger.debug("Self-RAG: NLI scoring failed for claim %r — using similarity", claim[:50])
+
+            covered = float(best_nli["entailment"]) >= 0.5  # type: ignore[arg-type]
+            contradicted = float(best_nli["contradiction"]) >= 0.6  # type: ignore[arg-type]
+
+            # Fallback: if NLI didn't load, use similarity
+            if best_nli["label"] == "neutral" and best_nli["entailment"] == 0.0:
+                covered = max_sim >= threshold
+
             assessments.append({
                 "claim": claim,
                 "max_similarity": round(max_sim, 4),
-                "covered": max_sim >= threshold,
+                "covered": covered,
+                "contradicted": contradicted,
+                "nli_entailment": best_nli["entailment"],
+                "nli_contradiction": best_nli["contradiction"],
                 "top_source": results[0].get("filename", "") if results else "",
             })
         except Exception as e:
@@ -196,6 +221,7 @@ async def _assess_claims(
                 "claim": claim,
                 "max_similarity": 0.0,
                 "covered": False,
+                "contradicted": False,
                 "top_source": "",
                 "error": str(e),
             })

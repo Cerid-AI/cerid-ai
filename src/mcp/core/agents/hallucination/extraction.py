@@ -78,10 +78,31 @@ def _reclassify_recency(claim_text: str, claim_type: str) -> str:
         r"\b(recent|recently|latest|newest|just)\b",
         r"\b(upcoming|forthcoming|soon|next)\b",
         r"\b(as of \d{4}|since \d{4})\b",
+        # Month + year (e.g., "in March 2026", "January 2025 report")
+        r"\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+20[2-9]\d\b",
+        # Quarter references (e.g., "Q1 2026", "Q4 2025 earnings")
+        r"\bQ[1-4]\s+20[2-9]\d\b",
+        # Relative time (e.g., "last week", "next quarter", "this year")
+        r"\b(?:last|next|this)\s+(?:week|month|quarter|year|season)\b",
+        # Year ranges with hyphen/dash (e.g., "2024-2025", "2025–26")
+        r"\b20[2-9]\d[-\u2013](?:20)?[2-9]\d\b",
     ]
     for pattern in recency_markers:
         if re.search(pattern, text_lower):
             return "recency"
+
+    # Past-tense recency: recent events that need current data to verify
+    current_year = _current_year()
+    for match in re.finditer(r"\b(20[2-9]\d)\b", claim_text):
+        year = int(match.group(1))
+        if current_year - 2 <= year <= current_year:
+            # Recent year + factual indicators = recency claim
+            factual_indicators = re.search(
+                r"\b(?:was|were|had|did|resulted|showed|reported|announced|reached|hit|exceeded|totaled)\b",
+                text_lower,
+            )
+            if factual_indicators:
+                return "recency"
 
     return claim_type
 

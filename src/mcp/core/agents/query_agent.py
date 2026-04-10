@@ -1108,6 +1108,27 @@ async def agent_query(
             except Exception as e:
                 logger.warning("MMR diversity reordering failed: %s", e)
 
+    # Step 5.65: NLI contradiction gate — remove results that contradict the query
+    with timer.step("nli_gate"):
+        try:
+            from core.utils.nli import batch_nli_score
+            _nli_pairs = [(r.get("content", "")[:512], query) for r in results[:15]]
+            _nli_scores = batch_nli_score(_nli_pairs)
+            _nli_filtered = []
+            for r, nli in zip(results[:15], _nli_scores):
+                if nli["contradiction"] >= config.NLI_CONTRADICTION_THRESHOLD:
+                    logger.debug("NLI gate removed contradictory result: %s", r.get("filename", "")[:40])
+                    continue
+                if nli["entailment"] >= 0.5:
+                    r["relevance"] = round(r["relevance"] + 0.05, 4)
+                    r["nli_entailment"] = nli["entailment"]
+                _nli_filtered.append(r)
+            # Keep any results beyond top 15 (not NLI-checked, low-ranked)
+            _nli_filtered.extend(results[15:])
+            results = _nli_filtered
+        except Exception:
+            logger.debug("NLI gate unavailable — skipping")
+
     # Step 5.7: Filter low-relevance results below minimum threshold
     # When metadata_filter is set, the caller explicitly scoped to a file —
     # use a relaxed threshold so generic questions still return results.
