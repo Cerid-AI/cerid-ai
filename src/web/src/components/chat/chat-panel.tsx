@@ -869,7 +869,14 @@ export function ChatPanel() {
       <PanelSeparator className="h-1 bg-border transition-colors hover:bg-primary/20 active:bg-primary/30" />
       <Panel defaultSize={67} minSize={20}>
         {ragMode === "manual" ? (
-          <KBContextPanel {...kbContext} onClose={() => setShowKB(false)} />
+          <KBContextPanel
+            {...kbContext}
+            onClose={() => setShowKB(false)}
+            contextSources={contextSources}
+            toggleKB={() => toggleSource("kb")}
+            toggleMemory={() => toggleSource("memory")}
+            toggleExternal={() => toggleSource("external")}
+          />
         ) : (
           <KnowledgeConsole
             {...orchestratedContext}

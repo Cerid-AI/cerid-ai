@@ -24,6 +24,10 @@ import { cn } from "@/lib/utils"
 
 interface KBContextPanelProps extends UseKBContextReturn {
   onClose: () => void
+  contextSources?: { kb?: boolean; memory?: boolean; external?: boolean }
+  toggleKB?: () => void
+  toggleMemory?: () => void
+  toggleExternal?: () => void
 }
 
 export function KBContextPanel({
@@ -47,6 +51,10 @@ export function KBContextPanel({
   injectedContext,
   injectResult,
   onClose,
+  contextSources,
+  toggleKB,
+  toggleMemory,
+  toggleExternal,
 }: KBContextPanelProps) {
   const confidencePct = Math.round(confidence * 100)
   const { autoInject, toggleAutoInject } = useSettings()
@@ -158,6 +166,55 @@ export function KBContextPanel({
           <X className="h-4 w-4" />
         </Button>
       </div>
+
+      {/* Source toggles */}
+      {(toggleKB || toggleMemory || toggleExternal) && (
+        <div className="flex items-center gap-1.5 border-b px-3 py-1.5">
+          <span className="text-[10px] text-muted-foreground mr-1">Sources</span>
+          {toggleKB && (
+            <button
+              onClick={toggleKB}
+              className={cn(
+                "flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors",
+                contextSources?.kb !== false
+                  ? "bg-blue-500/15 text-blue-600 dark:text-blue-400"
+                  : "bg-muted text-muted-foreground line-through",
+              )}
+            >
+              <Database className="h-2.5 w-2.5" />
+              KB
+            </button>
+          )}
+          {toggleMemory && (
+            <button
+              onClick={toggleMemory}
+              className={cn(
+                "flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors",
+                contextSources?.memory !== false
+                  ? "bg-purple-500/15 text-purple-600 dark:text-purple-400"
+                  : "bg-muted text-muted-foreground line-through",
+              )}
+            >
+              <Brain className="h-2.5 w-2.5" />
+              Memory
+            </button>
+          )}
+          {toggleExternal && (
+            <button
+              onClick={toggleExternal}
+              className={cn(
+                "flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors",
+                contextSources?.external !== false
+                  ? "bg-green-500/15 text-green-600 dark:text-green-400"
+                  : "bg-muted text-muted-foreground line-through",
+              )}
+            >
+              <Globe className="h-2.5 w-2.5" />
+              External
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Search */}
       <div className="border-b px-3 py-2">
