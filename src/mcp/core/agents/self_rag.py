@@ -199,8 +199,8 @@ async def _assess_claims(
             except Exception:
                 logger.debug("Self-RAG: NLI scoring failed for claim %r — using similarity", claim[:50])
 
-            covered = best_nli["entailment"] >= 0.5
-            contradicted = best_nli["contradiction"] >= 0.6
+            covered = float(best_nli["entailment"]) >= 0.5
+            contradicted = float(best_nli["contradiction"]) >= 0.6
 
             # Fallback: if NLI didn't load, use similarity
             if best_nli["label"] == "neutral" and best_nli["entailment"] == 0.0:

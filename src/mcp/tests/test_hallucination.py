@@ -243,7 +243,7 @@ class TestNumericAlignment:
             "Python was released in 2021 with 50% improvements",
             {"content": "Python was first released in 1991 with 30% speedup"},
         )
-        assert result == -0.05  # 0/2 match ratio, 2 checks
+        assert result == -0.03  # 0/2 match ratio → proportional disagreement penalty
 
     def test_no_numbers_returns_zero(self):
         """Claims without numbers should return 0 (nothing to check)."""
@@ -269,14 +269,14 @@ class TestNumericAlignment:
         )
         assert result == 0.0
 
-    def test_partial_match_returns_zero(self):
-        """One match out of two checks (50% ratio) returns 0 — neither boost nor penalty."""
+    def test_partial_match_returns_negative(self):
+        """One match out of two checks (50% ratio < 75% threshold) returns -0.03."""
         result = _check_numeric_alignment(
             "Version 3.11 was released in 2022 with 25% improvement",
             {"content": "Python 3.11 released in 2022 with 10% speedup"},
         )
-        # year 2022 matches, but 25% != 10% → 1/2 = 0.5 ratio → returns 0.0
-        assert result == 0.0
+        # year 2022 matches, but 25% != 10% → 1/2 = 0.5 ratio < 0.75 → -0.03
+        assert result == -0.03
 
 
 class TestAdjustedConfidence:

@@ -390,6 +390,12 @@ async def verify_response_streaming(
     except Exception as kb_exc:
         logger.debug("Batch KB pre-fetch failed (non-blocking): %s", kb_exc)
 
+    # Track verification progress per claim for graceful timeout handling.
+    # When the total deadline fires, claims that completed KB evidence gathering
+    # (Phase 2) but were waiting for external verdict (Phase 3) can use their
+    # KB-only result as a fallback instead of blanket "uncertain".
+    _claim_evidence: dict[int, dict] = {}  # {claim_index: {"kb_results": [...], "kb_quality": float}}
+
     # Populate _claim_evidence from batch KB pre-fetch so that timeout
     # fallback can use KB-only verdicts for claims that gathered evidence.
     if batch_kb_context:
@@ -501,12 +507,6 @@ async def verify_response_streaming(
     stream_interrupted = False
     credit_exhausted = False
     credit_error_emitted = False
-
-    # Track verification progress per claim for graceful timeout handling.
-    # When the total deadline fires, claims that completed KB evidence gathering
-    # (Phase 2) but were waiting for external verdict (Phase 3) can use their
-    # KB-only result as a fallback instead of blanket "uncertain".
-    _claim_evidence: dict[int, dict] = {}  # {claim_index: {"kb_results": [...], "kb_quality": float}}
 
     # Pre-fill collected_results with cached batch results (non-async, immediate)
     for idx, result in batch_results.items():
