@@ -12,8 +12,22 @@ logic (enrichment, NLI gate, dedup, assembly) runs for real.
 
 from __future__ import annotations
 
+import sys
+from unittest.mock import MagicMock
+
+# Mock heavy native deps if not available (host macOS lacks them; Docker has them).
+# We must also mock core.utils.embeddings itself because it uses Python 3.10+
+# union syntax (str | None) that fails to parse on the host's Python 3.9.
+for _mod in ("onnxruntime", "huggingface_hub", "tokenizers"):
+    if _mod not in sys.modules:
+        sys.modules[_mod] = MagicMock()
+if "core.utils.embeddings" not in sys.modules:
+    _emb_mock = MagicMock()
+    _emb_mock.l2_distance_to_relevance = lambda d: max(0.0, 1.0 - d / 2.0)
+    sys.modules["core.utils.embeddings"] = _emb_mock
+
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
