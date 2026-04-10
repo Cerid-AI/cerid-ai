@@ -418,3 +418,30 @@
 - **Rule:** NEVER use `cp`, `rsync`, or bulk file operations between repos. Cherry-pick individual changes. ALWAYS diff each file before committing a sync.
 - **Key files that DIFFER:** `config/settings.py`, `config/taxonomy.py`, `app/routers/agents.py`, `app/routers/sdk.py`, `app/main.py`, `app/tools.py`, `app/scheduler.py`, `.github/workflows/ci.yml`, `CLAUDE.md`
 - **Recovery:** When internal CI fails with `Module has no attribute "CERID_TRADING_ENABLED"`, the public settings.py was copied over. Restore from `git show HEAD~1:src/mcp/config/settings.py`.
+
+## Session 2026-04-09/10: NLI + Verification + Sync Architecture
+
+### Architecture Changes
+- **Surgical file splits**: 7 mixed files split into base + `*_internal.py`. Internal-only code (trading, boardroom, billing, enterprise) lives exclusively in `*_internal.py` files. Base files have zero internal references.
+- **Sync tooling**: `scripts/sync-repos.py` (to-public, from-public, validate) + `.sync-manifest.yaml` automates bidirectional repo sync. No more manual cherry-picking.
+- **NLI entailment service**: `core/utils/nli.py` — shared ONNX model (cross-encoder/nli-deberta-v3-xsmall, 22M params, <10ms). Replaces similarity-as-proof across verification, Self-RAG, RAGAS faithfulness, and RAG pipeline.
+- **Source authority tiering**: Chat transcripts (filename `chat_*`) get 0.35x relevance discount in KB retrieval. Extracted memories (`memory_*`) retain full relevance. Prevents circular self-verification.
+- **External source integration**: External data sources (Wikipedia, DuckDuckGo, etc.) run in parallel with KB queries in manual mode. Results tagged `domain: "external"` and discounted 0.6x.
+
+### Bug Fixes
+- `memory_type` was NOT passed to `calculate_memory_score()` — all memories used "decision" 90-day decay. Fixed: each type uses its configured half-life.
+- `MEMORY_TYPES` had 3 different definitions across patterns.py, memory.py, settings.py. Unified to include all 6 canonical + 2 legacy aliases.
+- Settings GET response missing `enable_memory_consolidation` and `enable_context_compression`. Fixed.
+- Pipeline config bar had stale "Reranking" and "Graph RAG" controls not synced to backend. Replaced with server-synced Self-RAG, Query Decomposition, Semantic Cache + NLI indicator.
+
+### Key Patterns
+- **NLI gate fires AFTER KB retrieval, BEFORE verdict**: entailment ≥ 0.7 → verified, contradiction ≥ 0.6 → unverified, neutral → fallback to similarity + external verification.
+- **Temporal claims always web-searched**: Even if NLI says "entailed," recency/current-event claims force web search to catch stale KB data.
+- **Bootstrap order matters**: `extend_settings()` → `extend_taxonomy()` → register routers. Settings must be populated before any router reads `CERID_TRADING_ENABLED`.
+- **Hook markers for sync**: Each mixed file has `# -- Internal ...` marker. Sync script truncates at marker for public, appends for internal.
+- **Test isolation in CI**: `bootstrap_internal()` may run if any test imports `app.main`, extending TAXONOMY to 13 domains. Tests must assert supersets, not exact domain counts.
+
+### Backlog (tasks/todo.md)
+- Knowledge Packs: Downloadable curated fact packs (Wikidata subset)
+- Hardware-Aware Preset Recommendations: Setup wizard should use detected RAM/CPU/GPU to recommend presets
+- GPU-Aware Model Selection: Surface GPU acceleration for local model routing
