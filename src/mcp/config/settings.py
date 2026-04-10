@@ -404,6 +404,14 @@ MEMORY_RETENTION_DAYS = int(os.getenv("MEMORY_RETENTION_DAYS", "180"))
 MEMORY_CONFLICT_THRESHOLD = float(os.getenv("MEMORY_CONFLICT_THRESHOLD", "0.85"))
 MEMORY_HALF_LIFE_DAYS = float(os.getenv("MEMORY_HALF_LIFE_DAYS", "30.0"))  # legacy fallback
 MEMORY_MIN_RECALL_SCORE = float(os.getenv("MEMORY_MIN_RECALL_SCORE", "0.3"))
+MEMORY_MIN_RECALL_BY_TYPE: dict[str, float] = {
+    "empirical": 0.4,
+    "decision": 0.4,
+    "preference": 0.4,
+    "project_context": 0.45,
+    "temporal": 0.5,
+    "conversational": 0.55,
+}
 
 # Memory Salience — per-type stability and scoring
 # Stability = base half-life in days for decay. Higher = slower fade.

@@ -591,7 +591,16 @@ async def recall_memories(
             base_score=base_similarity,
             access_count=access_count,
             age_days=age_days,
+            memory_type=metadata.get("memory_type", "decision"),
         )
+
+        # Per-type minimum recall threshold
+        type_min = config.MEMORY_MIN_RECALL_BY_TYPE.get(
+            metadata.get("memory_type", "decision"),
+            config.MEMORY_MIN_RECALL_SCORE,
+        )
+        if adjusted_score < type_min:
+            continue
 
         if adjusted_score >= min_score:
             scored_memories.append({
