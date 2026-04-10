@@ -972,9 +972,24 @@ async def _verify_claim_externally(
                 # Include KB snippet when available — gives the verifier
                 # partial evidence from the user's knowledge base to
                 # triangulate against, reducing false "uncertain" verdicts.
+                _ext_nli_label = ""
+                _ext_nli_conf = ""
+                if kb_snippet:
+                    try:
+                        from core.utils.nli import nli_score as _ext_nli_fn
+                        _ext_nli = _ext_nli_fn(kb_snippet[:512], claim)
+                        _ext_nli_label = _ext_nli["label"]
+                        _ext_nli_conf = (
+                            f"entailment={_ext_nli['entailment']:.2f}, "
+                            f"contradiction={_ext_nli['contradiction']:.2f}"
+                        )
+                    except Exception:
+                        _ext_nli_label = "unknown"
+                        _ext_nli_conf = ""
                 kb_block = (
-                    f"\n\nPartial evidence from the user's knowledge base "
-                    f"(may or may not support the claim):\n\"{kb_snippet}\"\n"
+                    f"\n\nEvidence from knowledge base ({_ext_nli_label}"
+                    f"{', ' + _ext_nli_conf if _ext_nli_conf else ''}):\n"
+                    f"\"{kb_snippet}\"\n"
                     if kb_snippet else ""
                 )
                 user_prompt = (
@@ -1646,8 +1661,48 @@ async def verify_claim(
         similarity = _compute_adjusted_confidence(claim, top_results, raw_similarity)
         details = _build_verification_details(claim, top_results)
 
+        # --- NLI entailment check on top KB result ---
+        try:
+            from core.utils.nli import nli_score
+            _nli = nli_score(top_result.get("content", "")[:512], claim)
+        except Exception:
+            logger.debug("NLI scoring failed for claim %r — falling back to similarity", claim[:60])
+            _nli = {"entailment": 0.0, "contradiction": 0.0, "neutral": 1.0, "label": "neutral"}
+
+        if _nli["entailment"] >= config.NLI_ENTAILMENT_THRESHOLD:
+            return await _cache_result({
+                "claim": claim,
+                "status": "verified",
+                "similarity": round(similarity, 3),
+                "nli_entailment": _nli["entailment"],
+                "source_artifact_id": top_result.get("artifact_id", ""),
+                "source_filename": top_result.get("filename", ""),
+                "source_domain": top_result.get("domain", ""),
+                "source_snippet": top_result.get("content", "")[:200],
+                "memory_source": bool(top_result.get("memory_source")),
+                "verification_details": details,
+                "verification_method": "kb_nli",
+                **({"circular_source": True} if top_result.get("_circular") else {}),
+            })
+
+        if _nli["contradiction"] >= config.NLI_CONTRADICTION_THRESHOLD:
+            return await _cache_result({
+                "claim": claim,
+                "status": "unverified",
+                "similarity": round(similarity, 3),
+                "nli_contradiction": _nli["contradiction"],
+                "reason": "KB evidence contradicts claim",
+                "source_artifact_id": top_result.get("artifact_id", ""),
+                "source_filename": top_result.get("filename", ""),
+                "source_domain": top_result.get("domain", ""),
+                "source_snippet": top_result.get("content", "")[:200],
+                "verification_details": details,
+                "verification_method": "kb_nli",
+                **({"circular_source": True} if top_result.get("_circular") else {}),
+            })
+
         if similarity >= threshold:
-            # Spurious matches already filtered by the term-overlap check above.
+            # NLI neutral — fall back to similarity-based verification.
             return await _cache_result({
                 "claim": claim,
                 "status": "verified",
