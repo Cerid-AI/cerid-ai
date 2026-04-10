@@ -165,6 +165,15 @@ RERANK_CROSS_ENCODER_MODEL = os.getenv(
 RERANK_ONNX_FILENAME = os.getenv("RERANK_ONNX_FILENAME", "onnx/model.onnx")
 RERANK_MODEL_CACHE_DIR = os.getenv("RERANK_MODEL_CACHE_DIR", "")
 
+# ---------------------------------------------------------------------------
+# NLI Entailment (Natural Language Inference)
+# ---------------------------------------------------------------------------
+NLI_MODEL = os.getenv("NLI_MODEL", "cross-encoder/nli-deberta-v3-xsmall")
+NLI_ONNX_FILENAME = os.getenv("NLI_ONNX_FILENAME", "onnx/model.onnx")
+NLI_MODEL_CACHE_DIR = os.getenv("NLI_MODEL_CACHE_DIR", "")
+NLI_ENTAILMENT_THRESHOLD = float(os.getenv("NLI_ENTAILMENT_THRESHOLD", "0.7"))
+NLI_CONTRADICTION_THRESHOLD = float(os.getenv("NLI_CONTRADICTION_THRESHOLD", "0.6"))
+
 # Score blending weights (cross-encoder or LLM score vs original hybrid score)
 RERANK_CE_WEIGHT = float(os.getenv("RERANK_CE_WEIGHT", "0.4"))
 RERANK_LLM_WEIGHT = float(os.getenv("RERANK_LLM_WEIGHT", "0.4"))
