@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -89,10 +89,7 @@ class TestNliFaithfulness:
     @pytest.mark.asyncio
     async def test_fallback_to_llm_when_nli_unavailable(self):
         """When NLI import fails, falls back to faithfulness_llm."""
-        import json
         from unittest.mock import AsyncMock
-
-        mock_resp = json.dumps({"score": 0.75, "reasoning": "LLM fallback"})
 
         with (
             patch(

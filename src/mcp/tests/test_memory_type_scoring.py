@@ -27,7 +27,7 @@ if "core.utils.embeddings" not in sys.modules:
     _emb_mock.l2_distance_to_relevance = lambda d: max(0.0, 1.0 - d / 2.0)
     sys.modules["core.utils.embeddings"] = _emb_mock
 
-import pytest
+import pytest  # noqa: E402
 
 # Stub heavy transitive imports so we don't trigger real model loading.
 if "routers.ingestion" not in sys.modules:
@@ -40,7 +40,7 @@ if "routers.ingestion" not in sys.modules:
         sys.modules["routers"] = ModuleType("routers")
     sys.modules["routers"].ingestion = _stub  # type: ignore[attr-defined]
 
-from core.agents.memory import calculate_memory_score, recall_memories
+from core.agents.memory import calculate_memory_score, recall_memories  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # TestCalculateMemoryScore — per-type decay curves

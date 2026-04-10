@@ -399,13 +399,12 @@ class TestMemoryRecallIntegration:
         neo4j = _mock_neo4j()
 
         # NLI shows low entailment — workshop attendance doesn't entail best practices.
-        # Patch both the module attribute and the lazy-import path so the
-        # mock is visible regardless of import timing.
+        # Inject a fake nli module into sys.modules so the lazy ``from
+        # core.utils.nli import nli_score`` inside recall_memories picks up
+        # our mock even when the real module isn't installed on the host.
         _nli_rv = {"contradiction": 0.05, "entailment": 0.15, "neutral": 0.80, "label": "neutral"}
-        with (
-            patch("core.utils.nli.nli_score", return_value=_nli_rv),
-            patch("core.agents.memory.nli_score", return_value=_nli_rv, create=True),
-        ):
+        _nli_mock = MagicMock(nli_score=MagicMock(return_value=_nli_rv))
+        with patch.dict("sys.modules", {"core.utils.nli": _nli_mock}):
             memories = await recall_memories(
                 query="Python best practices",
                 chroma_client=client,

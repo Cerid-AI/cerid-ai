@@ -12,15 +12,12 @@ handling in streaming.py.
 
 from __future__ import annotations
 
-import asyncio
 import sys
-import time
 from types import ModuleType
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Stub heavy native deps before importing anything from core.*
@@ -75,8 +72,6 @@ if not hasattr(_tok, "__file__"):
 # Pre-register a stub ``core.utils.embeddings`` module so the import chain
 # (verification → embeddings) never actually loads the real file, which uses
 # ``str | None`` syntax in a class body and therefore fails on Python 3.9.
-import importlib as _il
-
 _embeddings_mod = ModuleType("core.utils.embeddings")
 _embeddings_mod.l2_distance_to_relevance = MagicMock(side_effect=lambda d: max(0.0, 1.0 - d))  # type: ignore[attr-defined]
 _embeddings_mod.OnnxEmbeddingFunction = MagicMock  # type: ignore[attr-defined]
@@ -87,7 +82,7 @@ sys.modules.setdefault("core.utils.embeddings", _embeddings_mod)
 # Import targets under test
 # ---------------------------------------------------------------------------
 
-from core.agents.hallucination.verification import (
+from core.agents.hallucination.verification import (  # noqa: E402
     _check_numeric_alignment,
 )
 
@@ -111,12 +106,12 @@ def _map_verdict(raw_verdict: dict, claim_type: str) -> dict:
         elif status == "unverified":
             status = "verified"
     return {**raw_verdict, "status": status}
-from core.agents.hallucination.extraction import _reclassify_recency
-from core.agents.hallucination.patterns import (
+
+from core.agents.hallucination.extraction import _reclassify_recency  # noqa: E402
+from core.agents.hallucination.patterns import (  # noqa: E402
     _is_current_event_claim,
     _is_recency_claim,
 )
-
 
 # ===================================================================
 # TestMapVerdict — evidence-first _map_verdict with inversions

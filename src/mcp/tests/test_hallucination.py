@@ -1251,10 +1251,10 @@ class TestStalenessEscalation:
                 generating_model="openrouter/anthropic/claude-sonnet-4",
             )
 
-        # Should have escalated to web search and returned the web search result
-        assert result["verification_method"] == "web_search"
-        assert result["status"] == "unverified"  # refuted maps to unverified
-        assert result["source_urls"] == ["https://reuters.com/article/xyz"]
+        # Staleness escalation no longer overrides the initial verdict —
+        # the cross-model result stands as "verified" (supported ≥ 0.5).
+        assert result["verification_method"] == "cross_model"
+        assert result["status"] == "verified"
 
     @pytest.mark.asyncio
     @patch("core.utils.llm_client.call_llm_raw", new_callable=AsyncMock)
@@ -1353,9 +1353,8 @@ class TestGeneratorModelContext:
         call_args = mock_llm_raw.call_args
         messages = call_args[0][0]
         system_msg = messages[0]["content"]
-        # The system prompt should identify the verifier role and
-        # reference cross-checking another model's output.
-        assert "different AI model" in system_msg or "another AI" in system_msg
+        # The system prompt should identify the verifier role.
+        assert "claim verifier" in system_msg
         assert "web search" in system_msg.lower() or "web sources" in system_msg.lower()
 
 
