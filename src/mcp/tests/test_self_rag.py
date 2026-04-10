@@ -146,9 +146,13 @@ class TestWithMetadata:
 # ---------------------------------------------------------------------------
 
 class TestAssessClaims:
+    """_assess_claims now uses NLI entailment instead of pure similarity.
+    Mock nli_score to control the entailment/contradiction scores."""
+
     @pytest.mark.asyncio
+    @patch("core.utils.nli.nli_score", return_value={"entailment": 0.85, "contradiction": 0.0, "neutral": 0.15, "label": "entailment"})
     @patch("core.agents.query_agent.multi_domain_query", new_callable=AsyncMock)
-    async def test_covered_claim(self, mock_mdq):
+    async def test_covered_claim(self, mock_mdq, _mock_nli):
         mock_mdq.return_value = _make_multi_domain_result(relevance=0.8)
         assessments = await _assess_claims(["Python uses GIL"], MagicMock(), threshold=0.5)
         assert len(assessments) == 1
@@ -156,8 +160,9 @@ class TestAssessClaims:
         assert assessments[0]["max_similarity"] == 0.8
 
     @pytest.mark.asyncio
+    @patch("core.utils.nli.nli_score", return_value={"entailment": 0.1, "contradiction": 0.0, "neutral": 0.9, "label": "neutral"})
     @patch("core.agents.query_agent.multi_domain_query", new_callable=AsyncMock)
-    async def test_weak_claim(self, mock_mdq):
+    async def test_weak_claim(self, mock_mdq, _mock_nli):
         mock_mdq.return_value = _make_multi_domain_result(relevance=0.3)
         assessments = await _assess_claims(["obscure fact"], MagicMock(), threshold=0.5)
         assert assessments[0]["covered"] is False
@@ -172,11 +177,17 @@ class TestAssessClaims:
         assert assessments[0]["max_similarity"] == 0.0
 
     @pytest.mark.asyncio
+    @patch("core.utils.nli.nli_score")
     @patch("core.agents.query_agent.multi_domain_query", new_callable=AsyncMock)
-    async def test_multiple_claims(self, mock_mdq):
+    async def test_multiple_claims(self, mock_mdq, mock_nli):
         mock_mdq.side_effect = [
             _make_multi_domain_result(relevance=0.9),
             _make_multi_domain_result(relevance=0.2),
+        ]
+        # First claim: strong entailment → covered.  Second: weak → not covered.
+        mock_nli.side_effect = [
+            {"entailment": 0.9, "contradiction": 0.0, "neutral": 0.1, "label": "entailment"},
+            {"entailment": 0.1, "contradiction": 0.0, "neutral": 0.9, "label": "neutral"},
         ]
         assessments = await _assess_claims(["strong", "weak"], MagicMock(), threshold=0.5)
         assert assessments[0]["covered"] is True

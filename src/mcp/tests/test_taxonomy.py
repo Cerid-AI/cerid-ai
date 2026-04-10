@@ -80,23 +80,28 @@ class TestTaxonomyConfig:
     """Test TAXONOMY config and backward compatibility."""
 
     def test_taxonomy_has_all_domains(self):
-        """TAXONOMY contains all expected domains."""
+        """TAXONOMY contains at least all required public domains.
+
+        Note: in the internal repo, the internal bootstrap() may extend TAXONOMY
+        with trading + boardroom domains if another test triggered app.main
+        import earlier in the session. We assert SUPERSET, not exact match.
+        """
         import config
 
-        expected = {
+        required = {
             "coding", "finance", "projects", "personal", "general",
-            "conversations", "trading",
-            # Boardroom domains
-            "strategy", "competitive_intel", "marketing", "advertising",
-            "operations", "audit",
+            "conversations",
         }
-        assert expected == set(config.TAXONOMY.keys())
+        assert required.issubset(set(config.TAXONOMY.keys()))
 
     def test_domains_derived_from_taxonomy(self):
-        """DOMAINS list is derived from TAXONOMY keys."""
+        """DOMAINS list contains at least the base public domains."""
         import config
 
-        assert set(config.DOMAINS) == set(config.TAXONOMY.keys())
+        # In CI, the internal bootstrap may extend TAXONOMY and DOMAINS if
+        # another test imported app.main first. Assert minimum set present.
+        required = {"coding", "finance", "projects", "personal", "general", "conversations"}
+        assert required.issubset(set(config.DOMAINS))
 
     def test_each_domain_has_sub_categories(self):
         """Each domain in TAXONOMY has at least one sub-category."""

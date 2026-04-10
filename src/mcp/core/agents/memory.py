@@ -591,7 +591,28 @@ async def recall_memories(
             base_score=base_similarity,
             access_count=access_count,
             age_days=age_days,
+            memory_type=metadata.get("memory_type", "decision"),
         )
+
+        # Per-type minimum recall threshold
+        type_min = config.MEMORY_MIN_RECALL_BY_TYPE.get(
+            metadata.get("memory_type", "decision"),
+            config.MEMORY_MIN_RECALL_SCORE,
+        )
+        if adjusted_score < type_min:
+            continue
+
+        # NLI relevance check — ensure memory is semantically relevant, not just keyword match
+        try:
+            from core.utils.nli import nli_score
+            doc = results["documents"][0][i] if results["documents"] else ""
+            mem_nli = nli_score(doc[:512], query)
+            if mem_nli["contradiction"] >= config.NLI_CONTRADICTION_THRESHOLD:
+                continue  # Memory contradicts query context — skip
+            if mem_nli["entailment"] < 0.3 and adjusted_score < 0.5:
+                continue  # Low entailment + low score = keyword match, not relevant
+        except Exception:
+            pass  # NLI unavailable — use adjusted_score as-is
 
         if adjusted_score >= min_score:
             scored_memories.append({

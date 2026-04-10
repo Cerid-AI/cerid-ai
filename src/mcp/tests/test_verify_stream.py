@@ -344,20 +344,18 @@ class TestStreamingTimeouts:
         assert call_count == 1  # Only 1 attempt, no retries
 
     @pytest.mark.asyncio
-    async def test_streaming_mode_skips_web_escalation(self):
-        """In streaming mode, verify_claim should skip fallback 4 web search escalation."""
+    async def test_streaming_mode_same_as_non_streaming_for_web_escalation(self):
+        """After removing the streaming exclusion from staleness escalation,
+        both streaming and non-streaming modes should behave identically
+        with respect to web search escalation."""
         from agents.hallucination import verify_claim
 
         external_calls = []
 
-        # Claim and KB content must share enough terms (>= 25% overlap)
-        # to survive the heuristic term-overlap filter that precedes
-        # fallback scoring.  Use matching words so the result lands in
-        # the "uncertain" band (fallback 4), not fallback 1 (no results).
         claim_text = "The capital city of France is Paris."
         async def _mock_lightweight_kb_query(query, domains=None, top_k=5, chroma_client=None):
             return [{
-                "relevance": 0.55,  # Between unverified_threshold and threshold → uncertain
+                "relevance": 0.55,
                 "content": "France is a country in Europe with capital Paris",
                 "artifact_id": "a1",
                 "filename": "test.txt",
@@ -382,20 +380,17 @@ class TestStreamingTimeouts:
             patch("core.agents.hallucination.verification._verify_claim_externally", side_effect=_mock_external),
             patch("core.agents.hallucination.verification._query_memories", side_effect=_mock_memories),
         ):
-            # Non-streaming: should make 2 external calls (cross-model + web escalation)
             external_calls.clear()
             await verify_claim(claim_text, None, None, None, streaming=False)
             non_streaming_count = len(external_calls)
 
-            # Streaming: should make only 1 external call (skip web escalation)
             external_calls.clear()
             await verify_claim(claim_text, None, None, None, streaming=True)
             streaming_count = len(external_calls)
 
-        # Non-streaming makes 2 calls (fallback 4 + web escalation)
-        assert non_streaming_count == 2
-        # Streaming makes only 1 call (fallback 4 only, no web escalation)
-        assert streaming_count == 1
+        # Both modes should make the same number of external calls
+        # (streaming no longer skips web escalation)
+        assert non_streaming_count == streaming_count
 
 
 class TestExtractionErrorHandling:

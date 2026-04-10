@@ -126,6 +126,10 @@ CURRENT_EVENT_PATTERNS = [
     re.compile(r"(?:€|\$|£|¥|₹)\s*\d+[\d.,]*\b", re.I),       # currency symbols + amounts
     re.compile(r"\b(?:costs?|prices?|fees?|fares?|rates?|charges?|subscription|salary|salaries|wages?)\b.*\b(?:\d+[\d.,]*)\b", re.I),
     re.compile(r"\b(?:ticket|admission|entry|membership)\b.*\b(?:€|\$|£|¥|₹|\d+[\d.,]*)\b", re.I),
+    # Additional current-event patterns
+    re.compile(r"\b(?:just|recently)\s+(?:announced|released|launched|reported)\b", re.I),
+    re.compile(r"\b(?:as of|since)\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\b", re.I),
+    re.compile(r"\bnew(?:est|ly)?\s+(?:data|report|study|findings|numbers|statistics)\b", re.I),
 ]
 
 # Patterns that indicate a verification model's response admits stale knowledge.
