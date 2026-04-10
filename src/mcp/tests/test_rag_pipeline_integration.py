@@ -403,8 +403,11 @@ class TestMemoryRecallIntegration:
         # core.utils.nli import nli_score`` inside recall_memories picks up
         # our mock even when the real module isn't installed on the host.
         _nli_rv = {"contradiction": 0.05, "entailment": 0.15, "neutral": 0.80, "label": "neutral"}
-        _nli_mock = MagicMock(nli_score=MagicMock(return_value=_nli_rv))
-        with patch.dict("sys.modules", {"core.utils.nli": _nli_mock}):
+        # Patch nli_score at the source module — covers both fresh import
+        # (host) and cached import (CI Docker where the real module exists).
+        _nli_mock_mod = MagicMock(nli_score=MagicMock(return_value=_nli_rv))
+        with patch.dict("sys.modules", {"core.utils.nli": _nli_mock_mod}), \
+             patch("core.utils.nli.nli_score", return_value=_nli_rv, create=True):
             memories = await recall_memories(
                 query="Python best practices",
                 chroma_client=client,
@@ -413,7 +416,10 @@ class TestMemoryRecallIntegration:
                 min_score=0.3,
             )
 
-        # NLI entailment < 0.3 AND adjusted_score < 0.5 -> filtered
+        # NLI entailment < 0.3 AND adjusted_score < 0.5 -> filtered.
+        # If NLI mock didn't take effect (race condition), the memory may
+        # still be filtered by the per-type threshold (project_context=0.45,
+        # and 10-day decay reduces score below that).
         assert len(memories) == 0, (
             "Keyword-only match with low NLI entailment should be filtered"
         )
