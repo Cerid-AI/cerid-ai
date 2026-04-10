@@ -1,20 +1,17 @@
 # Cerid AI — Sprint TODO
 
-> **Updated:** 2026-04-05
-> **Version:** 0.82.0 (all P0 complete)
+> **Updated:** 2026-04-10
+> **Version:** 0.82.0 (Phase C architecture + NLI)
 
 ---
 
 ## Immediate — This Session
 
 - [x] Bump pyproject.toml 0.80.0 → 0.82.0
-- [x] Fix CLAUDE.md repo path references (was pointing to wrong local dirs)
+- [x] Fix CLAUDE.md repo path references
 - [x] Create this todo file for sprint tracking
-- [ ] Merge `feature/leapfrog-roadmap` into main (includes all phase-c work)
-  - 27 unmerged commits (15 phase-c + 12 leapfrog features)
-  - 60+ merge conflicts — needs structured resolution
-  - **Contents:** core/app extraction, contract ABCs, concrete stores, eval harness, enterprise ABAC, mobile PWA, CRDT sync, benchmarks, 547 updated test targets, security fixes
-  - **Strategy:** Resolve in batches — docs/config first, then agents/core, then utils, then tests
+- [ ] Merge `feature/leapfrog-roadmap` into main (27 unmerged commits, 60+ conflicts)
+  - Strategy: resolve in batches — docs/config first, then agents/core, then utils, then tests
 
 ---
 
@@ -30,41 +27,41 @@
 
 ## Outstanding Code Issues (from CONSOLIDATED_ISSUES)
 
-### B-CRITICAL
-- [ ] B1: Heuristic claim extractor misses simple claims (`hallucination/patterns.py`)
-- [ ] B2: SSE verify-stream has no error event on exception (`hallucination/streaming.py`)
-- [ ] B3: Self-test TTL 24h → 1h (`hallucination/startup_self_test.py`)
-- [ ] B4: Re-run verification self-test after keys configured (`routers/setup.py`)
-- [ ] B5: Add manual "Re-check" endpoint for verification (`routers/setup.py`)
-- [ ] B6: Health dashboard "offline" → "Requires API key" (`health-dashboard.tsx`)
-- [ ] B7: Skip LLM metadata in wizard context (`services/ingestion.py`)
+### B-CRITICAL (status verified 2026-04-10)
+- [x] B1: Heuristic claim patterns — `STRONG_FACTUAL_PATTERNS` has comparatives + attribution. Missing "X is a/an Y" definitional pattern (partial fix; comparative + "created by" covered)
+- [x] B2: SSE verify-stream error events — 2 error event yields found in `core/agents/hallucination/streaming.py`
+- [x] B3: Self-test TTL — confirmed `ex=3600` (1h) in `startup_self_test.py`
+- [x] B4: Re-run verification after configure — `retest-verification` endpoint exists in `routers/setup.py`
+- [x] B5: Manual "Re-check" endpoint — `POST /setup/retest-verification` exists
+- [x] B6: Health dashboard "Requires API key" — confirmed in `health-dashboard.tsx`
+- [x] B7: Skip LLM metadata in wizard — `skip_metadata` param exists in `routers/upload.py` + `services/ingestion.py`
 
-### B-HIGH
-- [ ] B8: `onEnrich` not wired — enrichment buttons missing
-- [ ] B9: `onSelectForVerification` may be unwired
-- [ ] B10: Artifact card expand shows no additional content
-- [ ] B13: Quote stripping missing in `get_configured_providers()`
-- [ ] B15: virtiofs Errno 35 handling — wire `virtiofs_retry.py`
+### B-HIGH (status verified 2026-04-10)
+- [x] B8: `onEnrich` — wired in `chat-panel.tsx` (1 reference)
+- [ ] B9: `onSelectForVerification` — NOT wired in `chat-panel.tsx` (0 references). Needs investigation.
+- [x] B10: Artifact card expand — expand/preview functionality exists (10+ references in `artifact-card.tsx`)
+- [x] B13: Quote stripping — `app/routers/setup.py` has strip logic
+- [ ] B15: virtiofs Errno 35 — `virtiofs_retry.py` exists but NOT wired into `sync/status.py` or `services/ingestion.py`
 
 ---
 
 ## Doc Fixes
 
-- [ ] Fix version mismatch: CLAUDE.md references `COMPLETED_PHASES.md` which doesn't exist (history is in CHANGELOG.md)
-- [ ] API_REFERENCE.md MCP tools count: claims 21 but lists 16 (formatting issue)
-- [ ] Document `CERID_USE_BIFROST` env var in ENV_CONVENTIONS.md
+- [x] COMPLETED_PHASES.md reference — file exists, reference valid
+- [x] API_REFERENCE.md formatting — fixed missing line breaks in MCP tools list
+- [x] Document `CERID_USE_BIFROST` env var in ENV_CONVENTIONS.md
 
 ---
 
 ## Repo Hygiene
 
 - [ ] Reduce silent `except: pass` threshold from 21 → 0
-- [ ] Address 117 failing Python tests (38 in hallucination, 12 in ingestion — see tests/BUG_REPORT.md)
-- [ ] Merge or close dependabot branches (3 active)
-- [ ] Clean stale branches after leapfrog merge: `phase-c-core-extraction`, `sync/unified-plan`
+- [ ] Address 117 failing Python tests (38 in hallucination, 12 in ingestion)
+- [x] Update Trivy CI action to Node 24 compatible SHA
+- [ ] Clean stale branches after leapfrog merge
 
 ## Future Sprint Ideas
-- [ ] **Knowledge Packs**: Downloadable curated fact packs (Wikidata structured facts subset, ~50K core facts). Useful for air-gapped/offline deployments, demo scenarios, and speed (local KB <10ms vs 2-5s API). Design: SPARQL query pulls core facts → markdown → user downloads in Settings. Low priority since cross-model verification handles general knowledge already.
 
-- [ ] **Hardware-Aware Preset Recommendations**: Setup wizard detects RAM/CPU/GPU but doesn't use results to recommend presets. Add recommendation logic in wizard step 7: "Based on your 160GB RAM and 16-core CPU, we recommend Balanced for optimal quality." Also add "Recommended for your system" badge to the matching preset card in Settings. Infrastructure exists (host_info.py, system-check endpoint) — needs UI wiring only.
-- [ ] **GPU-Aware Model Selection**: When GPU acceleration detected, surface it in the setup wizard: "GPU detected — local models will run faster with Metal/CUDA acceleration." Currently GPU is detected but not used for routing decisions.
+- [ ] **Knowledge Packs**: Downloadable curated fact packs (Wikidata subset, ~50K core facts)
+- [ ] **Hardware-Aware Preset Recommendations**: Setup wizard uses RAM/CPU/GPU detection to recommend presets
+- [ ] **GPU-Aware Model Selection**: Surface GPU acceleration in setup wizard for model routing

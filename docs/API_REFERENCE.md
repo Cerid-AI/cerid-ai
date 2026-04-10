@@ -152,12 +152,15 @@
 - `pkb_rectify` — Knowledge base health checks and auto-fix
 - `pkb_audit` — Audit reports (activity, ingestion, costs, queries, conversations)
 - `pkb_maintain` — Maintenance routines (health, stale, collections, orphans)
-- `pkb_curate` — Score artifact quality across the knowledge base- `pkb_digest` — Summary of recent KB activity, connections, and health status
+- `pkb_curate` — Score artifact quality across the knowledge base
+- `pkb_digest` — Summary of recent KB activity, connections, and health status
 - `pkb_scheduler_status` — Get status of scheduled maintenance jobs
-- `pkb_check_hallucinations` — Verify LLM claims against KB- `pkb_memory_extract` — Extract memories from conversations- `pkb_memory_archive` — Archive old conversation memories- `pkb_ingest_multimodal` — Multi-modal ingestion (OCR, audio, vision)
-
-**Additional tools:**
-- `pkb_web_search` — Agentic web search with verification- `pkb_memory_recall` — Context-aware memory retrieval with decay scoring
+- `pkb_check_hallucinations` — Verify LLM claims against KB
+- `pkb_memory_extract` — Extract memories from conversations
+- `pkb_memory_archive` — Archive old conversation memories
+- `pkb_ingest_multimodal` — Multi-modal ingestion (OCR, audio, vision)
+- `pkb_web_search` — Agentic web search with verification
+- `pkb_memory_recall` — Context-aware memory retrieval with decay scoring
 ### SDK Router (`/sdk/v1/`) — Stable External API
 
 Versioned facade for external consumers. Delegates to existing agent endpoints but provides a stable contract that survives internal refactoring.
