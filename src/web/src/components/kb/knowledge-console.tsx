@@ -243,9 +243,9 @@ function ConsoleConfigBar({
   ragMode: RagMode
   onRagModeChange: (mode: RagMode) => void
 }) {
-  const [reranking, setReranking] = useState(() => readLocalBool("cerid-console-reranking", true))
-  const [graphRag, setGraphRag] = useState(() => readLocalBool("cerid-console-graph-rag", false))
+  const [selfRag, setSelfRag] = useState(() => readLocalBool("cerid-console-self-rag", false))
   const [queryDecomp, setQueryDecomp] = useState(() => readLocalBool("cerid-console-query-decomp", false))
+  const [semanticCache, setSemanticCache] = useState(() => readLocalBool("cerid-console-semantic-cache", false))
   const [topK, setTopK] = useState(() => readLocalNumber("cerid-console-top-k", 10))
 
   const persistBool = useCallback((key: string, value: boolean, serverKey?: string) => {
@@ -253,19 +253,19 @@ function ConsoleConfigBar({
     if (serverKey) updateSettings({ [serverKey]: value } as Record<string, boolean>).catch(() => { /* noop */ })
   }, [])
 
-  const handleReranking = useCallback((v: boolean) => {
-    setReranking(v)
-    persistBool("cerid-console-reranking", v)
-  }, [persistBool])
-
-  const handleGraphRag = useCallback((v: boolean) => {
-    setGraphRag(v)
-    persistBool("cerid-console-graph-rag", v)
+  const handleSelfRag = useCallback((v: boolean) => {
+    setSelfRag(v)
+    persistBool("cerid-console-self-rag", v, "enable_self_rag")
   }, [persistBool])
 
   const handleQueryDecomp = useCallback((v: boolean) => {
     setQueryDecomp(v)
     persistBool("cerid-console-query-decomp", v, "enable_query_decomposition")
+  }, [persistBool])
+
+  const handleSemanticCache = useCallback((v: boolean) => {
+    setSemanticCache(v)
+    persistBool("cerid-console-semantic-cache", v, "enable_semantic_cache")
   }, [persistBool])
 
   const handleTopK = useCallback((v: number[]) => {
@@ -290,24 +290,70 @@ function ConsoleConfigBar({
             <Settings2 className="h-3.5 w-3.5" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-56 space-y-3 p-3" align="end">
+        <PopoverContent className="w-64 space-y-3 p-3" align="end">
           <p className="text-xs font-medium">Pipeline Settings</p>
 
+          {/* Self-RAG toggle */}
           <div className="flex items-center justify-between">
-            <Label className="text-[11px]">Reranking</Label>
-            <Switch checked={reranking} onCheckedChange={handleReranking} className="scale-75" />
+            <TooltipProvider delayDuration={0}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Label className="text-[11px] cursor-help border-b border-dotted border-muted-foreground/40">Self-RAG</Label>
+                </TooltipTrigger>
+                <TooltipContent side="left" className="max-w-[200px] text-xs">
+                  Validates response claims against KB. Adds ~1s latency.
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            <Switch checked={selfRag} onCheckedChange={handleSelfRag} className="scale-75" />
           </div>
 
+          {/* Query Decomposition toggle */}
           <div className="flex items-center justify-between">
-            <Label className="text-[11px]">Graph RAG</Label>
-            <Switch checked={graphRag} onCheckedChange={handleGraphRag} className="scale-75" />
-          </div>
-
-          <div className="flex items-center justify-between">
-            <Label className="text-[11px]">Query Decomposition</Label>
+            <TooltipProvider delayDuration={0}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Label className="text-[11px] cursor-help border-b border-dotted border-muted-foreground/40">Query Decomposition</Label>
+                </TooltipTrigger>
+                <TooltipContent side="left" className="max-w-[200px] text-xs">
+                  Splits complex queries into sub-queries for better coverage.
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
             <Switch checked={queryDecomp} onCheckedChange={handleQueryDecomp} className="scale-75" />
           </div>
 
+          {/* Semantic Cache toggle */}
+          <div className="flex items-center justify-between">
+            <TooltipProvider delayDuration={0}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Label className="text-[11px] cursor-help border-b border-dotted border-muted-foreground/40">Semantic Cache</Label>
+                </TooltipTrigger>
+                <TooltipContent side="left" className="max-w-[200px] text-xs">
+                  Caches similar queries to skip repeated retrieval. Saves ~500ms on cache hits.
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            <Switch checked={semanticCache} onCheckedChange={handleSemanticCache} className="scale-75" />
+          </div>
+
+          {/* NLI — read-only indicator */}
+          <div className="flex items-center justify-between">
+            <TooltipProvider delayDuration={0}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Label className="text-[11px] cursor-help border-b border-dotted border-muted-foreground/40">NLI Verification</Label>
+                </TooltipTrigger>
+                <TooltipContent side="left" className="max-w-[220px] text-xs">
+                  NLI entailment model validates KB evidence. Threshold: 0.7 entailment / 0.6 contradiction.
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            <Badge variant="secondary" className="text-[9px] px-1.5 py-0">Active</Badge>
+          </div>
+
+          {/* Top-K slider */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <Label className="text-[11px]">Top-K</Label>
