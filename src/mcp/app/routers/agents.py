@@ -215,6 +215,24 @@ async def agent_query_endpoint(req: AgentQueryRequest, request: Request):
         else:
             # Manual mode: KB gate check — if context_sources disables KB, skip retrieval
             _cs = req.context_sources or {}
+
+            # Launch external sources in parallel with KB (if enabled).
+            # Runs concurrently — no latency penalty when KB has results.
+            _ext_on = _cs.get("external", True)
+            _external_task = None
+            if _ext_on:
+                try:
+                    from utils.data_sources import registry
+                    _external_task = asyncio.create_task(
+                        registry.query_all(
+                            req.query,
+                            domain=req.domains[0] if req.domains else None,
+                            timeout=5.0,
+                        )
+                    )
+                except Exception:
+                    pass  # Registry unavailable — skip external
+
             if _cs.get("kb", True) is False:
                 result = {
                     "context": "", "sources": [], "confidence": 0.0,
@@ -241,6 +259,39 @@ async def agent_query_endpoint(req: AgentQueryRequest, request: Request):
                     skip_cache=req.skip_cache,
                     metadata_filter=req.metadata_filter,
                 )
+
+            # Merge external results (parallel task completes by now)
+            if _external_task is not None:
+                try:
+                    _ext_results = await _external_task
+                except Exception:
+                    _ext_results = []
+                if _ext_results:
+                    _DISCOUNT = 0.6
+                    for _raw in _ext_results:
+                        result.setdefault("results", []).append({
+                            "content": _raw.get("content", ""),
+                            "relevance": round(
+                                _raw.get("confidence", 0.8) * _DISCOUNT, 3,
+                            ),
+                            "source_url": _raw.get("source_url", ""),
+                            "source_name": _raw.get(
+                                "source_name", _raw.get("title", ""),
+                            ),
+                            "source_type": "external",
+                            "domain": "external",
+                            "artifact_id": "",
+                            "filename": _raw.get("source_name", ""),
+                            "chunk_id": "",
+                            "collection": "external",
+                        })
+                    result["total_results"] = len(result.get("results", []))
+                    if result.get("results"):
+                        result["confidence"] = round(
+                            sum(r["relevance"] for r in result["results"])
+                            / len(result["results"]),
+                            4,
+                        )
 
         # Self-RAG: validate claims and refine retrieval if enabled
         use_self_rag = req.enable_self_rag if req.enable_self_rag is not None else config.ENABLE_SELF_RAG
