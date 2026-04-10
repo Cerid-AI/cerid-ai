@@ -191,6 +191,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [lint, typecheck, test, security, lock-sync, frontend]
     timeout-minutes: 45
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v6
       - name: Lint Dockerfiles (hadolint)
@@ -235,7 +237,7 @@ jobs:
           CVE-2026-29111
           EOF
       - name: Scan MCP Docker image
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
+        uses: aquasecurity/trivy-action@f685ba7215360f3869e07df3fa6e2fe99b110407
         with:
           image-ref: cerid-mcp-test
           severity: CRITICAL,HIGH
@@ -243,7 +245,7 @@ jobs:
           trivyignores: .trivyignore
           version: v0.69.3
       - name: Scan Web Docker image
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
+        uses: aquasecurity/trivy-action@f685ba7215360f3869e07df3fa6e2fe99b110407
         with:
           image-ref: cerid-web-test
           severity: CRITICAL,HIGH
