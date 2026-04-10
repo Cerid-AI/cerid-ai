@@ -65,3 +65,6 @@
 
 ## Future Sprint Ideas
 - [ ] **Knowledge Packs**: Downloadable curated fact packs (Wikidata structured facts subset, ~50K core facts). Useful for air-gapped/offline deployments, demo scenarios, and speed (local KB <10ms vs 2-5s API). Design: SPARQL query pulls core facts → markdown → user downloads in Settings. Low priority since cross-model verification handles general knowledge already.
+
+- [ ] **Hardware-Aware Preset Recommendations**: Setup wizard detects RAM/CPU/GPU but doesn't use results to recommend presets. Add recommendation logic in wizard step 7: "Based on your 160GB RAM and 16-core CPU, we recommend Balanced for optimal quality." Also add "Recommended for your system" badge to the matching preset card in Settings. Infrastructure exists (host_info.py, system-check endpoint) — needs UI wiring only.
+- [ ] **GPU-Aware Model Selection**: When GPU acceleration detected, surface it in the setup wizard: "GPU detected — local models will run faster with Metal/CUDA acceleration." Currently GPU is detected but not used for routing decisions.
