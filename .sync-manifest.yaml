@@ -61,6 +61,8 @@ internal_only:
   - src/mcp/routers/trading_proxy.py
   - src/mcp/tests/test_router_sdk.py
   - tests/test_e2e_integration.py
+  # Frontend files that use types_internal.ts
+  - src/web/src/components/settings/plugins-section.tsx
   # Bridge-layer copies of internal-only modules
   - src/mcp/routers/trading_proxy.py
   - src/mcp/routers/alerts.py
@@ -106,8 +108,7 @@ mixed_files:
     hook_marker: null  # Internal deps stripped by keyword (structlog, stripe)
   - path: src/mcp/requirements.lock
     hook_marker: null  # Lock file handled separately (regenerated)
-  - path: src/web/src/components/settings/plugins-section.tsx
-    hook_marker: null  # Internal import differs
+  # plugins-section.tsx is internal_only (uses types_internal.ts imports)
 
 # Strings that must NEVER appear in the public repo (leak detection).
 # These are precise patterns — avoid overly broad matches like "_internal"
