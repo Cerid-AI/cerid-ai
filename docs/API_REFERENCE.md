@@ -137,9 +137,9 @@
 - `POST /mcp/sse` — SSE stream (POST variant)
 - `POST /mcp/messages?sessionId=X` — JSON-RPC handler
 
-### MCP Tools (26 total)
+### MCP Tools (21 total)
 
-**Core tools (19):**
+**Core tools (21):**
 - `pkb_query` — Single-domain query
 - `pkb_ingest` — Ingest raw text
 - `pkb_ingest_file` — Ingest a file with parsing and metadata
