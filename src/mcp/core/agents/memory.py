@@ -33,7 +33,10 @@ logger = logging.getLogger("ai-companion.memory")
 # Constants
 # ---------------------------------------------------------------------------
 MIN_RESPONSE_LENGTH = 100
-MEMORY_TYPES = {"fact", "decision", "preference", "action_item"}
+MEMORY_TYPES = {
+    "empirical", "decision", "preference", "project_context", "temporal", "conversational",
+    "fact", "action_item",  # Legacy aliases
+}
 
 
 # ---------------------------------------------------------------------------
