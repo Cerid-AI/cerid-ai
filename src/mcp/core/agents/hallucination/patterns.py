@@ -18,8 +18,12 @@ import config
 # Constants — configurable via env vars in config/settings.py
 # ---------------------------------------------------------------------------
 
-# Memory types that count as user-confirmed facts for verification
-MEMORY_TYPES = ["fact", "decision", "preference", "action_item"]
+# Memory types that count as user-confirmed facts for verification.
+# Must match config.settings.MEMORY_TYPES + legacy "fact"/"action_item" aliases.
+MEMORY_TYPES = [
+    "empirical", "decision", "preference", "project_context", "temporal", "conversational",
+    "fact", "action_item",  # Legacy aliases — some older memories use these names
+]
 
 # Authority boost for memory-sourced results (user-confirmed content)
 MEMORY_AUTHORITY_BOOST = 0.15
