@@ -1670,6 +1670,31 @@ async def verify_claim(
             _nli = {"entailment": 0.0, "contradiction": 0.0, "neutral": 1.0, "label": "neutral"}
 
         if _nli["entailment"] >= config.NLI_ENTAILMENT_THRESHOLD:
+            # For recency/current-event claims, even strong NLI entailment needs
+            # web search validation — KB evidence may be semantically correct but stale.
+            _is_temporal = (
+                _is_recency_claim(claim)
+                or _is_current_event_claim(claim)
+            )
+            if _is_temporal:
+                logger.debug(
+                    "NLI entailed but temporal claim — verifying freshness via web search: %r",
+                    claim[:60],
+                )
+                ext_result = await _verify_claim_externally(
+                    claim,
+                    model,
+                    force_web_search=True,
+                    streaming=streaming,
+                    expert_mode=expert_mode,
+                    response_context=response_context,
+                    claim_context=claim_context,
+                    kb_snippet=_top_snippet,
+                )
+                if ext_result and ext_result.get("status") in ("verified", "unverified"):
+                    return await _cache_result(ext_result)
+                # If web search inconclusive, use NLI entailment verdict below
+
             return await _cache_result({
                 "claim": claim,
                 "status": "verified",
@@ -1702,7 +1727,33 @@ async def verify_claim(
             })
 
         if similarity >= threshold:
-            # NLI neutral — fall back to similarity-based verification.
+            # NLI neutral — fall back to similarity-based checks.
+            # BUT: recency/current-event claims MUST escalate to web search even
+            # when KB similarity is high — stale data can match with high similarity.
+            _is_temporal = (
+                _is_recency_claim(claim)
+                or _is_current_event_claim(claim)
+            )
+            if _is_temporal:
+                # Force web search for temporal claims despite high KB similarity
+                logger.debug(
+                    "NLI neutral + high similarity but temporal claim — escalating to web search: %r",
+                    claim[:60],
+                )
+                ext_result = await _verify_claim_externally(
+                    claim,
+                    model,
+                    force_web_search=True,
+                    streaming=streaming,
+                    expert_mode=expert_mode,
+                    response_context=response_context,
+                    claim_context=claim_context,
+                    kb_snippet=_top_snippet,
+                )
+                if ext_result and ext_result.get("status") in ("verified", "unverified"):
+                    return await _cache_result(ext_result)
+                # If web search was inconclusive, fall through to KB verdict below
+
             return await _cache_result({
                 "claim": claim,
                 "status": "verified",
