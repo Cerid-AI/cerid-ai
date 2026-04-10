@@ -18,6 +18,7 @@ from app.eval.ragas_metrics import (
     context_recall,
     evaluate_all,
     faithfulness,
+    faithfulness_llm,
 )
 
 # ---------------------------------------------------------------------------
@@ -71,12 +72,14 @@ class TestParseScore:
 # Tests: faithfulness
 # ---------------------------------------------------------------------------
 
-class TestFaithfulness:
+class TestFaithfulnessLLM:
+    """Tests for the LLM-as-judge baseline (faithfulness_llm)."""
+
     @pytest.mark.asyncio
     async def test_calls_llm_with_contexts(self):
         mock_resp = json.dumps({"score": 0.9, "reasoning": "Supported"})
         with patch("app.eval.ragas_metrics.call_llm", new_callable=AsyncMock, return_value=mock_resp):
-            result = await faithfulness("Earth orbits the Sun", ["Astronomy textbook content"])
+            result = await faithfulness_llm("Earth orbits the Sun", ["Astronomy textbook content"])
         assert isinstance(result, MetricResult)
         assert result.score == 0.9
 
@@ -84,7 +87,7 @@ class TestFaithfulness:
     async def test_handles_empty_contexts(self):
         mock_resp = json.dumps({"score": 0.0, "reasoning": "No context"})
         with patch("app.eval.ragas_metrics.call_llm", new_callable=AsyncMock, return_value=mock_resp):
-            result = await faithfulness("Some claim", [])
+            result = await faithfulness_llm("Some claim", [])
         assert result.score == 0.0
 
 

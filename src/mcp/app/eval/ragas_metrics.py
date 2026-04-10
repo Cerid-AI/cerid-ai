@@ -59,7 +59,69 @@ async def faithfulness(
     *,
     model: str | None = None,
 ) -> MetricResult:
+    """RAGAS faithfulness -- NLI entailment scoring.
+
+    Decomposes answer into verifiable claims, checks each against
+    retrieved context via NLI entailment.
+    Score = entailed_claims / total_claims.
+
+    Falls back to LLM-as-judge if NLI model is unavailable.
+    """
+    try:
+        from core.agents.hallucination.extraction import _extract_claims_heuristic
+    except ImportError:
+        return await faithfulness_llm(answer, contexts, model=model)
+
+    claims = _extract_claims_heuristic(answer)
+    if not claims:
+        return MetricResult(score=1.0, reasoning="No verifiable claims extracted")
+
+    # Build context text (top 10 contexts, truncated for NLI window)
+    ctx_text = "\n\n".join(contexts[:10])[:2048]
+
+    try:
+        from core.utils.nli import nli_score
+    except Exception:
+        # NLI unavailable -- fall back to LLM judge
+        return await faithfulness_llm(answer, contexts, model=model)
+
+    import config
+
+    entailed = 0
+    contradicted = 0
+    details: list[str] = []
+
+    for claim in claims:
+        nli = nli_score(ctx_text[:512], claim)
+        if nli["entailment"] >= config.NLI_ENTAILMENT_THRESHOLD:
+            entailed += 1
+            details.append(f"ENTAILED: {claim[:80]}")
+        elif nli["contradiction"] >= config.NLI_CONTRADICTION_THRESHOLD:
+            contradicted += 1
+            details.append(f"CONTRADICTED: {claim[:80]}")
+        else:
+            details.append(f"NEUTRAL: {claim[:80]}")
+
+    score = entailed / len(claims)
+    return MetricResult(
+        score=round(score, 4),
+        reasoning=(
+            f"{entailed}/{len(claims)} claims entailed by context, "
+            f"{contradicted} contradicted. "
+            + "; ".join(details[:5])
+        ),
+    )
+
+
+async def faithfulness_llm(
+    answer: str,
+    contexts: list[str],
+    *,
+    model: str | None = None,
+) -> MetricResult:
     """Evaluate whether claims in the answer are supported by the contexts.
+
+    LLM-as-judge baseline — kept for comparison with NLI-based scoring.
 
     High score = answer is grounded in provided context.
     Low score = answer contains unsupported claims.
