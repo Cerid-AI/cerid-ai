@@ -2049,6 +2049,7 @@ requests==2.33.1 \
     #   posthog
     #   requests-oauthlib
     #   requests-toolbelt
+    #   stripe
     #   tiktoken
 requests-oauthlib==2.0.0 \
     --hash=sha256:7dd8a5c40426b779b0868c404bdef9768deccf22749cde15852df527e6269b36 \
@@ -2431,6 +2432,7 @@ typing-extensions==4.15.0 \
     #   python-docx
     #   referencing
     #   starlette
+    #   stripe
     #   typing-inspection
 typing-inspection==0.4.2 \
     --hash=sha256:4ed1cacbdc298c220f1bd249ed5287caa16f34d44ef4e9c3d0cbad5b521545e7 \

@@ -768,7 +768,7 @@ async def execute_tool(name: str, arguments: dict) -> Any:
 # -- Trading tools ------------------------------------------------------------
 # Below this line: internal-only bootstrap (stripped for public distribution)
 try:
-    from app.tools_internal import get_trading_tools, dispatch_trading_tool
+    from app.tools_internal import dispatch_trading_tool, get_trading_tools
     MCP_TOOLS.extend(get_trading_tools())
     _tool_dispatchers.append(dispatch_trading_tool)
 except ImportError:
