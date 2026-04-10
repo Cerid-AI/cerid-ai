@@ -392,7 +392,7 @@ class TestMemoryRecallIntegration:
                 "access_count": "0",
                 "summary": "Workshop attendance",
             }],
-            distances=[0.4],  # moderate similarity
+            distances=[0.7],  # lower similarity (distance = 0.7 → relevance ~0.3)
             ids=["mem-kw-1-chunk-0"],
         )
         client = _mock_chroma_client({"domain_conversations": coll})

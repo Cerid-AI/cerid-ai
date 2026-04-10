@@ -1234,7 +1234,9 @@ class TestStalenessEscalation:
             }]
         }
 
-        mock_llm_raw.side_effect = [stale_data, web_data]
+        # Provide enough responses for all possible LLM calls (initial verify,
+        # potential NLI temporal escalation, staleness web search escalation).
+        mock_llm_raw.side_effect = [stale_data, web_data, web_data]
 
         # Track call count so the initial routing call returns False
         # (non-current-event → cross_model path) but the staleness escalation
