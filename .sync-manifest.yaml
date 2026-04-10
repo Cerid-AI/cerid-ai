@@ -68,6 +68,9 @@ internal_only:
   - src/mcp/tests/test_benchmark_suite.py
   - src/mcp/tests/test_observability_alerts.py
   - src/mcp/tests/test_ragas_metrics.py
+  - src/mcp/tests/test_nli_ragas.py
+  - src/mcp/tests/test_migration.py
+  - src/mcp/tests/test_stores.py
   # Bridge-layer copies of internal-only modules
   - src/mcp/routers/trading_proxy.py
   - src/mcp/routers/alerts.py
