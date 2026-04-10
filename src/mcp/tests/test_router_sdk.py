@@ -154,13 +154,11 @@ class TestSDKHealth:
 
 class TestSDKTradingGate:
     def test_trading_endpoints_absent_when_disabled(self) -> None:
-        """When CERID_TRADING_ENABLED=false, /sdk/v1/trading/* routes should not exist."""
-        with patch("app.routers.sdk.CERID_TRADING_ENABLED", False):
-            # The routes are registered at import time based on CERID_TRADING_ENABLED.
-            # If trading is enabled in current module state, the routes exist regardless.
-            # This test verifies the concept — in production, the module-level if block
-            # prevents route registration when the flag is false at import time.
-            pass
+        """Trading endpoints were moved to sdk_internal.py.
+        Base sdk.py should NOT have any /sdk/v1/trading/* routes."""
+        app = _make_app()
+        trading_paths = [r.path for r in app.routes if hasattr(r, "path") and "/trading/" in getattr(r, "path", "")]
+        assert trading_paths == [], f"Base SDK router should not include trading routes, found: {trading_paths}"
 
     @pytest.mark.asyncio
     async def test_trading_signal_when_enabled(self) -> None:

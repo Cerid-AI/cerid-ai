@@ -17,7 +17,6 @@ from app.eval.ragas_metrics import (
     context_precision,
     context_recall,
     evaluate_all,
-    faithfulness,
     faithfulness_llm,
 )
 
@@ -142,13 +141,25 @@ class TestEvaluateAll:
     @pytest.mark.asyncio
     async def test_returns_all_four_metrics(self):
         mock_resp = json.dumps({"score": 0.8, "reasoning": "OK"})
-        with patch("app.eval.ragas_metrics.call_llm", new_callable=AsyncMock, return_value=mock_resp):
+        # faithfulness() now uses NLI-based scoring.  Mock nli_score so
+        # every claim is entailed, yielding score=1.0 for faithfulness.
+        # The other three metrics still go through call_llm.
+        _nli_rv = {"entailment": 0.9, "contradiction": 0.0, "neutral": 0.1, "label": "entailment"}
+        with (
+            patch("app.eval.ragas_metrics.call_llm", new_callable=AsyncMock, return_value=mock_resp),
+            patch("core.utils.nli.nli_score", return_value=_nli_rv),
+        ):
             results = await evaluate_all(
                 "What is Python?",
                 "Python is a language",
                 ["Python documentation"],
             )
         assert set(results.keys()) == {"faithfulness", "answer_relevancy", "context_precision", "context_recall"}
-        for v in results.values():
+        for key, v in results.items():
             assert isinstance(v, MetricResult)
-            assert v.score == 0.8
+            # faithfulness uses NLI (score=1.0 when all claims entailed),
+            # the rest use call_llm mock (score=0.8)
+            if key == "faithfulness":
+                assert v.score >= 0.8  # NLI-entailed or fallback LLM
+            else:
+                assert v.score == 0.8

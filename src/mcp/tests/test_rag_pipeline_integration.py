@@ -26,13 +26,13 @@ if "core.utils.embeddings" not in sys.modules:
     _emb_mock.l2_distance_to_relevance = lambda d: max(0.0, 1.0 - d / 2.0)
     sys.modules["core.utils.embeddings"] = _emb_mock
 
-from datetime import datetime, timezone
-from unittest.mock import patch
+from datetime import datetime, timezone  # noqa: E402
+from unittest.mock import patch  # noqa: E402
 
-import pytest
+import pytest  # noqa: E402
 
-from core.agents.memory import calculate_memory_score, recall_memories
-from core.agents.query_agent import (
+from core.agents.memory import calculate_memory_score, recall_memories  # noqa: E402
+from core.agents.query_agent import (  # noqa: E402
     _enrich_query,
     agent_query,
     assemble_context,
@@ -398,10 +398,14 @@ class TestMemoryRecallIntegration:
         client = _mock_chroma_client({"domain_conversations": coll})
         neo4j = _mock_neo4j()
 
-        # NLI shows low entailment — workshop attendance doesn't entail best practices
-        with patch("core.utils.nli.nli_score", return_value={
-            "contradiction": 0.05, "entailment": 0.15, "neutral": 0.80, "label": "neutral",
-        }):
+        # NLI shows low entailment — workshop attendance doesn't entail best practices.
+        # Patch both the module attribute and the lazy-import path so the
+        # mock is visible regardless of import timing.
+        _nli_rv = {"contradiction": 0.05, "entailment": 0.15, "neutral": 0.80, "label": "neutral"}
+        with (
+            patch("core.utils.nli.nli_score", return_value=_nli_rv),
+            patch("core.agents.memory.nli_score", return_value=_nli_rv, create=True),
+        ):
             memories = await recall_memories(
                 query="Python best practices",
                 chroma_client=client,

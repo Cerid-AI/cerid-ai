@@ -80,15 +80,12 @@ class TestTaxonomyConfig:
     """Test TAXONOMY config and backward compatibility."""
 
     def test_taxonomy_has_all_domains(self):
-        """TAXONOMY contains all expected domains."""
+        """TAXONOMY contains all expected public domains."""
         import config
 
         expected = {
             "coding", "finance", "projects", "personal", "general",
-            "conversations", "trading",
-            # Boardroom domains
-            "strategy", "competitive_intel", "marketing", "advertising",
-            "operations", "audit",
+            "conversations",
         }
         assert expected == set(config.TAXONOMY.keys())
 
