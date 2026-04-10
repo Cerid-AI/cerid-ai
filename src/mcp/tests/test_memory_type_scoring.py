@@ -199,9 +199,7 @@ class TestMemoryNliGate:
     """Verify the NLI relevance gate in recall_memories."""
 
     @pytest.mark.asyncio
-    @patch("core.agents.memory.nli_score", create=True)
-    @patch("core.agents.memory.l2_distance_to_relevance", return_value=0.85)
-    async def test_contradiction_memory_skipped(self, mock_rel, mock_nli):
+    async def test_contradiction_memory_skipped(self):
         """High contradiction score should cause memory to be filtered."""
         mock_nli_module = MagicMock()
         mock_nli_module.return_value = {
@@ -216,7 +214,7 @@ class TestMemoryNliGate:
             distances=[0.3],
         )
 
-        with patch("core.agents.memory.nli_score", mock_nli_module), \
+        with patch("core.utils.nli.nli_score", mock_nli_module), \
              patch("core.agents.memory.l2_distance_to_relevance", return_value=0.85):
             results = await recall_memories("What shape is the earth?", chroma, None)
 
@@ -238,7 +236,7 @@ class TestMemoryNliGate:
             distances=[1.2],  # higher L2 distance = lower similarity
         )
 
-        with patch("core.agents.memory.nli_score", mock_nli_fn), \
+        with patch("core.utils.nli.nli_score", mock_nli_fn), \
              patch("core.agents.memory.l2_distance_to_relevance", return_value=0.35):
             results = await recall_memories("Python GIL behavior", chroma, None)
 
@@ -260,7 +258,7 @@ class TestMemoryNliGate:
             distances=[0.2],
         )
 
-        with patch("core.agents.memory.nli_score", mock_nli_fn), \
+        with patch("core.utils.nli.nli_score", mock_nli_fn), \
              patch("core.agents.memory.l2_distance_to_relevance", return_value=0.9):
             results = await recall_memories("What is the Python GIL?", chroma, None)
 
@@ -279,7 +277,7 @@ class TestMemoryNliGate:
             distances=[0.2],
         )
 
-        with patch("core.agents.memory.nli_score", side_effect=nli_explodes), \
+        with patch("core.utils.nli.nli_score", side_effect=nli_explodes), \
              patch("core.agents.memory.l2_distance_to_relevance", return_value=0.85):
             results = await recall_memories("Tell me about Python", chroma, None)
 

@@ -459,12 +459,15 @@ class TestIgnoranceClaimRouting:
         ignorance claim -> verifier finds the info exists -> verdict INVERTED
         to 'unverified' (model should have known).
 
+        Note: the claim must NOT contain temporal markers like 'recent' that
+        would cause _reclassify_recency() to override the ignorance detection.
+
         The LLM returns 'supported' (the info exists), which _invert_ignorance_verdict
         flips to 'unverified'.
         """
         from core.agents.hallucination.verification import verify_claim
 
-        claim = "I don't have information about recent quantum computing advances"
+        claim = "I don't have information about quantum computing advances"
         mock_kb.return_value = []  # No KB match, falls to external
         mock_llm.return_value = _llm_verdict(
             verdict="supported", confidence=0.9,
