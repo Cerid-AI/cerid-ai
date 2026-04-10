@@ -35,8 +35,6 @@ const STATUS_BADGE: Record<PluginStatus, { label: string; className: string }> =
   installed: { label: "Installed", className: "bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-500/30" },
   disabled: { label: "Disabled", className: "bg-zinc-500/15 text-zinc-500 dark:text-zinc-400 border-zinc-500/30" },
   error: { label: "Error", className: "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30" },
-  requires_pro: { label: "Requires Pro", className: "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30" },
-  requires_enterprise: { label: "Requires Enterprise", className: "bg-purple-500/15 text-purple-700 dark:text-purple-400 border-purple-500/30" },
 }
 
 function pluginIcon(capabilities: string[]) {
@@ -71,7 +69,7 @@ function PluginCard({ plugin, onToggle, toggling }: PluginCardProps) {
 
   const badge = STATUS_BADGE[plugin.status] ?? STATUS_BADGE.disabled
   const Icon = pluginIconByName(plugin.name, plugin.capabilities)
-  const isProLocked = plugin.status === "requires_pro"
+  const isProLocked = false  // Pro tier gating not available in public distribution
 
   const loadConfig = useCallback(async () => {
     if (config !== null) return
