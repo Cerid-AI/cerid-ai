@@ -305,6 +305,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.debug("Pre-warm embedding model failed: %s", e)
 
+    # Warm up NLI model (non-blocking, swallows exceptions)
+    try:
+        from core.utils.nli import warmup as nli_warmup
+        nli_warmup()
+    except Exception:
+        logger.warning("NLI model warmup failed — will load on first verification")
+
     yield
 
     # Shutdown: stop scheduler, flush caches, close connections, clear MCP sessions
