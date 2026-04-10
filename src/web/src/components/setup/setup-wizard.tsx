@@ -796,6 +796,12 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
                 ollamaModel: state.ollama.model,
                 documentCount: state.firstDoc.ingested ? 1 : 0,
               }}
+              hardware={state.systemCheck ? {
+                ram_gb: state.systemCheck.ram_gb,
+                cpu: state.systemCheck.cpu,
+                gpu: state.systemCheck.gpu,
+                gpu_acceleration: state.systemCheck.gpu_acceleration,
+              } : null}
             />
           )}
         </div>
