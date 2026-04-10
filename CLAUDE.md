@@ -7,11 +7,22 @@
 
 This is the **internal** canonical development repo. The **public** repo (`Cerid-AI/cerid-ai`) is a lean Apache-2.0 distribution. They are NOT mirrors.
 
-**NEVER copy files wholesale from one repo to the other.** Each repo has files that must only exist in that repo. When syncing changes:
+**Use the automated sync script** — never copy files manually between repos:
 
-1. **Internal → Public:** Cherry-pick individual commits or copy specific files. ALWAYS check each file against the exclusion list below before copying.
-2. **Public → Internal:** Same discipline. The public repo has trading/boardroom/billing code REMOVED. Copying `settings.py`, `agents.py`, `sdk.py`, `main.py`, or `taxonomy.py` from public to internal will DELETE internal-only config (trading, boardroom, billing, enterprise).
-3. **NEVER rsync or bulk-copy** `src/mcp/config/`, `src/mcp/app/routers/`, or `src/mcp/app/main.py` between repos without reviewing every file.
+```bash
+python3 scripts/sync-repos.py to-public [--dry-run]    # Internal → Public
+python3 scripts/sync-repos.py from-public [--dry-run]   # Public → Internal
+python3 scripts/sync-repos.py validate                  # Check for leaks
+```
+
+The script reads `.sync-manifest.yaml` which declares internal-only files, mixed files (truncated at hook markers), and forbidden strings. Internal-only code lives in `*_internal.py` files that are never copied to public. Mixed files have `# -- Internal ...` hook markers — everything below the marker is stripped for public.
+
+**Key architecture (as of 2026-04-10):**
+- Internal-only code extracted to `*_internal.py` companion files (7 Python + 1 TypeScript)
+- `app/main_internal.py` bootstraps all internal features: `extend_settings()` → `extend_taxonomy()` → register routers
+- NLI entailment service at `core/utils/nli.py` (ONNX, <10ms) powers verification, Self-RAG, RAGAS, and RAG pipeline
+- Source authority: chat transcripts discounted 0.35x, memories retain full relevance
+- External sources (Wikipedia, DuckDuckGo, etc.) run in parallel with KB queries
 
 **Files that DIFFER between repos (internal has MORE):**
 
