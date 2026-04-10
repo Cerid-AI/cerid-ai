@@ -17,10 +17,51 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Database, ToggleLeft, CreditCard, ExternalLink, Globe, Shield, AlertTriangle } from "lucide-react"
-import { fetchDataSources, enableDataSource, disableDataSource, fetchSetupStatus, fetchHealthStatus } from "@/lib/api"
+import { Database, ToggleLeft, CreditCard, ExternalLink, Globe, Shield, AlertTriangle, Cpu, Zap } from "lucide-react"
+import { fetchDataSources, enableDataSource, disableDataSource, fetchSetupStatus, fetchHealthStatus, fetchSystemCheck } from "@/lib/api"
 import { SectionHeading, LabelWithInfo, Row, ToggleRow, SliderRow } from "./settings-primitives"
 import { assessRuntime, fromHealthStatus, CAPABILITY_STATUS_DOT, COST_PROFILE_LABELS } from "@/lib/provider-capabilities"
+
+/** Shows hardware-based recommendation for the current UI mode. */
+function HardwareRecommendation() {
+  const { data: hw } = useQuery({
+    queryKey: ["system-check"],
+    queryFn: fetchSystemCheck,
+    staleTime: 60_000,
+    retry: 1,
+  })
+
+  if (!hw || hw.ram_gb === 0) return null
+
+  const gpuAvailable = hw.gpu_acceleration !== "none"
+  const capable = hw.ram_gb >= 16 || gpuAvailable
+
+  return (
+    <div className="mb-4 rounded-lg border bg-card px-3 py-2.5">
+      <div className="flex items-center gap-2 mb-1.5">
+        <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
+        <span className="text-xs font-medium">System</span>
+        <span className="text-[10px] text-muted-foreground ml-auto">
+          {hw.ram_gb}GB RAM · {hw.cpu_cores ?? "?"} cores
+          {gpuAvailable && ` · ${hw.gpu_acceleration}`}
+        </span>
+      </div>
+      <p className="text-[10px] text-muted-foreground">
+        {capable
+          ? "Your hardware supports all features — Advanced mode recommended for full verification, reranking, and smart routing."
+          : "Simple mode recommended for smooth performance on your hardware. Switch to Advanced anytime if needed."}
+      </p>
+      {gpuAvailable && (
+        <div className="mt-1.5 flex items-center gap-1">
+          <Zap className="h-2.5 w-2.5 text-green-500" />
+          <span className="text-[9px] text-green-600 dark:text-green-400">
+            GPU acceleration active — embeddings and reranking use {hw.gpu_acceleration}
+          </span>
+        </div>
+      )}
+    </div>
+  )
+}
 
 interface EssentialsSectionProps {
   settings: ServerSettings
@@ -97,6 +138,9 @@ export function EssentialsSection({ settings, sections, toggleSection, patch, cr
       {sections.provider_status && (
         <ProviderStatusPanel settings={settings} />
       )}
+
+      {/* -- System Recommendation -- */}
+      <HardwareRecommendation />
 
       {/* -- Knowledge & Ingestion -- */}
       <SectionHeading icon={Database} label="Knowledge & Ingestion" open={sections.knowledge_ingestion} onToggle={() => toggleSection("knowledge_ingestion")} />
