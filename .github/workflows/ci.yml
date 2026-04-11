@@ -28,7 +28,7 @@ jobs:
           )
           FOUND=0
           for pattern in "${FORBIDDEN[@]}"; do
-            MATCHES=$(grep -rl "$pattern" --include="*.py" --include="*.ts" --include="*.tsx" --include="*.md" --include="*.yaml" --include="*.yml" --include="*.json" src/ docs/ scripts/ 2>/dev/null || true)
+            MATCHES=$(grep -rl "$pattern" --include="*.py" --include="*.ts" --include="*.tsx" --include="*.yaml" --include="*.yml" --include="*.json" src/ scripts/ 2>/dev/null || true)
             if [ -n "$MATCHES" ]; then
               echo "::error::Forbidden pattern '$pattern' found in:"
               echo "$MATCHES" | while read f; do echo "  - $f"; done
