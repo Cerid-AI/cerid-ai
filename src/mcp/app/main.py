@@ -693,11 +693,3 @@ app.include_router(sdk_openapi.router)
 def root():
     return {"service": "AI Companion MCP Server", "version": "1.0.0", "status": "running"}
 
-
-# -- Internal feature bootstrap -----------------------------------------------
-# Below this line: internal-only bootstrap (stripped for public distribution)
-try:
-    from app.main_internal import bootstrap_internal
-    bootstrap_internal(app)
-except ImportError:
-    pass
