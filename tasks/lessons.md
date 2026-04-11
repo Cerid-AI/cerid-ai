@@ -445,3 +445,9 @@
 - Knowledge Packs: Downloadable curated fact packs (Wikidata subset)
 - Hardware-Aware Preset Recommendations: Setup wizard should use detected RAM/CPU/GPU to recommend presets
 - GPU-Aware Model Selection: Surface GPU acceleration for local model routing
+
+### ALWAYS use sync-repos.py, NEVER manual file copy
+**When:** Syncing changes between internal and public repos.
+**Problem:** Multiple sessions manually copied files between repos (cp, direct edits), bypassing the sync manifest. This caused CLAUDE.md contamination (internal content in public), internal-only test files leaking to public, and stale worktrees with trading/boardroom content.
+**Fix:** ALWAYS use `python scripts/sync-repos.py to-public` for syncing. The sync manifest (.sync-manifest.yaml) has internal_only patterns, mixed_files with hook markers, and forbidden_in_public patterns. A `leak-check` CI job in the public repo now scans for forbidden patterns on every push.
+**Pattern:** Run `python scripts/sync-repos.py validate` before and after any sync operation. Never `cp` files directly.
