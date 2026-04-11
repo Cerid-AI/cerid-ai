@@ -46,14 +46,14 @@ export function StatusBar({ consoleOpen, onToggleConsole, consoleUnreadCount = 0
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="flex h-8 items-center gap-4 border-t bg-muted/40 px-4 text-xs text-muted-foreground">
+      <div className="flex h-8 items-center gap-4 border-t border-[rgba(212,175,55,0.22)] bg-muted/40 px-4 text-xs text-muted-foreground">
         <Tooltip>
           <TooltipTrigger asChild>
             <div className="flex cursor-default items-center gap-1.5">
               <div
                 className={cn(
                   "h-2 w-2 rounded-full",
-                  status === "healthy" && "bg-green-500",
+                  status === "healthy" && "bg-green-500 glow-teal",
                   status === "degraded" && "bg-yellow-500",
                   status === "loading" && "bg-muted-foreground/50",
                   (status === "error" || status === "unknown") && "bg-red-500"

@@ -59,7 +59,8 @@ export function AppLayout({ children, featureTier, onCycleTier }: AppLayoutProps
   }, [])
 
   return (
-    <div className="flex h-screen flex-col bg-background text-foreground safe-area-top safe-area-bottom safe-area-left safe-area-right">
+    <div className="flex h-screen flex-col bg-background text-foreground bg-circuit safe-area-top safe-area-bottom safe-area-left safe-area-right">
+      <div className="vignette" aria-hidden="true" />
       <div className="flex flex-1 overflow-hidden">
         <Sidebar
           activePane={activePane}

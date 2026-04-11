@@ -119,7 +119,7 @@ export function KBContextPanel({
 
   return (
     <div
-      className="relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
+      className="relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-brand-gradient"
       {...dragHandlers}
     >
       {/* Drag overlay */}
@@ -454,7 +454,7 @@ export function KBContextPanel({
       </ScrollArea>
 
       {/* KB Dashboard Footer */}
-      <div className="border-t bg-muted/30">
+      <div className="border-t divider-gold bg-muted/30">
         {/* Injected count */}
         {injectedContext.length > 0 && (
           <div className="border-b px-3 py-1.5 text-xs text-muted-foreground">

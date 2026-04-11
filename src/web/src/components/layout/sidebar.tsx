@@ -115,7 +115,7 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
               <div className="flex items-center gap-2.5">
                 <img src={tier.icon} alt={`Cerid ${tier.label}`} className="h-10 w-10 shrink-0" />
                 <span className="text-[21px] font-bold tracking-tight leading-none">
-                  <span className="bg-gradient-to-r from-brand to-[oklch(0.90_0.14_178)] bg-clip-text text-transparent">{tier.wordmark}</span>
+                  <span className="text-brand-shine">{tier.wordmark}</span>
                   {" "}
                   <span className={cn("font-semibold text-[20px]", tier.tierClass)}>{tier.tierWord}</span>
                 </span>
@@ -139,7 +139,7 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
                     className={cn(
                       "w-full justify-start gap-3",
                       collapsed && "justify-center px-0",
-                      activePane === pane && "border-l-2 border-brand bg-brand/5",
+                      activePane === pane && "border-l-2 border-brand bg-brand/5 glow-teal",
                       pane === "chat" && !collapsed && "flex-1",
                     )}
                     onClick={() => onPaneChange(pane)}

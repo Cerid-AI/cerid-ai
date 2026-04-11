@@ -254,6 +254,103 @@
 .border-gold { border-color: oklch(0.78 0.12 85 / 50%); }
 .bg-gold\/10 { background: oklch(0.78 0.12 85 / 10%); }
 
+/* ===================================================================
+   Brand effects — ported from marketing, opacity ~40% lower for app
+   =================================================================== */
+
+/* Circuit-board dot-grid background — dark mode only */
+.bg-circuit { background-image: none; }
+.dark .bg-circuit {
+  background-image:
+    radial-gradient(circle at 25% 25%, rgba(0, 229, 216, 0.04) 1.5px, transparent 1.5px),
+    radial-gradient(circle at 75% 75%, rgba(0, 229, 216, 0.04) 1.5px, transparent 1.5px),
+    radial-gradient(circle at 50% 50%, rgba(0, 229, 216, 0.018) 2px, transparent 2px);
+  background-size: 60px 60px, 60px 60px, 120px 120px;
+}
+
+/* Teal glow pulse — dark mode only */
+@keyframes teal-pulse {
+  0%, 100% { box-shadow: 0 0 12px rgba(0, 229, 216, 0.09), 0 0 36px rgba(0, 229, 216, 0.03); }
+  50%       { box-shadow: 0 0 18px rgba(0, 229, 216, 0.15), 0 0 48px rgba(0, 229, 216, 0.06); }
+}
+.glow-teal { animation: none; }
+.dark .glow-teal { animation: teal-pulse 4s ease-in-out infinite; }
+
+/* Gold shimmer for premium elements */
+@keyframes gold-shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+.shimmer-gold {
+  background: linear-gradient(90deg, transparent 25%, rgba(212, 175, 55, 0.12) 50%, transparent 75%);
+  background-size: 200% 100%;
+  animation: gold-shimmer 3s ease-in-out infinite;
+}
+
+/* Wordmark shine sweep — static in light mode, animates in dark */
+@keyframes shine-sweep {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+.text-brand-shine {
+  background: linear-gradient(135deg, #00E5D8, #7FF9E8);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.dark .text-brand-shine {
+  background: linear-gradient(90deg, #00E5D8 0%, #7FF9E8 25%, rgba(255,255,255,0.5) 50%, #7FF9E8 75%, #00E5D8 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: shine-sweep 5s ease-in-out infinite;
+}
+
+/* Brand gradient text */
+.text-brand-gradient {
+  background: linear-gradient(135deg, #00E5D8, #7FF9E8);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Radial hero glow (behind empty-state headings, wizard) */
+.bg-hero-glow {
+  background:
+    radial-gradient(ellipse 50% 40% at 30% 35%, rgba(0, 229, 216, 0.06), transparent 70%),
+    radial-gradient(ellipse 30% 30% at 80% 70%, rgba(212, 175, 55, 0.024), transparent 60%);
+}
+
+/* Gold decorative line */
+.gold-line {
+  background: linear-gradient(90deg, transparent, rgba(212, 175, 55, 0.3), transparent);
+  height: 1px;
+}
+
+/* Gold border-image divider */
+.divider-gold {
+  border-image: linear-gradient(90deg, transparent, rgba(212, 175, 55, 0.3), transparent) 1;
+}
+
+/* Page vignette overlay — dark mode only */
+.vignette { pointer-events: none; position: fixed; inset: 0; z-index: 1; }
+.dark .vignette {
+  background: radial-gradient(ellipse 80% 70% at 50% 50%, transparent 50%, rgba(10, 31, 61, 0.18) 100%);
+}
+
+/* Floating animation */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-8px); }
+}
+.float { animation: float 6s ease-in-out infinite; }
+
+/* AI assistant bubble — subtle teal outline in dark mode */
+.dark .ai-bubble-glow {
+  box-shadow: inset 0 0 0 1px oklch(0.82 0.16 178 / 12%), 0 2px 8px oklch(0.82 0.16 178 / 4%);
+}
+
 /* --- Chat title hover-scroll (marquee) --- */
 @keyframes marquee-scroll {
   0% { transform: translateX(0); }
