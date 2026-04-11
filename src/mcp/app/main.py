@@ -10,6 +10,8 @@ import asyncio
 import logging
 import os
 import signal
+import threading
+import time
 import traceback
 from contextlib import asynccontextmanager
 
@@ -75,6 +77,46 @@ logger = logging.getLogger("ai-companion")
 
 # Extension hooks — populated by bootstrap (internal features, plugins, etc.)
 _shutdown_hooks: list = []
+
+# ---------------------------------------------------------------------------
+# Event-loop watchdog
+# Detects a hung asyncio event loop and forces a clean SIGTERM so that
+# restart:unless-stopped brings the container back up automatically.
+# ---------------------------------------------------------------------------
+_WATCHDOG_TIMEOUT_S: float = 45.0
+_watchdog_stop = threading.Event()
+_heartbeat: list[float] = [0.0]  # mutable container avoids global keyword
+
+
+async def _heartbeat_task() -> None:
+    """Ticks every 5 s while the event loop is alive."""
+    while not _watchdog_stop.is_set():
+        _heartbeat[0] = time.monotonic()
+        try:
+            await asyncio.sleep(5)
+        except asyncio.CancelledError:
+            break
+
+
+def _start_watchdog() -> None:
+    """Starts a daemon thread that SIGTERMs the process if the loop goes silent."""
+    _watchdog_stop.clear()
+    _heartbeat[0] = time.monotonic()
+
+    def _watch() -> None:
+        time.sleep(20)  # grace: let the heartbeat task start before first check
+        while not _watchdog_stop.is_set():
+            time.sleep(10)
+            age = time.monotonic() - _heartbeat[0]
+            if age > _WATCHDOG_TIMEOUT_S:
+                logger.warning(
+                    "Event loop watchdog: heartbeat stalled for %.0fs — sending SIGTERM",
+                    age,
+                )
+                os.kill(os.getpid(), signal.SIGTERM)
+                return
+
+    threading.Thread(target=_watch, name="loop-watchdog", daemon=True).start()
 
 
 def _hydrate_settings_from_sync() -> None:
@@ -487,10 +529,12 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.debug("Pre-warm Ollama client failed: %s", e)
 
-    # Pre-warm reranker ONNX model (avoids 2-3s delay on first query)
+    # Pre-warm reranker ONNX model (avoids 2-3s delay on first query).
+    # run_in_executor keeps the event loop (and uvicorn) responsive while ONNX
+    # loads — without this the loop blocks for several seconds on cold start.
     try:
         from utils.reranker import warmup as reranker_warmup
-        reranker_warmup()
+        await asyncio.get_running_loop().run_in_executor(None, reranker_warmup)
         logger.info("Reranker ONNX model pre-warmed")
     except Exception as e:
         logger.debug("Pre-warm reranker failed (will load on first use): %s", e)
@@ -500,15 +544,17 @@ async def lifespan(app: FastAPI):
         from core.utils.embeddings import get_embedding_function
         ef = get_embedding_function()
         if ef:
-            ef(["warmup"])  # trigger lazy model load
+            await asyncio.get_running_loop().run_in_executor(None, ef, ["warmup"])
             logger.info("Embedding ONNX model pre-warmed")
     except Exception as e:
         logger.debug("Pre-warm embedding model failed: %s", e)
 
-    # Warm up NLI model (non-blocking, swallows exceptions)
+    # Warm up NLI model — the slow one (~45s on cold start due to model download).
+    # Must use run_in_executor: running it directly blocked the event loop for the
+    # entire download duration, causing healthcheck timeouts during startup.
     try:
         from core.utils.nli import warmup as nli_warmup
-        nli_warmup()
+        await asyncio.get_running_loop().run_in_executor(None, nli_warmup)
     except Exception:
         logger.warning("NLI model warmup failed — will load on first verification")
 
@@ -517,7 +563,19 @@ async def lifespan(app: FastAPI):
     # first user message sees an instant skip rather than a per-source timeout.
     asyncio.ensure_future(_prewarm_external_sources())
 
+    # Arm event-loop watchdog. The heartbeat coroutine ticks every 5 s; a daemon
+    # thread watches it and sends SIGTERM if the loop goes silent for 45 s.
+    # Combined with restart:unless-stopped this gives automatic recovery from
+    # hung uvicorn workers without any external monitoring infrastructure.
+    asyncio.ensure_future(_heartbeat_task())
+    _start_watchdog()
+    logger.info("Event loop watchdog armed (%.0fs timeout)", _WATCHDOG_TIMEOUT_S)
+
     yield
+
+    # Disarm watchdog before shutdown tasks run (avoid spurious SIGTERM during
+    # intentional slow-shutdown operations like cache flush).
+    _watchdog_stop.set()
 
     # Shutdown: stop scheduler, flush caches, close connections, clear MCP sessions
     try:

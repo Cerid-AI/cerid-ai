@@ -39,11 +39,15 @@ services:
           cpus: '2.0'
           memory: 6G
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:8888/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
+      # /health/live is instant (no Cypher query). "|| kill -s TERM 1" sends
+      # SIGTERM to uvicorn when the probe fails, causing a clean container exit
+      # which restart:unless-stopped then immediately restarts. This is the only
+      # way to auto-recover from a hung uvicorn (unhealthy alone does not restart).
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8888/health/live || kill -s TERM 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
 
 networks:
   llm-network:
