@@ -225,7 +225,7 @@ def exponential_backoff_with_jitter(
 _bifrost_rerank = AsyncCircuitBreaker("bifrost-rerank", failure_threshold=3, recovery_timeout=60)
 _bifrost_claims = AsyncCircuitBreaker("bifrost-claims", failure_threshold=3, recovery_timeout=60)
 _bifrost_verify = AsyncCircuitBreaker(
-    "bifrost-verify", failure_threshold=5, recovery_timeout=90,
+    "bifrost-verify", failure_threshold=5, recovery_timeout=30,
     excluded_exceptions=(NonTransientError,),
 )
 _bifrost_synopsis = AsyncCircuitBreaker("bifrost-synopsis", failure_threshold=3, recovery_timeout=60)
@@ -235,7 +235,7 @@ _ollama = AsyncCircuitBreaker("ollama", failure_threshold=3, recovery_timeout=30
 _bifrost_compress = AsyncCircuitBreaker("bifrost-compress", failure_threshold=3, recovery_timeout=60)
 _bifrost_decompose = AsyncCircuitBreaker("bifrost-decompose", failure_threshold=3, recovery_timeout=60)
 _web_search = AsyncCircuitBreaker("web-search", failure_threshold=3, recovery_timeout=30)
-_openrouter = AsyncCircuitBreaker("openrouter", failure_threshold=5, recovery_timeout=60)
+_openrouter = AsyncCircuitBreaker("openrouter", failure_threshold=5, recovery_timeout=30)
 _tavily = AsyncCircuitBreaker("tavily", failure_threshold=3, recovery_timeout=30)
 _searxng = AsyncCircuitBreaker("searxng", failure_threshold=3, recovery_timeout=30)
 _ragas_eval = AsyncCircuitBreaker("ragas_eval", failure_threshold=3, recovery_timeout=60)
@@ -256,8 +256,31 @@ def _is_client_error(exc: Exception) -> bool:
 
 _chromadb = AsyncCircuitBreaker("chromadb", failure_threshold=5, recovery_timeout=30)
 
+# External data source breakers — supplementary enrichment, never critical path.
+# failure_threshold=1: one timeout trips the breaker immediately (avoids hanging
+# the first user message when Docker has no egress to external services).
+# recovery_timeout=120: 2-minute cooldown before a single retry probe.
+_datasource_wikipedia = AsyncCircuitBreaker("datasource-wikipedia", failure_threshold=1, recovery_timeout=120)
+_datasource_duckduckgo = AsyncCircuitBreaker("datasource-duckduckgo", failure_threshold=1, recovery_timeout=120)
+_datasource_wolfram_alpha = AsyncCircuitBreaker("datasource-wolfram_alpha", failure_threshold=1, recovery_timeout=120)
+_datasource_exchange_rates = AsyncCircuitBreaker("datasource-exchange_rates", failure_threshold=1, recovery_timeout=120)
+_datasource_openlibrary = AsyncCircuitBreaker("datasource-openlibrary", failure_threshold=1, recovery_timeout=120)
+_datasource_pubchem = AsyncCircuitBreaker("datasource-pubchem", failure_threshold=1, recovery_timeout=120)
+_datasource_bookmarks = AsyncCircuitBreaker("datasource-bookmarks", failure_threshold=1, recovery_timeout=120)
+_datasource_email_imap = AsyncCircuitBreaker("datasource-email-imap", failure_threshold=1, recovery_timeout=120)
+_datasource_rss_feeds = AsyncCircuitBreaker("datasource-rss_feeds", failure_threshold=1, recovery_timeout=120)
+
 _BREAKER_REGISTRY: dict[str, AsyncCircuitBreaker] = {
     "chromadb": _chromadb,
+    "datasource-wikipedia": _datasource_wikipedia,
+    "datasource-duckduckgo": _datasource_duckduckgo,
+    "datasource-wolfram_alpha": _datasource_wolfram_alpha,
+    "datasource-exchange_rates": _datasource_exchange_rates,
+    "datasource-openlibrary": _datasource_openlibrary,
+    "datasource-pubchem": _datasource_pubchem,
+    "datasource-bookmarks": _datasource_bookmarks,
+    "datasource-email-imap": _datasource_email_imap,
+    "datasource-rss_feeds": _datasource_rss_feeds,
     "bifrost-rerank": _bifrost_rerank,
     "bifrost-claims": _bifrost_claims,
     "bifrost-verify": _bifrost_verify,

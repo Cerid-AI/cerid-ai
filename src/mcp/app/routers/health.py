@@ -155,11 +155,17 @@ def degradation_status() -> dict:
 
     # OpenRouter auth probe — runs on extended health only (15s poll interval)
     # Cached for 30s to avoid hammering the OpenRouter auth endpoint.
+    #
+    # The /auth/key endpoint can return 401 intermittently (rate limiting) even
+    # when completions are working fine.  If the probe returns 401 but the
+    # completion client's consecutive-failure counter is 0, completions are
+    # succeeding and we report auth_ok=True to avoid a false-positive UI error.
     global _openrouter_auth_cache, _openrouter_auth_cache_ts
     now = time.monotonic()
     if now - _openrouter_auth_cache_ts > 30.0:
         try:
             import httpx
+            from core.utils.llm_client import get_consecutive_auth_failures
             api_key = os.getenv("OPENROUTER_API_KEY", "")
             if api_key:
                 resp = httpx.get(
@@ -167,11 +173,23 @@ def degradation_status() -> dict:
                     headers={"Authorization": f"Bearer {api_key}"},
                     timeout=3,
                 )
-                _openrouter_auth_cache = resp.status_code == 200
+                if resp.status_code == 200:
+                    _openrouter_auth_cache = True
+                elif resp.status_code == 401 and get_consecutive_auth_failures() == 0:
+                    # /auth/key returned 401 but completions are succeeding —
+                    # treat as a transient probe false positive.
+                    _openrouter_auth_cache = True
+                else:
+                    _openrouter_auth_cache = resp.status_code == 200
             else:
                 _openrouter_auth_cache = None  # no key configured
         except Exception:
-            _openrouter_auth_cache = False
+            # Network error on the probe itself — fall back to completion health.
+            try:
+                from core.utils.llm_client import get_consecutive_auth_failures
+                _openrouter_auth_cache = get_consecutive_auth_failures() == 0
+            except Exception:
+                _openrouter_auth_cache = False
         _openrouter_auth_cache_ts = now
     base["openrouter_auth_ok"] = _openrouter_auth_cache
 

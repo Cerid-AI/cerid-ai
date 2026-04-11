@@ -2,7 +2,16 @@
 
 All notable changes to cerid-ai are documented here.
 
-## v0.82.0 — Unified Implementation Plan (2026-04-05)
+## v0.82.0 — Unified Implementation Plan + Phase C Architecture (2026-04-05 → 2026-04-10)
+
+### Phase C: Core Extraction + NLI Architecture (2026-04-08 → 2026-04-10)
+- **Core/App split** — portable orchestrator core (`core/`) separated from application layer (`app/`). Bridge modules in `agents/`, `utils/`, `services/` re-export for backward compat.
+- **`*_internal.py` pattern** — 7 Python files + 1 TypeScript file hold internal-only code. `app/main_internal.py` bootstraps trading, boardroom, billing, eval routers.
+- **NLI entailment service** — `core/utils/nli.py` (ONNX, <10ms) powers verification, Self-RAG, RAGAS, and RAG pipeline claim validation.
+- **Sync manifest** — `.sync-manifest.yaml` declares internal-only files, mixed files (hook markers), and forbidden strings for automated repo sync via `scripts/sync-repos.py`.
+- **Contract ABCs** — `core/contracts/` defines VectorStore, GraphStore, CacheStore, LLMClient interfaces.
+- **Concrete stores** — `app/stores/` implements ChromaVectorStore, Neo4jGraphStore, RedisCacheStore.
+- **Source authority** — chat transcripts discounted 0.35x, memories retain full relevance.
 
 ### Post-Phase: Dependency Cleanup + Remaining Items
 - **Dependency cleanup** — removed 8 unused deps (stripe/public, faster-whisper, requests, structlog/public, pytesseract, Pillow, bcrypt, PyJWT). Docker image 4.09→3.18 GB. Dependabot 33→2 vulns.
