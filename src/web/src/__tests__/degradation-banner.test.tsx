@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 vi.mock("@/lib/api", () => ({
   fetchHealthStatus: vi.fn(),
+  retestServices: vi.fn(),
 }))
 
 import { fetchHealthStatus } from "@/lib/api"
