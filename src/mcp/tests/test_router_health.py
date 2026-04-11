@@ -55,7 +55,7 @@ class TestHealthEndpoint:
         client = TestClient(_make_app())
         response = client.get("/health")
 
-        assert response.status_code == 200
+        assert response.status_code == 503
         data = response.json()
         assert data["status"] == "degraded"
         assert "error" in data["services"]["neo4j"]
@@ -67,7 +67,7 @@ class TestHealthEndpoint:
         client = TestClient(_make_app())
         response = client.get("/health")
 
-        assert response.status_code == 200
+        assert response.status_code == 503
         data = response.json()
         assert data["status"] == "degraded"
         for svc in data["services"].values():

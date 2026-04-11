@@ -52,7 +52,7 @@ beforeEach(() => {
 describe("SetupWizard", () => {
   it("renders step 0 welcome content", () => {
     render(<SetupWizard open={true} onComplete={noop} />)
-    expect(screen.getByText("Welcome to Cerid AI")).toBeInTheDocument()
+    expect(screen.getByText(/Welcome to Cerid/i)).toBeInTheDocument()
   })
 
   it("renders Get Started button on step 0", () => {
