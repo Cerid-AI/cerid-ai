@@ -5,7 +5,8 @@ import { useState, useCallback, useRef, useEffect } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { AlertTriangle, WifiOff, X, RefreshCw, Check, ChevronDown, ChevronRight, Copy } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { fetchHealthStatus } from "@/lib/api"
+import { fetchHealthStatus, retestServices } from "@/lib/api"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import type { DegradationTier } from "@/lib/provider-capabilities"
 
@@ -162,6 +163,8 @@ export function DegradationBanner() {
     queryClient.invalidateQueries({ queryKey: ["health-status"] })
     // Reset poll interval to fast for quick recovery detection
     pollIntervalRef.current = POLL_DEGRADED_INITIAL_MS
+    // Reset LLM connection pool and circuit breakers — best-effort, non-blocking
+    retestServices().catch(() => {})
     // Cooldown prevents hammering
     setTimeout(() => setCheckCooldown(false), CHECK_COOLDOWN_MS)
   }, [checkCooldown, queryClient])
@@ -224,16 +227,23 @@ export function DegradationBanner() {
         <span className={cn("flex-1", textColorStrong)}>
           {info.message}
         </span>
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={checkCooldown}
-          className={cn("h-6 gap-1 text-xs", textColorStrong)}
-          onClick={handleCheckNow}
-        >
-          <RefreshCw className={cn("h-3 w-3", checkCooldown && "animate-spin")} />
-          {checkCooldown ? "Checking..." : "Check now"}
-        </Button>
+        <TooltipProvider delayDuration={200}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={checkCooldown}
+                className={cn("h-6 gap-1 text-xs", textColorStrong)}
+                onClick={handleCheckNow}
+              >
+                <RefreshCw className={cn("h-3 w-3", checkCooldown && "animate-spin")} />
+                {checkCooldown ? "Checking..." : "Check now"}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Check service health and reset connection pools</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
         <button
           type="button"
           onClick={() => setExpanded(!expanded)}

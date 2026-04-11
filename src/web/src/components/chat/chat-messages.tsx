@@ -48,6 +48,8 @@ interface ChatMessagesProps {
   onEnrich?: (messageId: string, content: string) => void
   /** Called when user clicks "Try again" on a failed assistant message. Receives the preceding user message content. */
   onRetry?: (userContent: string) => void
+  /** Re-run verification for the last assistant message. */
+  onReVerify?: () => void
 }
 
 export function ChatMessages({
@@ -65,6 +67,7 @@ export function ChatMessages({
   onSelectVerificationMsg,
   onEnrich,
   onRetry,
+  onReVerify,
 }: ChatMessagesProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -119,6 +122,12 @@ export function ChatMessages({
             ? () => onSelectVerificationMsg?.(isSelected ? null : msg.id)  // Toggle: click again to deselect
             : undefined
 
+          // Only the last non-streaming assistant message gets the re-verify button
+          const isLastAssistant =
+            msg.role === "assistant" &&
+            !isStreaming &&
+            messages.slice(i + 1).every((m) => m.role !== "assistant")
+
           // Detect failed assistant messages (error embedded in content)
           const isError =
             msg.role === "assistant" &&
@@ -154,6 +163,7 @@ export function ChatMessages({
                 onClaimFocus={isSelected ? onClaimFocus : undefined}
                 onArtifactClick={msg.role === "assistant" ? onArtifactClick : undefined}
                 onEnrich={msg.role === "assistant" && !isStreaming ? onEnrich : undefined}
+                onReVerify={isLastAssistant ? onReVerify : undefined}
               />
               {isError && precedingUserMsg && onRetry && (
                 <div className="flex items-center gap-2 px-12 pb-2">

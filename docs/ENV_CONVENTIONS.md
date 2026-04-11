@@ -36,7 +36,10 @@ These exist for historical reasons and should **not** be renamed (would break ex
 |----------|--------|---------|-------------|
 | `NEO4J_PASSWORD` | `.env` | *(none)* | Neo4j database password |
 | `OPENROUTER_API_KEY` | `.env` | *(none)* | OpenRouter API key for LLM access |
-| `OPENAI_API_KEY` | `.env` | *(none)* | OpenAI API key (embeddings) |
+| `OPENAI_API_KEY` | `.env` | *(none)* | OpenAI API key (optional provider) |
+| `CERID_USE_BIFROST` | `.env` | `false` | Enable Bifrost LLM gateway for intent routing. When `false` (default), LLM calls route directly to OpenRouter. |
+| `INFERENCE_MODE` | `.env` | `auto` | Embedding provider: `auto` (detect best), `onnx-cpu`, `onnx-gpu`, `ollama`, `fastembed-sidecar` |
+| `CERID_SIDECAR_PORT` | `.env` | `8889` | FastEmbed sidecar port for native GPU embeddings |
 
 ### Port Overrides (optional)
 
