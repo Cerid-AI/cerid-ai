@@ -40,9 +40,16 @@ _logger = logging.getLogger("ai-companion.llm_client")
 # ---------------------------------------------------------------------------
 
 _client: httpx.AsyncClient | None = None
-
-
 _client_lock = asyncio.Lock()
+
+# Consecutive auth-failure counter — tracks 401/403 responses that indicate the
+# connection pool was poisoned by startup failures before DNS/auth stabilised.
+_consecutive_401s: int = 0
+# 5 consecutive 401s required to trigger a pool recycle.  Raised from 3 to
+# avoid false-positive recycling during startup when OpenRouter auth/DNS may
+# not yet be fully stabilised — a one-time burst of 3 startup failures was
+# triggering an unnecessary recycle ~70 seconds into container startup.
+_POOL_RECYCLE_401_THRESHOLD: int = 5
 
 
 async def _get_client() -> httpx.AsyncClient:
@@ -72,6 +79,50 @@ async def close_client() -> None:
     if _client is not None and not _client.is_closed:
         await _client.aclose()
         _client = None
+
+
+async def _recycle_client() -> None:
+    """Close and recreate the singleton httpx client.
+
+    Called after *_POOL_RECYCLE_401_THRESHOLD* consecutive auth failures.
+    Guards against a poisoned pool caused by 401s received before DNS/auth
+    stabilised at container startup.
+    """
+    global _client, _consecutive_401s
+    async with _client_lock:
+        if _client is not None and not _client.is_closed:
+            await _client.aclose()
+        _client = httpx.AsyncClient(
+            base_url="https://openrouter.ai/api/v1",
+            timeout=httpx.Timeout(connect=10, read=60, write=10, pool=10),
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        )
+        _consecutive_401s = 0
+    _logger.info(
+        "OpenRouter connection pool recycled after %d consecutive auth failures",
+        _POOL_RECYCLE_401_THRESHOLD,
+    )
+
+
+async def recycle_client() -> None:
+    """Public entry-point for :func:`_recycle_client`.  Used by setup endpoints."""
+    await _recycle_client()
+
+
+def reset_auth_failure_count() -> None:
+    """Reset the consecutive-401 counter.  Call after a confirmed successful auth."""
+    global _consecutive_401s
+    _consecutive_401s = 0
+
+
+def get_consecutive_auth_failures() -> int:
+    """Return the current consecutive-401 counter for completion calls.
+
+    A value of 0 means completions are succeeding (or haven't been attempted).
+    Used by the health endpoint to distinguish a /auth/key probe 401 (which can
+    be a rate-limit false positive) from a genuine auth failure on completions.
+    """
+    return _consecutive_401s
 
 
 def _strip_openrouter_prefix(model: str) -> str:
@@ -169,6 +220,7 @@ async def call_llm(
 
         resp = await client.post("/chat/completions", **post_kwargs)
         resp.raise_for_status()
+        reset_auth_failure_count()
         data = resp.json()
         return data.get("choices", [{}])[0].get("message", {}).get("content", "")
 
@@ -188,10 +240,14 @@ async def call_llm(
         )
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code in (401, 403):
+            global _consecutive_401s
+            _consecutive_401s += 1
             _logger.warning(
-                "OpenRouter auth failed (%d), falling back to Bifrost",
-                exc.response.status_code,
+                "OpenRouter auth failed (%d), consecutive_auth_failures=%d",
+                exc.response.status_code, _consecutive_401s,
             )
+            if _consecutive_401s >= _POOL_RECYCLE_401_THRESHOLD:
+                await _recycle_client()
             return await _bifrost_fallback(
                 messages,
                 breaker_name=breaker_name,
@@ -270,6 +326,7 @@ async def call_llm_raw(
             from core.agents.hallucination.verification import CreditExhaustedError
             raise CreditExhaustedError("openrouter")
         resp.raise_for_status()
+        reset_auth_failure_count()
         return resp.json()
 
     try:
@@ -288,10 +345,14 @@ async def call_llm_raw(
         )
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code in (401, 403):
+            global _consecutive_401s
+            _consecutive_401s += 1
             _logger.warning(
-                "OpenRouter auth failed (%d), falling back to Bifrost (raw)",
-                exc.response.status_code,
+                "OpenRouter auth failed (%d), consecutive_auth_failures=%d (raw)",
+                exc.response.status_code, _consecutive_401s,
             )
+            if _consecutive_401s >= _POOL_RECYCLE_401_THRESHOLD:
+                await _recycle_client()
             return await _bifrost_fallback_raw(
                 messages,
                 breaker_name=breaker_name,

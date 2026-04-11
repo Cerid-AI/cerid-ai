@@ -486,6 +486,68 @@ async def _post_configure_warmup() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Pool reset — recovers from transient startup failures without a restart
+# ---------------------------------------------------------------------------
+
+
+@router.post("/retest-services")
+async def retest_services() -> dict:
+    """Reset the LLM connection pool and circuit breakers, then re-probe all providers.
+
+    The frontend calls this to recover from startup transients (e.g. 401 before
+    DNS/auth stabilised, Bifrost not yet running) without requiring a container
+    restart.
+    """
+    results: dict[str, object] = {}
+
+    # Recycle the OpenRouter httpx singleton pool
+    try:
+        from core.utils.llm_client import recycle_client
+        await recycle_client()
+        results["llm_pool"] = "recycled"
+    except Exception as exc:
+        results["llm_pool"] = f"error: {exc}"
+
+    # Reset LLM + bifrost circuit breakers so they start fresh
+    _CB_NAMES = [
+        "openrouter",
+        "bifrost-rerank", "bifrost-claims", "bifrost-verify",
+        "bifrost-synopsis", "bifrost-memory", "bifrost-compress",
+        "bifrost-decompose",
+    ]
+    try:
+        from core.utils.circuit_breaker import get_breaker
+        for name in _CB_NAMES:
+            get_breaker(name).reset()
+        results["circuit_breakers"] = "reset"
+    except Exception as exc:
+        results["circuit_breakers"] = f"error: {exc}"
+
+    # Re-probe OpenRouter auth with the configured key
+    api_key = os.getenv("OPENROUTER_API_KEY", "")
+    if api_key:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as probe_client:
+                resp = await probe_client.get(
+                    "https://openrouter.ai/api/v1/auth/key",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+            if resp.status_code == 200:
+                results["openrouter_auth"] = "ok"
+            else:
+                results["openrouter_auth"] = f"failed (HTTP {resp.status_code})"
+        except Exception as exc:
+            results["openrouter_auth"] = f"error: {exc}"
+    else:
+        results["openrouter_auth"] = "no_key_configured"
+
+    # Re-probe all service statuses
+    results["services"] = await _service_statuses()
+
+    return {"status": "ok", "results": results}
+
+
+# ---------------------------------------------------------------------------
 # System check — environment detection for the setup wizard
 # ---------------------------------------------------------------------------
 

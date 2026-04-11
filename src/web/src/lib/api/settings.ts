@@ -228,6 +228,17 @@ export async function fetchSystemCheck(): Promise<SystemCheckResponse> {
   return res.json()
 }
 
+/** Reset LLM connection pool and circuit breakers, then re-probe all services.
+ *  Non-throwing — callers should treat errors as best-effort. */
+export async function retestServices(): Promise<{ status: string; results: Record<string, unknown> }> {
+  const res = await fetch(`${MCP_BASE}/setup/retest-services`, {
+    method: "POST",
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Retest services failed: ${res.status}`))
+  return res.json()
+}
+
 // ---------------------------------------------------------------------------
 // OpenRouter Credits
 // ---------------------------------------------------------------------------

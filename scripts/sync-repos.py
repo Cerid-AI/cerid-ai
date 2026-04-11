@@ -93,7 +93,7 @@ except ImportError:
 # Paths
 # ---------------------------------------------------------------------------
 INTERNAL_ROOT = Path(__file__).resolve().parent.parent
-PUBLIC_ROOT = INTERNAL_ROOT.parent / "cerid-ai"
+PUBLIC_ROOT = INTERNAL_ROOT.parent / "cerid-ai-public"
 MANIFEST_PATH = INTERNAL_ROOT / ".sync-manifest.yaml"
 
 SCANNABLE_EXTS = {".py", ".ts", ".tsx", ".yaml", ".yml", ".json", ".toml", ".cfg", ".md"}

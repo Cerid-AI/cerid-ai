@@ -220,6 +220,34 @@ async def _openrouter_auth_probe_loop() -> None:
     )
 
 
+async def _prewarm_external_sources() -> None:
+    """Probe all registered external data sources at startup.
+
+    With failure_threshold=1 on the named datasource-* circuit breakers, a
+    single timeout trips the breaker.  If Docker has no egress to external
+    services (Wikipedia, DuckDuckGo, etc.), all breakers open here rather than
+    on the first user message — eliminating the 5-6s hang per source that
+    users would otherwise experience.
+
+    Uses a 3s per-source timeout (shorter than the 5s query-time default) so
+    the probe is cheap even in production where sources are reachable.
+    """
+    try:
+        from utils.data_sources import registry
+        sources = registry.get_enabled_sources()
+        if not sources:
+            return
+        await asyncio.wait_for(
+            registry.query_all("startup connectivity probe", timeout=3.0),
+            timeout=4.0,
+        )
+        logger.info("External data source pre-warm complete (%d sources probed)", len(sources))
+    except asyncio.TimeoutError:
+        logger.info("External data source pre-warm timed out — circuit breakers now open for unreachable sources")
+    except Exception as exc:
+        logger.debug("External data source pre-warm error: %s", exc)
+
+
 async def _check_infra_connectivity() -> None:
     """Verify reachability of Neo4j, ChromaDB, and Redis at startup.
 
@@ -422,6 +450,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.debug("Pre-warm ChromaDB failed (lazy init on first use): %s", e)
 
+    # Pre-warm Redis: functional PING beyond TCP connectivity check
+    try:
+        from app.deps import get_redis as _get_redis
+        _get_redis().ping()
+        logger.info("Redis PING pre-warm passed")
+    except Exception as e:
+        logger.warning("Redis PING pre-warm failed (cache may be unavailable): %s", e)
+
     # Pre-warm LLM client pool (direct OpenRouter)
     try:
         from core.utils.llm_client import _get_client
@@ -481,6 +517,11 @@ async def lifespan(app: FastAPI):
         nli_warmup()
     except Exception:
         logger.warning("NLI model warmup failed — will load on first verification")
+
+    # Pre-warm external data sources — runs in the background so startup remains
+    # fast.  Trips circuit breakers for any source that can't be reached, so the
+    # first user message sees an instant skip rather than a per-source timeout.
+    asyncio.ensure_future(_prewarm_external_sources())
 
     yield
 

@@ -4,7 +4,7 @@
 import { useState } from "react"
 import {
   ShieldCheck, ShieldAlert, Loader2, ChevronDown, ChevronUp,
-  CheckCircle2, XOctagon, AlertTriangle, Circle, ExternalLink,
+  CheckCircle2, XOctagon, AlertTriangle, Circle, ExternalLink, RefreshCw,
 } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import type { HallucinationReport, StreamingClaim } from "@/lib/types"
@@ -34,6 +34,8 @@ interface VerificationStatusBarProps {
   onArtifactClick?: (artifactId: string) => void
   /** Credit exhaustion error message from the LLM provider. */
   creditError?: string | null
+  /** Re-run verification after a stream error. Resets connection pools then retriggers. */
+  onRetry?: () => void
 }
 
 /** Status icon for a single claim using display status */
@@ -78,7 +80,7 @@ export function VerificationStatusBar({
   streamPhase, verifiedCount = 0, totalClaims = 0,
   extractionMethod, streamingClaims,
   sessionClaimsChecked = 0, sessionEstCost = 0,
-  onArtifactClick, creditError,
+  onArtifactClick, creditError, onRetry,
 }: VerificationStatusBarProps) {
   const [expanded, setExpanded] = useState(false)
 
@@ -193,7 +195,7 @@ export function VerificationStatusBar({
       <div className="border-t bg-muted/30">
         <div className="flex items-center gap-2 px-4 py-1">
           <ShieldAlert className="h-3 w-3 shrink-0 text-yellow-500" />
-          <span className="text-xs text-muted-foreground">Verification incomplete — stream interrupted</span>
+          <span className="flex-1 text-xs text-muted-foreground">Verification incomplete — stream interrupted</span>
           {sessionClaimsChecked > 0 && (
             <>
               <div className="h-3 w-px shrink-0 bg-border" />
@@ -201,6 +203,24 @@ export function VerificationStatusBar({
                 Session: {sessionClaimsChecked} facts
               </span>
             </>
+          )}
+          {onRetry && (
+            <TooltipProvider delayDuration={200}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
+                    onClick={onRetry}
+                    aria-label="Reconnect and retry verification"
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                    Reconnect
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Reset connection pools and retry verification</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
         </div>
       </div>
