@@ -4,7 +4,7 @@
 
 A privacy-first, local-first workspace that unifies multi-domain knowledge bases (code, finance, projects, personal artifacts) into a context-aware LLM interface with RAG-powered retrieval, file ingestion, and intelligent agents.
 
-[![Status](https://img.shields.io/badge/Status-Phase%2050%20Complete-green)]()
+[![Status](https://img.shields.io/badge/Status-Active-green)]()
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue)](LICENSE)
 
 ---
@@ -166,26 +166,26 @@ To set up Cerid AI on an additional machine with existing encrypted secrets and 
 ### Prerequisites
 
 - Docker & Docker Compose v2+
-- `age` encryption tool (`brew install age`)
-- Dropbox installed and syncing (for knowledge base sync)
-- Access to the [dotfiles repo](https://github.com/sunrunnerfire/dotfiles) (contains the age decryption key)
+- `age` encryption tool (`brew install age` on macOS, `apt install age` on Linux)
+- Your `age` decryption key at `~/.config/cerid/age-key.txt`
+- Dropbox installed and syncing (optional, for knowledge base sync)
 
 ### Steps
 
 ```bash
-# 1. Install age key from dotfiles
-git clone git@github.com:sunrunnerfire/dotfiles.git ~/dotfiles
-cd ~/dotfiles && bash install.sh    # installs age key to ~/.config/cerid/age-key.txt
-
-# 2. Install age
+# 1. Install age
 brew install age                    # macOS (use apt on Linux)
 
-# 3. Clone the repo
+# 2. Clone the repo
 git clone git@github.com:Cerid-AI/cerid-ai.git ~/cerid-ai
 cd ~/cerid-ai
 
+# 3. Place your age key
+mkdir -p ~/.config/cerid
+# Copy your existing age-key.txt to ~/.config/cerid/age-key.txt
+
 # 4. Decrypt secrets
-./scripts/env-unlock.sh             # .env.age → .env (requires age key from step 1)
+./scripts/env-unlock.sh             # .env.age → .env
 
 # 5. Set up archive directory (choose one)
 # Option A: Dropbox sync (recommended for multi-machine)
