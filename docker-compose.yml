@@ -279,7 +279,13 @@ services:
 
 networks:
   llm-network:
-    driver: bridge
+    external: true   # Created by start-cerid.sh before compose runs.
+    # All compose files (root + stacks/*) reference this same external network
+    # so every container — infra, mcp, web — shares one DNS namespace and can
+    # resolve each other by container name.  The former "driver: bridge" entry
+    # caused Docker Compose to create a project-scoped "cerid-ai_llm-network"
+    # that was invisible to the stacks/ compose files (which all use external: true),
+    # producing a network split where redis/neo4j/chroma were unreachable from MCP.
 
 volumes:
   ollama-data:
