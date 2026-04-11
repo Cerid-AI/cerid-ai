@@ -7,6 +7,40 @@ on:
     branches: [main]
 
 jobs:
+  # Internal content leak detection — fails fast if forbidden patterns found
+  leak-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v6
+      - name: Scan for internal-only content
+        run: |
+          echo "Scanning for internal content leaks..."
+          FORBIDDEN=(
+            "trading_proxy" "pkb_trading_signal" "pkb_herd_detect"
+            "pkb_kelly_size" "pkb_cascade_confirm" "pkb_longshot_surface"
+            "settings_internal" "taxonomy_internal" "agents_internal"
+            "sdk_internal" "main_internal" "tools_internal"
+            "scheduler_internal" "types_internal" "trading_agent"
+            "trading_scheduler_jobs" "boardroom-agent"
+            "register_trading_endpoints" "register_internal_sdk_endpoints"
+            "bootstrap_internal" "extend_settings" "extend_taxonomy"
+          )
+          FOUND=0
+          for pattern in "${FORBIDDEN[@]}"; do
+            MATCHES=$(grep -rl "$pattern" --include="*.py" --include="*.ts" --include="*.tsx" --include="*.md" --include="*.yaml" --include="*.yml" --include="*.json" src/ docs/ scripts/ 2>/dev/null || true)
+            if [ -n "$MATCHES" ]; then
+              echo "::error::Forbidden pattern '$pattern' found in:"
+              echo "$MATCHES" | while read f; do echo "  - $f"; done
+              FOUND=$((FOUND + 1))
+            fi
+          done
+          if [ "$FOUND" -gt 0 ]; then
+            echo "::error::$FOUND forbidden patterns detected — internal content leaked into public repo."
+            exit 1
+          fi
+          echo "No internal content leaks detected"
+
   # Python backend
   lint:
     runs-on: ubuntu-latest
