@@ -657,7 +657,3 @@ Licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
 | `core/` | [Apache-2.0](src/mcp/core/LICENSE) | Orchestration engine, agents, retrieval, verification |
 | `app/` | [Apache-2.0](LICENSE) | Application layer, routers, parsers, GUI |
 | `plugins/` | [BSL-1.1](plugins/LICENSE) | Pro-tier extensions (converts to Apache-2.0 after 3 years) |
-
----
-
-**Owner:** Justin (@sunrunnerfire)
