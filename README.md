@@ -4,7 +4,7 @@
 
 A privacy-first, local-first workspace that unifies multi-domain knowledge bases (code, finance, projects, personal artifacts) into a context-aware LLM interface with RAG-powered retrieval, file ingestion, and intelligent agents.
 
-[![Status](https://img.shields.io/badge/Status-Phase%2050%20Complete-green)]()
+[![Status](https://img.shields.io/badge/Status-Active-green)]()
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue)](LICENSE)
 
 ---
@@ -161,31 +161,31 @@ curl -s http://localhost:8888/health | python3 -m json.tool
 
 ## Second Machine Setup
 
-To set up Cerid AI on an additional machine with existing encrypted secrets and Dropbox sync:
+To set up Cerid AI on an additional machine with existing encrypted secrets and optional Dropbox sync:
 
 ### Prerequisites
 
 - Docker & Docker Compose v2+
-- `age` encryption tool (`brew install age`)
-- Dropbox installed and syncing (for knowledge base sync)
-- Access to the [dotfiles repo](https://github.com/sunrunnerfire/dotfiles) (contains the age decryption key)
+- `age` encryption tool (`brew install age` on macOS, `apt install age` on Linux)
+- Your `age` decryption key at `~/.config/cerid/age-key.txt`
+- Dropbox installed and syncing (optional, for knowledge base sync)
 
 ### Steps
 
 ```bash
-# 1. Install age key from dotfiles
-git clone git@github.com:sunrunnerfire/dotfiles.git ~/dotfiles
-cd ~/dotfiles && bash install.sh    # installs age key to ~/.config/cerid/age-key.txt
-
-# 2. Install age
+# 1. Install age
 brew install age                    # macOS (use apt on Linux)
 
-# 3. Clone the repo
+# 2. Clone the repo
 git clone git@github.com:Cerid-AI/cerid-ai.git ~/cerid-ai
 cd ~/cerid-ai
 
+# 3. Place your age key
+mkdir -p ~/.config/cerid
+# Copy your existing age-key.txt to ~/.config/cerid/age-key.txt
+
 # 4. Decrypt secrets
-./scripts/env-unlock.sh             # .env.age → .env (requires age key from step 1)
+./scripts/env-unlock.sh             # .env.age → .env
 
 # 5. Set up archive directory (choose one)
 # Option A: Dropbox sync (recommended for multi-machine)
@@ -338,8 +338,6 @@ cerid-ai/
 ├── pyproject.toml                     # Ruff + pytest config
 ├── .env.age                           # Encrypted secrets (age)
 ├── .env.example                       # Template
-├── artifacts -> ~/Dropbox/AI-Artifacts
-├── data -> src/mcp/data
 │
 ├── .github/
 │   ├── workflows/ci.yml              # 9-job CI (lint, typecheck, test, security, lock-sync, frontend, docker, frontend-marketing, frontend-desktop)
@@ -360,9 +358,6 @@ cerid-ai/
 │   ├── env-lock.sh                    # Encrypt .env → .env.age
 │   ├── env-unlock.sh                  # Decrypt .env.age → .env
 │   └── hooks/pre-commit               # Lock file sync guard
-│
-├── tasks/
-│   └── todo.md                        # Task tracker
 │
 ├── src/mcp/                           # MCP Server (FastAPI + Python 3.11)
 │   ├── main.py                        # FastAPI entry point (114 lines — routes via routers/)
@@ -650,134 +645,6 @@ Auto-import on startup: when MCP starts with an empty Neo4j database and a valid
 | 7474 | Neo4j HTTP | ai-companion-neo4j | neo4j:5.26.21 | Graph DB Browser |
 | 7687 | Neo4j Bolt | ai-companion-neo4j | neo4j:5.26.21 | Graph DB Protocol |
 | 6379 | Redis | ai-companion-redis | redis:7.4.8-alpine | Cache + Audit |
-
----
-
-## Development Roadmap
-
-### Phase 0: Infrastructure ✅
-- [x] Docker stacks deployed on `llm-network`
-- [x] Bifrost + MCP integration
-- [x] MCP SSE transport — tools discoverable via MCP protocol
-
-### Phase 1: Core Ingestion ✅
-- [x] File parsing (PDF, DOCX, XLSX, CSV, HTML, 30+ formats)
-- [x] Metadata extraction, three-tier AI categorization
-- [x] Token-aware chunking, SHA-256 deduplication
-- [x] Folder watcher, CLI batch ingest, Recategorization
-
-### Phase 1.5: Bulk Ingest Hardening ✅
-- [x] Concurrent CLI (ThreadPoolExecutor), watcher retry queue
-- [x] Atomic dedup (Neo4j UNIQUE CONSTRAINT)
-- [x] PDF upgrade: pdfplumber (tables → Markdown)
-
-### Phase 2: Agent Workflows ✅
-- [x] Query Agent with LLM reranking (parallel multi-domain retrieval)
-- [x] Triage Agent (LangGraph), Rectification, Audit, Maintenance agents
-- [x] 15 MCP tools total
-
-### Phase 3: Integrations ✅
-- [x] Obsidian vault watcher
-
-### Phase 4: Optimization & Polish ✅
-- [x] **4A:** Modular refactor — split main.py into FastAPI routers
-- [x] **4B:** Hybrid BM25+vector search, knowledge graph traversal, cross-domain connections, temporal awareness
-- [x] **4C:** Scheduled maintenance (APScheduler), proactive knowledge surfacing, webhooks
-- [x] **4D:** 36 tests, GitHub Actions CI, security cleanup, centralized encrypted `.env`
-
-### Phase 5: Multi-Machine Sync ✅
-- [x] Infrastructure compose (Neo4j, ChromaDB, Redis in `stacks/infrastructure/`)
-- [x] Startup script, environment validation (`validate-env.sh`)
-- [x] Knowledge base sync CLI (`cerid-sync.py`) — JSONL export/import via Dropbox
-- [x] Auto-import on startup for empty databases
-
-### Phase 6: React GUI + Production Hardening ✅
-- [x] **6A:** React 19 scaffold, streaming chat via Bifrost, sidebar nav, conversation history, Docker/nginx
-- [x] **6B:** Knowledge context pane — split-pane layout, artifact cards, domain filters, graph preview, KB injection into chat
-- [x] **6C:** Monitoring & audit panes — health cards, collection charts, scheduler status, cost breakdown, activity charts
-- [x] **6D:** Backend hardening — API key auth, rate limiting, Redis query cache, LLM feedback loop, CORS
-- [x] Chat dashboard metrics bar (model costs, token estimate, context window usage)
-- [x] Bundle splitting via React.lazy + Vite manualChunks (75% main chunk reduction)
-
-### Phase 7: Intelligence & Automation ✅
-- [x] **7A:** Audit intelligence — hallucination detection agent, conversation analytics, enhanced feedback loop
-- [x] **7B:** Smart orchestration — client-side model router with cost/complexity scoring, auto-switch recommendations
-- [x] **7C:** Proactive knowledge — memory extraction from conversations, smart KB suggestions, memory archival
-
-### Phase 8: Extensibility & Hardening ✅
-- [x] **8A:** Plugin system — manifest-based loading, feature tiers (community/pro), feature flags, OCR scaffold
-- [x] **8B:** Smart ingestion — new parsers (.eml, .mbox, .epub, .rtf), semantic dedup
-- [x] **8C:** Hierarchical taxonomy — TAXONOMY dict, sub-categories/tags, taxonomy API
-- [x] **8D:** Encryption & sync — field-level Fernet encryption, pluggable sync backends
-- [x] **8E:** Infrastructure audit — 31 findings, security fixes, test DRY, N+1 fix
-
-### Phase 9: GUI Feature Parity ✅
-- [x] **9A:** Fix 3 user-reported bugs — KB error state, Neo4j health normalization, audit stats
-- [x] **9B:** Wire 5 structural gaps — hallucination auto-fetch, smart suggestions, memory trigger, settings sync, live metrics
-- [x] **9C:** 3 feature enhancements — file upload, sub-category/tag display, tag browsing
-- [x] **9D:** Neo4j auth hardening — docker-compose env var fix, Cypher auth validation
-
-### Phase 10: Commercial & Open-Source Readiness ✅
-- [x] **10A-10E:** Production quality, UX polish, structural splits, 564 backend tests, smart model switching
-
-### Phase 11: Knowledge Intelligence ✅
-- [x] Interactive audit controls, taxonomy tree sidebar, curation agent design, operations documentation
-
-### Phase 12: RAG & Retrieval Excellence ✅
-- [x] BM25s replacement (stemming, stopwords, 500x faster), configurable retrieval weights, eval harness
-
-### Phase 13: Conversation Intelligence ✅
-- [x] Conversation-aware KB queries, auto-injection with confidence gate, context budget optimization
-
-### Phase 14: Artifact Quality ✅
-- [x] Curation agent (4-dimension scoring), quality-weighted retrieval, metadata boost, AI synopses
-
-### Phase 15: Realtime Accuracy Watcher ✅
-- [x] Streaming verification via SSE, accuracy dashboard, claim feedback, model accuracy comparison
-
-### Phase 16: Quality, Cleanup & Polish ✅
-- [x] **16A-16H:** Security hardening, dead code cleanup, code quality, dependency optimization, feature wiring, artifact preview, documentation
-
-### Phase 17: iPad & Responsive Touch UX ✅
-- [x] Touch visibility, tablet layout, bottom sheet drawer, 44px touch targets, iOS safe area insets
-
-### Phase 18: Network Access & Demo Deployment ✅
-- [x] LAN auto-IP, Caddy HTTPS gateway, Cloudflare Tunnel for demos
-
-### Phase 19: Expert Orchestration & Validation ✅
-- [x] Circuit breakers, distributed tracing, semantic chunking, eval enhancements, adaptive quality feedback
-
-### Phase 20: Smart Tags & Artifact Quality ✅
-- [x] Per-domain tag vocabulary, typeahead UI, tag quality scoring, improved synopsis generation
-
-### Phase 21: Knowledge Sync & Multi-Computer Parity ✅
-- [x] **21A-21D:** Incremental sync, sync GUI, drag-drop ingestion, storage options
-
-### Phase 22: Deferred Items ✅
-- [x] CHANGELOG.md, ENV_CONVENTIONS.md, mypy type checking, frontend tests (271), Self-RAG validation loop
-
-### Phase 23: Production Hardening ✅
-- [x] Redis/ChromaDB auth, port binding, resource limits, CI timeouts, concurrency fixes
-
-### Phase 24: RAG Evolution — Expanded Verification ✅
-- [x] Four new claim type detectors (evasion, citation, recency, ignorance), verdict inversion, context-aware streaming
-
-### Phase 25: Smart Routing & Context-Aware Chat ✅
-- [x] **25A:** Direct-to-OpenRouter chat proxy, model catalog (9 models), `cerid_meta` SSE events
-- [x] **25B:** Capability-based scoring, three-way routing mode, auto-routing, capability badges
-- [x] **25C:** User corrections, token-budget KB injection, semantic dedup, domain headers, inline verification
-
-### Production Audit ✅
-- [x] Shared Bifrost utility, narrowed exception handling, nginx hardening, Docker resource limits, frontend consolidation
-
----
-
-## Host System
-
-- **Hardware:** Mac Pro (16-Core Intel Xeon W, 160 GB RAM)
-- **OS:** macOS
-- **Docker:** 29.1.5 / Compose v5.0.1
-- **Domains:** cerid.ai, cerid.net, getcerid.com
 
 ---
 
