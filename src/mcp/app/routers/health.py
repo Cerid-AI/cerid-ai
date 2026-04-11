@@ -16,6 +16,13 @@ from app.deps import get_chroma, get_neo4j, get_redis
 router = APIRouter()
 logger = logging.getLogger("ai-companion")
 
+
+@router.get("/health/ping", include_in_schema=False)
+async def health_ping() -> dict:
+    """Lightweight liveness probe — no DB checks, used by Docker healthcheck."""
+    return {"ok": True}
+
+
 # In-memory health cache — avoids blocking I/O on every poll
 _health_cache: dict = {}
 _health_cache_ts: float = 0.0
