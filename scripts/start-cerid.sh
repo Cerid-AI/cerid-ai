@@ -470,7 +470,12 @@ if [ -n "$CURRENT_MCP_URL" ] && [ "$CURRENT_MCP_URL" != "$VITE_MCP_URL" ]; then
     WEB_RECREATE="--force-recreate"
 fi
 
-# Ensure network exists (only needed for legacy mode; unified compose creates it)
+# Create the external Docker network that ALL compose files reference.
+# Previously the root docker-compose.yml used "driver: bridge" which silently
+# created a project-scoped "cerid-ai_llm-network" instead of reusing this
+# network, splitting infra containers from MCP/web.  Now that the root compose
+# also declares "external: true", this line is required for both unified and
+# legacy startup modes.
 docker network create llm-network 2>/dev/null || true
 
 if [ -n "$BUILD_FLAG" ]; then

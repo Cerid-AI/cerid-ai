@@ -9,6 +9,7 @@ import os
 import time
 
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 
 from app.deps import get_chroma, get_neo4j, get_redis
 
@@ -192,14 +193,33 @@ def liveness_probe():
 
 @router.get("/health")
 def health_check_endpoint():
+    """Return infrastructure health.
+
+    Returns HTTP 200 when all required services are reachable ("healthy") and
+    HTTP 503 when any are down ("degraded").  The Docker HEALTHCHECK uses
+    ``curl -f`` which fails on non-2xx, so this causes ``docker ps`` to show
+    the container as *unhealthy* when a network split isolates MCP from infra.
+
+    The Neo4j "disabled (lightweight mode)" state is treated as healthy — it
+    is intentional, not a connectivity failure.
+    """
     global _health_cache, _health_cache_ts
     now = time.monotonic()
     if _health_cache and (now - _health_cache_ts) < _HEALTH_CACHE_TTL:
-        return _health_cache
-    result = health_check()
-    _health_cache = result
-    _health_cache_ts = now
-    return result
+        result = _health_cache
+    else:
+        result = health_check()
+        _health_cache = result
+        _health_cache_ts = now
+
+    # A service is "ok" when connected OR intentionally disabled (lightweight neo4j).
+    def _ok(v: str) -> bool:
+        return v == "connected" or v.startswith("disabled")
+
+    http_status = 200 if all(_ok(v) for v in result["services"].values()) else 503
+    if http_status == 200:
+        return result
+    return JSONResponse(content=result, status_code=503)
 
 
 @router.get("/health/status")
