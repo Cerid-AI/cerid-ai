@@ -65,6 +65,7 @@ class SetupStatus(BaseModel):
     missing_keys: list[str]
     optional_keys: list[str]
     services: dict[str, str]
+    configured_providers: list[str] = Field(default_factory=list)
 
 
 class KeyValidationRequest(BaseModel):
@@ -248,12 +249,16 @@ def _update_env_file(updates: dict[str, str]) -> None:
 async def setup_status() -> SetupStatus:
     """Return the current first-run setup state."""
     services = await _service_statuses()
+    from config.providers import get_configured_providers
+    providers = get_configured_providers()
+    provider_names = [p["name"] for p in providers if p.get("key_set")]
     return SetupStatus(
         configured=_is_configured(),
         setup_required=not _is_configured(),
         missing_keys=_missing_keys(),
         optional_keys=_OPTIONAL_KEYS,
         services=services,
+        configured_providers=provider_names,
     )
 
 
