@@ -436,7 +436,7 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
   return (
     <Dialog open={open} onOpenChange={() => {}}>
       <DialogContent
-        className="max-w-xl gap-0 overflow-hidden p-0 [&>button]:hidden flex flex-col max-h-[85vh]"
+        className="max-w-xl gap-0 overflow-hidden p-0 [&>button]:hidden flex flex-col max-h-[85vh] bg-circuit"
         onPointerDownOutside={(e) => e.preventDefault()}
         onEscapeKeyDown={(e) => e.preventDefault()}
       >
@@ -469,12 +469,12 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
           {!showResumePrompt && state.step === 0 && (
             <>
               <div className="mb-2 flex items-center justify-center">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand/10">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand/10 glow-teal">
                   <Sparkles className="h-5 w-5 text-brand" />
                 </div>
               </div>
               <h3 className="mb-2 text-center text-lg font-semibold">
-                Welcome to Cerid AI
+                Welcome to Cerid <span className="text-brand-gradient">AI</span>
               </h3>
               <div className="space-y-3">
                 <p className="text-center text-sm text-muted-foreground">

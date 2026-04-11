@@ -34,7 +34,7 @@ import { useVerificationOrchestrator } from "@/hooks/use-verification-orchestrat
 import { useUIMode } from "@/contexts/ui-mode-context"
 import { UploadDialog } from "@/components/kb/upload-dialog"
 import { useQuery } from "@tanstack/react-query"
-import { uploadFile, enableOllama, fetchOllamaStatus, fetchOllamaRecommendations, pullOllamaModel, fetchHealthStatus } from "@/lib/api"
+import { uploadFile, enableOllama, fetchOllamaStatus, fetchOllamaRecommendations, pullOllamaModel, fetchHealthStatus, retestServices } from "@/lib/api"
 import type { ChatMessage } from "@/lib/types"
 import { MODELS } from "@/lib/types"
 import { uuid } from "@/lib/utils"
@@ -436,12 +436,12 @@ export function ChatPanel() {
 
   if (!active) {
     return (
-      <div className="flex h-full items-center justify-center bg-background bg-brand-gradient">
+      <div className="flex h-full items-center justify-center bg-background bg-brand-gradient bg-hero-glow">
         <div className="relative flex max-w-md flex-col items-center gap-6 px-6 text-center">
           {/* Subtle pulsing brand glow */}
           <div className="pointer-events-none absolute -top-12 h-32 w-32 animate-pulse rounded-full bg-brand/10 blur-2xl" />
           <div className="relative space-y-2">
-            <h1 className="text-2xl font-semibold tracking-tight">Cerid <span className="text-brand">AI</span></h1>
+            <h1 className="text-2xl font-semibold tracking-tight">Cerid <span className="text-brand-gradient">AI</span></h1>
             <p className="text-sm text-muted-foreground">
               Your personal knowledge companion — ask questions, explore your knowledge base, and get verified answers.
             </p>
@@ -734,6 +734,7 @@ export function ChatPanel() {
           handleSend(userContent)
           smartSuggestions.clear()
         }}
+        onReVerify={handleVerifyMessage}
       />
 
       {/* Smart KB suggestions (advanced only) */}
@@ -782,6 +783,10 @@ export function ChatPanel() {
           setShowKB(true)
         }}
         creditError={verification.creditError}
+        onRetry={() => {
+          retestServices().catch(() => {})
+          handleVerifyMessage()
+        }}
       />}
 
       {/* Auto-route notice (advanced only) */}

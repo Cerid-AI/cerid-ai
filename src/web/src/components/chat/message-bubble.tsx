@@ -5,7 +5,7 @@ import remarkGfm from "remark-gfm"
 import { lazy, Suspense, useState, useCallback, useMemo, useRef, useEffect, isValidElement, type ReactNode } from "react"
 
 import ReactMarkdown from "react-markdown"
-import { Copy, Check, User, Bot, ShieldCheck, ShieldAlert, Loader2, Pencil, Shield, ExternalLink, Sparkles, Globe, ThumbsUp, ThumbsDown } from "lucide-react"
+import { Copy, Check, User, Bot, ShieldCheck, ShieldAlert, Loader2, Pencil, Shield, ExternalLink, Sparkles, Globe, ThumbsUp, ThumbsDown, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn, formatCost } from "@/lib/utils"
@@ -291,9 +291,16 @@ function CopyButton({ text }: { text: string }) {
   }, [text])
 
   return (
-    <Button variant="ghost" size="icon" className="h-6 w-6" aria-label={copied ? "Copied" : "Copy to clipboard"} onClick={handleCopy}>
-      {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-    </Button>
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-6 w-6" aria-label={copied ? "Copied" : "Copy to clipboard"} onClick={handleCopy}>
+            {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{copied ? "Copied!" : "Copy to clipboard"}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   )
 }
 
@@ -368,24 +375,38 @@ function FeedbackButtons({ messageId }: { messageId: string }) {
 
   return (
     <>
-      <Button
-        variant="ghost"
-        size="icon"
-        className={cn("h-6 w-6", feedback === "up" && "text-green-500")}
-        aria-label="Good response"
-        onClick={() => submit("up")}
-      >
-        <ThumbsUp className="h-3 w-3" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        className={cn("h-6 w-6", feedback === "down" && "text-destructive")}
-        aria-label="Bad response"
-        onClick={() => submit("down")}
-      >
-        <ThumbsDown className="h-3 w-3" />
-      </Button>
+      <TooltipProvider delayDuration={200}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn("h-6 w-6", feedback === "up" && "text-green-500")}
+              aria-label="Good response"
+              onClick={() => submit("up")}
+            >
+              <ThumbsUp className="h-3 w-3" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Good response</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+      <TooltipProvider delayDuration={200}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn("h-6 w-6", feedback === "down" && "text-destructive")}
+              aria-label="Poor response"
+              onClick={() => submit("down")}
+            >
+              <ThumbsDown className="h-3 w-3" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Poor response</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
     </>
   )
 }
@@ -402,9 +423,11 @@ interface MessageBubbleProps {
   onSelectForVerification?: () => void
   onClaimFocus?: (index: number) => void
   onArtifactClick?: (artifactId: string) => void
+  /** Re-run verification for this message. Only provided for the last assistant message. */
+  onReVerify?: () => void
 }
 
-export function MessageBubble({ message, verificationStatus, verificationClaims, inlineMarkups, onCorrect, onEnrich, onToggleMarkup, onSelectForVerification, onClaimFocus, onArtifactClick }: MessageBubbleProps) {
+export function MessageBubble({ message, verificationStatus, verificationClaims, inlineMarkups, onCorrect, onEnrich, onToggleMarkup, onSelectForVerification, onClaimFocus, onArtifactClick, onReVerify }: MessageBubbleProps) {
   const isUser = message.role === "user"
   const [correcting, setCorrecting] = useState(false)
   const [correctionText, setCorrectionText] = useState("")
@@ -555,7 +578,7 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
         <div
           className={cn(
             "rounded-2xl px-4 py-2.5",
-            isUser ? "bg-primary text-primary-foreground" : "bg-muted"
+            isUser ? "bg-primary text-primary-foreground" : "bg-muted ai-bubble-glow"
           )}
         >
           {isUser ? (
@@ -593,15 +616,22 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
           <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
             <CopyButton text={message.content} />
             {onCorrect && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6"
-                aria-label="Correct this response"
-                onClick={() => setCorrecting(true)}
-              >
-                <Pencil className="h-3 w-3" />
-              </Button>
+              <TooltipProvider delayDuration={200}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      aria-label="Correct this response"
+                      onClick={() => setCorrecting(true)}
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Correct this response</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             )}
             {onEnrich && (
               <TooltipProvider delayDuration={200}>
@@ -618,6 +648,25 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>Search external sources for more context on this response</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
+            {onReVerify && (
+              <TooltipProvider delayDuration={200}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className={cn("h-6 w-6", verificationStatus?.state === "loading" && "text-brand")}
+                      aria-label="Re-verify this response"
+                      disabled={verificationStatus?.state === "loading"}
+                      onClick={onReVerify}
+                    >
+                      <RefreshCw className={cn("h-3 w-3", verificationStatus?.state === "loading" && "animate-spin")} />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Re-verify facts in this response</TooltipContent>
                 </Tooltip>
               </TooltipProvider>
             )}
@@ -683,15 +732,22 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
           {message.model && <ModelBadge modelId={message.model} />}
           {!isUser && verificationStatus && <VerificationBadge status={verificationStatus} onClick={onSelectForVerification ?? onToggleMarkup} />}
           {!isUser && onToggleMarkup && verificationClaims && verificationClaims.length > 0 && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className={cn("h-5 w-5", inlineMarkups ? "text-brand bg-brand/10" : "text-muted-foreground")}
-              aria-label={inlineMarkups ? "Hide inline verification" : "Show inline verification"}
-              onClick={onToggleMarkup}
-            >
-              {inlineMarkups ? <ShieldCheck className="h-3 w-3" /> : <Shield className="h-3 w-3" />}
-            </Button>
+            <TooltipProvider delayDuration={200}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={cn("h-5 w-5", inlineMarkups ? "text-brand bg-brand/10" : "text-muted-foreground")}
+                    aria-label={inlineMarkups ? "Hide inline verification" : "Show inline verification"}
+                    onClick={onToggleMarkup}
+                  >
+                    {inlineMarkups ? <ShieldCheck className="h-3 w-3" /> : <Shield className="h-3 w-3" />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{inlineMarkups ? "Hide inline claim highlights" : "Show inline claim highlights"}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
         </div>
       </div>
