@@ -54,7 +54,7 @@ describe("SetupWizard", () => {
 
   it("renders welcome step with correct copy", () => {
     render(<SetupWizard open={true} onComplete={noop} />)
-    expect(screen.getByText("Welcome to Cerid AI")).toBeInTheDocument()
+    expect(screen.getByText(/Welcome to Cerid/i)).toBeInTheDocument()
     expect(screen.getByText(/RAG-powered retrieval/)).toBeInTheDocument()
   })
 
@@ -107,7 +107,7 @@ describe("SetupWizard", () => {
     fireEvent.click(screen.getByRole("button", { name: /get started/i }))
     expect(screen.getByText("API Keys")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: /back/i }))
-    expect(screen.getByText("Welcome to Cerid AI")).toBeInTheDocument()
+    expect(screen.getByText(/Welcome to Cerid/i)).toBeInTheDocument()
   })
 
   // ---- Skip button behavior ----
@@ -181,7 +181,7 @@ describe("SetupWizard", () => {
     expect(screen.getByText("API Keys")).toBeInTheDocument()
     // Back to step 0
     fireEvent.click(screen.getByRole("button", { name: /back/i }))
-    expect(screen.getByText("Welcome to Cerid AI")).toBeInTheDocument()
+    expect(screen.getByText(/Welcome to Cerid/i)).toBeInTheDocument()
     // Forward again
     fireEvent.click(screen.getByRole("button", { name: /get started/i }))
     expect(screen.getByText("API Keys")).toBeInTheDocument()

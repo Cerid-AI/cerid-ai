@@ -165,6 +165,7 @@ def degradation_status() -> dict:
     if now - _openrouter_auth_cache_ts > 30.0:
         try:
             import httpx
+
             from core.utils.llm_client import get_consecutive_auth_failures
             api_key = os.getenv("OPENROUTER_API_KEY", "")
             if api_key:

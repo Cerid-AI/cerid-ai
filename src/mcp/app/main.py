@@ -273,12 +273,6 @@ async def _check_infra_connectivity() -> None:
         except Exception:
             return url
 
-    targets = {
-        "ChromaDB": (chroma_url.rstrip("/") + "/api/v1/heartbeat", "http"),
-        "Neo4j": (neo4j_bolt, "bolt"),
-        "Redis": (redis_url, "redis"),
-    }
-
     unreachable: list[str] = []
 
     for attempt in range(1, _INFRA_MAX_RETRIES + 1):
