@@ -46,7 +46,6 @@ These components form the foundation and must always be present:
 
 | Feature | Env Var | Default |
 |---------|---------|---------|
-| Trading integration | `CERID_TRADING_ENABLED` | `false` |
 | Multi-user auth | `CERID_MULTI_USER` | `false` |
 | Eval harness | `CERID_EVAL_ENABLED` | `false` |
 | Ollama proxy | `OLLAMA_ENABLED` | `false` |
@@ -59,7 +58,6 @@ Plugins in `plugins/` are scanned at startup. Each has a `manifest.json` with na
 
 | Package | Location | Deploy |
 |---------|----------|--------|
-| Desktop (Electron) | `packages/desktop/` | Local build |
 | Marketing (Next.js 16) | `packages/marketing/` | Vercel (cerid.ai) |
 
 ---
@@ -108,22 +106,12 @@ The SDK at `/sdk/v1/` is the stable API consumed by external agents. Changes her
 
 ### Current consumers
 
-| Consumer | Repo | Rate Limit | Client ID |
-|----------|------|-----------|-----------|
-| cerid-trading-agent | `Cerid-AI/cerid-trading-agent` | 80 req/min | `trading-agent` |
-| cerid-boardroom | `Cerid-AI/cerid-boardroom` | 60 req/min | `boardroom-agent` |
-
 ### Stable endpoints
 
 - `GET /sdk/v1/health` — Health check
 - `POST /sdk/v1/query` — Knowledge base query
 - `POST /sdk/v1/hallucination` — Hallucination detection
 - `POST /sdk/v1/memory/extract` — Memory extraction
-- `POST /sdk/v1/trading/signal` — Trading signal analysis (gated)
-- `POST /sdk/v1/trading/herd-detect` — Herd behavior detection (gated)
-- `POST /sdk/v1/trading/kelly-size` — Kelly criterion sizing (gated)
-- `POST /sdk/v1/trading/cascade-confirm` — Cascade confirmation (gated)
-- `POST /sdk/v1/trading/longshot-surface` — Longshot opportunity surfacing (gated)
 
 ### Rules for SDK changes
 
