@@ -4,7 +4,7 @@
 
 Cerid AI is a self-hosted, privacy-first AI Knowledge Companion. RAG-powered retrieval, intelligent agents, and an extensible SDK. Apache-2.0 licensed.
 
-**Version:** 0.82.0 | **Docs:** [`docs/`](docs/) | **SDK:** [`docs/SDK_GUIDE.md`](docs/SDK_GUIDE.md)
+**Version:** 0.83.0 | **Docs:** [`docs/`](docs/) | **SDK:** [`docs/SDK_GUIDE.md`](docs/SDK_GUIDE.md)
 
 ## Quick Start
 
@@ -62,7 +62,7 @@ python scripts/cerid-sidecar.py                        # run sidecar (outside Do
 
 ## Dependency Strategy
 
-Direct dependencies are minimal (14 core). See [`docs/DEPENDENCY_AUDIT_2026-04-05.md`](docs/DEPENDENCY_AUDIT_2026-04-05.md).
+Direct dependencies are minimal (14 core). See `src/mcp/requirements.txt` for the full list.
 
 **Optional extras (not installed by default):**
 ```bash

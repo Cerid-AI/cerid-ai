@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions & Discussion
+    url: https://github.com/Cerid-AI/cerid-ai/discussions
+    about: Ask questions and discuss Cerid AI
+  - name: Security Vulnerabilities
+    url: https://github.com/Cerid-AI/cerid-ai/blob/main/SECURITY.md
+    about: Report security vulnerabilities responsibly

@@ -4,6 +4,7 @@
 
 A privacy-first, local-first workspace that unifies multi-domain knowledge bases (code, finance, projects, personal artifacts) into a context-aware LLM interface with RAG-powered retrieval, file ingestion, and intelligent agents.
 
+[![CI](https://github.com/Cerid-AI/cerid-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/Cerid-AI/cerid-ai/actions/workflows/ci.yml)
 [![Status](https://img.shields.io/badge/Status-Active-green)]()
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue)](LICENSE)
 
@@ -18,14 +19,12 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 - **React GUI** at port 3000 — streaming chat, knowledge browser, monitoring & audit dashboards
 - **Multi-Provider LLM Access** via Bifrost gateway (Claude, GPT, Grok, Gemini, DeepSeek, Llama)
 - **9 Intelligent Agents** — Query (LLM reranking), Triage (LangGraph), Rectification, Audit, Maintenance, Hallucination Detection, Memory Extraction, Curation, Self-RAG
-- **Trading Agent Integration** — 5 MCP tools + SDK endpoints for signal enrichment, herd detection, Kelly sizing, cascade confirmation, and longshot calibration (opt-in via `CERID_TRADING_ENABLED`)
-- **27 MCP Tools** for knowledge base, trading, web search, memory, and multi-modal operations via MCP protocol
+- **21 MCP Tools** for knowledge base, web search, memory, and multi-modal operations via MCP protocol
 - **A2A Protocol** — Agent-to-Agent communication for remote agent discovery and task invocation
 - **Plugin System** — Extensible via manifest-based plugins (multi-modal KB, visual workflow builder)
 - **Observability Dashboard** — 8 Redis time-series metrics, health score grading, SVG sparklines
 - **Local LLM via Ollama** — Air-gapped deployment with local model routing
 - **Visual Workflow Builder** — DAG-based workflow engine with drag-and-drop SVG canvas
-- **Electron Desktop App** — Native macOS + Windows app with Docker lifecycle management
 - **Hallucination Detection** — claim extraction + KB verification with per-message truth audit
 - **Memory Extraction** — facts, decisions, preferences extracted from conversations and stored as KB artifacts
 - **Smart Model Router** — complexity scoring, cost sensitivity, auto-switch recommendations
@@ -78,7 +77,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 │          /agent/audit           │    │   Grok, DeepSeek, etc.)  │
 │          /agent/maintain        │    └──────────────────────────┘
 │  SSE:   /mcp/sse /mcp/messages  │
-│  Tools: 27 MCP tools (pkb_*)   │
+│  Tools: 21 MCP tools (pkb_*)   │
 │  Search: Hybrid BM25 + vector   │
 │  Middleware: auth, rate-limit    │
 │  Scheduler: APScheduler         │
@@ -342,12 +341,11 @@ cerid-ai/
 ├── data -> src/mcp/data
 │
 ├── .github/
-│   ├── workflows/ci.yml              # 9-job CI (lint, typecheck, test, security, lock-sync, frontend, docker, frontend-marketing, frontend-desktop)
+│   ├── workflows/ci.yml              # 6-job CI (lint, typecheck, test, security, frontend, docker)
 │   └── dependabot.yml                # Weekly grouped PRs (pip, npm, actions, docker)
 │
 ├── docs/
 │   ├── CERID_AI_PROJECT_REFERENCE.md  # Detailed technical reference
-│   ├── DEPENDENCY_COUPLING.md         # Cross-service version constraints
 │   ├── ISSUES.md                      # Issue tracker (1 open)
 │   ├── OPERATIONS.md                  # API keys, secrets, rate limits, CI
 │   ├── PHASE4_PLAN.md
@@ -496,7 +494,6 @@ cerid-ai/
 | `scripts/validate-env.sh` | Pre-flight environment validation (14 checks) |
 | `scripts/cerid-sync.py` | Knowledge base sync CLI (export/import/status) |
 | `Makefile` | lock-python, install-hooks, deps-check targets |
-| `docs/DEPENDENCY_COUPLING.md` | Cross-service version constraints |
 | `docs/ISSUES.md` | Open issues and backlog (1 open) |
 | `docs/OPERATIONS.md` | API keys, secrets rotation, rate limits, CI reference |
 
@@ -551,7 +548,7 @@ Automated weekly PRs for Python, npm, GitHub Actions, and monthly for Docker. Co
 
 ### Cross-Service Coupling
 
-See `docs/DEPENDENCY_COUPLING.md` for constraints that span files (ChromaDB client/server, spaCy lib/model, Node version, Python version).
+Key constraints: ChromaDB client `>=0.5,<0.6` must match server 0.5.23; Python 3.11 pinned in Dockerfile + CI; Node 22 pinned in `.nvmrc`.
 
 ---
 
