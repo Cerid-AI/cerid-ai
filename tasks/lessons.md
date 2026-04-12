@@ -451,3 +451,9 @@
 **Problem:** Multiple sessions manually copied files between repos (cp, direct edits), bypassing the sync manifest. This caused CLAUDE.md contamination (internal content in public), internal-only test files leaking to public, and stale worktrees with trading/boardroom content.
 **Fix:** ALWAYS use `python scripts/sync-repos.py to-public` for syncing. The sync manifest (.sync-manifest.yaml) has internal_only patterns, mixed_files with hook markers, and forbidden_in_public patterns. A `leak-check` CI job in the public repo now scans for forbidden patterns on every push.
 **Pattern:** Run `python scripts/sync-repos.py validate` before and after any sync operation. Never `cp` files directly.
+
+### Circuit breakers that share an upstream must be reset together
+**When:** Startup probe succeeds for a shared external service (e.g., OpenRouter).
+**Problem:** `_openrouter_auth_probe_loop()` only reset the `openrouter` breaker on successful auth, but `bifrost-verify`, `bifrost-claims`, `bifrost-synopsis`, etc. all call the same OpenRouter API. Transient DNS failures at startup tripped `bifrost-verify` and it was never reset, causing verification to fail permanently until container restart.
+**Fix:** Reset ALL OpenRouter-dependent breakers (7 total) in the probe success handler, not just the one named `openrouter`.
+**Pattern:** When adding a circuit breaker for a new call site to an existing upstream, add it to the startup probe's reset list in `main.py:_openrouter_auth_probe_loop()`.
