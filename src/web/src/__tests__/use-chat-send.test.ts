@@ -68,7 +68,7 @@ function makeOptions(overrides: Record<string, unknown> = {}) {
   const sendSpy = vi.fn()
   return {
     activeId: "conv-1",
-    activeMessages: [] as ChatMessage[],
+    activeMessages: [makeMessage("assistant", "Hello")] as ChatMessage[],
     create: vi.fn().mockReturnValue("conv-new"),
     addMessage: vi.fn(),
     updateModel: vi.fn(),
