@@ -42,6 +42,10 @@ export interface QueryOpts {
   strictDomains?: boolean
   skipCache?: boolean
   metadataFilter?: Record<string, string>
+  /** Skip cross-encoder reranking for faster (but less precise) results. Default true. */
+  useReranking?: boolean
+  /** AbortSignal to cancel the request (frees browser connection slot). */
+  signal?: AbortSignal
 }
 
 export async function queryKB(
@@ -54,11 +58,12 @@ export async function queryKB(
   const res = await fetch(`${MCP_BASE}/agent/query`, {
     method: "POST",
     headers: mcpHeaders({ "Content-Type": "application/json" }),
+    signal: opts?.signal,
     body: JSON.stringify({
       query,
       domains: domains ?? null,
       top_k: topK,
-      use_reranking: true,
+      use_reranking: opts?.useReranking ?? true,
       conversation_messages: conversationMessages ?? null,
       ...(opts?.queryScope != null && { query_scope: opts.queryScope }),
       ...(opts?.scopeRef != null && { scope_ref: opts.scopeRef }),

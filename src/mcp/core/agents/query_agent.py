@@ -236,7 +236,9 @@ async def multi_domain_query(
             }
             if metadata_filter:
                 query_kwargs["where"] = metadata_filter
-            results = collection.query(**query_kwargs)
+            # ChromaDB client uses sync HTTP — offload to thread to avoid
+            # blocking the event loop when multiple domains query in parallel.
+            results = await asyncio.to_thread(collection.query, **query_kwargs)
 
             formatted = []
             seen_ids: set = set()
@@ -416,7 +418,8 @@ async def graph_expand_results(
         domain = rel_artifact["domain"]
         collection = chroma_client.get_collection(name=config.collection_name(domain))
 
-        fetched = collection.query(
+        fetched = await asyncio.to_thread(
+            collection.query,
             query_texts=[query],
             n_results=min(3, len(chunk_ids)),
             where={"artifact_id": rel_artifact["id"]},
@@ -911,7 +914,9 @@ async def agent_query(
                 from core.utils.embeddings import get_embedding_function
                 _ef = get_embedding_function()
                 if _ef is not None:
-                    _query_embedding = np.asarray(_ef([query])[0])
+                    _query_embedding = await asyncio.to_thread(
+                        lambda: np.asarray(_ef([query])[0])
+                    )
                     cached = cache_lookup(_query_embedding, redis_client)
                     if cached is not None:
                         cached["semantic_cache_hit"] = True
@@ -1105,7 +1110,8 @@ async def agent_query(
                 from core.utils.embeddings import get_embedding_function
                 _ef = get_embedding_function()
                 if _ef is not None:
-                    results = late_interaction_rerank(
+                    results = await asyncio.to_thread(
+                        late_interaction_rerank,
                         results=results, query=query, embed_fn=_ef,
                     )
             except Exception as e:

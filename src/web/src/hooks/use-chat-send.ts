@@ -131,14 +131,26 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
 
       // Auto-inject: query KB with the CURRENT message, with a 500ms timeout
       // to avoid blocking the stream start. Falls back to stale results on timeout.
+      // IMPORTANT: AbortController ensures timed-out fetches release browser
+      // connection slots immediately, preventing the chat/stream request from
+      // being queued behind stale KB queries.
       let autoInjectedCount = 0
-      if (options.autoInject) {
+      // Skip auto-inject on the first message of a conversation — the KB
+      // queries compete for browser connection slots and backend event loop
+      // time, delaying the chat/stream response.  Follow-up messages benefit
+      // more from context injection once the conversation topic is established.
+      const isFirstMessage = !(options.activeMessages?.length)
+      if (options.autoInject && !isFirstMessage) {
         let freshResults = options.kbResults
         if (content.length > 2) {
-          const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 500))
+          const injectAbort = new AbortController()
+          const timeout = new Promise<null>((resolve) => setTimeout(() => {
+            injectAbort.abort()
+            resolve(null)
+          }, 500))
           // Fire KB query and memory recall in parallel with shared timeout
           const [freshKB, freshMemories] = await Promise.all([
-            Promise.race([queryKB(content, undefined, 10), timeout]).catch(() => null),
+            Promise.race([queryKB(content, undefined, 5, undefined, { signal: injectAbort.signal }), timeout]).catch(() => null),
             Promise.race([recallMemories(content, 3).catch(() => []), timeout]).catch(() => []),
           ])
           if (freshKB?.results?.length) {

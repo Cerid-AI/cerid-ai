@@ -201,6 +201,7 @@ services:
       # the CERID_USE_BIFROST env var check in main.py, not via depends_on.
     networks:
       - llm-network
+    init: true
     restart: unless-stopped
     deploy:
       resources:
@@ -208,11 +209,11 @@ services:
           cpus: '2.0'
           memory: 6G
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8888/health/ping || kill -s TERM 1"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8888/health/ping"]
       interval: 15s
       timeout: 5s
       retries: 3
-      start_period: 120s
+      start_period: 300s
 
   # ──────────────────────────────────────────────
   # Layer 4: Frontend
