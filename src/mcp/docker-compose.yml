@@ -32,6 +32,7 @@ services:
       # ${VAR} interpolation fails when running without --env-file.
     networks:
       - llm-network
+    init: true
     restart: unless-stopped
     deploy:
       resources:
@@ -39,15 +40,15 @@ services:
           cpus: '2.0'
           memory: 6G
     healthcheck:
-      # /health/live is instant (no Cypher query). "|| kill -s TERM 1" sends
-      # SIGTERM to uvicorn when the probe fails, causing a clean container exit
-      # which restart:unless-stopped then immediately restarts. This is the only
-      # way to auto-recover from a hung uvicorn (unhealthy alone does not restart).
-      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8888/health/live || kill -s TERM 1"]
+      # /health/live is instant (no Cypher query). The sentinel-guarded kill
+      # ensures auto-recovery from a hung uvicorn AFTER successful startup,
+      # without disrupting the first cold start (ONNX model downloads can take
+      # 3-5 minutes). init:true above prevents zombie PIDs.
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8888/health/live && touch /tmp/.health_ok || { [ -f /tmp/.health_ok ] && kill -s TERM 1; true; }"]
       interval: 15s
       timeout: 5s
       retries: 3
-      start_period: 120s
+      start_period: 300s
 
 networks:
   llm-network:

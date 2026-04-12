@@ -53,7 +53,7 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
       await uploadFile(file, { categorizeMode: "manual", domain: "general", skipQuality: true, skipMetadata: true })
       setIngestProgress("Indexing...")
       // Brief delay to let ChromaDB flush writes before enabling queries
-      await new Promise((r) => setTimeout(r, 1000))
+      await new Promise((r) => setTimeout(r, 300))
       setIngestProgress(null)
       setPhase("chat")
       onChange({ ...state, ingested: true })
@@ -104,13 +104,14 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
     setResponse(null)
 
     try {
-      // Scope query to the just-uploaded document only
-      const wizardOpts = { queryScope: "document" as const, scopeRef: fileName ?? undefined }
-      let result = await queryKB(text.trim(), ["general"], 10, undefined, wizardOpts)
+      // Scope query to the just-uploaded document only.
+      // Skip reranking and use small top_k for speed — wizard just needs proof-of-life.
+      const wizardOpts = { queryScope: "document" as const, scopeRef: fileName ?? undefined, useReranking: false, skipCache: true }
+      let result = await queryKB(text.trim(), ["general"], 3, undefined, wizardOpts)
       if (!result.results?.length) {
-        for (const delay of [500, 1000, 2000]) {
+        for (const delay of [300, 800]) {
           await new Promise((r) => setTimeout(r, delay))
-          result = await queryKB(text.trim(), ["general"], 10, undefined, wizardOpts)
+          result = await queryKB(text.trim(), ["general"], 3, undefined, wizardOpts)
           if (result.results?.length) break
         }
       }

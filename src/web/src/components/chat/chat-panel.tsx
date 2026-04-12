@@ -336,6 +336,7 @@ export function ChatPanel() {
     create,
     addMessage,
     updateModel,
+    replaceMessages,
     send,
     selectedModel,
     setSelectedModel,

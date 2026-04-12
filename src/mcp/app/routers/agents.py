@@ -19,6 +19,12 @@ from app.services.ingestion import ingest_content, validate_file_path
 router = APIRouter()
 logger = logging.getLogger("ai-companion")
 
+# Limit concurrent CPU-bound agent queries to prevent event loop stalls.
+# BM25 tokenization and ONNX embedding/reranking are synchronous and block
+# the event loop.  Without this limit, 5+ concurrent /agent/query requests
+# (e.g. from auto-inject) starve /chat/stream for 30+ seconds.
+_QUERY_SEMAPHORE = asyncio.Semaphore(2)
+
 
 class AgentQueryRequest(BaseModel):
     query: str
@@ -158,6 +164,11 @@ async def compress_history_endpoint(req: CompressRequest):
 
 @router.post("/agent/query")
 async def agent_query_endpoint(req: AgentQueryRequest, request: Request):
+    async with _QUERY_SEMAPHORE:
+        return await _agent_query_inner(req, request)
+
+
+async def _agent_query_inner(req: AgentQueryRequest, request: Request):
     try:
         # ── Scope expansion ─────────────────────────────────────────────
         # Expand query_scope into individual flags (only sets defaults;

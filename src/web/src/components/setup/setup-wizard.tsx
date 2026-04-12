@@ -246,10 +246,12 @@ function clearProgress() {
 
 interface SetupWizardProps {
   open: boolean
+  /** When true, shows a "Skip Setup" link — used when the backend is already configured but the user hasn't completed onboarding locally. */
+  canSkip?: boolean
   onComplete: () => void
 }
 
-export function SetupWizard({ open, onComplete }: SetupWizardProps) {
+export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
   const [state, dispatch] = useReducer(wizardReducer, undefined, createInitialState)
   const [showResumePrompt, setShowResumePrompt] = useState(false)
   const [resumeStep, setResumeStep] = useState(0)
@@ -896,6 +898,18 @@ export function SetupWizard({ open, onComplete }: SetupWizardProps) {
               currentStep={state.step}
               skippedSteps={state.skippedSteps}
             />
+
+            {canSkip && (
+              <div className="mt-1 text-center">
+                <button
+                  type="button"
+                  onClick={handleFinish}
+                  className="text-[10px] text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+                >
+                  Skip setup — I&apos;ve already configured Cerid
+                </button>
+              </div>
+            )}
           </div>
         )}
       </DialogContent>

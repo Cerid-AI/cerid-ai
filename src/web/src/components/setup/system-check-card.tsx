@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Check, X, Minus, Loader2, MemoryStick, Container, FileText, Bot, ExternalLink, Monitor, Cpu, Zap } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { fetchSystemCheck } from "@/lib/api"
@@ -44,75 +44,96 @@ export function SystemCheckCard({ onCheckComplete }: SystemCheckCardProps) {
   ])
   const [hardware, setHardware] = useState<{ os: string; cpu: string; cpuCores: number | null; gpu: string; gpuAcceleration: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [retrying, setRetrying] = useState(false)
   const [dockerMissing, setDockerMissing] = useState(false)
+  const succeededRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
+    let retryTimer: ReturnType<typeof setTimeout> | null = null
 
-    fetchSystemCheck()
-      .then((result) => {
-        if (cancelled) return
+    function applyResult(result: SystemCheckResponse) {
+      if (cancelled || succeededRef.current) return
 
-        const ramStatus: CheckStatus = result.ram_gb >= 12 ? "pass" : result.ram_gb >= 8 ? "warn" : "fail"
-        const ramDetail = result.ram_gb >= 12
-          ? `${result.ram_gb.toFixed(0)} GB — recommended config`
-          : `${result.ram_gb.toFixed(0)} GB — lightweight mode recommended`
+      const ramStatus: CheckStatus = result.ram_gb >= 12 ? "pass" : result.ram_gb >= 8 ? "warn" : "fail"
+      const ramDetail = result.ram_gb >= 12
+        ? `${result.ram_gb.toFixed(0)} GB — recommended config`
+        : `${result.ram_gb.toFixed(0)} GB — lightweight mode recommended`
 
-        const newChecks: CheckItem[] = [
-          {
-            label: "System Memory",
-            icon: MemoryStick,
-            status: ramStatus,
-            detail: ramDetail,
-          },
-          {
-            label: "Docker",
-            icon: Container,
-            status: result.docker_running ? "pass" : "fail",
-            detail: result.docker_running ? "Running" : "Not detected",
-          },
-          {
-            label: "Configuration",
-            icon: FileText,
-            status: result.env_exists
-              ? result.env_keys_present.length > 0 ? "pass" : "neutral"
-              : "neutral",
-            detail: result.env_exists
-              ? result.env_keys_present.length > 0
-                ? `Found (${result.env_keys_present.length} key${result.env_keys_present.length === 1 ? "" : "s"} configured)`
-                : "Found (no keys yet)"
-              : "Fresh install",
-          },
-          {
-            label: "Ollama",
-            icon: Bot,
-            status: result.ollama_detected ? "pass" : "neutral",
-            detail: result.ollama_detected
-              ? `Detected (${result.ollama_models.length} model${result.ollama_models.length === 1 ? "" : "s"})`
-              : "Not found",
-          },
-        ]
+      const newChecks: CheckItem[] = [
+        {
+          label: "System Memory",
+          icon: MemoryStick,
+          status: ramStatus,
+          detail: ramDetail,
+        },
+        {
+          label: "Docker",
+          icon: Container,
+          status: result.docker_running ? "pass" : "fail",
+          detail: result.docker_running ? "Running" : "Not detected",
+        },
+        {
+          label: "Configuration",
+          icon: FileText,
+          status: result.env_exists
+            ? result.env_keys_present.length > 0 ? "pass" : "neutral"
+            : "neutral",
+          detail: result.env_exists
+            ? result.env_keys_present.length > 0
+              ? `Found (${result.env_keys_present.length} key${result.env_keys_present.length === 1 ? "" : "s"} configured)`
+              : "Found (no keys yet)"
+            : "Fresh install",
+        },
+        {
+          label: "Ollama",
+          icon: Bot,
+          status: result.ollama_detected ? "pass" : "neutral",
+          detail: result.ollama_detected
+            ? `Detected (${result.ollama_models.length} model${result.ollama_models.length === 1 ? "" : "s"})`
+            : "Not found",
+        },
+      ]
 
-        setChecks(newChecks)
-        setHardware({
-          os: result.os,
-          cpu: result.cpu,
-          cpuCores: result.cpu_cores,
-          gpu: result.gpu,
-          gpuAcceleration: result.gpu_acceleration,
+      succeededRef.current = true
+      setChecks(newChecks)
+      setError(null)
+      setRetrying(false)
+      setHardware({
+        os: result.os,
+        cpu: result.cpu,
+        cpuCores: result.cpu_cores,
+        gpu: result.gpu,
+        gpuAcceleration: result.gpu_acceleration,
+      })
+      setDockerMissing(!result.docker_running)
+      onCheckComplete(result)
+    }
+
+    function tryCheck() {
+      fetchSystemCheck()
+        .then(applyResult)
+        .catch(() => {
+          if (cancelled || succeededRef.current) return
+          setError("Could not reach backend — is Docker running?")
+          setRetrying(true)
+          setChecks((prev) =>
+            prev.map((c) => c.status === "checking"
+              ? { ...c, status: "neutral" as CheckStatus, detail: "Unknown" }
+              : c,
+            ),
+          )
+          // Retry every 5s until backend responds
+          retryTimer = setTimeout(tryCheck, 5000)
         })
-        setDockerMissing(!result.docker_running)
-        onCheckComplete(result)
-      })
-      .catch(() => {
-        if (cancelled) return
-        setError("Could not reach backend for system check")
-        setChecks((prev) =>
-          prev.map((c) => ({ ...c, status: "neutral" as CheckStatus, detail: "Unknown" })),
-        )
-      })
+    }
 
-    return () => { cancelled = true }
+    tryCheck()
+
+    return () => {
+      cancelled = true
+      if (retryTimer) clearTimeout(retryTimer)
+    }
   }, [onCheckComplete])
 
   return (
@@ -173,7 +194,16 @@ export function SystemCheckCard({ onCheckComplete }: SystemCheckCardProps) {
       )}
       {error && (
         <div className="border-t px-3 py-2">
-          <p className="text-xs text-destructive">{error}</p>
+          <div className="flex items-center gap-2">
+            {retrying && <Loader2 className="h-3 w-3 animate-spin shrink-0 text-muted-foreground" />}
+            <p className="text-xs text-destructive">{error}</p>
+          </div>
+          {retrying && (
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              Retrying automatically... Start services with{" "}
+              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">./scripts/start-cerid.sh</code>
+            </p>
+          )}
         </div>
       )}
       {dockerMissing && (

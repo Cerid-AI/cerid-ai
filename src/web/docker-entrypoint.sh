@@ -31,7 +31,7 @@ sed -i "s|env-config\.js[^\"]*|env-config.js?v=$CACHE_BUST|" "$HTML"
 
 # Inject a stale-cache detector BEFORE the main bundle.
 if ! grep -q "cerid-stale-check" "$HTML"; then
-  DETECTOR="<script id=\"cerid-stale-check\">(function(){var b=\"$CACHE_BUST\";fetch(\"/version.json?_=\"+Date.now(),{cache:\"no-store\"}).then(function(r){return r.json()}).then(function(d){if(d.build!==b){console.warn(\"[cerid] Stale cache detected, reloading...\");location.reload()}}).catch(function(){});})()</script>"
+  DETECTOR="<script id=\"cerid-stale-check\">(function(){var b=\"$CACHE_BUST\",k=\"cerid-reload-\"+b;if(sessionStorage.getItem(k))return;fetch(\"/version.json?_=\"+Date.now(),{cache:\"no-store\"}).then(function(r){return r.json()}).then(function(d){if(d.build!==b){console.warn(\"[cerid] Stale cache detected, reloading...\");sessionStorage.setItem(k,\"1\");location.reload()}}).catch(function(){});})()</script>"
   sed -i "s|</head>|$DETECTOR</head>|" "$HTML"
 fi
 

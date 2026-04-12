@@ -110,11 +110,13 @@ def _start_watchdog() -> None:
             age = time.monotonic() - _heartbeat[0]
             if age > _WATCHDOG_TIMEOUT_S:
                 logger.warning(
-                    "Event loop watchdog: heartbeat stalled for %.0fs — sending SIGTERM",
+                    "Event loop watchdog: heartbeat stalled for %.0fs — forcing exit",
                     age,
                 )
-                os.kill(os.getpid(), signal.SIGTERM)
-                return
+                # os._exit bypasses signal handlers (which may be overridden) and
+                # immediately terminates the process so Docker's restart:unless-stopped
+                # can bring the container back up cleanly.
+                os._exit(1)
 
     threading.Thread(target=_watch, name="loop-watchdog", daemon=True).start()
 
@@ -197,12 +199,20 @@ def _hydrate_settings_from_sync() -> None:
 
 
 def _signal_handler(signum: int, frame) -> None:
-    """Log signal receipt with stack trace for debugging container restarts."""
+    """Log signal receipt with stack trace, then re-raise with default handler.
+
+    Installing a custom handler via signal.signal() overrides uvicorn's asyncio
+    handler.  After logging we restore SIG_DFL and re-raise so the process
+    terminates normally — otherwise SIGTERM (from `docker stop` or the watchdog)
+    would be silently swallowed and the container would hang.
+    """
     sig_name = signal.Signals(signum).name
     stack = "".join(traceback.format_stack(frame)) if frame else "no frame"
     logger.critical(
         "SIGNAL RECEIVED: %s (%d) — stack:\n%s", sig_name, signum, stack,
     )
+    signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
 
 
 async def _openrouter_auth_probe_loop() -> None:

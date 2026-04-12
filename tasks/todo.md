@@ -1,11 +1,22 @@
 # Cerid AI — Sprint TODO
 
-> **Updated:** 2026-04-10
+> **Updated:** 2026-04-12
 > **Version:** 0.82.0 (Phase C architecture + NLI)
 
 ---
 
-## Immediate — This Session
+## Immediate — This Session (2026-04-12)
+
+- [x] Fix setup wizard dark mode: `useTheme()` called in App.tsx so `dark` class applies during wizard (bg-circuit, glow-teal now render)
+- [x] Fix "Try It Out" wizard performance: skip reranking, reduce top_k 10→3, cut post-upload delay 1s→300ms, shorten retries 3.5s→1.1s
+- [x] Fix chat event loop stalls: `asyncio.Semaphore(2)` on agent queries, `asyncio.to_thread` on ChromaDB/embedding/reranking sync calls, skip auto-inject on first message, AbortController on timed-out KB fetches
+- [x] Wire missing `replaceMessages` prop to `useChatSend` (enables history compression)
+- [x] Add `useReranking` and `signal` options to `queryKB` API client
+- [x] System check card: retry logic with 5s backoff when backend unreachable
+- [x] Setup wizard: `canSkip` prop for returning users who already configured
+- [x] Docker: extended healthcheck start_period, improved watchdog with `os._exit`, `init: true` for signal handling
+
+## Previous Session (2026-04-10)
 
 - [x] Bump pyproject.toml 0.80.0 → 0.82.0
 - [x] Fix CLAUDE.md repo path references
