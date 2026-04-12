@@ -24,7 +24,7 @@ services:
       - CERID_SYNC_DIR=/sync
       # Performance tuning
       - ENABLE_SEMANTIC_CACHE=true
-      - RERANK_ONNX_FILENAME=onnx/model_quint8_avx2.onnx
+      - RERANK_ONNX_FILENAME=${RERANK_ONNX_FILENAME:-onnx/model.onnx}
       - EMBEDDING_MODEL=Snowflake/snowflake-arctic-embed-m-v1.5
       - SEMANTIC_CACHE_DIM=768
       # NEO4J_PASSWORD, CATEGORIZE_MODE, CERID_API_KEY, CORS_ORIGINS
