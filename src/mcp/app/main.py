@@ -241,10 +241,15 @@ async def _openrouter_auth_probe_loop() -> None:
                     headers={"Authorization": f"Bearer {api_key}"},
                 )
             if resp.status_code == 200:
-                get_breaker("openrouter").reset()
+                # Reset ALL OpenRouter-dependent breakers — they share the same
+                # upstream and may have tripped from startup DNS/auth races.
+                for breaker_name in ("openrouter", "bifrost-verify", "bifrost-claims",
+                                     "bifrost-synopsis", "bifrost-memory",
+                                     "bifrost-compress", "bifrost-decompose"):
+                    get_breaker(breaker_name).reset()
                 reset_auth_failure_count()
                 logger.info(
-                    "Startup OpenRouter auth probe succeeded (attempt %d/%d) — circuit reset to CLOSED",
+                    "Startup OpenRouter auth probe succeeded (attempt %d/%d) — all LLM circuits reset to CLOSED",
                     attempt + 1, max_attempts,
                 )
                 return

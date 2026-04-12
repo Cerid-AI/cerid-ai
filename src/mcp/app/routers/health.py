@@ -98,7 +98,7 @@ def health_check() -> dict:
 
     result: dict = {
         "status": "healthy" if all(v == "connected" for v in status.values()) else "degraded",
-        "version": "0.82.0",
+        "version": "0.83.0",
         "services": status,
         "circuit_breakers": {
             "bifrost": bifrost_cb_state,
