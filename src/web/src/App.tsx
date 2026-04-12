@@ -14,6 +14,7 @@ import { UIModeProvider } from "@/contexts/ui-mode-context"
 import { ProtectedRoute } from "@/components/auth/protected-route"
 import { fetchSettings, fetchSetupStatus, setTierOverride } from "@/lib/api"
 import { SetupWizard } from "@/components/setup/setup-wizard"
+import { useTheme } from "@/hooks/use-theme"
 
 const KnowledgePane = lazy(() => import("@/components/kb/knowledge-pane"))
 const MonitoringPane = lazy(() => import("@/components/monitoring/monitoring-pane"))
@@ -32,6 +33,10 @@ function PaneLoader() {
 }
 
 export default function App() {
+  // Initialize theme globally so dark-mode effects (bg-circuit, glow-teal, etc.)
+  // work in the setup wizard path where AppLayout is not mounted.
+  useTheme()
+
   const [multiUser, setMultiUser] = useState(false)
   const [featureTier, setFeatureTier] = useState("community")
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null)
@@ -103,6 +108,7 @@ export default function App() {
       <UIModeProvider>
         <SetupWizard
           open
+          canSkip={!setupRequired && showOnboarding}
           onComplete={() => {
             setSetupRequired(false)
             setShowOnboarding(false)

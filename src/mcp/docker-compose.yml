@@ -32,6 +32,7 @@ services:
       # ${VAR} interpolation fails when running without --env-file.
     networks:
       - llm-network
+    init: true
     restart: unless-stopped
     deploy:
       resources:
@@ -39,11 +40,15 @@ services:
           cpus: '2.0'
           memory: 6G
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:8888/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
+      # /health/live is instant (no Cypher query). The sentinel-guarded kill
+      # ensures auto-recovery from a hung uvicorn AFTER successful startup,
+      # without disrupting the first cold start (ONNX model downloads can take
+      # 3-5 minutes). init:true above prevents zombie PIDs.
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8888/health/live && touch /tmp/.health_ok || { [ -f /tmp/.health_ok ] && kill -s TERM 1; true; }"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 300s
 
 networks:
   llm-network:
