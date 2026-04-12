@@ -149,6 +149,13 @@ if [ -z "${HOST_OS:-}" ]; then
                 HOST_GPU_ACCEL="none"
             fi
             ;;
+        MINGW*|MSYS*|CYGWIN*)
+            HOST_OS="Windows ($(uname -s))"
+            HOST_CPU="Unknown"
+            HOST_CPU_CORES="$(nproc 2>/dev/null || echo '')"
+            HOST_GPU="Unknown"
+            HOST_GPU_ACCEL="none"
+            ;;
     esac
 fi
 export HOST_OS="${HOST_OS:-}"
@@ -156,6 +163,32 @@ export HOST_CPU="${HOST_CPU:-}"
 export HOST_CPU_CORES="${HOST_CPU_CORES:-}"
 export HOST_GPU="${HOST_GPU:-}"
 export HOST_GPU_ACCEL="${HOST_GPU_ACCEL:-}"
+
+# Auto-select ONNX model variant based on CPU architecture.
+# AVX2 quantized model (23MB, int8) is 4x faster but only works on x86 with AVX2.
+# Generic float32 model (91MB) works on any CPU including ARM64/Apple Silicon.
+if [ -z "${RERANK_ONNX_FILENAME:-}" ]; then
+    _arch="$(uname -m)"
+    case "$_arch" in
+        x86_64|amd64)
+            # Check for AVX2 support
+            if [ "$(uname -s)" = "Darwin" ]; then
+                _has_avx2=$(sysctl -n hw.optional.avx2_0 2>/dev/null || echo "0")
+            else
+                _has_avx2=$(grep -c avx2 /proc/cpuinfo 2>/dev/null || echo "0")
+            fi
+            if [ "$_has_avx2" -gt 0 ] 2>/dev/null; then
+                export RERANK_ONNX_FILENAME="onnx/model_quint8_avx2.onnx"
+            else
+                export RERANK_ONNX_FILENAME="onnx/model.onnx"
+            fi
+            ;;
+        *)
+            # ARM64, aarch64, or unknown — use generic float32 model
+            export RERANK_ONNX_FILENAME="onnx/model.onnx"
+            ;;
+    esac
+fi
 
 # Persist HOST_* values to .env so `docker compose up` without start-cerid.sh
 # still passes real host hardware info into containers.
@@ -175,6 +208,7 @@ _persist_host_var HOST_CPU "$HOST_CPU"
 _persist_host_var HOST_CPU_CORES "$HOST_CPU_CORES"
 _persist_host_var HOST_GPU "$HOST_GPU"
 _persist_host_var HOST_GPU_ACCEL "$HOST_GPU_ACCEL"
+_persist_host_var RERANK_ONNX_FILENAME "$RERANK_ONNX_FILENAME"
 
 # Platform-aware Ollama URL default (Section 4: Multi-OS)
 # macOS/Windows Docker Desktop: host.docker.internal
@@ -182,8 +216,18 @@ _persist_host_var HOST_GPU_ACCEL "$HOST_GPU_ACCEL"
 if [ -z "${OLLAMA_URL:-}" ]; then
     case "$(uname -s)" in
         Darwin)  export OLLAMA_URL="http://host.docker.internal:11434" ;;
+        Linux)
+            # Docker Desktop supports host.docker.internal; native Docker Engine does not.
+            if docker info 2>/dev/null | grep -q "Desktop"; then
+                export OLLAMA_URL="http://host.docker.internal:11434"
+            else
+                # Native Docker Engine — use the default bridge gateway
+                _bridge_ip=$(docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}' 2>/dev/null || echo "172.17.0.1")
+                export OLLAMA_URL="http://${_bridge_ip}:11434"
+            fi
+            ;;
         MINGW*|MSYS*|CYGWIN*)  export OLLAMA_URL="http://host.docker.internal:11434" ;;
-        Linux)   export OLLAMA_URL="http://host.docker.internal:11434" ;;
+        *)  export OLLAMA_URL="http://host.docker.internal:11434" ;;
     esac
 fi
 
