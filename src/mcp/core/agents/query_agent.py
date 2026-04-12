@@ -914,8 +914,9 @@ async def agent_query(
                 from core.utils.embeddings import get_embedding_function
                 _ef = get_embedding_function()
                 if _ef is not None:
+                    ef = _ef  # bind for mypy — lambda captures the variable, not the value
                     _query_embedding = await asyncio.to_thread(
-                        lambda: np.asarray(_ef([query])[0])
+                        lambda: np.asarray(ef([query])[0])
                     )
                     cached = cache_lookup(_query_embedding, redis_client)
                     if cached is not None:

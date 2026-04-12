@@ -103,7 +103,7 @@ describe("Simulated Chat Data Flow", () => {
 
   it("injects KB context into message via useChatSend", async () => {
     mockQueryKB.mockResolvedValue({ results: [makeKBResult({ artifact_id: "a1", filename: "auth.py", relevance: 0.9 })] })
-    const opts = makeSendOptions({ autoInject: true, autoInjectThreshold: 0.5 })
+    const opts = makeSendOptions({ autoInject: true, autoInjectThreshold: 0.5, activeMessages: [{ id: "prior-1", role: "assistant" as const, content: "Hello", timestamp: Date.now() }] })
     const { result } = renderHook(() => useChatSend(opts))
     await act(async () => { await result.current.handleSend("How does auth work?") })
     const sysMsg = sentMessages(opts._sendSpy).find((m) => m.role === "system")
@@ -188,10 +188,10 @@ describe("Simulated Chat Data Flow", () => {
 describe("KB Injection Data Flow", () => {
   it("queryKB returns results with correct source refs", async () => {
     mockQueryKB.mockResolvedValue({ results: [makeKBResult({ content: "Auth details", relevance: 0.92, artifact_id: "art-auth-1", domain: "coding" })] })
-    const opts = makeSendOptions({ autoInject: true, autoInjectThreshold: 0.5 })
+    const opts = makeSendOptions({ autoInject: true, autoInjectThreshold: 0.5, activeMessages: [{ id: "prior-1", role: "assistant" as const, content: "Hello", timestamp: Date.now() }] })
     const { result } = renderHook(() => useChatSend(opts))
     await act(async () => { await result.current.handleSend("How does auth work?") })
-    expect(mockQueryKB).toHaveBeenCalledWith("How does auth work?", undefined, 10)
+    expect(mockQueryKB).toHaveBeenCalledWith("How does auth work?", undefined, 5, undefined, expect.objectContaining({}))
     const sources = opts._sendSpy.mock.calls[0][3]
     expect(sources).toBeDefined()
     expect(sources[0]).toMatchObject({ artifact_id: "art-auth-1", domain: "coding" })
@@ -199,7 +199,7 @@ describe("KB Injection Data Flow", () => {
 
   it("injects KB results as document-tagged context header", async () => {
     mockQueryKB.mockResolvedValue({ results: [makeKBResult({ artifact_id: "a1", filename: "guide.md", relevance: 0.9 })] })
-    const opts = makeSendOptions({ autoInject: true, autoInjectThreshold: 0.5 })
+    const opts = makeSendOptions({ autoInject: true, autoInjectThreshold: 0.5, activeMessages: [{ id: "prior-1", role: "assistant" as const, content: "Hello", timestamp: Date.now() }] })
     const { result } = renderHook(() => useChatSend(opts))
     await act(async () => { await result.current.handleSend("Explain the guide") })
     const sysMsg = sentMessages(opts._sendSpy).find((m) => m.role === "system")
@@ -210,10 +210,10 @@ describe("KB Injection Data Flow", () => {
 
   it("passes domain filter via queryKB args", async () => {
     mockQueryKB.mockResolvedValue({ results: [] })
-    const opts = makeSendOptions({ autoInject: true, autoInjectThreshold: 0.5 })
+    const opts = makeSendOptions({ autoInject: true, autoInjectThreshold: 0.5, activeMessages: [{ id: "prior-1", role: "assistant" as const, content: "Hello", timestamp: Date.now() }] })
     const { result } = renderHook(() => useChatSend(opts))
     await act(async () => { await result.current.handleSend("coding question") })
-    expect(mockQueryKB).toHaveBeenCalledWith("coding question", undefined, 10)
+    expect(mockQueryKB).toHaveBeenCalledWith("coding question", undefined, 5, undefined, expect.objectContaining({}))
   })
 
   it("does not inject context when KB returns no results", async () => {
@@ -238,7 +238,7 @@ describe("KB Injection Data Flow", () => {
       makeKBResult({ artifact_id: "a3", filename: "utils.py", relevance: 0.82, chunk_index: 0, content: "Utils provide helpers" }),
     ]
     mockQueryKB.mockResolvedValue({ results: chunks })
-    const opts = makeSendOptions({ autoInject: true, autoInjectThreshold: 0.5 })
+    const opts = makeSendOptions({ autoInject: true, autoInjectThreshold: 0.5, activeMessages: [{ id: "prior-1", role: "assistant" as const, content: "Hello", timestamp: Date.now() }] })
     const { result } = renderHook(() => useChatSend(opts))
     await act(async () => { await result.current.handleSend("Show me the architecture") })
     const sysMsg = sentMessages(opts._sendSpy).find((m) => m.role === "system")
