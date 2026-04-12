@@ -80,7 +80,7 @@ describe("SystemCheckCard", () => {
     mockFetchSystemCheck.mockRejectedValue(new Error("Network error"))
     render(<SystemCheckCard onCheckComplete={vi.fn()} />)
     await waitFor(() => {
-      expect(screen.getByText("Could not reach backend for system check")).toBeInTheDocument()
+      expect(screen.getByText("Could not reach backend — is Docker running?")).toBeInTheDocument()
     })
   })
 })
