@@ -233,10 +233,12 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
             _external_task = None
             if _ext_on:
                 try:
+                    from agents.retrieval_orchestrator import _extract_search_terms
                     from utils.data_sources import registry
+                    _search_terms = _extract_search_terms(req.query)
                     _external_task = asyncio.create_task(
                         registry.query_all(
-                            req.query,
+                            _search_terms,
                             domain=req.domains[0] if req.domains else None,
                             timeout=5.0,
                         )

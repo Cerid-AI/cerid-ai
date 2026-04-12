@@ -251,6 +251,21 @@ async def orchestrated_query(
     return kb_result
 
 
+def _extract_search_terms(query: str) -> str:
+    """Extract keyword search terms from a natural-language query.
+
+    External data sources (PubChem, OpenLibrary, DuckDuckGo, etc.) are
+    keyword-oriented APIs, not natural-language search engines.  Passing
+    a full question like "What is the current population of Tokyo?" produces
+    garbage results.  This strips stop-words and question scaffolding,
+    returning compact search terms (e.g. "population Tokyo").
+    """
+    from utils.metadata import _extract_keywords_simple
+
+    keywords = _extract_keywords_simple(query, max_keywords=5)
+    return " ".join(keywords) if keywords else query
+
+
 async def _query_external_sources(
     query: str,
     domain: str | None = None,
@@ -264,8 +279,12 @@ async def _query_external_sources(
     try:
         from utils.data_sources import registry
 
+        # Extract keywords — external APIs need search terms, not full questions
+        search_terms = _extract_search_terms(query)
+        logger.debug("External source search terms: %r → %r", query, search_terms)
+
         return await asyncio.wait_for(
-            registry.query_all(query, domain=domain, timeout=timeout),
+            registry.query_all(search_terms, domain=domain, timeout=timeout),
             timeout=timeout + 1.0,  # outer guard above per-source timeout
         )
     except asyncio.TimeoutError:
