@@ -330,9 +330,9 @@ class TestHealthScore:
         metrics = {}
         score, grade, factors = _compute_health_score(metrics)
 
-        # Should get a reasonable default score, not zero
-        assert 30 <= score <= 70
-        assert grade in ("C", "D")
+        # No data → score defaults to 0
+        assert score == 0
+        assert grade == "F"
 
     def test_high_latency_penalized(self):
         from app.routers.observability import _compute_health_score
