@@ -277,7 +277,7 @@ export function ConversationList({
                     aria-label={`Select ${convo.title}`}
                   />
                 )}
-                <div className="min-w-0 flex-1 scroll-title">
+                <div className="min-w-0 flex-1 max-w-[calc(100%-4rem)] scroll-title">
                   {renamingId === convo.id ? (
                     <input
                       autoFocus
