@@ -15,7 +15,7 @@ class OpenLibrarySource(DataSource):
     name = "openlibrary"
     description = "Open Library -- free book metadata, author info, and ISBNs. No API key required."
     requires_api_key = False
-    domains: list[str] = []  # all domains
+    domains: list[str] = ["books", "research", "education"]
 
     async def query(self, query: str, **kwargs) -> list[DataSourceResult]:
         try:

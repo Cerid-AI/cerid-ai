@@ -17,7 +17,7 @@ class PubChemSource(DataSource):
     name = "pubchem"
     description = "PubChem -- chemical compound data and descriptions. No API key required."
     requires_api_key = False
-    domains: list[str] = ["research", "general"]
+    domains: list[str] = ["research", "chemistry"]
 
     async def query(self, query: str, **kwargs) -> list[DataSourceResult]:
         try:
