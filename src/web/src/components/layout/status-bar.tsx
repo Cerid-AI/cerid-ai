@@ -192,7 +192,7 @@ export function StatusBar({ consoleOpen, onToggleConsole, consoleUnreadCount = 0
           return (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="text-[10px] text-yellow-500/70">&#x26A1; 0 local</span>
+                <span className="text-[10px] text-yellow-500/70" title="No local model pipeline stages. Install Ollama for local inference.">&#x26A1; 0 local</span>
               </TooltipTrigger>
               <TooltipContent side="top">
                 <p>All pipeline stages use cloud APIs. Enable Ollama for faster local processing.</p>

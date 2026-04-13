@@ -296,6 +296,7 @@ export default function SettingsPane() {
                   <ProSection
                     featureTier={settings?.feature_tier ?? "community"}
                     featureFlags={settings?.feature_flags ?? {}}
+                    onRefresh={load}
                   />
                 </PaneErrorBoundary>
               </TabsContent>

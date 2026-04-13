@@ -359,10 +359,17 @@ export function KnowledgePane() {
   // Apply client source filter (browsing mode only — search results come pre-filtered)
   const sourceFiltered = useMemo(() => {
     if (activeSearch || clientSource === "all") return allResults
-    // In browse mode, metadata isn't fully available from the listing endpoint,
-    // so "gui" (Personal) shows everything that doesn't have a known external source.
-    // This is a UI-level filter; full server-side filtering uses fetchArtifactsFiltered.
-    return allResults
+    if (clientSource === "external") {
+      return allResults.filter((r) => (r as ReturnType<typeof artifactToResult>).source_type === "external")
+    }
+    // For named client sources (e.g. "gui", "trading-agent"), match client_source field;
+    // results without a client_source and without external source_type are treated as "gui" (Personal).
+    return allResults.filter((r) => {
+      const cs = (r as ReturnType<typeof artifactToResult>).client_source
+      if (cs) return cs === clientSource
+      // No explicit client_source and not external → treat as "gui"
+      return clientSource === "gui" && (r as ReturnType<typeof artifactToResult>).source_type !== "external"
+    })
   }, [allResults, clientSource, activeSearch])
 
   // Apply date filter

@@ -58,6 +58,7 @@ export function ProSection({ featureTier, featureFlags, onRefresh }: ProSectionP
   const [keySuccess, setKeySuccess] = useState("")
   const [validating, setValidating] = useState(false)
   const [deactivating, setDeactivating] = useState(false)
+  const [upgradeError, setUpgradeError] = useState("")
 
   // Waitlist state
   const [waitlistEmail, setWaitlistEmail] = useState("")
@@ -119,6 +120,7 @@ export function ProSection({ featureTier, featureFlags, onRefresh }: ProSectionP
   }, [onRefresh])
 
   const handleUpgrade = useCallback(async () => {
+    setUpgradeError("")
     try {
       const res = await fetch(`${MCP_BASE}/billing/create-checkout`, {
         method: "POST",
@@ -130,9 +132,11 @@ export function ProSection({ featureTier, featureFlags, onRefresh }: ProSectionP
         if (data.checkout_url) {
           window.open(data.checkout_url, "_blank")
         }
+      } else {
+        setUpgradeError("Pro upgrade is only available with a license key. Enter your key below.")
       }
     } catch {
-      // Stripe not configured — license key entry is the fallback
+      setUpgradeError("Pro upgrade is only available with a license key. Enter your key below.")
     }
   }, [])
 
@@ -195,6 +199,10 @@ export function ProSection({ featureTier, featureFlags, onRefresh }: ProSectionP
             )}
           </div>
         </div>
+
+        {upgradeError && (
+          <p className="mt-2 text-xs text-destructive">{upgradeError}</p>
+        )}
 
         {/* Masked key display when Pro */}
         {isPro && billingStatus?.key_masked && (
