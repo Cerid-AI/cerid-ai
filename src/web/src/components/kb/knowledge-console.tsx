@@ -237,11 +237,7 @@ function readLocalNumber(key: string, fallback: number): number {
   return fallback
 }
 
-function ConsoleConfigBar({
-  ragMode,
-}: {
-  ragMode: RagMode
-}) {
+function ConsoleConfigBar() {
   const [selfRag, setSelfRag] = useState(() => readLocalBool("cerid-console-self-rag", false))
   const [queryDecomp, setQueryDecomp] = useState(() => readLocalBool("cerid-console-query-decomp", false))
   const [semanticCache, setSemanticCache] = useState(() => readLocalBool("cerid-console-semantic-cache", false))
@@ -400,7 +396,7 @@ export function KnowledgeConsole({
 
       {/* Configuration bar — RAG mode + pipeline settings */}
       {onRagModeChange && (
-        <ConsoleConfigBar ragMode={ragMode} />
+        <ConsoleConfigBar />
       )}
 
       {/* Live ingestion progress — appears when files are being ingested */}
