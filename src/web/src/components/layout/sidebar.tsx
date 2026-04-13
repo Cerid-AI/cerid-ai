@@ -65,7 +65,7 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
   const {
     visibleConversations, activeId, setActiveId, create, remove, rename,
     archive, unarchive, showArchived, toggleShowArchived, archivedCount,
-    bulkDelete, bulkArchive,
+    bulkDelete, bulkArchive, active,
   } = useConversationsContext()
   const { toggle: toggleMode, isSimple } = useUIMode()
   const [historyExpanded, setHistoryExpanded] = useState(() => readBool("cerid-sidebar-history", true))
@@ -93,7 +93,7 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
   }
 
   const handleNewChat = () => {
-    create(MODELS[0].id)
+    create(active?.model || MODELS[0].id)
     if (activePane !== "chat") onPaneChange("chat")
   }
 

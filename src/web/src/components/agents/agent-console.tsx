@@ -29,6 +29,7 @@ function formatTime(ts: number): string {
 export default function AgentConsole() {
   const [entries, setEntries] = useState<ActivityEntry[]>([])
   const [connected, setConnected] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const esRef = useRef<EventSource | null>(null)
   const connectRef = useRef<() => void>(() => {})
@@ -42,7 +43,10 @@ export default function AgentConsole() {
     const es = new EventSource(url)
     esRef.current = es
 
-    es.onopen = () => setConnected(true)
+    es.onopen = () => {
+      setConnected(true)
+      setError(null)
+    }
 
     es.onmessage = (event) => {
       try {
@@ -58,6 +62,7 @@ export default function AgentConsole() {
 
     es.onerror = () => {
       setConnected(false)
+      setError("Connection to agent activity stream lost. Reconnecting...")
       es.close()
       // Reconnect after 3s
       setTimeout(() => connectRef.current(), 3000)
@@ -90,6 +95,12 @@ export default function AgentConsole() {
           {entries.length} events
         </span>
       </div>
+      {!connected && error && (
+        <div className="flex items-center gap-2 border-b border-red-500/20 bg-red-500/10 px-4 py-2 text-xs text-red-400">
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500 animate-pulse" />
+          {error}
+        </div>
+      )}
       <div
         ref={scrollRef}
         className="flex-1 overflow-y-auto bg-background p-3 font-mono text-xs leading-relaxed"
@@ -103,7 +114,7 @@ export default function AgentConsole() {
           const colorClass =
             AGENT_COLORS[entry.agent] ?? "text-muted-foreground"
           return (
-            <div key={i} className="flex gap-2">
+            <div key={`${entry.timestamp}-${i}`} className="flex gap-2">
               <span className="shrink-0 text-muted-foreground">
                 [{formatTime(entry.timestamp)}]
               </span>
