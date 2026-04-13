@@ -235,9 +235,11 @@ jobs:
           CVE-2026-27135
           # systemd arbitrary code execution — D-Bus not reachable in container context
           CVE-2026-29111
+          # openssl DoS via NULL pointer — Debian base image, pending 3.5.5-1 patch
+          CVE-2026-28390
           EOF
       - name: Scan MCP Docker image
-        uses: aquasecurity/trivy-action@f685ba7215360f3869e07df3fa6e2fe99b110407
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
         with:
           image-ref: cerid-mcp-test
           severity: CRITICAL,HIGH
@@ -245,7 +247,7 @@ jobs:
           trivyignores: .trivyignore
           version: v0.69.3
       - name: Scan Web Docker image
-        uses: aquasecurity/trivy-action@f685ba7215360f3869e07df3fa6e2fe99b110407
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
         with:
           image-ref: cerid-web-test
           severity: CRITICAL,HIGH
