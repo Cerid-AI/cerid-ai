@@ -173,11 +173,9 @@ export function AuditPane() {
                     <IngestionStats ingestion={audit?.ingestion} />
                   </PaneErrorBoundary>
                 )}
-                {enabledReports.activity && (
-                  <PaneErrorBoundary label="Recent Failures">
-                    <RecentFailures failures={audit?.activity?.recent_failures} />
-                  </PaneErrorBoundary>
-                )}
+                <PaneErrorBoundary label="Recent Failures">
+                  <RecentFailures failures={audit?.activity?.recent_failures} />
+                </PaneErrorBoundary>
                 {enabledReports.verification && (
                   <PaneErrorBoundary label="Verification Accuracy">
                     <AccuracyDashboard verification={audit?.verification} />

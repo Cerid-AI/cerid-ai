@@ -71,16 +71,19 @@ export default function MemoriesPane() {
   const [editText, setEditText] = useState("")
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [archiving, setArchiving] = useState(false)
   const [archiveResult, setArchiveResult] = useState<string | null>(null)
 
   const loadMemories = useCallback(async () => {
     setLoading(true)
+    setError(null)
     try {
       const res = await fetchMemories({ limit: 500 })
       setMemories(res.memories)
     } catch (err) {
       console.error("Failed to load memories:", err)
+      setError("Failed to load memories. Please try again.")
     } finally {
       setLoading(false)
     }
@@ -233,7 +236,12 @@ export default function MemoriesPane() {
       </div>
 
       {/* Content */}
-      {loading ? (
+      {error && !loading ? (
+        <div className="flex flex-col items-center gap-2 p-8 text-center text-sm text-muted-foreground">
+          <p>{error}</p>
+          <button onClick={loadMemories} className="text-xs underline hover:text-foreground">Retry</button>
+        </div>
+      ) : loading ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
           {[0, 1, 2].map((i) => (
             <div key={i} className="w-full max-w-md px-4">

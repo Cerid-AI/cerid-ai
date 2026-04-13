@@ -126,7 +126,7 @@ def _compute_health_score(metrics: dict) -> tuple[int, str, dict]:
         scores.append(latency_score * 0.35)
     else:
         factors["latency"] = {"p95_ms": None, "score": None, "weight": 35, "status": "no_data"}
-        scores.append(70 * 0.35)  # Default to "decent" when no data
+        scores.append(0)  # no data — don't contribute to score
 
     # Cache hit rate factor (weight: 20%)
     cache = metrics.get("cache_hit_rate", {})
@@ -137,7 +137,7 @@ def _compute_health_score(metrics: dict) -> tuple[int, str, dict]:
         scores.append(cache_score * 0.20)
     else:
         factors["cache"] = {"hit_rate": None, "score": None, "weight": 20, "status": "no_data"}
-        scores.append(50 * 0.20)
+        scores.append(0)  # no data — don't contribute to score
 
     # Verification accuracy factor (weight: 30%)
     verif = metrics.get("verification_accuracy", {})
@@ -148,7 +148,7 @@ def _compute_health_score(metrics: dict) -> tuple[int, str, dict]:
         scores.append(verif_score * 0.30)
     else:
         factors["verification"] = {"accuracy": None, "score": None, "weight": 30, "status": "no_data"}
-        scores.append(70 * 0.30)
+        scores.append(0)  # no data — don't contribute to score
 
     # Throughput factor (weight: 15%)
     throughput = metrics.get("queries_per_minute", {})
@@ -160,7 +160,7 @@ def _compute_health_score(metrics: dict) -> tuple[int, str, dict]:
         scores.append(tp_score * 0.15)
     else:
         factors["throughput"] = {"query_count": 0, "score": None, "weight": 15, "status": "no_data"}
-        scores.append(30 * 0.15)
+        scores.append(0)  # no data — don't contribute to score
 
     total = int(round(sum(scores)))
     total = max(0, min(100, total))

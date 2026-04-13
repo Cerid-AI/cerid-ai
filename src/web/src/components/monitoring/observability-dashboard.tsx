@@ -200,6 +200,16 @@ function formatCount(val: number | null | undefined): string {
 }
 
 // ---------------------------------------------------------------------------
+// Canonical pipeline stages — iterate this instead of API keys to guarantee order & completeness
+// ---------------------------------------------------------------------------
+
+const ALL_STAGES: PipelineStage[] = [
+  "claim_extraction", "query_decomposition", "topic_extraction",
+  "memory_resolution", "verification_simple", "verification_complex",
+  "reranking", "chat_generation",
+]
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
@@ -249,13 +259,8 @@ export function ObservabilityDashboard() {
   const pipelineStats = useMemo(() => {
     const providers = healthStatus?.pipeline_providers
     if (!providers) return null
-    const allStages: PipelineStage[] = [
-      "claim_extraction", "query_decomposition", "topic_extraction",
-      "memory_resolution", "verification_simple", "verification_complex",
-      "reranking", "chat_generation",
-    ]
-    const total = allStages.length
-    const ollamaCount = allStages.filter((s) => providers[s] === "ollama").length
+    const total = ALL_STAGES.length
+    const ollamaCount = ALL_STAGES.filter((s) => providers[s] === "ollama").length
     return { total, ollamaCount, providers }
   }, [healthStatus?.pipeline_providers])
 
@@ -307,16 +312,27 @@ export function ObservabilityDashboard() {
               <Shield className="h-4 w-4 text-teal-500" />
             </CardHeader>
             <CardContent className="p-3 pt-0">
-              <span className={cn(
-                "inline-block rounded-md px-2 py-0.5 text-lg font-bold uppercase",
-                healthStatus.degradation_tier === "full" && "bg-green-500/15 text-green-700 dark:text-green-400",
-                healthStatus.degradation_tier === "lite" && "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400",
-                healthStatus.degradation_tier === "direct" && "bg-blue-500/15 text-blue-700 dark:text-blue-400",
-                healthStatus.degradation_tier === "cached" && "bg-orange-500/15 text-orange-700 dark:text-orange-400",
-                healthStatus.degradation_tier === "offline" && "bg-red-500/15 text-red-700 dark:text-red-400",
-              )}>
-                {healthStatus.degradation_tier ?? "unknown"}
-              </span>
+              {(() => {
+                const TIER_DISPLAY: Record<string, string> = {
+                  full: "Healthy",
+                  lite: "Lite Mode",
+                  direct: "Direct",
+                  cached: "Cache Only",
+                  offline: "Offline",
+                }
+                return (
+                  <span className={cn(
+                    "inline-block rounded-md px-2 py-0.5 text-lg font-bold",
+                    healthStatus.degradation_tier === "full" && "bg-green-500/15 text-green-700 dark:text-green-400",
+                    healthStatus.degradation_tier === "lite" && "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400",
+                    healthStatus.degradation_tier === "direct" && "bg-blue-500/15 text-blue-700 dark:text-blue-400",
+                    healthStatus.degradation_tier === "cached" && "bg-orange-500/15 text-orange-700 dark:text-orange-400",
+                    healthStatus.degradation_tier === "offline" && "bg-red-500/15 text-red-700 dark:text-red-400",
+                  )}>
+                    {TIER_DISPLAY[healthStatus.degradation_tier ?? ""] ?? healthStatus.degradation_tier ?? "Unknown"}
+                  </span>
+                )
+              })()}
               <div className="mt-1.5 flex items-center gap-2 text-xs">
                 <span className="flex items-center gap-1">
                   Retrieve
@@ -346,13 +362,16 @@ export function ObservabilityDashboard() {
               </div>
               {pipelineStats && (
                 <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground">
-                  {Object.entries(pipelineStats.providers).map(([stage, provider]) => (
-                    <span key={stage}>
-                      <span className="font-medium">{stage.replace(/_/g, " ")}</span>
-                      {" "}
-                      <span className={provider === "ollama" ? "text-green-500" : "text-blue-500"}>{provider}</span>
-                    </span>
-                  ))}
+                  {ALL_STAGES.map((stage) => {
+                    const provider = pipelineStats.providers[stage] ?? "\u2014"
+                    return (
+                      <span key={stage}>
+                        <span className="font-medium">{stage.replace(/_/g, " ")}</span>
+                        {" "}
+                        <span className={provider === "ollama" ? "text-green-500" : "text-blue-500"}>{provider}</span>
+                      </span>
+                    )
+                  })}
                 </div>
               )}
             </CardContent>

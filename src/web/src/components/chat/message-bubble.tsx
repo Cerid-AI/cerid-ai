@@ -9,6 +9,7 @@ import { Copy, Check, User, Bot, ShieldCheck, ShieldAlert, Loader2, Pencil, Shie
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn, formatCost } from "@/lib/utils"
+import { MCP_BASE, mcpHeaders } from "@/lib/api"
 
 /** Lazy-load PrismLight (25 common languages, ~200KB) instead of full Prism (~1.6MB) */
 const LazySyntaxHighlighter = lazy(() =>
@@ -354,8 +355,6 @@ function VerificationBadge({ status, onClick }: { status: MessageVerificationSta
   )
 }
 
-const MCP_BASE = import.meta.env.VITE_MCP_URL || "http://localhost:8888"
-
 /** Thumbs up/down feedback buttons for assistant messages. */
 function FeedbackButtons({ messageId }: { messageId: string }) {
   const [feedback, setFeedback] = useState<"up" | "down" | null>(null)
@@ -365,7 +364,7 @@ function FeedbackButtons({ messageId }: { messageId: string }) {
     try {
       await fetch(`${MCP_BASE}/artifacts/${messageId}/feedback`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-Client-ID": "gui" },
+        headers: mcpHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ rating, source: "message_bubble" }),
       })
     } catch {

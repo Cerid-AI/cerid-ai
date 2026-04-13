@@ -58,7 +58,7 @@ async def extract_memories(
         "Return ONLY a JSON array of objects with keys: content, memory_type, summary.\n"
         "- content: the full extractable text\n"
         "- memory_type: one of fact/decision/preference/action_item\n"
-        "- summary: a one-line summary (max 100 chars)\n\n"
+        "- summary: a concise summary (max 500 chars)\n\n"
         "If nothing is worth extracting, return an empty array [].\n\n"
         f"Response:\n{response_text[:3000]}\n\n"
         "JSON array:"
@@ -90,7 +90,7 @@ async def extract_memories(
             valid.append({
                 "content": str(m.get("content", ""))[:2000],
                 "memory_type": mem_type,
-                "summary": str(m.get("summary", ""))[:100],
+                "summary": str(m.get("summary", ""))[:500],
             })
         return valid
 

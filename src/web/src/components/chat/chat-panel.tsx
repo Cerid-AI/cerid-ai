@@ -34,7 +34,7 @@ import { useVerificationOrchestrator } from "@/hooks/use-verification-orchestrat
 import { useUIMode } from "@/contexts/ui-mode-context"
 import { UploadDialog } from "@/components/kb/upload-dialog"
 import { useQuery } from "@tanstack/react-query"
-import { uploadFile, enableOllama, fetchOllamaStatus, fetchOllamaRecommendations, pullOllamaModel, fetchHealthStatus, retestServices } from "@/lib/api"
+import { uploadFile, enableOllama, fetchOllamaStatus, fetchOllamaRecommendations, pullOllamaModel, fetchHealthStatus, retestServices, MCP_BASE, mcpHeaders } from "@/lib/api"
 import type { ChatMessage } from "@/lib/types"
 import { MODELS } from "@/lib/types"
 import { uuid } from "@/lib/utils"
@@ -406,11 +406,10 @@ export function ChatPanel() {
 
   const handleEnrich = useCallback(
     async (messageId: string, content: string) => {
-      const MCP_URL = import.meta.env.VITE_MCP_URL || "http://localhost:8888"
       try {
-        const res = await fetch(`${MCP_URL}/agent/enrich`, {
+        const res = await fetch(`${MCP_BASE}/agent/enrich`, {
           method: "POST",
-          headers: { "Content-Type": "application/json", "X-Client-ID": "gui" },
+          headers: mcpHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({ message_id: messageId, content }),
         })
         if (!res.ok) return

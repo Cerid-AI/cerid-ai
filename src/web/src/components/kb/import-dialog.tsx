@@ -15,7 +15,7 @@ import {
 type Phase = "input" | "scanning" | "preview" | "importing" | "complete" | "error"
 
 export function ImportDialog({ onClose }: { onClose: () => void }) {
-  const [folderPath, setFolderPath] = useState("/archive")
+  const [folderPath, setFolderPath] = useState("~/cerid-archive")
   const [phase, setPhase] = useState<Phase>("input")
   const [preview, setPreview] = useState<ScanPreview | null>(null)
   const [error, setError] = useState("")
@@ -83,7 +83,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
               <Input
                 value={folderPath}
                 onChange={(e) => setFolderPath(e.target.value)}
-                placeholder="/archive or /archive/finance"
+                placeholder="~/cerid-archive or ~/cerid-archive/finance"
                 className="text-xs h-8"
               />
               <Button size="sm" className="h-8 shrink-0" onClick={runPreview} disabled={!folderPath.trim()}>
@@ -91,7 +91,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
               </Button>
             </div>
             <p className="text-[10px] text-muted-foreground">
-              Path relative to the archive mount. Junk files, caches, and system files are automatically skipped.
+              Path to the host archive directory. Junk files, caches, and system files are automatically skipped.
             </p>
           </>
         )}

@@ -376,7 +376,7 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
       const result = await applySetupConfig({
         keys: config,
         archive_path: state.kbConfig.archivePath,
-        domains: ["general"],
+        domains: state.kbConfig.domains,
         lightweight_mode: state.kbConfig.lightweightMode,
         watch_folder: state.kbConfig.watchFolder,
         ollama_enabled: state.ollama.enabled,

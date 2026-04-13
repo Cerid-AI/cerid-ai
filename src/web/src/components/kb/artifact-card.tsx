@@ -12,6 +12,7 @@ import { SourceTypeBadge } from "./source-type-badge"
 import { QualityDot } from "./quality-dot"
 import type { KBQueryResult } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { MCP_BASE, mcpHeaders } from "@/lib/api"
 
 /** Touch device detection — pointer type is static per device, so module-level is fine. */
 const isTouchDevice = typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches
@@ -148,10 +149,9 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
                   onBlur={async () => {
                     const trimmed = titleValue.trim()
                     if (trimmed && trimmed !== result.filename) {
-                      const MCP_URL = import.meta.env.VITE_MCP_URL || "http://localhost:8888"
-                      await fetch(`${MCP_URL}/artifacts/${result.artifact_id}`, {
+                      await fetch(`${MCP_BASE}/artifacts/${result.artifact_id}`, {
                         method: "PATCH",
-                        headers: { "Content-Type": "application/json", "X-Client-ID": "gui" },
+                        headers: mcpHeaders({ "Content-Type": "application/json" }),
                         body: JSON.stringify({ title: trimmed }),
                       }).catch(() => {})
                     }
@@ -333,10 +333,9 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
               onClick={async (e) => {
                 e.stopPropagation()
                 setRegeneratingSynopsis(true)
-                const MCP_URL = import.meta.env.VITE_MCP_URL || "http://localhost:8888"
-                await fetch(`${MCP_URL}/artifacts/${result.artifact_id}/regenerate-synopsis`, {
+                await fetch(`${MCP_BASE}/artifacts/${result.artifact_id}/regenerate-synopsis`, {
                   method: "POST",
-                  headers: { "X-Client-ID": "gui" },
+                  headers: mcpHeaders(),
                 }).catch(() => {})
                 setRegeneratingSynopsis(false)
               }}
