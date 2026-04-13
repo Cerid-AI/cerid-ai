@@ -200,6 +200,16 @@ function formatCount(val: number | null | undefined): string {
 }
 
 // ---------------------------------------------------------------------------
+// Canonical pipeline stages — iterate this instead of API keys to guarantee order & completeness
+// ---------------------------------------------------------------------------
+
+const ALL_STAGES: PipelineStage[] = [
+  "claim_extraction", "query_decomposition", "topic_extraction",
+  "memory_resolution", "verification_simple", "verification_complex",
+  "reranking", "chat_generation",
+]
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
@@ -249,13 +259,8 @@ export function ObservabilityDashboard() {
   const pipelineStats = useMemo(() => {
     const providers = healthStatus?.pipeline_providers
     if (!providers) return null
-    const allStages: PipelineStage[] = [
-      "claim_extraction", "query_decomposition", "topic_extraction",
-      "memory_resolution", "verification_simple", "verification_complex",
-      "reranking", "chat_generation",
-    ]
-    const total = allStages.length
-    const ollamaCount = allStages.filter((s) => providers[s] === "ollama").length
+    const total = ALL_STAGES.length
+    const ollamaCount = ALL_STAGES.filter((s) => providers[s] === "ollama").length
     return { total, ollamaCount, providers }
   }, [healthStatus?.pipeline_providers])
 
@@ -357,13 +362,16 @@ export function ObservabilityDashboard() {
               </div>
               {pipelineStats && (
                 <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground">
-                  {Object.entries(pipelineStats.providers).map(([stage, provider]) => (
-                    <span key={stage}>
-                      <span className="font-medium">{stage.replace(/_/g, " ")}</span>
-                      {" "}
-                      <span className={provider === "ollama" ? "text-green-500" : "text-blue-500"}>{provider}</span>
-                    </span>
-                  ))}
+                  {ALL_STAGES.map((stage) => {
+                    const provider = pipelineStats.providers[stage] ?? "\u2014"
+                    return (
+                      <span key={stage}>
+                        <span className="font-medium">{stage.replace(/_/g, " ")}</span>
+                        {" "}
+                        <span className={provider === "ollama" ? "text-green-500" : "text-blue-500"}>{provider}</span>
+                      </span>
+                    )
+                  })}
                 </div>
               )}
             </CardContent>

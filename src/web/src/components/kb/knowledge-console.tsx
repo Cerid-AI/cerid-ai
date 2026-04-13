@@ -241,7 +241,6 @@ function ConsoleConfigBar({
   ragMode,
 }: {
   ragMode: RagMode
-  onRagModeChange: (mode: RagMode) => void
 }) {
   const [selfRag, setSelfRag] = useState(() => readLocalBool("cerid-console-self-rag", false))
   const [queryDecomp, setQueryDecomp] = useState(() => readLocalBool("cerid-console-query-decomp", false))
@@ -401,7 +400,7 @@ export function KnowledgeConsole({
 
       {/* Configuration bar — RAG mode + pipeline settings */}
       {onRagModeChange && (
-        <ConsoleConfigBar ragMode={ragMode} onRagModeChange={onRagModeChange} />
+        <ConsoleConfigBar ragMode={ragMode} />
       )}
 
       {/* Live ingestion progress — appears when files are being ingested */}
