@@ -237,7 +237,12 @@ function readLocalNumber(key: string, fallback: number): number {
   return fallback
 }
 
-function ConsoleConfigBar() {
+function ConsoleConfigBar({
+  ragMode,
+}: {
+  ragMode: RagMode
+  onRagModeChange: (mode: RagMode) => void
+}) {
   const [selfRag, setSelfRag] = useState(() => readLocalBool("cerid-console-self-rag", false))
   const [queryDecomp, setQueryDecomp] = useState(() => readLocalBool("cerid-console-query-decomp", false))
   const [semanticCache, setSemanticCache] = useState(() => readLocalBool("cerid-console-semantic-cache", false))
@@ -271,6 +276,11 @@ function ConsoleConfigBar() {
 
   return (
     <div className="sticky top-0 z-10 flex items-center gap-1.5 border-b bg-background/95 backdrop-blur px-3 py-1.5">
+      {/* RAG Mode display (read-only — primary control is in chat toolbar) */}
+      <span className="rounded bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+        {ragMode === "smart" ? "Smart" : ragMode === "custom_smart" ? "Custom" : "Manual"}
+      </span>
+
       <div className="flex-1" />
 
       {/* Pipeline settings gear */}
@@ -396,7 +406,7 @@ export function KnowledgeConsole({
 
       {/* Configuration bar — RAG mode + pipeline settings */}
       {onRagModeChange && (
-        <ConsoleConfigBar />
+        <ConsoleConfigBar ragMode={ragMode} onRagModeChange={onRagModeChange} />
       )}
 
       {/* Live ingestion progress — appears when files are being ingested */}
@@ -465,6 +475,7 @@ export function KnowledgeConsole({
                 enabled={externalEnabled}
                 onToggle={toggleExternal}
                 color="bg-green-500/10 text-green-500"
+                defaultExpanded={false}
               >
                 {externalSources.length === 0 ? (
                   <p className="text-[11px] text-muted-foreground py-1">No external results</p>

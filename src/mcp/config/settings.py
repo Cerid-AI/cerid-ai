@@ -106,6 +106,11 @@ HYBRID_VECTOR_WEIGHT = float(os.getenv("HYBRID_VECTOR_WEIGHT", "0.5"))
 HYBRID_KEYWORD_WEIGHT = float(os.getenv("HYBRID_KEYWORD_WEIGHT", "0.5"))
 BM25_DATA_DIR = os.path.join(os.getenv("DATA_DIR", "data"), "bm25")
 
+# CRAG-style retrieval quality gate — if top result relevance is below this
+# threshold after initial retrieval, supplement with external sources before
+# proceeding to expensive reranking/generation.
+RETRIEVAL_QUALITY_THRESHOLD = float(os.getenv("RETRIEVAL_QUALITY_THRESHOLD", "0.4"))
+
 # ---------------------------------------------------------------------------
 # Storage Monitoring
 # ---------------------------------------------------------------------------
@@ -173,6 +178,26 @@ NLI_ONNX_FILENAME = os.getenv("NLI_ONNX_FILENAME", "onnx/model.onnx")
 NLI_MODEL_CACHE_DIR = os.getenv("NLI_MODEL_CACHE_DIR", "")
 NLI_ENTAILMENT_THRESHOLD = float(os.getenv("NLI_ENTAILMENT_THRESHOLD", "0.7"))
 NLI_CONTRADICTION_THRESHOLD = float(os.getenv("NLI_CONTRADICTION_THRESHOLD", "0.6"))
+
+# ---------------------------------------------------------------------------
+# Verified Memory Promotion
+# ---------------------------------------------------------------------------
+# Automatically promote high-confidence verified claims to empirical memories.
+ENABLE_VERIFIED_MEMORY_PROMOTION = os.getenv("ENABLE_VERIFIED_MEMORY_PROMOTION", "true").lower() == "true"
+VERIFIED_MEMORY_MIN_CONFIDENCE = float(os.getenv("VERIFIED_MEMORY_MIN_CONFIDENCE", "0.8"))
+VERIFIED_MEMORY_MIN_NLI = float(os.getenv("VERIFIED_MEMORY_MIN_NLI", "0.7"))
+# NLI guard for memory consolidation — prevents semantic drift during merges.
+MEMORY_CONSOLIDATION_NLI_GUARD = float(os.getenv("MEMORY_CONSOLIDATION_NLI_GUARD", "0.7"))
+
+# ---------------------------------------------------------------------------
+# Graph-Guided Verification & Authoritative Expert Verification
+# ---------------------------------------------------------------------------
+# Confidence boost when source artifacts have graph connections to verified artifacts.
+GRAPH_VERIFICATION_BOOST = float(os.getenv("GRAPH_VERIFICATION_BOOST", "0.05"))
+# Use authoritative external data sources (not just LLM) for expert verification.
+EXPERT_VERIFY_USE_AUTHORITATIVE_SOURCES = os.getenv("EXPERT_VERIFY_USE_AUTHORITATIVE_SOURCES", "true").lower() == "true"
+# Max authoritative sources queried per expert verification call.
+EXPERT_VERIFY_MAX_SOURCES = int(os.getenv("EXPERT_VERIFY_MAX_SOURCES", "3"))
 
 # Score blending weights (cross-encoder or LLM score vs original hybrid score)
 RERANK_CE_WEIGHT = float(os.getenv("RERANK_CE_WEIGHT", "0.4"))
@@ -566,7 +591,7 @@ CERID_EMAIL_IMAP_PASSWORD = os.getenv("CERID_EMAIL_IMAP_PASSWORD", "")
 CERID_EMAIL_FOLDER = os.getenv("CERID_EMAIL_FOLDER", "INBOX")
 CERID_EMAIL_POLL_INTERVAL = int(os.getenv("CERID_EMAIL_POLL_INTERVAL", "15"))  # minutes
 
-# Trading/boardroom config — stubs (overridden at runtime when enabled)
+# Extension stubs — overridden at runtime by internal extension modules
 CERID_TRADING_ENABLED: bool = False
 TRADING_AGENT_URL: str = ""
 

@@ -21,7 +21,6 @@ import httpx
 import config
 from core.agents.hallucination.extraction import _reclassify_recency
 from core.agents.hallucination.patterns import (
-    MEMORY_AUTHORITY_BOOST,
     MEMORY_TYPES,
     PERCENT_RE,
     YEAR_RE,
@@ -32,6 +31,7 @@ from core.agents.hallucination.patterns import (
     _is_ignorance_admission,
     _is_recency_claim,
     _pick_verification_model,
+    memory_authority_boost,
 )
 from core.utils.circuit_breaker import CircuitOpenError, NonTransientError
 from core.utils.claim_cache import cache_verdict, get_cached_verdict
@@ -455,6 +455,65 @@ def _check_numeric_alignment(
         return -0.03  # Significant disagreement (proportional)
 
 
+def _verify_fact_relationship(
+    claim: str,
+    top_result: dict[str, Any],
+) -> dict[str, Any]:
+    """Verify the KB match is about the SAME facts, not just the same topic.
+
+    Goes beyond "I found a match" to check:
+    1. Temporal alignment — claim says "2024" but source says "1990" → flag
+    2. Entity alignment — claim and source discuss different aspects of same topic
+    3. Specificity — claim makes numeric assertion but source is topic-general
+
+    Returns: {"aligned": bool, "reason": str, "confidence_adjustment": float}
+    """
+    source_text = top_result.get("content", "")[:500]
+    if not source_text:
+        return {"aligned": True, "reason": "no_source_text", "confidence_adjustment": 0.0}
+
+    adjustment = 0.0
+    reasons: list[str] = []
+
+    # Check 1: Temporal alignment — decade-level mismatch between claim and source
+    claim_years = set(YEAR_RE.findall(claim))
+    source_years = set(YEAR_RE.findall(source_text))
+    if claim_years and source_years and not claim_years & source_years:
+        # Years mentioned but none overlap — check if decades differ
+        claim_decades = {int(y) // 10 for y in claim_years}
+        source_decades = {int(y) // 10 for y in source_years}
+        if not claim_decades & source_decades:
+            adjustment -= 0.04
+            reasons.append(f"temporal_mismatch: claim={claim_years} vs source={source_years}")
+
+    # Check 2: Specificity — claim has numbers but source only mentions topic generally
+    claim_numbers = set(re.findall(r"\b\d[\d,.]+\b", claim))
+    source_numbers = set(re.findall(r"\b\d[\d,.]+\b", source_text))
+    if len(claim_numbers) >= 2 and not source_numbers:
+        adjustment -= 0.03
+        reasons.append("specificity_gap: claim has numbers, source is general")
+
+    # Check 3: Percentage contradiction (beyond simple presence check)
+    claim_pcts = PERCENT_RE.findall(claim)
+    source_pcts = PERCENT_RE.findall(source_text)
+    if claim_pcts and source_pcts:
+        # If both have percentages but they differ by >20pp, flag
+        try:
+            claim_vals = [float(p.rstrip("%")) for p in claim_pcts]
+            source_vals = [float(p.rstrip("%")) for p in source_pcts]
+            for cv in claim_vals:
+                if all(abs(cv - sv) > 20 for sv in source_vals):
+                    adjustment -= 0.03
+                    reasons.append(f"percentage_gap: claim={cv}% vs source={source_vals}")
+                    break
+        except (ValueError, TypeError):
+            pass
+
+    aligned = adjustment >= -0.02  # Small adjustments are tolerable
+    reason = "; ".join(reasons) if reasons else "aligned"
+    return {"aligned": aligned, "reason": reason, "confidence_adjustment": adjustment}
+
+
 # ---------------------------------------------------------------------------
 # Multi-result confidence calibration (zero LLM cost)
 # ---------------------------------------------------------------------------
@@ -499,8 +558,16 @@ def _compute_adjusted_confidence(
     if len(top_results) == 1:
         adjustment -= 0.02
 
-    # Cap total adjustment to prevent any single claim from swinging too far
-    adjustment = max(-0.06, min(0.06, adjustment))
+    # Factor 5: Fact-relationship verification (temporal + entity alignment)
+    fact_rel = _verify_fact_relationship(claim, top_results[0])
+    adjustment += fact_rel["confidence_adjustment"]
+
+    # NOTE: NLI contradiction scoring is handled by the main NLI check in
+    # verify_claim() (not here) to avoid double-counting. This function
+    # stays zero-LLM-cost per its contract.
+
+    # Cap total adjustment
+    adjustment = max(-0.08, min(0.08, adjustment))
 
     return max(0.0, min(1.0, raw_similarity + adjustment))
 
@@ -732,6 +799,7 @@ async def _verify_claim_externally(
     claim_context: str | None = None,
     response_context: str | None = None,
     kb_snippet: str | None = None,
+    conversation_context: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Direct structured cross-model verification for a single claim.
 
@@ -849,13 +917,40 @@ async def _verify_claim_externally(
         system_prompt = _SYSTEM_DIRECT_VERIFICATION
 
     # Expert mode: override model selection with the expert-tier model
+    # AND gather authoritative external evidence before sending to LLM
+    _authoritative_evidence: str = ""
     if expert_mode:
         if is_current_event:
-            # Append :online for web-search-capable verification
             verify_model = config.VERIFICATION_EXPERT_MODEL + ":online"
         else:
             verify_model = config.VERIFICATION_EXPERT_MODEL
         logger.debug("Expert mode: using %s for claim verification", verify_model)
+
+        # Gather authoritative external evidence — LLM synthesizes, data is source of truth
+        if getattr(config, "EXPERT_VERIFY_USE_AUTHORITATIVE_SOURCES", True):
+            try:
+                from core.agents.hallucination.authoritative_verify import (
+                    verify_claim_authoritatively,
+                )
+
+                auth_result = await verify_claim_authoritatively(
+                    claim,
+                    kb_results=[{"content": kb_snippet}] if kb_snippet else None,
+                    conversation_context=conversation_context,
+                )
+                auth_sources = auth_result.get("authoritative_sources", [])
+                if auth_sources:
+                    evidence_lines = [
+                        f"- [{s['source']}] (NLI entailment: {s['nli_entailment']:.2f}): {s['content']}"
+                        for s in auth_sources[:3]
+                    ]
+                    _authoritative_evidence = (
+                        "\n\nAuthoritative external evidence:\n"
+                        + "\n".join(evidence_lines)
+                        + f"\n\nEvidence summary: {auth_result.get('evidence_summary', '')}"
+                    )
+            except Exception:
+                logger.debug("Authoritative evidence gathering failed (non-blocking)")
 
     # Fast mode: use cheapest/fastest model, 1 retry, skip staleness escalation
     if fast_mode and not expert_mode:
@@ -965,6 +1060,18 @@ async def _verify_claim_externally(
                     f"Assess this claim for factual accuracy:\n\n"
                     f"\"{claim}\"{ctx_block}{kb_block}{context_line}{model_context}\n\n{_json_response_fmt}"
                 )
+
+            # Inject authoritative evidence and conversation context in expert mode
+            if expert_mode:
+                if _authoritative_evidence:
+                    user_prompt += _authoritative_evidence
+                if conversation_context:
+                    recent = conversation_context[-10:]  # Last 5 exchanges
+                    ctx_lines = "\n".join(
+                        f"[{m.get('role', '?')}]: {m.get('content', '')[:200]}"
+                        for m in recent
+                    )
+                    user_prompt += f"\n\nConversation context:\n{ctx_lines}"
 
             messages = [
                 {"role": "system", "content": system_prompt},
@@ -1259,6 +1366,7 @@ async def verify_claim(
     source_artifact_ids: list[str] | None = None,
     response_context: str | None = None,
     claim_context: str | None = None,
+    conversation_context: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Verify a single claim against the knowledge base and user memories.
 
@@ -1309,6 +1417,16 @@ async def verify_claim(
             "cached": True,
         }
 
+    # Common kwargs for all _verify_claim_externally calls in this function.
+    # Conversation context is threaded through to expert mode verification.
+    _ext_common: dict[str, Any] = {
+        "streaming": streaming,
+        "expert_mode": expert_mode,
+        "response_context": response_context,
+        "claim_context": claim_context,
+        "conversation_context": conversation_context if expert_mode else None,
+    }
+
     async def _cache_result(result: dict[str, Any]) -> dict[str, Any]:
         """Cache the verdict (fire-and-forget) and return the result unchanged."""
         if result.get("status") in ("verified", "unverified"):
@@ -1350,7 +1468,7 @@ async def verify_claim(
             raw_rel = mr["relevance"]
             mr["_raw_relevance"] = raw_rel
             # Memories get an authority boost (user-confirmed content)
-            mr["relevance"] = min(1.0, round(raw_rel + MEMORY_AUTHORITY_BOOST, 4))
+            mr["relevance"] = min(1.0, round(raw_rel + memory_authority_boost(mr), 4))
             all_results.append(mr)
 
         # Filter out results below verification relevance threshold
@@ -1409,8 +1527,7 @@ async def verify_claim(
         if not all_results:
             needs_web = _is_current_event_claim(claim) or _is_recency_claim(claim)
             ext_result = await _verify_claim_externally(
-                claim, model, force_web_search=needs_web, streaming=streaming,
-                expert_mode=expert_mode, response_context=response_context, claim_context=claim_context,
+                claim, model, force_web_search=needs_web, **_ext_common,
             )
             return await _cache_result({
                 "claim": claim,
@@ -1447,9 +1564,8 @@ async def verify_claim(
                 claim[:50],
             )
             ext_result = await _verify_claim_externally(
-                claim, model, streaming=streaming,
-                expert_mode=expert_mode, response_context=response_context,
-                claim_context=claim_context, kb_snippet=_top_snippet,
+                claim, model,
+                **_ext_common, kb_snippet=_top_snippet,
             )
             return await _cache_result({
                 "claim": claim,
@@ -1466,9 +1582,8 @@ async def verify_claim(
         # --- Fallback 2: Very low KB similarity → try external verification ---
         if escalation_similarity < ext_kb_threshold:
             ext_result = await _verify_claim_externally(
-                claim, model, streaming=streaming,
-                expert_mode=expert_mode, response_context=response_context,
-                claim_context=claim_context, kb_snippet=_top_snippet,
+                claim, model,
+                **_ext_common, kb_snippet=_top_snippet,
             )
             # Use external result if it provides a stronger signal than KB
             if ext_result["confidence"] > raw_similarity:
@@ -1486,6 +1601,25 @@ async def verify_claim(
         # Apply multi-result confidence calibration
         similarity = _compute_adjusted_confidence(claim, top_results, raw_similarity)
         details = _build_verification_details(claim, top_results)
+
+        # --- Graph-guided verification: connected verified artifacts boost confidence ---
+        # If the source artifact has graph relationships to other verified artifacts,
+        # this corroboration increases trust (knowledge graph structure as evidence).
+        _graph_boost = getattr(config, "GRAPH_VERIFICATION_BOOST", 0.05)
+        if _graph_boost > 0 and neo4j_driver and top_result.get("artifact_id"):
+            try:
+                with neo4j_driver.session() as _gs:
+                    _graph_count = _gs.run(
+                        "MATCH (a:Artifact {id: $aid})-[:RELATES_TO|DEPENDS_ON|REFERENCES]-(b:Artifact) "
+                        "WHERE EXISTS { MATCH (b)<-[:RELATES_TO]-(m:Memory)-[:VERIFIED_BY]->(r:VerificationReport) } "
+                        "RETURN count(b) AS verified_neighbors",
+                        aid=top_result["artifact_id"],
+                    ).single()
+                    if _graph_count and _graph_count["verified_neighbors"] >= 2:
+                        similarity = min(1.0, similarity + _graph_boost)
+                        details["graph_verified_neighbors"] = _graph_count["verified_neighbors"]
+            except Exception:
+                pass  # Graph query failed — non-blocking
 
         # --- NLI entailment check on top KB result ---
         try:
@@ -1508,14 +1642,8 @@ async def verify_claim(
                     claim[:60],
                 )
                 ext_result = await _verify_claim_externally(
-                    claim,
-                    model,
-                    force_web_search=True,
-                    streaming=streaming,
-                    expert_mode=expert_mode,
-                    response_context=response_context,
-                    claim_context=claim_context,
-                    kb_snippet=_top_snippet,
+                    claim, model, force_web_search=True,
+                    **_ext_common, kb_snippet=_top_snippet,
                 )
                 if ext_result and ext_result.get("status") in ("verified", "unverified"):
                     return await _cache_result(ext_result)
@@ -1567,14 +1695,8 @@ async def verify_claim(
                     claim[:60],
                 )
                 ext_result = await _verify_claim_externally(
-                    claim,
-                    model,
-                    force_web_search=True,
-                    streaming=streaming,
-                    expert_mode=expert_mode,
-                    response_context=response_context,
-                    claim_context=claim_context,
-                    kb_snippet=_top_snippet,
+                    claim, model, force_web_search=True,
+                    **_ext_common, kb_snippet=_top_snippet,
                 )
                 if ext_result and ext_result.get("status") in ("verified", "unverified"):
                     return await _cache_result(ext_result)
@@ -1596,9 +1718,8 @@ async def verify_claim(
         elif similarity < unverified_threshold:
             # --- Fallback 3: KB says "unverified" → try external ---
             ext_result = await _verify_claim_externally(
-                claim, model, streaming=streaming,
-                expert_mode=expert_mode, response_context=response_context,
-                claim_context=claim_context, kb_snippet=_top_snippet,
+                claim, model,
+                **_ext_common, kb_snippet=_top_snippet,
             )
             if ext_result.get("status") in ("verified", "unverified"):
                 return await _cache_result({
@@ -1624,9 +1745,8 @@ async def verify_claim(
             # --- Fallback 4: KB says "uncertain" → try external for a
             # definitive answer before falling back to KB-only uncertain ---
             ext_result = await _verify_claim_externally(
-                claim, model, streaming=streaming,
-                expert_mode=expert_mode, response_context=response_context,
-                claim_context=claim_context, kb_snippet=_top_snippet,
+                claim, model,
+                **_ext_common, kb_snippet=_top_snippet,
             )
             if ext_result.get("status") in ("verified", "unverified"):
                 return await _cache_result({
@@ -1648,8 +1768,7 @@ async def verify_claim(
             ):
                 web_result = await _verify_claim_externally(
                     claim, model, force_web_search=True,
-                    expert_mode=expert_mode, response_context=response_context,
-                    claim_context=claim_context, kb_snippet=_top_snippet,
+                    **_ext_common, kb_snippet=_top_snippet,
                 )
                 if web_result.get("status") in ("verified", "unverified"):
                     return await _cache_result({

@@ -10,18 +10,26 @@ from __future__ import annotations
 
 
 def validate_license_key(key: str) -> dict[str, bool | str | None]:
-    """Validate a license key format (offline check)."""
+    """Validate a license key format (offline check).
+
+    Returns
+    -------
+    dict
+        ``{"valid": bool, "tier": str, "error": str | None}``
+    """
     if not key or not key.startswith("CERID-PRO-"):
         return {"valid": False, "tier": "community", "error": "Invalid key format"}
+
     body = key.replace("CERID-PRO-", "")
     parts = body.split("-")
     if len(parts) != 5 or not all(len(p) == 4 for p in parts):
         return {"valid": False, "tier": "community", "error": "Invalid key format"}
+
     return {"valid": True, "tier": "pro", "error": None}
 
 
 def mask_license_key(key: str) -> str:
-    """Mask a license key for display: CERID-PRO-****-****-****-****-XXXX."""
+    """Mask a license key for display: ``CERID-PRO-****-****-****-****-XXXX``."""
     if not key or not key.startswith("CERID-PRO-"):
         return key
     body = key.replace("CERID-PRO-", "")

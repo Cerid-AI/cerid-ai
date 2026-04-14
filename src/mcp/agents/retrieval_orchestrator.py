@@ -278,13 +278,21 @@ async def _query_external_sources(
     """
     try:
         from utils.data_sources import registry
+        from utils.metadata import _extract_keywords_simple
 
         # Extract keywords — external APIs need search terms, not full questions
-        search_terms = _extract_search_terms(query)
+        keywords = _extract_keywords_simple(query, max_keywords=5)
+        search_terms = " ".join(keywords) if keywords else query
         logger.debug("External source search terms: %r → %r", query, search_terms)
 
         return await asyncio.wait_for(
-            registry.query_all(search_terms, domain=domain, timeout=timeout),
+            registry.query_all(
+                search_terms,
+                domain=domain,
+                timeout=timeout,
+                raw_query=query,
+                keywords=keywords,
+            ),
             timeout=timeout + 1.0,  # outer guard above per-source timeout
         )
     except asyncio.TimeoutError:

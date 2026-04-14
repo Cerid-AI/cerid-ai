@@ -71,15 +71,15 @@ export default function MemoriesPane() {
   const [editText, setEditText] = useState("")
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [archiving, setArchiving] = useState(false)
   const [archiveResult, setArchiveResult] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
 
   const loadMemories = useCallback(async () => {
     setLoading(true)
+    setError(null)
     try {
       const res = await fetchMemories({ limit: 500 })
-      setError(null)
       setMemories(res.memories)
     } catch (err) {
       console.error("Failed to load memories:", err)
