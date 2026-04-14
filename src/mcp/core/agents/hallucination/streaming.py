@@ -600,6 +600,7 @@ async def verify_response_streaming(
                         source_artifact_ids=source_artifact_ids,
                         response_context=response_context,
                         claim_context=_extract_claim_context(claim_text),
+                        conversation_context=conversation_history,
                     ),
                     timeout=claim_timeout,
                 )
@@ -870,6 +871,59 @@ async def verify_response_streaming(
         redis_client.setex(key, REDIS_HALLUCINATION_TTL, json.dumps(report))
     except Exception as e:
         logger.warning("Failed to persist streaming report to Redis: %s", e)
+
+    # --- Round 2 sweep: retry timed-out and errored claims ---
+    # Claims that timed out (sim=0.0, method=timeout) or errored were not
+    # properly evaluated. Retry them with a lightweight path (no streaming,
+    # tighter timeout) now that the main verification pressure is off.
+    retry_indices = [
+        i for i, r in enumerate(collected_results)
+        if r and r.get("verification_method") in ("timeout", "none")
+        or r and r.get("status") == "error"
+    ]
+    if retry_indices and not stream_interrupted:
+        retry_budget = min(15.0, config.STREAMING_TOTAL_TIMEOUT * 0.15)
+        retry_sem = asyncio.Semaphore(3)
+
+        async def _retry_claim(idx: int) -> None:
+            claim_text = claims[idx]
+            try:
+                async with retry_sem:
+                    result = await asyncio.wait_for(
+                        verify_claim(
+                            claim_text, chroma_client, neo4j_driver, redis_client,
+                            threshold, model=model, streaming=False,
+                            expert_mode=False,
+                            response_context=response_context,
+                            claim_context=_extract_claim_context(claim_text),
+                        ),
+                        timeout=retry_budget,
+                    )
+                    if result.get("status") in ("verified", "unverified"):
+                        collected_results[idx] = result
+                        old_status = "timeout/error"
+                        logger.info(
+                            "Sweep retry resolved claim %d: %s → %s ('%s...')",
+                            idx, old_status, result["status"], claim_text[:40],
+                        )
+            except (TimeoutError, Exception):
+                pass  # Keep the original timeout/error result
+
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*[_retry_claim(i) for i in retry_indices]),
+                timeout=retry_budget + 2.0,
+            )
+        except TimeoutError:
+            logger.debug("Sweep retry budget exhausted")
+
+        # Recount after sweep
+        verified_count = sum(1 for r in collected_results if r and r.get("status") == "verified")
+        unverified_count = sum(1 for r in collected_results if r and r.get("status") == "unverified")
+        uncertain_count = sum(
+            1 for r in collected_results
+            if r and r.get("status") not in ("verified", "unverified", "skipped", "error", None)
+        )
 
     # --- Promote verified facts to empirical memories (fire-and-forget) ---
     _create_mem_fn = create_memory_fn

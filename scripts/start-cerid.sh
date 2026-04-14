@@ -216,6 +216,7 @@ _persist_host_var RERANK_ONNX_FILENAME "$RERANK_ONNX_FILENAME"
 if [ -z "${OLLAMA_URL:-}" ]; then
     case "$(uname -s)" in
         Darwin)  export OLLAMA_URL="http://host.docker.internal:11434" ;;
+        MINGW*|MSYS*|CYGWIN*)  export OLLAMA_URL="http://host.docker.internal:11434" ;;
         Linux)
             # Docker Desktop supports host.docker.internal; native Docker Engine does not.
             if docker info 2>/dev/null | grep -q "Desktop"; then
@@ -226,8 +227,6 @@ if [ -z "${OLLAMA_URL:-}" ]; then
                 export OLLAMA_URL="http://${_bridge_ip}:11434"
             fi
             ;;
-        MINGW*|MSYS*|CYGWIN*)  export OLLAMA_URL="http://host.docker.internal:11434" ;;
-        *)  export OLLAMA_URL="http://host.docker.internal:11434" ;;
     esac
 fi
 

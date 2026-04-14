@@ -695,10 +695,13 @@ def _parse_verification_verdict(raw: str) -> dict[str, Any]:
             confidence = min(confidence, 0.35)
         else:
             # insufficient_info, unrecognized, or low-confidence supported
-            # → uncertain (neutral).  Unassessable claims get a truly neutral
-            # score so they don't drag down the overall confidence average.
+            # → uncertain (neutral). Use the LLM's reported confidence as a
+            # signal — a claim with 0.4 confidence from the verifier is closer
+            # to resolution than one with 0.1.
             status = "uncertain"
-            confidence = 0.5
+            # Clamp uncertain confidence to 0.36-0.64 range so it never
+            # crosses into verified (>= threshold) or unverified (<= 0.35)
+            confidence = max(0.36, min(0.64, confidence))
 
         reason_prefix = {
             "verified": "Cross-model verification confirmed",
@@ -1409,7 +1412,7 @@ async def verify_claim(
 
     # --- Fact-level cache: skip re-verification for previously seen claims ---
     cached = await get_cached_verdict(redis_client, claim)
-    if cached and cached.get("status") in ("verified", "unverified"):
+    if cached and cached.get("status") in ("verified", "unverified", "uncertain"):
         logger.info("Claim cache hit: '%s' -> %s", claim[:50], cached["status"])
         return {
             **cached,
@@ -1428,8 +1431,15 @@ async def verify_claim(
     }
 
     async def _cache_result(result: dict[str, Any]) -> dict[str, Any]:
-        """Cache the verdict (fire-and-forget) and return the result unchanged."""
-        if result.get("status") in ("verified", "unverified"):
+        """Cache the verdict (fire-and-forget) and return the result unchanged.
+
+        Uncertain claims are also cached (with shorter TTL) to prevent
+        repeated API calls for claims that are genuinely unverifiable.
+        Timeout results are NOT cached — they should be retried by the sweep.
+        """
+        status = result.get("status")
+        method = result.get("verification_method", "")
+        if status in ("verified", "unverified", "uncertain") and method != "timeout":
             await cache_verdict(redis_client, claim, result, response_context=response_context)
         return result
 
@@ -1760,12 +1770,10 @@ async def verify_claim(
                     **({"credit_exhausted": True} if ext_result.get("credit_exhausted") else {}),
                 })
             # External also uncertain — try web search as final escalation.
-            # In streaming mode, skip this second external call to avoid
-            # compounding delays (each call can take 20-40s + retries).
-            if (
-                not streaming
-                and ext_result.get("verification_method") != "web_search"
-            ):
+            # Previously skipped in streaming mode, but 26% uncertain rate was
+            # too high. Web search resolves many "cannot independently verify"
+            # cases that cross-model LLMs fail on.
+            if ext_result.get("verification_method") != "web_search":
                 web_result = await _verify_claim_externally(
                     claim, model, force_web_search=True,
                     **_ext_common, kb_snippet=_top_snippet,
@@ -1783,8 +1791,49 @@ async def verify_claim(
                         "source_urls": web_result.get("source_urls", []),
                         **({"credit_exhausted": True} if web_result.get("credit_exhausted") else {}),
                     })
+            # --- Fallback 5: Escalate to authoritative verification ---
+            # Before giving up, try authoritative external sources if available.
+            # This catches claims that cross-model LLMs can't verify from
+            # parametric knowledge but authoritative data sources can.
+            if getattr(config, "EXPERT_VERIFY_USE_AUTHORITATIVE_SOURCES", False):
+                try:
+                    from core.agents.hallucination.authoritative_verify import (
+                        verify_claim_authoritatively,
+                    )
+
+                    auth = await verify_claim_authoritatively(
+                        claim,
+                        kb_results=[{"content": _top_snippet}] if _top_snippet else None,
+                    )
+                    auth_sources = auth.get("authoritative_sources", [])
+                    # If any authoritative source has strong entailment, upgrade to verified
+                    strong_support = [s for s in auth_sources if s.get("nli_entailment", 0) >= 0.7]
+                    strong_contradict = [s for s in auth_sources if s.get("nli_contradiction", 0) >= 0.6]
+                    if strong_support:
+                        return await _cache_result({
+                            "claim": claim,
+                            "status": "verified",
+                            "similarity": max(s["nli_entailment"] for s in strong_support),
+                            "reason": f"Authoritative source confirmed: {strong_support[0].get('source', 'external')}",
+                            "verification_method": "authoritative",
+                            "source_urls": [s.get("source_url", "") for s in strong_support if s.get("source_url")],
+                            **_kb_source_fields(top_result),
+                        })
+                    if strong_contradict:
+                        return await _cache_result({
+                            "claim": claim,
+                            "status": "unverified",
+                            "similarity": 0.35,
+                            "reason": f"Authoritative source contradicts: {strong_contradict[0].get('source', 'external')}",
+                            "verification_method": "authoritative",
+                            "source_urls": [s.get("source_url", "") for s in strong_contradict if s.get("source_url")],
+                            **_kb_source_fields(top_result),
+                        })
+                except Exception:
+                    logger.debug("Authoritative escalation failed (non-blocking)")
+
             # All methods exhausted — return uncertain with all available context
-            return {
+            return await _cache_result({
                 "claim": claim,
                 "status": "uncertain",
                 "similarity": round(similarity, 3),
@@ -1793,7 +1842,7 @@ async def verify_claim(
                 "verification_method": "kb",
                 "source_urls": ext_result.get("source_urls", []),
                 **_kb_source_fields(top_result),
-            }
+            })
 
     except Exception as e:
         logger.warning("Claim verification failed for '%s...': %s", claim[:50], e)

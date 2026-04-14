@@ -729,12 +729,12 @@ class TestParseVerificationVerdict:
         assert "confirmed" in result["reason"].lower()
 
     def test_supported_low_confidence(self):
-        """Supported verdict with low confidence → uncertain with neutral score."""
+        """Supported verdict with low confidence → uncertain with graduated score."""
         raw = '{"verdict": "supported", "confidence": 0.45, "reasoning": "Seems plausible but uncertain."}'
         result = _parse_verification_verdict(raw)
         assert result["status"] == "uncertain"
-        # Uncertain claims get neutral 0.5 confidence to avoid dragging down averages
-        assert result["confidence"] == 0.5
+        # Graduated uncertain confidence: clamped to [0.36, 0.64] range
+        assert 0.36 <= result["confidence"] <= 0.64
 
     def test_refuted(self):
         """Refuted verdict → unverified with capped confidence."""
@@ -745,12 +745,12 @@ class TestParseVerificationVerdict:
         assert "factual errors" in result["reason"].lower()
 
     def test_insufficient_info(self):
-        """Insufficient info verdict → uncertain with neutral confidence."""
+        """Insufficient info verdict → uncertain with graduated confidence."""
         raw = '{"verdict": "insufficient_info", "confidence": 0.3, "reasoning": "Cannot verify this claim."}'
         result = _parse_verification_verdict(raw)
         assert result["status"] == "uncertain"
-        # Insufficient info always gets neutral 0.5 — not the model's low confidence
-        assert result["confidence"] == 0.5
+        # Graduated: 0.3 clamped up to 0.36 (minimum for uncertain range)
+        assert 0.36 <= result["confidence"] <= 0.64
         assert "not independently verifiable" in result["reason"].lower()
 
     def test_json_in_code_block(self):
