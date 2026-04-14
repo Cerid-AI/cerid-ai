@@ -22,12 +22,16 @@ export default defineConfig({
   build: {
     sourcemap: false,
     chunkSizeWarningLimit: 800,
+    // Vite 8 removed the object form of manualChunks; use the function form
+    // (works under both the legacy Rollup path and the new Rolldown bundler).
     rollupOptions: {
       output: {
-        manualChunks: {
-          "vendor-charts": ["recharts"],
-          "vendor-markdown": ["react-markdown", "remark-gfm"],
-          "vendor-query": ["@tanstack/react-query"],
+        manualChunks(id) {
+          if (id.includes("node_modules/recharts")) return "vendor-charts"
+          if (id.includes("node_modules/react-markdown") || id.includes("node_modules/remark-gfm")) {
+            return "vendor-markdown"
+          }
+          if (id.includes("node_modules/@tanstack/react-query")) return "vendor-query"
         },
       },
     },
