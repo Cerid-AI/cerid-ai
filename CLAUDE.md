@@ -17,6 +17,15 @@ python3 scripts/sync-repos.py validate                  # Check for leaks
 
 The script reads `.sync-manifest.yaml` which declares internal-only files, mixed files (truncated at hook markers), and forbidden strings. Internal-only code lives in `*_internal.py` files that are never copied to public. Mixed files have `# -- Internal ...` hook markers — everything below the marker is stripped for public.
 
+**Before ANY sync, verify these categories are in `internal_only`:**
+- All `*_internal.py` and `*_internal.ts` files
+- Billing/licensing: `pro-section.tsx`, `license.py`, billing router, billing models
+- Enterprise: `enterprise/` directory, all enterprise config stubs beyond `CERID_ENTERPRISE = False`
+- Desktop: `packages/desktop/`, `electron-build.yml`
+- Trading/boardroom: all agent files, scheduler jobs, proxy routers
+
+**After sync, always run `validate`** — the forbidden string scanner catches patterns like `generate_license_key`, `STRIPE_SECRET_KEY`, `ABAC_POLICY_KEY`, `billing/status` that indicate leaked internal content. Fix before committing.
+
 **Key architecture (as of 2026-04-10):**
 - Internal-only code extracted to `*_internal.py` companion files (7 Python + 1 TypeScript)
 - `app/main_internal.py` bootstraps all internal features: `extend_settings()` → `extend_taxonomy()` → register routers

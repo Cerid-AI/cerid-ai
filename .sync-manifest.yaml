@@ -62,8 +62,11 @@ internal_only:
   - src/mcp/routers/trading_proxy.py
   - src/mcp/tests/test_router_sdk.py
   - tests/test_e2e_integration.py
-  # Frontend files that use types_internal.ts
+  # Frontend files with internal dependencies
   - src/web/src/components/settings/plugins-section.tsx
+  # Billing/licensing — pro-section has Stripe checkout flow, license.py has HMAC keygen
+  - src/web/src/components/settings/pro-section.tsx
+  - src/mcp/utils/license.py
   # Tests that import internal-only modules (eval, alerts, etc.)
   - src/mcp/tests/test_ablation.py
   - src/mcp/tests/test_benchmark_suite.py
@@ -148,3 +151,17 @@ forbidden_in_public:
   - bootstrap_internal
   - extend_settings
   - extend_taxonomy
+  # Billing/licensing patterns
+  - generate_license_key
+  - STRIPE_SECRET_KEY
+  - STRIPE_WEBHOOK_SECRET
+  - create-checkout
+  - billing/status
+  - billing/validate-key
+  - billing/waitlist
+  # Enterprise feature internals
+  - ABAC_POLICY_KEY
+  - SSO_PROVIDER
+  - SSO_METADATA_URL
+  - CERID_BOARDROOM_ENABLED
+  - CERID_BOARDROOM_TIER
