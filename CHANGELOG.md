@@ -29,7 +29,7 @@ All notable changes to cerid-ai are documented here.
 - **InferenceConfig singleton** — auto-detects platform (macOS ARM/Intel, Linux, Windows), GPU (Metal/CUDA/ROCm/DirectML), Ollama, and FastEmbed sidecar at startup
 - **Dynamic ONNX providers** — embeddings.py and reranker.py use detected GPU providers instead of hardcoded CPU
 - **Health endpoint** — `/health` now includes `inference` field with provider, tier, GPU, latency
-- **Performance baseline** — documented in `docs/PERF_BASELINE_2026-04-05.md`
+- **Performance baseline** — documented in `docs/archive/2026-Q2/PERF_BASELINE_2026-04-05.md`
 
 ### Phase 2: FastEmbed Sidecar + UX Polish
 - **Sidecar server** — `scripts/cerid-sidecar.py` wraps ONNX embed/rerank with native GPU acceleration
@@ -65,7 +65,7 @@ All notable changes to cerid-ai are documented here.
 - `src/mcp/utils/inference_sidecar_client.py` — sidecar HTTP client
 - `scripts/cerid-sidecar.py` — FastEmbed sidecar server
 - `scripts/install-sidecar.sh` — platform-aware installer
-- `docs/PERF_BASELINE_2026-04-05.md` — performance baseline
+- `docs/archive/2026-Q2/PERF_BASELINE_2026-04-05.md` — performance baseline
 - `docs/FEEDBACK_LOOP_DESIGN.md` — feedback loop design doc
 
 ## v0.81 — Beta Test Implementation (2026-04-04)
