@@ -37,6 +37,15 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      # ESLint 10 is blocked on eslint-plugin-react-hooks: its latest stable
+      # (v7.x) peer-requires eslint <=9. Only canary releases support
+      # ESLint 10. Revisit once a stable react-hooks plugin ships with
+      # `eslint: ^10` peer support.
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@eslint/js"
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: "deps(npm):"
 
