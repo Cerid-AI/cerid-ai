@@ -6,9 +6,19 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    # Group non-major bumps; majors get their own PRs so they can be
+    # audited/tested individually (e.g. chromadb must stay pinned to <0.6
+    # until the server is upgraded).
     groups:
       python-deps:
         patterns: ["*"]
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # Server pin (ChromaDB 0.5.23) dictates client version — no bumps
+      # until server upgrade is scheduled.
+      - dependency-name: "chromadb"
     commit-message:
       prefix: "deps(py):"
 
@@ -18,9 +28,15 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    # Group non-major bumps; majors get their own PRs so each breaking-change
+    # migration (TypeScript 6, Vite 8, ESLint 10, etc.) can be staged and
+    # audited independently.
     groups:
       npm-deps:
         patterns: ["*"]
+        update-types:
+          - "minor"
+          - "patch"
     commit-message:
       prefix: "deps(npm):"
 
