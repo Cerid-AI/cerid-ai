@@ -35,6 +35,7 @@ internal_only:
   - src/mcp/scripts/rewrite_imports.py
   # Desktop app
   - packages/desktop/**
+  - .github/workflows/electron-build.yml
   # Internal-only tests
   - src/mcp/tests/test_trading_*.py
   - src/mcp/tests/test_enterprise_*.py
