@@ -154,6 +154,7 @@ async def check_hallucinations(
     model: str | None = None,
     user_query: str | None = None,
     expert_mode: bool = False,
+    create_memory_fn: Any = None,
 ) -> dict[str, Any]:
     """Extract claims, verify each against KB, and store results in Redis."""
     if threshold is None:
@@ -221,9 +222,8 @@ async def check_hallucinations(
 
     # --- Promote verified facts to empirical memories (non-streaming path) ---
     verified_count = status_counts.get("verified", 0)
-    if config.ENABLE_VERIFIED_MEMORY_PROMOTION and verified_count > 0:
+    if config.ENABLE_VERIFIED_MEMORY_PROMOTION and verified_count > 0 and create_memory_fn is not None:
         try:
-            from app.db.neo4j.memory import create_memory_node
             from core.agents.verified_memory import promote_verified_facts
 
             _task = asyncio.create_task(promote_verified_facts(
@@ -231,7 +231,7 @@ async def check_hallucinations(
                 chroma_client=chroma_client,
                 neo4j_driver=neo4j_driver,
                 redis_client=redis_client,
-                create_memory_fn=create_memory_node,
+                create_memory_fn=create_memory_fn,
             ))
             _task.add_done_callback(
                 lambda t: logger.warning("Verified memory promotion failed: %s", t.exception())
@@ -279,6 +279,7 @@ async def verify_response_streaming(
     conversation_history: list[dict[str, str]] | None = None,
     expert_mode: bool = False,
     source_artifact_ids: list[str] | None = None,
+    create_memory_fn: Any = None,
 ):
     """Streaming verification generator — yields claim results as they are verified.
 
@@ -871,9 +872,9 @@ async def verify_response_streaming(
         logger.warning("Failed to persist streaming report to Redis: %s", e)
 
     # --- Promote verified facts to empirical memories (fire-and-forget) ---
-    if config.ENABLE_VERIFIED_MEMORY_PROMOTION and verified_count > 0:
+    _create_mem_fn = create_memory_fn
+    if config.ENABLE_VERIFIED_MEMORY_PROMOTION and verified_count > 0 and _create_mem_fn is not None:
         try:
-            from app.db.neo4j.memory import create_memory_node
             from core.agents.verified_memory import promote_verified_facts
 
             _task = asyncio.create_task(promote_verified_facts(
@@ -881,7 +882,7 @@ async def verify_response_streaming(
                 chroma_client=chroma_client,
                 neo4j_driver=neo4j_driver,
                 redis_client=redis_client,
-                create_memory_fn=create_memory_node,
+                create_memory_fn=_create_mem_fn,
             ))
             _task.add_done_callback(
                 lambda t: logger.warning("Verified memory promotion failed: %s", t.exception())

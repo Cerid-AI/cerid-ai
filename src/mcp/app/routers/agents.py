@@ -416,6 +416,7 @@ async def triage_batch_endpoint(req: TriageBatchRequest):
 async def hallucination_check_endpoint(req: HallucinationCheckRequest):
     try:
         from agents.hallucination import check_hallucinations
+        from app.db.neo4j.memory import create_memory_node
         return await check_hallucinations(
             response_text=req.response_text,
             conversation_id=req.conversation_id,
@@ -426,6 +427,7 @@ async def hallucination_check_endpoint(req: HallucinationCheckRequest):
             model=req.model,
             user_query=req.user_query,
             expert_mode=req.expert_mode,
+            create_memory_fn=create_memory_node,
         )
     except Exception as e:
         logger.error(f"Hallucination check error: {e}")
@@ -590,6 +592,7 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
         keepalive_count = 0
         try:
             from agents.hallucination import verify_response_streaming
+            from app.db.neo4j.memory import create_memory_node as _create_mem_fn
 
             logger.info(
                 "Verify stream started for conversation=%s (model=%s, query_len=%d)",
@@ -610,6 +613,7 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
                 conversation_history=req.conversation_history,
                 expert_mode=req.expert_mode,
                 source_artifact_ids=req.source_artifact_ids,
+                create_memory_fn=_create_mem_fn,
             )
 
             # Read events with a keepalive timeout — if no event arrives
