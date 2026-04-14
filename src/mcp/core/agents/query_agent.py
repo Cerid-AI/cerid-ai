@@ -318,10 +318,20 @@ async def multi_domain_query(
 # ---------------------------------------------------------------------------
 
 def deduplicate_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Remove duplicate chunks, keeping highest relevance per (artifact_id, chunk_index)."""
+    """Remove duplicate chunks, keeping highest relevance per (artifact_id, chunk_index).
+
+    External source results (from CRAG gate) may lack artifact_id/chunk_index;
+    these are treated as unique (never deduplicated against KB results).
+    """
     groups = defaultdict(list)
     for result in results:
-        key = (result["artifact_id"], result["chunk_index"])
+        aid = result.get("artifact_id")
+        cidx = result.get("chunk_index")
+        if aid is not None and cidx is not None:
+            key = (aid, cidx)
+        else:
+            # External/memory results without KB keys — always unique
+            key = (id(result),)
         groups[key].append(result)
 
     deduplicated = []
@@ -1013,6 +1023,42 @@ async def agent_query(
                 chroma_client=chroma_client,
                 metadata_filter=metadata_filter,
             )
+
+    # ── CRAG quality gate: supplement with external sources if KB results are poor ──
+    # If top result relevance is below threshold, external sources may have
+    # better answers (e.g., KB has stale data, or the topic isn't well-covered).
+    # Only fires when results are poor — adds zero latency on good retrievals.
+    _top_rel = max((r.get("relevance", 0) for r in results), default=0.0) if results else 0.0
+    _crag_threshold = getattr(config, "RETRIEVAL_QUALITY_THRESHOLD", 0.4)
+    if isinstance(_crag_threshold, (int, float)) and _top_rel < _crag_threshold:
+        try:
+            from utils.data_sources import registry
+            from utils.metadata import _extract_keywords_simple
+
+            _crag_kw = _extract_keywords_simple(search_query, max_keywords=5)
+            _crag_terms = " ".join(_crag_kw) if _crag_kw else search_query
+            _crag_domain = effective_domains[0] if effective_domains else None
+            _crag_results = await asyncio.wait_for(
+                registry.query_all(
+                    _crag_terms,
+                    domain=_crag_domain,
+                    timeout=3.0,
+                    raw_query=search_query,
+                    keywords=_crag_kw,
+                ),
+                timeout=4.0,
+            )
+            if _crag_results:
+                for cr in _crag_results:
+                    cr["source_type"] = "external"
+                    cr["relevance"] = cr.get("confidence", cr.get("relevance", 0.5))
+                results.extend(_crag_results)
+                logger.info(
+                    "CRAG gate: top_rel=%.3f < %.3f — supplemented with %d external results",
+                    _top_rel, config.RETRIEVAL_QUALITY_THRESHOLD, len(_crag_results),
+                )
+        except Exception:
+            logger.debug("CRAG gate: external source query failed (non-blocking)")
 
     # Search adjacent domains at reduced weight when specific domains are requested.
     # Skipped when strict_domains=True (consumer isolation — no cross-domain bleed).

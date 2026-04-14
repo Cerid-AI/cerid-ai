@@ -214,6 +214,11 @@ export function ClaimOverlay({ container, claims, claimSpans, onClaimFocus, onAr
             {methodLabel}
           </Badge>
         )}
+        {claim.verification_model?.includes("grok-4") && (
+          <Badge variant="outline" className="text-[10px] px-1 py-0 bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-500/15 dark:text-indigo-400 dark:border-indigo-500/30">
+            expert
+          </Badge>
+        )}
       </div>
 
       <p className="mt-2 text-xs leading-relaxed">
@@ -234,8 +239,8 @@ export function ClaimOverlay({ container, claims, claimSpans, onClaimFocus, onAr
       {/* Expanded details */}
       {expanded && (
         <>
-          {/* KB-verified claims: artifact link + snippet */}
-          {claim.verification_method === "kb" && (
+          {/* KB-verified claims (kb or kb_nli): artifact link + snippet */}
+          {(claim.verification_method === "kb" || claim.verification_method === "kb_nli") && (
             <>
               <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
                 {claim.source_filename && (
@@ -264,7 +269,7 @@ export function ClaimOverlay({ container, claims, claimSpans, onClaimFocus, onAr
           )}
 
           {/* Externally-verified claims: model + reasoning */}
-          {claim.verification_method !== "kb" && (
+          {claim.verification_method !== "kb" && claim.verification_method !== "kb_nli" && (
             <>
               <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
                 {displayModelName(claim.verification_model) && (

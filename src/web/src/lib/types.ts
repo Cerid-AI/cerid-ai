@@ -352,6 +352,8 @@ export interface MemoryRecallResult {
   base_similarity: number
   access_count: number
   source_type: "memory"
+  /** Provenance: "verification" for promoted verified facts, undefined for standard memories */
+  memory_source_type?: string
 }
 
 export interface ExternalSourceResult {

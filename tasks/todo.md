@@ -1,7 +1,34 @@
 # Cerid AI — Sprint TODO
 
-> **Updated:** 2026-04-12
-> **Version:** 0.82.0 (Phase C architecture + NLI)
+> **Updated:** 2026-04-13
+> **Version:** 0.83.0 (Search tuning + Memory efficacy + Verification rigor)
+
+---
+
+## Completed — Session 2026-04-13
+
+- [x] Source-aware external query construction (adapt_query/is_relevant per source, intent-based routing)
+- [x] CRAG retrieval quality gate (supplements with external sources when KB results are poor)
+- [x] Verified-fact-to-memory promotion pipeline (high-confidence claims auto-promote to empirical memories)
+- [x] Tiered memory authority boost (0.05-0.25 based on verification status/confidence)
+- [x] Refresh-on-read memory decay (decay_anchor reset on retrieval, Ebbinghaus rehearsal)
+- [x] NLI consolidation guard (prevents semantic drift during memory merges)
+- [x] Fix hardcoded NLI threshold 0.5 → config 0.7 in Self-RAG
+- [x] Fact-relationship verification (temporal/entity/specificity alignment checks)
+- [x] Graph-guided verification (Neo4j relationship structure as evidence)
+- [x] Authoritative external verification (LLM synthesizes from external data, not parametric memory)
+- [x] Full conversation context threading to expert verification mode
+- [x] Dynamic confidence scoring per external source (Wikipedia title match, Wolfram non-answer, DuckDuckGo .gov boost)
+- [x] Memory efficacy measurement module (eval-only)
+- [x] Fix Docker path issue in test_retrieval_orchestrator.py
+- [x] Fix deduplicate_results crash on external results without artifact_id
+- [x] Fix non-streaming endpoint missing expert_mode/user_query pass-through
+- [x] Fix verified_memory field mapping (status/similarity vs verdict/confidence)
+- [x] Fix httpx.HTTPError missing from all 6 data source exception handlers
+- [x] Fix Wolfram API HTTP → HTTPS (credential exposure)
+- [x] Fix ClaimOverlay: kb_nli claims now show artifact link/snippet
+- [x] Add expert mode indicator badge to ClaimOverlay
+- [x] 65 new pipeline enhancement tests + Docker path fix (2374 backend + 705 frontend tests)
 
 ---
 

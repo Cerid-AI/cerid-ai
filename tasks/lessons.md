@@ -457,3 +457,38 @@
 **Problem:** `_openrouter_auth_probe_loop()` only reset the `openrouter` breaker on successful auth, but `bifrost-verify`, `bifrost-claims`, `bifrost-synopsis`, etc. all call the same OpenRouter API. Transient DNS failures at startup tripped `bifrost-verify` and it was never reset, causing verification to fail permanently until container restart.
 **Fix:** Reset ALL OpenRouter-dependent breakers (7 total) in the probe success handler, not just the one named `openrouter`.
 **Pattern:** When adding a circuit breaker for a new call site to an existing upstream, add it to the startup probe's reset list in `main.py:_openrouter_auth_probe_loop()`.
+
+## Session 2026-04-13: Search Tuning + Memory Efficacy + Verification Rigor
+
+### Backend claim dict field names differ from plan assumptions
+**When:** Building the verified_memory promotion pipeline.
+**Problem:** Planned code checked `verdict`/`confidence`/`nli_entailment`/`type` fields but production claim dicts use `status`/`similarity`/no nli field/no type field. The promotion filter silently skipped all claims.
+**Fix:** Always inspect LIVE API responses (curl the running service) before coding field access. Use `.get()` with fallback chains for variant field names: `claim_data.get("status", claim_data.get("verdict", ""))`.
+**Rule:** Never assume response shapes from documentation or code reading alone — hit the real endpoint.
+
+### Non-streaming and streaming code paths diverge silently
+**When:** Wiring verified memory promotion into the verification pipeline.
+**Problem:** `verify_response_streaming()` had the promotion code but `check_hallucinations()` (non-streaming) did not. The `/agent/hallucination` endpoint uses the non-streaming path. Promotion never fired via API.
+**Fix:** Search for ALL code paths that produce the same output (reports) and wire features into every path.
+**Rule:** When adding a post-processing step, grep for all functions that produce the input data — not just the one you're looking at.
+
+### Request model fields must match endpoint handler pass-through
+**When:** Testing expert_mode via the `/agent/hallucination` endpoint.
+**Problem:** `HallucinationCheckRequest` Pydantic model had 4 fields. The streaming endpoint's `StreamingVerificationRequest` had 8 fields including `expert_mode` and `user_query`. The non-streaming handler passed `model=req.model` but not `expert_mode=req.expert_mode` because the field didn't exist on the model.
+**Fix:** When adding parameters to a handler function, always check that the request model also has those fields AND the handler passes them through.
+
+### `deduplicate_results()` crashes when external results are mixed in
+**When:** CRAG quality gate injects external source results into the KB result list.
+**Problem:** `deduplicate_results()` did `result["artifact_id"]` (direct key access) which crashes on external results that lack this field.
+**Fix:** Use `.get()` with a fallback unique key for non-KB results. External/memory results without `artifact_id` are treated as always-unique.
+**Rule:** Any function that processes mixed-origin result lists must handle missing KB-specific fields gracefully.
+
+### NLI argument order matters — premise vs hypothesis
+**When:** Building the NLI consolidation guard for memory merges.
+**Problem:** `nli_score(merged_text, existing_text)` checks "does merged entail existing?" but the correct check is "does existing entail merged?" (is the original preserved in the merge?). Swapped arguments silently reject all legitimate merges.
+**Fix:** For "is A preserved in B?", the premise is A (the original fact) and the hypothesis is B (the merged text): `nli_score(existing_text, merged_text)`.
+
+### `_compute_adjusted_confidence` must stay zero-LLM-cost
+**When:** Adding graduated NLI contradiction scoring.
+**Problem:** Added an `nli_score()` call inside `_compute_adjusted_confidence()` which broke its "zero LLM cost" contract and double-counted contradictions with the main NLI check that runs separately.
+**Fix:** Removed the NLI call from `_compute_adjusted_confidence()`. Contradiction scoring belongs in the main verify_claim() flow, not in the confidence calibration function.

@@ -4,11 +4,15 @@
 """DuckDuckGo Instant Answers data source -- free, no API key required."""
 from __future__ import annotations
 
+import re
+
 import httpx
 
 from errors import RetrievalError
 
 from .base import DataSource, DataSourceResult, logger
+
+_QUOTED_RE = re.compile(r'"([^"]+)"')
 
 
 class DuckDuckGoSource(DataSource):
@@ -17,12 +21,32 @@ class DuckDuckGoSource(DataSource):
     requires_api_key = False
     domains: list[str] = []  # all domains
 
+    def score_confidence(self, raw_query: str, result: "DataSourceResult") -> float:
+        """Boost .gov/.edu source URLs; reduce for tangential related topics."""
+        url = result.source_url.lower()
+        if ".gov" in url or ".edu" in url:
+            return min(1.0, result.confidence + 0.10)
+        # Related topics with very short content are likely tangential
+        if len(result.content) < 30:
+            return max(0.0, result.confidence - 0.10)
+        return result.confidence
+
+    def adapt_query(self, raw_query: str, keywords: list[str]) -> str:
+        """Use keywords plus any quoted phrases from the original query."""
+        quoted = _QUOTED_RE.findall(raw_query)
+        parts = list(keywords[:4])
+        for q in quoted[:2]:
+            if q not in " ".join(parts):
+                parts.append(f'"{q}"')
+        return " ".join(parts) if parts else raw_query
+
     async def query(self, query: str, **kwargs) -> list[DataSourceResult]:
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
+                # Removed skip_disambig — disambiguation pages contain useful structured data
                 resp = await client.get(
                     "https://api.duckduckgo.com/",
-                    params={"q": query, "format": "json", "no_html": "1", "skip_disambig": "1"},
+                    params={"q": query, "format": "json", "no_html": "1"},
                 )
                 resp.raise_for_status()
                 data = resp.json()
@@ -54,6 +78,6 @@ class DuckDuckGoSource(DataSource):
                         ))
 
                 return results
-        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
+        except (RetrievalError, httpx.HTTPError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
             logger.debug("DuckDuckGo query failed: %s", exc)
             return []

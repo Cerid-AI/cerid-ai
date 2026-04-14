@@ -434,6 +434,34 @@ async def resolve_memory_conflict(
 
         merged_text = parsed.get("merged_text") if action == "merge" else None
 
+        # NLI guard: verify merged text preserves both original facts.
+        # Prevents semantic drift during consolidation (SSGM framework).
+        if action == "merge" and merged_text:
+            try:
+                from core.utils.nli import nli_score
+
+                nli_guard_threshold = getattr(config, "MEMORY_CONSOLIDATION_NLI_GUARD", 0.7)
+                # Check: does each original fact entail the merged result?
+                # Premise=original, hypothesis=merged — "is the original preserved in the merge?"
+                nli_old = nli_score(existing_text[:512], merged_text[:512])
+                nli_new = nli_score(new_memory[:512], merged_text[:512])
+                if (
+                    float(nli_old["entailment"]) < nli_guard_threshold
+                    or float(nli_new["entailment"]) < nli_guard_threshold
+                ):
+                    logger.info(
+                        "NLI guard: merge would lose info (old=%.2f, new=%.2f) — keeping both",
+                        nli_old["entailment"],
+                        nli_new["entailment"],
+                    )
+                    return {
+                        "action": "coexist",
+                        "reason": "NLI guard: merge would lose information",
+                        "merged_text": None,
+                    }
+            except Exception:
+                logger.debug("NLI guard check failed — proceeding with merge")
+
         return {
             "action": action,
             "reason": parsed.get("reason", ""),
@@ -571,8 +599,9 @@ async def recall_memories(
         base_similarity = l2_distance_to_relevance(distance)
         metadata = results["metadatas"][0][i] if results["metadatas"] else {}
 
-        # Compute age in days
-        created_str = metadata.get("valid_from", metadata.get("ingested_at", ""))
+        # Compute age in days — use decay_anchor (refresh-on-read) if available,
+        # falling back to valid_from or ingested_at for older memories.
+        created_str = metadata.get("decay_anchor", metadata.get("valid_from", metadata.get("ingested_at", "")))
         age_days = 0.0
         if created_str:
             try:

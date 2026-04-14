@@ -219,6 +219,27 @@ async def check_hallucinations(
     except Exception as e:
         logger.warning("Failed to store hallucination report in Redis: %s", e)
 
+    # --- Promote verified facts to empirical memories (non-streaming path) ---
+    verified_count = status_counts.get("verified", 0)
+    if config.ENABLE_VERIFIED_MEMORY_PROMOTION and verified_count > 0:
+        try:
+            from app.db.neo4j.memory import create_memory_node
+            from core.agents.verified_memory import promote_verified_facts
+
+            _task = asyncio.create_task(promote_verified_facts(
+                report,
+                chroma_client=chroma_client,
+                neo4j_driver=neo4j_driver,
+                redis_client=redis_client,
+                create_memory_fn=create_memory_node,
+            ))
+            _task.add_done_callback(
+                lambda t: logger.warning("Verified memory promotion failed: %s", t.exception())
+                if not t.cancelled() and t.exception() else None
+            )
+        except Exception:
+            logger.debug("Verified memory promotion dispatch failed (non-blocking)")
+
     # Log verification metrics for analytics
     try:
         from core.utils.cache import log_verification_metrics
@@ -848,6 +869,26 @@ async def verify_response_streaming(
         redis_client.setex(key, REDIS_HALLUCINATION_TTL, json.dumps(report))
     except Exception as e:
         logger.warning("Failed to persist streaming report to Redis: %s", e)
+
+    # --- Promote verified facts to empirical memories (fire-and-forget) ---
+    if config.ENABLE_VERIFIED_MEMORY_PROMOTION and verified_count > 0:
+        try:
+            from app.db.neo4j.memory import create_memory_node
+            from core.agents.verified_memory import promote_verified_facts
+
+            _task = asyncio.create_task(promote_verified_facts(
+                report,
+                chroma_client=chroma_client,
+                neo4j_driver=neo4j_driver,
+                redis_client=redis_client,
+                create_memory_fn=create_memory_node,
+            ))
+            _task.add_done_callback(
+                lambda t: logger.warning("Verified memory promotion failed: %s", t.exception())
+                if not t.cancelled() and t.exception() else None
+            )
+        except Exception:
+            logger.debug("Verified memory promotion dispatch failed (non-blocking)")
 
     try:
         from core.utils.cache import log_verification_metrics

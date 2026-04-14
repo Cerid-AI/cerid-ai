@@ -25,8 +25,36 @@ MEMORY_TYPES = [
     "fact", "action_item",  # Legacy aliases — some older memories use these names
 ]
 
-# Authority boost for memory-sourced results (user-confirmed content)
+# Authority boost for memory-sourced results (user-confirmed content).
+# Backward-compatible constant — callers that import this still work.
 MEMORY_AUTHORITY_BOOST = 0.15
+
+
+def memory_authority_boost(memory_result: dict) -> float:
+    """Tiered authority boost based on memory type and provenance.
+
+    Returns a higher boost for verified empirical facts and user-stated
+    memories, and a lower boost for conversational or low-relevance memories.
+    Falls back to the flat MEMORY_AUTHORITY_BOOST for unknown shapes.
+    """
+    memory_type = memory_result.get("memory_type", "")
+    source = memory_result.get("memory_source_type", "")  # set by verified_memory promotion
+    raw_rel = memory_result.get("_raw_relevance", memory_result.get("relevance", 0.5))
+
+    # Tier 1: Verified facts promoted from the verification pipeline
+    if source == "verification" or memory_type == "empirical":
+        return 0.25
+
+    # Tier 2: High-confidence user-stated or decision memories
+    if memory_type in ("decision", "preference") and raw_rel >= 0.7:
+        return 0.20
+
+    # Tier 3: Standard memories with decent relevance
+    if raw_rel >= 0.5:
+        return 0.15
+
+    # Tier 4: Low-relevance or conversational memories
+    return 0.05
 
 # ---------------------------------------------------------------------------
 # Concurrency gates

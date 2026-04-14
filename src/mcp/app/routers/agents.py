@@ -78,6 +78,8 @@ class HallucinationCheckRequest(BaseModel):
     conversation_id: str
     threshold: float | None = Field(None, ge=0.0, le=1.0)
     model: str | None = None
+    user_query: str | None = None
+    expert_mode: bool = False
 
 
 class MemoryExtractionRequest(BaseModel):
@@ -422,6 +424,8 @@ async def hallucination_check_endpoint(req: HallucinationCheckRequest):
             redis_client=get_redis(),
             threshold=req.threshold,
             model=req.model,
+            user_query=req.user_query,
+            expert_mode=req.expert_mode,
         )
     except Exception as e:
         logger.error(f"Hallucination check error: {e}")

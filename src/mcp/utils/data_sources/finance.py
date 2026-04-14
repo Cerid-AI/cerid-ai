@@ -24,6 +24,10 @@ class ExchangeRatesSource(DataSource):
     requires_api_key = False
     domains: list[str] = ["finance"]
 
+    def is_relevant(self, raw_query: str, keywords: list[str]) -> bool:
+        """Only relevant for currency/exchange-rate queries."""
+        return bool(_CURRENCY_RE.search(raw_query))
+
     async def query(self, query: str, **kwargs) -> list[DataSourceResult]:
         if not _CURRENCY_RE.search(query):
             return []  # Only respond to currency-related queries
@@ -44,6 +48,6 @@ class ExchangeRatesSource(DataSource):
                     source_name="Open Exchange Rates",
                     confidence=0.9,
                 )]
-        except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
+        except (RetrievalError, httpx.HTTPError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
             logger.debug("Exchange rates query failed: %s", exc)
             return []
