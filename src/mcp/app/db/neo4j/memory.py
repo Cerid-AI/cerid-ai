@@ -72,6 +72,7 @@ def create_memory_node(driver, memory_data: dict[str, Any]) -> str:
     memory_id = memory_data.get("id") or str(uuid.uuid4())
     text = memory_data.get("text", "")
     source = memory_data.get("source", "extraction")
+    memory_type = memory_data.get("memory_type", "decision")
     confidence = float(memory_data.get("confidence", 1.0))
     base_score = float(memory_data.get("base_score", 1.0))
     now = utcnow_iso()
@@ -82,16 +83,19 @@ def create_memory_node(driver, memory_data: dict[str, Any]) -> str:
             "  id: $id,"
             "  text: $text,"
             "  source: $source,"
+            "  memory_type: $memory_type,"
             "  confidence: $confidence,"
             "  access_count: 0,"
             "  base_score: $base_score,"
             "  created_at: $now,"
             "  last_accessed_at: $now,"
+            "  decay_anchor: $now,"
             "  status: 'active'"
             "})",
             id=memory_id,
             text=text,
             source=source,
+            memory_type=memory_type,
             confidence=confidence,
             base_score=base_score,
             now=now,
@@ -124,13 +128,19 @@ def create_memory_node(driver, memory_data: dict[str, Any]) -> str:
 
 
 def update_memory_access(driver, memory_id: str) -> None:
-    """Increment access_count and update last_accessed_at."""
+    """Increment access_count, update last_accessed_at, and reset decay_anchor.
+
+    The decay_anchor reset implements refresh-on-read: active retrieval of a
+    memory resets its decay timer, preventing useful-but-old memories from
+    decaying despite frequent use (Ebbinghaus rehearsal pattern).
+    """
     now = utcnow_iso()
     with driver.session() as session:
         result = session.run(
             "MATCH (m:Memory {id: $mid}) "
             "SET m.access_count = coalesce(m.access_count, 0) + 1, "
-            "    m.last_accessed_at = $now "
+            "    m.last_accessed_at = $now, "
+            "    m.decay_anchor = $now "
             "RETURN m.access_count AS count",
             mid=memory_id,
             now=now,

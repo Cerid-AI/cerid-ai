@@ -2,16 +2,6 @@
 
 All notable changes to cerid-ai are documented here.
 
-## v0.83.0 — Open Source Launch (2026-04-12)
-
-- **Public release preparation** — removed 13 internal-only docs, orphaned Electron workflow, and INSTALL.md
-- **README.md cleanup** — removed internal references (trading, desktop, dotfiles), fixed tool/CI counts, added CI badge
-- **CLAUDE.md rewrite** — streamlined for external contributors (117 lines, standalone quick start)
-- **GitHub community** — added issue templates (bug report, feature request), PR template, Discussions enabled
-- **Branch protection** — required CI checks (lint, typecheck, test, security, frontend, docker), PR reviews, no force push
-- **Repository metadata** — description, topics, homepage (cerid.ai), FUNDING.yml
-- **SDK/Contributing docs** — removed internal consumer references, cleaned trading endpoints from guides
-
 ## v0.82.0 — Unified Implementation Plan + Phase C Architecture (2026-04-05 → 2026-04-10)
 
 ### Phase C: Core Extraction + NLI Architecture (2026-04-08 → 2026-04-10)

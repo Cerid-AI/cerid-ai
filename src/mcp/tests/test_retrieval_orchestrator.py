@@ -17,12 +17,25 @@ from agents.retrieval_orchestrator import (
 )
 
 # _apply_source_config was extracted to the BSL-1.1 custom-rag plugin.
-# Import it directly for unit testing.
-_plugin_path = Path(__file__).resolve().parents[3] / "plugins" / "custom-rag" / "plugin.py"
-_spec = importlib.util.spec_from_file_location("cerid_plugin_custom_rag_test", str(_plugin_path))
-_mod = importlib.util.module_from_spec(_spec)  # type: ignore[arg-type]
-_spec.loader.exec_module(_mod)  # type: ignore[union-attr]
-_apply_source_config = _mod.apply_source_config
+# Import it directly for unit testing. Walk up from tests/ to find repo root
+# regardless of whether we're running natively or inside a Docker container.
+_test_dir = Path(__file__).resolve().parent
+_repo_root = _test_dir
+for _ in range(10):  # walk up at most 10 levels to find plugins/
+    if (_repo_root / "plugins" / "custom-rag" / "plugin.py").exists():
+        break
+    _repo_root = _repo_root.parent
+else:
+    _repo_root = None  # type: ignore[assignment]
+
+_apply_source_config = None
+if _repo_root is not None:
+    _plugin_path = _repo_root / "plugins" / "custom-rag" / "plugin.py"
+    _spec = importlib.util.spec_from_file_location("cerid_plugin_custom_rag_test", str(_plugin_path))
+    if _spec and _spec.loader:
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _apply_source_config = _mod.apply_source_config
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -227,6 +240,7 @@ class TestSmartMode:
 # Custom smart mode tests
 # ---------------------------------------------------------------------------
 
+@pytest.mark.skipif(_apply_source_config is None, reason="custom-rag plugin not found (Docker path)")
 class TestCustomSmartMode:
     """Custom smart mode applies source_config weights and toggles."""
 
@@ -341,6 +355,7 @@ class TestHelpers:
         assert "Prefers Python" in result
         assert "Uses PostgreSQL for DB" in result  # Falls back to content[:80]
 
+    @pytest.mark.skipif(_apply_source_config is None, reason="custom-rag plugin not found")
     def test_apply_source_config_all_disabled(self):
         """Disabling all sources should return empty lists."""
         config = {"kb_enabled": False, "memory_enabled": False, "external_enabled": False}
@@ -352,6 +367,7 @@ class TestHelpers:
         assert mem == []
         assert ext == []
 
+    @pytest.mark.skipif(_apply_source_config is None, reason="custom-rag plugin not found")
     def test_apply_source_config_no_relevance_key(self):
         """Items without 'relevance' key should not crash weight application."""
         config = {"kb_enabled": True, "memory_enabled": True, "external_enabled": True,

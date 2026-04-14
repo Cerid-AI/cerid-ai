@@ -57,8 +57,8 @@ export function ProSection({ featureTier, featureFlags, onRefresh }: ProSectionP
   const [keyError, setKeyError] = useState("")
   const [keySuccess, setKeySuccess] = useState("")
   const [validating, setValidating] = useState(false)
-  const [deactivating, setDeactivating] = useState(false)
   const [upgradeError, setUpgradeError] = useState("")
+  const [deactivating, setDeactivating] = useState(false)
 
   // Waitlist state
   const [waitlistEmail, setWaitlistEmail] = useState("")

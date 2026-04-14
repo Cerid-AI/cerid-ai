@@ -169,6 +169,7 @@ Default limits:
 
 | Consumer | Requests/min |
 |----------|-------------|
+| trading-agent | 80 |
 | finance-dashboard | 40 |
 | gui (internal) | 200 |
 | Default (unregistered) | 30 |
@@ -209,6 +210,11 @@ Each entry defines:
 
 ```python
 CONSUMER_REGISTRY = {
+    "trading-agent": {
+        "rate_limit": 80,
+        "allowed_domains": ["trading", "finance", "general"],
+        "description": "DeFi trading agent",
+    },
     "finance-dashboard": {
         "rate_limit": 40,
         "allowed_domains": ["finance", "general"],
