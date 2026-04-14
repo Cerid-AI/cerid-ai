@@ -15,12 +15,12 @@ jinja2>=3.1,<4
 
 # Databases
 chromadb>=0.5,<0.6  # server pinned to 0.5.23 — do not widen until server upgrade
-neo4j>=5.0,<7
+neo4j>=5.0,<6       # neo4j 6.x staged for dedicated upgrade (context-manager audit required)
 redis>=4.0,<8
 
 # AI / NLP
 tiktoken>=0.5,<1
-langgraph>=0.3.0,<2.0
+langgraph>=0.3.0,<1.0  # langgraph 1.x staged for dedicated upgrade (API audit required)
 
 # File parsing
 pdfplumber>=0.10,<0.12
