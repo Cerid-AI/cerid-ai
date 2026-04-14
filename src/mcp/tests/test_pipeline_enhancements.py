@@ -16,8 +16,6 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 
 def _run(coro):
     return asyncio.get_event_loop().run_until_complete(coro)
@@ -167,7 +165,7 @@ class TestQueryAllSourceFiltering:
     """query_all should skip irrelevant sources and adapt queries per-source."""
 
     def test_is_relevant_filters_sources(self):
-        from utils.data_sources.base import DataSource, DataSourceRegistry, DataSourceResult
+        from utils.data_sources.base import DataSource, DataSourceResult
 
         class AlwaysRelevant(DataSource):
             name = "always"
@@ -213,28 +211,28 @@ class TestDynamicConfidenceScoring:
     """score_confidence should adjust results based on query-source fit."""
 
     def test_wikipedia_boosts_title_match(self):
-        from utils.data_sources.wikipedia import WikipediaSource, DataSourceResult
+        from utils.data_sources.wikipedia import DataSourceResult, WikipediaSource
         src = WikipediaSource()
         result = DataSourceResult("Tokyo", "content about Tokyo", confidence=0.85)
         score = src.score_confidence("what is the population of tokyo?", result)
         assert score > 0.85
 
     def test_wikipedia_reduces_disambiguation(self):
-        from utils.data_sources.wikipedia import WikipediaSource, DataSourceResult
+        from utils.data_sources.wikipedia import DataSourceResult, WikipediaSource
         src = WikipediaSource()
         result = DataSourceResult("Python (disambiguation)", "disambiguation page", confidence=0.85)
         score = src.score_confidence("python programming", result)
         assert score < 0.85
 
     def test_wolfram_reduces_non_answer(self):
-        from utils.data_sources.wolfram import WolframAlphaSource, DataSourceResult
+        from utils.data_sources.wolfram import DataSourceResult, WolframAlphaSource
         src = WolframAlphaSource()
         result = DataSourceResult("query", "Wolfram|Alpha did not understand your input", confidence=0.95)
         score = src.score_confidence("gibberish query", result)
         assert score < 0.5
 
     def test_duckduckgo_boosts_gov_url(self):
-        from utils.data_sources.duckduckgo import DuckDuckGoSource, DataSourceResult
+        from utils.data_sources.duckduckgo import DataSourceResult, DuckDuckGoSource
         src = DuckDuckGoSource()
         result = DataSourceResult("CDC Data", "health data", source_url="https://www.cdc.gov/data", confidence=0.80)
         score = src.score_confidence("covid statistics", result)
@@ -557,6 +555,7 @@ class TestNLIThresholdFix:
     def test_uses_config_threshold(self):
         """Verify the self_rag module uses config.NLI_ENTAILMENT_THRESHOLD."""
         import inspect
+
         import core.agents.self_rag as self_rag_mod
         # Read the entire module source, not just the top-level function
         source = inspect.getsource(self_rag_mod)
@@ -692,6 +691,7 @@ class TestRefreshOnRead:
     def test_recall_uses_decay_anchor_from_metadata(self):
         """recall_memories should prefer decay_anchor over created_at for age."""
         import inspect
+
         from core.agents.memory import recall_memories
         source = inspect.getsource(recall_memories)
         assert "decay_anchor" in source

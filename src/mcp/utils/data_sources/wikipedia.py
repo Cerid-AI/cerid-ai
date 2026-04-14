@@ -12,7 +12,7 @@ from errors import RetrievalError
 
 from .base import DataSource, DataSourceResult, logger
 
-_PROPER_NOUN_RE = re.compile(r"\b([A-Z][a-z]{2,}(?:\s[A-Z][a-z]{2,})*)\b")
+_PROPER_NOUN_RE = re.compile(r"\b([A-Z][a-z]{2,}(?:\s[A-Z][a-z]{2,}){0,4})\b")
 
 
 class WikipediaSource(DataSource):

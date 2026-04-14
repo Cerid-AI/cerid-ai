@@ -323,7 +323,7 @@ def deduplicate_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     External source results (from CRAG gate) may lack artifact_id/chunk_index;
     these are treated as unique (never deduplicated against KB results).
     """
-    groups = defaultdict(list)
+    groups: dict[tuple, list] = defaultdict(list)
     for result in results:
         aid = result.get("artifact_id")
         cidx = result.get("chunk_index")
@@ -331,7 +331,7 @@ def deduplicate_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
             key = (aid, cidx)
         else:
             # External/memory results without KB keys — always unique
-            key = (id(result),)
+            key = ("_ext", id(result))
         groups[key].append(result)
 
     deduplicated = []

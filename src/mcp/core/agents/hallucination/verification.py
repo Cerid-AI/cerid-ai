@@ -1419,7 +1419,7 @@ async def verify_claim(
 
     # Common kwargs for all _verify_claim_externally calls in this function.
     # Conversation context is threaded through to expert mode verification.
-    _ext_common = {
+    _ext_common: dict[str, Any] = {
         "streaming": streaming,
         "expert_mode": expert_mode,
         "response_context": response_context,
