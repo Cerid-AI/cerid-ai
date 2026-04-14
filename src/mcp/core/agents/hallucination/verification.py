@@ -1435,9 +1435,11 @@ async def verify_claim(
 
         Uncertain claims are also cached (with shorter TTL) to prevent
         repeated API calls for claims that are genuinely unverifiable.
+        Timeout results are NOT cached — they should be retried by the sweep.
         """
         status = result.get("status")
-        if status in ("verified", "unverified", "uncertain"):
+        method = result.get("verification_method", "")
+        if status in ("verified", "unverified", "uncertain") and method != "timeout":
             await cache_verdict(redis_client, claim, result, response_context=response_context)
         return result
 
