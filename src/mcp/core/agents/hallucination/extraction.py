@@ -128,6 +128,39 @@ _SYSTEM_CLAIM_EXTRACTION = (
 # Pronoun resolution for heuristic claims (non-LLM fallback)
 # ---------------------------------------------------------------------------
 
+# Unresolved-subject patterns — if an extracted claim starts with one of these,
+# the LLM or heuristic failed to substitute in a concrete subject. Such claims
+# can't be verified in isolation (Verifier: "who/what is 'it'?") and should be
+# either rehabilitated with response context or dropped.
+_UNRESOLVED_SUBJECT_LEAD = re.compile(
+    r"^\s*(?:"
+    # Bare demonstratives / pronouns still at the head
+    r"it|its|they|their|them|this|that|these|those|he|his|him|she|her|"
+    # Leading verb with no subject (orphan predicate)
+    r"is|was|were|are|be|been|being|has|have|had|"
+    r"reaches|stands|measures|contains|includes|equals|totals|exceeds|"
+    r"spans|runs|holds|takes|gives|shows|appears|seems|became|becomes"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _claim_has_subject(claim: str) -> bool:
+    """Return True when a claim has a resolvable subject/noun-phrase head.
+
+    This is a cheap semantic-validity check — not full syntactic parsing. It
+    catches the common failure mode where claim extraction leaves a dangling
+    pronoun or a bare predicate ("is 8848 meters tall"). Full grammar-aware
+    validation would need spaCy or similar; we trade precision for zero
+    runtime cost.
+    """
+    if not claim or len(claim) < 8:
+        return False
+    if _UNRESOLVED_SUBJECT_LEAD.match(claim):
+        return False
+    return True
+
+
 # Pronouns that commonly refer to the main subject of a response
 _SUBJECT_PRONOUNS = re.compile(
     r"^(It|They|This|That|These|Those|The (?:building|tower|city|country|"
@@ -567,8 +600,33 @@ async def extract_claims(
     def _merge_special(primary: list[str]) -> list[str]:
         return _merge_special_claims(primary, ignorance_claims, evasion_claims, citation_claims, max_claims)
 
+    def _enforce_subject_validity(claims: list[str], source: str) -> list[str]:
+        """Drop claims whose head is an unresolved pronoun or bare predicate.
+
+        Logs the drops at INFO so observability can surface extraction-quality
+        drift (a rising drop rate means the upstream LLM/heuristic is losing
+        pronoun-resolution quality). The drops themselves are structurally
+        correct — the verifier cannot assess "is 8848 meters tall" without a
+        subject, so feeding it in isolation wastes a model call and skews the
+        aggregate accuracy score downward.
+        """
+        kept: list[str] = []
+        dropped: list[str] = []
+        for c in claims:
+            if _claim_has_subject(c):
+                kept.append(c)
+            else:
+                dropped.append(c)
+        if dropped:
+            logger.info(
+                "Dropped %d subject-less %s claim(s) (e.g. %r)",
+                len(dropped), source, dropped[0][:80],
+            )
+        return kept
+
     # Try LLM extraction first
     llm_claims = await _extract_claims_llm(response_text, max_claims, user_query=user_query)
+    llm_claims = _enforce_subject_validity(llm_claims, "LLM")
     if llm_claims:
         return _merge_special(llm_claims), "llm"
 
@@ -579,6 +637,7 @@ async def extract_claims(
         heuristic_claims = _resolve_pronouns_heuristic(
             heuristic_claims, response_text, user_query,
         )
+        heuristic_claims = _enforce_subject_validity(heuristic_claims, "heuristic")
         return _merge_special(heuristic_claims), "heuristic"
 
     # Evasion claims alone are high priority

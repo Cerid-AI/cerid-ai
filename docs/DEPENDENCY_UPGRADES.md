@@ -2,10 +2,13 @@
 
 > **Purpose:** Track staged platform/runtime upgrades that need dedicated coordination
 > (not handled by routine dependabot group PRs). Updated as items land or conditions change.
-> **Last reviewed:** 2026-04-14
+> **Last reviewed:** 2026-04-15
 
 For the routine-bump policy, see `.github/dependabot.yml`: `npm-deps` and `python-deps`
-groups match `minor` + `patch` only; majors arrive as individual PRs per-package.
+groups match `minor` + `patch` only; majors arrive as individual PRs per-package. The
+docker `python` base image is additionally gated against major+minor bumps — the
+runtime upgrade is tracked below as its own coordinated PR, not a transitive docker
+change that would skip the necessary Dockerfile/CI/pyproject/mypy coordination.
 
 ---
 

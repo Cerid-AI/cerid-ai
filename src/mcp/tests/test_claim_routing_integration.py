@@ -203,9 +203,15 @@ class TestFactualClaimRouting:
         mock_neo4j,
         mock_redis,
     ):
-        """'Python was created in 2020' with KB saying 1991 -> contradiction.
+        """'Python was created in 2020' with an authoritative KB that says 1991.
 
-        NLI detects contradiction, should return 'unverified' via 'kb_nli'.
+        The KB result here has high relevance (0.75) AND non-trivial NLI
+        entailment (0.20) on top of strong contradiction (0.88) — the
+        signature of "KB doc is about the claim's subject AND disagrees with
+        it". Pipeline should trust it: terminal `unverified` via `kb_nli`.
+
+        When entailment is near zero, the kb_nli path escalates externally
+        instead (covered by `test_factual_claim_kb_contradiction_weak_evidence`).
         """
         from core.agents.hallucination.verification import verify_claim
 
@@ -216,7 +222,11 @@ class TestFactualClaimRouting:
                 relevance=0.75,
             ),
         ]
-        mock_nli.return_value = _nli(contradiction=0.88, label="contradiction")
+        # Entailment >= 0.15 gates the KB as authoritative (topically engaged
+        # with the claim), so the strong contradiction is trusted as terminal.
+        mock_nli.return_value = _nli(
+            entailment=0.20, contradiction=0.88, label="contradiction",
+        )
 
         result = await verify_claim(
             claim=claim,
@@ -228,6 +238,71 @@ class TestFactualClaimRouting:
         assert result["status"] == "unverified"
         assert result["verification_method"] == "kb_nli"
         assert result.get("nli_contradiction", 0) >= 0.6
+
+    @pytest.mark.asyncio
+    @patch(_PATCH_CACHE_SET, new_callable=AsyncMock)
+    @patch(_PATCH_CACHE_GET, new_callable=AsyncMock, return_value=None)
+    @patch(_PATCH_LLM_RAW, new_callable=AsyncMock)
+    @patch(_PATCH_NLI)
+    @patch(_PATCH_MEMORIES, new_callable=AsyncMock, return_value=[])
+    @patch(_PATCH_KB_QUERY, new_callable=AsyncMock)
+    async def test_factual_claim_kb_contradiction_weak_evidence_escalates(
+        self,
+        mock_kb,
+        mock_mem,
+        mock_nli,
+        mock_llm,
+        mock_cache_get,
+        mock_cache_set,
+        mock_chroma,
+        mock_neo4j,
+        mock_redis,
+    ):
+        """Canary: "Paris is the capital of France" vs a KB doc that matches
+        on keywords only (near-zero entailment, high contradiction).
+
+        This is the "shared keywords, different topic" pattern that used to
+        hard-fail on kb_nli. With the `entailment >= 0.15` authority gate,
+        the pipeline must NOT terminate on the spurious NLI contradiction —
+        it should escalate externally and let cross_model arbitrate.
+        """
+        from core.agents.hallucination.verification import verify_claim
+
+        claim = "Paris is the capital of France"
+        mock_kb.return_value = [
+            # High similarity because both strings mention "Paris" — but the
+            # KB content is a chat transcript about something else entirely.
+            _kb_result(
+                "Yesterday I walked through Paris and saw the river.",
+                relevance=0.90,
+            ),
+        ]
+        mock_nli.return_value = _nli(
+            entailment=0.01,       # near zero — orthogonal to the claim
+            contradiction=0.88,
+            label="contradiction",
+        )
+        # Cross-model confirms the claim as a simple supported fact.
+        mock_llm.return_value = {
+            "choices": [{
+                "message": {
+                    "content": '{"verdict": "supported", "confidence": 0.98, "reasoning": "Paris is widely known as the capital of France."}',
+                    "annotations": [],
+                },
+            }],
+        }
+
+        result = await verify_claim(
+            claim=claim,
+            chroma_client=mock_chroma,
+            neo4j_driver=mock_neo4j,
+            redis_client=mock_redis,
+        )
+
+        assert result["status"] == "verified"
+        # Must NOT terminate at kb_nli — the weak-entailment gate forces escalation.
+        assert result.get("kb_nli_escalated") is True
+        assert result.get("kb_nli_contradiction", 0) >= 0.6
 
     @pytest.mark.asyncio
     @patch(_PATCH_CACHE_SET, new_callable=AsyncMock)

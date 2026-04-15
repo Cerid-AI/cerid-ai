@@ -185,14 +185,86 @@ async def check_hallucinations(
 
     sem = _get_claim_verify_semaphore()
 
-    async def _limited_verify(claim_text: str) -> dict[str, Any]:
+    # Expert mode pays for a premium verifier (Grok 4) + authoritative
+    # external sources — give it a materially wider context window so the
+    # investment pays off. Standard mode stays at ±200 to keep prompt cost
+    # sane for gpt-4o-mini.
+    _ctx_radius = 600 if expert_mode else 200
+
+    def _extract_surrounding(claim_text: str) -> str | None:
+        """Surrounding ±N chars from response_text — parallels the streaming path
+        (`_extract_claim_context`) so cross-model verifiers see the same framing
+        in both SSE and non-streaming flows. Radius grows in expert mode."""
+        claim_start = response_text.find(claim_text[:40])
+        if claim_start < 0:
+            return None
+        ctx_start = max(0, claim_start - _ctx_radius)
+        ctx_end = min(len(response_text), claim_start + len(claim_text) + _ctx_radius)
+        surrounding = response_text[ctx_start:ctx_end].strip()
+        return surrounding if len(surrounding) > len(claim_text) + 20 else None
+
+    # --- Batch pre-verification for current-event claims ---
+    # Mirrors the streaming path's batch-optimization (see `streaming.py:485`):
+    # group time-sensitive claims going to the same web-search model and verify
+    # them in a single LLM call rather than N parallel calls. Reduces cost,
+    # latency, and rate-limit pressure against the same resource.
+    from core.agents.hallucination.verification import verify_claims_batch_external
+    from core.utils.claim_cache import get_cached_verdict
+
+    batch_results: dict[int, dict[str, Any]] = {}
+    current_event_claims: list[tuple[int, str]] = []
+    for idx, claim_text in enumerate(claims):
+        if _is_current_event_claim(claim_text) or _is_recency_claim(claim_text):
+            cached = await get_cached_verdict(redis_client, claim_text)
+            if cached and cached.get("status") in ("verified", "unverified"):
+                batch_results[idx] = cached
+            else:
+                current_event_claims.append((idx, claim_text))
+
+    if len(current_event_claims) >= 2:
+        batch_model = config.VERIFICATION_CURRENT_EVENT_MODEL
+        if expert_mode:
+            batch_model = config.VERIFICATION_EXPERT_MODEL + ":online"
+        try:
+            batch_verdicts = await asyncio.wait_for(
+                verify_claims_batch_external(
+                    current_event_claims,
+                    model=batch_model,
+                    response_context=user_query,
+                    timeout=config.STREAMING_EXPERT_CLAIM_TIMEOUT,
+                ),
+                timeout=config.STREAMING_EXPERT_CLAIM_TIMEOUT + 5,
+            )
+            batch_results.update(batch_verdicts)
+            logger.info(
+                "Non-streaming batch verified %d/%d current-event claims via %s",
+                len(batch_verdicts), len(current_event_claims), batch_model,
+            )
+        except (TimeoutError, Exception) as exc:
+            logger.warning(
+                "Non-streaming batch verification failed (%s) — falling back to individual",
+                exc,
+            )
+
+    async def _limited_verify(idx: int, claim_text: str) -> dict[str, Any]:
+        # Skip individual verification if batch already resolved this claim.
+        if idx in batch_results:
+            return batch_results[idx]
         async with sem:
             return await verify_claim(
                 claim_text, chroma_client, neo4j_driver, redis_client,
                 threshold, model=model, expert_mode=expert_mode,
+                # Context propagation — the streaming path threads these through;
+                # the non-streaming path must too, or claims get validated in
+                # isolation which produces false unverified verdicts on facts that
+                # only make sense with their surrounding response (e.g. pronoun
+                # references like "It is 8848.86 meters tall") or with the
+                # topical frame the user asked about.
+                response_context=user_query,
+                claim_context=_extract_surrounding(claim_text),
             )
 
-    results = await asyncio.gather(*[_limited_verify(c) for c in claims])
+    results = await asyncio.gather(*[_limited_verify(i, c) for i, c in enumerate(claims)])
 
     status_counts = {"verified": 0, "unverified": 0, "uncertain": 0, "error": 0}
     for r in results:
