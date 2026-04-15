@@ -2,21 +2,11 @@
 
 All notable changes to cerid-ai are documented here.
 
-## v0.83.0 — Open Source Launch (2026-04-12)
-
-- **Public release preparation** — removed 13 internal-only docs, orphaned Electron workflow, and INSTALL.md
-- **README.md cleanup** — removed internal references (trading, desktop, dotfiles), fixed tool/CI counts, added CI badge
-- **CLAUDE.md rewrite** — streamlined for external contributors (117 lines, standalone quick start)
-- **GitHub community** — added issue templates (bug report, feature request), PR template, Discussions enabled
-- **Branch protection** — required CI checks (lint, typecheck, test, security, frontend, docker), PR reviews, no force push
-- **Repository metadata** — description, topics, homepage (cerid.ai), FUNDING.yml
-- **SDK/Contributing docs** — removed internal consumer references, cleaned trading endpoints from guides
-
 ## v0.82.0 — Unified Implementation Plan + Phase C Architecture (2026-04-05 → 2026-04-10)
 
 ### Phase C: Core Extraction + NLI Architecture (2026-04-08 → 2026-04-10)
 - **Core/App split** — portable orchestrator core (`core/`) separated from application layer (`app/`). Bridge modules in `agents/`, `utils/`, `services/` re-export for backward compat.
-- **`*_internal.py` pattern** — 7 Python files + 1 TypeScript file hold internal-only code. `app/main_internal.py` bootstraps trading, boardroom, billing, eval routers.
+- **`*_internal.py` pattern** — 7 Python files + 1 TypeScript file hold internal-only code; an internal bootstrap module registers the corresponding private routers at startup.
 - **NLI entailment service** — `core/utils/nli.py` (ONNX, <10ms) powers verification, Self-RAG, RAGAS, and RAG pipeline claim validation.
 - **Sync manifest** — `.sync-manifest.yaml` declares internal-only files, mixed files (hook markers), and forbidden strings for automated repo sync via `scripts/sync-repos.py`.
 - **Contract ABCs** — `core/contracts/` defines VectorStore, GraphStore, CacheStore, LLMClient interfaces.
@@ -39,7 +29,7 @@ All notable changes to cerid-ai are documented here.
 - **InferenceConfig singleton** — auto-detects platform (macOS ARM/Intel, Linux, Windows), GPU (Metal/CUDA/ROCm/DirectML), Ollama, and FastEmbed sidecar at startup
 - **Dynamic ONNX providers** — embeddings.py and reranker.py use detected GPU providers instead of hardcoded CPU
 - **Health endpoint** — `/health` now includes `inference` field with provider, tier, GPU, latency
-- **Performance baseline** — documented in `docs/PERF_BASELINE_2026-04-05.md`
+- **Performance baseline** — documented in `docs/archive/2026-Q2/PERF_BASELINE_2026-04-05.md`
 
 ### Phase 2: FastEmbed Sidecar + UX Polish
 - **Sidecar server** — `scripts/cerid-sidecar.py` wraps ONNX embed/rerank with native GPU acceleration
@@ -75,7 +65,7 @@ All notable changes to cerid-ai are documented here.
 - `src/mcp/utils/inference_sidecar_client.py` — sidecar HTTP client
 - `scripts/cerid-sidecar.py` — FastEmbed sidecar server
 - `scripts/install-sidecar.sh` — platform-aware installer
-- `docs/PERF_BASELINE_2026-04-05.md` — performance baseline
+- `docs/archive/2026-Q2/PERF_BASELINE_2026-04-05.md` — performance baseline
 - `docs/FEEDBACK_LOOP_DESIGN.md` — feedback loop design doc
 
 ## v0.81 — Beta Test Implementation (2026-04-04)

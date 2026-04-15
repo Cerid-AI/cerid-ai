@@ -55,35 +55,6 @@ else
     fail "Docker daemon is not running — start Docker Desktop or 'sudo systemctl start docker'"
 fi
 
-# [1b] Disk space (warn at <5GB free in project root)
-_free_kb=$(df -k "$CERID_ROOT" 2>/dev/null | awk 'NR==2{print $4}')
-if [ -n "$_free_kb" ] && [ "$_free_kb" -lt 5242880 ] 2>/dev/null; then
-    _free_gb=$(echo "$_free_kb" | awk '{printf "%.1f", $1/1048576}')
-    warn "Low disk space: ${_free_gb}GB free (recommend 5GB+)"
-else
-    pass "Disk space sufficient"
-fi
-
-# [1c] System RAM (warn if <8GB)
-case "$(uname -s)" in
-    Darwin) _ram_gb=$(sysctl -n hw.memsize 2>/dev/null | awk '{printf "%.0f", $1/1073741824}') ;;
-    Linux)  _ram_gb=$(awk '/MemTotal/{printf "%.0f", $2/1048576}' /proc/meminfo 2>/dev/null) ;;
-    *)      _ram_gb="" ;;
-esac
-if [ -n "$_ram_gb" ] && [ "$_ram_gb" -lt 8 ] 2>/dev/null; then
-    warn "System RAM: ${_ram_gb}GB (recommend 8GB+ for full stack, or set CERID_LIGHTWEIGHT=true)"
-else
-    pass "System RAM: ${_ram_gb:-?}GB"
-fi
-
-# [1d] Docker Compose V2
-_compose_ver=$(docker compose version --short 2>/dev/null || echo "")
-if [ -z "$_compose_ver" ]; then
-    fail "Docker Compose V2 not found (required)"
-else
-    pass "Docker Compose $_compose_ver"
-fi
-
 # ── Check 2: llm-network ──────────────────────────────────────────────────────
 if docker network inspect llm-network > /dev/null 2>&1; then
     pass "Docker network 'llm-network' exists"

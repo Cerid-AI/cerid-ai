@@ -2,7 +2,7 @@
   "compilerOptions": {
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
     "target": "ES2023",
-    "baseUrl": ".",
+    // TS 6: baseUrl deprecated; paths are resolved relative to this config.
     "paths": {
       "@/*": ["./src/*"]
     },

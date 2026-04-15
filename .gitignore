@@ -75,7 +75,7 @@ Thumbs.db
 *.docx
 *.xlsx
 *.csv
-archive/
+/archive/
 cerid-archive/
 inbox/
 .worktrees/

@@ -1,4 +1,4 @@
-# Copyright (c) 2026 Cerid AI. All rights reserved.
+# Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 """
@@ -26,6 +26,10 @@ from utils.time import utcnow_iso
 logger = logging.getLogger("ai-companion.scheduler")
 
 _scheduler: AsyncIOScheduler | None = None
+
+# Hooks registered by the internal-build bootstrap (see bottom of this file).
+# Each callable receives the scheduler instance and may add jobs before start.
+_post_setup_hooks: list = []
 
 
 def _log_execution(job_name: str, status: str, duration: float, detail: str = "") -> None:
@@ -253,6 +257,11 @@ def start_scheduler() -> AsyncIOScheduler:
         name="Weekly tombstone purge",
         replace_existing=True,
     )
+
+    # Invoke any registered internal-build hooks (no-op in the public build;
+    # set by the module-level bootstrap block at the bottom of this file).
+    for hook in _post_setup_hooks:
+        hook(_scheduler)
 
     # Folder scan (opt-in — empty SCHEDULE_FOLDER_SCAN disables)
     scan_cron = getattr(config, "SCHEDULE_FOLDER_SCAN", "")
