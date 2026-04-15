@@ -7,6 +7,9 @@ Provides:
 - ``GET /agent-console/stream``  — SSE endpoint using Redis XREAD BLOCK
 - ``GET /agent-console/recent``  — last N events for initial hydration
 - ``DELETE /agent-console/clear`` — clear the event stream
+
+The same SSE stream is also exposed at ``GET /agents/activity/stream`` as the
+stable client-facing URL used by the React Agents pane and the public API.
 """
 
 from __future__ import annotations
@@ -26,6 +29,12 @@ from utils.agent_events import STREAM_KEY, clear_events, get_recent_events
 logger = logging.getLogger("ai-companion.agent_console")
 
 router = APIRouter(prefix="/agent-console", tags=["agent-console"])
+
+# Second router for the client-facing ``/agents/activity/*`` URL space.
+# Registered alongside ``router`` in ``app/main.py`` so both paths serve the
+# same underlying Redis Stream — ``/agent-console/*`` is the legacy/internal
+# path, ``/agents/activity/*`` is the documented public URL.
+activity_router = APIRouter(prefix="/agents/activity", tags=["agent-console"])
 
 
 # ---------------------------------------------------------------------------
@@ -109,6 +118,45 @@ def recent_events(count: int = Query(default=50, ge=1, le=200)):
 
 @router.delete("/clear")
 def clear():
+    """Clear the agent event stream."""
+    deleted = clear_events()
+    return {"cleared": deleted}
+
+
+# ---------------------------------------------------------------------------
+# Public ``/agents/activity/*`` aliases — same handlers, canonical client URL
+# ---------------------------------------------------------------------------
+
+
+@activity_router.get("/stream")
+async def activity_stream():
+    """SSE stream of real-time agent activity events (public client URL).
+
+    Emits ``{agent, message, level, timestamp, metadata, id}`` JSON envelopes
+    matching the shape already consumed by ``AgentConsole`` in the React GUI.
+    Heartbeats fire every 5 s to keep proxies (nginx, Cloudflare) from
+    severing the connection during idle periods.
+    """
+    return StreamingResponse(
+        _event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+        },
+    )
+
+
+@activity_router.get("/recent")
+def activity_recent(count: int = Query(default=50, ge=1, le=200)):
+    """Return the most recent agent events for initial hydration."""
+    events = get_recent_events(count)
+    return {"events": events, "count": len(events)}
+
+
+@activity_router.delete("/clear")
+def activity_clear():
     """Clear the agent event stream."""
     deleted = clear_events()
     return {"cleared": deleted}

@@ -1,4 +1,14 @@
-# Cerid AI Desktop — Installation Guide
+# Cerid AI — Installation Guide
+
+Cerid AI runs as a set of Docker containers (database, vector store, cache,
+LLM gateway, API, web UI). Installation is the same on every platform:
+
+1. Install Docker
+2. Clone this repository
+3. Run `bash scripts/setup.sh`
+
+The setup script checks prerequisites, prompts for an LLM API key, brings up
+all containers, and verifies every service is healthy.
 
 ## System Requirements
 
@@ -27,35 +37,85 @@
 | RAM | 8 GB | 16 GB |
 | Disk Space | 15 GB free | 25 GB free |
 
-## Step 1: Install Docker Desktop
+---
 
-Cerid AI runs its services (database, vector store, cache) inside Docker containers.
+## macOS Installation
 
-- **Apple Silicon Mac (M1/M2/M3/M4):** [Download Docker Desktop for Mac (ARM)](https://desktop.docker.com/mac/main/arm64/Docker.dmg)
-- **Intel Mac:** [Download Docker Desktop for Mac (Intel)](https://desktop.docker.com/mac/main/amd64/Docker.dmg)
+### Step 1: Install Docker Desktop
 
-Open the downloaded `.dmg` file and drag Docker to your Applications folder. Launch Docker Desktop once and wait for it to finish starting (the whale icon in the menu bar should stop animating).
+Docker Desktop provides the container runtime Cerid AI depends on.
 
-## Step 2: Download Cerid AI
+- **Homebrew (recommended):**
 
-Download the latest `.dmg` from [GitHub Releases](https://github.com/Cerid-AI/cerid-ai/releases).
+  ```bash
+  brew install --cask docker
+  ```
 
-## Step 3: Install
+- **Manual install:**
+  - Apple Silicon (M1/M2/M3/M4): [Docker Desktop for Mac (ARM)](https://desktop.docker.com/mac/main/arm64/Docker.dmg)
+  - Intel Mac: [Docker Desktop for Mac (Intel)](https://desktop.docker.com/mac/main/amd64/Docker.dmg)
 
-1. Open the downloaded `Cerid AI.dmg`
-2. Drag the Cerid AI icon to the Applications folder
-3. Eject the disk image
+Launch Docker Desktop once so it finishes first-run initialization (the whale
+icon in the menu bar will stop animating when it is ready).
 
-## Step 4: First Launch
+### Step 2: Clone the repository
 
-1. Open Cerid AI from your Applications folder
-2. If Docker Desktop is not running, the app will attempt to start it automatically
-3. The built-in setup wizard will guide you through:
-   - Entering your LLM API key (OpenRouter recommended)
-   - Starting the service containers
-   - Verifying all services are healthy
+```bash
+git clone https://github.com/Cerid-AI/cerid-ai.git ~/cerid-ai
+cd ~/cerid-ai
+```
 
-After the first-run wizard completes, Cerid AI is ready to use.
+### Step 3: Run the setup script
+
+```bash
+bash scripts/setup.sh
+```
+
+The script will:
+
+- Verify Docker is running and has enough resources.
+- Prompt for your LLM API key (OpenRouter recommended; see `docs/PROVIDERS.md`
+  for alternatives).
+- Start the infrastructure, Bifrost, MCP server, and web UI in the correct
+  order.
+- Run a post-startup reachability check on every service.
+
+When it finishes, open <http://localhost:3000> in your browser.
+
+---
+
+## Linux Installation (Ubuntu/Debian)
+
+### Step 1: Install Docker
+
+```bash
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker "$USER"
+```
+
+Log out and back in so the new group membership takes effect.
+
+### Step 2: Install Docker Compose v2
+
+Docker Compose v2 is bundled with modern Docker Engine installs. Verify:
+
+```bash
+docker compose version
+```
+
+If missing, install the plugin:
+
+```bash
+sudo apt update && sudo apt install docker-compose-plugin
+```
+
+### Step 3: Clone and setup
+
+```bash
+git clone https://github.com/Cerid-AI/cerid-ai.git ~/cerid-ai
+cd ~/cerid-ai
+bash scripts/setup.sh
+```
 
 ---
 
@@ -69,7 +129,8 @@ Open PowerShell as Administrator and run:
 wsl --install
 ```
 
-Reboot when prompted. After reboot, a Ubuntu terminal will open to create your Linux user.
+Reboot when prompted. After reboot, a Ubuntu terminal will open to create
+your Linux user.
 
 ### Step 2: Install Docker Desktop for Windows
 
@@ -77,78 +138,35 @@ Download and install [Docker Desktop for Windows (AMD64)](https://desktop.docker
 
 After installation, open Docker Desktop and enable WSL2 integration:
 
-1. Go to **Settings > General** and ensure "Use the WSL 2 based engine" is checked
-2. Go to **Settings > Resources > WSL Integration** and enable integration with your Ubuntu distro
-3. Click **Apply & Restart**
+1. **Settings > General:** ensure "Use the WSL 2 based engine" is checked.
+2. **Settings > Resources > WSL Integration:** enable integration with your
+   Ubuntu distro.
+3. Click **Apply & Restart**.
 
-### Step 3: Clone and Setup (in WSL2 terminal)
+### Step 3: Clone and setup (in WSL2 terminal)
 
-All remaining commands must be run in a WSL2 terminal (Ubuntu), not PowerShell:
+All remaining commands must be run in a WSL2 (Ubuntu) terminal, **not**
+PowerShell:
 
 ```bash
-git clone git@github.com:Cerid-AI/cerid-ai.git ~/cerid-ai
+git clone https://github.com/Cerid-AI/cerid-ai.git ~/cerid-ai
 cd ~/cerid-ai
 bash scripts/setup.sh
 ```
 
-The setup wizard will guide you through API key configuration and starting the stack.
-
-> **Important:** Clone the repo inside WSL2 (`~/cerid-ai`), not on the Windows filesystem (`/mnt/c/...`). Docker volume performance is significantly better on the native WSL2 filesystem.
-
----
-
-## Linux Installation (Ubuntu/Debian)
-
-### Step 1: Install Docker
-
-```bash
-curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker $USER
-```
-
-Log out and back in for the group change to take effect.
-
-### Step 2: Install Docker Compose v2
-
-Docker Compose v2 is included with modern Docker Engine installs. Verify:
-
-```bash
-docker compose version
-```
-
-If missing, install the plugin:
-
-```bash
-sudo apt update && sudo apt install docker-compose-plugin
-```
-
-### Step 3: Clone and Setup
-
-```bash
-git clone git@github.com:Cerid-AI/cerid-ai.git ~/cerid-ai
-cd ~/cerid-ai
-bash scripts/setup.sh
-```
+> **Important:** Clone the repo inside WSL2 (`~/cerid-ai`), not on the
+> Windows filesystem (`/mnt/c/...`). Docker volume performance is
+> significantly better on the native WSL2 filesystem.
 
 ---
 
 ## Troubleshooting
 
-### "Cerid AI cannot be opened because it is from an unidentified developer"
+### Docker Desktop does not start (macOS)
 
-This happens if the app is not yet notarized. To bypass:
-
-1. Open **System Settings** > **Privacy & Security**
-2. Scroll down to the Security section
-3. Click **Open Anyway** next to the Cerid AI message
-
-Alternatively, right-click the app in Finder and select **Open** from the context menu.
-
-### Docker Desktop does not start
-
-1. Open Docker Desktop manually from your Applications folder
-2. Wait for the whale icon in the menu bar to stop animating
-3. Then re-launch Cerid AI
+1. Open Docker Desktop manually from your Applications folder.
+2. Wait for the whale icon in the menu bar to stop animating.
+3. Re-run `bash scripts/setup.sh`.
 
 ### Port conflicts
 
@@ -163,21 +181,35 @@ Cerid AI uses the following ports by default:
 | ChromaDB | 8001 |
 | Redis | 6379 |
 
-If another application is using one of these ports, stop that application first or configure port overrides in `.env` using `CERID_PORT_*` variables.
+If another application is using one of these ports, stop that application
+first or configure port overrides in `.env` using the `CERID_PORT_*`
+variables (see `.env.example`).
 
 ### Services fail to start
 
-Check the tray icon color:
-- **Green** — all services healthy
-- **Yellow** — some services degraded (click the tray icon to see details)
-- **Red** — services offline
+Re-run the validation script to pinpoint the failure:
 
-Open the app and navigate to Settings to view container logs and restart individual services.
+```bash
+./scripts/validate-env.sh
+```
+
+For a one-line container status check:
+
+```bash
+./scripts/validate-env.sh --quick
+```
+
+Container logs are available via:
+
+```bash
+docker compose logs --tail=200 <service>
+```
 
 ### Insufficient memory
 
-If containers crash or fail to start, ensure Docker Desktop has at least 4 GB of memory allocated:
+If containers crash or fail to start, ensure Docker Desktop has at least 4 GB
+of memory allocated:
 
-1. Open Docker Desktop > Settings > Resources
-2. Set Memory to 4 GB or higher (6 GB recommended)
-3. Click Apply & Restart
+1. Open Docker Desktop > **Settings > Resources**.
+2. Set Memory to 4 GB or higher (6 GB recommended).
+3. Click **Apply & Restart**.

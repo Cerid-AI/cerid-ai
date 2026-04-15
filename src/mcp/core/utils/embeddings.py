@@ -191,6 +191,10 @@ class OnnxEmbeddingFunction:
 _embedding_fn: OnnxEmbeddingFunction | None = None
 _ef_lock = threading.Lock()
 
+# Server default output dim (all-MiniLM-L6-v2 → 384). Used by get_embedding_dim()
+# when EMBEDDING_MODEL == _SERVER_DEFAULT_MODEL (server-side embedding path).
+_SERVER_DEFAULT_DIM = 384
+
 
 def get_embedding_function() -> Any | None:
     """Return the configured embedding function, or ``None`` for server default.
@@ -198,6 +202,13 @@ def get_embedding_function() -> Any | None:
     When ``EMBEDDING_MODEL`` matches the ChromaDB server default
     (``all-MiniLM-L6-v2``), returns ``None`` — the server handles embedding
     transparently.  Otherwise, returns an ``OnnxEmbeddingFunction`` instance.
+
+    This is the ONLY legitimate way to obtain an embedder instance anywhere
+    in the codebase.  It is keyed on the ``EMBEDDING_MODEL`` env var and
+    guarantees a single shared instance per process.  Do NOT instantiate
+    ``OnnxEmbeddingFunction`` directly — collections get dim-locked on
+    first use, and diverging entry points cause the dim-mismatch bug that
+    crashes first-ingest on fresh installs.
     """
     model = config.EMBEDDING_MODEL
     if model == _SERVER_DEFAULT_MODEL:
@@ -222,3 +233,53 @@ def get_embedding_function() -> Any | None:
             dimensions=dims,
         )
         return _embedding_fn
+
+
+# Canonical alias — new code should call get_embedder() for clarity.
+def get_embedder() -> Any | None:
+    """Alias for :func:`get_embedding_function` — the singleton embedder accessor.
+
+    Returns ``None`` when the ChromaDB server default model is configured
+    (server-side embedding), otherwise an ``OnnxEmbeddingFunction`` singleton.
+    """
+    return get_embedding_function()
+
+
+def get_embedding_dim() -> int:
+    """Return the output dimensionality of the configured embedder.
+
+    - Matryoshka models with ``EMBEDDING_DIMENSIONS > 0`` return that value.
+    - Server-default model returns 384 (all-MiniLM-L6-v2).
+    - Client-side ONNX models return the loaded model's output dim (forces
+      a model load on first call if it has not happened yet).
+
+    Raises ``RuntimeError`` if the dim cannot be inferred (e.g. the ONNX
+    output shape has a symbolic last dimension).
+    """
+    # Matryoshka truncation wins — it's the final dim ChromaDB will see.
+    if config.EMBEDDING_DIMENSIONS and config.EMBEDDING_DIMENSIONS > 0:
+        return int(config.EMBEDDING_DIMENSIONS)
+
+    if config.EMBEDDING_MODEL == _SERVER_DEFAULT_MODEL:
+        return _SERVER_DEFAULT_DIM
+
+    ef = get_embedding_function()
+    if ef is None:
+        return _SERVER_DEFAULT_DIM
+
+    # Force model load so _output_dim() has a session to inspect.
+    ef._load()
+    dim = ef._output_dim()
+    if not isinstance(dim, int) or dim <= 0:
+        raise RuntimeError(
+            f"Could not infer embedding dim for model {config.EMBEDDING_MODEL!r} "
+            f"(got: {dim!r}). Set EMBEDDING_DIMENSIONS explicitly."
+        )
+    return dim
+
+
+def _reset_singleton_for_testing() -> None:
+    """Reset the module-level singleton. Tests only — never call in production."""
+    global _embedding_fn
+    with _ef_lock:
+        _embedding_fn = None
