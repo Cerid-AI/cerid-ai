@@ -48,6 +48,12 @@ internal_only:
   # Sync tooling
   - .sync-manifest.yaml
   - scripts/sync-repos.py
+  # Tool caches that can leak internal module names into their metadata files
+  - src/mcp/.import_linter_cache/**
+  - src/mcp/.mypy_cache/**
+  - src/mcp/.pytest_cache/**
+  - src/mcp/.ruff_cache/**
+  - "**/__pycache__/**"
   # Internal docs (each repo has its own versions)
   - docs/superpowers/**
   - CLAUDE.md
