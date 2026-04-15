@@ -107,7 +107,6 @@ Host Processes (outside Docker):
 - Docker & Docker Compose v2+
 - OpenRouter API key ([get one here](https://openrouter.ai/keys))
 - macOS or Linux
-- `age` encryption tool (`brew install age` on macOS)
 
 ### 1. Clone & Configure
 
@@ -119,8 +118,8 @@ cd cerid-ai
 cp .env.example .env
 # Edit .env and add your OPENROUTER_API_KEY and other secrets
 
-# If cloning on a second machine with existing encrypted secrets:
-./scripts/env-unlock.sh   # Decrypts .env.age → .env (requires age key)
+# Optional: if you have an encrypted `.env.age` from another machine,
+# decrypt it with `./scripts/env-unlock.sh`. Otherwise, edit `.env` directly.
 ```
 
 ### 2. Create Archive Folders

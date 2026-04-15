@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
@@ -13,6 +13,17 @@
 CERID_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="$CERID_ROOT/.env"
 AGE_KEY="${CERID_AGE_KEY:-$HOME/.config/cerid/age-key.txt}"
+
+# Counters are shared with the healthcheck library (which increments them
+# via pass/fail/warn). Initialize BEFORE sourcing.
+PASS=0
+FAIL=0
+
+# Shared health-check library — single source of truth for container,
+# HTTP, Redis (auth-aware), and Neo4j (Cypher) probes.
+export CERID_ENV_FILE="$ENV_FILE"
+# shellcheck source=lib/healthcheck.sh
+source "$CERID_ROOT/scripts/lib/healthcheck.sh"
 
 QUICK=false
 FIX=false
@@ -37,13 +48,6 @@ resolve_link() {
         readlink "$1"      # BSD readlink (macOS)
     fi
 }
-
-PASS=0
-FAIL=0
-
-pass() { echo -e "\033[32m✓\033[0m $1"; PASS=$((PASS + 1)); }
-fail() { echo -e "\033[31m✗\033[0m $1"; FAIL=$((FAIL + 1)); }
-warn() { echo -e "\033[33m!\033[0m $1"; }
 
 echo "=== Cerid AI Environment Validation ==="
 echo ""
@@ -95,90 +99,83 @@ if [ "$QUICK" = false ]; then
         fi
     fi
 
-    # ── Check 4: age installed + key file ─────────────────────────────────────
-    if command -v age > /dev/null 2>&1; then
-        pass "'age' encryption tool is installed"
-    else
-        warn "'age' is not installed — secret encryption unavailable (brew install age)"
-    fi
+    # ── Check 4: age installed + key file (only relevant when encrypted .env.age exists) ──
+    # Preserved from Charlie's guard — dev machines without encrypted backup
+    # don't fail just because `age` is absent.
+    if [ -f "$CERID_ROOT/.env.age" ]; then
+        if command -v age > /dev/null 2>&1; then
+            pass "'age' encryption tool is installed"
+        else
+            warn "'age' is not installed — secret encryption unavailable (brew install age)"
+        fi
 
-    if [ -f "$AGE_KEY" ]; then
-        pass "age key file exists at $AGE_KEY"
-    else
-        warn "age key not found at $AGE_KEY — run: age-keygen -o $AGE_KEY"
+        if [ -f "$AGE_KEY" ]; then
+            pass "age key file exists at $AGE_KEY"
+        else
+            warn "age key not found at $AGE_KEY — run: age-keygen -o $AGE_KEY"
+        fi
     fi
 
 fi  # end !QUICK for checks 3–4
 
 # ── Check 5: Infrastructure containers ───────────────────────────────────────
+# Container state + health (neo4j, chroma, redis). Uses the shared library so
+# validate-env and start-cerid agree on what "healthy" means.
 INFRA_COMPOSE="$CERID_ROOT/stacks/infrastructure/docker-compose.yml"
 INFRA_CONTAINERS=(ai-companion-neo4j ai-companion-chroma ai-companion-redis)
 
 for container in "${INFRA_CONTAINERS[@]}"; do
-    status="$(docker inspect --format '{{.State.Status}}' "$container" 2>/dev/null || echo "missing")"
-    health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container" 2>/dev/null || echo "missing")"
-
-    if [ "$status" = "running" ]; then
-        if [ "$health" = "healthy" ] || [ "$health" = "none" ]; then
-            pass "Container $container is running and healthy"
-        elif [ "$health" = "starting" ]; then
-            warn "Container $container is running but health check still starting"
-            PASS=$((PASS + 1))
+    if check_container "$container"; then
+        continue
+    fi
+    if [ "$FIX" = true ]; then
+        warn "Container $container not healthy — attempting auto-start (--fix)..."
+        if docker compose -f "$INFRA_COMPOSE" --env-file "$ENV_FILE" up -d > /dev/null 2>&1; then
+            pass "Infrastructure stack started via --fix (verify health in ~30s)"
+            break  # siblings come up as a group
         else
-            fail "Container $container is running but unhealthy (health: $health)"
+            fail "Failed to auto-start infrastructure via $INFRA_COMPOSE"
+            break
         fi
     else
-        if [ "$FIX" = true ]; then
-            warn "Container $container not running — attempting auto-start (--fix)..."
-            if docker compose -f "$INFRA_COMPOSE" --env-file "$ENV_FILE" up -d > /dev/null 2>&1; then
-                pass "Infrastructure stack started via --fix (verify health in ~30s)"
-                # Skip remaining infra containers — they all started together
-                break
-            else
-                fail "Failed to auto-start infrastructure via $INFRA_COMPOSE"
-                break
-            fi
-        else
-            fail "Container $container is not running (status: $status) — run: ./scripts/start-cerid.sh"
-        fi
+        warn "Remediation: ./scripts/start-cerid.sh  (or re-run with --fix)"
     fi
 done
 
-# ── Check 6: MCP container ────────────────────────────────────────────────────
-mcp_status="$(docker inspect --format '{{.State.Status}}' ai-companion-mcp 2>/dev/null || echo "missing")"
-mcp_health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' ai-companion-mcp 2>/dev/null || echo "missing")"
+# Authenticated Redis PING — catches the case where the container is healthy
+# but REDIS_PASSWORD is wrong / stale. This is the check that used to be wrong
+# in start-cerid.sh (reported UNREACHABLE). Now both scripts run the same probe.
+if [ "$(_hc_container_status ai-companion-redis)" = "running" ]; then
+    check_redis ai-companion-redis "${REDIS_PASSWORD:-}" || true
+fi
 
-if [ "$mcp_status" = "running" ]; then
-    if [ "$mcp_health" = "healthy" ] || [ "$mcp_health" = "none" ]; then
-        pass "Container ai-companion-mcp is running and healthy"
-    elif [ "$mcp_health" = "starting" ]; then
-        warn "Container ai-companion-mcp is running but health check still starting"
-        PASS=$((PASS + 1))
-    else
-        fail "Container ai-companion-mcp is running but unhealthy (health: $mcp_health)"
-    fi
-else
+# Authenticated Neo4j Cypher probe — same smoke test deps.py runs on startup.
+if [ "$(_hc_container_status ai-companion-neo4j)" = "running" ]; then
+    check_neo4j ai-companion-neo4j "${NEO4J_USER:-neo4j}" "${NEO4J_PASSWORD:-}" || true
+fi
+
+# ── Check 6: MCP container ────────────────────────────────────────────────────
+if ! check_container ai-companion-mcp; then
     if [ "$FIX" = true ]; then
-        warn "Container ai-companion-mcp not running — attempting auto-start (--fix)..."
+        warn "Container ai-companion-mcp not healthy — attempting auto-start (--fix)..."
         if docker compose -f "$CERID_ROOT/src/mcp/docker-compose.yml" --env-file "$ENV_FILE" up -d > /dev/null 2>&1; then
             pass "MCP stack started via --fix"
         else
             fail "Failed to auto-start MCP stack"
         fi
     else
-        fail "Container ai-companion-mcp is not running (status: $mcp_status) — run: ./scripts/start-cerid.sh"
+        warn "Remediation: ./scripts/start-cerid.sh"
     fi
 fi
 
 # ── Optional: Ollama check ─────────────────────────────────────────────────
 OLLAMA_ENABLED_VAL=$(grep -s '^OLLAMA_ENABLED=true' "$ENV_FILE" 2>/dev/null || echo "")
 if [ -n "$OLLAMA_ENABLED_VAL" ]; then
-    ollama_container_status="$(docker inspect --format '{{.State.Status}}' cerid-ollama 2>/dev/null || echo "missing")"
-    ollama_health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' cerid-ollama 2>/dev/null || echo "missing")"
-    if [ "$ollama_container_status" = "running" ] && { [ "$ollama_health" = "healthy" ] || [ "$ollama_health" = "none" ]; }; then
-        pass "Container cerid-ollama is running and healthy"
+    ollama_container_status="$(_hc_container_status cerid-ollama)"
+    if [ "$ollama_container_status" = "running" ]; then
+        check_container cerid-ollama || true
     elif [ "$ollama_container_status" = "missing" ]; then
-        # Check for native Ollama (macOS)
+        # Native Ollama on macOS lives outside Docker — probe the HTTP API.
         OLLAMA_URL_VAL=$(grep -s '^OLLAMA_URL=' "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- || echo "http://localhost:11434")
         if curl -sf "$OLLAMA_URL_VAL/api/tags" >/dev/null 2>&1; then
             pass "Ollama (native) is reachable at $OLLAMA_URL_VAL"
@@ -186,7 +183,7 @@ if [ -n "$OLLAMA_ENABLED_VAL" ]; then
             warn "Ollama enabled but not running — start with: ollama serve (native) or docker compose --profile ollama up -d"
         fi
     else
-        warn "Container cerid-ollama is $ollama_container_status (health: $ollama_health)"
+        warn "Container cerid-ollama is $ollama_container_status"
     fi
 fi
 
