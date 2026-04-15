@@ -268,6 +268,21 @@ describe("KnowledgePane", () => {
     })
   })
 
+  it("counter numerator never exceeds the filtered total (Bug #12 regression guard)", async () => {
+    // Small set (6 items) — numerator must equal 6, NEVER PAGE_SIZE (50).
+    const artifacts = Array.from({ length: 6 }, (_, i) =>
+      makeArtifact({ id: `art-${i}`, filename: `file-${i}.pdf` }),
+    )
+    mockFetchArtifacts.mockResolvedValue(artifacts)
+    render(<KnowledgePane />, { wrapper: createWrapper() })
+    await waitFor(() => {
+      expect(screen.getByText(/Showing 6 of 6 artifacts/)).toBeInTheDocument()
+    })
+    // Guard against regression: must not render "Showing 50 of 6" (or any N>6 of 6).
+    expect(screen.queryByText(/Showing 50 of 6 artifacts/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Showing 20 of 6 artifacts/)).not.toBeInTheDocument()
+  })
+
   // ---- Search results count ----
 
   it("shows result count text for search queries", async () => {

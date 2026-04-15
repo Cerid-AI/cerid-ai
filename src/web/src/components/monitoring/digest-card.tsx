@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Select,
@@ -10,7 +11,15 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
-import { BookOpen, Loader2, Inbox } from "lucide-react"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { BookOpen, Loader2, Inbox, AlertCircle } from "lucide-react"
+import { cn } from "@/lib/utils"
 import type { DigestResponse } from "@/lib/types"
 
 interface DigestCardProps {
@@ -45,7 +54,10 @@ function periodLabel(hours: number): string {
 }
 
 export function DigestCard({ digest, isLoading, onPeriodChange }: DigestCardProps) {
+  const [errorsOpen, setErrorsOpen] = useState(false)
   const periodHours = digest?.period_hours ?? 24
+  const errorCount = digest?.errors?.count ?? 0
+  const errorItems = digest?.errors?.items ?? []
 
   const handlePeriodChange = (value: string) => {
     onPeriodChange?.(Number(value))
@@ -55,7 +67,8 @@ export function DigestCard({ digest, isLoading, onPeriodChange }: DigestCardProp
     !digest ||
     (digest.artifacts.count === 0 &&
       digest.relationships.new_count === 0 &&
-      digest.recent_events === 0)
+      digest.recent_events === 0 &&
+      errorCount === 0)
 
   return (
     <Card>
@@ -99,7 +112,7 @@ export function DigestCard({ digest, isLoading, onPeriodChange }: DigestCardProp
         ) : (
           <div className="space-y-4">
             {/* Summary stats */}
-            <div className="grid grid-cols-4 gap-2 text-center">
+            <div className="grid grid-cols-5 gap-2 text-center">
               <div>
                 <div className="text-2xl font-bold">{digest.artifacts.count}</div>
                 <div className="text-xs text-muted-foreground">Artifacts</div>
@@ -118,6 +131,28 @@ export function DigestCard({ digest, isLoading, onPeriodChange }: DigestCardProp
                 <div className="text-2xl font-bold">{digest.recent_events}</div>
                 <div className="text-xs text-muted-foreground">Events</div>
               </div>
+              {errorCount > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setErrorsOpen(true)}
+                  aria-label={`View ${errorCount} ingestion error${errorCount === 1 ? "" : "s"}`}
+                  className={cn(
+                    "rounded-md transition-colors focus-visible:outline-none",
+                    "focus-visible:ring-2 focus-visible:ring-ring",
+                    "hover:bg-destructive/10 cursor-pointer",
+                  )}
+                >
+                  <div className="text-2xl font-bold text-destructive">{errorCount}</div>
+                  <div className="text-xs text-destructive underline-offset-2 hover:underline">
+                    Errors
+                  </div>
+                </button>
+              ) : (
+                <div>
+                  <div className="text-2xl font-bold text-muted-foreground">0</div>
+                  <div className="text-xs text-muted-foreground">Errors</div>
+                </div>
+              )}
             </div>
 
             {/* Domain breakdown */}
@@ -170,6 +205,58 @@ export function DigestCard({ digest, isLoading, onPeriodChange }: DigestCardProp
           </div>
         )}
       </CardContent>
+      <Dialog open={errorsOpen} onOpenChange={setErrorsOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 text-destructive" />
+              Ingestion Errors
+              <span className="text-muted-foreground text-sm font-normal">
+                ({errorCount} in the last {periodLabel(periodHours)})
+              </span>
+            </DialogTitle>
+            <DialogDescription>
+              Failures captured from the audit log. Investigate each entry to determine whether
+              it was retried successfully or still needs attention.
+            </DialogDescription>
+          </DialogHeader>
+          {errorItems.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              No error details available.
+            </p>
+          ) : (
+            <ul className="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
+              {errorItems.map((item, idx) => (
+                <li
+                  key={`${item.timestamp ?? "t"}-${item.artifact_id ?? "a"}-${idx}`}
+                  className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate font-medium">
+                      {item.filename ?? item.artifact_id ?? "Unknown source"}
+                    </span>
+                    {item.timestamp && (
+                      <span className="shrink-0 text-muted-foreground">
+                        {formatRelativeTime(item.timestamp)}
+                      </span>
+                    )}
+                  </div>
+                  {item.domain && (
+                    <div className="mt-1 text-muted-foreground">
+                      Domain: <span className="capitalize">{item.domain}</span>
+                    </div>
+                  )}
+                  {item.detail && (
+                    <p className="mt-1 whitespace-pre-wrap break-words text-destructive">
+                      {item.detail}
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </DialogContent>
+      </Dialog>
     </Card>
   )
 }

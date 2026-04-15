@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, fireEvent } from "@testing-library/react"
 import { DigestCard } from "@/components/monitoring/digest-card"
 import type { DigestResponse } from "@/lib/types"
 
@@ -40,7 +40,7 @@ const makeDigest = (overrides: Partial<DigestResponse> = {}): DigestResponse => 
 })
 
 describe("DigestCard", () => {
-  it("renders 4 summary stats", () => {
+  it("renders 5 summary stats including Errors", () => {
     render(<DigestCard digest={makeDigest()} isLoading={false} />)
     // Artifacts count
     expect(screen.getByText("12")).toBeInTheDocument()
@@ -54,6 +54,8 @@ describe("DigestCard", () => {
     // Events count
     expect(screen.getByText("47")).toBeInTheDocument()
     expect(screen.getByText("Events")).toBeInTheDocument()
+    // Errors count (0 when no errors field)
+    expect(screen.getByText("Errors")).toBeInTheDocument()
   })
 
   it("renders domain breakdown badges", () => {
@@ -97,6 +99,47 @@ describe("DigestCard", () => {
     )
     // Radix Select renders a combobox trigger
     expect(screen.getByRole("combobox")).toBeInTheDocument()
+  })
+
+  it("renders Errors button when errors.count > 0", () => {
+    const digest = makeDigest({
+      errors: {
+        count: 14,
+        items: [
+          { timestamp: new Date().toISOString(), filename: "bad.pdf", domain: "finance", detail: "Parse failed: malformed PDF header" },
+        ],
+      },
+    })
+    render(<DigestCard digest={digest} isLoading={false} />)
+    const button = screen.getByRole("button", { name: /view 14 ingestion errors/i })
+    expect(button).toBeInTheDocument()
+    expect(button).toHaveTextContent("14")
+  })
+
+  it("opens error drill-through dialog when Errors button clicked", () => {
+    const digest = makeDigest({
+      errors: {
+        count: 2,
+        items: [
+          { timestamp: new Date(Date.now() - 3 * 60_000).toISOString(), filename: "doc1.pdf", domain: "research", detail: "Parse failed" },
+          { timestamp: new Date(Date.now() - 10 * 60_000).toISOString(), filename: "doc2.epub", domain: "coding", detail: "Unsupported encoding" },
+        ],
+      },
+    })
+    render(<DigestCard digest={digest} isLoading={false} />)
+    fireEvent.click(screen.getByRole("button", { name: /view 2 ingestion errors/i }))
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+    expect(screen.getByText("doc1.pdf")).toBeInTheDocument()
+    expect(screen.getByText("doc2.epub")).toBeInTheDocument()
+    expect(screen.getByText(/parse failed/i)).toBeInTheDocument()
+    expect(screen.getByText(/unsupported encoding/i)).toBeInTheDocument()
+  })
+
+  it("renders Errors stat as non-interactive when count is 0", () => {
+    render(<DigestCard digest={makeDigest()} isLoading={false} />)
+    // Errors label exists, but there's no button role for it (0 count → plain div)
+    expect(screen.queryByRole("button", { name: /ingestion errors/i })).not.toBeInTheDocument()
+    expect(screen.getByText("Errors")).toBeInTheDocument()
   })
 
   it("limits recent artifacts list to 10 items", () => {
