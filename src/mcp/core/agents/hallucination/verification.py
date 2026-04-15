@@ -78,8 +78,12 @@ _SYSTEM_DIRECT_VERIFICATION = (
     '"reasoning": "1-2 sentence explanation"}\n\n'
     "Rules:\n"
     "- \"supported\": The claim is factually accurate\n"
-    "- \"refuted\": The claim contains clear factual errors\n"
-    "- \"insufficient_info\": You cannot confidently verify or refute\n"
+    "- \"refuted\": The claim contains clear factual errors you can point to\n"
+    "- \"insufficient_info\": You cannot confidently verify or refute. This "
+    "INCLUDES claims about live/dynamic data you cannot snapshot "
+    "(stock prices, current weather, live sports scores, today's temperatures, "
+    "real-time ridership, etc.) — these are UNVERIFIABLE, not REFUTED. "
+    "Use \"insufficient_info\" for them.\n"
     "- Be honest about uncertainty — use \"insufficient_info\" when unsure\n"
     "- For \"refuted\" claims, briefly state what is wrong\n"
     "- confidence: 0.0 = no idea, 1.0 = certain"
@@ -1558,9 +1562,13 @@ async def verify_claim(
         escalation_similarity = top_result.get("_raw_relevance", raw_similarity)
 
         # Extract top KB snippet to pass as partial evidence to external
-        # verification.  Truncate to 300 chars — enough for the verifier
-        # to triangulate without overwhelming the prompt.
-        _top_snippet = (top_result.get("content", "") or "")[:300] or None
+        # verification. Standard mode truncates to 300 chars for token economy
+        # with gpt-4o-mini. Expert mode widens to 1200 chars — the premium
+        # verifier (Grok 4) has a much larger effective context and benefits
+        # from the extra triangulation surface, especially on technical claims
+        # where the snippet's full paragraph matters.
+        _snippet_limit = 1200 if expert_mode else 300
+        _top_snippet = (top_result.get("content", "") or "")[:_snippet_limit] or None
 
         # --- Anti-circularity escalation: if ALL top results are circular
         # (derived from the same KB artifacts injected into the LLM prompt),
@@ -1675,6 +1683,38 @@ async def verify_claim(
             })
 
         if _nli["contradiction"] >= config.NLI_CONTRADICTION_THRESHOLD:
+            # KB-authority gate: only treat NLI contradiction as terminal when
+            # the KB source is strong enough to trust. TWO signals must agree:
+            #   (1) raw_similarity >= threshold — topically related to the claim
+            #   (2) NLI entailment >= 0.15 — semantically about the claim's
+            #       assertion, not just keyword-overlapping on an orthogonal
+            #       topic (e.g. a chat transcript mentioning "Paris" in a
+            #       different context scores high similarity but ~0 entailment)
+            # High contradiction + near-zero entailment is the signature of
+            # "different topic, same keywords" — NOT a real contradiction.
+            # Escalate instead of hard-failing.
+            _kb_authoritative = (
+                raw_similarity >= threshold
+                and _nli["entailment"] >= 0.15
+            )
+            if not _kb_authoritative:
+                logger.debug(
+                    "NLI contradiction on weak KB evidence (sim=%.2f < %.2f) — escalating externally: %r",
+                    raw_similarity, threshold, claim[:60],
+                )
+                ext_result = await _verify_claim_externally(
+                    claim, model, **_ext_common, kb_snippet=_top_snippet,
+                )
+                if ext_result and ext_result.get("status") in ("verified", "unverified", "uncertain"):
+                    return await _cache_result({
+                        **ext_result,
+                        # Preserve the NLI signal for observability / debugging
+                        "kb_nli_contradiction": round(_nli["contradiction"], 3),
+                        "kb_nli_escalated": True,
+                    })
+                # If external verification failed/errored, fall through to the
+                # original terminal-contradiction verdict below as a safety net.
+
             return await _cache_result({
                 "claim": claim,
                 "status": "unverified",
@@ -1711,6 +1751,33 @@ async def verify_claim(
                 if ext_result and ext_result.get("status") in ("verified", "unverified"):
                     return await _cache_result(ext_result)
                 # If web search was inconclusive, fall through to KB verdict below
+
+            # Semantic-alignment gate: high similarity + fully-neutral NLI is
+            # the signature of "shared keywords, different topic" (e.g. a KB
+            # doc mentioning both 'Docker' and 'Java' gets high similarity to
+            # the false claim 'Docker was written in Java' but NLI says
+            # neutral — the doc isn't actually supporting the claim). Require
+            # a minimum entailment floor to trust the kb-only verdict. If NLI
+            # is entirely indifferent, escalate externally rather than rubber-
+            # stamping on keyword overlap alone.
+            if _nli["entailment"] < 0.15:
+                logger.debug(
+                    "High KB similarity (%.2f) but NLI entailment too weak "
+                    "(%.2f) — escalating externally: %r",
+                    similarity, _nli["entailment"], claim[:60],
+                )
+                ext_result = await _verify_claim_externally(
+                    claim, model, **_ext_common, kb_snippet=_top_snippet,
+                )
+                if ext_result and ext_result.get("status") in ("verified", "unverified", "uncertain"):
+                    return await _cache_result({
+                        **ext_result,
+                        "kb_semantic_gate_escalated": True,
+                        "kb_similarity": round(similarity, 3),
+                        "kb_nli_entailment": round(_nli["entailment"], 3),
+                    })
+                # External inconclusive — fall through to the kb verdict below
+                # as a safety net so we still return something.
 
             return await _cache_result({
                 "claim": claim,

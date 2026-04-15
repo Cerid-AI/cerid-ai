@@ -63,6 +63,17 @@ updates:
     directory: /src/mcp
     schedule:
       interval: monthly
+    # Python runtime upgrades are platform-infrastructure changes with
+    # coordinated touches to Dockerfile + CI + pyproject.toml + mypy config
+    # + DEPENDENCY_COUPLING.md. They are tracked in docs/DEPENDENCY_UPGRADES.md
+    # and get their own dedicated PR (3.11 -> 3.12 first, not the jump to
+    # 3.14 dependabot keeps proposing). Ignore major + minor base-image bumps
+    # until scheduled; patch bumps (security) still land.
+    ignore:
+      - dependency-name: "python"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
     commit-message:
       prefix: "deps(docker):"
 
