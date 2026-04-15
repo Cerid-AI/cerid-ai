@@ -591,11 +591,9 @@ CERID_EMAIL_IMAP_PASSWORD = os.getenv("CERID_EMAIL_IMAP_PASSWORD", "")
 CERID_EMAIL_FOLDER = os.getenv("CERID_EMAIL_FOLDER", "INBOX")
 CERID_EMAIL_POLL_INTERVAL = int(os.getenv("CERID_EMAIL_POLL_INTERVAL", "15"))  # minutes
 
-# Trading/boardroom config — stubs (overridden at runtime when enabled)
+# Trading config — public-safe stubs (overridden at runtime when enabled)
 CERID_TRADING_ENABLED: bool = False
 TRADING_AGENT_URL: str = ""
-CERID_BOARDROOM_ENABLED: bool = False
-CERID_BOARDROOM_TIER: str = "foundation"
 
 # ---------------------------------------------------------------------------
 # RSS/Atom Feed Poller
@@ -770,12 +768,10 @@ EVAL_LEADERBOARD_MAX: int = 50
 EVAL_DEFAULT_BENCHMARK: str = "beir_subset.jsonl"
 
 # ---------------------------------------------------------------------------
-# Enterprise Features
+# Enterprise Features (public-safe stubs only; forbidden wiring lives below
+# the "-- Internal settings" hook marker so it's stripped from the public repo)
 # ---------------------------------------------------------------------------
 CERID_ENTERPRISE = os.getenv("CERID_ENTERPRISE", "false").lower() in ("1", "true")
-ABAC_POLICY_KEY = "cerid:enterprise:abac_policy"
-SSO_PROVIDER = os.getenv("CERID_SSO_PROVIDER", "")  # saml | oidc
-SSO_METADATA_URL = os.getenv("CERID_SSO_METADATA_URL", "")
 CLASSIFICATION_ENABLED = os.getenv("CERID_CLASSIFICATION", "false").lower() in ("1", "true")
 AUDIT_STREAM_KEY = "cerid:audit:stream"
 AUDIT_RETENTION_DAYS = int(os.getenv("CERID_AUDIT_RETENTION_DAYS", "365"))
@@ -796,4 +792,16 @@ if not NEO4J_PASSWORD:
     )
 
 # -- Internal settings -------------------------------------------------------
-# Below this line: internal-only bootstrap (stripped for public distribution)
+# Below this line: internal-only bootstrap (stripped for public distribution).
+# Any identifier listed in .sync-manifest.yaml `forbidden_in_public` MUST live
+# below this marker — the to-public sync truncates the file here.
+
+# Internal-only config stubs (forbidden as literal strings in the public repo).
+# Referenced only by internal_only modules: sdk_internal.py (boardroom
+# endpoint gating), settings_internal.py (env-var overrides), and the
+# enterprise/ overlay (ABAC/SSO wiring). Public code must not import these.
+CERID_BOARDROOM_ENABLED: bool = False
+CERID_BOARDROOM_TIER: str = "foundation"
+ABAC_POLICY_KEY = "cerid:enterprise:abac_policy"
+SSO_PROVIDER = os.getenv("CERID_SSO_PROVIDER", "")  # saml | oidc
+SSO_METADATA_URL = os.getenv("CERID_SSO_METADATA_URL", "")

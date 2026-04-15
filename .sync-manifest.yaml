@@ -107,7 +107,7 @@ mixed_files:
   - path: src/mcp/app/tools.py
     hook_marker: "# -- Trading tools"
   - path: src/mcp/app/scheduler.py
-    hook_marker: null  # No hook marker yet — handled manually
+    hook_marker: "# -- Internal feature bootstrap"
   - path: src/mcp/config/settings.py
     hook_marker: "# -- Internal settings"
   - path: src/mcp/config/taxonomy.py

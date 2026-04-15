@@ -27,6 +27,10 @@ logger = logging.getLogger("ai-companion.scheduler")
 
 _scheduler: AsyncIOScheduler | None = None
 
+# Hooks registered by the internal-build bootstrap (see bottom of this file).
+# Each callable receives the scheduler instance and may add jobs before start.
+_post_setup_hooks: list = []
+
 
 def _log_execution(job_name: str, status: str, duration: float, detail: str = "") -> None:
     """Log a scheduled job execution to Redis."""
@@ -254,13 +258,10 @@ def start_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
-    # -- Trading jobs ---------------------------------------------------------
-    # Below this line: internal-only bootstrap (stripped for public distribution)
-    try:
-        from app.scheduler_internal import register_trading_jobs
-        register_trading_jobs(_scheduler)
-    except ImportError:
-        pass
+    # Invoke any registered internal-build hooks (no-op in the public build;
+    # set by the module-level bootstrap block at the bottom of this file).
+    for hook in _post_setup_hooks:
+        hook(_scheduler)
 
     # Folder scan (opt-in — empty SCHEDULE_FOLDER_SCAN disables)
     scan_cron = getattr(config, "SCHEDULE_FOLDER_SCAN", "")
@@ -306,3 +307,13 @@ def get_job_status() -> dict[str, Any]:
             "trigger": str(job.trigger),
         })
     return {"status": "running", "jobs": jobs}
+
+
+# -- Internal feature bootstrap -----------------------------------------------
+# Below this line: internal-only bootstrap (stripped for public distribution).
+# The to-public sync truncates the file at this marker.
+try:
+    from app.scheduler_internal import register_trading_jobs
+    _post_setup_hooks.append(register_trading_jobs)
+except ImportError:
+    pass

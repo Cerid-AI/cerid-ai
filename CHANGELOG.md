@@ -6,7 +6,7 @@ All notable changes to cerid-ai are documented here.
 
 ### Phase C: Core Extraction + NLI Architecture (2026-04-08 → 2026-04-10)
 - **Core/App split** — portable orchestrator core (`core/`) separated from application layer (`app/`). Bridge modules in `agents/`, `utils/`, `services/` re-export for backward compat.
-- **`*_internal.py` pattern** — 7 Python files + 1 TypeScript file hold internal-only code. `app/main_internal.py` bootstraps trading, boardroom, billing, eval routers.
+- **`*_internal.py` pattern** — 7 Python files + 1 TypeScript file hold internal-only code; an internal bootstrap module registers the corresponding private routers at startup.
 - **NLI entailment service** — `core/utils/nli.py` (ONNX, <10ms) powers verification, Self-RAG, RAGAS, and RAG pipeline claim validation.
 - **Sync manifest** — `.sync-manifest.yaml` declares internal-only files, mixed files (hook markers), and forbidden strings for automated repo sync via `scripts/sync-repos.py`.
 - **Contract ABCs** — `core/contracts/` defines VectorStore, GraphStore, CacheStore, LLMClient interfaces.
