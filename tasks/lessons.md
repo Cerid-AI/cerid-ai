@@ -492,3 +492,82 @@
 **When:** Adding graduated NLI contradiction scoring.
 **Problem:** Added an `nli_score()` call inside `_compute_adjusted_confidence()` which broke its "zero LLM cost" contract and double-counted contradictions with the main NLI check that runs separately.
 **Fix:** Removed the NLI call from `_compute_adjusted_confidence()`. Contradiction scoring belongs in the main verify_claim() flow, not in the confidence calibration function.
+
+---
+
+## Session 2026-04-15 Bug-Hunt Lessons
+
+### Streaming vs non-streaming verification paths drift silently
+**When:** Auditing `/agent/hallucination` after user observation that "The capital of France is Paris." returned "No factual claims to verify".
+**Problem:** `check_hallucinations()` (non-streaming) invoked `verify_claim()` with no `response_context` or `claim_context`. The streaming path at `verify_response_streaming()` threaded both through via `_extract_claim_context()`. Claims routed via the non-streaming endpoint were validated in isolation, producing false-unverified verdicts on facts that only make sense in their surrounding paragraph.
+**Fix:** Ported the identical ±200-char surrounding-text extractor from streaming path to `check_hallucinations` and threaded `user_query` as `response_context`. Added a comment documenting the FE/BE length-gate coupling.
+**Rule:** When two code paths produce the same output shape, wire every feature addition into both paths OR refactor to a single shared implementation. Silent drift is the rule, not the exception.
+
+### FE/BE numeric constants must be documented when coupled
+**When:** Chat side panel reported "No factual claims to verify" for 31-char responses.
+**Problem:** Backend `HALLUCINATION_MIN_RESPONSE_LENGTH = 25`, frontend `MIN_VERIFIABLE_LENGTH = 200`. The FE gate was higher than the BE gate, so short-but-verifiable responses never hit the verifier. Neither constant mentioned the other.
+**Fix:** Lower FE constant to 25 AND add explicit cross-reference comment on both sides. Cross-reference pattern: "MUST stay in sync with `src/mcp/config/settings.py:HALLUCINATION_MIN_RESPONSE_LENGTH` (default 25). If the FE gate is higher than the BE gate, short-but-verifiable responses never hit the verifier."
+**Rule:** When a constant exists on both sides of the frontend/backend boundary, either (a) have only one source of truth (config endpoint the FE reads on startup), or (b) document the coupling in a comment on BOTH sides with the file path of the sibling. Silent drift is guaranteed otherwise.
+
+### NLI contradiction is not terminal unless KB authority is also present
+**When:** Paris canary failing — "Paris is the capital of France" returning unverified via kb_nli.
+**Problem:** When ANY KB doc squeaked through the 25% term-overlap filter and produced NLI contradiction ≥ 0.6, verify_claim hard-failed as unverified. A chat transcript that mentions "Paris" in some unrelated context scores high similarity but near-zero entailment — the "shared keywords, different topic" pattern. That's NOT a real contradiction; it's the KB being asked about a subject it doesn't engage with.
+**Fix:** Authority gate requires BOTH `raw_similarity >= threshold` AND `_nli["entailment"] >= 0.15`. If either fails, escalate to cross_model externally instead of terminating. Same gate applied to the `kb` (similarity-only) verdict path to prevent keyword-match rubber-stamping.
+**Rule:** NLI contradiction alone is not proof of disagreement. A doc that's orthogonal to the claim produces high contradiction scores indistinguishable from a doc that actually disagrees. Always require the doc to be *about* the claim (entailment floor) before trusting its verdict.
+
+### Tool caches leak internal module names across sync boundary
+**When:** Running `scripts/sync-repos.py to-public` after working in the repo.
+**Problem:** `.import_linter_cache/`, `.mypy_cache/`, `.ruff_cache/`, `.pytest_cache/`, and `__pycache__/` directories contain metadata files that reference every module scanned by the tool — including internal-only names like `trading_proxy`, `agents_internal`, `sdk_internal`. Syncing these to public triggered 27 validator failures.
+**Fix:** Added to `internal_only` in `.sync-manifest.yaml`:
+- `src/mcp/.import_linter_cache/**`
+- `src/mcp/.mypy_cache/**`
+- `src/mcp/.pytest_cache/**`
+- `src/mcp/.ruff_cache/**`
+- `**/__pycache__/**`
+**Rule:** Any tool that caches AST/import-graph results must be excluded from public sync. The pattern isn't "files that contain secrets" — it's "files whose contents are derived from the full codebase including internal modules". Add new cache dirs to internal_only proactively when new dev tools are introduced.
+
+### Docker bind mounts drift silently when multiple compose projects target same container name
+**When:** Running the internal repo while a fresh-clone bug-hunt had its own stack up.
+**Problem:** `ai-companion-mcp` / `cerid-web` / infra containers were owned by the fresh-clone compose project. `docker compose -p cerid-ai-internal … up -d` reported "Conflict: container name already in use" because the fresh-clone had claimed the names. Silent part: even when I thought I was testing the internal code, my curl-to-localhost:8888 was hitting the fresh-clone MCP.
+**Fix:** Before rebuilding, always `docker inspect ai-companion-mcp --format '{{range .Mounts}}{{.Source}}{{end}}'` to verify the bind mount actually points at the intended source tree. If not, `docker rm -f` the existing containers, then re-up from the intended compose project. Cannot rely on `--force-recreate --no-deps` alone — the container name is the lock.
+**Rule:** Container names are the authoritative ownership signal, not compose project names. When switching between project clones, verify mounts before running live smoke tests. Otherwise your "tests passed" signal is against the wrong codebase.
+
+### Transient `node_modules/` corruption from partial installs
+**When:** Running `docker run --rm … npm run build` after parallel agent work that touched `package.json`.
+**Problem:** `lucide-react/dist/esm/` contained only `.js.map` files — no actual `.js`. Rolldown failed to resolve `"lucide-react"`. The transient failure mode appears when multiple processes (agent subprocesses + host editor + pre-existing container) touch `node_modules` interleaved.
+**Fix:** `rm -rf node_modules && npm install` produced a complete, working install. After heavy parallel work on `package.json` / `package-lock.json`, treat `node_modules` as potentially corrupt and do a clean install before build-verifying.
+**Rule:** Never trust `node_modules` after multi-agent or multi-container activity on the same workspace. A clean `rm -rf node_modules && npm install` is ~30s and guarantees a consistent baseline.
+
+### Python stdout buffering sinkholes tool output
+**When:** Running pytest under `docker run … bash -c "… python -m pytest …" > /tmp/results.log &` (backgrounded).
+**Problem:** Python defaults to block buffering when stdout is redirected to a pipe. A pytest run that produces thousands of lines appears to hang — the log file has only the first 3 lines for minutes, even though the process is actively running.
+**Fix:** Use `python -u -m pytest …` (unbuffered). Or use `stdbuf -oL`. Or pipe through `tee` which forces line-buffering. For ad-hoc verification, running synchronously (not backgrounded) also forces a TTY and auto-flushes.
+**Rule:** When backgrounding Python test runs, ALWAYS use `-u` (unbuffered). Otherwise debugging "is it stuck or just buffering?" wastes a full cycle per run.
+
+### Claim extraction loses sub-claims in compound sentences
+**When:** Running 42-case verification battery.
+**Problem:** "Paris is the capital of France. The Eiffel Tower, which is actually the tallest building in Europe, was completed in 1889." The extractor returned 2 claims, missing the "tallest building in Europe" sub-claim nested in a relative clause.
+**Fix:** Not yet shipped — flagged in the fix plan. Would require either prompt engineering (explicit sub-claim extraction instructions with multi-claim-per-sentence examples) or a post-pass splitter that decomposes compound claims into atomic facts.
+**Rule:** Claim extraction accuracy is bounded by the extractor's attention to conjoined/relative-clause sub-claims. Compound sentences are an open weakness; fixtures should include them as regression gates.
+
+### Subject-less extracted claims can't be verified in isolation
+**When:** Chat responses with pronoun references got verified inconsistently.
+**Problem:** LLM-extracted claims like "is 8848 meters tall" or "It contains seeds" have no resolvable subject. The verifier asked to validate them in isolation returns `refuted` (can't find the fact) or `insufficient_info` — either degrades aggregate accuracy.
+**Fix:** Added `_claim_has_subject()` in `extraction.py` — regex check for unresolved pronouns (`it/they/this/that/these/those/he/his/him/she/her`) and bare predicates (`is/was/were/has/had/reaches/stands/measures/contains/…`) as the claim's head. Drop with INFO log. The drop rate is an observability signal — rising = extraction prompt quality regression.
+**Rule:** Syntactic completeness is verification-hygiene — a claim without a grammatical subject is not a claim, it's a predicate. Drop pre-verify; don't waste an LLM call on it and don't let it skew accuracy aggregates.
+
+### Background-task output buffering vs scheduled wakeups
+**When:** Running a long-running verification battery in a background shell and scheduling a wakeup to check results.
+**Problem:** Battery runner produced zero stdout flush for the full runtime because Python stdout was piped to a non-TTY file. Scheduled wakeup arrived before the final flush. I kept rescheduling instead of noticing the process was DONE — I just couldn't see its output.
+**Fix:** Check `task-notification` events (they fire on process exit regardless of buffering). Or use `python -u` so stdout flushes on every line.
+**Rule:** Don't infer "still running" from an empty log when the process could be "done but buffered". Always check both: (a) the log file AND (b) whether the PID is alive AND (c) whether a task-notification has fired.
+
+### Agent report "all tests pass" does not obviate local verification
+**When:** 6 sub-agents all reported green results in their returns; I skipped re-running locally to save time.
+**Problem:** Each agent's tests ran in THEIR container; the combined tree might have cross-agent breakage (e.g., one agent's signature change breaks another's caller). The user had to correct me: "you keep getting stuck".
+**Fix:** After multi-agent swarm, ALWAYS:
+  1. Read each agent's report for the exact file list
+  2. Cross-check coordination points (shared files) explicitly
+  3. Re-run the FULL verification sweep against the combined tree — not just the sub-agents' individual verifications
+  4. Be honest when a test run is slow/hung; don't keep waiting indefinitely
+**Rule:** Trust but verify. Sub-agent reports describe their local state, not the merged state. The merge cost (integration testing) is NOT optional.

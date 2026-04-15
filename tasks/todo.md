@@ -1,7 +1,61 @@
 # Cerid AI — Sprint TODO
 
-> **Updated:** 2026-04-13
-> **Version:** 0.83.0 (Search tuning + Memory efficacy + Verification rigor)
+> **Updated:** 2026-04-15
+> **Version:** 0.83.0 (Search tuning + Memory efficacy + Verification rigor + Bug-hunt fixes)
+
+---
+
+## Completed — Session 2026-04-15 (bug-hunt + structural fix sprint)
+
+- [x] Comprehensive new-user bug-hunt on public repo (fresh clone, setup, validate-env, API sweep, GUI walkthrough, E2E) — **15 bugs identified**
+- [x] Root-cause grouping (15 surface bugs → 8 root causes) — `tasks/bughunt-fix-plan.md`
+- [x] Parallel sub-agent swarm execution (6 agents: Alpha/Bravo/Charlie/Delta/Echo/Foxtrot)
+- [x] **Fix E — Embedding singleton + startup dim-check + `/admin/collections/repair`** (`src/mcp/core/utils/embeddings.py`, `app/startup.py`, `app/routers/kb_admin.py` + 3 tests)
+- [x] **Fix D + #1 — `/agents/activity/*` alias router + SSE exponential back-off + unified INSTALL.md** (`routers/agent_console.py`, `use-agent-activity-stream.ts`, `INSTALL.md` + tests)
+- [x] **Fix A+F — Remove age from public README + CERID_SYNC_DIR_HOST rename + CONTRIBUTING drift** (`.env.example`, `docker-compose.yml`, `README.md`, `CONTRIBUTING.md`, `validate-env.sh` guard)
+- [x] **Fix B — `scripts/lib/healthcheck.sh` shared library + auth-aware Redis/Neo4j + Bifrost skip + zombie cleanup** (all 3 scripts)
+- [x] **Fix C — `MIN_VERIFIABLE_LENGTH` FE/BE alignment 200 → 25** + cross-reference comment + regression test
+- [x] **Fix G — Tab title "Cerid Core" → "Cerid AI" + KB counter unification + Knowledge Digest errors drill-through modal** (`App.tsx`, `knowledge-pane.tsx`, `digest-card.tsx`, `digest.py`, `types.ts`)
+- [x] Integration cross-check — wiring confirmed at main.py:572 (startup) + main.py:762 (activity_router); Charlie's `.env.age` guard + Delta's lib source coexist cleanly
+- [x] Python syntax verification (11 touched files) — all clean
+- [x] Shell syntax verification (3 scripts) — all clean
+- [x] Frontend verification — tsc clean, eslint clean, vitest **719 pass** (+14 over 705 baseline), build 533KB main bundle
+- [x] `validate-env.sh` live run — 13/14 pass (1 pre-existing data-dir failure unrelated)
+- [x] Rebuilt MCP + cerid-web against internal tree
+- [x] Live smoke — Paris canary verifies via cross_model; `/agents/activity/recent` HTTP 200; API sweep 6/7 OK
+- [x] Commit by logical phase — internal `863b77e`, `07f7b6c`, `e8e31f0`, `3debefb` — all pushed to `origin/main`
+- [x] Sync to public — validator clean; public `329db27` pushed
+- [x] `tasks/lessons.md` — appended 10 new lessons from this session
+- [x] `tasks/SESSION-REVIEW-2026-04-15.md` — full context dump for next session
+
+## Review — Session 2026-04-15
+
+### Result
+- **15/15 bugs fixed**, all as structural root-cause resolutions (no symptom patches)
+- **Frontend tests: +14** (705 → 719 passing; 1 skipped)
+- **Zero regressions** in the 42-case verification battery baseline
+- **Zero open PRs, zero stale branches** on both repos
+- **Both CIs running** at session close (check status at next session start)
+
+### Commits shipped
+| SHA | Summary |
+|---|---|
+| `863b77e` | fix(pipeline): critical new-user blockers — embedding singleton, agent activity stream, install docs |
+| `07f7b6c` | fix(onboarding): public-repo doc polish, CERID_SYNC_DIR rename, healthcheck rewrite |
+| `e8e31f0` | fix(ux): verification-panel wiring + tab title + KB counter + errors drill-through |
+| `3debefb` | chore(sync): exclude tool caches from public sync |
+| `329db27` | (public) fix(pipeline+onboarding+ux): comprehensive bug-hunt fixes |
+
+### Known open items (deferred)
+- **Compound-sentence sub-claim extraction** — flagged in fix plan; would need extractor prompt tuning or post-pass splitter
+- **`/conversations` 404** — pre-existing API shape drift, not in this fix scope
+- **6 pre-existing pytest failures** (test_hallucination + test_taxonomy mock drift) — confirmed pre-existing on main; separate cleanup
+- **`stacks/infrastructure/data/` missing** on this dev machine — `validate-env.sh` flags but unrelated to any code change
+
+### Next-session entry point
+See `tasks/SESSION-REVIEW-2026-04-15.md` for the complete pickup handoff.
+
+---
 
 ---
 
