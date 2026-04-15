@@ -15,7 +15,6 @@ import ast
 from pathlib import Path
 from unittest.mock import patch
 
-
 # The single legitimate call site is the singleton module itself.
 _MCP_ROOT = Path(__file__).parent.parent
 _SINGLETON_MODULE = _MCP_ROOT / "core" / "utils" / "embeddings.py"
