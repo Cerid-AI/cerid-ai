@@ -162,7 +162,13 @@ services:
     volumes:
       - ./src/mcp:/app
       - ${HOME}/cerid-archive:/archive:cached
-      - ${CERID_SYNC_DIR:-${HOME}/Dropbox/cerid-sync}:/sync
+      # Host-side mount source for the KB sync directory.
+      # CERID_SYNC_DIR_HOST is the canonical name (host path).
+      # CERID_SYNC_DIR is retained as a fallback for backward-compat, but note
+      # that inside the MCP container CERID_SYNC_DIR is ALWAYS /sync — if a user
+      # sets CERID_SYNC_DIR=/sync in .env (thinking container-side), the fallback
+      # would try to bind-mount /sync on the host. Prefer CERID_SYNC_DIR_HOST.
+      - ${CERID_SYNC_DIR_HOST:-${CERID_SYNC_DIR:-${HOME}/Dropbox/cerid-sync}}:/sync
     env_file:
       - .env
     environment:

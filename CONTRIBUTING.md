@@ -6,7 +6,7 @@ Thank you for your interest in contributing to Cerid AI!
 
 ### Prerequisites
 - Python 3.11+
-- Node.js 20+ (for React GUI development)
+- Node.js 22+ (for React GUI development)
 - Docker & Docker Compose V2
 
 ### Quick Start
@@ -80,7 +80,7 @@ The Vite dev server proxies `/api/bifrost` to `localhost:8080` (Bifrost LLM gate
 ## Coding Standards
 
 - **Python 3.11+** with type hints on public functions
-- **FastAPI** routers in `src/mcp/routers/` with `APIRouter`
+- **FastAPI** routers in `src/mcp/app/routers/` (bridge re-exports at `src/mcp/routers/` preserved for backward-compat imports) with `APIRouter`
 - **React 19** + **Tailwind v4** + **shadcn/ui** (New York style, Zinc base)
 - **No hardcoded secrets** — use environment variables via `config.py`
 - **Cypher queries** live in `utils/graph.py`, never inline in routers

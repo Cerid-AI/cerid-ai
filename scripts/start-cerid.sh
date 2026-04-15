@@ -14,6 +14,13 @@ set -euo pipefail
 CERID_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="$CERID_ROOT/.env"
 
+# Shared health-check library (container probes, auth-aware redis/neo4j,
+# HTTP tri-state with skip, zombie cleanup). Sourced early so both
+# preflight and Quick Health Check can use it.
+# shellcheck source=lib/healthcheck.sh
+export CERID_ENV_FILE="$ENV_FILE"
+source "$CERID_ROOT/scripts/lib/healthcheck.sh"
+
 BUILD_FLAG=""
 FORCE_FLAG=""
 LEGACY_FLAG=""
@@ -556,6 +563,11 @@ fi
 # (especially ChromaDB's SQLite) fail with write permission errors.
 mkdir -p "$CERID_ROOT/stacks/infrastructure/data/"{chroma,neo4j,neo4j-logs,redis}
 
+# Zombie-container cleanup — any ai-companion-*/cerid-* container in
+# Exited/Dead/Created state holds its name, causing `docker compose up`
+# to fail with an opaque conflict error. Remove them up front.
+cleanup_zombies
+
 if [ -z "$LEGACY_FLAG" ] && [ -f "$UNIFIED_COMPOSE" ]; then
     COMPOSE_FILES="-f $UNIFIED_COMPOSE"
     if [ "$LIGHTWEIGHT_MODE" = "true" ]; then
@@ -687,34 +699,33 @@ docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 echo ""
 echo "=== Quick Health Check ==="
 
-# Structured health output
-check_health() {
-    local name=$1 url=$2
-    local code
-    code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "$url" 2>/dev/null || echo "000")
-    case "$code" in
-        200) printf "  %-12s \033[32mOK\033[0m\n" "$name" ;;
-        000) printf "  %-12s \033[31mUNREACHABLE\033[0m\n" "$name" ;;
-        *)   printf "  %-12s \033[33mHTTP %s\033[0m\n" "$name" "$code" ;;
-    esac
-}
+# All probes below delegate to scripts/lib/healthcheck.sh so that start-cerid
+# and validate-env stay in lockstep. The library handles:
+#   - Redis: authenticated PING via `docker exec`, honoring REDIS_PASSWORD
+#   - Bifrost: tri-state (skip when container absent or BIFROST_URL unset)
+#   - Neo4j:  authenticated Cypher probe (not just HTTP, which ignores auth)
 
-check_health "MCP" "http://localhost:${CERID_PORT_MCP}/health"
-check_health "React GUI" "http://localhost:${CERID_PORT_GUI}"
-check_health "Bifrost" "http://localhost:${CERID_PORT_BIFROST}"
+check_http "MCP"       "http://localhost:${CERID_PORT_MCP}/health" || true
+check_http "React GUI" "http://localhost:${CERID_PORT_GUI}"        || true
+
+# Bifrost is optional. Skip cleanly if the container isn't present OR if
+# BIFROST_URL is unset in the environment. This kills the "HTTP 000000" bug.
+_bifrost_target=""
+if _hc_container_exists bifrost && [ "$(_hc_container_status bifrost)" = "running" ]; then
+    _bifrost_target="http://localhost:${CERID_PORT_BIFROST}/health"
+elif [ -n "${BIFROST_URL:-}" ]; then
+    _bifrost_target="${BIFROST_URL%/}/health"
+fi
+check_http "Bifrost" "$_bifrost_target" || true
+
 if [ "$LIGHTWEIGHT_MODE" = "true" ]; then
-    printf "  %-12s \033[33mSKIPPED (lightweight)\033[0m\n" "Neo4j"
+    skip "Neo4j — lightweight mode"
 else
-    check_health "Neo4j" "http://localhost:${CERID_PORT_NEO4J}"
+    check_neo4j ai-companion-neo4j "${NEO4J_USER:-neo4j}" "${NEO4J_PASSWORD:-}" || true
 fi
-check_health "ChromaDB" "http://localhost:${CERID_PORT_CHROMA}/api/v1/heartbeat"
-REDIS_PASS=$(grep -s '^REDIS_PASSWORD=' "$ENV_FILE" | cut -d'=' -f2- || echo "")
-printf "  %-12s " "Redis"
-if redis-cli -p "$CERID_PORT_REDIS" ${REDIS_PASS:+-a "$REDIS_PASS"} ping 2>/dev/null | grep -q PONG; then
-    printf "\033[32mOK\033[0m\n"
-else
-    printf "\033[31mUNREACHABLE\033[0m\n"
-fi
+
+check_http  "ChromaDB" "http://localhost:${CERID_PORT_CHROMA}/api/v1/heartbeat" || true
+check_redis ai-companion-redis "${REDIS_PASSWORD:-}" || true
 
 echo ""
 echo "=== Access URLs ==="

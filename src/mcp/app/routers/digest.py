@@ -74,12 +74,28 @@ async def digest_endpoint(hours: int = Query(24, ge=1, le=168)):
         logger.debug(f"Health check failed during digest: {e}")
         system_health = {"status": "unknown"}
 
-    # Recent activity log from Redis
-    recent_events = []
+    # Recent activity log from Redis — pull a wider slice so we can surface errors
+    # in the window even when the most recent 20 entries are all successful.
+    recent_events: list[dict] = []
+    error_items: list[dict] = []
     try:
-        log = get_log(get_redis(), limit=20)
+        log = get_log(get_redis(), limit=500)
         if isinstance(log, list):
-            recent_events = log
+            for entry in log:
+                ts = entry.get("timestamp")
+                if ts and ts < cutoff:
+                    # Entries older than the window — log is ordered newest-first,
+                    # so we can stop scanning here.
+                    break
+                recent_events.append(entry)
+                if entry.get("event") == "error":
+                    error_items.append({
+                        "timestamp": ts,
+                        "filename": entry.get("filename"),
+                        "artifact_id": entry.get("artifact_id"),
+                        "domain": entry.get("domain"),
+                        "detail": entry.get("detail") or entry.get("error") or entry.get("message"),
+                    })
     except Exception as e:
         logger.debug(f"Redis activity log unavailable for digest: {e}")
 
@@ -96,4 +112,8 @@ async def digest_endpoint(hours: int = Query(24, ge=1, le=168)):
         },
         "health": system_health,
         "recent_events": len(recent_events),
+        "errors": {
+            "count": len(error_items),
+            "items": error_items[:50],
+        },
     }

@@ -1,15 +1,11 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useCallback, useEffect, useRef, useState } from "react"
-import { MCP_BASE } from "@/lib/api"
-
-interface ActivityEntry {
-  agent: string
-  message: string
-  level: string
-  timestamp: number
-}
+import { useEffect, useRef } from "react"
+import {
+  useAgentActivityStream,
+  type ActivityEntry,
+} from "@/hooks/use-agent-activity-stream"
 
 const AGENT_COLORS: Record<string, string> = {
   QueryAgent: "text-blue-400",
@@ -19,63 +15,23 @@ const AGENT_COLORS: Record<string, string> = {
   Memory: "text-pink-400",
 }
 
-const MAX_ENTRIES = 100
-
 function formatTime(ts: number): string {
   const d = new Date(ts * 1000)
   return d.toLocaleTimeString("en-US", { hour12: false })
 }
 
-export default function AgentConsole() {
-  const [entries, setEntries] = useState<ActivityEntry[]>([])
-  const [connected, setConnected] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+interface AgentConsoleProps {
+  /**
+   * When false, the SSE connection is torn down. The parent (Agents tab
+   * host) flips this on unmount so the stream doesn't leak across tab
+   * changes — fixes the "keeps polling after user navigates away" bug.
+   */
+  enabled?: boolean
+}
+
+export default function AgentConsole({ enabled = true }: AgentConsoleProps) {
+  const { entries, status, error, reset } = useAgentActivityStream({ enabled })
   const scrollRef = useRef<HTMLDivElement>(null)
-  const esRef = useRef<EventSource | null>(null)
-  const connectRef = useRef<() => void>(() => {})
-
-  const connect = useCallback(() => {
-    if (esRef.current) {
-      esRef.current.close()
-    }
-
-    const url = `${MCP_BASE}/agents/activity/stream`
-    const es = new EventSource(url)
-    esRef.current = es
-
-    es.onopen = () => {
-      setConnected(true)
-      setError(null)
-    }
-
-    es.onmessage = (event) => {
-      try {
-        const data: ActivityEntry = JSON.parse(event.data)
-        setEntries((prev) => {
-          const next = [...prev, data]
-          return next.length > MAX_ENTRIES ? next.slice(-MAX_ENTRIES) : next
-        })
-      } catch {
-        // ignore parse errors from keepalives
-      }
-    }
-
-    es.onerror = () => {
-      setConnected(false)
-      setError("Connection to agent activity stream lost. Reconnecting...")
-      es.close()
-      // Reconnect after 3s
-      setTimeout(() => connectRef.current(), 3000)
-    }
-  }, [])
-
-  useEffect(() => {
-    connectRef.current = connect
-    connect()
-    return () => {
-      esRef.current?.close()
-    }
-  }, [connect])
 
   // Auto-scroll to bottom on new entries
   useEffect(() => {
@@ -83,6 +39,9 @@ export default function AgentConsole() {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
   }, [entries])
+
+  const connected = status === "open"
+  const banner = status === "unavailable" ? "unavailable" : error ? "error" : null
 
   return (
     <div className="flex h-full flex-col">
@@ -95,7 +54,22 @@ export default function AgentConsole() {
           {entries.length} events
         </span>
       </div>
-      {!connected && error && (
+      {banner === "unavailable" && (
+        <div className="flex items-center gap-2 border-b border-red-500/20 bg-red-500/10 px-4 py-2 text-xs text-red-400">
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" />
+          <span className="flex-1">
+            Agent activity unavailable — reload to retry.
+          </span>
+          <button
+            type="button"
+            onClick={reset}
+            className="rounded border border-red-500/40 px-2 py-0.5 text-red-300 hover:bg-red-500/20"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+      {banner === "error" && (
         <div className="flex items-center gap-2 border-b border-red-500/20 bg-red-500/10 px-4 py-2 text-xs text-red-400">
           <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500 animate-pulse" />
           {error}
@@ -110,7 +84,7 @@ export default function AgentConsole() {
             Waiting for agent activity...
           </p>
         )}
-        {entries.map((entry, i) => {
+        {entries.map((entry: ActivityEntry, i) => {
           const colorClass =
             AGENT_COLORS[entry.agent] ?? "text-muted-foreground"
           return (

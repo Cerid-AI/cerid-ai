@@ -564,6 +564,16 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.debug("Pre-warm embedding model failed: %s", e)
 
+    # Validate collection embedding dimensions against the configured embedder.
+    # Dim-locks inside existing Chroma collections are a silent landmine — we
+    # surface them at boot with a remediation pointer rather than blowing up
+    # on first ingest. Runs after pre-warm so ef.load() has happened.
+    try:
+        from app.startup import run_startup_dim_check
+        await asyncio.get_running_loop().run_in_executor(None, run_startup_dim_check)
+    except Exception as e:
+        logger.warning("Startup dim check errored (non-fatal): %s", e)
+
     # Warm up NLI model — the slow one (~45s on cold start due to model download).
     # Must use run_in_executor: running it directly blocked the event loop for the
     # entire download duration, causing healthcheck timeouts during startup.
@@ -749,6 +759,7 @@ _bridge_routers = [
     dlq.router,
     webhook_subscriptions.router,
     agent_console.router,
+    agent_console.activity_router,
     custom_agents.router,
     mcp_client.router,
     plugin_registry.router,

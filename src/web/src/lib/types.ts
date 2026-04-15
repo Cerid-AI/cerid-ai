@@ -419,6 +419,14 @@ export interface DigestArtifact {
   ingested_at: string
 }
 
+export interface DigestErrorItem {
+  timestamp?: string | null
+  filename?: string | null
+  artifact_id?: string | null
+  domain?: string | null
+  detail?: string | null
+}
+
 export interface DigestResponse {
   period_hours: number
   generated_at: string
@@ -430,6 +438,10 @@ export interface DigestResponse {
   relationships: { new_count: number }
   health: MaintenanceHealth
   recent_events: number
+  errors?: {
+    count: number
+    items: DigestErrorItem[]
+  }
 }
 
 export interface MaintenanceCollections {

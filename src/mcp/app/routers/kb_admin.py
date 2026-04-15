@@ -105,6 +105,27 @@ class ReingestResponse(BaseModel):
     timestamp: str
 
 
+class CollectionRepairRequest(BaseModel):
+    collection_name: str = Field(..., description="Chroma collection name to repair")
+    dry_run: bool = Field(
+        True,
+        description="When true (default), reports what would happen without touching state",
+    )
+
+
+class CollectionRepairResponse(BaseModel):
+    status: str
+    collection_name: str
+    domain: str
+    actual_dim: int | None
+    expected_dim: int
+    artifacts_found: int
+    rebuilt_documents: int
+    backup_path: str | None
+    dry_run: bool
+    message: str
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -375,6 +396,210 @@ async def delete_single_artifact(artifact_id: str):
     except Exception as e:
         logger.error("Failed to delete artifact %s: %s", artifact_id[:8], e)
         raise HTTPException(status_code=500, detail=f"Failed to delete artifact: {e}")
+
+
+def _derive_domain_from_collection(collection_name: str) -> str | None:
+    """Reverse ``config.collection_name()`` to recover the source domain.
+
+    Handles both legacy ``domain_{slug}`` and namespaced ``kb_{ns}_{slug}``.
+    Returns ``None`` if the collection name does not match either pattern
+    or the recovered slug is not a known domain.
+    """
+    slug: str | None = None
+    if collection_name.startswith("domain_"):
+        slug = collection_name[len("domain_"):]
+    elif collection_name.startswith("kb_"):
+        # kb_{ns}_{slug} — slug is everything after the second underscore
+        parts = collection_name.split("_", 2)
+        if len(parts) == 3:
+            slug = parts[2]
+    if slug and slug in config.DOMAINS:
+        return slug
+    return None
+
+
+def _backup_collection(chroma_client: Any, coll_name: str) -> tuple[str, int]:
+    """Export a collection's documents + metadata to JSONL under ``data/backups/``.
+
+    Returns ``(backup_path, document_count)``. Always creates the backup
+    directory; writes a single JSONL file timestamped to the second.
+    """
+    import json as _json
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    backup_dir = Path(config.DATA_DIR if hasattr(config, "DATA_DIR") else "data") / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    backup_path = backup_dir / f"{coll_name}_{ts}.jsonl"
+
+    try:
+        collection = chroma_client.get_collection(name=coll_name)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Collection not found: {coll_name} ({e})")
+
+    # Dump all documents. get() with no ids returns everything.
+    try:
+        dump = collection.get(include=["documents", "metadatas"])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to export collection: {e}")
+
+    ids = dump.get("ids", []) or []
+    documents = dump.get("documents", []) or []
+    metadatas = dump.get("metadatas", []) or []
+
+    with backup_path.open("w", encoding="utf-8") as fh:
+        for i, _id in enumerate(ids):
+            record = {
+                "id": _id,
+                "document": documents[i] if i < len(documents) else None,
+                "metadata": metadatas[i] if i < len(metadatas) else None,
+            }
+            fh.write(_json.dumps(record, default=str) + "\n")
+
+    return str(backup_path), len(ids)
+
+
+@router.post("/admin/collections/repair", response_model=CollectionRepairResponse)
+async def repair_collection(req: CollectionRepairRequest):
+    """Repair a dim-mismatched Chroma collection.
+
+    Pipeline (non-dry-run):
+      1. Backup docs + metadata to ``data/backups/<collection>_<ts>.jsonl``
+      2. Delete the collection (drops the dim lock)
+      3. Recreate via ``get_or_create_collection`` (picks up current ef dim)
+      4. Re-ingest every ``:Artifact`` that BELONGS_TO the collection's domain
+         using the existing ingestion pipeline — no chunking reimplementation.
+
+    Dry-run reports what would happen without touching anything.
+    """
+    from app.services.ingestion import ingest_content
+    from core.utils.embeddings import get_embedding_dim
+
+    coll_name = req.collection_name
+    domain = _derive_domain_from_collection(coll_name)
+    if domain is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Collection {coll_name!r} does not map to a known domain",
+        )
+
+    chroma = get_chroma()
+    neo4j = get_neo4j()
+
+    try:
+        expected_dim = get_embedding_dim()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not determine expected dim: {e}")
+
+    # Probe current dim (for reporting)
+    from app.startup import _probe_collection_dim
+    try:
+        existing = chroma.get_collection(name=coll_name)
+        actual_dim = _probe_collection_dim(existing)
+    except Exception:
+        actual_dim = None
+
+    # Find artifacts that would be re-ingested
+    artifacts = list_artifacts(neo4j, domain=domain, limit=10000)
+
+    if req.dry_run:
+        return CollectionRepairResponse(
+            status="dry_run",
+            collection_name=coll_name,
+            domain=domain,
+            actual_dim=actual_dim,
+            expected_dim=expected_dim,
+            artifacts_found=len(artifacts),
+            rebuilt_documents=0,
+            backup_path=None,
+            dry_run=True,
+            message=(
+                f"Dry run: would back up collection {coll_name!r}, delete it, recreate "
+                f"with dim={expected_dim}, and re-ingest {len(artifacts)} artifact(s)."
+            ),
+        )
+
+    # --- APPLY ---
+    backup_path, backed_up = _backup_collection(chroma, coll_name)
+    logger.warning(
+        "Repair: backed up %d docs from %s to %s", backed_up, coll_name, backup_path,
+    )
+
+    try:
+        chroma.delete_collection(name=coll_name)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete collection: {e}")
+
+    # Recreating will pick up the current embedder dim via _EmbeddingAwareClient.
+    chroma.get_or_create_collection(name=coll_name)
+
+    # Artifact nodes in Neo4j (``artifacts`` above) carry the canonical
+    # filename/domain/sub_category metadata; the raw chunk text lives only
+    # in the deleted ChromaDB collection, so we rehydrate via the JSONL
+    # backup rather than needing the source file on disk.
+    rebuilt = 0
+
+    # Replay the backup into the fresh collection via the public ingest path.
+    import json as _json
+    from pathlib import Path
+
+    replayed = 0
+    try:
+        with Path(backup_path).open("r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = _json.loads(line)
+                except Exception:
+                    continue
+                doc = rec.get("document")
+                meta = rec.get("metadata") or {}
+                if not doc:
+                    continue
+                try:
+                    ingest_content(
+                        content=doc,
+                        domain=domain,
+                        metadata={
+                            k: v for k, v in meta.items()
+                            if k in (
+                                "filename", "sub_category", "tags_json",
+                                "keywords_json", "summary", "client_source",
+                                "file_type",
+                            )
+                        },
+                    )
+                    replayed += 1
+                except Exception as e:
+                    logger.warning("Repair replay failed for one doc: %s", e)
+        rebuilt = replayed
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Backup replay failed (collection was dropped — restore from {backup_path}): {e}",
+        )
+
+    await invalidate_cache_non_blocking()
+
+    return CollectionRepairResponse(
+        status="repaired",
+        collection_name=coll_name,
+        domain=domain,
+        actual_dim=actual_dim,
+        expected_dim=expected_dim,
+        artifacts_found=len(artifacts),
+        rebuilt_documents=rebuilt,
+        backup_path=backup_path,
+        dry_run=False,
+        message=(
+            f"Repaired {coll_name!r}: backed up {backed_up} doc(s) to {backup_path}, "
+            f"recreated at dim={expected_dim}, replayed {rebuilt} doc(s)."
+        ),
+    )
 
 
 @router.get("/admin/kb/stats", response_model=KBStatsResponse)

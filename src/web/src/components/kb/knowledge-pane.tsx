@@ -548,7 +548,7 @@ export function KnowledgePane() {
         <p className="text-xs text-muted-foreground">
           {activeSearch
             ? `${results.length} results for "${activeSearch}"`
-            : `Showing ${Math.min(displayLimit, totalCount)} of ${totalCount} artifacts`}
+            : `Showing ${paginatedResults.length} of ${totalCount} artifacts`}
           {taxonomyFilter.subCategory && (
             <span className="ml-1 text-primary">
               in {taxonomyFilter.subCategory}

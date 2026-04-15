@@ -39,10 +39,35 @@ _LABELS_KEY = _CACHE_PREFIX + "labels"  # Hash: label_id -> entry_id
 
 # HNSW tuning parameters (sized for ~500-entry cache)
 _HNSW_SPACE = "cosine"
-_HNSW_DIM = int(os.getenv("SEMANTIC_CACHE_DIM", "768"))  # Arctic Embed M v1.5 default
 _HNSW_EF_CONSTRUCTION = 100
 _HNSW_M = 16
 _HNSW_EF = int(os.getenv("SEMANTIC_CACHE_HNSW_EF", "50"))
+
+
+def _resolve_hnsw_dim() -> int:
+    """Resolve the HNSW index dim from the configured embedder singleton.
+
+    Priority:
+    1. ``SEMANTIC_CACHE_DIM`` env var (explicit override — preserves the
+       ability to pin the cache dim independently for migration scenarios).
+    2. ``core.utils.embeddings.get_embedding_dim()`` — single source of
+       truth, keyed on ``EMBEDDING_MODEL``.
+    3. 768 fallback (Arctic Embed M v1.5) if resolution fails — matches
+       the historical default so behaviour is unchanged for users on the
+       default model even if the embedder probe fails at import time.
+    """
+    override = os.getenv("SEMANTIC_CACHE_DIM")
+    if override:
+        return int(override)
+    try:
+        from core.utils.embeddings import get_embedding_dim
+        return get_embedding_dim()
+    except Exception:
+        return 768
+
+
+# Arctic Embed M v1.5 default (768) when no override / embedder unavailable.
+_HNSW_DIM = _resolve_hnsw_dim()
 
 
 # ---------------------------------------------------------------------------
@@ -195,7 +220,12 @@ _index_lock = threading.Lock()
 
 
 def _get_index(redis_client: Any) -> _HNSWIndex:
-    """Get or initialize the HNSW index (lazy singleton)."""
+    """Get or initialize the HNSW index (lazy singleton).
+
+    Dim is resolved from the embedder singleton at first use (not at import
+    time) so that a late-configured ``EMBEDDING_MODEL`` is honoured without
+    reloading the module.
+    """
     global _index
     if _index is not None:
         return _index
@@ -204,7 +234,7 @@ def _get_index(redis_client: Any) -> _HNSWIndex:
         if _index is not None:
             return _index
 
-        idx = _HNSWIndex(dim=_HNSW_DIM, max_elements=SEMANTIC_CACHE_MAX_ENTRIES)
+        idx = _HNSWIndex(dim=_resolve_hnsw_dim(), max_elements=SEMANTIC_CACHE_MAX_ENTRIES)
         idx.load_from_redis(redis_client)
         _index = idx
         return _index
@@ -348,9 +378,9 @@ def invalidate_cache(redis_client: Any) -> int:
             if cursor == 0:
                 break
 
-        # Reinitialize empty index
+        # Reinitialize empty index (re-resolve dim in case embedder changed)
         with _index_lock:
-            _index = _HNSWIndex(dim=_HNSW_DIM, max_elements=SEMANTIC_CACHE_MAX_ENTRIES)
+            _index = _HNSWIndex(dim=_resolve_hnsw_dim(), max_elements=SEMANTIC_CACHE_MAX_ENTRIES)
 
         if count:
             logger.info("Semantic cache invalidated: %d keys", count)

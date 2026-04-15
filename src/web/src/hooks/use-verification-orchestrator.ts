@@ -122,8 +122,12 @@ export function useVerificationOrchestrator({
   const triggerCounter = useRef(0)
   const [triggerBump, setTriggerBump] = useState(0)
 
-  // Minimum response length (chars) to trigger verification — skip trivial replies
-  const MIN_VERIFIABLE_LENGTH = 200
+  // Minimum response length (chars) to trigger verification — skip trivial replies.
+  // MUST stay in sync with backend `HALLUCINATION_MIN_RESPONSE_LENGTH` (default 25,
+  // see src/mcp/config/settings.py). If the FE gate is higher than the BE gate,
+  // short-but-verifiable responses ("The capital of France is Paris.") never hit
+  // the verifier and the side panel renders the skipped/"no claims" empty state.
+  const MIN_VERIFIABLE_LENGTH = 25
 
   // Move trigger logic into useEffect to avoid render-body ref mutations
   // (unsafe in React 18 Concurrent Mode / StrictMode)
