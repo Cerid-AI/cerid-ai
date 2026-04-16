@@ -2,6 +2,40 @@
 
 All notable changes to cerid-ai are documented here.
 
+## v0.83.0 — Verification Hardening + Memory Efficacy + Bug-Hunt Sprint (2026-04-10 → 2026-04-15)
+
+### Verification Pipeline Hardening
+- **Round-2 claim sweep** — timed-out claims re-verified in a second pass with full conversation context
+- **Expert verification mode** — dedicated verification model for high-stakes claims
+- **Authoritative external verification** — LLM synthesizes from external data sources rather than parametric memory
+- **Graph-guided verification** — Neo4j relationship structure used as evidence for fact-relationship checks
+- **Dynamic confidence scoring** — per-source tuning (Wikipedia, Wolfram, DuckDuckGo)
+
+### Memory Efficacy
+- **Source-aware external query construction** — per-source `adapt_query()`/`is_relevant()` with intent-based routing
+- **CRAG retrieval quality gate** — supplements with external sources when KB results are poor
+- **Verified-fact-to-memory promotion** — high-confidence verified claims auto-promote to empirical memories
+- **Tiered memory authority boost** — 4-tier system (0.05-0.25) based on verification status
+- **Refresh-on-read memory decay** — Ebbinghaus rehearsal pattern
+- **NLI consolidation guard** — prevents semantic drift during memory merges
+
+### Bug-Hunt Sprint — 15 bugs → 8 root causes
+- **Embedding singleton** — fixed dimension mismatch on fresh installs + startup dim-check + `/admin/collections/repair`
+- **Agent activity stream** — `/agents/activity/*` alias router + SSE exponential backoff + abort-on-unmount
+- **Healthcheck rewrite** — shared library with auth-aware Redis/Neo4j checks + zombie container cleanup
+- **Onboarding polish** — `CERID_SYNC_DIR_HOST` rename, fixed CONTRIBUTING.md drift
+- **Verification wiring** — `MIN_VERIFIABLE_LENGTH` FE/BE alignment 200→25
+- **UX fixes** — tab title, KB counter unification, Knowledge Digest errors drill-through modal
+
+### Dependency Upgrades
+- langgraph 0.6 → 1.1, neo4j 5.28 → 6.1, TypeScript 5.9 → 6.0
+- Vite 7 → 8, jsdom 28 → 29, lucide-react v0.577 → v1.8
+- React 19.2.5, @tanstack/react-query 5.99
+
+### Testing & CI
+- +14 frontend tests (705 → 719), +4 backend tests
+- Sync manifest hygiene, Dependabot configuration updates
+
 ## v0.82.0 — Unified Implementation Plan + Phase C Architecture (2026-04-05 → 2026-04-10)
 
 ### Phase C: Core Extraction + NLI Architecture (2026-04-08 → 2026-04-10)
