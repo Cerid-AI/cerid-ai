@@ -54,11 +54,11 @@ function readBool(key: string, fallback: boolean): boolean {
 const SIMPLE_PANES = new Set<Pane>(["chat", "memories", "settings"])
 
 const TIER_CONFIG: Record<string, { label: string; wordmark: string; tierWord: string; tierClass: string; iconColor: string; icon: string }> = {
-  community: { label: "Core", wordmark: "CERID", tierWord: "CORE", tierClass: "text-muted-foreground", iconColor: "text-brand", icon: "/cerid-core.svg" },
+  community: { label: "AI", wordmark: "CERID", tierWord: "AI", tierClass: "text-muted-foreground", iconColor: "text-brand", icon: "/cerid-core.svg" },
   pro:       { label: "Pro",  wordmark: "CERID", tierWord: "PRO",  tierClass: "text-muted-foreground", iconColor: "text-brand", icon: "/cerid-pro.svg" },
   enterprise:{ label: "Vault",wordmark: "CERID", tierWord: "VAULT",tierClass: "text-gold",            iconColor: "text-gold",  icon: "/cerid-vault.svg" },
 }
-const TIER_LABELS: Record<string, string> = { community: "Core", pro: "Pro", enterprise: "Vault" }
+const TIER_LABELS: Record<string, string> = { community: "AI", pro: "Pro", enterprise: "Vault" }
 const TIER_COLORS: Record<string, string> = { community: "text-muted-foreground", pro: "text-brand", enterprise: "text-gold" }
 
 export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse, theme, onToggleTheme, featureTier, onCycleTier, activePanes }: SidebarProps) {

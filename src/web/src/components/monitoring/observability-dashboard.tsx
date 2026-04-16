@@ -149,13 +149,24 @@ function MetricCard({ title, icon: Icon, value, subtitle, sparklineData, trend, 
 // Grade badge
 // ---------------------------------------------------------------------------
 
-function GradeBadge({ grade, score }: { grade: string; score: number }) {
+function GradeBadge({ grade, score, noData }: { grade: string; score: number; noData?: boolean }) {
   const gradeColors: Record<string, string> = {
     A: "bg-green-500/15 text-green-700 dark:text-green-400",
     B: "bg-teal-500/15 text-teal-700 dark:text-teal-400",
     C: "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400",
     D: "bg-orange-500/15 text-orange-700 dark:text-orange-400",
     F: "bg-red-500/15 text-red-700 dark:text-red-400",
+  }
+
+  if (noData) {
+    return (
+      <span
+        className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-xs font-semibold text-muted-foreground"
+        title="Insufficient data — send some queries to build a health baseline"
+      >
+        — awaiting data
+      </span>
+    )
   }
 
   return (
@@ -298,7 +309,7 @@ export function ObservabilityDashboard() {
         <div className="flex items-center gap-2">
           <Gauge className="h-4 w-4 text-teal-500" />
           <span className="text-xs font-medium">System Health:</span>
-          <GradeBadge grade={healthData.grade} score={healthData.score} />
+          <GradeBadge grade={healthData.grade} score={healthData.score} noData={healthData.factors && Object.values(healthData.factors as Record<string, { status?: string }>).filter(f => f?.status === "no_data").length >= 2} />
         </div>
       )}
 

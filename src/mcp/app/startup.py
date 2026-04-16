@@ -44,7 +44,13 @@ def _probe_collection_dim(collection: Any) -> int | None:
     else:
         embeddings = getattr(peek, "embeddings", None)
 
-    if not embeddings:
+    if embeddings is None:
+        return None
+    # embeddings may be a numpy array — avoid boolean coercion.
+    try:
+        if len(embeddings) == 0:
+            return None
+    except TypeError:
         return None
 
     first = embeddings[0]
