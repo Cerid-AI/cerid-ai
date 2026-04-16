@@ -19,7 +19,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 - **Multi-Provider LLM Access** via Bifrost gateway (Claude, GPT, Grok, Gemini, DeepSeek, Llama)
 - **9 Intelligent Agents** — Query (LLM reranking), Triage (LangGraph), Rectification, Audit, Maintenance, Hallucination Detection, Memory Extraction, Curation, Self-RAG
 - **Trading Agent Integration** — 5 MCP tools + SDK endpoints for signal enrichment, herd detection, Kelly sizing, cascade confirmation, and longshot calibration (opt-in via `CERID_TRADING_ENABLED`)
-- **27 MCP Tools** for knowledge base, trading, web search, memory, and multi-modal operations via MCP protocol
+- **26 MCP Tools** for knowledge base, trading, web search, memory, and multi-modal operations via MCP protocol
 - **A2A Protocol** — Agent-to-Agent communication for remote agent discovery and task invocation
 - **Plugin System** — Extensible via manifest-based plugins (multi-modal KB, visual workflow builder)
 - **Observability Dashboard** — 8 Redis time-series metrics, health score grading, SVG sparklines
@@ -40,7 +40,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 - **Multi-Machine Sync** via Dropbox — JSONL export/import with auto-import on startup
 - **Source Attribution** — collapsible source references with relevance scores on chat responses
 - **Model Context Breaks** — provider-colored model badges, switch dividers between model changes
-- **GitHub Actions CI/CD** with 1,921+ tests (1376+ pytest + 545+ frontend)
+- **GitHub Actions CI/CD** with 3,100+ tests (2,413 pytest + 719 frontend)
 - **Three-Tier AI Categorization** (manual, smart, pro) via Bifrost
 - **Obsidian Vault Integration** — auto-sync vault notes into knowledge base
 - **Reproducible Builds** — pip-compile lock files with hashes, pinned Docker images, Dependabot
@@ -78,7 +78,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 │          /agent/audit           │    │   Grok, DeepSeek, etc.)  │
 │          /agent/maintain        │    └──────────────────────────┘
 │  SSE:   /mcp/sse /mcp/messages  │
-│  Tools: 27 MCP tools (pkb_*)   │
+│  Tools: 26 MCP tools (pkb_*)   │
 │  Search: Hybrid BM25 + vector   │
 │  Middleware: auth, rate-limit    │
 │  Scheduler: APScheduler         │
@@ -316,7 +316,7 @@ curl http://localhost:8888/ingest_log?limit=10
 
 **MCP SSE:** `/mcp/sse` (SSE stream) + `/mcp/messages` (JSON-RPC 2.0)
 
-**MCP Tools (18):** `pkb_query`, `pkb_ingest`, `pkb_ingest_file`, `pkb_health`, `pkb_collections`, `pkb_agent_query`, `pkb_artifacts`, `pkb_recategorize`, `pkb_triage`, `pkb_rectify`, `pkb_audit`, `pkb_maintain`, `pkb_curate`, `pkb_digest`, `pkb_scheduler_status`, `pkb_check_hallucinations`, `pkb_memory_extract`, `pkb_memory_archive`
+**MCP Tools (21 core + 5 trading):** `pkb_query`, `pkb_ingest`, `pkb_ingest_file`, `pkb_health`, `pkb_collections`, `pkb_agent_query`, `pkb_artifacts`, `pkb_recategorize`, `pkb_triage`, `pkb_rectify`, `pkb_audit`, `pkb_maintain`, `pkb_curate`, `pkb_digest`, `pkb_scheduler_status`, `pkb_check_hallucinations`, `pkb_memory_extract`, `pkb_memory_archive`, `pkb_memory_recall`, `pkb_web_search`, `pkb_ingest_multimodal` + 5 trading tools (opt-in)
 
 **Authentication (Phase 6D, opt-in):** Set `CERID_API_KEY` env var to enable. Requests require `X-API-Key` header. Exempt: `/health`, `/mcp/*`, `/docs`.
 **Rate Limiting:** `/agent/*` (20 req/min), `/ingest*` (10 req/min), `/recategorize*` (10 req/min) per client IP.
