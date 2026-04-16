@@ -58,7 +58,9 @@ export function HealthCards({ health }: HealthCardsProps) {
           const normalizedStatus = status.toLowerCase()
           const isOk = normalizedStatus === "connected" || normalizedStatus === "ok" || normalizedStatus === "healthy"
           const isSkipped = normalizedStatus.startsWith("skipped")
-          const statusLabel = isOk ? "connected" : isSkipped ? "skipped" : "error"
+          const isUnavailable = normalizedStatus === "unavailable" || normalizedStatus.includes("name or service not known") || normalizedStatus.includes("connection refused")
+          const isOptionalAbsent = isUnavailable && (name === "bifrost" || name === "ollama")
+          const statusLabel = isOk ? "connected" : isSkipped ? "skipped" : isOptionalAbsent ? "not configured" : "error"
           // Extract meaningful error detail for tooltip (strip "error: " prefix, case-insensitive)
           const errorDetail = !isOk && !isSkipped && normalizedStatus.startsWith("error:")
             ? status.slice(7).trim()
@@ -75,13 +77,13 @@ export function HealthCards({ health }: HealthCardsProps) {
                   <div
                     className={cn(
                       "h-2 w-2 rounded-full",
-                      isOk ? "bg-green-500" : isSkipped ? "bg-yellow-500" : "bg-red-500",
+                      isOk ? "bg-green-500" : isSkipped ? "bg-yellow-500" : isOptionalAbsent ? "bg-muted-foreground" : "bg-red-500",
                     )}
                     aria-hidden="true"
                   />
                   <span className="text-xs text-muted-foreground capitalize">{statusLabel}</span>
                 </div>
-                {errorDetail && (
+                {errorDetail && !isOptionalAbsent && (
                   <p className="mt-1 truncate text-xs text-destructive" title={errorDetail}>
                     {errorDetail.length > 60 ? `${errorDetail.slice(0, 60)}...` : errorDetail}
                   </p>

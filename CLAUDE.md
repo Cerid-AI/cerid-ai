@@ -12,7 +12,7 @@ Cerid AI is a self-hosted, privacy-first AI Knowledge Companion. RAG-powered ret
 cp .env.example .env                        # configure (set OPENROUTER_API_KEY)
 ./scripts/start-cerid.sh                    # start stack
 ./scripts/start-cerid.sh --build            # rebuild after code changes
-curl http://localhost:8888/health/ready      # verify
+curl http://localhost:8888/health             # verify
 ```
 
 ## Architecture
