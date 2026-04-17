@@ -111,13 +111,22 @@ BM25_DATA_DIR = os.path.join(os.getenv("DATA_DIR", "data"), "bm25")
 # proceeding to expensive reranking/generation.
 RETRIEVAL_QUALITY_THRESHOLD = float(os.getenv("RETRIEVAL_QUALITY_THRESHOLD", "0.4"))
 
-# Wall-clock ceiling for a single agent_query() call. Must stay well under
-# the event-loop watchdog's 45s heartbeat threshold — smart RAG on a fresh
-# install fans out across 6 KB collections + 4 external sources and, under
-# threadpool contention, can legitimately exceed 30s. Hitting the ceiling
-# triggers degraded-mode: partial results returned with source_status
-# flagged as "timeout" rather than aborting the request.
-AGENT_QUERY_BUDGET_SECONDS = float(os.getenv("AGENT_QUERY_BUDGET_SECONDS", "25.0"))
+# Wall-clock ceiling for a single agent_query() call. Two competing
+# constraints pick this value:
+#
+#   1. Must stay well under the event-loop watchdog's 45s heartbeat
+#      threshold so a single slow query can't trip the process kill.
+#   2. Must stay SHORT so the _QUERY_SEMAPHORE(2) queue drains fast —
+#      every /agent/query holds a semaphore permit for up to this
+#      many seconds, which blocks other KB queries and makes the chat
+#      experience feel hung even when /chat/stream itself is fast.
+#
+# 10s is the current sweet spot: long enough for a warm-cache smart RAG
+# on 6 domains to complete, short enough that a cold-start or
+# pathological query returns degraded results before the user loses
+# patience. Increase via env var if your hardware is slow enough that
+# this isn't enough budget for the happy path.
+AGENT_QUERY_BUDGET_SECONDS = float(os.getenv("AGENT_QUERY_BUDGET_SECONDS", "10.0"))
 
 # ---------------------------------------------------------------------------
 # Storage Monitoring
