@@ -9,6 +9,43 @@ A privacy-first, local-first workspace that unifies multi-domain knowledge bases
 
 ---
 
+## 5-minute quickstart
+
+If you have Docker, an OpenRouter API key, and macOS or Linux, this gets you a running chat in under 5 minutes.
+
+```bash
+# 1. Clone
+git clone git@github.com:Cerid-AI/cerid-ai.git && cd cerid-ai
+
+# 2. Configure (add your OPENROUTER_API_KEY to .env)
+cp .env.example .env
+$EDITOR .env          # only OPENROUTER_API_KEY is required
+
+# 3. Create archive folders (shell-portable helper — replaces brace
+#    expansion which breaks on dash/POSIX sh)
+./scripts/setup-archive.sh
+
+# 4. Start the stack
+./scripts/start-cerid.sh
+```
+
+**It's working when:** you can open <http://localhost:3000> and the header reads "Cerid AI" with green service dots (`chromadb`, `redis`, `neo4j` → `connected`) in the bottom-left status bar.
+
+**First query:** click **New Conversation**, then one of the suggested prompt cards. You'll see the AI respond and the verification pipeline flag any factual claims for cross-checking against your knowledge base.
+
+**Need help?**
+- `./scripts/validate-env.sh` — 14-check pre-flight that tells you what's missing or misconfigured
+- `curl http://localhost:8888/health` — JSON status of every backend service
+- `docker logs ai-companion-mcp --tail 50 -f` — tail the backend logs
+
+**Cost context:** the default model is the cheapest capable one from whichever provider you configured (e.g. `gpt-4o-mini` for OpenAI, ~$0.15 per 1M input tokens). $5 in OpenRouter credits typically gets a few hundred chat messages before you need to top up.
+
+**Stop the stack:** `docker compose down` from the repo root.
+
+For everything below — detailed prerequisites, architecture, API reference, second-machine setup, sync, backup — see the rest of this README or jump to the section you need.
+
+---
+
 ## Overview
 
 Cerid AI provides a unified interface for interacting with multiple LLM providers while maintaining complete control over your personal knowledge. All data stays local; only LLM API calls go external.
@@ -125,7 +162,7 @@ cp .env.example .env
 ### 2. Create Archive Folders
 
 ```bash
-mkdir -p ~/cerid-archive/{coding,finance,projects,personal,general,inbox}
+./scripts/setup-archive.sh        # shell-portable; creates ~/cerid-archive/{coding,finance,projects,personal,general,inbox}
 ```
 
 ### 3. Start Services
@@ -190,7 +227,7 @@ mkdir -p ~/.config/cerid
 # Option A: Dropbox sync (recommended for multi-machine)
 ln -s ~/Dropbox/cerid-archive ~/cerid-archive
 # Option B: Standalone (no sync)
-mkdir -p ~/cerid-archive/{coding,finance,projects,personal,general,inbox}
+./scripts/setup-archive.sh        # shell-portable; creates ~/cerid-archive/{coding,finance,projects,personal,general,inbox}
 
 # 6. Start services (first run builds all images — takes a few minutes)
 ./scripts/start-cerid.sh
