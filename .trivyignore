@@ -1,5 +1,20 @@
-# Base image vulnerabilities — cannot fix without upstream python:3.11-slim update
-# ncurses buffer overflow — base image dependency, no user-facing exposure
+# Base image vulnerabilities — cannot fix without upstream python:3.11-slim update.
+#
+# Sunset policy: every ignore carries a "Re-evaluate" date. When the date
+# lands, the entry must be removed and either (a) the upstream patch is
+# consumed, (b) the CVE is verifiably not exploitable in our container,
+# or (c) a new re-eval date is set with a fresh justification. Accumulating
+# forever-ignores is forbidden by this policy.
+
+# ncurses buffer overflow — base image dependency, no user-facing exposure.
+# Re-evaluate: 2026-06-01 (next Debian 13 point release window).
 CVE-2025-69720
-# systemd arbitrary code execution — base image libsystemd0/libudev1, containerized (no systemd running)
+
+# systemd arbitrary code execution — libsystemd0/libudev1 in the base image;
+# we run with no systemd instance so RegisterMachine et al. are unreachable.
+# Re-evaluate: 2026-06-01.
 CVE-2026-29111
+
+# OpenSSL DoS in Debian 13 — pending 3.5.5-1 patch from Debian security.
+# Re-evaluate: 2026-05-15 (Debian typically ships within 4-6 weeks of advisory).
+CVE-2026-28390

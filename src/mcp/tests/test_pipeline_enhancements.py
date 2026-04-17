@@ -649,6 +649,61 @@ class TestAuthoritativeVerification:
         assert _classify_claim_domain("Calculate the integral of x^2") == "computational"
         assert _classify_claim_domain("What color is the sky?") == "general"
 
+    def test_priority_breaks_ties_between_equal_match_counts(self):
+        """When two domains each match once, priority weight breaks the tie.
+        Scientific (weight 1.00) outranks financial (weight 0.90).
+
+        If one domain has more matches than another, match count wins —
+        priority only decides *ties*, not dominance. See other tests for
+        that case.
+        """
+        from core.agents.hallucination.authoritative_verify import (
+            _classify_claim_domain_detailed,
+        )
+        # "drug" → 1 scientific, "market" → 1 financial. Both single matches
+        # → priority weight decides → scientific wins.
+        result = _classify_claim_domain_detailed("The drug entered the market.")
+        assert result["primary"] == "scientific"
+        assert any(name == "financial" for name, _ in result["secondary"])
+
+    def test_match_count_dominates_priority_when_not_tied(self):
+        """Multi-match financial should beat single-match scientific — match
+        count dominates; priority is a tiebreaker, not a trump card."""
+        from core.agents.hallucination.authoritative_verify import (
+            _classify_claim_domain_detailed,
+        )
+        # "pharmaceutical" = 1 sci; "stock", "price" = 2 fin → financial wins.
+        result = _classify_claim_domain_detailed(
+            "How has the stock price of pharmaceutical companies moved?"
+        )
+        assert result["primary"] == "financial"
+        assert any(name == "scientific" for name, _ in result["secondary"])
+
+    def test_domain_confidence_is_high_when_only_one_matches(self):
+        from core.agents.hallucination.authoritative_verify import (
+            _classify_claim_domain_detailed,
+        )
+        result = _classify_claim_domain_detailed(
+            "What is the molecular weight of aspirin?"
+        )
+        assert result["primary"] == "scientific"
+        assert result["confidence"] == 1.0
+        assert result["secondary"] == []
+
+    def test_domain_confidence_is_lower_when_tied(self):
+        """Equal single-hit across two domains → low confidence signal so
+        downstream can query multiple registries."""
+        from core.agents.hallucination.authoritative_verify import (
+            _classify_claim_domain_detailed,
+        )
+        # One hit each in two domains → scores close to equal, priority
+        # weighting breaks the tie but confidence should be small.
+        result = _classify_claim_domain_detailed(
+            "Calculate the GDP growth rate."
+        )
+        assert result["primary"] in ("financial", "computational")
+        assert 0 < result["confidence"] < 0.2  # tight margin
+
     def test_returns_empty_when_disabled(self):
         from core.agents.hallucination.authoritative_verify import verify_claim_authoritatively
 

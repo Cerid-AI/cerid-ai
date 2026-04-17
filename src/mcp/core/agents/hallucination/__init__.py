@@ -60,7 +60,7 @@ from core.agents.hallucination.streaming import (  # noqa: F401
 # Re-exports from verification.py
 # ---------------------------------------------------------------------------
 # System prompts (accessed by tests via inline import)
-from core.agents.hallucination.verification import (  # noqa: F401  # noqa: F401
+from core.agents.hallucination.verification import (  # noqa: F401
     _SYSTEM_CITATION_VERIFICATION,
     _SYSTEM_CONSISTENCY_CHECK,
     _SYSTEM_CURRENT_EVENT_VERIFICATION,
@@ -81,3 +81,23 @@ from core.agents.hallucination.verification import (  # noqa: F401  # noqa: F401
     _verify_claim_externally,
     verify_claim,
 )
+
+
+# Explicit public API. Private helpers above (prefixed `_`) are only re-exported
+# for existing test patch targets and are NOT part of the public contract —
+# tests import them directly from their concrete submodules in new code. When
+# `from core.agents.hallucination import *` runs (agents/hallucination/__init__.py
+# bridge), only these names are pulled; the bridge re-imports the private
+# helpers explicitly for the same test-compatibility reason. Keeping __all__
+# narrow lets import-linter + pyright enforce the layer boundary.
+__all__ = [
+    # Public functions
+    "extract_claims",
+    "check_hallucinations",
+    "verify_response_streaming",
+    "verify_claim",
+    "get_hallucination_report",
+    # Public constants
+    "REDIS_HALLUCINATION_PREFIX",
+    "REDIS_HALLUCINATION_TTL",
+]
