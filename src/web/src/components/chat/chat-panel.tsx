@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useCallback, useState, useMemo, useSyncExternalStore } from "react"
+import { useEffect, useCallback, useState, useMemo, useRef, useSyncExternalStore } from "react"
 import { Group, Panel, Separator as PanelSeparator } from "react-resizable-panels"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -34,6 +34,8 @@ import { useVerificationOrchestrator } from "@/hooks/use-verification-orchestrat
 import { useUIMode } from "@/contexts/ui-mode-context"
 import { UploadDialog } from "@/components/kb/upload-dialog"
 import { useQuery } from "@tanstack/react-query"
+import { fetchSetupStatus } from "@/lib/api/settings"
+import { deriveDefaultModel } from "@/lib/derive-defaults"
 import { uploadFile, enableOllama, fetchOllamaStatus, fetchOllamaRecommendations, pullOllamaModel, fetchHealthStatus, retestServices, MCP_BASE, mcpHeaders } from "@/lib/api"
 import type { ChatMessage } from "@/lib/types"
 import { MODELS } from "@/lib/types"
@@ -119,7 +121,34 @@ export function ChatPanel() {
     privateModeLevel,
   })
 
-  const [selectedModel, setSelectedModel] = useState(MODELS[0].id)
+  // Default model derived from the user's actually-configured providers —
+  // previously hardcoded to MODELS[0] (Claude Sonnet 4.6), which failed on
+  // the first message for users who only configured OpenAI or no provider
+  // capable of that model. See lib/derive-defaults.ts for the priority table.
+  const { data: setupStatusForDefault } = useQuery({
+    queryKey: ["setup-status"],
+    queryFn: fetchSetupStatus,
+    staleTime: 60_000,
+  })
+  const [selectedModel, setSelectedModel] = useState(() => {
+    const configuredProviders = setupStatusForDefault?.configured_providers ?? []
+    const providers = configuredProviders.map((id) => ({ id, configured: true }))
+    const derived = deriveDefaultModel(providers)
+    return derived ?? MODELS[0].id
+  })
+  // Track whether the user has manually picked a model — if so, never
+  // overwrite on late-arriving setup status.
+  const userPickedModelRef = useRef(false)
+  useEffect(() => {
+    if (userPickedModelRef.current) return
+    if (!setupStatusForDefault) return
+    const configuredProviders = setupStatusForDefault.configured_providers ?? []
+    const providers = configuredProviders.map((id) => ({ id, configured: true }))
+    const derived = deriveDefaultModel(providers)
+    if (derived && derived !== selectedModel) {
+      setSelectedModel(derived)
+    }
+  }, [setupStatusForDefault, selectedModel])
   const [showKB, setShowKB] = useState(() => window.innerWidth >= 1024)
   const [pendingChatFiles, setPendingChatFiles] = useState<File[]>([])
   const [focusedClaimIndex, setFocusedClaimIndex] = useState<number | null>(null)
@@ -300,6 +329,7 @@ export function ChatPanel() {
       currentModel: currentModelObj,
       messages: active?.messages ?? [],
       onModelChange: (modelId) => {
+        userPickedModelRef.current = true
         setSelectedModel(modelId)
         if (activeId) updateModel(activeId, modelId)
       },

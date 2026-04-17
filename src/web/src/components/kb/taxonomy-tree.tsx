@@ -44,12 +44,22 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts, onRecateg
     return (
       <div className="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground">
         <Loader2 className="h-3 w-3 animate-spin" />
-        Loading taxonomy...
+        Loading taxonomy…
       </div>
     )
   }
 
-  if (!taxonomy?.domains) return null
+  // Empty-state: taxonomy endpoint returned an empty / null response.
+  // Previously this `return null` rendered a silent void, making the
+  // tree look stuck. Now we surface the state so the user knows the
+  // request completed and the taxonomy is genuinely unpopulated.
+  if (!taxonomy?.domains || Object.keys(taxonomy.domains).length === 0) {
+    return (
+      <div className="px-2 py-3 text-xs text-muted-foreground/70">
+        No taxonomy yet — it builds as you ingest documents.
+      </div>
+    )
+  }
 
   const toggleExpand = (domain: string) => {
     setExpanded((prev) => {
