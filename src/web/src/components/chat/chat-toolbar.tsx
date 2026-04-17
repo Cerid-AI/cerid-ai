@@ -297,13 +297,32 @@ export function ChatToolbar({
           menuContent={
             <>
               <MenuLabel>RAG Mode</MenuLabel>
-              <MenuRadioItem checked={ragMode === "manual"} onClick={() => setRagMode("manual")}>Manual — you pick docs</MenuRadioItem>
-              <MenuRadioItem checked={ragMode === "smart"} onClick={() => setRagMode("smart")}>Smart — auto-retrieval</MenuRadioItem>
+              <MenuRadioItem checked={ragMode === "manual"} onClick={() => setRagMode("manual")}>
+                <div className="flex flex-col gap-0.5">
+                  <span>Manual — you pick docs</span>
+                  <span className="text-[10px] font-normal text-muted-foreground">
+                    Only documents you @mention or drag in are included.
+                  </span>
+                </div>
+              </MenuRadioItem>
+              <MenuRadioItem checked={ragMode === "smart"} onClick={() => setRagMode("smart")}>
+                <div className="flex flex-col gap-0.5">
+                  <span>Smart — auto-retrieval</span>
+                  <span className="text-[10px] font-normal text-muted-foreground">
+                    Searches your KB on every message and injects matches.
+                  </span>
+                </div>
+              </MenuRadioItem>
               <MenuRadioItem checked={ragMode === "custom_smart"} onClick={() => setRagMode("custom_smart")}>
-                <span className="flex items-center gap-1">
-                  Custom
-                  <Badge variant="outline" className="text-[9px] ml-1 px-1 py-0 text-gold">Pro</Badge>
-                </span>
+                <div className="flex flex-col gap-0.5">
+                  <span className="flex items-center gap-1">
+                    Custom
+                    <Badge variant="outline" className="text-[9px] ml-1 px-1 py-0">Advanced</Badge>
+                  </span>
+                  <span className="text-[10px] font-normal text-muted-foreground">
+                    Tune source weights + thresholds manually.
+                  </span>
+                </div>
               </MenuRadioItem>
             </>
           }
