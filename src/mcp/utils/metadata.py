@@ -75,6 +75,36 @@ def extract_metadata(text: str, filename: str, domain: str) -> dict[str, Any]:
     }
 
 
+def extract_metadata_minimal(text: str, filename: str, domain: str) -> dict[str, Any]:
+    """Fast-path metadata for wizard / bulk ingest — skips spaCy + tiktoken.
+
+    Returns a structurally-identical dict to extract_metadata() but
+    substitutes cheap filename-derived keywords and a raw-prefix summary
+    for the NLP-heavy versions. estimated_tokens uses a rough char/4
+    heuristic which is ±15% for English prose.
+
+    Use this when the caller is willing to trade keyword/summary quality
+    for sub-100ms ingest latency (wizard first-run, batch re-ingest).
+    The resulting artifact can be re-enriched later by the curator agent.
+    """
+    file_type = Path(filename).suffix.lstrip(".").lower()
+    # Filename-derived keyword hint: split stem on word separators, drop
+    # short tokens. Stable and cheap — zero NLP dependencies.
+    stem = Path(filename).stem
+    stem_words = [w.lower() for w in stem.replace("-", "_").split("_") if len(w) > 2]
+    return {
+        "filename": filename,
+        "file_type": file_type,
+        "domain": domain,
+        "ingested_at": utcnow_iso(),
+        "char_count": len(text),
+        "estimated_tokens": len(text) // 4,
+        "keywords": json.dumps(stem_words[:5]),
+        "summary": _extract_summary(text),
+        "metadata_mode": "minimal",  # audit trail — curator can re-enrich
+    }
+
+
 def _extract_summary(text: str, max_len: int = 200) -> str:
     """Extract a meaningful summary from the first portion of text.
 

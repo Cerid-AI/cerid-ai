@@ -23,7 +23,7 @@ from app.deps import get_chroma, get_neo4j, get_redis
 from app.parsers import parse_file
 from utils import cache
 from utils.chunker import chunk_text, make_context_header
-from utils.metadata import ai_categorize, extract_metadata
+from utils.metadata import ai_categorize, extract_metadata, extract_metadata_minimal
 from utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion")
@@ -187,8 +187,16 @@ def ingest_content(
     content: str,
     domain: str = "general",
     metadata: dict[str, Any] | None = None,
+    *,
+    skip_quality: bool = False,
 ) -> dict:
-    """Core ingest path. Called by REST endpoints, agents, and MCP tool dispatcher."""
+    """Core ingest path. Called by REST endpoints, agents, and MCP tool dispatcher.
+
+    When ``skip_quality`` is True the weighted 4-dimension quality score is
+    skipped (neutral 0.5 stored) — used by wizard / bulk paths that don't
+    have the summary/keywords the quality function expects. The curator
+    agent can re-score later when artifact metadata is enriched.
+    """
     chroma = get_chroma()
     coll_name = config.collection_name(domain)
     collection = chroma.get_or_create_collection(name=coll_name)
@@ -281,17 +289,22 @@ def ingest_content(
     except Exception as e:
         logger.warning(f"BM25 indexing failed (non-blocking): {e}")
 
-    # Compute quality_score using weighted 4-dimension formula
-    from utils.quality import compute_quality_score as _compute_quality
+    # Compute quality_score using weighted 4-dimension formula (skip in fast
+    # paths where summary/keywords haven't been populated — curator re-scores
+    # later; neutral 0.5 lets retrieval work in the meantime).
+    if skip_quality:
+        quality_score = 0.5
+    else:
+        from utils.quality import compute_quality_score as _compute_quality
 
-    quality_score = _compute_quality(
-        summary=base_meta.get("summary", ""),
-        keywords=base_meta.get("keywords_json", "[]"),
-        tags=base_meta.get("tags_json", "[]"),
-        sub_category=base_meta.get("sub_category", ""),
-        default_sub_category=config.DEFAULT_SUB_CATEGORY,
-        ingested_at=base_meta.get("ingested_at"),
-    )
+        quality_score = _compute_quality(
+            summary=base_meta.get("summary", ""),
+            keywords=base_meta.get("keywords_json", "[]"),
+            tags=base_meta.get("tags_json", "[]"),
+            sub_category=base_meta.get("sub_category", ""),
+            default_sub_category=config.DEFAULT_SUB_CATEGORY,
+            ingested_at=base_meta.get("ingested_at"),
+        )
 
     artifact_created = False
     try:
@@ -416,15 +429,30 @@ async def ingest_file(
     tags: str = "",
     categorize_mode: str = "",
     client_source: str = "",
+    *,
+    skip_metadata: bool = False,
+    skip_quality: bool = False,
 ) -> dict:
-    """Parse a file, extract metadata, optionally AI-categorize, chunk, and store."""
+    """Parse a file, extract metadata, optionally AI-categorize, chunk, and store.
+
+    ``skip_metadata`` swaps the NLP-heavy ``extract_metadata()`` (spaCy NER
+    + tiktoken) for the fast ``extract_metadata_minimal()`` fallback used
+    by the setup wizard — trades keyword/summary quality for sub-100ms
+    latency. ``skip_quality`` is threaded into ``ingest_content`` and skips
+    the 4-dimension quality scorer. Both flags are opt-in and default False;
+    the frontend sets them on the wizard's "Try It Out" ingest so the user
+    isn't waiting for metadata extraction before their first query.
+    """
     validate_file_path(file_path)
     filename = Path(file_path).name
     # Run sync parser in thread pool to avoid blocking the event loop
     # (CPU-bound: PDF/DOCX parsing can take 100ms–2s per file)
     parsed = await asyncio.to_thread(parse_file, file_path)
     text = parsed["text"]
-    meta = extract_metadata(text, filename, domain or config.DEFAULT_DOMAIN)
+    if skip_metadata:
+        meta = extract_metadata_minimal(text, filename, domain or config.DEFAULT_DOMAIN)
+    else:
+        meta = extract_metadata(text, filename, domain or config.DEFAULT_DOMAIN)
     mode = categorize_mode or (
         "manual" if domain and domain in config.DOMAINS else config.CATEGORIZE_MODE
     )
@@ -460,7 +488,9 @@ async def ingest_file(
         meta["client_source"] = client_source
     # Run sync ingest_content in thread pool to avoid blocking the event loop
     # (I/O-bound: Neo4j, ChromaDB, Redis writes + CPU-bound tiktoken chunking)
-    result = await asyncio.to_thread(ingest_content, text, domain, meta)
+    result = await asyncio.to_thread(
+        ingest_content, text, domain, meta, skip_quality=skip_quality,
+    )
     result["filename"] = filename
     result["categorize_mode"] = mode
     result["metadata"] = {
