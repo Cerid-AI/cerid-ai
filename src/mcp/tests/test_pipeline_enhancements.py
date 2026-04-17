@@ -669,6 +669,85 @@ class TestAuthoritativeVerification:
         assert result["authoritative_sources"] == []
         assert "No authoritative sources" in result["evidence_summary"]
 
+    def test_expert_mode_return_carries_structured_evidence(self):
+        """Expert-mode verification must surface authoritative_sources,
+        claim_domain, cross_validation and evidence_summary in its return
+        so downstream SSE/audit/UI consumers can show *which* sources and
+        NLI scores drove the verdict — not just the LLM's narrative answer."""
+        from core.agents.hallucination import verification
+
+        fake_auth = {
+            "authoritative_sources": [
+                {"source": "Wikipedia", "content": "snippet",
+                 "source_url": "https://en.wikipedia.org/example",
+                 "nli_entailment": 0.82, "nli_contradiction": 0.02},
+            ],
+            "cross_validation": {"kb_vs_external_agreement": 0.91},
+            "claim_domain": "scientific",
+            "evidence_summary": "1 authoritative source supports the claim.",
+        }
+        fake_llm_response = {
+            "choices": [{
+                "message": {
+                    "content": '{"verdict": "supported", "confidence": 0.95, "reasoning": "ok"}',
+                    "annotations": [],
+                },
+            }],
+        }
+
+        with (
+            patch(
+                "core.agents.hallucination.authoritative_verify.verify_claim_authoritatively",
+                new_callable=AsyncMock, return_value=fake_auth,
+            ),
+            patch(
+                "core.utils.llm_client.call_llm_raw",
+                new_callable=AsyncMock, return_value=fake_llm_response,
+            ),
+            patch("config.EXPERT_VERIFY_USE_AUTHORITATIVE_SOURCES", True),
+        ):
+            result = _run(verification._verify_claim_externally(
+                "Aspirin has a molecular weight of 180.16 g/mol",
+                generating_model="openai/gpt-4o-mini",
+                expert_mode=True,
+            ))
+
+        assert result.get("status") == "verified"
+        assert result["authoritative_sources"] == fake_auth["authoritative_sources"]
+        assert result["claim_domain"] == "scientific"
+        assert result["cross_validation"] == fake_auth["cross_validation"]
+        assert result["evidence_summary"] == fake_auth["evidence_summary"]
+
+    def test_non_expert_mode_does_not_include_authoritative_fields(self):
+        """Without expert_mode, the cheap cross-model path must NOT attach
+        authoritative fields — they'd be confusing zero-valued noise in
+        the SSE payload."""
+        from core.agents.hallucination import verification
+
+        fake_llm_response = {
+            "choices": [{
+                "message": {
+                    "content": '{"status": "verified", "confidence": 0.9, "reason": "ok"}',
+                    "annotations": [],
+                },
+            }],
+        }
+
+        with patch(
+            "core.utils.llm_client.call_llm_raw",
+            new_callable=AsyncMock, return_value=fake_llm_response,
+        ):
+            result = _run(verification._verify_claim_externally(
+                "Some factual claim",
+                generating_model="openai/gpt-4o-mini",
+                expert_mode=False,
+            ))
+
+        assert "authoritative_sources" not in result
+        assert "claim_domain" not in result
+        assert "cross_validation" not in result
+        assert "evidence_summary" not in result
+
 
 # ===========================================================================
 # 10. Memory Type in create_memory_node

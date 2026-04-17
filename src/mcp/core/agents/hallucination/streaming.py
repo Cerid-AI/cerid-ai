@@ -861,6 +861,26 @@ async def verify_response_streaming(
                 "verification_model": result.get("verification_model"),
                 "source_urls": result.get("source_urls", []),
                 "verification_answer": result.get("verification_answer", ""),
+                # Expert-mode authoritative evidence — surfaces per-source NLI
+                # scores, domain classification, and KB-vs-external cross
+                # validation so the UI can show *why* a verdict was reached.
+                # Fields are omitted entirely when not in expert/authoritative path.
+                **(
+                    {"authoritative_sources": result["authoritative_sources"]}
+                    if result.get("authoritative_sources") else {}
+                ),
+                **(
+                    {"claim_domain": result["claim_domain"]}
+                    if result.get("claim_domain") else {}
+                ),
+                **(
+                    {"cross_validation": result["cross_validation"]}
+                    if result.get("cross_validation") else {}
+                ),
+                **(
+                    {"evidence_summary": result["evidence_summary"]}
+                    if result.get("evidence_summary") else {}
+                ),
                 **({"circular_source": True} if result.get("circular_source") else {}),
             }
 
