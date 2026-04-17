@@ -926,6 +926,11 @@ async def _verify_claim_externally(
     # Expert mode: override model selection with the expert-tier model
     # AND gather authoritative external evidence before sending to LLM
     _authoritative_evidence: str = ""
+    # Structured copy of the authoritative_verify result so downstream consumers
+    # (SSE stream, audit log, verified-memory promotion) can show *which* sources
+    # drove the verdict — previously the LLM-facing prompt string was the only
+    # artifact that survived, hiding per-source NLI scores and domain classification.
+    _authoritative_result: dict[str, Any] | None = None
     if expert_mode:
         if is_current_event:
             verify_model = config.VERIFICATION_EXPERT_MODEL + ":online"
@@ -945,6 +950,7 @@ async def _verify_claim_externally(
                     kb_results=[{"content": kb_snippet}] if kb_snippet else None,
                     conversation_context=conversation_context,
                 )
+                _authoritative_result = auth_result
                 auth_sources = auth_result.get("authoritative_sources", [])
                 if auth_sources:
                     evidence_lines = [
@@ -1181,6 +1187,16 @@ async def _verify_claim_externally(
                 "verification_model": verify_model,
                 "verification_answer": raw_answer,
                 "source_urls": source_urls,
+                **(
+                    {
+                        "authoritative_sources": _authoritative_result.get("authoritative_sources", []),
+                        "claim_domain": _authoritative_result.get("claim_domain", "general"),
+                        "cross_validation": _authoritative_result.get("cross_validation", {}),
+                        "evidence_summary": _authoritative_result.get("evidence_summary", ""),
+                    }
+                    if _authoritative_result
+                    else {}
+                ),
             }
 
         except CreditExhaustedError as credit_err:
@@ -1876,6 +1892,16 @@ async def verify_claim(
                     # If any authoritative source has strong entailment, upgrade to verified
                     strong_support = [s for s in auth_sources if s.get("nli_entailment", 0) >= 0.7]
                     strong_contradict = [s for s in auth_sources if s.get("nli_contradiction", 0) >= 0.6]
+                    # Full structured evidence for downstream audit/UI — previously
+                    # only the scalar verdict + source_urls survived, losing
+                    # per-source NLI scores, domain classification, and
+                    # KB-vs-external cross-validation agreement.
+                    _auth_payload = {
+                        "authoritative_sources": auth_sources,
+                        "claim_domain": auth.get("claim_domain", "general"),
+                        "cross_validation": auth.get("cross_validation", {}),
+                        "evidence_summary": auth.get("evidence_summary", ""),
+                    }
                     if strong_support:
                         return await _cache_result({
                             "claim": claim,
@@ -1884,6 +1910,7 @@ async def verify_claim(
                             "reason": f"Authoritative source confirmed: {strong_support[0].get('source', 'external')}",
                             "verification_method": "authoritative",
                             "source_urls": [s.get("source_url", "") for s in strong_support if s.get("source_url")],
+                            **_auth_payload,
                             **_kb_source_fields(top_result),
                         })
                     if strong_contradict:
@@ -1894,6 +1921,7 @@ async def verify_claim(
                             "reason": f"Authoritative source contradicts: {strong_contradict[0].get('source', 'external')}",
                             "verification_method": "authoritative",
                             "source_urls": [s.get("source_url", "") for s in strong_contradict if s.get("source_url")],
+                            **_auth_payload,
                             **_kb_source_fields(top_result),
                         })
                 except Exception:

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -78,14 +78,17 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
   const [regeneratingSynopsis, setRegeneratingSynopsis] = useState(false)
   const cardRef = useRef<HTMLDivElement>(null)
 
-  // Scroll card into view when expanding via card click
-  const prevExpanded = useRef(expanded)
-  if (expanded && !prevExpanded.current) {
-    requestAnimationFrame(() => {
+  // Scroll card into view when expanded. Gated by useEffect so React Compiler
+  // doesn't see a render-phase ref write (prior code updated prevExpanded in
+  // the render body), and the RAF is cancelled on unmount or rapid re-expand
+  // so two quick toggles don't queue two scroll animations.
+  useEffect(() => {
+    if (!expanded) return
+    const rafId = requestAnimationFrame(() => {
       cardRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" })
     })
-  }
-  prevExpanded.current = expanded
+    return () => cancelAnimationFrame(rafId)
+  }, [expanded])
   const relevancePct = Math.round(result.relevance * 100)
   const showRelevance = result.relevance > 0
   const isBrowseMode = result.relevance === 0

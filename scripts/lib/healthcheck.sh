@@ -178,9 +178,14 @@ check_redis() {
         return 1
     fi
 
+    # REDISCLI_AUTH is the documented env-var alternative to -a <password>;
+    # it never appears in the container's process list (ps/audit logs/docker
+    # inspect), so using it instead of the flag eliminates the leak risk if
+    # the container's stdout or `docker exec` invocations are ever captured.
     local out
     if [ -n "$password" ]; then
-        out=$(docker exec "$container" redis-cli -a "$password" --no-auth-warning ping 2>/dev/null || echo "")
+        out=$(docker exec -e "REDISCLI_AUTH=$password" "$container" \
+              redis-cli --no-auth-warning ping 2>/dev/null || echo "")
     else
         out=$(docker exec "$container" redis-cli ping 2>/dev/null || echo "")
     fi

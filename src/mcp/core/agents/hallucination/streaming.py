@@ -861,6 +861,26 @@ async def verify_response_streaming(
                 "verification_model": result.get("verification_model"),
                 "source_urls": result.get("source_urls", []),
                 "verification_answer": result.get("verification_answer", ""),
+                # Expert-mode authoritative evidence — surfaces per-source NLI
+                # scores, domain classification, and KB-vs-external cross
+                # validation so the UI can show *why* a verdict was reached.
+                # Fields are omitted entirely when not in expert/authoritative path.
+                **(
+                    {"authoritative_sources": result["authoritative_sources"]}
+                    if result.get("authoritative_sources") else {}
+                ),
+                **(
+                    {"claim_domain": result["claim_domain"]}
+                    if result.get("claim_domain") else {}
+                ),
+                **(
+                    {"cross_validation": result["cross_validation"]}
+                    if result.get("cross_validation") else {}
+                ),
+                **(
+                    {"evidence_summary": result["evidence_summary"]}
+                    if result.get("evidence_summary") else {}
+                ),
                 **({"circular_source": True} if result.get("circular_source") else {}),
             }
 
@@ -890,6 +910,20 @@ async def verify_response_streaming(
             )
         except Exception:
             pass
+        # Explicit SSE error event — without this the frontend sees the stream
+        # end mid-verification with no diagnostic and has to guess whether it
+        # succeeded, failed, or is hung. The summary at the bottom of this
+        # generator is still emitted as a "guaranteed" terminator; this event
+        # tells the client *why* claims after this point are missing.
+        yield {
+            "type": "error",
+            "error_type": "stream_interrupted",
+            "phase": "verification",
+            "message": str(loop_exc)[:500],
+            "claims_seen": verified_count + unverified_count + uncertain_count,
+            "claims_total": len(claims),
+            "recoverable": True,
+        }
 
     # --- Consistency checking (cross-turn + internal contradictions) ---
     # Launch as a background task so it overlaps with summary emission and

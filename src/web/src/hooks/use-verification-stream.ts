@@ -360,10 +360,20 @@ export function useVerificationStream(
                   }
                   break
 
-                case "error":
+                case "error": {
                   setPhase("error")
-                  logEntry("Verification error", "error")
+                  // Use the detailed payload surfaced by streaming.py when
+                  // available (error_type / phase / message / claims_seen).
+                  // Falls back to a generic message for forward-compat with
+                  // older backends that still emit bare error events.
+                  const detail = event.message ? `: ${String(event.message).slice(0, 200)}` : ""
+                  const errPhase = event.phase ? ` (${event.phase})` : ""
+                  const seen = typeof event.claims_seen === "number" && typeof event.claims_total === "number"
+                    ? ` — ${event.claims_seen}/${event.claims_total} claims processed before failure`
+                    : ""
+                  logEntry(`Verification error${errPhase}${detail}${seen}`, "error")
                   break
+                }
               }
             } catch {
               // Skip malformed JSON lines

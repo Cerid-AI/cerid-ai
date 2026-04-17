@@ -1055,7 +1055,7 @@ async def agent_query(
                 results.extend(_crag_results)
                 logger.info(
                     "CRAG gate: top_rel=%.3f < %.3f — supplemented with %d external results",
-                    _top_rel, config.RETRIEVAL_QUALITY_THRESHOLD, len(_crag_results),
+                    _top_rel, _crag_threshold, len(_crag_results),
                 )
         except Exception:
             logger.debug("CRAG gate: external source query failed (non-blocking)")

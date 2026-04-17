@@ -406,6 +406,67 @@ class TestVerifiedMemoryPromotion:
         assert counts["promoted"] == 0
         assert counts["errors"] == 0
 
+    def test_concurrent_promotion_of_same_claim_serializes(self):
+        """Two concurrent promotions of the same claim must NOT both pass
+        the dedup check before either writes. The per-claim async lock in
+        verified_memory.py serializes the critical section."""
+        from core.agents.verified_memory import promote_verified_facts
+
+        claim = "The concurrent-serialize test claim — distinct text"
+        report = {
+            "conversation_id": "conv-race",
+            "claims": [
+                {"claim": claim, "verdict": "supported",
+                 "confidence": 0.95, "type": "factual", "nli_entailment": 0.9, "sources": []},
+            ],
+        }
+
+        gate = asyncio.Event()
+        detect_order: list[int] = []
+
+        async def slow_detect(text, *args, **kwargs):
+            detect_order.append(1)
+            if len(detect_order) == 1:
+                await gate.wait()
+            return []
+
+        create_calls: list[str] = []
+
+        def counting_create(driver, data):
+            create_calls.append(data["text"])
+            return f"mem-{len(create_calls)}"
+
+        async def drive():
+            with patch("core.agents.memory.detect_memory_conflict", side_effect=slow_detect):
+                t1 = asyncio.create_task(promote_verified_facts(
+                    report, MagicMock(), MagicMock(), create_memory_fn=counting_create,
+                ))
+                # Yield so t1 enters the critical section
+                await asyncio.sleep(0)
+                await asyncio.sleep(0)
+                t2 = asyncio.create_task(promote_verified_facts(
+                    report, MagicMock(), MagicMock(), create_memory_fn=counting_create,
+                ))
+                # Yield so t2 reaches the lock and blocks
+                await asyncio.sleep(0)
+                await asyncio.sleep(0)
+
+                # While t1 holds the lock, t2 MUST be blocked — only one detect call so far
+                assert len(detect_order) == 1, (
+                    f"second task slipped past the lock: detect_order={detect_order}"
+                )
+
+                gate.set()
+                await asyncio.gather(t1, t2)
+
+        _run(drive())
+
+        # Both eventually ran their detect check
+        assert len(detect_order) == 2
+        # Both created (mocks don't simulate post-create dedup) — the property under
+        # test is the serialization order, not the create-count.
+        assert len(create_calls) == 2
+
 
 # ===========================================================================
 # 5. Tiered Authority Boost
@@ -607,6 +668,85 @@ class TestAuthoritativeVerification:
             result = _run(verify_claim_authoritatively("aspirin molecular weight"))
         assert result["authoritative_sources"] == []
         assert "No authoritative sources" in result["evidence_summary"]
+
+    def test_expert_mode_return_carries_structured_evidence(self):
+        """Expert-mode verification must surface authoritative_sources,
+        claim_domain, cross_validation and evidence_summary in its return
+        so downstream SSE/audit/UI consumers can show *which* sources and
+        NLI scores drove the verdict — not just the LLM's narrative answer."""
+        from core.agents.hallucination import verification
+
+        fake_auth = {
+            "authoritative_sources": [
+                {"source": "Wikipedia", "content": "snippet",
+                 "source_url": "https://en.wikipedia.org/example",
+                 "nli_entailment": 0.82, "nli_contradiction": 0.02},
+            ],
+            "cross_validation": {"kb_vs_external_agreement": 0.91},
+            "claim_domain": "scientific",
+            "evidence_summary": "1 authoritative source supports the claim.",
+        }
+        fake_llm_response = {
+            "choices": [{
+                "message": {
+                    "content": '{"verdict": "supported", "confidence": 0.95, "reasoning": "ok"}',
+                    "annotations": [],
+                },
+            }],
+        }
+
+        with (
+            patch(
+                "core.agents.hallucination.authoritative_verify.verify_claim_authoritatively",
+                new_callable=AsyncMock, return_value=fake_auth,
+            ),
+            patch(
+                "core.utils.llm_client.call_llm_raw",
+                new_callable=AsyncMock, return_value=fake_llm_response,
+            ),
+            patch("config.EXPERT_VERIFY_USE_AUTHORITATIVE_SOURCES", True),
+        ):
+            result = _run(verification._verify_claim_externally(
+                "Aspirin has a molecular weight of 180.16 g/mol",
+                generating_model="openai/gpt-4o-mini",
+                expert_mode=True,
+            ))
+
+        assert result.get("status") == "verified"
+        assert result["authoritative_sources"] == fake_auth["authoritative_sources"]
+        assert result["claim_domain"] == "scientific"
+        assert result["cross_validation"] == fake_auth["cross_validation"]
+        assert result["evidence_summary"] == fake_auth["evidence_summary"]
+
+    def test_non_expert_mode_does_not_include_authoritative_fields(self):
+        """Without expert_mode, the cheap cross-model path must NOT attach
+        authoritative fields — they'd be confusing zero-valued noise in
+        the SSE payload."""
+        from core.agents.hallucination import verification
+
+        fake_llm_response = {
+            "choices": [{
+                "message": {
+                    "content": '{"status": "verified", "confidence": 0.9, "reason": "ok"}',
+                    "annotations": [],
+                },
+            }],
+        }
+
+        with patch(
+            "core.utils.llm_client.call_llm_raw",
+            new_callable=AsyncMock, return_value=fake_llm_response,
+        ):
+            result = _run(verification._verify_claim_externally(
+                "Some factual claim",
+                generating_model="openai/gpt-4o-mini",
+                expert_mode=False,
+            ))
+
+        assert "authoritative_sources" not in result
+        assert "claim_domain" not in result
+        assert "cross_validation" not in result
+        assert "evidence_summary" not in result
 
 
 # ===========================================================================
