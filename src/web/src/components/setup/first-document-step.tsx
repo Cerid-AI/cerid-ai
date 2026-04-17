@@ -51,10 +51,13 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
       // Use manual categorization in wizard — AI categorization is unreliable
       // before providers are configured, and adds 2-5s latency
       await uploadFile(file, { categorizeMode: "manual", domain: "general", skipQuality: true, skipMetadata: true })
-      setIngestProgress("Indexing...")
-      // Brief delay to let ChromaDB flush writes before enabling queries
-      await new Promise((r) => setTimeout(r, 300))
       setIngestProgress(null)
+      // No artificial wait here — the backend's query retry on empty results
+      // handles ChromaDB's write-flush window (usually <100ms but can spike on
+      // slow disks), and the user's natural think-time before typing the first
+      // query dwarfs the flush delay in practice. Deleting the 300ms fixed
+      // setTimeout that used to live here: it was too short on slow hardware
+      // (silent empty results) and pure latency on fast hardware.
       setPhase("chat")
       onChange({ ...state, ingested: true })
     } catch {
