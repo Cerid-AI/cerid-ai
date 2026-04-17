@@ -376,8 +376,16 @@ else
         echo "  The embedding sidecar runs natively and uses your GPU for faster ingestion."
         echo "  Hardware: ${CERID_GPU_LABEL:-Unknown}"
         echo ""
-        read -r -p "  Install embedding sidecar for faster ingestion? [Y/n]: " SIDECAR_ANSWER </dev/tty 2>/dev/null || SIDECAR_ANSWER="n"
-        if [ "${SIDECAR_ANSWER,,}" != "n" ]; then
+        SIDECAR_ANSWER=""
+        if [ -t 0 ] && [ -r /dev/tty ]; then
+            read -r -p "  Install embedding sidecar for faster ingestion? [Y/n]: " SIDECAR_ANSWER </dev/tty 2>/dev/null || SIDECAR_ANSWER=""
+        else
+            echo "  (non-interactive shell — skipping sidecar prompt; export CERID_INSTALL_SIDECAR=1 to force install)"
+            [ "${CERID_INSTALL_SIDECAR:-}" = "1" ] && SIDECAR_ANSWER="y"
+        fi
+        # POSIX-portable lowercase (avoids bash 4+ ${VAR,,} which fails on macOS /bin/bash 3.2)
+        SIDECAR_LOWER=$(printf '%s' "${SIDECAR_ANSWER:-n}" | tr '[:upper:]' '[:lower:]')
+        if [ "$SIDECAR_LOWER" != "n" ]; then
             echo "[sidecar] Installing..."
             bash "$CERID_ROOT/scripts/install-sidecar.sh"
             # Start sidecar in background
@@ -421,7 +429,13 @@ if [ -z "$OLLAMA_CONFIGURED" ]; then
         echo "            Install via: brew install ollama && ollama serve"
     fi
     echo ""
-    read -r -p "  Install Ollama add-on? [y/N]: " OLLAMA_ANSWER </dev/tty 2>/dev/null || OLLAMA_ANSWER="n"
+    OLLAMA_ANSWER="n"
+    if [ -t 0 ] && [ -r /dev/tty ]; then
+        read -r -p "  Install Ollama add-on? [y/N]: " OLLAMA_ANSWER </dev/tty 2>/dev/null || OLLAMA_ANSWER="n"
+    else
+        echo "  (non-interactive shell — skipping Ollama prompt; export CERID_INSTALL_OLLAMA=1 to force install)"
+        [ "${CERID_INSTALL_OLLAMA:-}" = "1" ] && OLLAMA_ANSWER="y"
+    fi
 
     if [[ "$OLLAMA_ANSWER" =~ ^[Yy]$ ]]; then
         echo "OLLAMA_ENABLED=true" >> "$ENV_FILE"
