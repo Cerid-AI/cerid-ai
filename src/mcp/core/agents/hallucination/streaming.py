@@ -910,6 +910,20 @@ async def verify_response_streaming(
             )
         except Exception:
             pass
+        # Explicit SSE error event — without this the frontend sees the stream
+        # end mid-verification with no diagnostic and has to guess whether it
+        # succeeded, failed, or is hung. The summary at the bottom of this
+        # generator is still emitted as a "guaranteed" terminator; this event
+        # tells the client *why* claims after this point are missing.
+        yield {
+            "type": "error",
+            "error_type": "stream_interrupted",
+            "phase": "verification",
+            "message": str(loop_exc)[:500],
+            "claims_seen": verified_count + unverified_count + uncertain_count,
+            "claims_total": len(claims),
+            "recoverable": True,
+        }
 
     # --- Consistency checking (cross-turn + internal contradictions) ---
     # Launch as a background task so it overlaps with summary emission and

@@ -482,12 +482,46 @@ async def _post_configure_warmup() -> None:
             _logger.info("Post-configure: Embedding model pre-warmed")
     except Exception as e:
         _logger.debug("Post-configure: Embedding warmup failed: %s", e)
+
+    # Re-run the verification self-test now that API keys are live. Without
+    # this, a user who completes setup with a valid key still sees the old
+    # startup-time "fail" result (cached up to 1h) in the health panel, and
+    # has no in-product way to know the system is actually healthy.
+    try:
+        from agents.hallucination.startup_self_test import run_verification_self_test
+        from app.deps import get_redis
+        result = await run_verification_self_test(get_redis())
+        _logger.info(
+            "Post-configure verification self-test: status=%s method=%s claims=%d",
+            result.get("status"), result.get("extraction_method"), result.get("claims_found"),
+        )
+    except Exception as e:
+        _logger.debug("Post-configure self-test failed: %s", e)
     _logger.info("Post-configure warmup complete")
 
 
 # ---------------------------------------------------------------------------
 # Pool reset — recovers from transient startup failures without a restart
 # ---------------------------------------------------------------------------
+
+
+@router.post("/retest-verification")
+async def retest_verification() -> dict:
+    """Re-run the verification pipeline self-test and overwrite cached status.
+
+    The frontend Health panel exposes this as a "Re-check" button so a user
+    who fixes a bad API key doesn't have to wait for the 1h self-test TTL
+    or restart the container to see verification flip from "offline" to
+    "healthy".
+    """
+    try:
+        from agents.hallucination.startup_self_test import run_verification_self_test
+        from app.deps import get_redis
+        result = await run_verification_self_test(get_redis())
+        return {"ok": True, "result": result}
+    except Exception as exc:
+        _logger.exception("retest-verification failed")
+        return {"ok": False, "error": str(exc)}
 
 
 @router.post("/retest-services")
