@@ -31,6 +31,16 @@ async def upload_file_endpoint(
     sub_category: str = Query("", description="Sub-category within domain"),
     tags: str = Query("", description="Comma-separated tags or JSON array"),
     categorize_mode: str = Query("", description="Categorization tier: manual, smart, or pro"),
+    skip_metadata: bool = Query(
+        False,
+        description="Skip spaCy/tiktoken metadata extraction (wizard fast-path). "
+                    "Filename-derived keywords used instead; curator re-enriches later.",
+    ),
+    skip_quality: bool = Query(
+        False,
+        description="Skip 4-dimension quality score (stores neutral 0.5). "
+                    "Use with skip_metadata for sub-100ms wizard ingest.",
+    ),
 ):
     """Accept a multipart file upload, validate it, and ingest into the knowledge base.
 
@@ -75,18 +85,24 @@ async def upload_file_endpoint(
         # and concurrent requests (mirrors ingest_file in ingestion.py).
         from app.parsers import parse_file as _parse_file
         from app.services.ingestion import ingest_content
+        from utils.metadata import extract_metadata, extract_metadata_minimal
 
         parsed = await asyncio.to_thread(_parse_file, tmp_path)
         text = parsed.get("text", "")
         if not text.strip():
             raise ValueError(f"No text extracted from '{file.filename}'")
 
-        metadata = {
-            "filename": file.filename,
-            "file_type": parsed.get("file_type", ""),
-            "sub_category": sub_category,
-            "client_source": "upload",
-        }
+        # Honor skip_metadata: the wizard's fast-path swaps the spaCy + tiktoken
+        # pipeline for filename-derived keywords so Try-It-Out doesn't block
+        # on NLP cold-start. Enriched metadata can be re-computed later by
+        # the curator agent without re-ingesting the file.
+        if skip_metadata:
+            metadata = extract_metadata_minimal(text, file.filename, domain or "general")
+        else:
+            metadata = extract_metadata(text, file.filename, domain or "general")
+        metadata["file_type"] = parsed.get("file_type", metadata.get("file_type", ""))
+        metadata["sub_category"] = sub_category
+        metadata["client_source"] = "upload"
         # Add optional parsed fields, filtering out None (ChromaDB rejects None)
         for key in ("page_count", "table_count", "form_field_count"):
             val = parsed.get(key)
@@ -97,6 +113,7 @@ async def upload_file_endpoint(
             text,
             domain or "general",
             metadata,
+            skip_quality=skip_quality,
         )
         result["categorize_mode"] = categorize_mode or "smart"
         result["metadata"] = metadata

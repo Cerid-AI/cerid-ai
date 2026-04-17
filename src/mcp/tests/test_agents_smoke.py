@@ -166,6 +166,50 @@ class TestSelfRagImports:
         assert callable(self_rag_enhance)
 
 
+class TestMetadataFastPath:
+    """extract_metadata_minimal is the wizard's fast-path alternative to the
+    NLP-heavy extract_metadata. The two must be shape-compatible — downstream
+    consumers read the same keys from both."""
+
+    def test_minimal_has_same_keys_as_full_plus_audit_marker(self):
+        from utils.metadata import extract_metadata, extract_metadata_minimal
+
+        text = "The quick brown fox jumps over the lazy dog. " * 20
+        full = extract_metadata(text, "test_doc.pdf", "general")
+        fast = extract_metadata_minimal(text, "test_doc.pdf", "general")
+
+        # All of full's keys must be present in fast (so downstream doesn't break)
+        for key in full.keys():
+            assert key in fast, f"{key} missing from minimal metadata"
+        # Fast-path adds an audit marker so the curator knows to re-enrich
+        assert fast["metadata_mode"] == "minimal"
+        assert "metadata_mode" not in full
+
+    def test_minimal_is_nlp_free(self):
+        """The fast-path must not invoke spaCy or tiktoken — proven by patching
+        both and asserting neither is called."""
+        from unittest.mock import MagicMock, patch
+        from utils.metadata import extract_metadata_minimal
+
+        with (
+            patch("utils.metadata._get_nlp", MagicMock()) as mock_nlp,
+            patch("utils.metadata._ENCODING", MagicMock()) as mock_enc,
+        ):
+            extract_metadata_minimal("some text", "file_name_parts.pdf", "general")
+        mock_nlp.assert_not_called()
+        mock_enc.encode.assert_not_called()
+
+    def test_minimal_derives_keywords_from_filename(self):
+        from utils.metadata import extract_metadata_minimal
+        import json
+
+        meta = extract_metadata_minimal("", "annual_financial_report.pdf", "finance")
+        kws = json.loads(meta["keywords"])
+        assert "annual" in kws
+        assert "financial" in kws
+        assert "report" in kws
+
+
 class TestSelfRagSmoke:
     def test_enhance_short_circuits_when_no_claims_extracted(self):
         """No-claims path must return the original query_result without
