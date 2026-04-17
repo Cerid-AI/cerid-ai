@@ -21,7 +21,7 @@ const MonitoringPane = lazy(() => import("@/components/monitoring/monitoring-pan
 const AuditPane = lazy(() => import("@/components/audit/audit-pane"))
 const MemoriesPane = lazy(() => import("@/components/memories/memories-pane"))
 const SettingsPane = lazy(() => import("@/components/settings/settings-pane"))
-const AgentConsole = lazy(() => import("@/components/agents/agent-console"))
+const AgentsPane = lazy(() => import("@/components/agents/agents-pane"))
 
 function PaneLoader() {
   return (
@@ -147,7 +147,7 @@ export default function App() {
                   {activePane === "monitoring" && <MonitoringPane />}
                   {activePane === "audit" && <AuditPane />}
                   {activePane === "memories" && <MemoriesPane />}
-                  {activePane === "agents" && <AgentConsole />}
+                  {activePane === "agents" && <AgentsPane />}
                   {activePane === "settings" && <SettingsPane />}
                 </Suspense>
               </PaneErrorBoundary>

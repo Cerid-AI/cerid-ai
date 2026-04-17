@@ -11,6 +11,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
 import { RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { FirstRunSuggestions } from "./first-run-suggestions"
 import { MessageBubble, type MessageVerificationStatus } from "./message-bubble"
 import { ModelSwitchDivider } from "./model-switch-divider"
 import type { ChatMessage, HallucinationReport } from "@/lib/types"
@@ -50,6 +51,9 @@ interface ChatMessagesProps {
   onRetry?: (userContent: string) => void
   /** Re-run verification for the last assistant message. */
   onReVerify?: () => void
+  /** Called when a first-run suggestion card is clicked. Parent wires this
+   * to the chat input (populate text + optionally submit). */
+  onPickSuggestion?: (prompt: string) => void
 }
 
 export function ChatMessages({
@@ -68,6 +72,7 @@ export function ChatMessages({
   onEnrich,
   onRetry,
   onReVerify,
+  onPickSuggestion,
 }: ChatMessagesProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -84,9 +89,13 @@ export function ChatMessages({
     <ScrollArea className="min-h-0 flex-1 px-4" ref={scrollRef}>
       <div className="mx-auto max-w-4xl py-4">
         {messages.length === 0 && (
-          <div className="flex items-center justify-center py-20 text-muted-foreground">
-            <p>Start a conversation...</p>
-          </div>
+          onPickSuggestion ? (
+            <FirstRunSuggestions onPickSuggestion={onPickSuggestion} />
+          ) : (
+            <div className="flex items-center justify-center py-20 text-muted-foreground">
+              <p>Start a conversation…</p>
+            </div>
+          )
         )}
         {messages.map((msg, i) => {
           let divider: React.ReactNode = null

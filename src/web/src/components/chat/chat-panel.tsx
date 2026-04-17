@@ -765,6 +765,13 @@ export function ChatPanel() {
           smartSuggestions.clear()
         }}
         onReVerify={handleVerifyMessage}
+        onPickSuggestion={(prompt) => {
+          // First-run suggestion clicked — send immediately so the user sees
+          // Cerid respond right away. Alternative would be to populate the
+          // input and let them edit; we pick send because the suggestions
+          // are already well-formed introductory prompts.
+          handleSend(prompt)
+        }}
       />
 
       {/* Smart KB suggestions (advanced only) */}
