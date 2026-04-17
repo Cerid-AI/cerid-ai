@@ -111,6 +111,14 @@ BM25_DATA_DIR = os.path.join(os.getenv("DATA_DIR", "data"), "bm25")
 # proceeding to expensive reranking/generation.
 RETRIEVAL_QUALITY_THRESHOLD = float(os.getenv("RETRIEVAL_QUALITY_THRESHOLD", "0.4"))
 
+# Wall-clock ceiling for a single agent_query() call. Must stay well under
+# the event-loop watchdog's 45s heartbeat threshold — smart RAG on a fresh
+# install fans out across 6 KB collections + 4 external sources and, under
+# threadpool contention, can legitimately exceed 30s. Hitting the ceiling
+# triggers degraded-mode: partial results returned with source_status
+# flagged as "timeout" rather than aborting the request.
+AGENT_QUERY_BUDGET_SECONDS = float(os.getenv("AGENT_QUERY_BUDGET_SECONDS", "25.0"))
+
 # ---------------------------------------------------------------------------
 # Storage Monitoring
 # ---------------------------------------------------------------------------

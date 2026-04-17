@@ -835,8 +835,21 @@ export function KnowledgePane() {
               )}
 
               {!isLoading && !isError && results.length === 0 && (
-                <div className="py-12 text-center text-sm text-muted-foreground">
-                  {activeSearch ? "No results found" : "No artifacts in the knowledge base"}
+                <div className="py-12 text-center">
+                  {activeSearch ? (
+                    <p className="text-sm text-muted-foreground">
+                      No artifacts match &ldquo;{activeSearch}&rdquo;
+                    </p>
+                  ) : (
+                    <>
+                      <p className="text-sm font-medium text-muted-foreground">
+                        No artifacts yet
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground/70">
+                        Drop files into the upload zone above, or click Upload to browse.
+                      </p>
+                    </>
+                  )}
                 </div>
               )}
 

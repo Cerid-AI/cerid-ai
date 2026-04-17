@@ -4,6 +4,7 @@
 import { useState, useMemo } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { InfoTip } from "@/components/ui/info-tip"
 import { cn } from "@/lib/utils"
 import {
   Activity,
@@ -116,13 +117,18 @@ interface MetricCardProps {
   sparklineData?: number[]
   trend?: { current: number | null; previous: number | null }
   accentColor?: string
+  /** Glossary key for an InfoTip next to the title. See lib/glossary.ts. */
+  infoTerm?: string
 }
 
-function MetricCard({ title, icon: Icon, value, subtitle, sparklineData, trend, accentColor = "text-teal-500" }: MetricCardProps) {
+function MetricCard({ title, icon: Icon, value, subtitle, sparklineData, trend, accentColor = "text-teal-500", infoTerm }: MetricCardProps) {
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between space-y-0 p-3 pb-1">
-        <CardTitle className="text-xs font-medium text-muted-foreground">{title}</CardTitle>
+        <CardTitle className="text-xs font-medium text-muted-foreground">
+          {title}
+          {infoTerm && <> <InfoTip term={infoTerm} /></>}
+        </CardTitle>
         <Icon className={cn("h-4 w-4", accentColor)} />
       </CardHeader>
       <CardContent className="p-3 pt-0">
@@ -319,7 +325,9 @@ export function ObservabilityDashboard() {
           {/* Degradation Tier Card */}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 p-3 pb-1">
-              <CardTitle className="text-xs font-medium text-muted-foreground">Degradation Tier</CardTitle>
+              <CardTitle className="text-xs font-medium text-muted-foreground">
+                Degradation Tier <InfoTip term="degradation-tier" />
+              </CardTitle>
               <Shield className="h-4 w-4 text-teal-500" />
             </CardHeader>
             <CardContent className="p-3 pt-0">
@@ -364,7 +372,9 @@ export function ObservabilityDashboard() {
           {/* Pipeline Routing Card */}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 p-3 pb-1">
-              <CardTitle className="text-xs font-medium text-muted-foreground">Pipeline Routing</CardTitle>
+              <CardTitle className="text-xs font-medium text-muted-foreground">
+                Pipeline Routing <InfoTip term="pipeline-routing" />
+              </CardTitle>
               <Cpu className="h-4 w-4 text-purple-500" />
             </CardHeader>
             <CardContent className="p-3 pt-0">
@@ -454,6 +464,7 @@ export function ObservabilityDashboard() {
           subtitle={`${formatCount(metrics?.verification_accuracy?.count)} checks`}
           sparklineData={sparklines.verification_accuracy}
           accentColor="text-green-500"
+          infoTerm="response-verification"
         />
 
         <MetricCard
@@ -474,6 +485,7 @@ export function ObservabilityDashboard() {
           subtitle={`${formatCount(metrics?.retrieval_ndcg?.count)} evals`}
           sparklineData={sparklines.retrieval_ndcg}
           accentColor="text-teal-500"
+          infoTerm="ndcg-at-5"
         />
       </div>
       )}

@@ -904,6 +904,78 @@ async def agent_query(
     skip_cache: bool = False,
     metadata_filter: dict | None = None,
 ) -> dict[str, Any]:
+    """Budget-gated public entry for multi-domain query.
+
+    Wraps ``_agent_query_impl`` in ``asyncio.wait_for`` with the configured
+    wall-clock ceiling (``AGENT_QUERY_BUDGET_SECONDS``, default 25s) so a
+    pathologically slow retrieval can never block the event loop past the
+    45s watchdog. On timeout, returns a structured "degraded" response
+    rather than raising — the caller (frontend or downstream pipeline) can
+    surface a helpful message and let the user retry or narrow the query.
+    """
+    budget = getattr(config, "AGENT_QUERY_BUDGET_SECONDS", 25.0)
+    try:
+        return await asyncio.wait_for(
+            _agent_query_impl(
+                query=query,
+                domains=domains,
+                top_k=top_k,
+                use_reranking=use_reranking,
+                conversation_messages=conversation_messages,
+                chroma_client=chroma_client,
+                redis_client=redis_client,
+                neo4j_driver=neo4j_driver,
+                debug_timing=debug_timing,
+                allowed_domains=allowed_domains,
+                strict_domains=strict_domains,
+                model=model,
+                graph_store=graph_store,
+                skip_cache=skip_cache,
+                metadata_filter=metadata_filter,
+            ),
+            timeout=budget,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "agent_query exceeded %.1fs wall-clock budget for query=%r (degraded response returned)",
+            budget, query[:80],
+        )
+        return {
+            "results": [],
+            "context": "",
+            "answer": "",
+            "sources": [],
+            "source_breakdown": {"kb": [], "memory": [], "external": []},
+            "source_status": {"kb": "timeout", "memory": "timeout", "external": "timeout"},
+            "strategy": "degraded_budget_exhausted",
+            "budget_exceeded": True,
+            "budget_seconds": budget,
+            "degraded_reason": (
+                "Retrieval took longer than the configured budget. "
+                "This usually means the system is under load or the query "
+                "matched many large collections. Try a more specific query "
+                "or narrow the domain filter."
+            ),
+        }
+
+
+async def _agent_query_impl(
+    query: str,
+    domains: list[str] | None = None,
+    top_k: int = 10,
+    use_reranking: bool = True,
+    conversation_messages: list[dict[str, str]] | None = None,
+    chroma_client: Any | None = None,
+    redis_client: Any | None = None,
+    neo4j_driver: Any | None = None,
+    debug_timing: bool = False,
+    allowed_domains: list[str] | None = None,
+    strict_domains: bool = False,
+    model: str | None = None,
+    graph_store: GraphStore | None = None,
+    skip_cache: bool = False,
+    metadata_filter: dict | None = None,
+) -> dict[str, Any]:
     """Execute multi-domain query with reranking, graph expansion, and context assembly."""
     timer = StepTimer(enabled=debug_timing)
     from config.features import (

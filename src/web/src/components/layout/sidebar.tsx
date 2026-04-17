@@ -18,6 +18,7 @@ import { useUIMode } from "@/contexts/ui-mode-context"
 import { MODELS } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { fetchModelUpdatesFull } from "@/lib/api"
+import { fetchHealth } from "@/lib/api/settings"
 
 export type Pane = "chat" | "knowledge" | "monitoring" | "audit" | "memories" | "agents" | "settings"
 
@@ -76,6 +77,17 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
     staleTime: 120_000,
   })
   const updateCount = modelUpdates?.updates?.length ?? 0
+
+  // Backend version — shown in the sidebar footer so bug reports include it.
+  // Slow refetch (5m) because version only flips on MCP container restart.
+  const { data: health } = useQuery({
+    queryKey: ["health-for-version"],
+    queryFn: fetchHealth,
+    refetchInterval: 300_000,
+    staleTime: 120_000,
+    retry: 1,
+  })
+  const backendVersion = health?.version
 
   const visibleNav = isSimple ? NAV_ITEMS.filter((n) => SIMPLE_PANES.has(n.pane)) : NAV_ITEMS
 
@@ -254,7 +266,8 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
 
         {/* Bottom controls */}
         <div className="space-y-1 border-t p-2">
-          {/* Mode toggle */}
+          {/* Mode toggle — label unambiguously states CURRENT mode +
+              hover/click affordance for what the toggle does. */}
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -263,12 +276,15 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
                   collapsed && "justify-center px-0"
                 )}
                 onClick={toggleMode}
-                aria-label={isSimple ? "Switch to advanced mode" : "Switch to simple mode"}
+                aria-label={`Mode: ${isSimple ? "Simple" : "Advanced"}. Click to switch to ${isSimple ? "Advanced" : "Simple"}.`}
               >
                 {!collapsed ? (
                   <>
                     <span className="flex-1 text-left text-xs text-muted-foreground">
-                      {isSimple ? "Simple" : "Advanced"}
+                      Mode:{" "}
+                      <span className="font-medium text-foreground">
+                        {isSimple ? "Simple" : "Advanced"}
+                      </span>
                     </span>
                     <Switch checked={!isSimple} className="scale-75" />
                   </>
@@ -279,11 +295,16 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
                 )}
               </button>
             </TooltipTrigger>
-            {collapsed && (
-              <TooltipContent side="right">
-                {isSimple ? "Simple mode — click for Advanced" : "Advanced mode — click for Simple"}
-              </TooltipContent>
-            )}
+            <TooltipContent side="right" className="max-w-xs text-xs">
+              <p className="font-medium">
+                {isSimple ? "Simple mode" : "Advanced mode"}
+              </p>
+              <p className="mt-1 text-muted-foreground">
+                {isSimple
+                  ? "Hides pipeline internals, verification knobs, and tuning sliders. Click to switch to Advanced."
+                  : "Shows all retrieval, verification, and tuning controls. Click to switch to Simple."}
+              </p>
+            </TooltipContent>
           </Tooltip>
 
           {/* Theme toggle */}
@@ -335,6 +356,15 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
                 </TooltipContent>
               )}
             </Tooltip>
+          )}
+
+          {/* Version label — surfaces backend semver so bug reports include
+              it; hidden when the sidebar is collapsed to save vertical real
+              estate (the info is also accessible via /health). */}
+          {!collapsed && backendVersion && (
+            <p className="px-3 pt-1 text-[10px] font-mono text-muted-foreground/60">
+              v{backendVersion}
+            </p>
           )}
         </div>
       </div>

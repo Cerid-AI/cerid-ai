@@ -113,6 +113,8 @@ export interface ArtifactDetail {
 
 export interface HealthResponse {
   status: "healthy" | "degraded"
+  /** Backend semver (e.g. "0.83.0") — surfaced in the sidebar footer. */
+  version?: string
   services: {
     chromadb: "connected" | "error"
     redis: "connected" | "error"
