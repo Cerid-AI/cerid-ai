@@ -19,6 +19,8 @@ import structlog
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from core.utils.circuit_breaker import CircuitOpenError, _trading_agent
+
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/api/trading", tags=["trading-proxy"])
@@ -48,6 +50,39 @@ async def close_trading_proxy_client() -> None:
     if _client and not _client.is_closed:
         await _client.aclose()
         _client = None
+
+
+async def _proxy_get(path: str, **log_ctx: Any) -> Any:
+    """GET `path` on the trading agent through the circuit breaker.
+
+    Returns parsed JSON on success. Translates HTTP 5xx / network / circuit-open
+    errors into the appropriate FastAPI HTTPException so callers only need to
+    shape the happy-path response. 4xx is surfaced verbatim and does not trip
+    the breaker (handled by _is_client_error in circuit_breaker.py).
+    """
+    client = _get_client()
+
+    async def _call() -> httpx.Response:
+        resp = await client.get(path)
+        resp.raise_for_status()
+        return resp
+
+    try:
+        resp = await _trading_agent.call(_call)
+        return resp.json()
+    except httpx.HTTPStatusError as e:
+        logger.warning("trading_proxy_http_error", path=path, status=e.response.status_code, **log_ctx)
+        raise HTTPException(status_code=e.response.status_code, detail=str(e))
+    except (httpx.ConnectError, httpx.TimeoutException) as e:
+        logger.warning("trading_proxy_unreachable", path=path, error=str(e), **log_ctx)
+        raise HTTPException(status_code=502, detail=f"Trading agent unreachable: {e}")
+    except CircuitOpenError as e:
+        logger.warning("trading_proxy_circuit_open", path=path, retry_after=e.retry_after, **log_ctx)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Trading agent circuit open, retry in {e.retry_after:.0f}s",
+            headers={"Retry-After": str(max(1, int(e.retry_after) + 1))},
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -98,97 +133,38 @@ class MarketDataResponse(BaseModel):
 @router.get("/sessions")
 async def proxy_sessions() -> list[TradingSession]:
     """Proxy session list from trading agent."""
-    try:
-        client = _get_client()
-        resp = await client.get("/sessions")
-        resp.raise_for_status()
-        data = resp.json()
-        return [TradingSession(**s) if isinstance(s, dict) else TradingSession(name=str(s)) for s in data]
-    except httpx.HTTPStatusError as e:
-        logger.warning("trading_proxy_sessions_failed", status=e.response.status_code)
-        raise HTTPException(status_code=e.response.status_code, detail=str(e))
-    except (httpx.ConnectError, httpx.TimeoutException) as e:
-        logger.warning("trading_proxy_sessions_unreachable", error=str(e))
-        raise HTTPException(status_code=502, detail=f"Trading agent unreachable: {e}")
+    data = await _proxy_get("/sessions")
+    return [TradingSession(**s) if isinstance(s, dict) else TradingSession(name=str(s)) for s in data]
 
 
 @router.get("/sessions/{name}/portfolio")
 async def proxy_session_portfolio(name: str) -> PortfolioResponse:
     """Proxy session P&L and holdings from trading agent."""
-    try:
-        client = _get_client()
-        resp = await client.get(f"/sessions/{name}/portfolio")
-        resp.raise_for_status()
-        return PortfolioResponse(**resp.json())
-    except httpx.HTTPStatusError as e:
-        logger.warning("trading_proxy_portfolio_failed", session=name, status=e.response.status_code)
-        raise HTTPException(status_code=e.response.status_code, detail=str(e))
-    except (httpx.ConnectError, httpx.TimeoutException) as e:
-        logger.warning("trading_proxy_portfolio_unreachable", session=name, error=str(e))
-        raise HTTPException(status_code=502, detail=f"Trading agent unreachable: {e}")
+    data = await _proxy_get(f"/sessions/{name}/portfolio", session=name)
+    return PortfolioResponse(**data)
 
 
 @router.get("/sessions/{name}/positions")
 async def proxy_session_positions(name: str) -> list[PositionItem]:
     """Proxy open positions from a trading session."""
-    try:
-        client = _get_client()
-        resp = await client.get(f"/sessions/{name}/positions")
-        resp.raise_for_status()
-        data = resp.json()
-        return [PositionItem(**p) if isinstance(p, dict) else PositionItem() for p in data]
-    except httpx.HTTPStatusError as e:
-        logger.warning("trading_proxy_positions_failed", session=name, status=e.response.status_code)
-        raise HTTPException(status_code=e.response.status_code, detail=str(e))
-    except (httpx.ConnectError, httpx.TimeoutException) as e:
-        logger.warning("trading_proxy_positions_unreachable", session=name, error=str(e))
-        raise HTTPException(status_code=502, detail=f"Trading agent unreachable: {e}")
+    data = await _proxy_get(f"/sessions/{name}/positions", session=name)
+    return [PositionItem(**p) if isinstance(p, dict) else PositionItem() for p in data]
 
 
 @router.get("/sessions/{name}/signals")
 async def proxy_session_signals(name: str) -> list[SignalItem]:
     """Proxy recent trading signals from a session."""
-    try:
-        client = _get_client()
-        resp = await client.get(f"/sessions/{name}/signals")
-        resp.raise_for_status()
-        data = resp.json()
-        return [SignalItem(**s) if isinstance(s, dict) else SignalItem() for s in data]
-    except httpx.HTTPStatusError as e:
-        logger.warning("trading_proxy_signals_failed", session=name, status=e.response.status_code)
-        raise HTTPException(status_code=e.response.status_code, detail=str(e))
-    except (httpx.ConnectError, httpx.TimeoutException) as e:
-        logger.warning("trading_proxy_signals_unreachable", session=name, error=str(e))
-        raise HTTPException(status_code=502, detail=f"Trading agent unreachable: {e}")
+    data = await _proxy_get(f"/sessions/{name}/signals", session=name)
+    return [SignalItem(**s) if isinstance(s, dict) else SignalItem() for s in data]
 
 
 @router.get("/aggregate/portfolio")
 async def proxy_aggregate_portfolio() -> PortfolioResponse:
     """Proxy cross-session aggregate portfolio from trading agent."""
-    try:
-        client = _get_client()
-        resp = await client.get("/aggregate/portfolio")
-        resp.raise_for_status()
-        return PortfolioResponse(**resp.json())
-    except httpx.HTTPStatusError as e:
-        logger.warning("trading_proxy_aggregate_failed", status=e.response.status_code)
-        raise HTTPException(status_code=e.response.status_code, detail=str(e))
-    except (httpx.ConnectError, httpx.TimeoutException) as e:
-        logger.warning("trading_proxy_aggregate_unreachable", error=str(e))
-        raise HTTPException(status_code=502, detail=f"Trading agent unreachable: {e}")
+    return PortfolioResponse(**await _proxy_get("/aggregate/portfolio"))
 
 
 @router.get("/market-data")
 async def proxy_market_data() -> MarketDataResponse:
     """Proxy live market data (prices, VPIN, candles) from trading agent."""
-    try:
-        client = _get_client()
-        resp = await client.get("/market-data")
-        resp.raise_for_status()
-        return MarketDataResponse(**resp.json())
-    except httpx.HTTPStatusError as e:
-        logger.warning("trading_proxy_market_data_failed", status=e.response.status_code)
-        raise HTTPException(status_code=e.response.status_code, detail=str(e))
-    except (httpx.ConnectError, httpx.TimeoutException) as e:
-        logger.warning("trading_proxy_market_data_unreachable", error=str(e))
-        raise HTTPException(status_code=502, detail=f"Trading agent unreachable: {e}")
+    return MarketDataResponse(**await _proxy_get("/market-data"))

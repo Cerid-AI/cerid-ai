@@ -239,6 +239,7 @@ _openrouter = AsyncCircuitBreaker("openrouter", failure_threshold=5, recovery_ti
 _tavily = AsyncCircuitBreaker("tavily", failure_threshold=3, recovery_timeout=30)
 _searxng = AsyncCircuitBreaker("searxng", failure_threshold=3, recovery_timeout=30)
 _ragas_eval = AsyncCircuitBreaker("ragas_eval", failure_threshold=3, recovery_timeout=60)
+_trading_agent = AsyncCircuitBreaker("trading-agent", failure_threshold=3, recovery_timeout=30)
 
 
 def _is_client_error(exc: Exception) -> bool:
@@ -293,6 +294,7 @@ _BREAKER_REGISTRY: dict[str, AsyncCircuitBreaker] = {
     "tavily": _tavily,
     "searxng": _searxng,
     "ragas_eval": _ragas_eval,
+    "trading-agent": _trading_agent,
     "neo4j": _neo4j,
     "ollama": _ollama,
 }

@@ -406,6 +406,67 @@ class TestVerifiedMemoryPromotion:
         assert counts["promoted"] == 0
         assert counts["errors"] == 0
 
+    def test_concurrent_promotion_of_same_claim_serializes(self):
+        """Two concurrent promotions of the same claim must NOT both pass
+        the dedup check before either writes. The per-claim async lock in
+        verified_memory.py serializes the critical section."""
+        from core.agents.verified_memory import promote_verified_facts
+
+        claim = "The concurrent-serialize test claim — distinct text"
+        report = {
+            "conversation_id": "conv-race",
+            "claims": [
+                {"claim": claim, "verdict": "supported",
+                 "confidence": 0.95, "type": "factual", "nli_entailment": 0.9, "sources": []},
+            ],
+        }
+
+        gate = asyncio.Event()
+        detect_order: list[int] = []
+
+        async def slow_detect(text, *args, **kwargs):
+            detect_order.append(1)
+            if len(detect_order) == 1:
+                await gate.wait()
+            return []
+
+        create_calls: list[str] = []
+
+        def counting_create(driver, data):
+            create_calls.append(data["text"])
+            return f"mem-{len(create_calls)}"
+
+        async def drive():
+            with patch("core.agents.memory.detect_memory_conflict", side_effect=slow_detect):
+                t1 = asyncio.create_task(promote_verified_facts(
+                    report, MagicMock(), MagicMock(), create_memory_fn=counting_create,
+                ))
+                # Yield so t1 enters the critical section
+                await asyncio.sleep(0)
+                await asyncio.sleep(0)
+                t2 = asyncio.create_task(promote_verified_facts(
+                    report, MagicMock(), MagicMock(), create_memory_fn=counting_create,
+                ))
+                # Yield so t2 reaches the lock and blocks
+                await asyncio.sleep(0)
+                await asyncio.sleep(0)
+
+                # While t1 holds the lock, t2 MUST be blocked — only one detect call so far
+                assert len(detect_order) == 1, (
+                    f"second task slipped past the lock: detect_order={detect_order}"
+                )
+
+                gate.set()
+                await asyncio.gather(t1, t2)
+
+        _run(drive())
+
+        # Both eventually ran their detect check
+        assert len(detect_order) == 2
+        # Both created (mocks don't simulate post-create dedup) — the property under
+        # test is the serialization order, not the create-count.
+        assert len(create_calls) == 2
+
 
 # ===========================================================================
 # 5. Tiered Authority Boost

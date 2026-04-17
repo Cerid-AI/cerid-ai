@@ -16,12 +16,28 @@ Fire-and-forget from streaming.py — never blocks the verification response.
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import logging
 from typing import Any
 
 import config
 
 logger = logging.getLogger("ai-companion.verified_memory")
+
+# Per-claim async locks guarding the dedup-then-write critical section.
+# Two concurrent verifications of the same claim text must serialize their
+# detect_memory_conflict → create_memory path, otherwise both can pass the
+# duplicate check before either commits the :Memory node and create duplicates.
+# Keyed by normalized claim hash so different claims promote in parallel.
+_PROMOTE_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+def _claim_lock(claim_text: str) -> asyncio.Lock:
+    normalized = " ".join(claim_text.strip().lower().split())
+    key = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    # dict.setdefault is atomic under the GIL — safe across coroutines
+    return _PROMOTE_LOCKS.setdefault(key, asyncio.Lock())
 
 
 async def promote_verified_facts(
@@ -102,89 +118,94 @@ async def promote_verified_facts(
                 counts["skipped_type"] += 1
                 continue
 
-            # Dedup: check if equivalent memory already exists
-            from core.agents.memory import detect_memory_conflict
+            # Serialize dedup + write so two concurrent promotions of the
+            # same claim cannot both pass detect_memory_conflict and create
+            # duplicate :Memory nodes. Keyed per-claim so unrelated claims
+            # still promote in parallel.
+            async with _claim_lock(claim_text):
+                # Dedup: check if equivalent memory already exists
+                from core.agents.memory import detect_memory_conflict
 
-            conflicts = await detect_memory_conflict(
-                claim_text,
-                chroma_client,
-                neo4j_driver,
-                similarity_threshold=0.90,  # Higher bar: near-duplicate
-            )
-            if conflicts:
-                counts["skipped_duplicate"] += 1
-                logger.debug(
-                    "Verified fact already exists as memory (sim=%.3f): %s",
-                    conflicts[0].get("similarity", 0),
-                    claim_text[:60],
+                conflicts = await detect_memory_conflict(
+                    claim_text,
+                    chroma_client,
+                    neo4j_driver,
+                    similarity_threshold=0.90,  # Higher bar: near-duplicate
                 )
-                continue
+                if conflicts:
+                    counts["skipped_duplicate"] += 1
+                    logger.debug(
+                        "Verified fact already exists as memory (sim=%.3f): %s",
+                        conflicts[0].get("similarity", 0),
+                        claim_text[:60],
+                    )
+                    continue
 
-            # Create the Memory node via injected callable (keeps core/ free of app/ imports)
-            if create_memory_fn is None:
-                logger.warning("promote_verified_facts: no create_memory_fn provided, skipping")
-                counts["errors"] += 1
-                continue
+                # Create the Memory node via injected callable (keeps core/ free of app/ imports)
+                if create_memory_fn is None:
+                    logger.warning("promote_verified_facts: no create_memory_fn provided, skipping")
+                    counts["errors"] += 1
+                    continue
 
-            source_artifacts = claim_data.get("sources", [])
-            primary_artifact_id = (
-                source_artifacts[0].get("artifact_id", "")
-                if source_artifacts
-                else ""
-            )
+                source_artifacts = claim_data.get("sources", [])
+                primary_artifact_id = (
+                    source_artifacts[0].get("artifact_id", "")
+                    if source_artifacts
+                    else ""
+                )
 
-            memory_id = create_memory_fn(neo4j_driver, {
-                "text": claim_text,
-                "memory_type": "empirical",
-                "source": "verification",
-                "confidence": confidence,
-                "base_score": confidence,
-                "artifact_id": primary_artifact_id,
-            })
+                memory_id = create_memory_fn(neo4j_driver, {
+                    "text": claim_text,
+                    "memory_type": "empirical",
+                    "source": "verification",
+                    "confidence": confidence,
+                    "base_score": confidence,
+                    "artifact_id": primary_artifact_id,
+                })
 
-            # Link to VerificationReport via VERIFIED_BY relationship
-            if report_id and neo4j_driver:
+                # Link to VerificationReport via VERIFIED_BY relationship
+                if report_id and neo4j_driver:
+                    try:
+                        with neo4j_driver.session() as session:
+                            session.run(
+                                "MATCH (m:Memory {id: $mid}) "
+                                "MERGE (r:VerificationReport {conversation_id: $rid}) "
+                                "MERGE (m)-[:VERIFIED_BY]->(r)",
+                                mid=memory_id,
+                                rid=report_id,
+                            )
+                    except Exception:
+                        logger.debug("VERIFIED_BY link creation failed (non-blocking)")
+
+                # Ingest the claim text into ChromaDB conversations collection
+                # so it appears in future memory recall queries
                 try:
-                    with neo4j_driver.session() as session:
-                        session.run(
-                            "MATCH (m:Memory {id: $mid}) "
-                            "MERGE (r:VerificationReport {conversation_id: $rid}) "
-                            "MERGE (m)-[:VERIFIED_BY]->(r)",
-                            mid=memory_id,
-                            rid=report_id,
-                        )
+                    from datetime import datetime, timezone
+
+                    coll_name = config.collection_name("conversations")
+                    collection = chroma_client.get_or_create_collection(name=coll_name)
+                    now_iso = datetime.now(timezone.utc).isoformat()
+                    collection.add(
+                        ids=[f"verified_memory_{memory_id}"],
+                        documents=[claim_text],
+                        metadatas=[{
+                            "artifact_id": memory_id,
+                            "memory_type": "empirical",
+                            "memory_source_type": "verification",
+                            "domain": "conversations",
+                            "filename": f"verified_fact_{memory_id[:8]}",
+                            "ingested_at": now_iso,
+                            "decay_anchor": now_iso,
+                        }],
+                    )
                 except Exception:
-                    logger.debug("VERIFIED_BY link creation failed (non-blocking)")
+                    logger.debug("ChromaDB memory ingest failed (non-blocking)")
 
-            # Ingest the claim text into ChromaDB conversations collection
-            # so it appears in future memory recall queries
-            try:
-                from datetime import datetime, timezone
-
-                coll_name = config.collection_name("conversations")
-                collection = chroma_client.get_or_create_collection(name=coll_name)
-                now_iso = datetime.now(timezone.utc).isoformat()
-                collection.add(
-                    ids=[f"verified_memory_{memory_id}"],
-                    documents=[claim_text],
-                    metadatas=[{
-                        "artifact_id": memory_id,
-                        "memory_type": "empirical",
-                        "memory_source_type": "verification",
-                        "domain": "conversations",
-                        "filename": f"verified_fact_{memory_id[:8]}",
-                        "ingested_at": now_iso,
-                        "decay_anchor": now_iso,
-                    }],
+                counts["promoted"] += 1
+                logger.info(
+                    "Promoted verified fact to memory (id=%s, conf=%.2f): %s",
+                    memory_id, confidence, claim_text[:80],
                 )
-            except Exception:
-                logger.debug("ChromaDB memory ingest failed (non-blocking)")
-
-            counts["promoted"] += 1
-            logger.info(
-                "Promoted verified fact to memory (id=%s, conf=%.2f): %s",
-                memory_id, confidence, claim_text[:80],
-            )
 
         except Exception:
             counts["errors"] += 1
