@@ -112,16 +112,123 @@ def load_manifest() -> dict:
     return load_yaml(MANIFEST_PATH)
 
 
+# Directories + files that are NEVER synced to/from the public repo. These
+# are local-developer state (git, caches, venvs) or secrets that must never
+# leak across the boundary. Keep this list conservative: if in doubt, add.
+_SYNC_SKIP_PREFIXES: tuple[str, ...] = (
+    ".git/",
+    ".worktrees/",      # git worktrees live outside main tree but rglob sees them
+    "node_modules/",
+    "__pycache__/",
+    ".venv/",
+    ".mypy_cache/",
+    ".ruff_cache/",
+    ".pytest_cache/",
+    ".tox/",
+    ".cache/",
+    ".vite/",
+    "dist/",
+    "build/",
+    ".next/",
+    ".turbo/",
+    ".DS_Store",
+    "coverage/",
+    ".coverage",
+    "htmlcov/",
+)
+
+# Secrets — never leave the internal repo. .env.example is fine (template).
+_SYNC_SKIP_BASENAMES: frozenset[str] = frozenset({
+    ".env",
+    ".env.age",
+    ".env.local",
+    ".env.production",
+    ".env.development",
+})
+
+
+def _is_sync_skip(relpath: str) -> bool:
+    """True when *relpath* must be skipped by the file-walk — caches, venvs,
+    .git metadata, secrets. Checked before the internal_only manifest so
+    this list is authoritative for local-developer / secret files regardless
+    of manifest contents.
+    """
+    if any(relpath.startswith(p) for p in _SYNC_SKIP_PREFIXES):
+        return True
+    # Match on any component (e.g. packages/x/node_modules/...)
+    for part in relpath.split("/"):
+        if part in {"__pycache__", "node_modules", ".venv", ".mypy_cache",
+                    ".ruff_cache", ".pytest_cache", ".DS_Store", ".next",
+                    ".turbo"}:
+            return True
+    basename = relpath.rsplit("/", 1)[-1]
+    if basename in _SYNC_SKIP_BASENAMES:
+        return True
+    # Wildcard .env.* (but NOT .env.example which is template)
+    if basename.startswith(".env.") and basename != ".env.example":
+        return True
+    return False
+
+
+def _match_double_star(relpath: str, pat: str) -> bool:
+    """Match a pattern containing ``**`` against *relpath* using the four
+    shapes actually used in .sync-manifest.yaml:
+
+      * ``a/b/**``           — anything under directory ``a/b``
+      * ``**/b/**``          — any path containing a ``b`` component
+      * ``**/x.ext``         — any file named ``x.ext`` at any depth
+      * ``a/**/x.ext``       — ``x.ext`` at any depth under ``a``
+
+    Returns False for anything that doesn't match one of those shapes; the
+    caller's ``fnmatch.fnmatch`` will still handle literal globs.
+
+    Previously this function used ``relpath.startswith(pat.split('**')[0])``
+    which, for patterns starting with ``**`` (prefix = ''), matched every
+    file in the tree — causing every sync pass to report 0 copies.
+    """
+    # Shape: dir/**  →  anything at or below dir/
+    if pat.endswith("/**"):
+        dir_prefix = pat[:-3]
+        if dir_prefix and (relpath == dir_prefix or relpath.startswith(dir_prefix + "/")):
+            return True
+
+    # Shape: **/name/**  →  any component equals name
+    if pat.startswith("**/") and pat.endswith("/**"):
+        component = pat[3:-3]
+        if component and f"/{component}/" in f"/{relpath}/":
+            return True
+
+    # Shape: **/name  (or **/name.ext)  →  basename match at any depth
+    if pat.startswith("**/") and not pat.endswith("/**"):
+        tail = pat[3:]
+        parts = relpath.split("/")
+        # Match basename as literal OR as a glob (e.g. **/test_trading_*.py)
+        if parts and (parts[-1] == tail or fnmatch.fnmatch(parts[-1], tail)):
+            return True
+        # Also match if any sub-suffix equals the pattern tail (e.g. **/a/b.py)
+        if "/" in tail:
+            if relpath == tail or relpath.endswith("/" + tail):
+                return True
+
+    # Shape: dir/**/name.ext  →  name under dir at any depth
+    if "/**/" in pat and not pat.endswith("/**") and not pat.startswith("**/"):
+        dir_prefix, tail = pat.split("/**/", 1)
+        if relpath.startswith(dir_prefix + "/"):
+            remainder = relpath[len(dir_prefix) + 1:]
+            parts = remainder.split("/")
+            if parts and (parts[-1] == tail or fnmatch.fnmatch(parts[-1], tail)):
+                return True
+
+    return False
+
+
 def matches_internal_only(relpath: str, patterns: list[str]) -> bool:
     """Return True if *relpath* matches any internal_only pattern."""
     for pat in patterns:
         if fnmatch.fnmatch(relpath, pat):
             return True
-        # Also match if any parent dir matches a ** pattern
-        if "**" in pat:
-            prefix = pat.split("**")[0]
-            if relpath.startswith(prefix):
-                return True
+        if "**" in pat and _match_double_star(relpath, pat):
+            return True
     return False
 
 
@@ -198,9 +305,8 @@ def scan_for_leaks(root: Path, forbidden: list[str], skip_patterns: list[str] | 
             continue
         if fpath.suffix not in SCANNABLE_EXTS:
             continue
-        # Skip .git and node_modules
         rel = str(fpath.relative_to(root))
-        if rel.startswith(".git/") or "node_modules/" in rel:
+        if _is_sync_skip(rel):
             continue
         # Skip files excluded by internal_only patterns
         if skip_patterns and any(fnmatch.fnmatch(rel, p) for p in skip_patterns):
@@ -237,10 +343,7 @@ def cmd_to_public(manifest: dict, dry_run: bool) -> int:
         if not fpath.is_file():
             continue
         rel = str(fpath.relative_to(INTERNAL_ROOT))
-        # Skip .git, node_modules, __pycache__, .venv
-        if any(rel.startswith(p) for p in (".git/", "node_modules/", "__pycache__/", ".venv/")):
-            continue
-        if "/__pycache__/" in rel or "/node_modules/" in rel:
+        if _is_sync_skip(rel):
             continue
 
         # Skip internal-only files
@@ -328,9 +431,7 @@ def cmd_from_public(manifest: dict, dry_run: bool) -> int:
         if not fpath.is_file():
             continue
         rel = str(fpath.relative_to(PUBLIC_ROOT))
-        if any(rel.startswith(p) for p in (".git/", "node_modules/", "__pycache__/", ".venv/")):
-            continue
-        if "/__pycache__/" in rel or "/node_modules/" in rel:
+        if _is_sync_skip(rel):
             continue
 
         # Skip internal-only patterns (shouldn't exist in public, but guard)
