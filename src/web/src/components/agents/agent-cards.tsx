@@ -117,7 +117,11 @@ export function AgentCards() {
       const res = await fetch(`${MCP_BASE}${agent.endpoint}`, {
         method: agent.method ?? "POST",
         headers: mcpHeaders({ "Content-Type": "application/json", "X-Client-ID": "gui" }),
-        body: agent.body ? JSON.stringify(agent.body) : undefined,
+        // Always send a JSON body (even for no-payload endpoints) — FastAPI
+        // validators reject undefined body + Content-Type: application/json
+        // with a 422. Empty object is semantically "use defaults" for
+        // every /agent/* endpoint we wire here.
+        body: JSON.stringify(agent.body ?? {}),
       })
       if (!res.ok) {
         throw new Error(`${res.status} ${res.statusText}`)
