@@ -97,14 +97,46 @@ class _HNSWIndex:
         self._idx.set_ef(_HNSW_EF)
 
     def load_from_redis(self, redis_client: Any) -> bool:
-        """Load index from Redis.  Returns True if loaded, False if not found."""
+        """Load index from Redis. Returns True if loaded, False if not found
+        OR if the stored blob is corrupt (in which case the bad key is
+        deleted so the next save rebuilds cleanly).
+
+        Corruption paths:
+        - UnicodeDecodeError: a decode-responses Redis client tried to utf-8
+          the binary blob (TypedRedis normally has `_r` to bypass, but bare
+          clients don't). We catch this, delete the bad key, and cold-start.
+        - RuntimeError / OSError from hnswlib.load_index: the blob was a
+          different HNSW version or was truncated. Same recovery.
+        - Anything else: logged + cold-start; we don't want a cache-load
+          failure to propagate to the caller and trip the event-loop
+          watchdog during retrieval.
+        """
         try:
             # Use the raw (non-decoding) Redis client for binary I/O.
             # TypedRedis wraps a decode_responses=True client which attempts
             # UTF-8 decode on all GET results — the HNSW binary blob is not
             # valid UTF-8, so we bypass decoding via the underlying client.
             raw = getattr(redis_client, "_r", redis_client)
-            data = raw.get(_HNSW_KEY)
+            try:
+                data = raw.get(_HNSW_KEY)
+            except UnicodeDecodeError:
+                # Bare Redis(decode_responses=True) with no `_r` bypass —
+                # the blob stored is binary. Drop the bad key and cold-start
+                # so subsequent _save_to_redis can rewrite under the right
+                # client. Log a distinct message because this needs a dev
+                # to see (it means a client was mis-configured somewhere).
+                logger.warning(
+                    "Semantic cache: Redis client is decode_responses=True "
+                    "but no bypass exposed — deleting corrupt/undecodable "
+                    "blob at %s and cold-starting",
+                    _HNSW_KEY,
+                )
+                try:
+                    raw.delete(_HNSW_KEY)
+                except Exception:
+                    pass
+                return False
+
             if not data:
                 return False
 
@@ -116,7 +148,29 @@ class _HNSWIndex:
                 import hnswlib
 
                 self._idx = hnswlib.Index(space=_HNSW_SPACE, dim=self._dim)
-                self._idx.load_index(tmp_path, max_elements=self._max_elements)
+                try:
+                    self._idx.load_index(tmp_path, max_elements=self._max_elements)
+                except (RuntimeError, OSError, ValueError) as load_exc:
+                    # hnswlib version-skew or truncated blob. Drop and
+                    # rebuild on next write.
+                    logger.warning(
+                        "Semantic cache: HNSW load_index rejected blob "
+                        "(%s: %s) — deleting and cold-starting",
+                        type(load_exc).__name__, load_exc,
+                    )
+                    try:
+                        raw.delete(_HNSW_KEY)
+                    except Exception:
+                        pass
+                    # Reinitialize fresh so the in-process index is usable.
+                    self._idx = hnswlib.Index(space=_HNSW_SPACE, dim=self._dim)
+                    self._idx.init_index(
+                        max_elements=self._max_elements,
+                        ef_construction=_HNSW_EF_CONSTRUCTION,
+                        M=_HNSW_M,
+                    )
+                    self._idx.set_ef(_HNSW_EF)
+                    return False
                 self._idx.set_ef(_HNSW_EF)
                 self._next_label = int(self._idx.get_current_count())
                 logger.info(
