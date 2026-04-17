@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import re
 from typing import Any
 
@@ -52,18 +53,82 @@ _GEOGRAPHIC_RE = re.compile(
     re.I,
 )
 
+# (name, pattern, priority_weight). Priority order reflects which source
+# registry gets queried when a claim tokens land in multiple domains — e.g.
+# "how has the stock price of pharmaceutical companies like Pfizer changed"
+# matches both financial and scientific, and scientific is the more
+# authoritative routing target for empirical verification.
+_DOMAIN_PATTERNS: list[tuple[str, re.Pattern[str], float]] = [
+    ("scientific", _SCIENTIFIC_RE, 1.00),
+    ("financial", _FINANCIAL_RE, 0.90),
+    ("computational", _COMPUTATIONAL_RE, 0.85),
+    ("geographic", _GEOGRAPHIC_RE, 0.80),
+]
+
+
+def _score_claim_domains(claim: str) -> dict[str, float]:
+    """Per-domain score = (1 + log(match_count)) × priority_weight.
+
+    log scaling keeps keyword-heavy claims from runaway-dominating; priority
+    weights break ties in favour of the higher-authority source registry.
+    Empty dict means no domain matched (→ "general").
+    """
+    scores: dict[str, float] = {}
+    for name, pattern, weight in _DOMAIN_PATTERNS:
+        match_count = len(pattern.findall(claim))
+        if match_count:
+            scores[name] = round((1.0 + math.log(match_count)) * weight, 3)
+    return scores
+
 
 def _classify_claim_domain(claim: str) -> str:
-    """Classify a claim into a domain for source routing."""
-    if _SCIENTIFIC_RE.search(claim):
-        return "scientific"
-    if _FINANCIAL_RE.search(claim):
-        return "financial"
-    if _COMPUTATIONAL_RE.search(claim):
-        return "computational"
-    if _GEOGRAPHIC_RE.search(claim):
-        return "geographic"
-    return "general"
+    """Return the best-matching domain by score, or 'general' if none match.
+
+    Backward-compat wrapper around _classify_claim_domain_detailed() for
+    callers that only need the primary label. Previous version short-
+    circuited on the first regex hit with no weighting, which mis-routed
+    ambiguous claims (e.g. ``pharmaceutical stock price`` → financial
+    when the empirical-evidence need is scientific).
+    """
+    return _classify_claim_domain_detailed(claim)["primary"]
+
+
+def _classify_claim_domain_detailed(claim: str) -> dict[str, Any]:
+    """Detailed classification with confidence + secondary matches.
+
+    Returns::
+
+        {
+            "primary": str,              # best-scoring domain (or "general")
+            "confidence": float,         # 0-1, how decisive the primary is
+            "secondary": list[tuple[str, float]],  # (domain, score) sorted desc
+        }
+
+    Confidence is the normalized margin between the primary score and the
+    next-highest score: 1.0 when only one domain matches, 0 when the top
+    two tie. Downstream callers can use a low confidence signal to query
+    multiple source registries instead of committing to a single domain.
+    """
+    scores = _score_claim_domains(claim)
+    if not scores:
+        return {"primary": "general", "confidence": 0.0, "secondary": []}
+
+    sorted_scores = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+    primary, primary_score = sorted_scores[0]
+    secondary = sorted_scores[1:]
+
+    if not secondary:
+        confidence = 1.0
+    else:
+        second_score = secondary[0][1]
+        total = primary_score + second_score
+        confidence = round((primary_score - second_score) / total, 3) if total > 0 else 0.5
+
+    return {
+        "primary": primary,
+        "confidence": confidence,
+        "secondary": [(n, s) for n, s in secondary],
+    }
 
 
 async def verify_claim_authoritatively(
@@ -88,9 +153,24 @@ async def verify_claim_authoritatively(
         }
     """
     if not getattr(config, "EXPERT_VERIFY_USE_AUTHORITATIVE_SOURCES", True):
-        return {"authoritative_sources": [], "cross_validation": {}, "claim_domain": "disabled"}
+        return {
+            "authoritative_sources": [],
+            "cross_validation": {},
+            "claim_domain": "disabled",
+            "domain_confidence": 0.0,
+            "secondary_domains": [],
+        }
 
-    domain = claim_domain or _classify_claim_domain(claim)
+    # Detailed classification — primary for source routing, confidence +
+    # secondary for downstream consumers that want to query multiple
+    # registries on ambiguous claims.
+    if claim_domain is not None:
+        domain = claim_domain
+        domain_detail: dict[str, Any] = {"primary": claim_domain, "confidence": 1.0, "secondary": []}
+    else:
+        domain_detail = _classify_claim_domain_detailed(claim)
+        domain = domain_detail["primary"]
+
     max_sources = getattr(config, "EXPERT_VERIFY_MAX_SOURCES", 3)
 
     # Step 1: Query authoritative external sources via the DataSourceRegistry
@@ -120,6 +200,8 @@ async def verify_claim_authoritatively(
             "authoritative_sources": [],
             "cross_validation": {},
             "claim_domain": domain,
+            "domain_confidence": domain_detail["confidence"],
+            "secondary_domains": domain_detail["secondary"],
             "evidence_summary": "No authoritative sources returned results.",
         }
 
@@ -139,6 +221,15 @@ async def verify_claim_authoritatively(
                 "source_url": ext.get("source_url", ""),
                 "nli_entailment": float(nli["entailment"]),
                 "nli_contradiction": float(nli["contradiction"]),
+                # Provenance for staleness auditing — sources may provide
+                # last_updated / data_freshness / published / retrieved_at
+                # fields (data_sources registry), or none (defaults to
+                # "unknown" so downstream reports can render an honest
+                # "freshness unknown" label instead of dropping the field).
+                "data_freshness": ext.get("last_updated")
+                    or ext.get("data_freshness")
+                    or ext.get("published")
+                    or ext.get("retrieved_at", "unknown"),
             })
     except Exception:
         logger.debug("NLI scoring of authoritative sources failed")
@@ -150,6 +241,10 @@ async def verify_claim_authoritatively(
                 "source_url": ext.get("source_url", ""),
                 "nli_entailment": 0.0,
                 "nli_contradiction": 0.0,
+                "data_freshness": ext.get("last_updated")
+                    or ext.get("data_freshness")
+                    or ext.get("published")
+                    or ext.get("retrieved_at", "unknown"),
             })
 
     # Step 3: Cross-validate KB results against external evidence
@@ -184,5 +279,7 @@ async def verify_claim_authoritatively(
         "authoritative_sources": scored_sources,
         "cross_validation": cross_validation,
         "claim_domain": domain,
+        "domain_confidence": domain_detail["confidence"],
+        "secondary_domains": domain_detail["secondary"],
         "evidence_summary": summary,
     }
