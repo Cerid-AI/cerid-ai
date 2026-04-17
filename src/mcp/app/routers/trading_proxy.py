@@ -19,11 +19,25 @@ import structlog
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from core.utils.circuit_breaker import CircuitOpenError, _trading_agent
+from core.utils.circuit_breaker import (
+    AsyncCircuitBreaker,
+    CircuitOpenError,
+    _BREAKER_REGISTRY,
+)
 
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/api/trading", tags=["trading-proxy"])
+
+# Register the breaker lazily here (rather than in core/utils/circuit_breaker.py)
+# so the trading-specific wiring lives entirely inside the internal-only
+# trading_proxy module. The public repo never imports this file, so the
+# registry stays provider-neutral there. setdefault makes import idempotent
+# even if something else adds a breaker with the same name first.
+_trading_breaker = _BREAKER_REGISTRY.setdefault(
+    "trading-agent",
+    AsyncCircuitBreaker("trading-agent", failure_threshold=3, recovery_timeout=30),
+)
 
 # ---------------------------------------------------------------------------
 # Connection-pooled singleton client
@@ -68,7 +82,7 @@ async def _proxy_get(path: str, **log_ctx: Any) -> Any:
         return resp
 
     try:
-        resp = await _trading_agent.call(_call)
+        resp = await _trading_breaker.call(_call)
         return resp.json()
     except httpx.HTTPStatusError as e:
         logger.warning("trading_proxy_http_error", path=path, status=e.response.status_code, **log_ctx)

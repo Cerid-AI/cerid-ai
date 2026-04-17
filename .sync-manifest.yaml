@@ -38,6 +38,11 @@ internal_only:
   - .github/workflows/electron-build.yml
   # Internal-only tests
   - src/mcp/tests/test_trading_*.py
+  # The sync-repos test references internal paths as assertion fixtures
+  # (trading_proxy.py, settings_internal.py, trading_agent.py) — those
+  # assertions are the whole point of the test, so the test itself is
+  # internal-only alongside the sync-repos.py script it covers.
+  - scripts/tests/test_sync_repos_glob.py
   - src/mcp/tests/test_enterprise_*.py
   - src/mcp/tests/test_eval_*.py
   - src/mcp/tests/test_auth_*.py

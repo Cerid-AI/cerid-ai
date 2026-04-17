@@ -18,18 +18,20 @@ def _run(coro):
 
 
 def _reset_trading_breaker() -> None:
-    from core.utils.circuit_breaker import CircuitState, _trading_agent
+    from core.utils.circuit_breaker import CircuitState
+    from app.routers.trading_proxy import _trading_breaker
 
-    _trading_agent._state = CircuitState.CLOSED
-    _trading_agent._failure_count = 0
-    _trading_agent._last_failure_time = 0
+    _trading_breaker._state = CircuitState.CLOSED
+    _trading_breaker._failure_count = 0
+    _trading_breaker._last_failure_time = 0
 
 
 def test_breaker_registered_with_expected_name():
-    from core.utils.circuit_breaker import _BREAKER_REGISTRY, _trading_agent
+    from core.utils.circuit_breaker import _BREAKER_REGISTRY
+    from app.routers.trading_proxy import _trading_breaker
 
     assert "trading-agent" in _BREAKER_REGISTRY
-    assert _BREAKER_REGISTRY["trading-agent"] is _trading_agent
+    assert _BREAKER_REGISTRY["trading-agent"] is _trading_breaker
 
 
 def test_proxy_get_returns_json_on_success():
@@ -64,7 +66,8 @@ def test_connect_error_translates_to_502():
 def test_http_4xx_passes_through_and_does_not_trip_breaker():
     _reset_trading_breaker()
     from app.routers import trading_proxy
-    from core.utils.circuit_breaker import CircuitState, _trading_agent
+    from core.utils.circuit_breaker import CircuitState
+    from app.routers.trading_proxy import _trading_breaker
 
     # Build an httpx.HTTPStatusError with a 404 body
     req = httpx.Request("GET", "http://trading-agent:8090/nope")
@@ -83,14 +86,15 @@ def test_http_4xx_passes_through_and_does_not_trip_breaker():
             assert exc.value.status_code == 404
 
     # 4xx must NOT count as failure → breaker stays CLOSED
-    assert _trading_agent.state == CircuitState.CLOSED
-    assert _trading_agent._failure_count == 0
+    assert _trading_breaker.state == CircuitState.CLOSED
+    assert _trading_breaker._failure_count == 0
 
 
 def test_5xx_trips_breaker_after_threshold_then_503():
     _reset_trading_breaker()
     from app.routers import trading_proxy
-    from core.utils.circuit_breaker import CircuitState, _trading_agent
+    from core.utils.circuit_breaker import CircuitState
+    from app.routers.trading_proxy import _trading_breaker
 
     req = httpx.Request("GET", "http://trading-agent:8090/sessions")
     resp500 = httpx.Response(500, request=req)
@@ -103,13 +107,13 @@ def test_5xx_trips_breaker_after_threshold_then_503():
 
     with patch.object(trading_proxy, "_get_client", return_value=mock_client):
         # Drive failures up to the threshold (3) — each returns 500
-        for _ in range(_trading_agent.failure_threshold):
+        for _ in range(_trading_breaker.failure_threshold):
             with pytest.raises(HTTPException) as exc:
                 _run(trading_proxy._proxy_get("/sessions"))
             assert exc.value.status_code == 500
 
         # Breaker should now be OPEN
-        assert _trading_agent.state == CircuitState.OPEN
+        assert _trading_breaker.state == CircuitState.OPEN
 
         # Next call short-circuits to 503 with Retry-After header
         with pytest.raises(HTTPException) as exc:
