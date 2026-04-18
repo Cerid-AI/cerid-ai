@@ -1,7 +1,9 @@
 from app.models.query_envelope import QueryEnvelope, SourceItem
 
 
-def _src(name: str, artifact_id: str = "", source_type: str = "kb", relevance: float = 0.5) -> SourceItem:
+def _src(
+    name: str, artifact_id: str = "", source_type: str = "kb", relevance: float = 0.5
+) -> SourceItem:
     return SourceItem(
         content=f"c-{name}",
         relevance=relevance,
@@ -45,7 +47,11 @@ def test_envelope_empty_when_nothing_ran():
     out = env.to_dict()
     assert out["results"] == []
     assert out["source_breakdown"] == {"kb": [], "memory": [], "external": []}
-    assert out["source_status"] == {"kb": "timeout", "memory": "timeout", "external": "timeout"}
+    assert out["source_status"] == {
+        "kb": "timeout",
+        "memory": "timeout",
+        "external": "timeout",
+    }
 
 
 def test_envelope_merge_external_post_degrade():
@@ -61,10 +67,13 @@ def test_envelope_merge_external_post_degrade():
 
 
 def test_envelope_round_trip_legacy():
-    before = QueryEnvelope(kb=[_src("a.md")], external=[_src("w", source_type="external")])
+    before = QueryEnvelope(
+        kb=[_src("a.md")], external=[_src("w", source_type="external")]
+    )
     before.mark_degraded(budget_seconds=10.0, reason="x")
     d1 = before.to_dict()
     after = QueryEnvelope.from_legacy_result(d1)
     d2 = after.to_dict()
-    d1.pop("timestamp"); d2.pop("timestamp")
+    d1.pop("timestamp")
+    d2.pop("timestamp")
     assert d1 == d2

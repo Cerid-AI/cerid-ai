@@ -9,7 +9,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-import pytest
 
 
 def test_get_version_reads_version_file_if_present() -> None:
