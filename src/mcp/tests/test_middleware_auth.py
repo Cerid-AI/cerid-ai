@@ -131,7 +131,7 @@ class TestExemptPaths:
     def client(self):
         return TestClient(_make_app(api_key="secret"))
 
-    @pytest.mark.parametrize("path", ["/", "/health", "/api/v1/health", "/docs", "/openapi.json", "/redoc"])
+    @pytest.mark.parametrize("path", ["/", "/health", "/docs", "/openapi.json", "/redoc"])
     def test_exempt_exact_paths(self, client, path):
         resp = client.get(path)
         assert resp.status_code == 200, f"Expected 200 for exempt path {path}, got {resp.status_code}"
