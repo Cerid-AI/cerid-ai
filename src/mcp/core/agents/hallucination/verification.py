@@ -232,6 +232,97 @@ _SYSTEM_CONSISTENCY_CHECK = (
 
 
 # ---------------------------------------------------------------------------
+# Cited-URL verification (Task 12 / audit V-3)
+# ---------------------------------------------------------------------------
+
+async def _verify_against_cited_url(
+    claim_text: str,
+    url: str,
+    *,
+    timeout: float = 8.0,
+    max_bytes: int = 300_000,
+) -> dict[str, Any]:
+    """Fetch the LLM's cited URL and NLI-entail the claim against its body.
+
+    This plugs the audit V-3 hole: the verifier used to ignore cited URLs and
+    re-search from claim text, letting fabricated citations
+    ("According to https://wikipedia.org/foo, the sky is green") pass if an
+    unrelated web-search result happened to confirm the claim. Now the cited
+    page itself is the premise.
+
+    Returns a verdict dict shaped like other verification methods:
+    ``{status, similarity, verification_method, verification_model,
+    source_urls, reasoning}``. The caller should fall through to the normal
+    KB + web-search path when this function raises (fetch error, NLI failure)
+    or returns ``status == "uncertain"``.
+    """
+    from html.parser import HTMLParser
+
+    from core.utils.nli import nli_score
+
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        resp = await client.get(url, headers={"User-Agent": "cerid-verifier/1"})
+        resp.raise_for_status()
+        body = resp.text[:max_bytes]
+
+    class _TextExtractor(HTMLParser):
+        def __init__(self) -> None:
+            super().__init__()
+            self.parts: list[str] = []
+            self._skip = False
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            if tag in ("script", "style", "noscript"):
+                self._skip = True
+
+        def handle_endtag(self, tag: str) -> None:
+            if tag in ("script", "style", "noscript"):
+                self._skip = False
+
+        def handle_data(self, data: str) -> None:
+            if self._skip:
+                return
+            stripped = data.strip()
+            if stripped:
+                self.parts.append(stripped)
+
+    ext = _TextExtractor()
+    try:
+        ext.feed(body)
+        text = " ".join(ext.parts)
+    except Exception:
+        text = body  # fall back to raw body if HTML parsing explodes
+
+    # NLI context window — cross-encoder/nli-deberta-v3-xsmall truncates to
+    # 512 tokens (~2k chars). 4000 chars is an upper bound; the tokenizer
+    # truncates from there.
+    premise = text[:4000]
+    nli_result = nli_score(premise=premise, hypothesis=claim_text)
+
+    entail = float(nli_result.get("entailment", 0.0))
+    contra = float(nli_result.get("contradiction", 0.0))
+
+    if contra > 0.5:
+        status = "unverified"
+    elif entail > 0.6:
+        status = "verified"
+    else:
+        status = "uncertain"
+
+    return {
+        "status": status,
+        "similarity": round(entail, 3),
+        "verification_method": "cited_url",
+        "verification_model": "nli-onnx",
+        "source_urls": [url],
+        "reasoning": (
+            f"NLI against cited URL body (entail={entail:.2f}, "
+            f"contra={contra:.2f})"
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Verdict inversion helpers
 # ---------------------------------------------------------------------------
 
@@ -1390,6 +1481,7 @@ async def verify_claim(
     response_context: str | None = None,
     claim_context: str | None = None,
     conversation_context: list[dict[str, str]] | None = None,
+    source_urls: list[str] | None = None,
 ) -> dict[str, Any]:
     """Verify a single claim against the knowledge base and user memories.
 
@@ -1488,6 +1580,33 @@ async def verify_claim(
         return result
 
     try:
+        # --- Task 12 / audit V-3: if the LLM cited URLs for this claim,
+        # verify against those URLs *first* (NLI against the cited page body)
+        # before any KB lookup or cross-model web search. Otherwise a
+        # fabricated citation ("According to https://wikipedia.org/foo, the
+        # sky is green") can get "confirmed" against an unrelated web-search
+        # result, because the verifier was re-searching from claim text and
+        # ignoring the cited source entirely.
+        #
+        # Bounded to at most 3 URLs per claim to cap latency. The first URL
+        # that returns a definitive verdict (verified / unverified) wins.
+        # Any URL that errors (timeout, non-2xx, NLI failure) or returns
+        # "uncertain" falls through to the next URL, then ultimately to the
+        # existing KB + external verification path.
+        for url in (source_urls or [])[:3]:
+            try:
+                cited_verdict = await _verify_against_cited_url(claim, url)
+            except Exception as exc:
+                logger.debug(
+                    "cited URL verification failed for %s: %s", url, exc,
+                )
+                continue
+            if cited_verdict.get("status") in ("verified", "unverified"):
+                cited_verdict["claim"] = claim
+                return await _cache_result(cited_verdict)
+            # status == "uncertain" → try the next cited URL, then fall
+            # through to KB / external if all URLs are inconclusive.
+
         # Exclude 'conversations' domain from general KB query to avoid
         # self-verification against feedback-ingested LLM responses.
         verification_domains = [d for d in config.DOMAINS if d != "conversations"]
