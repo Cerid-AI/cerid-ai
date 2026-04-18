@@ -131,12 +131,12 @@ class TestMaintenanceImports:
     def test_helper_functions_callable(self):
         from core.agents.maintenance import (
             analyze_collections,
-            check_bifrost_health,
+            check_llm_health,
             check_system_health,
             purge_artifacts,
         )
         for fn in [
-            analyze_collections, check_bifrost_health, check_system_health,
+            analyze_collections, check_llm_health, check_system_health,
             purge_artifacts,
         ]:
             assert callable(fn)
