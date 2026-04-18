@@ -142,7 +142,12 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
       const isFirstMessage = !(options.activeMessages?.length)
       if (options.autoInject && !isFirstMessage) {
         let freshResults = options.kbResults
-        if (content.length > 2) {
+        // Only hit the network when the cache is cold. Wave-0 Task 3:
+        // useOrchestratedQuery / useKBContext already populate TanStack
+        // cache with staleTime 15s — re-firing queryKB here duplicates work
+        // and saturates the backend _QUERY_SEMAPHORE.
+        const cacheCold = !freshResults || freshResults.length === 0
+        if (cacheCold && content.length > 2) {
           const injectAbort = new AbortController()
           const timeout = new Promise<null>((resolve) => setTimeout(() => {
             injectAbort.abort()
@@ -158,6 +163,18 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
           }
           // Merge memories into the candidate pool as pseudo-KB results
           if (Array.isArray(freshMemories) && freshMemories.length > 0) {
+            for (const mem of freshMemories) {
+              freshResults.push(memoryToKBResult(mem))
+            }
+          }
+        } else if (!cacheCold && content.length > 2) {
+          // Cache warm — skip queryKB but still pull fresh memories
+          // (memories aren't covered by the TanStack KB cache).
+          const freshMemories = await recallMemories(content, 3).catch(() => [])
+          if (Array.isArray(freshMemories) && freshMemories.length > 0) {
+            // Avoid mutating the caller's kbResults array (it's a React
+            // state reference). Clone before pushing memory pseudo-results.
+            freshResults = [...freshResults]
             for (const mem of freshMemories) {
               freshResults.push(memoryToKBResult(mem))
             }

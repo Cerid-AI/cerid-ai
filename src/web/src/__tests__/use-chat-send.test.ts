@@ -409,3 +409,74 @@ describe("useChatSend — KB injection payload assembly", () => {
     expect(result.current.lastAutoInjectCount).toBe(0)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Task 3: KB query deduplication (Wave-0 reliability remediation)
+// ---------------------------------------------------------------------------
+// Background: three hooks fire /agent/query per chat turn. useKBContext (POST 1)
+// and useOrchestratedQuery (POST 2) both populate TanStack cache with
+// staleTime: 15_000. useChatSend.handleSend (POST 3) historically re-fired
+// queryKB unconditionally — redundant and, with _QUERY_SEMAPHORE(2) + 10s
+// budgets, enough to monopolize the backend for ~30s per user message.
+//
+// Fix: skip the fresh queryKB call when options.kbResults is already populated
+// (cache warm). Still fetch fresh memories — they aren't covered by the KB
+// cache and the prior duplication was KB-specific.
+
+describe("useChatSend — KB query deduplication (Task 3)", () => {
+  it("does NOT call queryKB when options.kbResults is non-empty (cache warm)", async () => {
+    const prePopulated = [
+      makeKBResult({ artifact_id: "pre-1", filename: "pre.md", relevance: 0.9, content: "hello" }),
+    ]
+
+    const opts = makeOptions({
+      autoInject: true,
+      autoInjectThreshold: 0.5,
+      kbResults: prePopulated,
+    })
+    const { result } = renderHook(() => useChatSend(opts))
+
+    await act(async () => {
+      await result.current.handleSend("hi there")
+    })
+
+    expect(mockQueryKB).not.toHaveBeenCalled()
+  })
+
+  it("DOES call queryKB when options.kbResults is empty (cache cold)", async () => {
+    mockQueryKB.mockResolvedValue({ results: [] })
+
+    const opts = makeOptions({
+      autoInject: true,
+      autoInjectThreshold: 0.5,
+      kbResults: [] as KBQueryResult[],
+    })
+    const { result } = renderHook(() => useChatSend(opts))
+
+    await act(async () => {
+      await result.current.handleSend("hi there")
+    })
+
+    expect(mockQueryKB).toHaveBeenCalledTimes(1)
+  })
+
+  it("still fetches fresh memories when cache is warm (memories not in KB cache)", async () => {
+    const prePopulated = [
+      makeKBResult({ artifact_id: "pre-1", filename: "pre.md", relevance: 0.9 }),
+    ]
+
+    const opts = makeOptions({
+      autoInject: true,
+      autoInjectThreshold: 0.5,
+      kbResults: prePopulated,
+    })
+    const { result } = renderHook(() => useChatSend(opts))
+
+    await act(async () => {
+      await result.current.handleSend("hi there")
+    })
+
+    expect(mockRecallMemories).toHaveBeenCalledTimes(1)
+    expect(mockQueryKB).not.toHaveBeenCalled()
+  })
+})
