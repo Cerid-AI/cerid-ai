@@ -335,17 +335,16 @@ class TestRerankResults:
         assert reranked[0]["artifact_id"] in ("a1", "a3")
 
     @patch("core.agents.query_agent.config")
-    @pytest.mark.skip(
-        reason=(
-            "Task 27 removed the LLM reranker fallback — cross-encoder failure now "
-            "returns input order with reranker_status='onnx_failed_no_fallback'. "
-            "Test still asserts _rerank_llm was called, which is the old contract. "
-            "Needs rewrite to match the graceful-fallback behaviour in "
-            "core.agents.query_agent._rerank_cross_encoder."
-        )
-    )
     def test_cross_encoder_fallback_to_llm(self, mock_config):
-        """When cross-encoder fails, falls back to LLM reranking."""
+        """Task 27: cross-encoder failure returns input order + status tag.
+
+        The former LLM fallback was removed after Bifrost retirement
+        (audit C-4/C-9) because a single ONNX load failure would otherwise
+        crash every query. ``_rerank_cross_encoder`` now returns results in
+        their original (relevance-sorted) order and tags each dict with
+        ``reranker_status = 'onnx_failed_no_fallback'`` so callers can
+        surface the degraded state.
+        """
         mock_config.RERANK_MODE = "cross_encoder"
         mock_config.QUERY_RERANK_CANDIDATES = 15
 
@@ -354,16 +353,24 @@ class TestRerankResults:
             _make_result(relevance=0.9, artifact_id="a2"),
         ]
 
-        with patch("core.retrieval.reranker.rerank", side_effect=RuntimeError("model not found")):
-            with patch("core.agents.query_agent._rerank_llm", new_callable=AsyncMock) as mock_llm:
-                mock_llm.return_value = sorted(
-                    results, key=lambda x: x["relevance"], reverse=True,
-                )
-                reranked = asyncio.get_event_loop().run_until_complete(
-                    rerank_results(results, "test", use_reranking=True)
-                )
-                mock_llm.assert_called_once()
-        assert reranked[0]["relevance"] >= reranked[1]["relevance"]
+        with patch(
+            "core.retrieval.reranker.rerank",
+            side_effect=RuntimeError("model not found"),
+        ):
+            reranked = asyncio.get_event_loop().run_until_complete(
+                rerank_results(results, "test", use_reranking=True)
+            )
+
+        # ``rerank_results`` pre-sorts by relevance before handing off to the
+        # cross-encoder, so the fallback preserves that relevance order
+        # (a2 @ 0.9 first, a1 @ 0.3 second) — no cross-encoder scores applied.
+        assert len(reranked) == len(results)
+        assert reranked[0]["artifact_id"] == "a2"
+        assert reranked[1]["artifact_id"] == "a1"
+        # Every result tagged with the failure mode so callers can react.
+        assert all(
+            r.get("reranker_status") == "onnx_failed_no_fallback" for r in reranked
+        )
 
     def test_rerank_mode_none_skips_reranking(self):
         """RERANK_MODE=none returns results in original sorted order."""
@@ -455,19 +462,9 @@ class TestRerankerModule:
 
 # Task 1 commit be79457 wrapped the agent_query entry in
 # ``asyncio.wait_for(..., timeout=config.AGENT_QUERY_BUDGET_SECONDS)``.  The
-# three test_agent_query cases below patch ``config`` with a bare ``MagicMock()``
-# whose ``AGENT_QUERY_BUDGET_SECONDS`` is a Mock, not a number — so
-# ``wait_for`` raises ``TypeError: '<=' not supported between instances of
-# 'MagicMock' and 'int'``.  The fix is to patch the attribute to a real float
-# in the fixture.  Keeping this class-level marker until the fixture is
-# updated; see commit be79457 + Task 1 implementer notes.
-_AGENT_QUERY_BUDGET_MOCK_SKIP = pytest.mark.skip(
-    reason=(
-        "config.AGENT_QUERY_BUDGET_SECONDS is a MagicMock in this test's "
-        "fixture, so asyncio.wait_for raises TypeError. Patch the attribute "
-        "to a float (e.g. 30.0) in mock_config to enable."
-    )
-)
+# three tests below must set ``mock_config.AGENT_QUERY_BUDGET_SECONDS`` to a
+# real float — otherwise ``wait_for`` raises ``TypeError: '<=' not supported
+# between instances of 'MagicMock' and 'int'``.
 
 
 class TestAgentQuery:
@@ -475,7 +472,6 @@ class TestAgentQuery:
     @patch("core.agents.query_agent.rerank_results")
     @patch("core.agents.query_agent.graph_expand_results")
     @patch("core.agents.query_agent.multi_domain_query")
-    @_AGENT_QUERY_BUDGET_MOCK_SKIP
     @patch("core.agents.query_agent.config")
     @patch("config.features.ENABLE_ADAPTIVE_RETRIEVAL", False)
     def test_basic_query_response_shape(
@@ -495,6 +491,11 @@ class TestAgentQuery:
         mock_config.TEMPORAL_RECENCY_WEIGHT = 0.1
         mock_config.CONTEXT_MAX_CHUNKS_PER_ARTIFACT = 2
         mock_config.QUERY_CONTEXT_MESSAGES = 5
+        # Task 1 commit be79457 wraps agent_query in ``asyncio.wait_for``
+        # which needs a numeric timeout — otherwise a bare MagicMock raises
+        # ``TypeError: '<=' not supported between instances of 'MagicMock'
+        # and 'int'`` before the test body runs.
+        mock_config.AGENT_QUERY_BUDGET_SECONDS = 30.0
 
         result_item = _make_result(content="test content", relevance=0.8)
         # Use side_effect to return fresh lists (avoids aliasing when extend() mutates)
@@ -519,12 +520,12 @@ class TestAgentQuery:
         assert isinstance(response["confidence"], float)
 
     @patch("core.agents.query_agent.log_event")
-    @_AGENT_QUERY_BUDGET_MOCK_SKIP
     @patch("core.agents.query_agent.rerank_results")
     @patch("core.agents.query_agent.graph_expand_results")
     @patch("core.agents.query_agent.multi_domain_query")
     @patch("core.agents.query_agent.config")
     @patch("config.features.ENABLE_ADAPTIVE_RETRIEVAL", False)
+    @patch("config.features.ENABLE_SEMANTIC_CACHE", False)
     def test_logs_to_redis_when_client_provided(
         self, mock_config, mock_mdq, mock_graph, mock_rerank, mock_log
     ):
@@ -542,6 +543,7 @@ class TestAgentQuery:
         mock_config.TEMPORAL_RECENCY_WEIGHT = 0.1
         mock_config.CONTEXT_MAX_CHUNKS_PER_ARTIFACT = 2
         mock_config.QUERY_CONTEXT_MESSAGES = 5
+        mock_config.AGENT_QUERY_BUDGET_SECONDS = 30.0
 
         mock_mdq.return_value = []
         mock_graph.return_value = []
@@ -556,7 +558,6 @@ class TestAgentQuery:
 
         mock_log.assert_called_once()
 
-    @_AGENT_QUERY_BUDGET_MOCK_SKIP
     @patch("core.agents.query_agent.log_event")
     @patch("core.agents.query_agent.rerank_results")
     @patch("core.agents.query_agent.graph_expand_results")
@@ -579,6 +580,7 @@ class TestAgentQuery:
         mock_config.TEMPORAL_RECENCY_WEIGHT = 0.1
         mock_config.CONTEXT_MAX_CHUNKS_PER_ARTIFACT = 2
         mock_config.QUERY_CONTEXT_MESSAGES = 5
+        mock_config.AGENT_QUERY_BUDGET_SECONDS = 30.0
 
         mock_mdq.return_value = []
         mock_graph.return_value = []
