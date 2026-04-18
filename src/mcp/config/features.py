@@ -157,10 +157,15 @@ ENABLE_DEGRADATION_TIERS = os.getenv("ENABLE_DEGRADATION_TIERS", "false").lower(
 
 # ---------------------------------------------------------------------------
 # Smart Orchestration
-# NOTE: ENABLE_MODEL_ROUTER is a client-side hint only.
-# It is exposed to the GUI via GET /settings but never enforced server-side.
 # ---------------------------------------------------------------------------
-ENABLE_MODEL_ROUTER = os.getenv("ENABLE_MODEL_ROUTER", "false").lower() == "true"
+# Task 16: ``ENABLE_MODEL_ROUTER`` used to be a separate "client-side hint"
+# toggle that diverged from the server-enforced ``SMART_ROUTING_ENABLED``
+# (``config/settings.py``).  Two flags naming the same concept drift: prefer
+# ``SMART_ROUTING_ENABLED`` — ``ENABLE_MODEL_ROUTER`` is kept as a pure alias
+# so any code reading it (GUI ``/settings`` payload, sync hydration) sees the
+# same value the server actually enforces.
+from config.settings import SMART_ROUTING_ENABLED as ENABLE_MODEL_ROUTER  # noqa: F401,E402
+
 COST_SENSITIVITY = os.getenv("COST_SENSITIVITY", "medium")  # low/medium/high
 
 # ---------------------------------------------------------------------------

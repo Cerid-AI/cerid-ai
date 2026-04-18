@@ -12,6 +12,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from app.deps import get_chroma, get_neo4j, get_redis
+from core.utils.version import get_version
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion")
@@ -98,7 +99,7 @@ def health_check() -> dict:
 
     result: dict = {
         "status": "healthy" if all(v == "connected" for v in status.values()) else "degraded",
-        "version": "0.83.0",
+        "version": get_version(),
         "services": status,
         "circuit_breakers": {
             "bifrost": bifrost_cb_state,

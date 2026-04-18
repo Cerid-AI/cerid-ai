@@ -232,10 +232,19 @@ Cross-service version constraints: see `docs/DEPENDENCY_COUPLING.md`.
 ### Verification
 
 ```bash
-curl http://localhost:8888/health
+curl http://localhost:8888/health               # liveness + invariants (Task 14)
 curl http://localhost:8888/collections
 curl http://localhost:8888/artifacts
+curl http://localhost:8888/admin/kb/stats       # KB artifact/chunk counts per domain
+curl http://localhost:8888/observability/health-score   # weighted A-F grade
+curl http://localhost:8888/observability/metrics        # Redis time-series sparklines
+curl http://localhost:8888/observability/queue-depth    # Task 8: ingest/scheduler queue depth
 ```
+
+The server version, reported by `/`, `/health`, and `/openapi.json`, is read from
+the repo-root `pyproject.toml` via `core/utils/version.py` (Task 16 — single source
+of truth).  The legacy `/api/v1/*` dual mount was retired in the same task; the
+nginx proxy in `src/web/` should 301 old clients to the root path in a follow-up.
 
 ## Claude Code Setup (New Machine)
 

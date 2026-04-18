@@ -25,13 +25,13 @@ def bootstrap_internal(app) -> None:
     from config.taxonomy_internal import extend_taxonomy
     extend_taxonomy()
 
-    # 3. Register internal-only routers
+    # 3. Register internal-only routers.  Task 16: the `/api/v1/*` dual mount
+    # is retired — routes live only at root.  See app/main.py for the matching
+    # change on the public router block.
     from app.routers import alerts, migration, ws_sync
 
     app.include_router(alerts.router)
-    app.include_router(alerts.router, prefix="/api/v1")
     app.include_router(migration.router)
-    app.include_router(migration.router, prefix="/api/v1")
     app.include_router(ws_sync.router)
 
     # Trading proxy (conditional)
@@ -51,7 +51,6 @@ def bootstrap_internal(app) -> None:
     if os.getenv("CERID_TIER", "community") in ("pro", "enterprise"):
         from routers import billing
         app.include_router(billing.router)
-        app.include_router(billing.router, prefix="/api/v1")
         logger.info("Billing router registered (tier=%s)", os.getenv("CERID_TIER"))
 
     # 4. Register shutdown hooks via the public callback list
