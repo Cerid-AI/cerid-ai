@@ -100,10 +100,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     current = len(self._hits[key])
 
                     if current >= max_req:
-                        reset = math.ceil(window - (now - self._hits[key][0]))
+                        reset = int(max(1, math.ceil(window - (now - self._hits[key][0]))))
                         return JSONResponse(
                             status_code=429,
-                            content={"detail": f"Rate limit exceeded. Max {max_req} requests per {window}s."},
+                            content={
+                                "detail": f"Rate limit exceeded. Max {max_req} requests per {window}s.",
+                                "retry_after": reset,
+                            },
                             headers={
                                 "RateLimit-Limit": str(max_req),
                                 "RateLimit-Remaining": "0",

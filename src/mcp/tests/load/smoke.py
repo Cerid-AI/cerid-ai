@@ -87,7 +87,13 @@ async def test_rate_limit(client):
     results = await asyncio.gather(*tasks, return_exceptions=True)
     codes = [(r[1] if not isinstance(r,Exception) else "ERR") for r in results]
     from collections import Counter
-    print(f"  status counts: {dict(Counter(codes))}")
+    codes_cnt = dict(Counter(codes))
+    print(f"  status counts: {codes_cnt}")
+    # Task 10 invariant: breaching the per-client quota must produce a 429,
+    # never drop the connection. "ERR" in the histogram means the server
+    # hung up under load — a graceful-backpressure regression.
+    assert "ERR" not in codes_cnt, f"connection drops under load (graceful 429 regression): {codes_cnt}"
+    assert 429 in codes_cnt, f"expected 429 in mix, got {codes_cnt}"
 
 async def test_sse_chat_stream():
     print(f"\n== TEST F: /chat/stream TTFB + chunk latency + cancel behaviour ==")
