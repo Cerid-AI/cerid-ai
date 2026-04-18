@@ -524,17 +524,12 @@ async def lifespan(app: FastAPI):
     if os.getenv("OPENROUTER_API_KEY"):
         asyncio.ensure_future(_openrouter_auth_probe_loop())
 
-    # Bifrost pre-warm only when explicitly enabled
+    # Bifrost was retired (audit C-4) — chat + smart-router route direct to
+    # OpenRouter. BIFROST_URL is still honoured by a few pipeline call sites
+    # (topic extraction, contextual chunking, maintenance health probes) but
+    # no longer pre-warmed at startup.
+
     import config as _startup_config
-    if getattr(_startup_config, "USE_BIFROST", False):
-        try:
-            from utils.bifrost import get_bifrost_client
-            await get_bifrost_client()
-            logger.info("Bifrost HTTP client pool pre-warmed")
-        except Exception as e:
-            logger.debug("Pre-warm Bifrost client failed: %s", e)
-    else:
-        logger.info("Bifrost disabled (CERID_USE_BIFROST=false) — LLM calls route directly to OpenRouter")
 
     # Pre-warm Ollama client pool (for pipeline tasks)
     if getattr(_startup_config, "OLLAMA_ENABLED", False):

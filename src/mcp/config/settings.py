@@ -53,9 +53,11 @@ AI_SNIPPET_MAX_CHARS = 1500
 # ---------------------------------------------------------------------------
 # Bifrost / LLM Gateway
 # ---------------------------------------------------------------------------
-# When false (default), all LLM calls go directly to OpenRouter via llm_client.py.
-# When true, Bifrost is used for intent-based auto-routing on user chat.
-USE_BIFROST = os.getenv("CERID_USE_BIFROST", "false").lower() == "true"
+# Bifrost was retired 2026-04-17 (audit C-4). All chat + smart-router traffic
+# routes directly to OpenRouter via llm_client.py. BIFROST_URL is retained
+# for a handful of pipeline call sites (topic extraction, contextual chunking,
+# maintenance-agent health probes) that still hit the gateway when one is
+# deployed externally.
 BIFROST_URL = os.getenv("BIFROST_URL", "http://bifrost:8080/v1")
 BIFROST_TIMEOUT = float(os.getenv("BIFROST_TIMEOUT", "20.0"))
 

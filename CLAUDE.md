@@ -83,7 +83,6 @@ Microservices architecture with Docker Compose orchestration on a shared `llm-ne
 | Service | Port | Stack Path | Tech |
 |---------|------|------------|------|
 | MCP Server (API) | 8888 | `src/mcp/` | FastAPI / Python 3.11 |
-| Bifrost (LLM Gateway) | 8080 | `stacks/bifrost/` | Semantic intent routing |
 | ChromaDB (Vectors) | 8001 | `stacks/infrastructure/` | Vector DB |
 | Neo4j (Graph) | 7474/7687 | `stacks/infrastructure/` | Graph DB |
 | Redis (Cache) | 6379 | `stacks/infrastructure/` | Cache + audit log |
@@ -94,14 +93,15 @@ Microservices architecture with Docker Compose orchestration on a shared `llm-ne
 ### Key Data Flow
 
 ```
-User → React GUI (3000) → Bifrost (8080, optional) → OpenRouter → LLM Provider
-                        → MCP Server (8888) → ChromaDB/Neo4j (RAG context)
+User → React GUI (3000) → MCP Server (8888) → OpenRouter → LLM Provider
+                                             → ChromaDB/Neo4j (RAG context)
 
 File Ingestion:
 ~/cerid-archive/ → Watcher → POST /ingest_file → Parse → Dedup → Chunk → ChromaDB + Neo4j + Redis
 ```
 
-React GUI talks to Bifrost via nginx proxy (`/api/bifrost/`) and to MCP directly (CORS `*`). Bifrost classifies intent (coding/research/simple/general) and routes to the appropriate model.
+React GUI talks to MCP directly (CORS `*`). Chat and smart-router traffic
+route through `llm_client.py` straight to OpenRouter.
 
 ## Directory Structure
 
@@ -302,6 +302,7 @@ Frontend tests: `cd src/web && npx vitest run`
 
 ## Conventions
 
+- **Bifrost retirement (2026-04-17, audit C-4):** Bifrost was removed as a runtime dependency. `USE_BIFROST` / `CERID_USE_BIFROST` is gone, the Bifrost container was dropped from the root `docker-compose.yml`, pre-warm was removed from `app/main.py`, and `call_llm` / `call_llm_raw` in `core/utils/llm_client.py` now raise `RuntimeError` when `OPENROUTER_API_KEY` is unset or the OpenRouter circuit trips — no silent re-route. `BIFROST_URL` is kept in `config/settings.py` for the handful of pipeline call sites (`utils/metadata.py` topic extraction, `core/utils/contextual.py`, `core/agents/maintenance.py` health probe) that still hit it when a gateway is deployed externally. Do not re-introduce the pre-warm or the fallback.
 - **Session start:** Run `./scripts/validate-env.sh --quick` at the beginning of every session. If the session-start hook reports missing plugins or MCP servers, run `bash ~/dotfiles/install.sh` before proceeding with any other work
 - Docker services use container-name-based discovery on `llm-network`
 - MCP protocol uses SSE transport with session-based message queuing
