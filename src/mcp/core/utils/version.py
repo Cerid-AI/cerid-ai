@@ -21,13 +21,29 @@ _DEFAULT = "0.0.0"
 
 @cache
 def get_version() -> str:
-    """Return the package version string from pyproject.toml.
+    """Return the package version string.
 
-    Walks up from this file until a ``pyproject.toml`` is found. Falls back
-    to ``0.0.0`` if nothing is found — preferable to raising at startup.
+    Priority:
+    1. VERSION file (injected during Docker build)
+    2. pyproject.toml (local development)
+    3. Fallback to "0.0.0"
+
+    Walks up from this file until a ``VERSION`` or ``pyproject.toml`` is found.
+    Falls back to ``0.0.0`` if nothing is found — preferable to raising at startup.
     """
     here = Path(__file__).resolve()
     for parent in (here, *here.parents):
+        # Check for VERSION file first (Docker build artifact)
+        version_file = parent / "VERSION"
+        if version_file.is_file():
+            try:
+                version = version_file.read_text().strip()
+                if version:
+                    return version
+            except Exception as exc:
+                logger.warning("Failed to read %s: %s", version_file, exc)
+
+        # Fall back to pyproject.toml
         candidate = parent / "pyproject.toml"
         if candidate.is_file():
             try:

@@ -58,6 +58,7 @@ htmlcov/
 env/
 venv/
 .venv/
+src/mcp/VERSION
 
 # macOS / temp
 .DS_Store

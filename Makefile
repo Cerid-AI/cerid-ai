@@ -1,4 +1,4 @@
-.PHONY: lock-python lock-python-dev lock-all install-hooks deps-check \
+.PHONY: lock-python lock-python-dev lock-all install-hooks deps-check version-file \
        lint-frontend test-frontend typecheck-frontend build-frontend check-all \
        test test-all test-eval smoke help
 
@@ -15,6 +15,11 @@ lock-all: lock-python lock-python-dev
 install-hooks:
 	git config core.hooksPath scripts/hooks
 	@echo "Git hooks installed from scripts/hooks/"
+
+# -- Build artifacts --
+version-file:
+	@python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])" > src/mcp/VERSION
+	@echo "[version-file] wrote $$(cat src/mcp/VERSION)"
 
 # -- Validation --
 deps-check:

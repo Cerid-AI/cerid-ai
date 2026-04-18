@@ -49,6 +49,9 @@ RUN chown -R cerid:cerid /home/cerid/.cache
 WORKDIR /app
 COPY --chown=cerid:cerid . .
 
+ARG CERID_VERSION=""
+RUN if [ -n "$CERID_VERSION" ]; then echo "$CERID_VERSION" > VERSION; fi
+
 USER cerid
 EXPOSE 8888
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8888", \

@@ -582,6 +582,10 @@ mkdir -p "$CERID_ROOT/stacks/infrastructure/data/"{chroma,neo4j,neo4j-logs,redis
 # to fail with an opaque conflict error. Remove them up front.
 cleanup_zombies
 
+# Generate VERSION file from pyproject.toml for Docker build
+echo "[build] Generating src/mcp/VERSION file..."
+make version-file
+
 if [ -z "$LEGACY_FLAG" ] && [ -f "$UNIFIED_COMPOSE" ]; then
     COMPOSE_FILES="-f $UNIFIED_COMPOSE"
     if [ "$LIGHTWEIGHT_MODE" = "true" ]; then
