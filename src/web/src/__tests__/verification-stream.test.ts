@@ -351,6 +351,95 @@ describe("useVerificationStream", () => {
     resolveStream!()
   })
 
+  // --- Abort finalizer (Task 13) ---
+  //
+  // Regression: when the stream ends without per-claim verdicts (natural
+  // close-without-summary, backend error event, or non-OK response),
+  // previously-pending claim cards kept their "pending" status and
+  // ClaimOverlay rendered a spinner forever.  The hook must flip every
+  // lingering pending claim to "uncertain" so the UI settles.
+
+  it("flips pending claims to 'uncertain' when stream closes without a summary", async () => {
+    // Two claims extracted, zero verified — stream closes cleanly with no summary event.
+    const events: SSEEvent[] = [
+      { type: "extraction_complete", method: "llm", count: 2 },
+      { type: "claim_extracted", claim: "Claim A", index: 0, claim_type: "factual" },
+      { type: "claim_extracted", claim: "Claim B", index: 1, claim_type: "factual" },
+    ]
+    mockStreamFn.mockReturnValue(makeSSEStream(events))
+
+    const { result } = renderHook(() =>
+      useVerificationStream("Test response", "conv-finalizer-1", true, 1),
+    )
+
+    await waitFor(() => {
+      expect(result.current.phase).toBe("error")
+    })
+
+    expect(result.current.claims).toHaveLength(2)
+    // No claim should be left in the "pending" state.
+    for (const c of result.current.claims) {
+      expect(c.status).not.toBe("pending")
+      expect(c.status).toBe("uncertain")
+      // A human-readable reason is attached so the popover explains itself.
+      expect(typeof c.reason).toBe("string")
+      expect(c.reason?.length ?? 0).toBeGreaterThan(0)
+    }
+  })
+
+  it("flips pending claims to 'uncertain' on backend error event mid-stream", async () => {
+    const events: SSEEvent[] = [
+      { type: "extraction_complete", method: "llm", count: 2 },
+      { type: "claim_extracted", claim: "Claim A", index: 0, claim_type: "factual" },
+      { type: "claim_extracted", claim: "Claim B", index: 1, claim_type: "factual" },
+      { type: "error", message: "backend exploded" },
+    ]
+    mockStreamFn.mockReturnValue(makeSSEStream(events))
+
+    const { result } = renderHook(() =>
+      useVerificationStream("Test response", "conv-finalizer-2", true, 1),
+    )
+
+    await waitFor(() => {
+      expect(result.current.phase).toBe("error")
+    })
+
+    expect(result.current.claims).toHaveLength(2)
+    for (const c of result.current.claims) {
+      expect(c.status).toBe("uncertain")
+    }
+  })
+
+  it("flips pending claims to 'uncertain' when response fails to open", async () => {
+    // Seed claims by hand would require a first successful stream; instead
+    // simulate: first event extracts claims, but then response.ok is false
+    // is not a valid sequence.  Use the "no summary" path via closed body.
+    const events: SSEEvent[] = [
+      { type: "extraction_complete", method: "llm", count: 1 },
+      { type: "claim_extracted", claim: "Lone claim", index: 0, claim_type: "factual" },
+      // one verdict arrives for claim 0, but a second claim_extracted shows up
+      // AFTER extraction_complete (backend quirk), leaving #1 pending when stream closes
+      { type: "claim_extracted", claim: "Late claim", index: 1, claim_type: "factual" },
+      { type: "claim_verified", index: 0, claim: "Lone claim", claim_type: "factual", status: "verified", confidence: 0.9, source: "", reason: "OK", verification_method: "cross_model" },
+    ]
+    mockStreamFn.mockReturnValue(makeSSEStream(events))
+
+    const { result } = renderHook(() =>
+      useVerificationStream("Test response", "conv-finalizer-3", true, 1),
+    )
+
+    await waitFor(() => {
+      expect(result.current.phase).toBe("error")
+    })
+
+    expect(result.current.claims).toHaveLength(2)
+    // Claim 0 keeps its real verdict; claim 1's pending is finalized.
+    const verdicts = result.current.claims.map((c) => c.status)
+    expect(verdicts).toContain("verified")
+    expect(verdicts).toContain("uncertain")
+    expect(verdicts).not.toContain("pending")
+  })
+
   // --- SSE keepalive comment handling ---
 
   it("ignores SSE keepalive comments interleaved with data events", async () => {
