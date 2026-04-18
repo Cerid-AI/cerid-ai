@@ -1,7 +1,11 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Neo4j schema migrations — one-time, idempotent transformations."""
+"""Neo4j schema migrations — one-time, idempotent transformations.
+
+Previously lived at ``app/db/neo4j/migrations.py``; moved here when
+``migrations`` became a package to host versioned migrations.
+"""
 
 from __future__ import annotations
 

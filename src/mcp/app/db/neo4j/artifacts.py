@@ -497,28 +497,55 @@ def save_verification_report(
     uncertain: int = 0,
     total: int = 0,
 ) -> str:
-    """Persist a verification report as a Neo4j node.
+    """Persist a verification report with complete provenance.
 
-    Creates a ``VerificationReport`` node and ``VERIFIED`` relationships
-    to any ``Artifact`` nodes referenced in the claims' sources.
+    Writes:
+      * ``(:VerificationReport {conversation_id})`` with claims blob, scores,
+        plus ``source_urls`` and ``verification_methods`` on the node so that
+        external-verified claims retain provenance without an Artifact node.
+      * ``(r)-[:EXTRACTED_FROM]->(:Artifact)`` for every referenced artifact.
+      * ``(r)-[:VERIFIED]->(:Artifact)`` alias retained for backward compat.
     """
     import uuid
 
     report_id = str(uuid.uuid4())
     claims_json = json.dumps(claims)
 
+    artifact_ids: set[str] = set()
+    source_urls: set[str] = set()
+    methods: set[str] = set()
+    for claim in claims:
+        method = claim.get("verification_method", "")
+        if method:
+            methods.add(method)
+        # Claim-level flat URL list (actual shape emitted by verification pipeline)
+        for u in claim.get("source_urls", []) or []:
+            if isinstance(u, str) and u:
+                source_urls.add(u)
+        # Structured sources (future shape + KB matches with artifact_id)
+        for src in claim.get("sources", []) or []:
+            aid = src.get("artifact_id") or ""
+            if aid:
+                artifact_ids.add(aid)
+            url = src.get("url") or src.get("source_url") or ""
+            if url:
+                source_urls.add(url)
+
     with driver.session() as session:
-        # Upsert: one report per conversation (replace if re-verified)
         session.run(
-            "MERGE (r:VerificationReport {conversation_id: $cid}) "
-            "SET r.id = $rid, "
-            "    r.claims = $claims, "
-            "    r.overall_score = $score, "
-            "    r.verified = $verified, "
-            "    r.unverified = $unverified, "
-            "    r.uncertain = $uncertain, "
-            "    r.total = $total, "
-            "    r.created_at = $now ",
+            """
+            MERGE (r:VerificationReport {conversation_id: $cid})
+            SET r.id = $rid,
+                r.claims = $claims,
+                r.overall_score = $score,
+                r.verified = $verified,
+                r.unverified = $unverified,
+                r.uncertain = $uncertain,
+                r.total = $total,
+                r.created_at = $now,
+                r.source_urls = $source_urls,
+                r.verification_methods = $verification_methods
+            """,
             rid=report_id,
             cid=conversation_id,
             claims=claims_json,
@@ -528,29 +555,29 @@ def save_verification_report(
             uncertain=uncertain,
             total=total,
             now=utcnow_iso(),
+            source_urls=sorted(source_urls),
+            verification_methods=sorted(methods),
         )
-
-        # Create VERIFIED relationships to referenced artifacts
-        artifact_ids = set()
-        for claim in claims:
-            for source in claim.get("sources", []):
-                aid = source.get("artifact_id")
-                if aid:
-                    artifact_ids.add(aid)
 
         for aid in artifact_ids:
             try:
                 session.run(
-                    "MATCH (r:VerificationReport {conversation_id: $cid}) "
-                    "MATCH (a:Artifact {id: $aid}) "
-                    "MERGE (r)-[:VERIFIED]->(a)",
+                    """
+                    MATCH (r:VerificationReport {conversation_id: $cid})
+                    MATCH (a:Artifact {id: $aid})
+                    MERGE (r)-[:EXTRACTED_FROM]->(a)
+                    MERGE (r)-[:VERIFIED]->(a)
+                    """,
                     cid=conversation_id,
                     aid=aid,
                 )
             except Exception as e:
-                logger.debug("Failed to create VERIFIED relationship: %s", e)
+                logger.debug("Failed to create report edges for %s: %s", aid, e)
 
-    logger.info("Saved verification report %s for conversation %s", report_id[:8], conversation_id[:8])
+    logger.info(
+        "Saved verification report %s for conversation %s (%d artifacts, %d urls, methods=%s)",
+        report_id[:8], conversation_id[:8], len(artifact_ids), len(source_urls), sorted(methods),
+    )
     return report_id
 
 

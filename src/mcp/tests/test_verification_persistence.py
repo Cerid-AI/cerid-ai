@@ -271,3 +271,51 @@ class TestVerificationRoundTrip:
         assert result["overall_score"] == 0.55
         assert len(result["claims"]) == 2
         assert result["claims"][0]["claim"] == "Earth orbits the Sun"
+
+
+# ---------------------------------------------------------------------------
+# Task-2 regression tests: EXTRACTED_FROM edge + external provenance
+# ---------------------------------------------------------------------------
+
+
+def _mk_driver():
+    driver = MagicMock()
+    session = MagicMock()
+    ctx = MagicMock()
+    ctx.__enter__ = MagicMock(return_value=session)
+    ctx.__exit__ = MagicMock(return_value=False)
+    driver.session.return_value = ctx
+    return driver, session
+
+
+def test_save_report_writes_extracted_from_for_each_artifact():
+    driver, session = _mk_driver()
+    claims = [{"sources": [{"artifact_id": "a1"}, {"artifact_id": "a2"}]}]
+    save_verification_report(driver, "conv-1", claims, 0.8, 2, 0, 0, 2)
+    cyphers = [c[0][0] for c in session.run.call_args_list]
+    assert any("EXTRACTED_FROM" in c for c in cyphers), f"no EXTRACTED_FROM in {cyphers}"
+    assert any("VERIFIED" in c for c in cyphers)
+
+
+def test_save_report_persists_external_urls_when_no_artifact():
+    """External / web_search claims have aid='' — must still persist provenance."""
+    driver, session = _mk_driver()
+    claims = [{
+        "verification_method": "web_search",
+        "sources": [{"artifact_id": "", "url": "https://en.wikipedia.org/foo"}],
+    }]
+    save_verification_report(driver, "conv-2", claims, 0.7, 1, 0, 0, 1)
+    upsert_call = session.run.call_args_list[0]
+    params = upsert_call[1]
+    assert "source_urls" in params
+    assert "https://en.wikipedia.org/foo" in params["source_urls"]
+    assert "verification_methods" in params
+    assert "web_search" in params["verification_methods"]
+
+
+def test_save_report_handles_no_sources_gracefully():
+    driver, session = _mk_driver()
+    claims = [{"sources": []}]
+    save_verification_report(driver, "conv-3", claims, 0.5, 0, 0, 1, 1)
+    cyphers = [c[0][0] for c in session.run.call_args_list]
+    assert sum("MERGE (r:VerificationReport" in c for c in cyphers) == 1
