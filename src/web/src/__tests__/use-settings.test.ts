@@ -212,8 +212,10 @@ describe("useSettings", () => {
       expect(localStorage.getItem("cerid-settings-updated-at")).toBe("2000")
       // No PATCH fired — we took the server value, not pushed ours.
       const patchCalls = fetchMock.mock.calls.filter(
-        ([url, init]: [string, RequestInit | undefined]) =>
-          url.includes("/settings") && init?.method === "PATCH",
+        (call) => {
+          const [url, init] = call as unknown as [string, RequestInit | undefined]
+          return url.includes("/settings") && init?.method === "PATCH"
+        },
       )
       expect(patchCalls).toHaveLength(0)
     })
@@ -246,12 +248,13 @@ describe("useSettings", () => {
 
       // PATCH fires with the divergent local toggle.
       await waitFor(() => {
-        const patchCalls = fetchMock.mock.calls.filter(
-          ([url, init]: [string, RequestInit | undefined]) =>
-            url.includes("/settings") && init?.method === "PATCH",
-        )
+        const patchCalls = fetchMock.mock.calls.filter((call) => {
+          const [url, init] = call as unknown as [string, RequestInit | undefined]
+          return url.includes("/settings") && init?.method === "PATCH"
+        })
         expect(patchCalls.length).toBeGreaterThan(0)
-        const body = JSON.parse(patchCalls[0][1]!.body as string)
+        const [, firstInit] = patchCalls[0] as unknown as [string, RequestInit]
+        const body = JSON.parse(firstInit.body as string)
         expect(body.enable_feedback_loop).toBe(true)
       })
     })

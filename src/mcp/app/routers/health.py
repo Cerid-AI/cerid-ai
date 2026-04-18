@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from typing import Any
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -245,7 +246,7 @@ def _invariants_snapshot() -> dict:
             pass
         if neo4j_driver is None:
             # Lightweight mode — skip the orphan check, NLI still matters.
-            snap = {
+            snap: dict[str, Any] = {
                 "verification_report_orphans": 0,
                 "collections_empty": [],
                 "errors": [],
@@ -255,7 +256,9 @@ def _invariants_snapshot() -> dict:
                 if chroma is not None:
                     snap.update(_probe_chroma(chroma))
             except Exception as exc:
-                snap["errors"].append(f"chroma: {exc}")
+                errs = snap["errors"]
+                if isinstance(errs, list):
+                    errs.append(f"chroma: {exc}")
             snap.update(_probe_nli())
             snap["healthy_invariants"] = bool(snap.get("nli_model_loaded"))
             return snap

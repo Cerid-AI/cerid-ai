@@ -94,6 +94,7 @@ async def _extract_text(file_path: str, plugin_name: str) -> tuple[str, str]:
         # Vision plugin uses async — import and call directly
         try:
             import importlib
+            import importlib.util
             import sys
 
             vision_module = sys.modules.get("cerid_plugin_cerid-vision")

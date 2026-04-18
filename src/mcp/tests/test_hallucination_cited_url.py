@@ -188,8 +188,9 @@ async def test_cited_url_uncertain_falls_through():
     """If the cited URL body NLI-scores as ``uncertain`` (neither strong
     entailment nor strong contradiction), fall through to the existing
     KB + web_search path so we still produce a verdict."""
-    from core.agents.hallucination import verification
     from unittest.mock import MagicMock
+
+    from core.agents.hallucination import verification
 
     mock_chroma_client = MagicMock()
     mock_neo4j_driver = MagicMock()

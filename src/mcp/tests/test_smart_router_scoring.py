@@ -76,7 +76,11 @@ def test_model_ids_have_openrouter_prefix():
     """Every registry entry must start with 'openrouter/' so Bifrost path
     doesn't silently break when USE_BIFROST is re-enabled."""
     from core.routing.smart_router import (
-        CAPABLE_MODELS, CHEAP_MODELS, EXPERT_MODELS, FREE_MODELS, RESEARCH_MODELS,
+        CAPABLE_MODELS,
+        CHEAP_MODELS,
+        EXPERT_MODELS,
+        FREE_MODELS,
+        RESEARCH_MODELS,
     )
     for registry in (FREE_MODELS, CHEAP_MODELS, CAPABLE_MODELS, RESEARCH_MODELS, EXPERT_MODELS):
         for key, model in registry.items():

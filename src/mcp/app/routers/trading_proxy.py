@@ -20,9 +20,9 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from core.utils.circuit_breaker import (
+    _BREAKER_REGISTRY,
     AsyncCircuitBreaker,
     CircuitOpenError,
-    _BREAKER_REGISTRY,
 )
 
 logger = structlog.get_logger(__name__)

@@ -85,6 +85,69 @@ def _probe_neo4j(neo4j: Any) -> dict[str, Any]:
     return {"verification_report_orphans": orphans}
 
 
+def _probe_collection_dim(collection: Any) -> int | None:
+    """Return the embedding dimension of a Chroma collection, or None.
+
+    Chroma exposes dim in different shapes across versions.  We try, in
+    order: ``metadata['dimension']``, ``metadata['dim']``, and a single
+    ``.peek(1)`` probe whose first embedding width we measure.  All
+    probes are wrapped in broad ``try`` — a None return means "unknown"
+    and the caller must treat it as non-fatal.
+    """
+    try:
+        md = getattr(collection, "metadata", None) or {}
+        for key in ("dimension", "dim", "hnsw:dim"):
+            if key in md and md[key] is not None:
+                return int(md[key])
+    except Exception:
+        pass
+    try:
+        peek = collection.peek(1)
+        emb = (peek or {}).get("embeddings") or []
+        if emb and emb[0] is not None:
+            return int(len(emb[0]))
+    except Exception:
+        pass
+    return None
+
+
+def run_startup_dim_check() -> dict[str, Any]:
+    """Iterate Chroma collections at boot; warn on dim mismatches.
+
+    The collection layer can silently trap old embeddings after a model
+    swap — the embedder produces 768-dim vectors but the collection was
+    initialised at 384.  CI never catches this (empty collections start
+    life without a dim); prod surfaces it as opaque add/query errors.
+
+    This check runs in the lifespan ``run_in_executor`` and MUST NOT
+    raise: any failure degrades to a log warning.  Returns a summary
+    dict for observability dashboards.
+    """
+    summary: dict[str, Any] = {"mismatches": [], "errors": []}
+    try:
+        from app.deps import get_chroma
+        from core.utils.embeddings import get_embedding_dim
+
+        expected = int(get_embedding_dim())
+        chroma = get_chroma()
+        for c in chroma.list_collections():
+            name = _collection_name(c) or "<unknown>"
+            actual = _probe_collection_dim(c)
+            if actual is not None and actual != expected:
+                summary["mismatches"].append(
+                    {"collection": name, "expected": expected, "actual": actual}
+                )
+                logger.warning(
+                    "collection %r dim mismatch: actual=%d expected=%d "
+                    "(rerun admin/collections/repair to remediate)",
+                    name, actual, expected,
+                )
+    except Exception as exc:
+        summary["errors"].append(str(exc))
+        logger.warning("startup dim check errored (non-fatal): %s", exc)
+    return summary
+
+
 def _probe_nli() -> dict[str, Any]:
     """Probe: is the NLI model loaded?  (Task 14: replaces silent swallow
     in ``core.utils.nli.warmup``.)"""

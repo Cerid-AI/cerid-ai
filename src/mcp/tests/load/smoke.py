@@ -2,10 +2,10 @@
 """Cerid-AI smoke / load test harness. Read-only probes against localhost."""
 
 import asyncio
-import time
+import random
 import statistics
 import sys
-import random
+import time
 
 try:
     import httpx
