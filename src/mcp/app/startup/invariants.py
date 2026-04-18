@@ -159,16 +159,20 @@ def run_startup_dim_check() -> list[dict[str, Any]]:
     mismatch log message points to.
     """
     try:
+        # Look up validator through the package namespace so tests that
+        # do ``patch.object(app.startup, "validate_collection_dimensions", ...)``
+        # can intercept the call.  (A same-module bare name would resolve
+        # before the patch applies.)
+        import app.startup as _startup_pkg
         from app.deps import get_chroma
         from core.utils.embeddings import get_embedding_dim
 
         expected = int(get_embedding_dim())
         chroma = get_chroma()
-        return validate_collection_dimensions(chroma, expected)
+        return _startup_pkg.validate_collection_dimensions(chroma, expected)
     except Exception as exc:
         _startup_logger.info("startup dim check skipped (non-fatal): %s", exc)
         return []
-    return summary
 
 
 def _probe_nli() -> dict[str, Any]:
