@@ -13,17 +13,12 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 import config
+from app.concurrency import KB_POOL
 from app.deps import get_chroma, get_neo4j, get_redis
 from app.services.ingestion import ingest_content, validate_file_path
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion")
-
-# Limit concurrent CPU-bound agent queries to prevent event loop stalls.
-# BM25 tokenization and ONNX embedding/reranking are synchronous and block
-# the event loop.  Without this limit, 5+ concurrent /agent/query requests
-# (e.g. from auto-inject) starve /chat/stream for 30+ seconds.
-_QUERY_SEMAPHORE = asyncio.Semaphore(2)
 
 
 def should_fire_external_crag(
@@ -196,7 +191,10 @@ async def compress_history_endpoint(req: CompressRequest):
 
 @router.post("/agent/query")
 async def agent_query_endpoint(req: AgentQueryRequest, request: Request):
-    async with _QUERY_SEMAPHORE:
+    # Heavy RAG path is gated by KB_POOL so /health, /observability, and
+    # other lightweight routes served by HEALTH_POOL are never starved by
+    # concurrent KB queries (audit RC-C, smoke Test G).
+    async with KB_POOL.acquire():
         return await _agent_query_inner(req, request)
 
 

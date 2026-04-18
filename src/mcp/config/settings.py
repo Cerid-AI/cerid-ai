@@ -116,10 +116,12 @@ RETRIEVAL_QUALITY_THRESHOLD = float(os.getenv("RETRIEVAL_QUALITY_THRESHOLD", "0.
 #
 #   1. Must stay well under the event-loop watchdog's 45s heartbeat
 #      threshold so a single slow query can't trip the process kill.
-#   2. Must stay SHORT so the _QUERY_SEMAPHORE(2) queue drains fast —
-#      every /agent/query holds a semaphore permit for up to this
+#   2. Must stay SHORT so the app.concurrency.KB_POOL queue drains
+#      fast — every /agent/query holds a KB_POOL slot for up to this
 #      many seconds, which blocks other KB queries and makes the chat
 #      experience feel hung even when /chat/stream itself is fast.
+#      (Pre-Task-8 this was _QUERY_SEMAPHORE(2); now path-partitioned
+#      so /health and /observability are immune to the queue depth.)
 #
 # 10s is the current sweet spot: long enough for a warm-cache smart RAG
 # on 6 domains to complete, short enough that a cold-start or

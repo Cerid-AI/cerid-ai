@@ -123,6 +123,11 @@ async def test_head_of_line_blocking(client):
         try: await b
         except: pass
     print(f"  /health during load: p50={statistics.median(mids):.2f}s p95={sorted(mids)[-1]:.2f}s max={max(mids):.2f}s")
+    # Wave-1 invariant (Task 8): /health must not serialize behind KB.
+    # Pre-Task-8 baseline was p95 4.67s under 3 bg agent queries; post-fix
+    # /health runs on HEALTH_POOL (cap 32) so the max should be sub-second.
+    # 1s is a forgiving ceiling that still catches regression.
+    assert max(mids) < 1.0, f"HOL regression: /health max {max(mids):.2f}s under 3 bg agent queries"
 
 async def test_cb_trip_after_flap(client):
     print(f"\n== TEST H: CB state after triggering external flake ==")

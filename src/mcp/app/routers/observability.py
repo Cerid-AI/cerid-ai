@@ -307,6 +307,18 @@ def get_cost_per_query(
     }
 
 
+@router.get("/queue-depth")
+async def queue_depth_endpoint():
+    """Return in-use and waiting counts for each concurrency pool.
+
+    Surfaces the path-partitioned pools defined in ``app.concurrency``
+    so dashboards can spot queue buildup on the KB pool (the usual
+    suspect when chat latency spikes) before users notice.
+    """
+    from app.concurrency import queue_depths
+    return queue_depths()
+
+
 @router.get("/claim-accuracy")
 def get_claim_accuracy(
     window: int = Query(60, ge=1, le=10080, alias="window_minutes"),
