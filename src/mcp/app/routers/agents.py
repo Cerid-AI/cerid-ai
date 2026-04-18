@@ -221,6 +221,10 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
         if not has_context and not req.skip_cache:
             cached = get_cached(req.query, domain_key, req.top_k)
             if cached:
+                # ``get_cached`` stamps ``cached: True`` + ``cache_age_ms`` on
+                # the payload; the metrics middleware reads the body and sets
+                # ``X-Cache: HIT`` so dashboards/smoke harnesses can distinguish
+                # warm from cold without timing the call (audit RC-G).
                 return cached
 
         debug_timing = request.headers.get("X-Debug-Timing", "").lower() == "true"
