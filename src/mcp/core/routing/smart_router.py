@@ -60,26 +60,32 @@ class RouteDecision:
 # Model registry -- centralized model definitions
 # ---------------------------------------------------------------------------
 
+# Every model ID carries the ``openrouter/`` prefix so the Bifrost path keeps
+# working if ``USE_BIFROST=true`` is ever flipped on — the OpenRouter-direct
+# path strips the prefix via ``_strip_openrouter_prefix`` in ``llm_client``.
+# Audit C-7: previously the registry stored bare IDs and relied on chat.py
+# stripping a prefix that was never added, silently breaking Bifrost.
+
 FREE_MODELS = {
-    "llama-3.3": "meta-llama/llama-3.3-70b-instruct",
+    "llama-3.3": "openrouter/meta-llama/llama-3.3-70b-instruct",
 }
 
 CHEAP_MODELS: dict[str, dict[str, str | float]] = {
-    "gpt-4o-mini": {"id": "openai/gpt-4o-mini", "cost": 0.00015},
-    "gemini-flash": {"id": "google/gemini-2.5-flash", "cost": 0.0003},
+    "gpt-4o-mini": {"id": "openrouter/openai/gpt-4o-mini", "cost": 0.00015},
+    "gemini-flash": {"id": "openrouter/google/gemini-2.5-flash", "cost": 0.0003},
 }
 
 CAPABLE_MODELS: dict[str, dict[str, str | float]] = {
-    "claude-sonnet": {"id": "anthropic/claude-sonnet-4.6", "cost": 0.003},
-    "gpt-4o": {"id": "openai/gpt-4o", "cost": 0.0025},
+    "claude-sonnet": {"id": "openrouter/anthropic/claude-sonnet-4.6", "cost": 0.003},
+    "gpt-4o": {"id": "openrouter/openai/gpt-4o", "cost": 0.0025},
 }
 
 RESEARCH_MODELS: dict[str, dict[str, str | float]] = {
-    "grok-online": {"id": "x-ai/grok-4.1-fast:online", "cost": 0.0002},
+    "grok-online": {"id": "openrouter/x-ai/grok-4.1-fast:online", "cost": 0.0002},
 }
 
 EXPERT_MODELS: dict[str, dict[str, str | float]] = {
-    "grok-4": {"id": "x-ai/grok-4:online", "cost": 0.003},
+    "grok-4": {"id": "openrouter/x-ai/grok-4:online", "cost": 0.003},
 }
 
 # ---------------------------------------------------------------------------
@@ -125,91 +131,129 @@ async def _check_ollama() -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Complexity classification (heuristic -- no LLM call)
+# Complexity classification (scored heuristic -- no LLM call)
 # ---------------------------------------------------------------------------
+#
+# Audit C-5/C-6: the old classifier used first-keyword-match, so any query
+# containing {code, function, class, analyze, considering} short-circuited
+# to COMPLEX → Claude Sonnet — wasting tokens on trivial queries and leaving
+# the free-Llama path nearly dead.  The scored approach below lets a single
+# weak signal fall through; a short "analyze this" no longer hijacks routing.
+
+# Research indicators -- needs real-time data.  Short-circuits complexity
+# scoring entirely because research always routes through Grok-online
+# regardless of how "complex" the query text looks.
+_RESEARCH_KEYWORDS: tuple[str, ...] = (
+    "latest", "recent", "current", "today", "news",
+    "2025", "2026", "trending", "stock price", "weather",
+    "score", "election",
+)
+
+# Short factual-lookup patterns -- when a short query clearly asks for a
+# definition or fact, skip the scoring path.
+_SIMPLE_PATTERNS: tuple[str, ...] = (
+    "what is", "who is", "how many", "capital of",
+    "define ", "what does", "when was", "where is", "how old",
+)
+
+# Weighted signals for COMPLEX classification.  Chosen so a single weak
+# signal cannot push a short query into COMPLEX:
+#   * COMPLEX requires total >= 3.0 (usually at least one strong + one weak)
+#   * MODERATE requires complex >= 1.5 OR moderate >= 1.0
+#   * SIMPLE is the default
+_COMPLEX_SIGNALS: dict[str, dict] = {
+    "code": {
+        "keywords": (
+            "def ", "class ", "function", "import ", "```",
+            "refactor", "implement", "debug",
+        ),
+        "weight": 2.0,
+    },
+    "multi_aspect": {
+        "keywords": (
+            "considering", "tradeoff", "trade-off", "compare",
+            "analyze", "analyse", "evaluate", "critique",
+        ),
+        "weight": 1.0,
+    },
+    "length": {"threshold": 200, "weight": 1.5},  # chars
+    "domain_depth": {
+        "keywords": (
+            "architecture", "architectural", "algorithm", "distributed",
+            "consensus", "thread-safe", "race condition", "scalability",
+            "concurrency",
+        ),
+        "weight": 1.5,
+    },
+}
+
+_MODERATE_SIGNALS: dict[str, dict] = {
+    "summarize": {
+        "keywords": ("summarize", "summary", "overview", "explain"),
+        "weight": 1.0,
+    },
+    "length": {"threshold": 80, "weight": 0.5},
+}
 
 
-def _classify_complexity(query: str) -> Complexity:
-    """Heuristic complexity classification (no LLM call needed).
+def classify_task_type(query: str) -> Complexity:
+    """Score-based task-complexity classifier (replaces keyword-first-match).
 
-    Uses simple rules to avoid the chicken-and-egg problem of needing
-    an LLM to classify a query before sending it to an LLM.
+    Thresholds:
+      * COMPLEX:  ``complex_score`` >= 3.0
+      * MODERATE: ``complex_score`` >= 1.5 or ``moderate_score`` >= 1.0
+      * SIMPLE:   else
+
+    Research keywords (``latest``, ``news``, ``2026`` …) short-circuit to
+    :attr:`Complexity.RESEARCH`; short factual patterns (``what is …``)
+    short-circuit to :attr:`Complexity.SIMPLE` so we don't penalise bare
+    definitional lookups.
     """
-    query_lower = query.lower().strip()
-    word_count = len(query_lower.split())
+    q = query.lower().strip()
+    word_count = len(q.split())
 
-    # Research indicators -- needs real-time data
-    research_keywords = [
-        "latest",
-        "recent",
-        "current",
-        "today",
-        "news",
-        "2025",
-        "2026",
-        "trending",
-        "stock price",
-        "weather",
-        "score",
-        "election",
-    ]
-    if any(kw in query_lower for kw in research_keywords):
+    # Research short-circuit
+    if any(kw in q for kw in _RESEARCH_KEYWORDS):
         return Complexity.RESEARCH
 
-    # Simple indicators -- short factual queries
-    simple_patterns = [
-        "what is",
-        "who is",
-        "how many",
-        "capital of",
-        "define ",
-        "what does",
-        "when was",
-        "where is",
-        "how old",
-    ]
+    # Factual short-circuit
     if word_count <= 15 and any(
-        query_lower.startswith(p) or p in query_lower for p in simple_patterns
+        q.startswith(p) or p in q for p in _SIMPLE_PATTERNS
     ):
         return Complexity.SIMPLE
 
-    # Complex indicators -- multi-step, code, analysis, reasoning
-    complex_keywords = [
-        "implement",
-        "build",
-        "create",
-        "design",
-        "architect",
-        "refactor",
-        "debug",
-        "optimize",
-        "compare and contrast",
-        "pros and cons",
-        "step by step",
-        "write a",
-        "code",
-        "function",
-        "class",
-        # Analytical reasoning signals
-        "analyze",
-        "analyse",
-        "evaluate",
-        "assess",
-        "review",
-        "critique",
-        "trade-off",
-        "tradeoff",
-        "implications",
-        "scalability",
-        "thread-safe",
-        "race condition",
-        "considering",
-    ]
-    if any(kw in query_lower for kw in complex_keywords) or word_count > 100:
-        return Complexity.COMPLEX
+    complex_score = 0.0
+    moderate_score = 0.0
 
-    # Default: moderate
-    return Complexity.MODERATE
+    for spec in _COMPLEX_SIGNALS.values():
+        if "keywords" in spec and any(kw in q for kw in spec["keywords"]):
+            complex_score += spec["weight"]
+        if "threshold" in spec and len(query) >= spec["threshold"]:
+            complex_score += spec["weight"]
+
+    for spec in _MODERATE_SIGNALS.values():
+        if "keywords" in spec and any(kw in q for kw in spec["keywords"]):
+            moderate_score += spec["weight"]
+        if "threshold" in spec and len(query) >= spec["threshold"]:
+            moderate_score += spec["weight"]
+
+    # Very long queries (100+ words) are almost always complex regardless
+    # of keywords — preserves the old ``word_count > 100`` escape hatch.
+    if word_count > 100:
+        complex_score += 2.0
+
+    if complex_score >= 3.0:
+        return Complexity.COMPLEX
+    if complex_score >= 1.5 or moderate_score >= 1.0:
+        return Complexity.MODERATE
+    return Complexity.SIMPLE
+
+
+# Backward-compat alias: the bridge module and the existing test suite import
+# ``_classify_complexity``.  The new ``classify_task_type`` is the public name
+# (per Task 17 spec); ``_classify_complexity`` stays as a thin alias so we
+# don't break call-sites on an internal refactor.
+_classify_complexity = classify_task_type
 
 
 async def _classify_with_best_available(query: str) -> Complexity:
@@ -383,11 +427,15 @@ async def route(
     # But Ollama CAN classify the query (free, instant) to pick the best model
     complexity = await _classify_with_best_available(query)
 
-    # Context-aware escalation: KB injections and large conversations
-    # require models with sufficient context windows and reasoning ability
+    # KB-injection MODERATE tilt (Task 17): 3+ injected documents indicate a
+    # retrieval-augmented question.  Bump SIMPLE→MODERATE so the free model
+    # doesn't try to reason over a large context window.  Never pushes to
+    # COMPLEX on its own — that's what the classifier is for.
     if kb_injection_count >= 3 and complexity == Complexity.SIMPLE:
         complexity = Complexity.MODERATE
         logger.info("Escalated SIMPLE→MODERATE: %d KB injections", kb_injection_count)
+
+    # Total-context escalations: very large contexts need bigger-window models.
     if total_chars > 40_000:
         complexity = Complexity.COMPLEX
         logger.info("Escalated to COMPLEX: %d total chars (large context)", total_chars)
@@ -395,30 +443,31 @@ async def route(
         complexity = Complexity.MODERATE
         logger.info("Escalated SIMPLE→MODERATE: %d total chars", total_chars)
 
-    # Cost sensitivity shifts model selection:
-    # HIGH: use free models more aggressively (even for moderate queries)
-    # LOW: use capable models more aggressively (even for simple queries)
     cs = cost_sensitivity.lower()
 
+    # ---- Decision table (Task 17) -----------------------------------------
+    #   SIMPLE   | any       → FREE
+    #   MODERATE | high      → FREE (llama)
+    #            | medium    → CHEAP (gpt-4o-mini)
+    #            | low       → CAPABLE (claude-sonnet)
+    #   COMPLEX  | high      → CHEAP (gemini-flash)  # override — user asked
+    #            | medium    → CAPABLE (claude-sonnet)
+    #            | low       → CAPABLE (claude-sonnet; EXPERT behind a flag)
+    #   RESEARCH | any       → RESEARCH (grok-online)
+    # -----------------------------------------------------------------------
+
     if complexity == Complexity.RESEARCH:
-        # Research always needs web search — no free alternative
-        if cs == "high":
-            # High cost sensitivity: use cheaper Grok Fast instead of Grok 4
-            return RouteDecision(
-                model=str(RESEARCH_MODELS["grok-online"]["id"]),
-                provider="openrouter_paid",
-                reason="research query — using cheaper web model (high cost sensitivity)",
-                estimated_cost_per_1k=0.0002,
-            )
         return RouteDecision(
             model=str(RESEARCH_MODELS["grok-online"]["id"]),
             provider="openrouter_paid",
-            reason="research query — real-time data needed",
+            reason=(
+                "research query — cheaper web model (high cost sensitivity)"
+                if cs == "high" else "research query — real-time data needed"
+            ),
             estimated_cost_per_1k=0.0002,
         )
 
     if complexity == Complexity.SIMPLE:
-        # Simple: always free — even low cost sensitivity doesn't waste money here
         return RouteDecision(
             model=FREE_MODELS["llama-3.3"],
             provider="openrouter_free",
@@ -428,48 +477,42 @@ async def route(
 
     if complexity == Complexity.COMPLEX:
         if cs == "high":
-            # High cost sensitivity: use cheapest *capable* model, not a mini model.
-            # Complex queries need reasoning quality — gpt-4o-mini can't handle
-            # architecture analysis, code review, or multi-step reasoning well.
-            # Gemini Flash is 2x the cost of mini but dramatically better at reasoning.
+            # Complex + high: still capable-tier but cheapest (gemini-flash).
+            # gpt-4o-mini is too weak for multi-step reasoning.
             return RouteDecision(
                 model=str(CHEAP_MODELS["gemini-flash"]["id"]),
                 provider="openrouter_paid",
                 reason="complex query — cheapest capable model (high cost sensitivity)",
                 estimated_cost_per_1k=0.0003,
             )
-        if cs == "low":
-            # Low cost sensitivity: use best available model
-            return RouteDecision(
-                model=str(CAPABLE_MODELS["claude-sonnet"]["id"]),
-                provider="openrouter_paid",
-                reason="complex query — best model (low cost sensitivity)",
-                estimated_cost_per_1k=0.003,
-            )
-        # Medium: capable model (default)
+        # medium or low → CAPABLE.  Escalation to EXPERT is kept behind a
+        # separate flag so "low cost sensitivity" doesn't silently 10x spend.
+        reason = (
+            "complex query — best model (low cost sensitivity)"
+            if cs == "low" else "complex query — strong reasoning needed"
+        )
         return RouteDecision(
             model=str(CAPABLE_MODELS["claude-sonnet"]["id"]),
             provider="openrouter_paid",
-            reason="complex query — strong reasoning needed",
+            reason=reason,
             estimated_cost_per_1k=0.003,
         )
 
     # Moderate complexity
     if cs == "high":
-        # High cost sensitivity: use free model for moderate queries too
         return RouteDecision(
             model=FREE_MODELS["llama-3.3"],
             provider="openrouter_free",
-            reason="moderate query — using free model (high cost sensitivity)",
+            reason="moderate query — free model (high cost sensitivity)",
             estimated_cost_per_1k=0.0,
         )
     if cs == "low":
-        # Low cost sensitivity: upgrade moderate to capable model
+        # Task 17 decision table: MODERATE + low → CAPABLE (was CHEAP).
         return RouteDecision(
-            model=str(CHEAP_MODELS["gemini-flash"]["id"]),
+            model=str(CAPABLE_MODELS["claude-sonnet"]["id"]),
             provider="openrouter_paid",
-            reason="moderate query — upgraded model (low cost sensitivity)",
-            estimated_cost_per_1k=0.0003,
+            reason="moderate query — capable model (low cost sensitivity)",
+            estimated_cost_per_1k=0.003,
         )
     # Medium: cheap paid model balances quality and cost
     return RouteDecision(

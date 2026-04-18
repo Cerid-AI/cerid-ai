@@ -32,9 +32,16 @@ class TestClassifyComplexity:
         assert _classify_complexity("what is the capital of France?") == Complexity.SIMPLE
 
     def test_classify_moderate_query(self):
-        """Normal question without complex/research keywords -> MODERATE."""
+        """Question long enough to tip the MODERATE length signal -> MODERATE.
+
+        Task 17: the classifier is now scored, so an 8-word factual biology
+        question without any complexity signals falls through to SIMPLE.
+        To assert MODERATE we need at least one explicit signal (an
+        ``explain``/``summarize`` keyword or ~80+ chars of text).
+        """
         assert _classify_complexity(
-            "How does photosynthesis work in most plants?"
+            "explain how photosynthesis works in eukaryotic plant cells, "
+            "including the light and dark reactions"
         ) == Complexity.MODERATE
 
     def test_classify_complex_query(self):
@@ -54,8 +61,13 @@ class TestClassifyComplexity:
         assert _classify_complexity(long_query) == Complexity.COMPLEX
 
     def test_classify_empty_query(self):
-        """Empty query -> MODERATE (default)."""
-        assert _classify_complexity("") == Complexity.MODERATE
+        """Empty query -> SIMPLE (no signals, shortest possible query).
+
+        Task 17: the old default for ambiguous queries was MODERATE; the new
+        scored classifier treats "no signal" as SIMPLE so the free model
+        handles trivially-empty inputs without burning a paid token.
+        """
+        assert _classify_complexity("") == Complexity.SIMPLE
 
 
 # ---------------------------------------------------------------------------
@@ -136,10 +148,15 @@ class TestRouteCostSensitivity:
 
     @pytest.mark.asyncio
     async def test_route_cost_sensitivity_low_moderate(self):
-        """Low cost sensitivity + moderate -> upgraded model."""
+        """Low cost sensitivity + moderate -> upgraded model.
+
+        Task 17: the scored classifier needs at least one MODERATE signal to
+        lift the query above SIMPLE; ``explain`` is the canonical trigger.
+        """
         with patch("utils.smart_router._check_ollama", new_callable=AsyncMock, return_value=False):
             decision = await route(
-                "How does photosynthesis work in eukaryotic cells?",
+                "explain how photosynthesis works in eukaryotic plant cells "
+                "in a way that a high schooler can follow",
                 task_type=TaskType.CHAT,
                 cost_sensitivity="low",
             )

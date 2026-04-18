@@ -60,6 +60,13 @@ class AgentQueryRequest(BaseModel):
     response_text: str | None = Field(None, description="LLM response text for Self-RAG validation")
     model: str | None = Field(None, description="Generating model (for Self-RAG metadata)")
     enable_self_rag: bool | None = Field(None, description="Override Self-RAG toggle (None = use server config)")
+    cost_sensitivity: str | None = Field(
+        None,
+        description=(
+            "User cost preference: 'low' | 'medium' | 'high'. When None the "
+            "server resolves it from the consumer registry (Task 17)."
+        ),
+    )
     # --- Query scope (high-level intent) ---
     # "document" = single-file focus, "domain" = single-domain, "kb" = whole KB (default)
     # Expands into strict_domains / skip_cache / metadata_filter automatically.

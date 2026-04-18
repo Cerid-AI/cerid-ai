@@ -147,6 +147,7 @@ async def call_llm(
     response_format: dict | None = None,
     extra_payload: dict | None = None,
     breaker_name: str = "openrouter",
+    cost_sensitivity: str = "medium",  # noqa: ARG001 — observability / forward-compat
 ) -> str:
     """Call an LLM via OpenRouter directly.  Returns assistant content as string.
 
@@ -172,6 +173,12 @@ async def call_llm(
         Additional keys merged into the API payload.
     breaker_name:
         Circuit breaker name for this call category.
+    cost_sensitivity:
+        ``"low"`` | ``"medium"`` | ``"high"``.  Only meaningful when ``model``
+        is empty and the caller is relying on upstream routing: this parameter
+        accepts a user-scoped cost preference so callers can forward it
+        without an if-else.  When ``model`` is set explicitly, the choice is
+        already made and this value is ignored.
     """
     api_key = os.getenv("OPENROUTER_API_KEY", "")
     if not api_key:
@@ -271,6 +278,7 @@ async def call_llm_raw(
     response_format: dict | None = None,
     extra_payload: dict | None = None,
     breaker_name: str = "openrouter",
+    cost_sensitivity: str = "medium",  # noqa: ARG001 — observability / forward-compat
 ) -> dict:
     """Like :func:`call_llm` but returns the full parsed response dict.
 
@@ -379,15 +387,29 @@ async def route_and_call(
     temperature: float = 0.1,
     max_tokens: int = 500,
     response_format: dict | None = None,
+    cost_sensitivity: str = "medium",
+    kb_injection_count: int = 0,
+    total_chars: int = 0,
 ) -> tuple[str, "RouteDecision"]:
     """Smart-route a query to the best LLM, then call it.
+
+    ``cost_sensitivity`` is forwarded to :func:`smart_router.route` so the
+    user's cost preference influences model selection for this call.  See
+    Task 17 audit C-6: this value used to get dropped at the router boundary
+    and default to ``medium`` regardless of the user's setting.
 
     Returns ``(content, route_decision)`` tuple.
     """
     from utils.smart_router import TaskType, route
 
     task = TaskType(task_type)
-    decision = await route(query, task_type=task)
+    decision = await route(
+        query,
+        task_type=task,
+        cost_sensitivity=cost_sensitivity,
+        kb_injection_count=kb_injection_count,
+        total_chars=total_chars,
+    )
 
     if decision.provider == "ollama":
         # Call Ollama directly
@@ -406,6 +428,7 @@ async def route_and_call(
             temperature=temperature,
             max_tokens=max_tokens,
             response_format=response_format,
+            cost_sensitivity=cost_sensitivity,
         )
         return content, decision
 
