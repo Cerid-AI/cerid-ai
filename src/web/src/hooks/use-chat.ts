@@ -28,7 +28,7 @@ export function useChat({ onMessageStart, onMessageUpdate, onModelResolved, onMo
   onModelFallbackRef.current = onModelFallback
 
   const send = useCallback(
-    async (convoId: string, messages: Pick<ChatMessage, "role" | "content">[], model: string, sourcesUsed?: SourceRef[]) => {
+    async (convoId: string, messages: Pick<ChatMessage, "role" | "content">[], model: string, sourcesUsed?: SourceRef[], degradedReason?: string) => {
       setIsStreaming(true)
       abortRef.current = new AbortController()
 
@@ -39,6 +39,7 @@ export function useChat({ onMessageStart, onMessageUpdate, onModelResolved, onMo
         model,
         timestamp: Date.now(),
         sourcesUsed,
+        ...(degradedReason ? { degradedReason } : {}),
       }
       onMessageStart(convoId, assistantMsg)
 

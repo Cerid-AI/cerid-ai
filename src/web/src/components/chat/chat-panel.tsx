@@ -377,6 +377,7 @@ export function ChatPanel() {
     injectedContext,
     kbResults: effectiveKBResults,
     clearInjected,
+    degradedReason: orchestratedContext.degradedReason,
     onBeforeSend: () => setVerificationRecBanner(null),
   })
 

@@ -34,6 +34,10 @@ export interface UseOrchestratedQueryReturn {
   memorySources: MemoryRecallResult[]
   externalSources: ExternalSourceResult[]
 
+  /** Non-empty string when the retrieval pipeline exceeded its time budget
+   *  for the most recent query and returned an ungrounded answer. */
+  degradedReason: string
+
   // Source toggles (for Knowledge Console)
   kbEnabled: boolean
   memoryEnabled: boolean
@@ -150,6 +154,7 @@ export function useOrchestratedQuery(
 
   // Parse source breakdown from response
   const sourceBreakdown = data?.source_breakdown ?? null
+  const degradedReason = data?.degraded_reason ?? ""
 
   const kbSources = useMemo(
     () => (kbEnabled ? sourceBreakdown?.kb ?? [] : []),
@@ -189,6 +194,8 @@ export function useOrchestratedQuery(
     kbSources,
     memorySources,
     externalSources,
+
+    degradedReason,
 
     kbEnabled,
     memoryEnabled,

@@ -28,7 +28,7 @@ interface UseChatSendOptions {
   replaceMessages?: (convoId: string, msgs: ChatMessage[]) => void
 
   // Chat send primitive
-  send: (convoId: string, messages: Pick<ChatMessage, "role" | "content">[], model: string, sources?: SourceRef[]) => void
+  send: (convoId: string, messages: Pick<ChatMessage, "role" | "content">[], model: string, sources?: SourceRef[], degradedReason?: string) => void
 
   // Current model (owned by ChatPanel, shared with toolbar/dialog/correction)
   selectedModel: string
@@ -46,6 +46,11 @@ interface UseChatSendOptions {
   injectedContext: KBQueryResult[]
   kbResults: KBQueryResult[]
   clearInjected: () => void
+
+  /** Non-empty when retrieval breached its time budget for the current query.
+   *  Propagated onto the assistant ChatMessage so MessageBubble can render a
+   *  warning banner explaining the answer is ungrounded. */
+  degradedReason?: string
 
   // Callback before send (e.g. reset verification banner)
   onBeforeSend?: () => void
@@ -321,7 +326,7 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
         }
       }
 
-      options.send(convoId, allMessages, modelToUse, sourcesForAssistant)
+      options.send(convoId, allMessages, modelToUse, sourcesForAssistant, options.degradedReason)
       if (modelToUse !== options.selectedModel && options.activeId) {
         options.updateModel(options.activeId, modelToUse)
       }
