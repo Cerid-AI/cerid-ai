@@ -282,31 +282,24 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
                 except Exception:
                     _ext_results = []
                 if _ext_results:
+                    from app.models.query_envelope import QueryEnvelope, SourceItem
+                    env = QueryEnvelope.from_legacy_result(result)
                     _DISCOUNT = 0.6
-                    for _raw in _ext_results:
-                        result.setdefault("results", []).append({
-                            "content": _raw.get("content", ""),
-                            "relevance": round(
-                                _raw.get("confidence", 0.8) * _DISCOUNT, 3,
-                            ),
-                            "source_url": _raw.get("source_url", ""),
-                            "source_name": _raw.get(
-                                "source_name", _raw.get("title", ""),
-                            ),
-                            "source_type": "external",
-                            "domain": "external",
-                            "artifact_id": "",
-                            "filename": _raw.get("source_name", ""),
-                            "chunk_id": "",
-                            "collection": "external",
-                        })
-                    result["total_results"] = len(result.get("results", []))
-                    if result.get("results"):
-                        result["confidence"] = round(
-                            sum(r["relevance"] for r in result["results"])
-                            / len(result["results"]),
-                            4,
+                    env.merge_external([
+                        SourceItem(
+                            content=r.get("content", ""),
+                            relevance=round(r.get("confidence", 0.8) * _DISCOUNT, 3),
+                            artifact_id="",
+                            filename=r.get("source_name", ""),
+                            source_type="external",
+                            domain="external",
+                            collection="external",
+                            source_url=r.get("source_url", ""),
+                            source_name=r.get("source_name", r.get("title", "")),
                         )
+                        for r in _ext_results
+                    ])
+                    result = env.to_dict()
 
         # Self-RAG: validate claims and refine retrieval if enabled
         use_self_rag = req.enable_self_rag if req.enable_self_rag is not None else config.ENABLE_SELF_RAG

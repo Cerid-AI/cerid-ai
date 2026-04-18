@@ -76,6 +76,10 @@ async def test_source_shape_invariant(client):
         nsrc = len(j.get("sources",[]))
         nsb = {k:len(v) for k,v in (j.get("source_breakdown") or {}).items()}
         print(f"  q={q!r:35} results={nr} sources={nsrc} source_breakdown={nsb} strategy={j.get('strategy','')[:22]}")
+        # Wave-0 invariant
+        assert nr == sum(nsb.values()), f"shape drift: results={nr} vs source_breakdown={nsb}"
+        assert nsrc == nr, f"sources({nsrc}) must mirror results({nr})"
+        assert "kb" in nsb and "memory" in nsb and "external" in nsb, "source_breakdown keys missing"
 
 async def test_rate_limit(client):
     print(f"\n== TEST E: rate-limit (fire 25 /agent/query under X-Client-ID=gui which is 20/min) ==")

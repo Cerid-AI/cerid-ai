@@ -940,23 +940,18 @@ async def agent_query(
             "agent_query exceeded %.1fs wall-clock budget for query=%r (degraded response returned)",
             budget, query[:80],
         )
-        return {
-            "results": [],
-            "context": "",
-            "answer": "",
-            "sources": [],
-            "source_breakdown": {"kb": [], "memory": [], "external": []},
-            "source_status": {"kb": "timeout", "memory": "timeout", "external": "timeout"},
-            "strategy": "degraded_budget_exhausted",
-            "budget_exceeded": True,
-            "budget_seconds": budget,
-            "degraded_reason": (
+        from core.models.query_envelope import QueryEnvelope
+        env = QueryEnvelope()
+        env.mark_degraded(
+            budget_seconds=budget,
+            reason=(
                 "Retrieval took longer than the configured budget. "
                 "This usually means the system is under load or the query "
                 "matched many large collections. Try a more specific query "
                 "or narrow the domain filter."
             ),
-        }
+        )
+        return env.to_dict()
 
 
 async def _agent_query_impl(
