@@ -120,18 +120,18 @@ def pytest_configure(config):
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(autouse=True)
-def _reset_bifrost_client():
-    """Reset the shared Bifrost and LLM httpx.AsyncClient singletons between tests.
+def _reset_llm_client():
+    """Reset the shared LLM httpx.AsyncClient singleton between tests.
 
-    Without this, get_bifrost_client() / _get_client() cache a client from the
-    first test, preventing subsequent tests' patches from taking effect.
-    Also clears the claim_cache L1 in-memory cache to prevent cross-test leakage.
-    Sets a dummy OPENROUTER_API_KEY so LLM calls use the direct OpenRouter code
-    path (where httpx.AsyncClient mocks take effect) instead of Bifrost fallback.
+    Without this, _get_client() caches a client from the first test,
+    preventing subsequent tests' patches from taking effect.  Also clears
+    the claim_cache L1 in-memory cache to prevent cross-test leakage.
+    Sets a dummy OPENROUTER_API_KEY so LLM calls reach the mocked
+    httpx.AsyncClient rather than short-circuiting on the missing-key
+    RuntimeError.
     """
     import os
 
-    import utils.bifrost as _bifrost_mod
     import utils.llm_client as _llm_mod
     from core.utils.circuit_breaker import get_breaker
     from utils.claim_cache import clear_l1_cache
@@ -147,10 +147,12 @@ def _reset_bifrost_client():
     except Exception:
         pass
 
-    _bifrost_mod._client = None
     _llm_mod._client = None
     clear_l1_cache()
-    # Reset all circuit breakers to prevent cross-test state leakage
+    # Reset all circuit breakers to prevent cross-test state leakage.
+    # The "bifrost-*" breaker names survive as legacy identifiers for
+    # historical call-site categories (rerank/claims/verify/...); Bifrost
+    # itself was retired (audit C-4 + 2026-04-17 follow-up).
     for name in (
         "bifrost-rerank", "bifrost-claims", "bifrost-verify",
         "bifrost-synopsis", "bifrost-memory", "bifrost-compress",
@@ -159,7 +161,6 @@ def _reset_bifrost_client():
     ):
         get_breaker(name).reset()
     yield
-    _bifrost_mod._client = None
     _llm_mod._client = None
     clear_l1_cache()
     # Restore original API key state

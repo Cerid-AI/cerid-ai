@@ -142,7 +142,7 @@ services:
       - SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-development}
       - OLLAMA_ENABLED=${OLLAMA_ENABLED:-false}
       - OLLAMA_URL=${OLLAMA_URL:-http://cerid-ollama:11434}
-      - INTERNAL_LLM_PROVIDER=${INTERNAL_LLM_PROVIDER:-bifrost}
+      - INTERNAL_LLM_PROVIDER=${INTERNAL_LLM_PROVIDER:-openrouter}
       - INTERNAL_LLM_MODEL=${INTERNAL_LLM_MODEL:-openrouter/openai/gpt-4o-mini}
       - HOST_MEMORY_GB=${HOST_MEMORY_GB:-}
       - HOST_OS=${HOST_OS:-}

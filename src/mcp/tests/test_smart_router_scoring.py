@@ -6,8 +6,8 @@
 Guards against the regression where a bare 'analyze' or 'considering' token
 pushes any query to COMPLEX/claude-sonnet — wasting tokens on simple queries
 and leaving the free-llama path nearly dead. Also guards that every model
-registry entry carries the ``openrouter/`` prefix so the Bifrost path keeps
-working when USE_BIFROST is flipped on.
+registry entry carries the ``openrouter/`` prefix so the prefix-stripping
+logic in ``llm_client._strip_openrouter_prefix`` keeps working.
 """
 from __future__ import annotations
 
@@ -73,8 +73,8 @@ async def test_cost_sensitivity_low_allows_capable():
 
 
 def test_model_ids_have_openrouter_prefix():
-    """Every registry entry must start with 'openrouter/' so Bifrost path
-    doesn't silently break when USE_BIFROST is re-enabled."""
+    """Every registry entry must start with 'openrouter/' so prefix
+    stripping in llm_client._strip_openrouter_prefix stays load-bearing."""
     from core.routing.smart_router import (
         CAPABLE_MODELS,
         CHEAP_MODELS,

@@ -58,12 +58,6 @@ def health_check() -> dict:
         status["neo4j"] = f"error: {exc}"
     # Circuit breaker states
     try:
-        from utils.circuit_breaker import get_breaker
-        bifrost_cb_state = get_breaker("bifrost-rerank").state.value
-    except (ValueError, ImportError):
-        bifrost_cb_state = "unknown"
-
-    try:
         from utils.circuit_breaker import get_breaker as _gb
         ollama_cb_state = _gb("ollama").state.value
     except (ValueError, ImportError):
@@ -76,7 +70,7 @@ def health_check() -> dict:
     except (ValueError, ImportError):
         openrouter_cb_state = "unknown"
 
-    # OpenRouter credit exhaustion flag (set by bifrost.py on 402)
+    # OpenRouter credit exhaustion flag (set by llm_client on 402)
     credits_exhausted = False
     try:
         redis_client = get_redis()
@@ -103,7 +97,6 @@ def health_check() -> dict:
         "version": get_version(),
         "services": status,
         "circuit_breakers": {
-            "bifrost": bifrost_cb_state,
             "ollama": ollama_cb_state,
             "openrouter": openrouter_cb_state,
         },

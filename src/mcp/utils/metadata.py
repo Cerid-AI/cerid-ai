@@ -314,7 +314,7 @@ async def ai_categorize(
     except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(f"AI categorization failed: {e}")
         return {}
-    except Exception as e:  # pragma: no cover - defensive catch (httpx / circuit-breaker)
+    except Exception as e:  # noqa: BLE001 — defensive catch for httpx/circuit-breaker errors
         logger.error(f"AI categorization failed (unexpected): {e}")
         return {}
 

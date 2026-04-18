@@ -158,6 +158,6 @@ def _generate_contexts(
     except (json.JSONDecodeError, KeyError, IndexError) as e:
         logger.warning("Contextual chunk enrichment failed: %s", e)
         return [""] * len(chunks)
-    except Exception as e:  # pragma: no cover - defensive catch (httpx / circuit-breaker)
+    except Exception as e:  # noqa: BLE001 — defensive catch for httpx/circuit-breaker errors
         logger.warning("Contextual chunk enrichment failed (unexpected): %s", e)
         return [""] * len(chunks)

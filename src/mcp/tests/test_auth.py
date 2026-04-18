@@ -502,17 +502,8 @@ class TestChatApiKeyResolution:
 
 
 # ---------------------------------------------------------------------------
-# Bifrost optional api_key parameter
+# (Retired) Bifrost optional api_key parameter — Bifrost was fully retired in
+# audit C-4 + 2026-04-17 follow-up; call_bifrost no longer exists. LLM calls
+# flow through core.utils.llm_client.call_llm which takes the api_key from
+# OPENROUTER_API_KEY directly.
 # ---------------------------------------------------------------------------
-
-class TestBifrostApiKey:
-    """Test that call_bifrost accepts optional api_key parameter."""
-
-    def test_call_bifrost_signature(self):
-        import inspect
-
-        from utils.bifrost import call_bifrost
-
-        sig = inspect.signature(call_bifrost)
-        assert "api_key" in sig.parameters
-        assert sig.parameters["api_key"].default is None

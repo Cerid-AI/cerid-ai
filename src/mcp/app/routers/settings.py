@@ -166,8 +166,7 @@ async def get_settings_endpoint():
             "extraction_model": "Llama 3.3 (free tier)",
         },
         # Infrastructure (read-only)
-        "bifrost_url": config.BIFROST_URL,
-        "bifrost_timeout": config.BIFROST_TIMEOUT,
+        "bifrost_timeout": config.BIFROST_TIMEOUT,  # legacy name, generic LLM call timeout
         "chroma_url": config.CHROMA_URL,
         "neo4j_uri": config.NEO4J_URI,
         "redis_url": _redact_url(config.REDIS_URL),

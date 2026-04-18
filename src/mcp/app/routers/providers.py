@@ -150,7 +150,7 @@ async def get_internal_provider():
         pass
 
     return {
-        "provider": getattr(config, "INTERNAL_LLM_PROVIDER", "bifrost"),
+        "provider": getattr(config, "INTERNAL_LLM_PROVIDER", "openrouter"),
         "model": getattr(config, "INTERNAL_LLM_MODEL", ""),
         "intelligence_model": getattr(config, "INTELLIGENCE_MODEL", ""),
         "ollama_available": ollama_available,
@@ -160,12 +160,12 @@ async def get_internal_provider():
 @router.put("/internal")
 async def set_internal_provider(body: dict):
     """Update internal LLM provider configuration (runtime, not persisted to .env)."""
-    provider = body.get("provider", "bifrost")
+    provider = body.get("provider", "openrouter")
     model = body.get("model", "")
     intelligence_model = body.get("intelligence_model", "")
 
-    if provider not in ("bifrost", "ollama"):
-        raise HTTPException(status_code=400, detail="Provider must be 'bifrost' or 'ollama'")
+    if provider not in ("openrouter", "ollama"):
+        raise HTTPException(status_code=400, detail="Provider must be 'openrouter' or 'ollama'")
 
     config.INTERNAL_LLM_PROVIDER = provider
     config.INTERNAL_LLM_MODEL = model
@@ -248,9 +248,9 @@ async def enable_ollama():
 
 @router.post("/ollama/disable")
 async def disable_ollama():
-    """Disable Ollama — fall back to Bifrost/OpenRouter for pipeline tasks."""
-    config.INTERNAL_LLM_PROVIDER = "bifrost"
-    return {"status": "disabled", "provider": "bifrost"}
+    """Disable Ollama — fall back to OpenRouter for pipeline tasks."""
+    config.INTERNAL_LLM_PROVIDER = "openrouter"
+    return {"status": "disabled", "provider": "openrouter"}
 
 
 @router.get("/ollama/recommendations")
