@@ -710,6 +710,11 @@ CONSUMER_REGISTRY: dict[str, dict] = {
             "/sdk/": (20, 60),
             "/ingest": (10, 60),
             "/recategorize": (10, 60),
+            # Audit C-11: state-mutating setup + polling admin/observability surfaces
+            # were previously unthrottled. Bound them to prevent abuse / tight loops.
+            "/setup/": (20, 60),
+            "/admin/": (20, 60),
+            "/observability/": (30, 60),
         },
         "allowed_domains": None,     # Full access to all domains
         "strict_domains": False,     # Cross-domain affinity enabled
@@ -760,6 +765,9 @@ CONSUMER_REGISTRY: dict[str, dict] = {
             "/sdk/": (30, 60),
             "/ingest": (10, 60),
             "/recategorize": (10, 60),
+            "/setup/": (20, 60),
+            "/admin/": (20, 60),
+            "/observability/": (30, 60),
         },
         "allowed_domains": None,
         "strict_domains": False,

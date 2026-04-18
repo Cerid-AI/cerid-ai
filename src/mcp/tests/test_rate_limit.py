@@ -31,6 +31,9 @@ def _make_app() -> Starlette:
     app = Starlette(
         routes=[
             Route("/agent/query", _ok, methods=["POST"]),
+            Route("/setup/configure", _ok, methods=["POST"]),
+            Route("/admin/kb/stats", _ok, methods=["GET"]),
+            Route("/observability/health-score", _ok, methods=["GET"]),
         ],
     )
     app.add_middleware(RateLimitMiddleware)
@@ -109,6 +112,43 @@ def test_retry_after_header_matches_body(client: TestClient) -> None:
             break
     assert r is not None and r.status_code == 429
     assert int(r.headers["Retry-After"]) == int(r.json()["retry_after"])
+
+
+def test_setup_is_rate_limited(client: TestClient) -> None:
+    """Audit C-11: /setup/* was prefix-exempt despite state-mutating POSTs.
+
+    A burst of POSTs to /setup/configure must eventually produce a 429.
+    """
+    headers = {"X-Client-ID": "gui"}
+    statuses: list[int] = []
+    for _ in range(25):
+        r = client.post("/setup/configure", json={}, headers=headers)
+        statuses.append(r.status_code)
+        if r.status_code == 429:
+            assert "Retry-After" in r.headers
+            return
+    pytest.fail(f"POST /setup/configure never rate-limited; statuses={statuses}")
+
+
+def test_admin_get_is_rate_limited(client: TestClient) -> None:
+    """Audit C-11: GET on /admin/* must be counted (previously blanket-exempt)."""
+    headers = {"X-Client-ID": "gui"}
+    for _ in range(25):
+        r = client.get("/admin/kb/stats", headers=headers)
+        if r.status_code == 429:
+            assert "Retry-After" in r.headers
+            return
+    pytest.fail("GET /admin/kb/stats never rate-limited")
+
+
+def test_observability_get_is_rate_limited(client: TestClient) -> None:
+    """Audit C-11: GET on /observability/* is a polling surface and must be counted."""
+    headers = {"X-Client-ID": "gui"}
+    for _ in range(35):
+        r = client.get("/observability/health-score", headers=headers)
+        if r.status_code == 429:
+            return
+    pytest.fail("GET /observability/health-score never rate-limited")
 
 
 def test_per_client_isolation_under_breach() -> None:
