@@ -85,6 +85,9 @@ def _probe_neo4j(neo4j: Any) -> dict[str, Any]:
     return {"verification_report_orphans": orphans}
 
 
+_startup_logger = logging.getLogger("ai-companion.startup")
+
+
 def _probe_collection_dim(collection: Any) -> int | None:
     """Return the embedding dimension of a Chroma collection, or None.
 
@@ -111,8 +114,38 @@ def _probe_collection_dim(collection: Any) -> int | None:
     return None
 
 
-def run_startup_dim_check() -> dict[str, Any]:
-    """Iterate Chroma collections at boot; warn on dim mismatches.
+def validate_collection_dimensions(client: Any, expected_dim: int) -> list[dict[str, Any]]:
+    """Return a list of mismatches for Chroma collections whose stored
+    embedding dim differs from ``expected_dim``.
+
+    * Empty collections (peek returns no embeddings) are skipped — the
+      dim isn't observable until the first doc lands.
+    * Mismatches are logged at ERROR level to ``ai-companion.startup``
+      with the tag ``embedding_dim_mismatch`` and a pointer to
+      ``/admin/collections/repair`` so the operator can act.
+    * Returns shape: ``[{"collection": str, "actual_dim": int, "expected_dim": int}]``.
+    """
+    mismatches: list[dict[str, Any]] = []
+    for c in client.list_collections():
+        name = _collection_name(c) or "<unknown>"
+        actual = _probe_collection_dim(c)
+        if actual is None:
+            # Empty/unknown — don't report.
+            continue
+        if actual != expected_dim:
+            mismatches.append(
+                {"collection": name, "actual_dim": actual, "expected_dim": expected_dim}
+            )
+            _startup_logger.error(
+                "embedding_dim_mismatch: collection=%r actual=%d expected=%d — "
+                "run POST /admin/collections/repair to re-ingest under the current embedder",
+                name, actual, expected_dim,
+            )
+    return mismatches
+
+
+def run_startup_dim_check() -> list[dict[str, Any]]:
+    """Iterate Chroma collections at boot; report dim mismatches.
 
     The collection layer can silently trap old embeddings after a model
     swap — the embedder produces 768-dim vectors but the collection was
@@ -120,31 +153,21 @@ def run_startup_dim_check() -> dict[str, Any]:
     life without a dim); prod surfaces it as opaque add/query errors.
 
     This check runs in the lifespan ``run_in_executor`` and MUST NOT
-    raise: any failure degrades to a log warning.  Returns a summary
-    dict for observability dashboards.
+    raise: any failure degrades to an info log and returns ``[]``.
+    Soft-fail semantics are deliberate — hard-failing would lock the
+    operator out of the ``/admin/collections/repair`` endpoint the
+    mismatch log message points to.
     """
-    summary: dict[str, Any] = {"mismatches": [], "errors": []}
     try:
         from app.deps import get_chroma
         from core.utils.embeddings import get_embedding_dim
 
         expected = int(get_embedding_dim())
         chroma = get_chroma()
-        for c in chroma.list_collections():
-            name = _collection_name(c) or "<unknown>"
-            actual = _probe_collection_dim(c)
-            if actual is not None and actual != expected:
-                summary["mismatches"].append(
-                    {"collection": name, "expected": expected, "actual": actual}
-                )
-                logger.warning(
-                    "collection %r dim mismatch: actual=%d expected=%d "
-                    "(rerun admin/collections/repair to remediate)",
-                    name, actual, expected,
-                )
+        return validate_collection_dimensions(chroma, expected)
     except Exception as exc:
-        summary["errors"].append(str(exc))
-        logger.warning("startup dim check errored (non-fatal): %s", exc)
+        _startup_logger.info("startup dim check skipped (non-fatal): %s", exc)
+        return []
     return summary
 
 
