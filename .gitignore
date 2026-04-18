@@ -100,3 +100,6 @@ src/mcp/rag-api-logs.txt
 
 # Working documents (not for public repo)
 tests/BUG_REPORT.md
+
+# Smoke test scratch directory (host path, outside repo)
+/tmp/cerid-smoke/

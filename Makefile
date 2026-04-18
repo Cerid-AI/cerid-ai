@@ -1,6 +1,6 @@
 .PHONY: lock-python lock-python-dev lock-all install-hooks deps-check \
        lint-frontend test-frontend typecheck-frontend build-frontend check-all \
-       test test-all test-eval help
+       test test-all test-eval smoke help
 
 # -- Python deps --
 lock-python:
@@ -47,6 +47,11 @@ test-eval:
 # -- Combined --
 check-all: deps-check lint-frontend typecheck-frontend test-frontend
 
+# -- Load testing --
+smoke:
+	@echo "[smoke] requires stack running (scripts/start-cerid.sh)"
+	python3 src/mcp/tests/load/smoke.py
+
 help:
 	@echo "Available targets:"
 	@echo "  lock-python        Regenerate requirements.lock"
@@ -62,3 +67,4 @@ help:
 	@echo "  test-all           Run ALL tests including eval"
 	@echo "  test-eval          Run evaluation harness only (Monte Carlo, RAGAS)"
 	@echo "  check-all          Run deps-check + lint + typecheck + test"
+	@echo "  smoke              Run smoke/load harness (requires running stack)"
