@@ -18,7 +18,6 @@ from starlette.testclient import TestClient
 
 from app.middleware.metrics import MetricsMiddleware
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

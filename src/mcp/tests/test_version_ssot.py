@@ -10,7 +10,6 @@ import tempfile
 from pathlib import Path
 
 
-
 def test_get_version_reads_version_file_if_present() -> None:
     """Verify get_version() reads VERSION file before pyproject.toml."""
     with tempfile.TemporaryDirectory() as tmpdir:

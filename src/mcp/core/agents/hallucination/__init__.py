@@ -82,7 +82,6 @@ from core.agents.hallucination.verification import (  # noqa: F401
     verify_claim,
 )
 
-
 # Explicit public API. Private helpers above (prefixed `_`) are only re-exported
 # for existing test patch targets and are NOT part of the public contract —
 # tests import them directly from their concrete submodules in new code. When

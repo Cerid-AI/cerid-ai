@@ -189,6 +189,7 @@ class TestMetadataFastPath:
         """The fast-path must not invoke spaCy or tiktoken — proven by patching
         both and asserting neither is called."""
         from unittest.mock import MagicMock, patch
+
         from utils.metadata import extract_metadata_minimal
 
         with (
@@ -200,8 +201,9 @@ class TestMetadataFastPath:
         mock_enc.encode.assert_not_called()
 
     def test_minimal_derives_keywords_from_filename(self):
-        from utils.metadata import extract_metadata_minimal
         import json
+
+        from utils.metadata import extract_metadata_minimal
 
         meta = extract_metadata_minimal("", "annual_financial_report.pdf", "finance")
         kws = json.loads(meta["keywords"])
