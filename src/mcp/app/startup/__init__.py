@@ -9,6 +9,7 @@ from app.startup.invariants import (
     _probe_nli,
     run_invariants,
     run_startup_dim_check,
+    validate_collection_dimensions,
 )
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "_probe_nli",
     "run_invariants",
     "run_startup_dim_check",
+    "validate_collection_dimensions",
 ]
