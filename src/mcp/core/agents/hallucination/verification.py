@@ -1431,7 +1431,22 @@ async def verify_claim(
     ext_kb_threshold = config.EXTERNAL_VERIFY_KB_THRESHOLD
 
     # --- Fact-level cache: skip re-verification for previously seen claims ---
-    cached = await get_cached_verdict(redis_client, claim)
+    # Key on (claim, model, method, response_context) so we don't return a
+    # stale verdict from a different model or from a prior conversation
+    # where a pronoun in `claim` resolved to a different subject.
+    #
+    # `method` here is the verification *tier* the caller is running, not the
+    # method-of-record on the verdict. We use "expert" vs "standard" so a
+    # user who explicitly requested expert-mode verification doesn't get a
+    # cheaper-mode verdict back — the writer below uses the same tier.
+    _cache_tier = "expert" if expert_mode else "standard"
+    cached = await get_cached_verdict(
+        redis_client,
+        claim,
+        model=model or "",
+        method=_cache_tier,
+        response_context=response_context or "",
+    )
     if cached and cached.get("status") in ("verified", "unverified", "uncertain"):
         logger.info("Claim cache hit: '%s' -> %s", claim[:50], cached["status"])
         return {
@@ -1460,7 +1475,16 @@ async def verify_claim(
         status = result.get("status")
         method = result.get("verification_method", "")
         if status in ("verified", "unverified", "uncertain") and method != "timeout":
-            await cache_verdict(redis_client, claim, result, response_context=response_context)
+            # Key on the same (model, tier, response_context) the reader uses
+            # above — otherwise cache writes never match cache reads.
+            await cache_verdict(
+                redis_client,
+                claim,
+                result,
+                response_context=response_context,
+                model=model or "",
+                method=_cache_tier,
+            )
         return result
 
     try:

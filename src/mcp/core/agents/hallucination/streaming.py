@@ -211,11 +211,23 @@ async def check_hallucinations(
     from core.agents.hallucination.verification import verify_claims_batch_external
     from core.utils.claim_cache import get_cached_verdict
 
+    # Cache key (model, tier, response_context) must match what verify_claim
+    # writes in verification.py — otherwise this batch pre-check always misses.
+    # `verify_claim` below is invoked with `response_context=user_query`, so we
+    # use the same value here.
+    _cache_tier = "expert" if expert_mode else "standard"
+    _cache_context = user_query or ""
     batch_results: dict[int, dict[str, Any]] = {}
     current_event_claims: list[tuple[int, str]] = []
     for idx, claim_text in enumerate(claims):
         if _is_current_event_claim(claim_text) or _is_recency_claim(claim_text):
-            cached = await get_cached_verdict(redis_client, claim_text)
+            cached = await get_cached_verdict(
+                redis_client,
+                claim_text,
+                model=model or "",
+                method=_cache_tier,
+                response_context=_cache_context,
+            )
             if cached and cached.get("status") in ("verified", "unverified"):
                 batch_results[idx] = cached
             else:
@@ -540,6 +552,9 @@ async def verify_response_streaming(
     # This reduces API round-trips, avoids rate limits, and prevents timeouts.
     from core.agents.hallucination.verification import verify_claims_batch_external
 
+    # Cache key (model, tier, response_context) must match what verify_claim
+    # writes in verification.py — otherwise this pre-check always misses.
+    _cache_tier = "expert" if expert_mode else "standard"
     batch_results: dict[int, dict[str, Any]] = {}
     current_event_claims: list[tuple[int, str]] = []
     for idx, claim_text in enumerate(claims):
@@ -547,7 +562,13 @@ async def verify_response_streaming(
         if ct in ("recency",) or _is_current_event_claim(claim_text):
             # Check cache first — don't re-batch already-cached claims
             from core.utils.claim_cache import get_cached_verdict
-            cached = await get_cached_verdict(redis_client, claim_text)
+            cached = await get_cached_verdict(
+                redis_client,
+                claim_text,
+                model=model or "",
+                method=_cache_tier,
+                response_context=response_context or "",
+            )
             if cached and cached.get("status") in ("verified", "unverified"):
                 batch_results[idx] = cached
             else:

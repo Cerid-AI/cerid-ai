@@ -75,18 +75,76 @@ def normalize_claim(claim: str) -> str:
 
 
 def claim_hash(claim: str) -> str:
-    """SHA-256 hash (first 16 hex chars) of the normalized claim text."""
+    """SHA-256 hash (first 16 hex chars) of the normalized claim text.
+
+    DEPRECATED: kept for backward compatibility only. Prefer
+    :func:`claim_cache_key`, which additionally mixes in model, verification
+    method, and response context so a claim verdict is not reused across model
+    swaps or across conversations where a pronoun ("it") resolves to a
+    different subject. This function is no longer used by the cache itself.
+    """
     return hashlib.sha256(normalize_claim(claim).encode()).hexdigest()[:16]
 
 
-async def get_cached_verdict(redis_client, claim_text: str) -> dict[str, Any] | None:
+# Bump this string when the cache key algorithm changes. Entries written under
+# a prior schema will simply never be read — the old keys don't collide with
+# the new `verf:claim:v2:…` namespace and will age out via their 30d TTL.
+_CACHE_SCHEMA = "v2"
+
+
+def claim_cache_key(
+    claim: str,
+    *,
+    model: str,
+    method: str,
+    response_context: str,
+) -> str:
+    """Return a cache key mixing claim + model + method + response_context.
+
+    Keying only on the claim text produces two failure modes:
+      1. **Model swap staleness** — switching verification models silently
+         returns the prior model's verdict even though the new model might
+         reach a different conclusion.
+      2. **Pronoun collision** — "It is 8848m tall" as a bare claim collides
+         across conversations even when "it" resolves to different subjects.
+
+    Mixing model, method, and the surrounding response context into the hash
+    input eliminates both. The key is schema-versioned (``v2:``) so the v1
+    cache can be left untouched — its entries will simply never be read and
+    age out naturally.
+    """
+    normalized = normalize_claim(claim)
+    # \x1f (Unit Separator) cannot appear in model IDs or method names and is
+    # vanishingly unlikely in response text, so it's a safe field delimiter.
+    material = (
+        f"{_CACHE_SCHEMA}\x1f{model}\x1f{method}\x1f{normalized}\x1f"
+        f"{response_context or ''}"
+    )
+    digest = hashlib.sha256(material.encode()).hexdigest()[:20]
+    return f"{_CACHE_SCHEMA}:{digest}"
+
+
+async def get_cached_verdict(
+    redis_client,
+    claim_text: str,
+    *,
+    model: str = "",
+    method: str = "",
+    response_context: str = "",
+) -> dict[str, Any] | None:
     """Check if a claim has been verified before. Returns cached verdict or *None*.
 
     Uses a two-tier cache: L1 in-memory (5min TTL, ~500 entries) → L2 Redis (30d TTL).
+
+    ``model``, ``method``, and ``response_context`` are folded into the key so
+    that verdicts are scoped to the verification model, verification method,
+    and conversational context in which they were produced. Call sites that
+    don't yet pass them fall back to empty strings and operate in their own
+    (distinct) cache namespace.
     """
     if any(claim_text.strip().startswith(p) for p in _SPECIAL_PREFIXES):
         return None
-    key = f"verf:claim:{claim_hash(claim_text)}"
+    key = f"verf:claim:{claim_cache_key(claim_text, model=model, method=method, response_context=response_context)}"
     # L1 check (no network I/O)
     l1_hit = _l1_get(key)
     if l1_hit is not None:
@@ -111,21 +169,40 @@ async def cache_verdict(
     verdict: dict[str, Any],
     ttl: int = 2_592_000,
     response_context: str | None = None,
+    *,
+    model: str | None = None,
+    method: str | None = None,
 ) -> None:
     """Cache a verified claim verdict. Default TTL: 30 days.
 
-    When ``response_context`` is provided it is stored alongside the verdict
-    so that future cache hits can include the topic context (e.g. "the Eiffel
-    Tower") — enabling downstream consumers to interpret the cached claim
-    correctly even when the bare claim text is ambiguous.
+    The cache key is derived from ``(claim, model, method, response_context)``
+    so verdicts don't bleed across model swaps or pronoun-different contexts.
+    Callers that don't pass ``model`` / ``method`` land in the empty-string
+    cache namespace, which pairs with ``get_cached_verdict`` callers that
+    also don't pass them — this keeps backward compatibility with existing
+    code paths while letting updated call sites scope keys per model/tier.
+
+    The TTL shortening for web-search verdicts still uses the verdict
+    payload's ``verification_method`` so time-sensitive data is always
+    capped regardless of what the caller keys on.
+
+    When ``response_context`` is provided it is also stored alongside the
+    verdict so that future cache hits can include the topic context
+    (e.g. "the Eiffel Tower") — enabling downstream consumers to interpret
+    the cached claim correctly even when the bare claim text is ambiguous.
     """
     if any(claim_text.strip().startswith(p) for p in _SPECIAL_PREFIXES):
         return
-    # Use shorter TTL for web-search verdicts (time-sensitive data)
-    method = verdict.get("verification_method", "")
-    if method in ("web_search",) and ttl > 259_200:
+    # Shorten TTL when the *verdict* is a web-search result — time-sensitive
+    # data goes stale even if the reader asked us to scope the key differently.
+    verdict_method = verdict.get("verification_method", "") or ""
+    if verdict_method in ("web_search",) and ttl > 259_200:
         ttl = 259_200  # 3 days for web-search verdicts
-    key = f"verf:claim:{claim_hash(claim_text)}"
+    # Key components default to empty string so unupdated callers stay in a
+    # self-consistent namespace with unupdated readers.
+    key_model = model if model is not None else ""
+    key_method = method if method is not None else ""
+    key = f"verf:claim:{claim_cache_key(claim_text, model=key_model, method=key_method, response_context=response_context or '')}"
     try:
         cache_entry: dict[str, Any] = {
             "status": verdict.get("status", "unknown"),
