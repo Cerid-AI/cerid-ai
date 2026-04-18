@@ -32,6 +32,10 @@ export interface SourceRef {
   tags?: string[]
   quality_score?: number
   source_type?: "kb" | "memory" | "external"
+  /** Populated for external-source items (e.g. Wikipedia, DuckDuckGo) so the
+   *  sources pane can render a link to the origin page. Empty/undefined for
+   *  KB and memory items. */
+  source_url?: string
 }
 
 export interface Conversation {

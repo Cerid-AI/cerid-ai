@@ -39,6 +39,7 @@ import { deriveDefaultModel } from "@/lib/derive-defaults"
 import { uploadFile, enableOllama, fetchOllamaStatus, fetchOllamaRecommendations, pullOllamaModel, fetchHealthStatus, retestServices, MCP_BASE, mcpHeaders } from "@/lib/api"
 import type { ChatMessage } from "@/lib/types"
 import { MODELS } from "@/lib/types"
+import { externalToKBResult } from "@/lib/kb-utils"
 import { uuid } from "@/lib/utils"
 
 const NARROW_MQ = "(max-width: 1024px)"
@@ -310,10 +311,16 @@ export function ChatPanel() {
   // In manual mode, orchestrated results are ignored (user controls injection).
   const effectiveKBResults = useMemo(() => {
     if (ragMode === "manual") return kbContext.results
-    return orchestratedContext.results.length > 0
-      ? orchestratedContext.results
-      : kbContext.results
-  }, [ragMode, orchestratedContext.results, kbContext.results])
+    const r = orchestratedContext.results
+    if (r.length > 0) return r
+    // Degraded path (F-2 remediation): if the orchestrator returned no KB
+    // results but external sources are present in the source_breakdown,
+    // promote them into the candidate pool so the sources pane and auto-inject
+    // can still surface the Wikipedia/DuckDuckGo content the backend used.
+    const ext = orchestratedContext.sourceBreakdown?.external ?? []
+    if (ext.length > 0) return ext.map(externalToKBResult)
+    return kbContext.results
+  }, [ragMode, orchestratedContext.results, orchestratedContext.sourceBreakdown, kbContext.results])
 
   // --- Model routing ---
   const { recommendation, dismiss: dismissRec, resetDismiss } = useModelRouter({

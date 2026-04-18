@@ -73,7 +73,18 @@ function SourceCard({ source }: { source: SourceRef }) {
   return (
     <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-2.5 py-1.5 text-xs">
       <FileText className="h-3 w-3 shrink-0 text-muted-foreground" />
-      <span className="min-w-0 truncate font-medium">{source.filename}</span>
+      {source.source_url ? (
+        <a
+          href={source.source_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="min-w-0 truncate font-medium underline-offset-2 hover:underline"
+        >
+          {source.filename}
+        </a>
+      ) : (
+        <span className="min-w-0 truncate font-medium">{source.filename}</span>
+      )}
       <DomainBadge domain={source.domain} />
       {source.sub_category && source.sub_category !== "general" && (
         <Badge variant="secondary" className="text-[10px]">

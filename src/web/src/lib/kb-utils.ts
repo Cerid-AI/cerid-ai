@@ -5,7 +5,7 @@
  * KB context utilities — semantic dedup + domain headers for LLM injection.
  */
 
-import type { KBQueryResult, MemoryRecallResult } from "./types"
+import type { KBQueryResult, MemoryRecallResult, ExternalSourceResult } from "./types"
 
 /**
  * Word-set Jaccard similarity between two texts.
@@ -92,5 +92,38 @@ export function memoryToKBResult(memory: MemoryRecallResult): KBQueryResult {
     collection: "memories",
     ingested_at: "",
     source_type: "memory",
+  }
+}
+
+/**
+ * Convert an ExternalSourceResult (Wikipedia, DuckDuckGo, etc.) to a
+ * KBQueryResult shape so it can flow through the shared dedup / auto-inject /
+ * source-attribution pipelines alongside KB chunks. Preserves the origin URL
+ * and display name so the sources pane can render a link back to the source.
+ */
+export function externalToKBResult(ext: ExternalSourceResult): KBQueryResult {
+  const displayName = ext.source_name || safeHostname(ext.source_url) || "External"
+  return {
+    content: ext.content,
+    relevance: ext.relevance,
+    // Use the URL as a stable artifact_id so dedupeByArtifact can group
+    // multiple chunks from the same external page.
+    artifact_id: ext.source_url,
+    filename: displayName,
+    domain: "external",
+    chunk_index: 0,
+    collection: "external",
+    ingested_at: "",
+    source_type: "external",
+    source_url: ext.source_url,
+    source_name: ext.source_name,
+  }
+}
+
+function safeHostname(url: string): string | null {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return null
   }
 }

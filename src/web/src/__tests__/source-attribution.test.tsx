@@ -128,3 +128,45 @@ describe("SourceAttribution", () => {
     expect(screen.getByText("85%")).toBeInTheDocument()
   })
 })
+
+describe("SourceAttribution \u2014 external (Task 5)", () => {
+  it("renders external items with URL and source name", async () => {
+    const user = userEvent.setup()
+    render(<SourceAttribution sources={[{
+      artifact_id: "",
+      filename: "Wikipedia",
+      domain: "external",
+      sub_category: "",
+      relevance: 0.55,
+      chunk_index: 0,
+      tags: [],
+      quality_score: 0,
+      source_type: "external",
+      source_url: "https://en.wikipedia.org/foo",
+    } as never]} />)
+    // Expand the collapsible to reveal the source card
+    await user.click(screen.getByText(/1 source/))
+    expect(screen.getByText(/Wikipedia/)).toBeInTheDocument()
+    const links = screen.queryAllByRole("link") as HTMLAnchorElement[]
+    expect(links.length).toBeGreaterThan(0)
+    expect(links.some(a => a.href.includes("wikipedia.org/foo"))).toBe(true)
+  })
+
+  it("does not produce a link when source_url is absent", async () => {
+    const user = userEvent.setup()
+    render(<SourceAttribution sources={[{
+      artifact_id: "a1",
+      filename: "notes.md",
+      domain: "general",
+      sub_category: "",
+      relevance: 0.8,
+      chunk_index: 0,
+      tags: [],
+      quality_score: 0.9,
+      source_type: "kb",
+    } as never]} />)
+    await user.click(screen.getByText(/1 source/))
+    expect(screen.getByText(/notes\.md/)).toBeInTheDocument()
+    expect(screen.queryByRole("link")).toBeNull()
+  })
+})
