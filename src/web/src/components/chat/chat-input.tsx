@@ -34,6 +34,10 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount
   const [input, setInput] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [isArtifactDragOver, setIsArtifactDragOver] = useState(false)
+  // Synchronous guard against rapid-Enter double-submit.
+  // `isStreaming` is React state and won't update between the Enter-press and state propagation,
+  // so a second Enter fired before the parent flips `isStreaming` to true would double-send.
+  const sendingRef = useRef(false)
 
   const handleFiles = useCallback((files: File[]) => onFileDrop?.(files), [onFileDrop])
   const { isDragOver, dragHandlers } = useDragDrop(handleFiles)
@@ -67,10 +71,19 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount
   const handleSend = useCallback(() => {
     const trimmed = input.trim()
     if (!trimmed || isStreaming) return
-    onSend(trimmed)
-    setInput("")
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto"
+    sendingRef.current = true
+    try {
+      onSend(trimmed)
+      setInput("")
+      if (textareaRef.current) {
+        textareaRef.current.style.height = "auto"
+      }
+    } finally {
+      // Released on the next tick so a second Enter fired in the same event burst
+      // still sees the guard. The parent's `isStreaming` will have flipped by then.
+      queueMicrotask(() => {
+        sendingRef.current = false
+      })
     }
   }, [input, isStreaming, onSend])
 
@@ -78,6 +91,7 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount
     (e: KeyboardEvent) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault()
+        if (sendingRef.current) return
         handleSend()
       }
     },
