@@ -5,7 +5,8 @@
 Metadata extraction and AI-assisted categorization.
 
 extract_metadata()  — local-only, no API calls
-ai_categorize()     — calls Bifrost for domain classification (token-efficient)
+ai_categorize()     — calls OpenRouter (via llm_client) for domain classification
+                      (token-efficient)
 """
 
 from __future__ import annotations
@@ -15,7 +16,6 @@ import logging
 from pathlib import Path
 from typing import Any
 
-import httpx
 import tiktoken
 
 import config
@@ -215,8 +215,8 @@ async def ai_categorize(
     mode: str | None = None,
 ) -> dict[str, Any]:
     """
-    Classify a document using Bifrost AI. Token-efficient: sends a snippet,
-    not the full document.
+    Classify a document using an OpenRouter-hosted LLM via ``core.utils.llm_client``.
+    Token-efficient: sends a snippet, not the full document.
 
     Args:
         text: Full document text.
@@ -271,20 +271,16 @@ async def ai_categorize(
                 stage="topic_extraction",
             )
         else:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post(
-                    f"{config.BIFROST_URL}/chat/completions",
-                    json={
-                        "model": model_id,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.1,
-                        "max_tokens": 200,
-                        "response_format": {"type": "json_object"},
-                    },
-                )
-                resp.raise_for_status()
-                data = resp.json()
-            content = data["choices"][0]["message"]["content"]
+            from core.utils.llm_client import call_llm
+            content = await call_llm(
+                [{"role": "user", "content": prompt}],
+                model=model_id,
+                temperature=0.1,
+                max_tokens=200,
+                timeout=30.0,
+                response_format={"type": "json_object"},
+                breaker_name="bifrost-claims",
+            )
         from utils.llm_parsing import parse_llm_json
         result = parse_llm_json(content)
         suggested = result.get("domain", "").lower().strip()
@@ -317,6 +313,9 @@ async def ai_categorize(
 
     except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
         logger.error(f"AI categorization failed: {e}")
+        return {}
+    except Exception as e:  # pragma: no cover - defensive catch (httpx / circuit-breaker)
+        logger.error(f"AI categorization failed (unexpected): {e}")
         return {}
 
 
