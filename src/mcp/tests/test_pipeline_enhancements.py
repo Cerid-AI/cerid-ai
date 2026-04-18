@@ -257,39 +257,58 @@ class TestDynamicConfidenceScoring:
 
 
 class TestCRAGQualityGate:
-    """CRAG gate should supplement with external sources on poor KB results."""
+    """CRAG gate is owned by the router layer (SSOT).
+
+    The inner gate in core/agents/query_agent.py was removed — the router-level
+    gate in app/routers/agents.py is now the single source of truth for firing
+    external sources. See test_rag_resilience.TestCRAGGate for full behavioural
+    coverage; these tests cover config plumbing and ensure no inner gate
+    regressed.
+    """
 
     def test_gate_fires_on_low_relevance(self):
-        """When top KB relevance is below threshold, external sources are queried."""
+        """Router-level should_fire_external_crag returns True when KB is weak."""
         import config as _cfg
+        from app.routers.agents import should_fire_external_crag
 
-        low_results = [{"relevance": 0.2, "content": "weak match", "domain": "general"}]
-
-        with (
-            patch("core.agents.query_agent.multi_domain_query", new_callable=AsyncMock, return_value=low_results),
-            patch("core.agents.query_agent.deduplicate_results", side_effect=lambda x: x),
-            patch("utils.data_sources.registry") as mock_registry,
-            patch("utils.metadata._extract_keywords_simple", return_value=["test"]),
-        ):
-            mock_registry.query_all = AsyncMock(return_value=[
-                {"content": "external result", "confidence": 0.8, "source_name": "Wikipedia"},
-            ])
-
-            # Verify the config threshold is a real number
-            assert isinstance(getattr(_cfg, "RETRIEVAL_QUALITY_THRESHOLD", 0.4), (int, float))
+        low_kb = {"results": [{"relevance": 0.2, "content": "weak match"}]}
+        threshold = getattr(_cfg, "RETRIEVAL_QUALITY_THRESHOLD", 0.4)
+        assert isinstance(threshold, (int, float))
+        assert should_fire_external_crag(
+            ext_on=True, kb_result=low_kb, threshold=threshold,
+        ) is True
 
     def test_gate_does_not_fire_on_high_relevance(self):
-        """When top KB relevance is above threshold, no external call."""
-        high_results = [{"relevance": 0.85, "content": "strong match", "domain": "general"}]
-        # If top relevance > threshold, CRAG gate should not trigger
-        top_rel = max(r.get("relevance", 0) for r in high_results)
-        assert top_rel >= 0.4  # default threshold
+        """Router gate returns False when top KB relevance is above threshold."""
+        from app.routers.agents import should_fire_external_crag
+
+        high_kb = {"results": [{"relevance": 0.85, "content": "strong match"}]}
+        assert should_fire_external_crag(
+            ext_on=True, kb_result=high_kb, threshold=0.4,
+        ) is False
 
     def test_gate_handles_empty_results(self):
-        """Empty results should trigger the gate (top_rel = 0.0)."""
-        top_rel = max((r.get("relevance", 0) for r in []), default=0.0)
-        assert top_rel == 0.0
-        assert top_rel < 0.4
+        """Empty KB results trigger the router gate (top_rel = 0.0)."""
+        from app.routers.agents import should_fire_external_crag
+
+        assert should_fire_external_crag(
+            ext_on=True, kb_result={"results": []}, threshold=0.4,
+        ) is True
+
+    def test_no_inner_gate_in_query_agent(self):
+        """Regression: the inner CRAG block must stay removed.
+
+        A second gate would double-fan-out to the same external sources and
+        split threshold tuning across two files. Router is SSOT.
+        """
+        from pathlib import Path
+
+        src = Path(__file__).resolve().parent.parent / "core" / "agents" / "query_agent.py"
+        text = src.read_text()
+        # The inner block used these locals — their absence proves the gate is gone.
+        assert "_crag_threshold" not in text
+        assert "_crag_results" not in text
+        assert "registry.query_all" not in text
 
 
 # ===========================================================================
