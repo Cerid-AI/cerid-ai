@@ -156,4 +156,104 @@ describe("useSettings", () => {
     // Should keep localStorage value
     expect(result.current.feedbackLoop).toBe(true)
   })
+
+  // ── Audit F-7: version-vector reconciliation across machines ──────────────
+  describe("cross-machine reconciliation", () => {
+    /**
+     * Route fetch calls to their appropriate mock payloads.
+     *
+     * `useSettings` hits /settings, /user-state, and /settings/private-mode
+     * during hydration. We key on URL substring so the test can control
+     * each response without caring about call order.
+     */
+    function routedFetch(routes: Record<string, unknown>) {
+      return vi.fn((url: string) => {
+        for (const [key, body] of Object.entries(routes)) {
+          if (url.includes(key)) {
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: () => Promise.resolve(body),
+            })
+          }
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({}),
+        })
+      })
+    }
+
+    it("server wins when server.updated_at is newer than localUpdatedAt", async () => {
+      // Local wrote at t=1000, server wrote at t=2000 (a later machine's edit).
+      localStorage.setItem("cerid-feedback-loop", "false")
+      localStorage.setItem("cerid-settings-updated-at", "1000")
+      const serverIso = new Date(2000).toISOString()
+
+      const fetchMock = routedFetch({
+        "/settings/private-mode": { enabled: false, level: 0 },
+        "/user-state": {
+          settings: { updated_at: serverIso },
+          preferences: {},
+          conversation_ids: [],
+        },
+        "/settings": { enable_feedback_loop: true },
+      })
+      vi.stubGlobal("fetch", fetchMock)
+
+      const { result } = renderHook(() => useSettings())
+
+      await waitFor(() => {
+        expect(result.current.feedbackLoop).toBe(true)
+      })
+      // Local record replaced and stamp advanced to the server revision.
+      expect(localStorage.getItem("cerid-feedback-loop")).toBe("true")
+      expect(localStorage.getItem("cerid-settings-updated-at")).toBe("2000")
+      // No PATCH fired — we took the server value, not pushed ours.
+      const patchCalls = fetchMock.mock.calls.filter(
+        ([url, init]: [string, RequestInit | undefined]) =>
+          url.includes("/settings") && init?.method === "PATCH",
+      )
+      expect(patchCalls).toHaveLength(0)
+    })
+
+    it("local wins when localUpdatedAt is newer than server.updated_at", async () => {
+      // Local wrote at t=5000, server still has t=1000. Expect a PATCH with
+      // the local toggle values so the server catches up.
+      localStorage.setItem("cerid-feedback-loop", "true")
+      localStorage.setItem("cerid-settings-updated-at", "5000")
+      const serverIso = new Date(1000).toISOString()
+
+      const fetchMock = routedFetch({
+        "/settings/private-mode": { enabled: false, level: 0 },
+        "/user-state": {
+          settings: { updated_at: serverIso },
+          preferences: {},
+          conversation_ids: [],
+        },
+        "/settings": { enable_feedback_loop: false },
+      })
+      vi.stubGlobal("fetch", fetchMock)
+
+      const { result } = renderHook(() => useSettings())
+
+      // Local value is preserved — reconciliation must not clobber it with
+      // the stale server value.
+      await waitFor(() => {
+        expect(result.current.feedbackLoop).toBe(true)
+      })
+
+      // PATCH fires with the divergent local toggle.
+      await waitFor(() => {
+        const patchCalls = fetchMock.mock.calls.filter(
+          ([url, init]: [string, RequestInit | undefined]) =>
+            url.includes("/settings") && init?.method === "PATCH",
+        )
+        expect(patchCalls.length).toBeGreaterThan(0)
+        const body = JSON.parse(patchCalls[0][1]!.body as string)
+        expect(body.enable_feedback_loop).toBe(true)
+      })
+    })
+  })
 })

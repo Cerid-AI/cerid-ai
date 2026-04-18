@@ -393,7 +393,17 @@ export function useConversations() {
     })
   }, [])
 
-  // Hydrate from server on mount — merge server conversations with localStorage
+  // Hydrate from server on mount — per-conversation version-vector merge
+  // (audit F-7). For each ID we compare `updatedAt` on both sides:
+  //   - server-only      → add to local
+  //   - local-only       → push to server
+  //   - server newer     → replace local record with server's
+  //   - local newer      → push local record to server (existing
+  //                         fire-and-forget semantics)
+  //   - equal/unset      → no-op
+  // Without this, the first local edit on any machine permanently shadowed
+  // changes from other machines because the previous merge only accepted
+  // server-only records.
   const serverHydratedRef = useRef(false)
   useEffect(() => {
     if (serverHydratedRef.current) return
@@ -401,13 +411,44 @@ export function useConversations() {
 
     fetchSyncedConversations()
       .then((serverConvos) => {
-        if (!serverConvos.length) return
         setConversations((local) => {
-          const localIds = new Set(local.map((c) => c.id))
-          const newFromServer = serverConvos.filter((sc) => !localIds.has(sc.id))
-          if (newFromServer.length === 0) return local
+          const byId = new Map(local.map((c) => [c.id, c] as const))
+          const serverIds = new Set<string>()
+          let changed = false
 
-          const merged = [...local, ...newFromServer].slice(0, MAX_CONVERSATIONS)
+          for (const sc of serverConvos) {
+            serverIds.add(sc.id)
+            const existing = byId.get(sc.id)
+            if (!existing) {
+              byId.set(sc.id, sc)
+              changed = true
+              continue
+            }
+            const localTs = existing.updatedAt ?? 0
+            const serverTs = sc.updatedAt ?? 0
+            if (serverTs > localTs) {
+              byId.set(sc.id, sc)
+              changed = true
+            } else if (localTs > serverTs && !isPrivateModeActive()) {
+              // Local has newer changes the server never received (e.g.
+              // previous syncConversation() failed). Push now.
+              syncConversation(existing).catch(() => { /* fire-and-forget */ })
+            }
+          }
+
+          // Push any local-only conversations the server is missing.
+          if (!isPrivateModeActive()) {
+            for (const c of local) {
+              if (!serverIds.has(c.id)) {
+                syncConversation(c).catch(() => { /* fire-and-forget */ })
+              }
+            }
+          }
+
+          if (!changed) return local
+          const merged = Array.from(byId.values())
+            .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+            .slice(0, MAX_CONVERSATIONS)
           saveConversations(merged)
           return merged
         })

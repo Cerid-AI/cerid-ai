@@ -21,34 +21,72 @@ function persist(key: string, value: string): void {
   try { localStorage.setItem(key, value) } catch { /* noop */ }
 }
 
+// ── Version-vector reconciliation (audit F-7) ───────────────────────────────
+// The server and each machine stamp `updatedAt` on every settings/preferences
+// write.  On hydrate we compare the local stamp against the server stamp and
+// pick the newer record; without this, any local write permanently shadows
+// changes from other machines.
+
+const SETTINGS_UPDATED_AT_KEY = "cerid-settings-updated-at"
+
+/** Read local settings revision as epoch ms. Returns 0 if unset. */
+function readSettingsUpdatedAt(): number {
+  try {
+    const v = localStorage.getItem(SETTINGS_UPDATED_AT_KEY)
+    if (v !== null) {
+      const n = parseInt(v, 10)
+      if (!isNaN(n) && n > 0) return n
+    }
+  } catch { /* noop */ }
+  return 0
+}
+
+/** Bump the local settings revision to now (call after any local write). */
+function bumpSettingsUpdatedAt(): void {
+  persist(SETTINGS_UPDATED_AT_KEY, String(Date.now()))
+}
+
+/** Parse an ISO-8601 or epoch-ms timestamp to epoch ms, 0 on failure. */
+function parseServerUpdatedAt(v: unknown): number {
+  if (typeof v === "number" && v > 0) return v
+  if (typeof v === "string" && v) {
+    const n = Date.parse(v)
+    if (!isNaN(n)) return n
+  }
+  return 0
+}
+
 /** Boolean setting with localStorage persistence + server sync. */
 function useSyncedToggle(
   localKey: string,
   serverKey: keyof SettingsUpdate,
-): [boolean, () => void, (v: boolean) => void] {
+): [boolean, () => void, (v: boolean, force?: boolean) => void] {
   const [value, setValue] = useState(() => readBool(localKey))
 
   const toggle = useCallback(() => {
     setValue((prev) => {
       const next = !prev
       persist(localKey, String(next))
+      bumpSettingsUpdatedAt()
       updateSettings({ [serverKey]: next }).catch(() => { /* noop */ })
       return next
     })
   }, [localKey, serverKey])
 
   /**
-   * Accept value from server hydration — but ONLY if localStorage has no
-   * value for this key yet (first-time setup).  Once the user has toggled a
-   * setting (or a prior hydration wrote it), localStorage IS the source of
-   * truth because `toggle()` syncs to the server with fire-and-forget
-   * semantics: if that `updateSettings()` call failed the server is stale,
-   * and hydrating from the stale server value would overwrite the user's
-   * explicit intent.
+   * Accept value from server hydration.
+   *
+   * First-time setup (no local value yet): always accept.
+   *
+   * Audit F-7: when `force=true`, caller has determined the server record is
+   * strictly newer than the local one via `updated_at` comparison, so we
+   * override the write-once guard and replace the local value.  Without this
+   * override, the first local write permanently shadowed cross-machine
+   * updates.
    */
-  const hydrate = useCallback((v: boolean) => {
+  const hydrate = useCallback((v: boolean, force: boolean = false) => {
     try {
-      if (localStorage.getItem(localKey) !== null) return
+      if (!force && localStorage.getItem(localKey) !== null) return
     } catch { /* noop */ }
     setValue(v)
     persist(localKey, String(v))
@@ -90,6 +128,7 @@ export function useSettings() {
     setInlineMarkupsState((prev) => {
       const next = !prev
       persist("cerid-inline-markups", String(next))
+      bumpSettingsUpdatedAt()
       syncPreferences({ inline_markups: next }).catch(() => { /* fire-and-forget */ })
       return next
     })
@@ -100,6 +139,7 @@ export function useSettings() {
     setExpertVerificationState((prev) => {
       const next = !prev
       persist("cerid-expert-verification", String(next))
+      bumpSettingsUpdatedAt()
       syncPreferences({ expert_verification: next }).catch(() => { /* fire-and-forget */ })
       return next
     })
@@ -135,24 +175,47 @@ export function useSettings() {
   useEffect(() => {
     if (hydratedRef.current) return
     hydratedRef.current = true
-    fetchSettings()
-      .then((s) => {
-        if (s.enable_feedback_loop !== undefined) hydrateFeedback(s.enable_feedback_loop)
+
+    // Fetch runtime settings + full user-state in parallel. We need both
+    // because `fetchSettings()` surfaces the live server values and
+    // `fetchUserState().settings.updated_at` is the cross-machine revision
+    // stamp used for version-vector reconciliation (audit F-7).
+    Promise.all([
+      fetchSettings().catch(() => null),
+      fetchUserState().catch(() => null),
+    ]).then(([s, state]) => {
+      // ── Version-vector reconciliation ────────────────────────────────────
+      // Compare local `cerid-settings-updated-at` against server
+      // `settings.updated_at`.  If server is strictly newer, force-replace
+      // local values (normally the per-key hydrate skips when localStorage
+      // already has a value).  If local is strictly newer, push current
+      // local toggle + scalar state back to the server.
+      const serverStamp = parseServerUpdatedAt(state?.settings?.updated_at)
+      const localStamp = readSettingsUpdatedAt()
+      const serverWins = serverStamp > 0 && serverStamp > localStamp
+      const localWins = localStamp > 0 && localStamp > serverStamp
+
+      if (s) {
+        if (s.enable_feedback_loop !== undefined) hydrateFeedback(s.enable_feedback_loop, serverWins)
         if (s.cost_sensitivity) {
           const v = s.cost_sensitivity as "low" | "medium" | "high"
           if (v === "low" || v === "medium" || v === "high") {
-            setCostSensitivity(v)
-            persist("cerid-cost-sensitivity", v)
+            if (serverWins || !localStorage.getItem("cerid-cost-sensitivity")) {
+              setCostSensitivity(v)
+              persist("cerid-cost-sensitivity", v)
+            }
           }
         }
-        if (s.enable_auto_inject !== undefined) hydrateAutoInject(s.enable_auto_inject)
+        if (s.enable_auto_inject !== undefined) hydrateAutoInject(s.enable_auto_inject, serverWins)
         if (s.auto_inject_threshold !== undefined) {
-          setAutoInjectThresholdState(s.auto_inject_threshold)
-          persist("cerid-auto-inject-threshold", String(s.auto_inject_threshold))
+          if (serverWins || !localStorage.getItem("cerid-auto-inject-threshold")) {
+            setAutoInjectThresholdState(s.auto_inject_threshold)
+            persist("cerid-auto-inject-threshold", String(s.auto_inject_threshold))
+          }
         }
-        if (s.enable_hallucination_check !== undefined) hydrateHallucination(s.enable_hallucination_check)
-        if (s.enable_memory_extraction !== undefined) hydrateMemory(s.enable_memory_extraction)
-        if (s.rag_mode && !localStorage.getItem("cerid-rag-mode")) {
+        if (s.enable_hallucination_check !== undefined) hydrateHallucination(s.enable_hallucination_check, serverWins)
+        if (s.enable_memory_extraction !== undefined) hydrateMemory(s.enable_memory_extraction, serverWins)
+        if (s.rag_mode && (serverWins || !localStorage.getItem("cerid-rag-mode"))) {
           const rm = s.rag_mode as string
           if (rm === "manual" || rm === "smart" || rm === "custom_smart") {
             setRagModeState(rm as RagMode)
@@ -161,34 +224,70 @@ export function useSettings() {
         }
         if (s.enable_model_router !== undefined) {
           const current = localStorage.getItem("cerid-routing-mode")
-          if (current !== "auto") {
+          // Preserve explicit "auto" unless server is authoritatively newer.
+          if (serverWins || current !== "auto") {
             const mode: RoutingMode = s.enable_model_router ? "recommend" : "manual"
             setRoutingModeState(mode)
             persist("cerid-routing-mode", mode)
           }
         }
 
-        // Reconcile: push local boolean toggle values back to server when
-        // they disagree.  This fixes stale server state left by previous
-        // fire-and-forget updateSettings() failures.
-        const reconcile: SettingsUpdate = {}
-        const check = (localKey: string, serverVal: boolean | undefined, assign: (r: SettingsUpdate, v: boolean) => void) => {
-          try {
-            const stored = localStorage.getItem(localKey)
-            if (stored !== null && serverVal !== undefined && (stored === "true") !== serverVal) {
-              assign(reconcile, stored === "true")
-            }
-          } catch { /* noop */ }
+        if (serverWins) {
+          // We replaced local state with server state — adopt the server
+          // revision stamp so the next hydrate is a clean no-op.
+          persist(SETTINGS_UPDATED_AT_KEY, String(serverStamp))
+        } else if (localWins) {
+          // Push the divergent local toggle state to the server. We don't
+          // need to push scalar setters (threshold/rag_mode/etc.) because
+          // the write-path already bumps the timestamp — if they disagree
+          // a follow-up setter call will reconcile naturally.
+          const reconcile: SettingsUpdate = {}
+          const pushBool = (
+            localKey: string,
+            serverVal: boolean | undefined,
+            assign: (r: SettingsUpdate, v: boolean) => void,
+          ) => {
+            try {
+              const stored = localStorage.getItem(localKey)
+              if (stored !== null && (stored === "true") !== serverVal) {
+                assign(reconcile, stored === "true")
+              }
+            } catch { /* noop */ }
+          }
+          pushBool("cerid-feedback-loop", s.enable_feedback_loop, (r, v) => { r.enable_feedback_loop = v })
+          pushBool("cerid-auto-inject", s.enable_auto_inject, (r, v) => { r.enable_auto_inject = v })
+          pushBool("cerid-hallucination-check", s.enable_hallucination_check, (r, v) => { r.enable_hallucination_check = v })
+          pushBool("cerid-memory-extraction", s.enable_memory_extraction, (r, v) => { r.enable_memory_extraction = v })
+          if (Object.keys(reconcile).length > 0) {
+            updateSettings(reconcile).catch(() => { /* best-effort */ })
+          }
         }
-        check("cerid-feedback-loop", s.enable_feedback_loop, (r, v) => { r.enable_feedback_loop = v })
-        check("cerid-auto-inject", s.enable_auto_inject, (r, v) => { r.enable_auto_inject = v })
-        check("cerid-hallucination-check", s.enable_hallucination_check, (r, v) => { r.enable_hallucination_check = v })
-        check("cerid-memory-extraction", s.enable_memory_extraction, (r, v) => { r.enable_memory_extraction = v })
-        if (Object.keys(reconcile).length > 0) {
-          updateSettings(reconcile).catch(() => { /* best-effort */ })
+      }
+
+      // ── UI preferences (part of the same reconciliation window) ────────
+      // The server preferences file shares the same `updated_at` semantics as
+      // settings.json — re-use `serverWins` so a stale local machine can't
+      // shadow cross-machine updates to routing_mode / expert_verification /
+      // inline_markups.
+      const p = (state?.preferences ?? {}) as Record<string, unknown>
+      if (p.routing_mode && (serverWins || !localStorage.getItem("cerid-routing-mode"))) {
+        const m = p.routing_mode as string
+        if (m === "manual" || m === "recommend" || m === "auto") {
+          setRoutingModeState(m as RoutingMode)
+          persist("cerid-routing-mode", m)
         }
-      })
-      .catch(() => { /* Server unavailable — use localStorage values */ })
+      }
+      if (p.expert_verification !== undefined && (serverWins || localStorage.getItem("cerid-expert-verification") === null)) {
+        const v = Boolean(p.expert_verification)
+        setExpertVerificationState(v)
+        persist("cerid-expert-verification", String(v))
+      }
+      if (p.inline_markups !== undefined && (serverWins || localStorage.getItem("cerid-inline-markups") === null)) {
+        const v = Boolean(p.inline_markups)
+        setInlineMarkupsState(v)
+        persist("cerid-inline-markups", String(v))
+      }
+    }).catch(() => { /* Server unavailable — use localStorage values */ })
 
     // Hydrate private mode from server
     fetchPrivateMode()
@@ -203,31 +302,6 @@ export function useSettings() {
         }
       })
       .catch(() => { /* Server unavailable — use localStorage values */ })
-
-    // Hydrate UI preferences from cloud sync
-    fetchUserState()
-      .then((state) => {
-        if (!state.preferences) return
-        const p = state.preferences as Record<string, unknown>
-        if (p.routing_mode && !localStorage.getItem("cerid-routing-mode")) {
-          const m = p.routing_mode as string
-          if (m === "manual" || m === "recommend" || m === "auto") {
-            setRoutingModeState(m as RoutingMode)
-            persist("cerid-routing-mode", m)
-          }
-        }
-        if (p.expert_verification !== undefined && localStorage.getItem("cerid-expert-verification") === null) {
-          const v = Boolean(p.expert_verification)
-          setExpertVerificationState(v)
-          persist("cerid-expert-verification", String(v))
-        }
-        if (p.inline_markups !== undefined && localStorage.getItem("cerid-inline-markups") === null) {
-          const v = Boolean(p.inline_markups)
-          setInlineMarkupsState(v)
-          persist("cerid-inline-markups", String(v))
-        }
-      })
-      .catch(() => { /* noop */ })
   }, [hydrateFeedback, hydrateAutoInject, hydrateHallucination, hydrateMemory])
 
   const toggleDashboard = useCallback(() => {
@@ -241,6 +315,7 @@ export function useSettings() {
   const setRoutingMode = useCallback((mode: RoutingMode) => {
     setRoutingModeState(mode)
     persist("cerid-routing-mode", mode)
+    bumpSettingsUpdatedAt()
     updateSettings({ enable_model_router: mode !== "manual" }).catch(() => { /* noop */ })
     syncPreferences({ routing_mode: mode }).catch(() => { /* fire-and-forget */ })
   }, [])
@@ -249,6 +324,7 @@ export function useSettings() {
     setRoutingModeState((prev) => {
       const next: RoutingMode = prev === "manual" ? "recommend" : prev === "recommend" ? "auto" : "manual"
       persist("cerid-routing-mode", next)
+      bumpSettingsUpdatedAt()
       updateSettings({ enable_model_router: next !== "manual" }).catch(() => { /* noop */ })
       syncPreferences({ routing_mode: next }).catch(() => { /* fire-and-forget */ })
       return next
@@ -258,18 +334,21 @@ export function useSettings() {
   const setAutoInjectThreshold = useCallback((value: number) => {
     setAutoInjectThresholdState(value)
     persist("cerid-auto-inject-threshold", String(value))
+    bumpSettingsUpdatedAt()
     updateSettings({ auto_inject_threshold: value }).catch(() => { /* noop */ })
   }, [])
 
   const setRagMode = useCallback((mode: RagMode) => {
     setRagModeState(mode)
     persist("cerid-rag-mode", mode)
+    bumpSettingsUpdatedAt()
     updateSettings({ rag_mode: mode }).catch(() => { /* noop */ })
   }, [])
 
   const updateCostSensitivity = useCallback((value: "low" | "medium" | "high") => {
     setCostSensitivity(value)
     persist("cerid-cost-sensitivity", value)
+    bumpSettingsUpdatedAt()
     updateSettings({ cost_sensitivity: value }).catch(() => { /* noop */ })
   }, [])
 
