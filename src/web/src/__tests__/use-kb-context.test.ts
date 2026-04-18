@@ -82,7 +82,13 @@ describe("useKBContext", () => {
     expect(result.current.totalResults).toBe(3)
     expect(result.current.executionTime).toBe(150)
     expect(result.current.hasQueried).toBe(true)
-    expect(mockQueryKB).toHaveBeenCalledWith("how does auth work", undefined, 10, undefined)
+    expect(mockQueryKB).toHaveBeenCalledWith(
+      "how does auth work",
+      undefined,
+      10,
+      undefined,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
   })
 
   it("does not query for very short messages", () => {
@@ -143,7 +149,13 @@ describe("useKBContext", () => {
     // Execute manual search (replaces the auto query)
     act(() => { result.current.executeManualSearch() })
     await waitFor(() => {
-      expect(mockQueryKB).toHaveBeenCalledWith("manual search term", undefined, 10, undefined)
+      expect(mockQueryKB).toHaveBeenCalledWith(
+        "manual search term",
+        undefined,
+        10,
+        undefined,
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      )
     })
   })
 

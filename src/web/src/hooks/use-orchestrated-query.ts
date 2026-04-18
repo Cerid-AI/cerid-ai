@@ -97,7 +97,7 @@ export function useOrchestratedQuery(
 
   const { data, isLoading, isError, error, refetch } = useQuery<AgentQueryResponse>({
     queryKey: ["orchestrated-query", effectiveQuery, ragMode, domainKey, contextMsgCount, sourcesKey],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       try {
         return await queryKBOrchestrated(
           effectiveQuery,
@@ -107,6 +107,7 @@ export function useOrchestratedQuery(
           conversationMessages,
           undefined,
           contextSources,
+          { signal },
         )
       } catch {
         // Return a safe empty response so the error state doesn't block the console
