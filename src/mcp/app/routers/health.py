@@ -217,6 +217,53 @@ def liveness_probe():
     return {"status": "alive"}
 
 
+def _invariants_snapshot() -> dict:
+    """Build the invariants block for /health, swallowing any top-level error.
+
+    Task 14: reports observable data-layer facts beyond "connected".  A
+    total failure of the probe module itself is treated as a critical
+    invariant violation (503) — if we can't measure health, we can't
+    claim it.
+    """
+    try:
+        from app.startup.invariants import run_invariants
+        chroma = None
+        redis_client = None
+        neo4j_driver = None
+        try:
+            chroma = get_chroma()
+        except Exception:
+            pass
+        try:
+            redis_client = get_redis()
+        except Exception:
+            pass
+        try:
+            neo4j_driver = get_neo4j()
+        except Exception:
+            pass
+        if neo4j_driver is None:
+            # Lightweight mode — skip the orphan check, NLI still matters.
+            snap = {
+                "verification_report_orphans": 0,
+                "collections_empty": [],
+                "errors": [],
+            }
+            from app.startup.invariants import _probe_chroma, _probe_nli
+            try:
+                if chroma is not None:
+                    snap.update(_probe_chroma(chroma))
+            except Exception as exc:
+                snap["errors"].append(f"chroma: {exc}")
+            snap.update(_probe_nli())
+            snap["healthy_invariants"] = bool(snap.get("nli_model_loaded"))
+            return snap
+        return run_invariants(chroma, redis_client, neo4j_driver)
+    except Exception as exc:
+        logger.warning("invariants snapshot failed: %s", exc)
+        return {"healthy_invariants": False, "errors": [str(exc)]}
+
+
 @router.get("/health")
 def health_check_endpoint():
     """Return infrastructure health.
@@ -228,6 +275,12 @@ def health_check_endpoint():
 
     The Neo4j "disabled (lightweight mode)" state is treated as healthy — it
     is intentional, not a connectivity failure.
+
+    Task 14: the response additionally carries an ``invariants`` block with
+    observable data-layer facts (empty Chroma collections, orphan
+    VerificationReports, NLI model load status).  A critical invariant
+    violation flips the endpoint to 503 even when transport connections
+    are nominally healthy.
     """
     global _health_cache, _health_cache_ts
     now = time.monotonic()
@@ -235,6 +288,7 @@ def health_check_endpoint():
         result = _health_cache
     else:
         result = health_check()
+        result["invariants"] = _invariants_snapshot()
         _health_cache = result
         _health_cache_ts = now
 
@@ -242,7 +296,9 @@ def health_check_endpoint():
     def _ok(v: str) -> bool:
         return v == "connected" or v.startswith("disabled")
 
-    http_status = 200 if all(_ok(v) for v in result["services"].values()) else 503
+    services_ok = all(_ok(v) for v in result["services"].values())
+    invariants_ok = result.get("invariants", {}).get("healthy_invariants", True)
+    http_status = 200 if (services_ok and invariants_ok) else 503
     if http_status == 200:
         return result
     return JSONResponse(content=result, status_code=503)

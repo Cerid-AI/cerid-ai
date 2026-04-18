@@ -36,6 +36,11 @@ _session: ort.InferenceSession | None = None
 _tokenizer: Tokenizer | None = None
 _lock = threading.Lock()
 
+# Task 14: observable load status for startup invariants.  Flipped to True
+# only after a successful load; surfaced by /health via
+# ``app.startup.invariants``.
+_MODEL_LOADED: bool = False
+
 
 def _softmax(logits: np.ndarray) -> np.ndarray:
     """Numerically stable softmax over the last axis."""
@@ -46,7 +51,7 @@ def _softmax(logits: np.ndarray) -> np.ndarray:
 
 def _load_model() -> tuple[ort.InferenceSession, Tokenizer]:
     """Download (once) and return the NLI ONNX session + tokenizer."""
-    global _session, _tokenizer
+    global _session, _tokenizer, _MODEL_LOADED
     if _session is not None and _tokenizer is not None:
         return _session, _tokenizer
 
@@ -83,20 +88,37 @@ def _load_model() -> tuple[ort.InferenceSession, Tokenizer]:
         _tokenizer.enable_truncation(max_length=512)
         _tokenizer.enable_padding()
 
+        _MODEL_LOADED = True
         logger.info("NLI model ready (%s)", repo)
         return _session, _tokenizer
 
 
 def warmup() -> None:
     """Pre-load the NLI model so first call isn't slow.
-    Swallows all exceptions so a download failure never prevents server start."""
-    global _session
+
+    Task 14: no longer silent.  On failure, ``_MODEL_LOADED`` stays False and
+    the exception message is logged at WARNING.  ``/health`` surfaces the
+    failure via the invariants snapshot and flips to 503 — verification,
+    Self-RAG, and RAGAS all depend on NLI, so running without it is a
+    deployment incident, not a soft failure.
+
+    The server itself still starts — the model will be loaded lazily on
+    first use if this warmup fails, which gives an operator the chance to
+    restore network connectivity without a restart.
+    """
+    global _session, _MODEL_LOADED
     if _session is not None:
+        _MODEL_LOADED = True
         return
     try:
         _load_model()
-    except Exception:
-        logger.warning("NLI warmup failed — model will be loaded on first use")
+    except Exception as exc:
+        _MODEL_LOADED = False
+        logger.warning(
+            "NLI warmup failed: %s — /health will report unhealthy until a "
+            "lazy load on first use succeeds",
+            exc,
+        )
 
 
 def nli_score(premise: str, hypothesis: str) -> dict[str, Any]:

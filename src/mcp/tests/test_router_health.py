@@ -34,10 +34,21 @@ class TestHealthEndpoint:
         session = MagicMock()
         driver.session.return_value.__enter__ = MagicMock(return_value=session)
         driver.session.return_value.__exit__ = MagicMock(return_value=False)
+        # Task 14: invariants probe runs a count(orphans) Cypher; default its result.
+        session.run.return_value.single.return_value = {"orphans": 0}
         mock_neo4j.return_value = driver
 
-        client = TestClient(_make_app())
-        response = client.get("/health")
+        # Task 14: NLI model must be "loaded" for /health to return 200 —
+        # in production the warmup() call sets this; in tests we set it
+        # directly.
+        from core.utils import nli
+        prior_loaded = getattr(nli, "_MODEL_LOADED", False)
+        nli._MODEL_LOADED = True
+        try:
+            client = TestClient(_make_app())
+            response = client.get("/health")
+        finally:
+            nli._MODEL_LOADED = prior_loaded
 
         assert response.status_code == 200
         data = response.json()
@@ -45,6 +56,9 @@ class TestHealthEndpoint:
         assert data["services"]["chromadb"] == "connected"
         assert data["services"]["redis"] == "connected"
         assert data["services"]["neo4j"] == "connected"
+        # Task 14: invariants block is additive to the existing response.
+        assert "invariants" in data
+        assert data["invariants"]["healthy_invariants"] is True
 
     @patch("app.routers.health.get_redis")
     @patch("app.routers.health.get_chroma")
