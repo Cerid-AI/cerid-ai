@@ -51,6 +51,33 @@ logger = logging.getLogger("ai-companion.hallucination")
 _CGROUP_MEMORY_MAX = pathlib.Path("/sys/fs/cgroup/memory.max")
 _CGROUP_MEMORY_CURRENT = pathlib.Path("/sys/fs/cgroup/memory.current")
 
+# Task 12 / audit V-3: extract URLs the LLM cited inline in a claim so the
+# verifier can check them *first* instead of re-searching from claim text.
+# Matches bare http(s)://... URLs; stops at whitespace or common trailing
+# punctuation. Conservative on purpose — the cost of a false positive is a
+# single extra HEAD-like fetch; the cost of a miss is letting a fabricated
+# citation through.
+_URL_IN_CLAIM_RE = re.compile(r"https?://[^\s<>\"')\]}]+")
+
+
+def _extract_source_urls_from_claim(claim_text: str) -> list[str]:
+    """Pull any http(s) URLs the LLM cited inline in the claim text.
+
+    These become ``source_urls`` for ``verify_claim`` which NLI-entails the
+    claim against the cited body before falling back to KB / web search.
+    De-duplicates preserving first-seen order; trims trailing punctuation.
+    """
+    if not claim_text or "http" not in claim_text:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for match in _URL_IN_CLAIM_RE.finditer(claim_text):
+        url = match.group(0).rstrip(".,;:!?")
+        if url and url not in seen:
+            seen.add(url)
+            out.append(url)
+    return out
+
 
 def _heuristic_response_context(response_text: str, user_query: str | None) -> str | None:
     """Heuristic fallback: build topic context from user query + first heading."""
@@ -211,11 +238,23 @@ async def check_hallucinations(
     from core.agents.hallucination.verification import verify_claims_batch_external
     from core.utils.claim_cache import get_cached_verdict
 
+    # Cache key (model, tier, response_context) must match what verify_claim
+    # writes in verification.py — otherwise this batch pre-check always misses.
+    # `verify_claim` below is invoked with `response_context=user_query`, so we
+    # use the same value here.
+    _cache_tier = "expert" if expert_mode else "standard"
+    _cache_context = user_query or ""
     batch_results: dict[int, dict[str, Any]] = {}
     current_event_claims: list[tuple[int, str]] = []
     for idx, claim_text in enumerate(claims):
         if _is_current_event_claim(claim_text) or _is_recency_claim(claim_text):
-            cached = await get_cached_verdict(redis_client, claim_text)
+            cached = await get_cached_verdict(
+                redis_client,
+                claim_text,
+                model=model or "",
+                method=_cache_tier,
+                response_context=_cache_context,
+            )
             if cached and cached.get("status") in ("verified", "unverified"):
                 batch_results[idx] = cached
             else:
@@ -262,6 +301,7 @@ async def check_hallucinations(
                 # topical frame the user asked about.
                 response_context=user_query,
                 claim_context=_extract_surrounding(claim_text),
+                source_urls=_extract_source_urls_from_claim(claim_text),
             )
 
     results = await asyncio.gather(*[_limited_verify(i, c) for i, c in enumerate(claims)])
@@ -540,6 +580,9 @@ async def verify_response_streaming(
     # This reduces API round-trips, avoids rate limits, and prevents timeouts.
     from core.agents.hallucination.verification import verify_claims_batch_external
 
+    # Cache key (model, tier, response_context) must match what verify_claim
+    # writes in verification.py — otherwise this pre-check always misses.
+    _cache_tier = "expert" if expert_mode else "standard"
     batch_results: dict[int, dict[str, Any]] = {}
     current_event_claims: list[tuple[int, str]] = []
     for idx, claim_text in enumerate(claims):
@@ -547,7 +590,13 @@ async def verify_response_streaming(
         if ct in ("recency",) or _is_current_event_claim(claim_text):
             # Check cache first — don't re-batch already-cached claims
             from core.utils.claim_cache import get_cached_verdict
-            cached = await get_cached_verdict(redis_client, claim_text)
+            cached = await get_cached_verdict(
+                redis_client,
+                claim_text,
+                model=model or "",
+                method=_cache_tier,
+                response_context=response_context or "",
+            )
             if cached and cached.get("status") in ("verified", "unverified"):
                 batch_results[idx] = cached
             else:
@@ -673,6 +722,7 @@ async def verify_response_streaming(
                         response_context=response_context,
                         claim_context=_extract_claim_context(claim_text),
                         conversation_context=conversation_history,
+                        source_urls=_extract_source_urls_from_claim(claim_text),
                     ),
                     timeout=claim_timeout,
                 )
@@ -1002,6 +1052,7 @@ async def verify_response_streaming(
                             expert_mode=False,
                             response_context=response_context,
                             claim_context=_extract_claim_context(claim_text),
+                            source_urls=_extract_source_urls_from_claim(claim_text),
                         ),
                         timeout=retry_budget,
                     )

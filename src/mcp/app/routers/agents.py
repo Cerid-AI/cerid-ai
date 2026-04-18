@@ -13,17 +13,42 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 import config
+from app.concurrency import KB_POOL
 from app.deps import get_chroma, get_neo4j, get_redis
 from app.services.ingestion import ingest_content, validate_file_path
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion")
 
-# Limit concurrent CPU-bound agent queries to prevent event loop stalls.
-# BM25 tokenization and ONNX embedding/reranking are synchronous and block
-# the event loop.  Without this limit, 5+ concurrent /agent/query requests
-# (e.g. from auto-inject) starve /chat/stream for 30+ seconds.
-_QUERY_SEMAPHORE = asyncio.Semaphore(2)
+
+def should_fire_external_crag(
+    *,
+    ext_on: bool,
+    kb_result: dict,
+    threshold: float,
+) -> bool:
+    """CRAG gate: decide whether to launch external sources.
+
+    External sources are expensive (5s per-source timeout, network I/O,
+    circuit-breaker pressure).  When KB already has a strong hit we skip
+    them entirely — strong KB > any external result for the usual query
+    mix, and the 10s /agent/query wall-clock budget is precious.
+
+    Fires only when:
+      - the client allowed external (`ext_on`), AND
+      - the best KB relevance is strictly below `threshold`.
+
+    A result set with no `results` key (or empty list) yields max=0.0,
+    which is always < threshold — so unknown-KB correctly falls through
+    to external.
+    """
+    if not ext_on:
+        return False
+    results = kb_result.get("results") if isinstance(kb_result, dict) else None
+    if not results:
+        return True
+    max_rel = max((r.get("relevance", 0.0) for r in results), default=0.0)
+    return max_rel < threshold
 
 
 class AgentQueryRequest(BaseModel):
@@ -35,6 +60,13 @@ class AgentQueryRequest(BaseModel):
     response_text: str | None = Field(None, description="LLM response text for Self-RAG validation")
     model: str | None = Field(None, description="Generating model (for Self-RAG metadata)")
     enable_self_rag: bool | None = Field(None, description="Override Self-RAG toggle (None = use server config)")
+    cost_sensitivity: str | None = Field(
+        None,
+        description=(
+            "User cost preference: 'low' | 'medium' | 'high'. When None the "
+            "server resolves it from the consumer registry (Task 17)."
+        ),
+    )
     # --- Query scope (high-level intent) ---
     # "document" = single-file focus, "domain" = single-domain, "kb" = whole KB (default)
     # Expands into strict_domains / skip_cache / metadata_filter automatically.
@@ -166,7 +198,10 @@ async def compress_history_endpoint(req: CompressRequest):
 
 @router.post("/agent/query")
 async def agent_query_endpoint(req: AgentQueryRequest, request: Request):
-    async with _QUERY_SEMAPHORE:
+    # Heavy RAG path is gated by KB_POOL so /health, /observability, and
+    # other lightweight routes served by HEALTH_POOL are never starved by
+    # concurrent KB queries (audit RC-C, smoke Test G).
+    async with KB_POOL.acquire():
         return await _agent_query_inner(req, request)
 
 
@@ -193,6 +228,10 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
         if not has_context and not req.skip_cache:
             cached = get_cached(req.query, domain_key, req.top_k)
             if cached:
+                # ``get_cached`` stamps ``cached: True`` + ``cache_age_ms`` on
+                # the payload; the metrics middleware reads the body and sets
+                # ``X-Cache: HIT`` so dashboards/smoke harnesses can distinguish
+                # warm from cold without timing the call (audit RC-G).
                 return cached
 
         debug_timing = request.headers.get("X-Debug-Timing", "").lower() == "true"
@@ -228,26 +267,12 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
         else:
             # Manual mode: KB gate check — if context_sources disables KB, skip retrieval
             _cs = req.context_sources or {}
-
-            # Launch external sources in parallel with KB (if enabled).
-            # Runs concurrently — no latency penalty when KB has results.
             _ext_on = _cs.get("external", True)
-            _external_task = None
-            if _ext_on:
-                try:
-                    from agents.retrieval_orchestrator import _extract_search_terms
-                    from utils.data_sources import registry
-                    _search_terms = _extract_search_terms(req.query)
-                    _external_task = asyncio.create_task(
-                        registry.query_all(
-                            _search_terms,
-                            domain=req.domains[0] if req.domains else None,
-                            timeout=5.0,
-                        )
-                    )
-                except Exception:
-                    pass  # Registry unavailable — skip external
 
+            # ── Fetch KB first, then decide whether to fire external (CRAG gate) ──
+            # Audit RC-B: launching external unconditionally in parallel ate the
+            # 10s /agent/query budget even when KB had strong hits. The CRAG gate
+            # below skips external when KB is already authoritative.
             if _cs.get("kb", True) is False:
                 result = {
                     "context": "", "sources": [], "confidence": 0.0,
@@ -275,38 +300,47 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
                     metadata_filter=req.metadata_filter,
                 )
 
-            # Merge external results (parallel task completes by now)
-            if _external_task is not None:
+            # CRAG gate: fire external only when KB quality is below threshold.
+            # Saves the 5s-per-source hang cost when KB already has strong hits.
+            _threshold = getattr(config, "RETRIEVAL_QUALITY_THRESHOLD", 0.4)
+            if should_fire_external_crag(
+                ext_on=_ext_on, kb_result=result, threshold=_threshold,
+            ):
+                _ext_results: list = []
                 try:
-                    _ext_results = await _external_task
-                except Exception:
+                    from agents.retrieval_orchestrator import _extract_search_terms
+                    from utils.data_sources import registry
+                    _search_terms = _extract_search_terms(req.query)
+                    _ext_results = await asyncio.wait_for(
+                        registry.query_all(
+                            _search_terms,
+                            domain=req.domains[0] if req.domains else None,
+                            timeout=5.0,
+                        ),
+                        timeout=6.0,
+                    )
+                except (Exception, asyncio.TimeoutError):
                     _ext_results = []
+
                 if _ext_results:
+                    from app.models.query_envelope import QueryEnvelope, SourceItem
+                    env = QueryEnvelope.from_legacy_result(result)
                     _DISCOUNT = 0.6
-                    for _raw in _ext_results:
-                        result.setdefault("results", []).append({
-                            "content": _raw.get("content", ""),
-                            "relevance": round(
-                                _raw.get("confidence", 0.8) * _DISCOUNT, 3,
-                            ),
-                            "source_url": _raw.get("source_url", ""),
-                            "source_name": _raw.get(
-                                "source_name", _raw.get("title", ""),
-                            ),
-                            "source_type": "external",
-                            "domain": "external",
-                            "artifact_id": "",
-                            "filename": _raw.get("source_name", ""),
-                            "chunk_id": "",
-                            "collection": "external",
-                        })
-                    result["total_results"] = len(result.get("results", []))
-                    if result.get("results"):
-                        result["confidence"] = round(
-                            sum(r["relevance"] for r in result["results"])
-                            / len(result["results"]),
-                            4,
+                    env.merge_external([
+                        SourceItem(
+                            content=r.get("content", ""),
+                            relevance=round(r.get("confidence", 0.8) * _DISCOUNT, 3),
+                            artifact_id="",
+                            filename=r.get("source_name", ""),
+                            source_type="external",
+                            domain="external",
+                            collection="external",
+                            source_url=r.get("source_url", ""),
+                            source_name=r.get("source_name", r.get("title", "")),
                         )
+                        for r in _ext_results
+                    ])
+                    result = env.to_dict()
 
         # Self-RAG: validate claims and refine retrieval if enabled
         use_self_rag = req.enable_self_rag if req.enable_self_rag is not None else config.ENABLE_SELF_RAG

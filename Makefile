@@ -1,6 +1,6 @@
-.PHONY: lock-python lock-python-dev lock-all install-hooks deps-check \
+.PHONY: lock-python lock-python-dev lock-all install-hooks deps-check version-file \
        lint-frontend test-frontend typecheck-frontend build-frontend check-all \
-       test test-all test-eval help
+       test test-all test-eval smoke help
 
 # -- Python deps --
 lock-python:
@@ -15,6 +15,11 @@ lock-all: lock-python lock-python-dev
 install-hooks:
 	git config core.hooksPath scripts/hooks
 	@echo "Git hooks installed from scripts/hooks/"
+
+# -- Build artifacts --
+version-file:
+	@python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])" > src/mcp/VERSION
+	@echo "[version-file] wrote $$(cat src/mcp/VERSION)"
 
 # -- Validation --
 deps-check:
@@ -47,6 +52,11 @@ test-eval:
 # -- Combined --
 check-all: deps-check lint-frontend typecheck-frontend test-frontend
 
+# -- Load testing --
+smoke:
+	@echo "[smoke] requires stack running (scripts/start-cerid.sh)"
+	python3 src/mcp/tests/load/smoke.py
+
 help:
 	@echo "Available targets:"
 	@echo "  lock-python        Regenerate requirements.lock"
@@ -62,3 +72,4 @@ help:
 	@echo "  test-all           Run ALL tests including eval"
 	@echo "  test-eval          Run evaluation harness only (Monte Carlo, RAGAS)"
 	@echo "  check-all          Run deps-check + lint + typecheck + test"
+	@echo "  smoke              Run smoke/load harness (requires running stack)"

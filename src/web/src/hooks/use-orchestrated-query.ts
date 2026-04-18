@@ -34,6 +34,10 @@ export interface UseOrchestratedQueryReturn {
   memorySources: MemoryRecallResult[]
   externalSources: ExternalSourceResult[]
 
+  /** Non-empty string when the retrieval pipeline exceeded its time budget
+   *  for the most recent query and returned an ungrounded answer. */
+  degradedReason: string
+
   // Source toggles (for Knowledge Console)
   kbEnabled: boolean
   memoryEnabled: boolean
@@ -93,7 +97,7 @@ export function useOrchestratedQuery(
 
   const { data, isLoading, isError, error, refetch } = useQuery<AgentQueryResponse>({
     queryKey: ["orchestrated-query", effectiveQuery, ragMode, domainKey, contextMsgCount, sourcesKey],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       try {
         return await queryKBOrchestrated(
           effectiveQuery,
@@ -103,6 +107,7 @@ export function useOrchestratedQuery(
           conversationMessages,
           undefined,
           contextSources,
+          { signal },
         )
       } catch {
         // Return a safe empty response so the error state doesn't block the console
@@ -150,6 +155,7 @@ export function useOrchestratedQuery(
 
   // Parse source breakdown from response
   const sourceBreakdown = data?.source_breakdown ?? null
+  const degradedReason = data?.degraded_reason ?? ""
 
   const kbSources = useMemo(
     () => (kbEnabled ? sourceBreakdown?.kb ?? [] : []),
@@ -189,6 +195,8 @@ export function useOrchestratedQuery(
     kbSources,
     memorySources,
     externalSources,
+
+    degradedReason,
 
     kbEnabled,
     memoryEnabled,

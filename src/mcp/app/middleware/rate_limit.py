@@ -70,19 +70,28 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Per-key locks to avoid blocking unrelated endpoints
         self._locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
+    # Prefixes whose GETs must still be rate-limited (polling / admin surfaces).
+    # Anything outside these prefixes keeps the read-only GET exemption.
+    _GET_LIMITED_PREFIXES: tuple[str, ...] = ("/admin/", "/observability/")
+
     async def dispatch(self, request: Request, call_next):
         from config.settings import CLIENT_RATE_LIMITS
 
         path = request.url.path
         method = request.method
 
-        # GET requests are read-only lookups — exempt from rate limiting
+        # GET requests are read-only lookups — generally exempt from rate limiting
         # to avoid exhausting the budget with report fetches, health checks, etc.
-        if method == "GET":
+        # Exception: GETs on /admin/* and /observability/* are polling surfaces
+        # whose cost is non-trivial and whose abuse vector is real (audit C-11).
+        if method == "GET" and not path.startswith(self._GET_LIMITED_PREFIXES):
             return await call_next(request)
 
-        # MCP SSE transport and health paths are internal — exempt
-        if path.startswith(("/mcp/", "/health", "/setup/")):
+        # MCP SSE transport and health paths are internal — exempt.
+        # Note: /setup/* was previously exempt, which allowed unthrottled bursts
+        # against state-mutating /setup/configure, /setup/validate-key, etc.
+        # (audit C-11). It is now rate-limited like any other router.
+        if path.startswith(("/mcp/", "/health")):
             return await call_next(request)
 
         # Per-client isolation via X-Client-ID (set by RequestIDMiddleware)
@@ -100,10 +109,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     current = len(self._hits[key])
 
                     if current >= max_req:
-                        reset = math.ceil(window - (now - self._hits[key][0]))
+                        reset = int(max(1, math.ceil(window - (now - self._hits[key][0]))))
                         return JSONResponse(
                             status_code=429,
-                            content={"detail": f"Rate limit exceeded. Max {max_req} requests per {window}s."},
+                            content={
+                                "detail": f"Rate limit exceeded. Max {max_req} requests per {window}s.",
+                                "retry_after": reset,
+                            },
                             headers={
                                 "RateLimit-Limit": str(max_req),
                                 "RateLimit-Remaining": "0",

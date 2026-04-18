@@ -8,6 +8,9 @@ export interface ChatMessage {
   model?: string
   timestamp: number
   sourcesUsed?: SourceRef[]
+  /** Non-empty when retrieval breached its time budget and the answer is ungrounded.
+   * Populated from the backend `AgentQueryResponse.degraded_reason` field. */
+  degradedReason?: string
 }
 
 export type RagMode = "manual" | "smart" | "custom_smart"
@@ -29,6 +32,10 @@ export interface SourceRef {
   tags?: string[]
   quality_score?: number
   source_type?: "kb" | "memory" | "external"
+  /** Populated for external-source items (e.g. Wikipedia, DuckDuckGo) so the
+   *  sources pane can render a link to the origin page. Empty/undefined for
+   *  KB and memory items. */
+  source_url?: string
 }
 
 export interface Conversation {
@@ -385,6 +392,9 @@ export interface AgentQueryResponse {
   execution_time_ms?: number
   source_breakdown?: SourceBreakdown
   rag_mode?: RagMode
+  /** Non-empty string when the retrieval pipeline exceeded its time budget and
+   *  returned an ungrounded answer. Empty string when not degraded. */
+  degraded_reason?: string
   /** Timing breakdown (only present when X-Debug-Timing header is sent). */
   _timings?: Record<string, number>
 }

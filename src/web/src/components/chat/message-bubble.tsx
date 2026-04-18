@@ -24,6 +24,7 @@ import { matchClaimsToText, type ClaimDisplayStatus } from "@/lib/verification-u
 import { SourceAttribution } from "./source-attribution"
 import { KBContextIndicator } from "./kb-context-indicator"
 import { ClaimOverlay } from "./claim-overlay"
+import { DegradedBanner } from "./degraded-banner"
 
 /** Inline styles for <mark> elements — avoids prose class specificity overriding Tailwind utilities.
  *  Verified claims use a subtle underline instead of a background highlight
@@ -574,6 +575,7 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
       </div>
 
       <div className={cn("flex max-w-[85%] flex-col gap-1", isUser && "items-end")}>
+        {!isUser && <DegradedBanner reason={message.degradedReason ?? ""} />}
         <div
           className={cn(
             "rounded-2xl px-4 py-2.5",

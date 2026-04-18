@@ -84,10 +84,12 @@ export async function queryKBOrchestrated(
   conversationMessages?: { role: string; content: string }[],
   sourceConfig?: Record<string, unknown>,
   contextSources?: ContextSources,
+  opts: { signal?: AbortSignal } = {},
 ): Promise<AgentQueryResponse> {
   const res = await fetch(`${MCP_BASE}/agent/query`, {
     method: "POST",
     headers: mcpHeaders({ "Content-Type": "application/json" }),
+    signal: opts.signal,
     body: JSON.stringify({
       query,
       rag_mode: ragMode,

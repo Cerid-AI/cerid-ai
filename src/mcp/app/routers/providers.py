@@ -4,9 +4,11 @@
 """Provider management endpoints — BYOK provider listing, key validation, and model config."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 
+import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -26,6 +28,46 @@ from core.routing.model_providers import (
 
 router = APIRouter(prefix="/providers", tags=["providers"])
 logger = logging.getLogger("ai-companion.providers")
+
+
+# ── Shared httpx client for OpenRouter credit probe ──────────────────────────
+#
+# GUI polls ``/providers/credits`` at 15s+60s cadences per tab — spawning a
+# fresh ``httpx.AsyncClient`` per call caused socket-reuse failures ("Server
+# disconnected without sending a response" noise).  Hoist a single lazy
+# module-level client so polls share the connection pool.
+
+_openrouter_http_client: httpx.AsyncClient | None = None
+_openrouter_http_client_lock = asyncio.Lock()
+
+
+async def _openrouter_client() -> httpx.AsyncClient:
+    """Return the shared httpx client used for OpenRouter credit probes.
+
+    Lazily created on first use to avoid import-time side effects.  Recreated
+    if a previous instance was closed (e.g. during shutdown in a test).
+    """
+    global _openrouter_http_client
+    if _openrouter_http_client is not None and not _openrouter_http_client.is_closed:
+        return _openrouter_http_client
+    async with _openrouter_http_client_lock:
+        if _openrouter_http_client is None or _openrouter_http_client.is_closed:
+            _openrouter_http_client = httpx.AsyncClient(
+                timeout=10,
+                limits=httpx.Limits(
+                    max_keepalive_connections=5,
+                    max_connections=10,
+                ),
+            )
+    return _openrouter_http_client
+
+
+async def close_openrouter_client() -> None:
+    """Close the shared OpenRouter credit-probe client.  Call during shutdown."""
+    global _openrouter_http_client
+    if _openrouter_http_client is not None and not _openrouter_http_client.is_closed:
+        await _openrouter_http_client.aclose()
+        _openrouter_http_client = None
 
 
 # ── Pydantic models ──────────────────────────────────────────────────────────
@@ -324,8 +366,6 @@ async def get_ollama_recommendations():
 @router.get("/credits")
 async def get_provider_credits():
     """Get OpenRouter credit balance and usage stats."""
-    import httpx
-
     api_key = os.getenv("OPENROUTER_API_KEY", "")
     if not api_key:
         return {"configured": False, "message": "No OpenRouter API key configured"}
@@ -339,42 +379,44 @@ async def get_provider_credits():
     }
 
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            # Get credits balance
-            credits_resp = await client.get(
-                "https://openrouter.ai/api/v1/credits",
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
-            if credits_resp.status_code == 200:
-                credits_data = credits_resp.json().get("data", {})
-                total = credits_data.get("total_credits", 0)
-                used = credits_data.get("total_usage", 0)
-                result["balance"] = round(total - used, 2)
-                result["total_credits"] = total
-                result["total_usage"] = round(used, 2)
+        client = await _openrouter_client()
+        headers = {"Authorization": f"Bearer {api_key}"}
 
-            # Get usage stats
-            key_resp = await client.get(
-                "https://openrouter.ai/api/v1/auth/key",
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
-            if key_resp.status_code == 200:
-                key_data = key_resp.json().get("data", {})
-                result["usage_daily"] = round(key_data.get("usage_daily", 0), 4)
-                result["usage_weekly"] = round(key_data.get("usage_weekly", 0), 2)
-                result["usage_monthly"] = round(key_data.get("usage_monthly", 0), 2)
-                result["is_free_tier"] = key_data.get("is_free_tier", False)
+        # Get credits balance
+        credits_resp = await client.get(
+            "https://openrouter.ai/api/v1/credits",
+            headers=headers,
+        )
+        if credits_resp.status_code == 200:
+            credits_data = credits_resp.json().get("data", {})
+            total = credits_data.get("total_credits", 0)
+            used = credits_data.get("total_usage", 0)
+            result["balance"] = round(total - used, 2)
+            result["total_credits"] = total
+            result["total_usage"] = round(used, 2)
 
-                # Warning thresholds
-                balance = result.get("balance", 0)
-                if balance <= 0:
-                    result["status"] = "exhausted"
-                    result["warning"] = "Credits exhausted — add credits to continue using paid models"
-                elif balance < 5:
-                    result["status"] = "low"
-                    result["warning"] = f"Low credits (${balance:.2f} remaining)"
-                else:
-                    result["status"] = "ok"
+        # Get usage stats
+        key_resp = await client.get(
+            "https://openrouter.ai/api/v1/auth/key",
+            headers=headers,
+        )
+        if key_resp.status_code == 200:
+            key_data = key_resp.json().get("data", {})
+            result["usage_daily"] = round(key_data.get("usage_daily", 0), 4)
+            result["usage_weekly"] = round(key_data.get("usage_weekly", 0), 2)
+            result["usage_monthly"] = round(key_data.get("usage_monthly", 0), 2)
+            result["is_free_tier"] = key_data.get("is_free_tier", False)
+
+            # Warning thresholds
+            balance = result.get("balance", 0)
+            if balance <= 0:
+                result["status"] = "exhausted"
+                result["warning"] = "Credits exhausted — add credits to continue using paid models"
+            elif balance < 5:
+                result["status"] = "low"
+                result["warning"] = f"Low credits (${balance:.2f} remaining)"
+            else:
+                result["status"] = "ok"
     except Exception as e:
         logger.warning("OpenRouter credit check failed: %s", e)
         result["error"] = str(e)

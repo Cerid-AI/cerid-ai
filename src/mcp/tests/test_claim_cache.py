@@ -253,3 +253,51 @@ class TestRoundTrip:
 
         assert result is not None
         assert result["status"] == "verified"
+
+
+# ---------------------------------------------------------------------------
+# claim_cache_key — v2 schema (claim + model + method + response_context)
+# ---------------------------------------------------------------------------
+
+def test_claim_cache_key_includes_model():
+    """Same claim, different model → different key."""
+    from core.utils.claim_cache import claim_cache_key
+    a = claim_cache_key("Paris is the capital of France", model="grok-4", method="web_search", response_context="")
+    b = claim_cache_key("Paris is the capital of France", model="claude-sonnet", method="web_search", response_context="")
+    assert a != b
+
+
+def test_claim_cache_key_includes_method():
+    """Same claim and model, different verification_method → different key."""
+    from core.utils.claim_cache import claim_cache_key
+    a = claim_cache_key("x", model="m", method="web_search", response_context="")
+    b = claim_cache_key("x", model="m", method="kb", response_context="")
+    assert a != b
+
+
+def test_claim_cache_key_includes_response_context():
+    """Same bare claim in different contexts should not collide.
+
+    This is the classic pronoun-resolution case: 'It is 8848m tall' under
+    Mt Everest context vs. Mt Kilimanjaro context.
+    """
+    from core.utils.claim_cache import claim_cache_key
+    a = claim_cache_key("It is 8848m tall", model="m", method="web_search", response_context="Mt. Everest is the tallest mountain")
+    b = claim_cache_key("It is 8848m tall", model="m", method="web_search", response_context="Mt. Kilimanjaro is in Tanzania")
+    assert a != b
+
+
+def test_claim_cache_key_schema_version_prefix():
+    """Key must be prefixed with v2: schema tag so the v1 cache can be safely
+    left in place (it'll just never be read)."""
+    from core.utils.claim_cache import claim_cache_key
+    key = claim_cache_key("x", model="m", method="kb", response_context="")
+    assert key.startswith("v2:")
+
+
+def test_claim_cache_key_deterministic():
+    """Same inputs → same key."""
+    from core.utils.claim_cache import claim_cache_key
+    a = claim_cache_key("x", model="m", method="kb", response_context="c")
+    b = claim_cache_key("x", model="m", method="kb", response_context="c")
+    assert a == b

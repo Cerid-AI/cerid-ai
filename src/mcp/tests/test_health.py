@@ -89,12 +89,27 @@ class TestHealthEndpoints:
     def test_health_endpoint_returns_json(self, mock_chroma, mock_neo4j, mock_redis):
         """Main /health returns JSON with service statuses."""
         mock_chroma.return_value = MagicMock()
+        mock_chroma.return_value.list_collections.return_value = []
         mock_neo4j.return_value = None
         mock_redis.return_value = MagicMock()
 
-        client = TestClient(_make_app())
-        resp = client.get("/health")
+        # Task 14: invariants gate — pretend NLI is loaded so endpoint returns 200.
+        from core.utils import nli
+        prior_loaded = getattr(nli, "_MODEL_LOADED", False)
+        nli._MODEL_LOADED = True
+        # Reset the /health cache so the new invariants block is computed.
+        import app.routers.health as h
+        h._health_cache = {}
+        h._health_cache_ts = 0.0
+        try:
+            client = TestClient(_make_app())
+            resp = client.get("/health")
+        finally:
+            nli._MODEL_LOADED = prior_loaded
+
         assert resp.status_code == 200
         data = resp.json()
         assert "chromadb" in data["services"]
         assert "redis" in data["services"]
+        # Task 14: invariants block is additive to the existing response.
+        assert "invariants" in data

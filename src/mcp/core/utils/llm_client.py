@@ -1,11 +1,12 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unified LLM client — calls OpenRouter directly, bypassing Bifrost.
+"""Unified LLM client — calls OpenRouter directly.
 
-All internal LLM operations route through this client.  Bifrost is optional
-and only used as a fallback when OPENROUTER_API_KEY is not set or when the
-OpenRouter circuit breaker is open.
+All internal LLM operations route through this client. Bifrost was retired
+2026-04-17 (audit C-4); the remaining fallbacks here raise ``RuntimeError``
+when ``OPENROUTER_API_KEY`` is unset or the OpenRouter circuit is open, so
+the caller sees an explicit failure rather than a silent re-route.
 
 Usage::
 
@@ -27,7 +28,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 
-from core.utils.circuit_breaker import CircuitOpenError, get_breaker
+from core.utils.circuit_breaker import get_breaker
 from core.utils.tracing import tracing_headers
 
 if TYPE_CHECKING:
@@ -147,6 +148,7 @@ async def call_llm(
     response_format: dict | None = None,
     extra_payload: dict | None = None,
     breaker_name: str = "openrouter",
+    cost_sensitivity: str = "medium",  # noqa: ARG001 — observability / forward-compat
 ) -> str:
     """Call an LLM via OpenRouter directly.  Returns assistant content as string.
 
@@ -172,19 +174,18 @@ async def call_llm(
         Additional keys merged into the API payload.
     breaker_name:
         Circuit breaker name for this call category.
+    cost_sensitivity:
+        ``"low"`` | ``"medium"`` | ``"high"``.  Only meaningful when ``model``
+        is empty and the caller is relying on upstream routing: this parameter
+        accepts a user-scoped cost preference so callers can forward it
+        without an if-else.  When ``model`` is set explicitly, the choice is
+        already made and this value is ignored.
     """
     api_key = os.getenv("OPENROUTER_API_KEY", "")
     if not api_key:
-        # No OpenRouter key — fall back to Bifrost
-        return await _bifrost_fallback(
-            messages,
-            breaker_name=breaker_name,
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=timeout,
-            response_format=response_format,
-            extra_payload=extra_payload,
+        raise RuntimeError(
+            "OPENROUTER_API_KEY is not configured. Set the key in .env — Bifrost "
+            "was retired and is no longer available as a fallback gateway."
         )
 
     if not model:
@@ -226,18 +227,6 @@ async def call_llm(
 
     try:
         return await breaker.call(_do_call)
-    except CircuitOpenError:
-        _logger.warning("Circuit '%s' open, falling back to Bifrost", breaker_name)
-        return await _bifrost_fallback(
-            messages,
-            breaker_name=breaker_name,
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=timeout,
-            response_format=response_format,
-            extra_payload=extra_payload,
-        )
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code in (401, 403):
             global _consecutive_401s
@@ -248,16 +237,6 @@ async def call_llm(
             )
             if _consecutive_401s >= _POOL_RECYCLE_401_THRESHOLD:
                 await _recycle_client()
-            return await _bifrost_fallback(
-                messages,
-                breaker_name=breaker_name,
-                model=model,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                timeout=timeout,
-                response_format=response_format,
-                extra_payload=extra_payload,
-            )
         raise
 
 
@@ -271,6 +250,7 @@ async def call_llm_raw(
     response_format: dict | None = None,
     extra_payload: dict | None = None,
     breaker_name: str = "openrouter",
+    cost_sensitivity: str = "medium",  # noqa: ARG001 — observability / forward-compat
 ) -> dict:
     """Like :func:`call_llm` but returns the full parsed response dict.
 
@@ -279,15 +259,9 @@ async def call_llm_raw(
     """
     api_key = os.getenv("OPENROUTER_API_KEY", "")
     if not api_key:
-        return await _bifrost_fallback_raw(
-            messages,
-            breaker_name=breaker_name,
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=timeout,
-            response_format=response_format,
-            extra_payload=extra_payload,
+        raise RuntimeError(
+            "OPENROUTER_API_KEY is not configured. Set the key in .env — Bifrost "
+            "was retired and is no longer available as a fallback gateway."
         )
 
     if not model:
@@ -331,18 +305,6 @@ async def call_llm_raw(
 
     try:
         return await breaker.call(_do_call)
-    except CircuitOpenError:
-        _logger.warning("Circuit '%s' open, falling back to Bifrost", breaker_name)
-        return await _bifrost_fallback_raw(
-            messages,
-            breaker_name=breaker_name,
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=timeout,
-            response_format=response_format,
-            extra_payload=extra_payload,
-        )
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code in (401, 403):
             global _consecutive_401s
@@ -353,16 +315,6 @@ async def call_llm_raw(
             )
             if _consecutive_401s >= _POOL_RECYCLE_401_THRESHOLD:
                 await _recycle_client()
-            return await _bifrost_fallback_raw(
-                messages,
-                breaker_name=breaker_name,
-                model=model,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                timeout=timeout,
-                response_format=response_format,
-                extra_payload=extra_payload,
-            )
         raise
 
 
@@ -379,15 +331,29 @@ async def route_and_call(
     temperature: float = 0.1,
     max_tokens: int = 500,
     response_format: dict | None = None,
+    cost_sensitivity: str = "medium",
+    kb_injection_count: int = 0,
+    total_chars: int = 0,
 ) -> tuple[str, "RouteDecision"]:
     """Smart-route a query to the best LLM, then call it.
+
+    ``cost_sensitivity`` is forwarded to :func:`smart_router.route` so the
+    user's cost preference influences model selection for this call.  See
+    Task 17 audit C-6: this value used to get dropped at the router boundary
+    and default to ``medium`` regardless of the user's setting.
 
     Returns ``(content, route_decision)`` tuple.
     """
     from utils.smart_router import TaskType, route
 
     task = TaskType(task_type)
-    decision = await route(query, task_type=task)
+    decision = await route(
+        query,
+        task_type=task,
+        cost_sensitivity=cost_sensitivity,
+        kb_injection_count=kb_injection_count,
+        total_chars=total_chars,
+    )
 
     if decision.provider == "ollama":
         # Call Ollama directly
@@ -406,6 +372,7 @@ async def route_and_call(
             temperature=temperature,
             max_tokens=max_tokens,
             response_format=response_format,
+            cost_sensitivity=cost_sensitivity,
         )
         return content, decision
 
@@ -439,67 +406,3 @@ async def _call_ollama_direct(
         return await call_llm(messages, temperature=temperature, max_tokens=max_tokens)
 
 
-# ---------------------------------------------------------------------------
-# Bifrost fallback (when OpenRouter key is absent or circuit is open)
-# ---------------------------------------------------------------------------
-
-
-async def _bifrost_fallback(
-    messages: list[dict],
-    *,
-    breaker_name: str,
-    model: str = "",
-    temperature: float = 0.1,
-    max_tokens: int = 500,
-    timeout: float | None = None,
-    response_format: dict | None = None,
-    extra_payload: dict | None = None,
-) -> str:
-    from utils.bifrost import call_bifrost, extract_content
-
-    extra: dict = {}
-    if response_format:
-        extra["response_format"] = response_format
-    if extra_payload:
-        extra.update(extra_payload)
-
-    data = await call_bifrost(
-        messages=messages,
-        breaker_name=breaker_name,
-        model=model or None,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        timeout=timeout,
-        extra_payload=extra if extra else None,
-    )
-    return extract_content(data)
-
-
-async def _bifrost_fallback_raw(
-    messages: list[dict],
-    *,
-    breaker_name: str,
-    model: str = "",
-    temperature: float = 0.1,
-    max_tokens: int = 500,
-    timeout: float | None = None,
-    response_format: dict | None = None,
-    extra_payload: dict | None = None,
-) -> dict:
-    from utils.bifrost import call_bifrost
-
-    extra: dict = {}
-    if response_format:
-        extra["response_format"] = response_format
-    if extra_payload:
-        extra.update(extra_payload)
-
-    return await call_bifrost(
-        messages=messages,
-        breaker_name=breaker_name,
-        model=model or None,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        timeout=timeout,
-        extra_payload=extra if extra else None,
-    )

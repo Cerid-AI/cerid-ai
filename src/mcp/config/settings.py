@@ -53,9 +53,11 @@ AI_SNIPPET_MAX_CHARS = 1500
 # ---------------------------------------------------------------------------
 # Bifrost / LLM Gateway
 # ---------------------------------------------------------------------------
-# When false (default), all LLM calls go directly to OpenRouter via llm_client.py.
-# When true, Bifrost is used for intent-based auto-routing on user chat.
-USE_BIFROST = os.getenv("CERID_USE_BIFROST", "false").lower() == "true"
+# Bifrost was retired 2026-04-17 (audit C-4). All chat + smart-router traffic
+# routes directly to OpenRouter via llm_client.py. BIFROST_URL is retained
+# for a handful of pipeline call sites (topic extraction, contextual chunking,
+# maintenance-agent health probes) that still hit the gateway when one is
+# deployed externally.
 BIFROST_URL = os.getenv("BIFROST_URL", "http://bifrost:8080/v1")
 BIFROST_TIMEOUT = float(os.getenv("BIFROST_TIMEOUT", "20.0"))
 
@@ -116,10 +118,12 @@ RETRIEVAL_QUALITY_THRESHOLD = float(os.getenv("RETRIEVAL_QUALITY_THRESHOLD", "0.
 #
 #   1. Must stay well under the event-loop watchdog's 45s heartbeat
 #      threshold so a single slow query can't trip the process kill.
-#   2. Must stay SHORT so the _QUERY_SEMAPHORE(2) queue drains fast —
-#      every /agent/query holds a semaphore permit for up to this
+#   2. Must stay SHORT so the app.concurrency.KB_POOL queue drains
+#      fast — every /agent/query holds a KB_POOL slot for up to this
 #      many seconds, which blocks other KB queries and makes the chat
 #      experience feel hung even when /chat/stream itself is fast.
+#      (Pre-Task-8 this was _QUERY_SEMAPHORE(2); now path-partitioned
+#      so /health and /observability are immune to the queue depth.)
 #
 # 10s is the current sweet spot: long enough for a warm-cache smart RAG
 # on 6 domains to complete, short enough that a cold-start or
@@ -708,6 +712,11 @@ CONSUMER_REGISTRY: dict[str, dict] = {
             "/sdk/": (20, 60),
             "/ingest": (10, 60),
             "/recategorize": (10, 60),
+            # Audit C-11: state-mutating setup + polling admin/observability surfaces
+            # were previously unthrottled. Bound them to prevent abuse / tight loops.
+            "/setup/": (20, 60),
+            "/admin/": (20, 60),
+            "/observability/": (30, 60),
         },
         "allowed_domains": None,     # Full access to all domains
         "strict_domains": False,     # Cross-domain affinity enabled
@@ -758,6 +767,9 @@ CONSUMER_REGISTRY: dict[str, dict] = {
             "/sdk/": (30, 60),
             "/ingest": (10, 60),
             "/recategorize": (10, 60),
+            "/setup/": (20, 60),
+            "/admin/": (20, 60),
+            "/observability/": (30, 60),
         },
         "allowed_domains": None,
         "strict_domains": False,

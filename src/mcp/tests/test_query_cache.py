@@ -71,7 +71,7 @@ class TestCacheKey:
 class TestGetCached:
     @patch("utils.query_cache.get_redis")
     def test_get_cached_hit(self, mock_get_redis):
-        """Redis has data -- returns parsed dict."""
+        """Redis has data -- returns parsed dict (with cached flag added)."""
         payload = {"results": [{"id": 1, "text": "hello"}], "score": 0.95}
         redis = MagicMock()
         redis.get.return_value = json.dumps(payload)
@@ -79,7 +79,10 @@ class TestGetCached:
 
         result = get_cached("test query", "code", 10)
 
-        assert result == payload
+        assert result is not None
+        # Preserved fields
+        assert result["results"] == payload["results"]
+        assert result["score"] == payload["score"]
         redis.get.assert_called_once()
 
     @patch("utils.query_cache.get_redis")
@@ -139,7 +142,12 @@ class TestSetCached:
 
         assert key_arg.startswith(CACHE_PREFIX)
         assert ttl_arg == 120
-        assert json.loads(data_arg) == payload
+        stored = json.loads(data_arg)
+        # Caller's payload is preserved verbatim except for the private
+        # stored-at timestamp that drives cache_age_ms on read.
+        for k, v in payload.items():
+            assert stored[k] == v
+        assert "_cache_stored_at" in stored
 
     @patch("utils.query_cache.get_redis")
     def test_set_cached_default_ttl(self, mock_get_redis):
@@ -229,3 +237,71 @@ class TestInvalidateCacheNonBlocking:
             # asyncio.to_thread will propagate the exception
             with pytest.raises(OSError):
                 await invalidate_cache_non_blocking()
+
+
+# ---------------------------------------------------------------------------
+# Cache-hit surfacing (audit RC-G)
+# ---------------------------------------------------------------------------
+
+
+class _FakeRedis:
+    """Minimal in-memory redis substitute for round-trip set/get testing."""
+
+    def __init__(self) -> None:
+        self._store: dict[str, str] = {}
+
+    def setex(self, key: str, ttl: int, value: str) -> None:  # noqa: ARG002
+        self._store[key] = value
+
+    def get(self, key: str):
+        return self._store.get(key)
+
+
+class TestCachedFlag:
+    """A cached response must be distinguishable from a fresh one.
+
+    Users reported warm 0.08 s vs cold 11.66 s but no signal in the body.
+    """
+
+    @patch("utils.query_cache.get_redis")
+    def test_cached_response_marked_with_cached_flag(self, mock_get_redis):
+        """After round-trip through set_cached/get_cached, response has cached=True."""
+        fake = _FakeRedis()
+        mock_get_redis.return_value = fake
+
+        # Write fresh (no cached flag)
+        set_cached("q1", "dk", 5, {"results": [], "answer": "cached"})
+
+        # Read back
+        out = get_cached("q1", "dk", 5)
+
+        assert out is not None
+        assert out.get("cached") is True
+        assert "cache_age_ms" in out
+        assert isinstance(out["cache_age_ms"], int)
+        assert out["cache_age_ms"] >= 0
+
+    @patch("utils.query_cache.get_redis")
+    def test_fresh_result_before_caching_has_no_cached_flag(self, mock_get_redis):
+        """Writing a result must NOT pre-stamp cached=True on the input dict."""
+        fake = _FakeRedis()
+        mock_get_redis.return_value = fake
+
+        fresh = {"results": [], "answer": "fresh"}
+        set_cached("q2", "dk", 5, fresh)
+
+        # The caller's dict must not be mutated to look cached
+        assert "cached" not in fresh or fresh.get("cached") is not True
+
+    @patch("utils.query_cache.get_redis")
+    def test_internal_timestamp_field_not_exposed(self, mock_get_redis):
+        """The private _cache_stored_at field must not leak to callers."""
+        fake = _FakeRedis()
+        mock_get_redis.return_value = fake
+
+        set_cached("q3", "dk", 5, {"results": [], "answer": "x"})
+        out = get_cached("q3", "dk", 5)
+
+        assert out is not None
+        # Internal field should be stripped on the way out
+        assert "_cache_stored_at" not in out

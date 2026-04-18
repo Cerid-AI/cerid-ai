@@ -68,6 +68,7 @@ from app.routers import (
 )
 from app.scheduler import start_scheduler, stop_scheduler
 from config.features import CERID_MULTI_USER
+from core.utils.version import get_version
 
 logging.basicConfig(
     level=logging.INFO,
@@ -523,17 +524,12 @@ async def lifespan(app: FastAPI):
     if os.getenv("OPENROUTER_API_KEY"):
         asyncio.ensure_future(_openrouter_auth_probe_loop())
 
-    # Bifrost pre-warm only when explicitly enabled
+    # Bifrost was retired (audit C-4) — chat + smart-router route direct to
+    # OpenRouter. BIFROST_URL is still honoured by a few pipeline call sites
+    # (topic extraction, contextual chunking, maintenance health probes) but
+    # no longer pre-warmed at startup.
+
     import config as _startup_config
-    if getattr(_startup_config, "USE_BIFROST", False):
-        try:
-            from utils.bifrost import get_bifrost_client
-            await get_bifrost_client()
-            logger.info("Bifrost HTTP client pool pre-warmed")
-        except Exception as e:
-            logger.debug("Pre-warm Bifrost client failed: %s", e)
-    else:
-        logger.info("Bifrost disabled (CERID_USE_BIFROST=false) — LLM calls route directly to OpenRouter")
 
     # Pre-warm Ollama client pool (for pipeline tasks)
     if getattr(_startup_config, "OLLAMA_ENABLED", False):
@@ -627,6 +623,11 @@ async def lifespan(app: FastAPI):
         await close_ollama_client()
     except Exception as exc:
         logger.warning("Ollama client shutdown failed: %s", exc)
+    try:
+        from app.routers.providers import close_openrouter_client
+        await close_openrouter_client()
+    except Exception as exc:
+        logger.warning("OpenRouter credit-probe client shutdown failed: %s", exc)
     # Extension shutdown hooks (registered by bootstrap)
     for _hook in _shutdown_hooks:
         try:
@@ -648,7 +649,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="AI Companion MCP Server",
-    version="1.0.0",
+    version=get_version(),
     lifespan=lifespan,
 )
 
@@ -681,7 +682,12 @@ app.add_middleware(TenantContextMiddleware)
 # 7. Request ID (added last, runs first — sets X-Request-ID for all subsequent middleware)
 app.add_middleware(RequestIDMiddleware)
 
-# Register routers at root (backward compatibility) and /api/v1/ prefix
+# Register routers at root. The legacy `/api/v1/*` dual mount was retired
+# (Task 16): it double-registered every route (185 duplicates in openapi.json)
+# and served no purpose — callers using /api/v1/* should be redirected to
+# root paths by the nginx proxy in a follow-up. `/sdk/v1/*` endpoints live at
+# their own prefix intentionally — they are the stable external contract and
+# are registered separately below.
 _api_routers = [
     health.router,
     query.router,
@@ -704,23 +710,17 @@ _api_routers = [
 ]
 for r in _api_routers:
     app.include_router(r)
-    app.include_router(r, prefix="/api/v1")
 
 # Setup, provider, and model assignment routers — first-run wizard and BYOK configuration
 app.include_router(setup.router)
-app.include_router(setup.router, prefix="/api/v1")
 app.include_router(providers.router)
-app.include_router(providers.router, prefix="/api/v1")
 app.include_router(models.router)
-app.include_router(models.router, prefix="/api/v1")
 
 # Observability dashboard API (real-time metrics, health score, cost, quality)
 app.include_router(observability.router)
-app.include_router(observability.router, prefix="/api/v1")
 
 # Ollama local LLM proxy (always registered; endpoints gate on OLLAMA_ENABLED)
 app.include_router(ollama_proxy.router)
-app.include_router(ollama_proxy.router, prefix="/api/v1")
 
 # SDK router — stable external contract (manages its own /sdk/v1/ prefix)
 app.include_router(sdk.router)
@@ -735,7 +735,6 @@ app.include_router(mcp_sse.router)
 if CERID_MULTI_USER:
     from app.routers import auth as auth_router
     app.include_router(auth_router.router)
-    app.include_router(auth_router.router, prefix="/api/v1")
 
 # Routers from bridge layer (not yet extracted to app/routers/ — Phase C follow-up)
 from routers import (  # noqa: E402,I001
@@ -767,7 +766,6 @@ _bridge_routers = [
 ]
 for r in _bridge_routers:
     app.include_router(r)
-    app.include_router(r, prefix="/api/v1")
 
 # SDK OpenAPI spec (serves at /sdk/v1/openapi.json — no versioned prefix needed)
 app.include_router(sdk_openapi.router)
@@ -775,4 +773,4 @@ app.include_router(sdk_openapi.router)
 
 @app.get("/")
 def root():
-    return {"service": "AI Companion MCP Server", "version": "1.0.0", "status": "running"}
+    return {"service": "AI Companion MCP Server", "version": get_version(), "status": "running"}

@@ -207,6 +207,19 @@ export function useVerificationStream(
       })
     }
 
+    // Finalize any still-`pending` claim cards so the UI doesn't render a
+    // stale spinner indefinitely when the stream ends without a per-claim
+    // verdict (abort, timeout, or natural close without summary).
+    const finalizePendingClaims = (reason: string) => {
+      setClaims((prev) =>
+        prev.map((c) =>
+          c.status === "pending"
+            ? { ...c, status: "uncertain", reason: c.reason ?? reason }
+            : c,
+        ),
+      )
+    }
+
     // Timeout: abort verification if it takes too long.
     // Backend total deadline is 60s (fast-path for no-KB claims + 10s per-claim
     // timeouts).  60s frontend timeout matches the backend ceiling.
@@ -215,6 +228,7 @@ export function useVerificationStream(
       if (!cancelled) {
         cancelled = true
         abort()
+        finalizePendingClaims("verification timed out")
         setPhase("error")
       }
     }, STREAM_TIMEOUT_MS)
@@ -223,7 +237,10 @@ export function useVerificationStream(
       try {
         const res = await response
         if (!res.ok || !res.body) {
-          if (!cancelled) setPhase("error")
+          if (!cancelled) {
+            finalizePendingClaims("stream failed to open")
+            setPhase("error")
+          }
           return
         }
 
@@ -361,6 +378,11 @@ export function useVerificationStream(
                   break
 
                 case "error": {
+                  finalizePendingClaims(
+                    typeof event.message === "string" && event.message
+                      ? `verification error: ${String(event.message).slice(0, 120)}`
+                      : "verification error",
+                  )
                   setPhase("error")
                   // Use the detailed payload surfaced by streaming.py when
                   // available (error_type / phase / message / claims_seen).
@@ -381,12 +403,15 @@ export function useVerificationStream(
           }
         }
 
-        // Stream ended — if no summary event was received, don't leave phase stuck
+        // Stream ended — if no summary event was received, don't leave phase
+        // stuck AND don't leave per-claim cards rendering a spinner forever.
         if (!cancelled && !receivedSummary) {
+          finalizePendingClaims("stream closed before verdict")
           setPhase("error")
         }
       } catch (err) {
         if (!cancelled && !(err instanceof DOMException && (err as DOMException).name === "AbortError")) {
+          finalizePendingClaims("stream interrupted")
           setPhase("error")
         }
       } finally {

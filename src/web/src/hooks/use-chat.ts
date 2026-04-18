@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useRef, useCallback } from "react"
+import { useState, useRef, useCallback, useEffect } from "react"
 import { streamChat, ingestFeedback, extractMemories } from "@/lib/api"
 import { uuid } from "@/lib/utils"
 import type { ChatMessage, SourceRef } from "@/lib/types"
@@ -27,8 +27,17 @@ export function useChat({ onMessageStart, onMessageUpdate, onModelResolved, onMo
   const onModelFallbackRef = useRef(onModelFallback)
   onModelFallbackRef.current = onModelFallback
 
+  // Abort any in-flight stream when the consumer unmounts (e.g. user switches
+  // conversations mid-stream). Without this, the fetch leaks and keeps
+  // pumping chunks into a detached callback.
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort()
+    }
+  }, [])
+
   const send = useCallback(
-    async (convoId: string, messages: Pick<ChatMessage, "role" | "content">[], model: string, sourcesUsed?: SourceRef[]) => {
+    async (convoId: string, messages: Pick<ChatMessage, "role" | "content">[], model: string, sourcesUsed?: SourceRef[], degradedReason?: string) => {
       setIsStreaming(true)
       abortRef.current = new AbortController()
 
@@ -39,6 +48,7 @@ export function useChat({ onMessageStart, onMessageUpdate, onModelResolved, onMo
         model,
         timestamp: Date.now(),
         sourcesUsed,
+        ...(degradedReason ? { degradedReason } : {}),
       }
       onMessageStart(convoId, assistantMsg)
 

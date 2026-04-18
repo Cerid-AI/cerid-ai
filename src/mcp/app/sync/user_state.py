@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import errno
 import json
 import logging
 from datetime import datetime, timezone
@@ -14,6 +16,14 @@ from typing import Any
 import config
 
 logger = logging.getLogger("ai-companion.sync.user_state")
+
+# Audit P1-11: macOS advisory lock collisions with Dropbox-synced
+# settings.json surface as OSError(errno.EDEADLK, 'Resource deadlock
+# avoided'). The condition clears within ~100 ms as Dropbox releases its
+# lock; these constants tune the retry loop used by the async wrappers
+# below.
+_EDEADLK_RETRY_ATTEMPTS = 3
+_EDEADLK_BACKOFF_BASE_S = 0.1
 
 # ---------------------------------------------------------------------------
 # Encryption helpers
@@ -150,6 +160,71 @@ def write_settings(sync_dir: str, settings: dict[str, Any]) -> None:
     existing["machine_id"] = config.MACHINE_ID
     _write_json(path, _encrypt_dict(existing))
     logger.info("Wrote settings to %s", path)
+
+
+async def write_settings_with_retry(
+    sync_dir: str, settings: dict[str, Any]
+) -> bool:
+    """Async wrapper around :func:`write_settings` with EDEADLK retry.
+
+    Audit P1-11: on macOS, Dropbox holds an advisory lock on settings.json
+    while syncing. A write during that window fails with
+    ``OSError(errno.EDEADLK, 'Resource deadlock avoided')`` (errno 35) and
+    — because the caller previously logged and moved on — the user's
+    settings update would be silently lost.
+
+    This wrapper retries up to three times with exponential backoff
+    (100 ms, 200 ms, 400 ms) specifically for EDEADLK. Other OSErrors are
+    re-raised immediately so genuine permission / disk issues are not
+    masked. After the final attempt, emits a structured warning the GUI
+    can surface so the user knows the write did not land.
+
+    Returns True on success, False on final failure.
+    """
+    last_exc: OSError | None = None
+    for attempt in range(_EDEADLK_RETRY_ATTEMPTS):
+        try:
+            await asyncio.to_thread(write_settings, sync_dir, settings)
+            if attempt > 0:
+                logger.info(
+                    "settings.sync_write_recovered",
+                    extra={
+                        "attempt": attempt + 1,
+                        "errno": errno.EDEADLK,
+                    },
+                )
+            return True
+        except OSError as exc:
+            if exc.errno != errno.EDEADLK:
+                # Not the lock-collision case we know how to retry — let
+                # the caller see it (permission denied, disk full, etc).
+                raise
+            last_exc = exc
+            if attempt == _EDEADLK_RETRY_ATTEMPTS - 1:
+                break
+            delay = _EDEADLK_BACKOFF_BASE_S * (2**attempt)
+            logger.info(
+                "settings.sync_write_edeadlk_retry",
+                extra={"attempt": attempt + 1, "delay_s": delay},
+            )
+            await asyncio.sleep(delay)
+
+    # Exhausted retries — surface a structured warning the GUI can render.
+    logger.warning(
+        "settings.sync_write_failed_edeadlk",
+        extra={
+            "sync_dir": sync_dir,
+            "attempts": _EDEADLK_RETRY_ATTEMPTS,
+            "errno": errno.EDEADLK,
+            "error": str(last_exc) if last_exc else "EDEADLK",
+            "user_message": (
+                "Settings were not saved to cloud sync — another process "
+                "(likely Dropbox) held the file lock. Try again or pause "
+                "Dropbox briefly."
+            ),
+        },
+    )
+    return False
 
 
 def read_settings(sync_dir: str) -> dict[str, Any]:

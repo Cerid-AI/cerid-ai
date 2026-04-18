@@ -28,7 +28,7 @@ interface UseChatSendOptions {
   replaceMessages?: (convoId: string, msgs: ChatMessage[]) => void
 
   // Chat send primitive
-  send: (convoId: string, messages: Pick<ChatMessage, "role" | "content">[], model: string, sources?: SourceRef[]) => void
+  send: (convoId: string, messages: Pick<ChatMessage, "role" | "content">[], model: string, sources?: SourceRef[], degradedReason?: string) => void
 
   // Current model (owned by ChatPanel, shared with toolbar/dialog/correction)
   selectedModel: string
@@ -46,6 +46,11 @@ interface UseChatSendOptions {
   injectedContext: KBQueryResult[]
   kbResults: KBQueryResult[]
   clearInjected: () => void
+
+  /** Non-empty when retrieval breached its time budget for the current query.
+   *  Propagated onto the assistant ChatMessage so MessageBubble can render a
+   *  warning banner explaining the answer is ungrounded. */
+  degradedReason?: string
 
   // Callback before send (e.g. reset verification banner)
   onBeforeSend?: () => void
@@ -142,7 +147,12 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
       const isFirstMessage = !(options.activeMessages?.length)
       if (options.autoInject && !isFirstMessage) {
         let freshResults = options.kbResults
-        if (content.length > 2) {
+        // Only hit the network when the cache is cold. Wave-0 Task 3:
+        // useOrchestratedQuery / useKBContext already populate TanStack
+        // cache with staleTime 15s — re-firing queryKB here duplicates work
+        // and saturates the backend _QUERY_SEMAPHORE.
+        const cacheCold = !freshResults || freshResults.length === 0
+        if (cacheCold && content.length > 2) {
           const injectAbort = new AbortController()
           const timeout = new Promise<null>((resolve) => setTimeout(() => {
             injectAbort.abort()
@@ -158,6 +168,18 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
           }
           // Merge memories into the candidate pool as pseudo-KB results
           if (Array.isArray(freshMemories) && freshMemories.length > 0) {
+            for (const mem of freshMemories) {
+              freshResults.push(memoryToKBResult(mem))
+            }
+          }
+        } else if (!cacheCold && content.length > 2) {
+          // Cache warm — skip queryKB but still pull fresh memories
+          // (memories aren't covered by the TanStack KB cache).
+          const freshMemories = await recallMemories(content, 3).catch(() => [])
+          if (Array.isArray(freshMemories) && freshMemories.length > 0) {
+            // Avoid mutating the caller's kbResults array (it's a React
+            // state reference). Clone before pushing memory pseudo-results.
+            freshResults = [...freshResults]
             for (const mem of freshMemories) {
               freshResults.push(memoryToKBResult(mem))
             }
@@ -199,7 +221,12 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
           chunk_index: r.chunk_index,
           tags: r.tags,
           quality_score: r.quality_score,
-          source_type: r.source_url ? "external" as const : "kb" as const,
+          source_type: r.source_url
+            ? ("external" as const)
+            : r.source_type === "memory"
+              ? ("memory" as const)
+              : ("kb" as const),
+          source_url: r.source_url,
         }))
 
         // Separate documents from memories for distinct formatting
@@ -304,7 +331,7 @@ export function useChatSend(options: UseChatSendOptions): UseChatSendReturn {
         }
       }
 
-      options.send(convoId, allMessages, modelToUse, sourcesForAssistant)
+      options.send(convoId, allMessages, modelToUse, sourcesForAssistant, options.degradedReason)
       if (modelToUse !== options.selectedModel && options.activeId) {
         options.updateModel(options.activeId, modelToUse)
       }

@@ -494,8 +494,11 @@ async def rerank_results(
 ) -> list[dict[str, Any]]:
     """Rerank results using the configured strategy.
 
-    Dispatches to cross-encoder (fast local ONNX) or Bifrost LLM based on
-    ``config.RERANK_MODE``.  Falls back to relevance sort on any failure.
+    Dispatches to cross-encoder (fast local ONNX) or LLM (via
+    ``core.utils.internal_llm``) based on ``config.RERANK_MODE``. When the
+    ONNX cross-encoder fails to load, results are returned in their original
+    order and each is tagged with ``reranker_status = 'onnx_failed_no_fallback'``
+    — see :func:`_rerank_cross_encoder` for the rationale.
     """
     if not use_reranking or len(results) == 0:
         return sorted(results, key=lambda x: x["relevance"], reverse=True)
@@ -527,15 +530,29 @@ async def _rerank_cross_encoder(
     results: list[dict[str, Any]],
     query: str,
 ) -> list[dict[str, Any]]:
-    """Rerank via local cross-encoder model (ONNX, ~50 ms for 15 candidates)."""
+    """Rerank via local cross-encoder model (ONNX, ~50 ms for 15 candidates).
+
+    On failure, returns results in their input order (already sorted by
+    relevance upstream) and tags each with ``reranker_status =
+    'onnx_failed_no_fallback'`` so the caller can surface the degraded state.
+    The former LLM fallback routed through Bifrost; after Bifrost retirement
+    (audit C-4/C-9) a single ONNX load failure would otherwise crash every
+    query, so we prefer an honest no-op over a broken alternative path.
+    """
     try:
         from core.retrieval.reranker import rerank as ce_rerank
 
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, ce_rerank, query, results)
     except Exception as e:
-        logger.warning("Cross-encoder reranking failed, falling back to LLM: %s", e)
-        return await _rerank_llm(results, query)
+        logger.warning(
+            "Cross-encoder reranking failed — returning results in original "
+            "order (no LLM fallback after Bifrost retirement): %s",
+            e,
+        )
+        for r in results:
+            r["reranker_status"] = "onnx_failed_no_fallback"
+        return results
 
 
 async def _rerank_llm(
@@ -940,23 +957,18 @@ async def agent_query(
             "agent_query exceeded %.1fs wall-clock budget for query=%r (degraded response returned)",
             budget, query[:80],
         )
-        return {
-            "results": [],
-            "context": "",
-            "answer": "",
-            "sources": [],
-            "source_breakdown": {"kb": [], "memory": [], "external": []},
-            "source_status": {"kb": "timeout", "memory": "timeout", "external": "timeout"},
-            "strategy": "degraded_budget_exhausted",
-            "budget_exceeded": True,
-            "budget_seconds": budget,
-            "degraded_reason": (
+        from core.models.query_envelope import QueryEnvelope
+        env = QueryEnvelope()
+        env.mark_degraded(
+            budget_seconds=budget,
+            reason=(
                 "Retrieval took longer than the configured budget. "
                 "This usually means the system is under load or the query "
                 "matched many large collections. Try a more specific query "
                 "or narrow the domain filter."
             ),
-        }
+        )
+        return env.to_dict()
 
 
 async def _agent_query_impl(

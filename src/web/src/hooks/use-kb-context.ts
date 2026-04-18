@@ -67,12 +67,13 @@ export function useKBContext(
 
   const { data, isLoading, isError, error, refetch } = useQuery<AgentQueryResponse>({
     queryKey: ["kb-query", effectiveQuery, domainKey, contextMsgCount],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       queryKB(
         effectiveQuery,
         activeDomains.size > 0 ? [...activeDomains] : undefined,
         10,
         recentMessages,
+        { signal },
       ),
     enabled: !!effectiveQuery && effectiveQuery.length > 2,
     staleTime: 15_000,

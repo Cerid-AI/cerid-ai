@@ -377,11 +377,14 @@ async def update_settings_endpoint(req: SettingsUpdateRequest):
             detail="No valid fields provided. See API docs for updatable fields.",
         )
 
-    # Persist to sync directory for cross-machine/restart durability
+    # Persist to sync directory for cross-machine/restart durability.
+    # Audit P1-11: macOS advisory lock collisions with Dropbox surface as
+    # OSError(EDEADLK). Retry briefly (3x, 100/200/400ms) before giving up
+    # so a transient lock does not silently drop the user's settings write.
     try:
         if getattr(config, "SYNC_DIR", ""):
-            from app.sync.user_state import write_settings
-            write_settings(config.SYNC_DIR, updated)
+            from app.sync.user_state import write_settings_with_retry
+            await write_settings_with_retry(config.SYNC_DIR, updated)
     except Exception as exc:
         logger.warning("Failed to persist settings to sync dir: %s", exc)
 
