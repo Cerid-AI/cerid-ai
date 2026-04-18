@@ -256,19 +256,22 @@ def _is_client_error(exc: Exception) -> bool:
 
 _chromadb = AsyncCircuitBreaker("chromadb", failure_threshold=5, recovery_timeout=30)
 
-# External data source breakers — supplementary enrichment, never critical path.
-# failure_threshold=1: one timeout trips the breaker immediately (avoids hanging
-# the first user message when Docker has no egress to external services).
-# recovery_timeout=120: 2-minute cooldown before a single retry probe.
-_datasource_wikipedia = AsyncCircuitBreaker("datasource-wikipedia", failure_threshold=1, recovery_timeout=120)
-_datasource_duckduckgo = AsyncCircuitBreaker("datasource-duckduckgo", failure_threshold=1, recovery_timeout=120)
-_datasource_wolfram_alpha = AsyncCircuitBreaker("datasource-wolfram_alpha", failure_threshold=1, recovery_timeout=120)
-_datasource_exchange_rates = AsyncCircuitBreaker("datasource-exchange_rates", failure_threshold=1, recovery_timeout=120)
-_datasource_openlibrary = AsyncCircuitBreaker("datasource-openlibrary", failure_threshold=1, recovery_timeout=120)
-_datasource_pubchem = AsyncCircuitBreaker("datasource-pubchem", failure_threshold=1, recovery_timeout=120)
-_datasource_bookmarks = AsyncCircuitBreaker("datasource-bookmarks", failure_threshold=1, recovery_timeout=120)
-_datasource_email_imap = AsyncCircuitBreaker("datasource-email-imap", failure_threshold=1, recovery_timeout=120)
-_datasource_rss_feeds = AsyncCircuitBreaker("datasource-rss_feeds", failure_threshold=1, recovery_timeout=120)
+# External data-source breakers. Tuned for transient-tolerance:
+# - failure_threshold=3: tolerate 2 flaky requests before opening. A single
+#   timeout or DNS blip no longer locks the source out for minutes.
+# - recovery_timeout=30: re-probe every 30s rather than punishing for 2 min.
+# The per-request 5s timeout already bounds hang cost; audit RC-B showed the
+# old (1, 120) tuning turned one transient flake into 2 full minutes of
+# ext_count=0 / strategy=degraded_budget_exhausted responses.
+_datasource_wikipedia = AsyncCircuitBreaker("datasource-wikipedia", failure_threshold=3, recovery_timeout=30)
+_datasource_duckduckgo = AsyncCircuitBreaker("datasource-duckduckgo", failure_threshold=3, recovery_timeout=30)
+_datasource_wolfram_alpha = AsyncCircuitBreaker("datasource-wolfram_alpha", failure_threshold=3, recovery_timeout=30)
+_datasource_exchange_rates = AsyncCircuitBreaker("datasource-exchange_rates", failure_threshold=3, recovery_timeout=30)
+_datasource_openlibrary = AsyncCircuitBreaker("datasource-openlibrary", failure_threshold=3, recovery_timeout=30)
+_datasource_pubchem = AsyncCircuitBreaker("datasource-pubchem", failure_threshold=3, recovery_timeout=30)
+_datasource_bookmarks = AsyncCircuitBreaker("datasource-bookmarks", failure_threshold=3, recovery_timeout=30)
+_datasource_email_imap = AsyncCircuitBreaker("datasource-email-imap", failure_threshold=3, recovery_timeout=30)
+_datasource_rss_feeds = AsyncCircuitBreaker("datasource-rss_feeds", failure_threshold=3, recovery_timeout=30)
 
 _BREAKER_REGISTRY: dict[str, AsyncCircuitBreaker] = {
     "chromadb": _chromadb,

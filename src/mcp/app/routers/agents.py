@@ -26,6 +26,36 @@ logger = logging.getLogger("ai-companion")
 _QUERY_SEMAPHORE = asyncio.Semaphore(2)
 
 
+def should_fire_external_crag(
+    *,
+    ext_on: bool,
+    kb_result: dict,
+    threshold: float,
+) -> bool:
+    """CRAG gate: decide whether to launch external sources.
+
+    External sources are expensive (5s per-source timeout, network I/O,
+    circuit-breaker pressure).  When KB already has a strong hit we skip
+    them entirely — strong KB > any external result for the usual query
+    mix, and the 10s /agent/query wall-clock budget is precious.
+
+    Fires only when:
+      - the client allowed external (`ext_on`), AND
+      - the best KB relevance is strictly below `threshold`.
+
+    A result set with no `results` key (or empty list) yields max=0.0,
+    which is always < threshold — so unknown-KB correctly falls through
+    to external.
+    """
+    if not ext_on:
+        return False
+    results = kb_result.get("results") if isinstance(kb_result, dict) else None
+    if not results:
+        return True
+    max_rel = max((r.get("relevance", 0.0) for r in results), default=0.0)
+    return max_rel < threshold
+
+
 class AgentQueryRequest(BaseModel):
     query: str
     domains: list[str] | None = None
@@ -228,26 +258,12 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
         else:
             # Manual mode: KB gate check — if context_sources disables KB, skip retrieval
             _cs = req.context_sources or {}
-
-            # Launch external sources in parallel with KB (if enabled).
-            # Runs concurrently — no latency penalty when KB has results.
             _ext_on = _cs.get("external", True)
-            _external_task = None
-            if _ext_on:
-                try:
-                    from agents.retrieval_orchestrator import _extract_search_terms
-                    from utils.data_sources import registry
-                    _search_terms = _extract_search_terms(req.query)
-                    _external_task = asyncio.create_task(
-                        registry.query_all(
-                            _search_terms,
-                            domain=req.domains[0] if req.domains else None,
-                            timeout=5.0,
-                        )
-                    )
-                except Exception:
-                    pass  # Registry unavailable — skip external
 
+            # ── Fetch KB first, then decide whether to fire external (CRAG gate) ──
+            # Audit RC-B: launching external unconditionally in parallel ate the
+            # 10s /agent/query budget even when KB had strong hits. The CRAG gate
+            # below skips external when KB is already authoritative.
             if _cs.get("kb", True) is False:
                 result = {
                     "context": "", "sources": [], "confidence": 0.0,
@@ -275,12 +291,28 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
                     metadata_filter=req.metadata_filter,
                 )
 
-            # Merge external results (parallel task completes by now)
-            if _external_task is not None:
+            # CRAG gate: fire external only when KB quality is below threshold.
+            # Saves the 5s-per-source hang cost when KB already has strong hits.
+            _threshold = getattr(config, "RETRIEVAL_QUALITY_THRESHOLD", 0.4)
+            if should_fire_external_crag(
+                ext_on=_ext_on, kb_result=result, threshold=_threshold,
+            ):
+                _ext_results: list = []
                 try:
-                    _ext_results = await _external_task
-                except Exception:
+                    from agents.retrieval_orchestrator import _extract_search_terms
+                    from utils.data_sources import registry
+                    _search_terms = _extract_search_terms(req.query)
+                    _ext_results = await asyncio.wait_for(
+                        registry.query_all(
+                            _search_terms,
+                            domain=req.domains[0] if req.domains else None,
+                            timeout=5.0,
+                        ),
+                        timeout=6.0,
+                    )
+                except (Exception, asyncio.TimeoutError):
                     _ext_results = []
+
                 if _ext_results:
                     from app.models.query_envelope import QueryEnvelope, SourceItem
                     env = QueryEnvelope.from_legacy_result(result)

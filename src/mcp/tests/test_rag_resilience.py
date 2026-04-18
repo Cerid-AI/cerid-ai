@@ -509,3 +509,89 @@ class TestTechnicalQueryClassifier:
         assert decision.action == "full"
         # Reason should be complex_query, not technical_term_upgrade
         assert decision.reason == "complex_query"
+
+
+# =========================================================================
+# 7. TestCRAGGate
+# =========================================================================
+
+
+class TestCRAGGate:
+    """CRAG gate at the router level: external sources only fire when KB is weak.
+
+    Audit RC-B: the old code launched external unconditionally in parallel with
+    KB, eating the 10s /agent/query budget even when KB had strong hits.  The
+    gate now checks post-KB relevance against RETRIEVAL_QUALITY_THRESHOLD and
+    skips external entirely on strong KB.
+    """
+
+    def test_strong_kb_suppresses_external(self):
+        """Top KB relevance above threshold → external NOT launched."""
+        from app.routers.agents import should_fire_external_crag
+
+        result = {"results": [
+            {"relevance": 0.85, "content": "strong hit"},
+            {"relevance": 0.30, "content": "weaker"},
+        ]}
+        assert should_fire_external_crag(
+            ext_on=True, kb_result=result, threshold=0.4,
+        ) is False
+
+    def test_weak_kb_fires_external(self):
+        """Top KB relevance below threshold → external IS launched."""
+        from app.routers.agents import should_fire_external_crag
+
+        result = {"results": [
+            {"relevance": 0.15, "content": "weak hit"},
+            {"relevance": 0.05, "content": "weaker"},
+        ]}
+        assert should_fire_external_crag(
+            ext_on=True, kb_result=result, threshold=0.4,
+        ) is True
+
+    def test_empty_kb_fires_external(self):
+        """No KB results (KB disabled or empty) → external fires."""
+        from app.routers.agents import should_fire_external_crag
+
+        assert should_fire_external_crag(
+            ext_on=True, kb_result={"results": []}, threshold=0.4,
+        ) is True
+        assert should_fire_external_crag(
+            ext_on=True, kb_result={}, threshold=0.4,
+        ) is True
+
+    def test_ext_disabled_blocks_fire(self):
+        """When client sets context_sources.external=False, gate never fires."""
+        from app.routers.agents import should_fire_external_crag
+
+        # Even empty KB should not fire when ext_on is False.
+        assert should_fire_external_crag(
+            ext_on=False, kb_result={"results": []}, threshold=0.4,
+        ) is False
+        # Even weak KB.
+        assert should_fire_external_crag(
+            ext_on=False,
+            kb_result={"results": [{"relevance": 0.05}]},
+            threshold=0.4,
+        ) is False
+
+    def test_relevance_at_threshold_does_not_fire(self):
+        """Boundary: relevance == threshold is treated as 'strong enough'."""
+        from app.routers.agents import should_fire_external_crag
+
+        # Strict '<' means == threshold counts as strong.
+        assert should_fire_external_crag(
+            ext_on=True,
+            kb_result={"results": [{"relevance": 0.4}]},
+            threshold=0.4,
+        ) is False
+
+    def test_missing_relevance_treated_as_zero(self):
+        """A result without a 'relevance' field is treated as weak (0.0)."""
+        from app.routers.agents import should_fire_external_crag
+
+        assert should_fire_external_crag(
+            ext_on=True,
+            kb_result={"results": [{"content": "x"}]},
+            threshold=0.4,
+        ) is True

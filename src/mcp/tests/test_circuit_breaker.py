@@ -154,3 +154,33 @@ class TestAsyncCircuitBreaker:
 
         # Should still be closed since 4xx errors are not counted
         assert cb.state == CircuitState.CLOSED
+
+
+# ---------------------------------------------------------------------------
+# Tests: External datasource breaker tuning
+# ---------------------------------------------------------------------------
+
+
+def test_external_datasource_breakers_are_tolerant():
+    """Regression: audit found failure_threshold=1 + 120s recovery was too
+    aggressive — one transient failure locked sources out for 2 minutes.
+
+    New tuning: threshold=3, recovery=30s. The per-request 5s timeout
+    already bounds hang cost, so tolerating a couple of flakes avoids
+    punishing the user for transient network blips.
+    """
+    from utils.circuit_breaker import get_breaker
+    for name in (
+        "datasource-wikipedia",
+        "datasource-duckduckgo",
+        "datasource-wolfram_alpha",
+        "datasource-exchange_rates",
+        "datasource-openlibrary",
+        "datasource-pubchem",
+        "datasource-bookmarks",
+        "datasource-email-imap",
+        "datasource-rss_feeds",
+    ):
+        cb = get_breaker(name)
+        assert cb.failure_threshold == 3, f"{name} threshold={cb.failure_threshold}"
+        assert cb.recovery_timeout == 30, f"{name} recovery={cb.recovery_timeout}"
