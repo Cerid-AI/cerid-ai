@@ -628,6 +628,11 @@ async def lifespan(app: FastAPI):
         await close_ollama_client()
     except Exception as exc:
         logger.warning("Ollama client shutdown failed: %s", exc)
+    try:
+        from app.routers.providers import close_openrouter_client
+        await close_openrouter_client()
+    except Exception as exc:
+        logger.warning("OpenRouter credit-probe client shutdown failed: %s", exc)
     # Extension shutdown hooks (registered by bootstrap)
     for _hook in _shutdown_hooks:
         try:
