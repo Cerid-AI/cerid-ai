@@ -2,6 +2,66 @@
 
 All notable changes to cerid-ai are documented here.
 
+## v0.84.0 — Reliability Remediation (2026-04-17 → 2026-04-18)
+
+Audit-driven reliability, data-wiring, UX, and LLM-integration fixes across 32 commits. Every P0/P1 concern from the 2026-04-17 live beta audit addressed. Full plan at [`tasks/2026-04-17-reliability-remediation-plan.md`](tasks/2026-04-17-reliability-remediation-plan.md).
+
+### Correctness (Wave 0)
+- **`QueryEnvelope` single-writer** — unified `/agent/query` response shape. External results are now always mirrored into `sources` and `source_breakdown.external`; the degraded-budget path no longer drops them.
+- **VerificationReport edges + backfill** — writer now always creates `[:EXTRACTED_FROM]` and `[:VERIFIED]`; stores `source_urls` / `verification_methods` on the node for external-verified claims. One-shot `m0001` migration backfills pre-existing reports.
+- **Frontend triple-fire killed** — one chat turn used to spawn 3 identical `/agent/query` POSTs. `useChatSend` now skips the redundant refetch when TanStack cache is warm.
+- **`DegradedBanner`** — ungrounded answers surface an amber banner with the backend's `degraded_reason`.
+- **External source attribution** — `source_breakdown.external` merges into the assistant's "Sources used" pane.
+
+### Reliability (Wave 1)
+- **Retrieval budget + CB tuning** — external data-source circuit breakers relaxed from `failure_threshold=1, recovery=120s` to `3 / 30s`. Router-level CRAG gate suppresses external fan-out when top KB relevance ≥ `RETRIEVAL_QUALITY_THRESHOLD`.
+- **Cancellation-safe SSE** — `/chat/stream` polls `request.is_disconnected()` and catches `CancelledError` / `GeneratorExit` to close upstream OpenRouter sockets on client abort. O(chunks²) usage parse short-circuited.
+- **Partitioned concurrency pools** — `KB` / `CHAT` / `HEALTH` replace the process-wide `_QUERY_SEMAPHORE(2)`. `/health` polling no longer serializes behind chat turns. Queue depth visible at `/observability/queue-depth`.
+- **Frontend abort cleanup** — `useChat` aborts on unmount. `queryKBOrchestrated` accepts an `AbortSignal` and threads TanStack's `signal` through.
+- **Graceful 429** — rate-limit middleware returns `429` with `Retry-After` header and JSON body `retry_after` instead of dropping connections under burst load.
+
+### Trust (Wave 2)
+- **Claim cache schema v2** — keyed on `(claim, model, tier, response_context)`. No more stale verdicts across model swaps or pronoun-resolved claim collisions.
+- **Cited-URL verification** — claims with `source_urls` fetch the page and NLI-entail before considering web search. Fabricated citations no longer get confirmed from unrelated search hits.
+- **Stream-abort claim finalizer** — pending claim cards flip to `uncertain` on verify-stream close; no more forever-spinning popovers.
+- **Startup invariants in `/health`** — collection dim checks, `verification_report_orphans` count, NLI load status. `/health` returns 503 on critical invariant violation.
+- **`X-Cache` header + `cached: true` body** — cache hits observable from the client.
+- **Version SSOT** — `/`, `/health`, and FastAPI `app.version` all read from `pyproject.toml` via `core/utils/version.py`. `/api/v1/*` dual mount retired.
+- **Smart-router scored classification** — replaces first-keyword-match with weighted signals. `cost_sensitivity` now plumbs from `/agent/query` through `route()` and `call_llm`. All registered model IDs carry the `openrouter/` prefix.
+
+### Hygiene (Wave 3)
+- Favicon / apple-touch-icon / viewport zoom-lock + conversation-search a11y labels + rapid-Enter race guard.
+- Rate-limit now covers `/setup/*`, `/admin/*` GETs, `/observability/*` GETs.
+- **Semantic-cache dim self-heal** — stored HNSW blobs carry a magic+dim header; mismatch on load deletes the blob and cold-starts.
+- **Dropbox `EDEADLK` retry** — 3-attempt exponential backoff; structured final-failure warning surfaced to the GUI.
+- **Shared `httpx.AsyncClient` for OpenRouter credits** — module-level client + lazy getter eliminates per-poll socket churn.
+- **Cross-machine settings/conversations reconciliation** — `updatedAt`-based version vector; drift now resolves on the next load.
+- **Graceful reranker fallback** — ONNX cross-encoder failure returns results in original order with `reranker_status: "onnx_failed_no_fallback"` instead of crashing.
+
+### Bifrost retirement (audit C-4)
+- Bifrost **fully retired** — no container, no helper module, no URL. `utils/bifrost.py`, `core/utils/bifrost.py`, `stacks/bifrost/` deleted.
+- Three pipeline callers migrated to `core.utils.llm_client.call_llm` (`utils/metadata.py` topic extraction, `core/utils/contextual.py` chunk summaries, `core/agents/maintenance.py` health probe).
+- `USE_BIFROST` / `CERID_USE_BIFROST` env vars removed. `BIFROST_TIMEOUT` kept as a legacy name for a generic LLM timeout.
+- `bifrost-*` circuit-breaker names preserved as historical identifiers for call-site categories (rerank / claims / verify / synopsis / memory / compress / decompose).
+- `call_llm` / `call_llm_raw` now raise `RuntimeError` when `OPENROUTER_API_KEY` is unset — no silent re-route.
+- nginx `/api/bifrost/` proxy removed.
+
+### Testing + CI
+- **Smoke harness** (`src/mcp/tests/load/smoke.py` + `make smoke`) — 8 scenarios covering `/health` concurrency, response-shape invariants, cache hit-rate, 429 graceful behaviour, SSE cancel, HOL blocking, CB flap.
+- **4 previously-skipped tests restored** (+5 active / -5 skipped): SSE generator `CancelledError` path, reranker graceful-fallback contract, 3 agent-query budget-fixture tests.
+- **CRAG inner-gate regression test** scans `query_agent.py` source to prevent re-introduction of the duplicate gate.
+- **+16 new backend tests** across VerificationReport persistence, dim-validation, envelope shape-invariants, SSE cancellation, concurrency pools, claim cache key, cited-URL verification, startup invariants, metrics middleware, rate limiting, settings-sync retry, reranker fallback.
+- **CI hygiene** — lint / typecheck / tsc / lockfile blockers cleared. Pinned `ruff==0.15.4` + `pip-tools==7.5.3` to match CI exactly.
+
+### Deferred
+- **Task 18 — chat-messages virtualization.** First attempt broke 46 testing-library measurement-dependent tests under jsdom. Needs a `@tanstack/react-virtual` approach that doesn't interfere with `measureElement` in jsdom.
+
+### Post-deploy actions
+- Run `python -m scripts.run_migrations` (m0001) to backfill existing `VerificationReport` provenance.
+- `make version-file` is now part of `scripts/start-cerid.sh --build` so `get_version()` returns the real version in the MCP image.
+- Operators see a one-time `embedding_dim_mismatch` ERROR log per mismatched Chroma collection, pointing at `POST /admin/collections/repair`.
+- Claim cache v2 cold-starts existing `verf:claim:*` entries — expect 10-20× latency on first verification pass until the cache rewarms.
+
 ## v0.83.0 — Verification Hardening + Memory Efficacy + Bug-Hunt Sprint (2026-04-10 → 2026-04-15)
 
 ### Verification Pipeline Hardening (2026-04-13)

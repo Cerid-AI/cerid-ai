@@ -7,9 +7,7 @@
 
 ## Unified Docker Compose
 
-A single root `docker-compose.yml` replaces the previous multi-step startup sequence. All services (Infrastructure, Bifrost, MCP, React GUI) are defined in one file with `depends_on` healthchecks ensuring correct startup order.
-
-> **Note:** Bifrost is now optional. Use `--profile bifrost` to enable it, controlled by the `CERID_USE_BIFROST` env var. When disabled, chat routes directly to OpenRouter.
+A single root `docker-compose.yml` defines all services (Infrastructure, MCP, React GUI) in one file with `depends_on` healthchecks ensuring correct startup order.
 
 ```bash
 # Start everything (preferred)
@@ -88,7 +86,7 @@ Tuned for local inference speed (Ollama is slower than cloud APIs):
 - `OLLAMA_ENABLED` — Enable/disable Ollama integration (default: `false`)
 - `OLLAMA_URL` — Ollama server URL (default: `http://localhost:11434`; use `http://host.docker.internal:11434` for Docker)
 - `OLLAMA_DEFAULT_MODEL` — Default model (auto-recommended if not set; fallback: `llama3.2:3b`)
-- `INTERNAL_LLM_PROVIDER` — `ollama` or `bifrost` (default: `bifrost`)
+- `INTERNAL_LLM_PROVIDER` — `ollama` or `openrouter` (default: `openrouter`)
 - `INTERNAL_LLM_MODEL` — Model override (empty = use `OLLAMA_DEFAULT_MODEL`)
 
 ---
@@ -130,7 +128,6 @@ Circuit breakers prevent cascading failures. Registered breakers:
 | `neo4j` | Neo4j graph database | 5 failures | 60s |
 | `redis` | Redis cache | 5 failures | 60s |
 | `ollama` | Ollama local LLM | 5 failures | 60s |
-| `bifrost` | Bifrost LLM gateway | 5 failures | 60s |
 
 Client locks prevent concurrent connection attempts during recovery. States: CLOSED (healthy) -> OPEN (failing, fast-fail) -> HALF_OPEN (testing recovery).
 
@@ -197,7 +194,7 @@ CERID_ENABLED_PLUGINS=        # Comma-separated plugin IDs to auto-enable
 
 API key auth is **opt-in**. When `CERID_API_KEY` is set in `.env`, all non-exempt endpoints require the key via `X-API-Key` header. When unset, all requests pass through.
 
-**Exempt paths:** `/health`, `/api/v1/health`, `/`, `/docs`, `/openapi.json`, `/redoc`, `/mcp/*`
+**Exempt paths:** `/health`, `/`, `/docs`, `/openapi.json`, `/redoc`, `/mcp/*`
 
 ### Key Rotation
 
@@ -406,7 +403,6 @@ export CERID_HOST=192.168.1.42
 2. Exports `VITE_MCP_URL=http://<CERID_HOST>:8888`
 3. The web container's `docker-entrypoint.sh` injects this URL into `/env-config.js` at runtime
 4. The React GUI picks up `window.__ENV__.VITE_MCP_URL` for API calls
-5. Bifrost chat API is proxied through nginx (`/api/bifrost/`), so no additional config needed
 
 ### CORS Configuration
 

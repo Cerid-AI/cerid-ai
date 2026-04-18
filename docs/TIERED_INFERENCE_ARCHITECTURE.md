@@ -388,13 +388,13 @@ Ten compute-heavy functions benefit from tiered acceleration. The table maps eac
 |---|----------|-----------|----------|-----------------|
 | 1 | `OnnxEmbeddingFunction.__call__()` | `utils/embeddings.py:112` | Bi-encoder embedding (768-dim) | ONNX CPUExecutionProvider |
 | 2 | `_score_pairs()` / `rerank()` | `utils/reranker.py:78` / `:129` | Cross-encoder scoring | ONNX CPUExecutionProvider |
-| 3 | `_extract_claims_llm()` | `agents/hallucination/extraction.py:362` | Claim extraction (LLM) | Bifrost → OpenRouter |
-| 4 | `decompose_query()` | `utils/query_decomposer.py:97` | Query decomposition (LLM) | Bifrost → OpenRouter |
-| 5 | `extract_memories()` | `agents/memory.py:44` | Memory extraction (LLM) | Bifrost → OpenRouter |
-| 6 | `resolve_memory_conflict()` | `agents/memory.py:386` | Conflict resolution (LLM) | Bifrost → OpenRouter |
-| 7 | `ai_categorize()` | `utils/metadata.py:182` | Document classification (LLM) | Bifrost → OpenRouter |
-| 8 | `contextualize_chunks()` | `utils/contextual.py:34` | Chunk context generation (LLM) | Bifrost → OpenRouter |
-| 9 | `_rerank_llm()` | `agents/assembler.py:115` | LLM reranking (fallback) | Bifrost → OpenRouter |
+| 3 | `_extract_claims_llm()` | `agents/hallucination/extraction.py:362` | Claim extraction (LLM) | OpenRouter |
+| 4 | `decompose_query()` | `utils/query_decomposer.py:97` | Query decomposition (LLM) | OpenRouter |
+| 5 | `extract_memories()` | `agents/memory.py:44` | Memory extraction (LLM) | OpenRouter |
+| 6 | `resolve_memory_conflict()` | `agents/memory.py:386` | Conflict resolution (LLM) | OpenRouter |
+| 7 | `ai_categorize()` | `utils/metadata.py:182` | Document classification (LLM) | OpenRouter |
+| 8 | `contextualize_chunks()` | `utils/contextual.py:34` | Chunk context generation (LLM) | OpenRouter |
+| 9 | `_rerank_llm()` | `agents/assembler.py:115` | LLM reranking (fallback) | OpenRouter |
 | 10 | `generate_hypothetical_document()` | `utils/hyde.py:43` | HyDE generation (LLM) | Ollama / OpenRouter |
 
 ### 4.2 Provider Selection Per Platform
@@ -417,9 +417,9 @@ Ten compute-heavy functions benefit from tiered acceleration. The table maps eac
 
 | Platform | Option 1 | Fallback |
 |----------|----------|----------|
-| Any + Ollama GPU | Ollama (GPU-accelerated) | Bifrost → OpenRouter |
-| Any + Ollama CPU | Ollama (CPU) | Bifrost → OpenRouter |
-| Any without Ollama | Bifrost → OpenRouter | — |
+| Any + Ollama GPU | Ollama (GPU-accelerated) | OpenRouter |
+| Any + Ollama CPU | Ollama (CPU) | OpenRouter |
+| Any without Ollama | OpenRouter | — |
 
 These are controlled by `INTERNAL_LLM_PROVIDER` and the per-stage `PIPELINE_PROVIDERS` dict in `config/settings.py:510`.
 
@@ -744,8 +744,8 @@ echo "Done. Start the sidecar with: cerid-sidecar --daemon"
 | `utils/embeddings.py` | Add Ollama embed path: if `inference_config.provider == "ollama"`, call `/api/embed` instead of local ONNX. Dimension must match (768 for Arctic). |
 | `utils/internal_llm.py:61` | `call_internal_llm()` already supports Ollama routing — no changes needed for LLM stages |
 | `config/settings.py:510` | `PIPELINE_PROVIDERS` already supports per-stage Ollama override — no changes needed |
-| `utils/metadata.py:182` | Modify `ai_categorize()` to use `call_internal_llm()` instead of direct Bifrost HTTP when `INTERNAL_LLM_PROVIDER=ollama` |
-| `utils/contextual.py:34` | Modify `contextualize_chunks()` to use `call_internal_llm()` instead of direct Bifrost HTTP when Ollama available |
+| `utils/metadata.py:182` | Ensure `ai_categorize()` uses `call_internal_llm()` which routes through `INTERNAL_LLM_PROVIDER` |
+| `utils/contextual.py:34` | Ensure `contextualize_chunks()` uses `call_internal_llm()` for provider-agnostic LLM routing |
 
 **Critical constraint for Ollama embeddings:** The Ollama embedding model must produce vectors of the same dimension as the configured `EMBEDDING_DIMENSIONS` (768 for Arctic). Mismatched dimensions corrupt the ChromaDB collection. The detection logic must validate dimensions match before activating Ollama embed.
 
@@ -784,7 +784,7 @@ echo "Done. Start the sidecar with: cerid-sidecar --daemon"
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `INTERNAL_LLM_PROVIDER` | `bifrost` | Global LLM provider for pipeline stages (`bifrost` / `ollama`) |
+| `INTERNAL_LLM_PROVIDER` | `openrouter` | Global LLM provider for pipeline stages (`openrouter` / `ollama`) |
 | `OLLAMA_URL` | `http://localhost:11434` | Ollama API endpoint |
 | `OLLAMA_DEFAULT_MODEL` | `llama3.2:3b` | Default Ollama model for LLM stages |
 | `OLLAMA_ENABLED` | `false` | Enable Ollama integration |
