@@ -70,22 +70,17 @@ def test_legacy_agent_console_recent_still_works(client):
     assert response.json() == {"events": [], "count": 0}
 
 
-@pytest.mark.skip(
-    reason=(
-        "Hangs CI: MagicMock xread returns instantly (no block=5000 semantics), "
-        "generator churns heartbeats in a tight loop, TestClient stream close "
-        "doesn't reliably interrupt the worker. Fix: make fake_redis.xread raise "
-        "on the 2nd call so the generator exits. Out of scope for the "
-        "reliability-remediation branch; test pre-dates this work."
-    )
-)
 def test_activity_stream_returns_sse_content_type(client):
     """The SSE endpoint must set text/event-stream and disable proxy buffering."""
+    import asyncio as _asyncio
+
     fake_redis = MagicMock()
-    # xread returns None once so the generator yields its initial heartbeat
-    # and then the timeout-keepalive branch, at which point the TestClient
-    # will pull a single chunk and we can close the connection.
-    fake_redis.xread.return_value = None
+    # First xread call returns None → generator yields a keepalive heartbeat
+    # (the test reads that first chunk and breaks).  Second call raises
+    # ``CancelledError`` — caught by the generator's explicit
+    # ``except asyncio.CancelledError`` branch, which returns cleanly so
+    # the StreamingResponse terminates instead of looping on a MagicMock.
+    fake_redis.xread.side_effect = [None, _asyncio.CancelledError()]
 
     with patch("routers.agent_console.get_redis", return_value=fake_redis):
         with client.stream("GET", "/agents/activity/stream") as response:
