@@ -51,14 +51,14 @@ CATEGORIZE_MODELS = {
 AI_SNIPPET_MAX_CHARS = 1500
 
 # ---------------------------------------------------------------------------
-# Bifrost / LLM Gateway
+# LLM timeout (seconds)
 # ---------------------------------------------------------------------------
-# Bifrost was retired 2026-04-17 (audit C-4). All chat + smart-router traffic
-# routes directly to OpenRouter via llm_client.py. BIFROST_URL is retained
-# for a handful of pipeline call sites (topic extraction, contextual chunking,
-# maintenance-agent health probes) that still hit the gateway when one is
-# deployed externally.
-BIFROST_URL = os.getenv("BIFROST_URL", "http://bifrost:8080/v1")
+# Bifrost was retired 2026-04-17 (audit C-4); the last pipeline callers that
+# still hit a gateway URL were migrated to core.utils.llm_client.call_llm in
+# the follow-up (2026-04-17). The name BIFROST_TIMEOUT is kept solely for
+# binary backwards-compat — it is now a generic LLM call timeout and is read
+# by verification and contextual chunking as such. Prefer BIFROST_TIMEOUT
+# for any new callers that need a shared LLM timeout knob.
 BIFROST_TIMEOUT = float(os.getenv("BIFROST_TIMEOUT", "20.0"))
 
 # Default model for internal LLM calls (reranking, hallucination, memory extraction).

@@ -108,7 +108,6 @@ fi
 # Override in .env or environment to avoid port conflicts.
 export CERID_PORT_GUI="${CERID_PORT_GUI:-3000}"
 export CERID_PORT_MCP="${CERID_PORT_MCP:-8888}"
-export CERID_PORT_BIFROST="${CERID_PORT_BIFROST:-8080}"
 export CERID_PORT_NEO4J="${CERID_PORT_NEO4J:-7474}"
 export CERID_PORT_NEO4J_BOLT="${CERID_PORT_NEO4J_BOLT:-7687}"
 export CERID_PORT_CHROMA="${CERID_PORT_CHROMA:-8001}"
@@ -256,7 +255,7 @@ preflight_checks() {
     done
 
     # Check port conflicts (skip ports owned by our containers)
-    local our_containers="ai-companion-mcp|ai-companion-neo4j|ai-companion-chroma|ai-companion-redis|bifrost|cerid-web"
+    local our_containers="ai-companion-mcp|ai-companion-neo4j|ai-companion-chroma|ai-companion-redis|cerid-web"
 
     # Cross-platform port listener detection (macOS lsof, Linux ss/netstat)
     _port_in_use() {
@@ -287,7 +286,6 @@ preflight_checks() {
     }
     check_port "$CERID_PORT_GUI" "gui"
     check_port "$CERID_PORT_MCP" "mcp"
-    check_port "$CERID_PORT_BIFROST" "bifrost"
     if [ "$LIGHTWEIGHT_MODE" != "true" ]; then
         check_port "$CERID_PORT_NEO4J" "neo4j"
     fi
@@ -563,12 +561,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-  bifrost:
-    depends_on:
-      chromadb:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
 LEOF
 fi
 
@@ -591,10 +583,10 @@ if [ -z "$LEGACY_FLAG" ] && [ -f "$UNIFIED_COMPOSE" ]; then
     if [ "$LIGHTWEIGHT_MODE" = "true" ]; then
         COMPOSE_FILES="$COMPOSE_FILES -f $LIGHTWEIGHT_OVERRIDE"
         echo "[unified] Starting services via docker-compose.yml + lightweight override..."
-        echo "  Startup order: ChromaDB, Redis → Bifrost → MCP → Web (Neo4j SKIPPED)"
+        echo "  Startup order: ChromaDB, Redis → MCP → Web (Neo4j SKIPPED)"
     else
         echo "[unified] Starting all services via root docker-compose.yml..."
-        echo "  Startup order: Neo4j, ChromaDB, Redis → Bifrost → MCP → Web"
+        echo "  Startup order: Neo4j, ChromaDB, Redis → MCP → Web"
     fi
     echo "  (depends_on healthchecks enforce correct ordering)"
     docker compose $COMPOSE_FILES --env-file "$ENV_FILE" $OLLAMA_PROFILE up -d $BUILD_FLAG $WEB_RECREATE
@@ -602,20 +594,17 @@ else
     # --- Legacy 4-step startup (preserved for backward compatibility) ---
     echo "[legacy] Starting services in 4-step order..."
     if [ "$LIGHTWEIGHT_MODE" = "true" ]; then
-        echo "[1/4] Starting Infrastructure (ChromaDB, Redis — Neo4j SKIPPED)..."
+        echo "[1/3] Starting Infrastructure (ChromaDB, Redis — Neo4j SKIPPED)..."
         docker compose -f "$CERID_ROOT/stacks/infrastructure/docker-compose.yml" --env-file "$ENV_FILE" up -d chromadb redis
     else
-        echo "[1/4] Starting Infrastructure (Neo4j, ChromaDB, Redis)..."
+        echo "[1/3] Starting Infrastructure (Neo4j, ChromaDB, Redis)..."
         docker compose -f "$CERID_ROOT/stacks/infrastructure/docker-compose.yml" --env-file "$ENV_FILE" up -d
     fi
 
-    echo "[2/4] Starting Bifrost (LLM Gateway)..."
-    docker compose -f "$CERID_ROOT/stacks/bifrost/docker-compose.yml" --env-file "$ENV_FILE" up -d
-
-    echo "[3/4] Starting MCP Server..."
+    echo "[2/3] Starting MCP Server..."
     docker compose -f "$CERID_ROOT/src/mcp/docker-compose.yml" --env-file "$ENV_FILE" up -d $BUILD_FLAG
 
-    echo "[4/4] Starting React GUI..."
+    echo "[3/3] Starting React GUI..."
     docker compose -f "$CERID_ROOT/src/web/docker-compose.yml" --env-file "$ENV_FILE" up -d $BUILD_FLAG $WEB_RECREATE
 fi
 
@@ -659,8 +648,6 @@ else
 fi
 echo -n "  ChromaDB..."
 wait_for_service "ChromaDB" "http://127.0.0.1:${CERID_PORT_CHROMA}/api/v1/heartbeat" 30 && echo " ready" || echo " timeout"
-echo -n "  Bifrost..."
-wait_for_service "Bifrost" "http://localhost:${CERID_PORT_BIFROST}/health" 30 && echo " ready" || { echo " timeout"; CRITICAL_FAIL=1; }
 echo -n "  MCP..."
 wait_for_service "MCP" "http://localhost:${CERID_PORT_MCP}/health" 90 && echo " ready" || { echo " timeout"; CRITICAL_FAIL=1; }
 echo -n "  React GUI..."
@@ -720,21 +707,10 @@ echo "=== Quick Health Check ==="
 # All probes below delegate to scripts/lib/healthcheck.sh so that start-cerid
 # and validate-env stay in lockstep. The library handles:
 #   - Redis: authenticated PING via `docker exec`, honoring REDIS_PASSWORD
-#   - Bifrost: tri-state (skip when container absent or BIFROST_URL unset)
 #   - Neo4j:  authenticated Cypher probe (not just HTTP, which ignores auth)
 
 check_http "MCP"       "http://localhost:${CERID_PORT_MCP}/health" || true
 check_http "React GUI" "http://localhost:${CERID_PORT_GUI}"        || true
-
-# Bifrost is optional. Skip cleanly if the container isn't present OR if
-# BIFROST_URL is unset in the environment. This kills the "HTTP 000000" bug.
-_bifrost_target=""
-if _hc_container_exists bifrost && [ "$(_hc_container_status bifrost)" = "running" ]; then
-    _bifrost_target="http://localhost:${CERID_PORT_BIFROST}/health"
-elif [ -n "${BIFROST_URL:-}" ]; then
-    _bifrost_target="${BIFROST_URL%/}/health"
-fi
-check_http "Bifrost" "$_bifrost_target" || true
 
 if [ "$LIGHTWEIGHT_MODE" = "true" ]; then
     skip "Neo4j — lightweight mode"
@@ -749,7 +725,6 @@ echo ""
 echo "=== Access URLs ==="
 echo "React GUI: http://localhost:${CERID_PORT_GUI}"
 echo "MCP Docs:  http://localhost:${CERID_PORT_MCP}/docs"
-echo "Bifrost:   http://localhost:${CERID_PORT_BIFROST}"
 if [ "$CERID_HOST" != "localhost" ]; then
     echo ""
     echo "=== LAN Access (iPad / other devices) ==="

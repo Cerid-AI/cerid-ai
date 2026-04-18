@@ -3,14 +3,16 @@
 
 """Tests for agents/maintenance.py — system health checks and automated cleanup."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from agents.maintenance import (
     analyze_collections,
     check_system_health,
     purge_artifacts,
 )
-from core.agents.maintenance import _check_bifrost_sync
+from core.agents.maintenance import check_llm_health
 
 # ---------------------------------------------------------------------------
 # Tests: check_system_health
@@ -138,43 +140,29 @@ class TestCheckSystemHealth:
 
 
 # ---------------------------------------------------------------------------
-# Tests: _check_bifrost_sync
+# Tests: check_llm_health
 # ---------------------------------------------------------------------------
 
-class TestCheckBifrostSync:
-    @patch("core.agents.maintenance.config")
-    @patch("urllib.request.urlopen")
-    def test_healthy_bifrost(self, mock_urlopen, mock_config):
-        mock_config.BIFROST_URL = "http://bifrost:8080/v1"
-        mock_resp = MagicMock()
-        mock_resp.status = 200
-        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
-        mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_urlopen.return_value = mock_resp
+class TestCheckLLMHealth:
+    @pytest.mark.asyncio
+    async def test_healthy_llm(self):
+        """A successful call_llm response returns 'connected'."""
+        with patch(
+            "core.utils.llm_client.call_llm",
+            new=AsyncMock(return_value="pong"),
+        ):
+            assert await check_llm_health() == "connected"
 
-        assert _check_bifrost_sync() == "connected"
-
-    @patch("core.agents.maintenance.config")
-    @patch("urllib.request.urlopen")
-    def test_bifrost_non_200(self, mock_urlopen, mock_config):
-        mock_config.BIFROST_URL = "http://bifrost:8080/v1"
-        mock_resp = MagicMock()
-        mock_resp.status = 503
-        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
-        mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_urlopen.return_value = mock_resp
-
-        result = _check_bifrost_sync()
-        assert "503" in result
-
-    @patch("core.agents.maintenance.config")
-    @patch("urllib.request.urlopen")
-    def test_bifrost_unreachable(self, mock_urlopen, mock_config):
-        mock_config.BIFROST_URL = "http://bifrost:8080/v1"
-        mock_urlopen.side_effect = OSError("Connection refused")
-
-        result = _check_bifrost_sync()
-        assert "unreachable" in result
+    @pytest.mark.asyncio
+    async def test_llm_unreachable(self):
+        """An exception from call_llm returns 'unreachable: <msg>'."""
+        with patch(
+            "core.utils.llm_client.call_llm",
+            new=AsyncMock(side_effect=RuntimeError("Connection refused")),
+        ):
+            result = await check_llm_health()
+            assert "unreachable" in result
+            assert "Connection refused" in result
 
 
 # ---------------------------------------------------------------------------

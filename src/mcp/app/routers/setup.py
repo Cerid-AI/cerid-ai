@@ -152,19 +152,12 @@ async def _service_statuses() -> dict[str, str]:
         os.environ.get("CHROMA_URL", "http://ai-companion-chroma:8000") + "/api/v1/heartbeat",
     )
 
-    bifrost_url = os.environ.get("BIFROST_URL", "http://ai-companion-bifrost:8080")
-    if not _is_configured():
-        bifrost_status = "unavailable"
-    else:
-        bifrost_status = await _check_service("bifrost", f"{bifrost_url}/health")
-
     mcp_status = "setup_mode" if not _is_configured() else "healthy"
 
     return {
         "neo4j": neo4j_status,
         "chromadb": chroma_status,
         "redis": redis_status,
-        "bifrost": bifrost_status,
         "mcp": mcp_status,
     }
 
@@ -267,7 +260,6 @@ async def setup_health() -> dict:
     """Detailed health dashboard for all services."""
     neo4j_url = os.environ.get("NEO4J_URI", "bolt://ai-companion-neo4j:7687")
     chroma_url = os.environ.get("CHROMA_URL", "http://ai-companion-chroma:8000")
-    bifrost_url = os.environ.get("BIFROST_URL", "http://ai-companion-bifrost:8080")
 
     statuses = await _service_statuses()
 
@@ -290,21 +282,14 @@ async def setup_health() -> dict:
             "port": 6379,
         },
         {
-            "name": "bifrost",
-            "status": statuses["bifrost"],
-            "port": 8080,
-            "url": bifrost_url,
-            **({"error": "OPENROUTER_API_KEY not set"} if not _is_configured() else {}),
-        },
-        {
             "name": "mcp",
             "status": statuses["mcp"],
             "port": 8888,
         },
     ]
 
-    # Required services must all be healthy; bifrost is optional
-    _OPTIONAL = {"bifrost", "verification_pipeline"}
+    # Required services must all be healthy
+    _OPTIONAL = {"verification_pipeline"}
     required_healthy = all(
         s["status"] in ("healthy", "connected")
         for s in services

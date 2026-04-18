@@ -524,10 +524,10 @@ async def lifespan(app: FastAPI):
     if os.getenv("OPENROUTER_API_KEY"):
         asyncio.ensure_future(_openrouter_auth_probe_loop())
 
-    # Bifrost was retired (audit C-4) — chat + smart-router route direct to
-    # OpenRouter. BIFROST_URL is still honoured by a few pipeline call sites
-    # (topic extraction, contextual chunking, maintenance health probes) but
-    # no longer pre-warmed at startup.
+    # Bifrost was fully retired (audit C-4 + follow-up 2026-04-17). Chat,
+    # smart-router, and the last pipeline callers (topic extraction,
+    # contextual chunking, maintenance health probes) all route direct to
+    # OpenRouter via core.utils.llm_client.call_llm. No pre-warm required.
 
     import config as _startup_config
 
@@ -608,11 +608,6 @@ async def lifespan(app: FastAPI):
         await close_client()
     except Exception as exc:
         logger.warning("LLM client shutdown failed: %s", exc)
-    try:
-        from utils.bifrost import close_bifrost_client
-        await close_bifrost_client()
-    except Exception as exc:
-        logger.warning("Bifrost client shutdown failed: %s", exc)
     try:
         from app.routers.chat import close_chat_client
         await close_chat_client()

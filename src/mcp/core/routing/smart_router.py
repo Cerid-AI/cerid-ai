@@ -60,11 +60,11 @@ class RouteDecision:
 # Model registry -- centralized model definitions
 # ---------------------------------------------------------------------------
 
-# Every model ID carries the ``openrouter/`` prefix so the Bifrost path keeps
-# working if ``USE_BIFROST=true`` is ever flipped on — the OpenRouter-direct
-# path strips the prefix via ``_strip_openrouter_prefix`` in ``llm_client``.
-# Audit C-7: previously the registry stored bare IDs and relied on chat.py
-# stripping a prefix that was never added, silently breaking Bifrost.
+# Every model ID carries the ``openrouter/`` prefix for historical
+# compatibility with Bifrost-era call sites. The OpenRouter-direct path
+# strips the prefix via ``_strip_openrouter_prefix`` in ``llm_client``.
+# Audit C-7: keeping the prefix avoids a class of silent misroute bugs
+# where chat.py stripped a prefix that was never added.
 
 FREE_MODELS = {
     "llama-3.3": "openrouter/meta-llama/llama-3.3-70b-instruct",

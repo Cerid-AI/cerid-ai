@@ -4,35 +4,7 @@
 """Tests for utils/contextual.py — LLM-generated contextual chunk enrichment."""
 
 import json
-from unittest.mock import MagicMock, patch
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _mock_config(**overrides):
-    """Build a mock config with contextual chunking defaults."""
-    cfg = MagicMock()
-    cfg.ENABLE_CONTEXTUAL_CHUNKS = True
-    cfg.CONTEXTUAL_CHUNKS_MODEL = "test-model"
-    cfg.BIFROST_URL = "http://bifrost:8080/v1"
-    for k, v in overrides.items():
-        setattr(cfg, k, v)
-    return cfg
-
-
-def _mock_response(contexts: list[str], status_code: int = 200):
-    """Build a mock httpx response returning a JSON array of context strings."""
-    resp = MagicMock()
-    resp.status_code = status_code
-    resp.raise_for_status = MagicMock()
-    resp.json.return_value = {
-        "choices": [{
-            "message": {"content": json.dumps(contexts)},
-        }],
-    }
-    return resp
-
+from unittest.mock import AsyncMock, patch
 
 # ---------------------------------------------------------------------------
 # Tests — contextualize_chunks
@@ -60,16 +32,15 @@ class TestContextualizeChunks:
         result = contextualize_chunks([], "full text")
         assert result == []
 
-    @patch("core.utils.contextual.httpx")
+    @patch("core.utils.llm_client.call_llm", new_callable=AsyncMock)
     @patch("core.utils.contextual.config")
-    def test_successful_enrichment(self, mock_config, mock_httpx):
+    def test_successful_enrichment(self, mock_config, mock_call_llm):
         """Successful LLM call prepends context to each chunk."""
         mock_config.ENABLE_CONTEXTUAL_CHUNKS = True
         mock_config.CONTEXTUAL_CHUNKS_MODEL = "test-model"
-        mock_config.BIFROST_URL = "http://bifrost:8080/v1"
 
         contexts = ["revenue discussion in Q3 report", "API auth setup guide"]
-        mock_httpx.post.return_value = _mock_response(contexts)
+        mock_call_llm.return_value = json.dumps(contexts)
 
         from utils.contextual import contextualize_chunks
 
@@ -80,42 +51,40 @@ class TestContextualizeChunks:
         assert result[0] == "[revenue discussion in Q3 report]\nRevenue increased 15%"
         assert result[1] == "[API auth setup guide]\nSet up API key in config.yaml"
 
-    @patch("core.utils.contextual.httpx")
+    @patch("core.utils.llm_client.call_llm", new_callable=AsyncMock)
     @patch("core.utils.contextual.config")
-    def test_batching(self, mock_config, mock_httpx):
+    def test_batching(self, mock_config, mock_call_llm):
         """Chunks are processed in batches of 5."""
         mock_config.ENABLE_CONTEXTUAL_CHUNKS = True
         mock_config.CONTEXTUAL_CHUNKS_MODEL = "test-model"
-        mock_config.BIFROST_URL = "http://bifrost:8080/v1"
 
         # 7 chunks → 2 batches (5 + 2)
         chunks = [f"chunk {i}" for i in range(7)]
         batch1_contexts = [f"ctx {i}" for i in range(5)]
         batch2_contexts = [f"ctx {i}" for i in range(5, 7)]
 
-        mock_httpx.post.side_effect = [
-            _mock_response(batch1_contexts),
-            _mock_response(batch2_contexts),
+        mock_call_llm.side_effect = [
+            json.dumps(batch1_contexts),
+            json.dumps(batch2_contexts),
         ]
 
         from utils.contextual import contextualize_chunks
 
         result = contextualize_chunks(chunks, "doc text")
         assert len(result) == 7
-        assert mock_httpx.post.call_count == 2
+        assert mock_call_llm.call_count == 2
         assert result[0] == "[ctx 0]\nchunk 0"
         assert result[6] == "[ctx 6]\nchunk 6"
 
-    @patch("core.utils.contextual.httpx.post")
+    @patch("core.utils.llm_client.call_llm", new_callable=AsyncMock)
     @patch("core.utils.contextual.config")
-    def test_http_error_returns_originals(self, mock_config, mock_post):
-        """On HTTP error, returns original chunks unchanged."""
+    def test_http_error_returns_originals(self, mock_config, mock_call_llm):
+        """On LLM error, returns original chunks unchanged."""
         mock_config.ENABLE_CONTEXTUAL_CHUNKS = True
         mock_config.CONTEXTUAL_CHUNKS_MODEL = "test-model"
-        mock_config.BIFROST_URL = "http://bifrost:8080/v1"
 
         import httpx as real_httpx
-        mock_post.side_effect = real_httpx.ConnectError("Connection refused")
+        mock_call_llm.side_effect = real_httpx.ConnectError("Connection refused")
 
         from utils.contextual import contextualize_chunks
 
@@ -124,16 +93,15 @@ class TestContextualizeChunks:
         # Should fall back — chunks pass through without context
         assert result == chunks
 
-    @patch("core.utils.contextual.httpx")
+    @patch("core.utils.llm_client.call_llm", new_callable=AsyncMock)
     @patch("core.utils.contextual.config")
-    def test_mismatched_count_returns_no_context(self, mock_config, mock_httpx):
+    def test_mismatched_count_returns_no_context(self, mock_config, mock_call_llm):
         """When LLM returns wrong number of contexts, chunks pass through."""
         mock_config.ENABLE_CONTEXTUAL_CHUNKS = True
         mock_config.CONTEXTUAL_CHUNKS_MODEL = "test-model"
-        mock_config.BIFROST_URL = "http://bifrost:8080/v1"
 
         # Return 1 context for 3 chunks
-        mock_httpx.post.return_value = _mock_response(["only one context"])
+        mock_call_llm.return_value = json.dumps(["only one context"])
 
         from utils.contextual import contextualize_chunks
 
@@ -142,26 +110,15 @@ class TestContextualizeChunks:
         # Mismatched count → no context prepended
         assert result == ["chunk 1", "chunk 2", "chunk 3"]
 
-    @patch("core.utils.contextual.httpx")
+    @patch("core.utils.llm_client.call_llm", new_callable=AsyncMock)
     @patch("core.utils.contextual.config")
-    def test_markdown_code_block_stripped(self, mock_config, mock_httpx):
+    def test_markdown_code_block_stripped(self, mock_config, mock_call_llm):
         """LLM responses wrapped in ```json code blocks are handled."""
         mock_config.ENABLE_CONTEXTUAL_CHUNKS = True
         mock_config.CONTEXTUAL_CHUNKS_MODEL = "test-model"
-        mock_config.BIFROST_URL = "http://bifrost:8080/v1"
 
         # Simulate LLM wrapping output in markdown code block
-        resp = MagicMock()
-        resp.status_code = 200
-        resp.raise_for_status = MagicMock()
-        resp.json.return_value = {
-            "choices": [{
-                "message": {
-                    "content": '```json\n["ctx for chunk 0", "ctx for chunk 1"]\n```'
-                },
-            }],
-        }
-        mock_httpx.post.return_value = resp
+        mock_call_llm.return_value = '```json\n["ctx for chunk 0", "ctx for chunk 1"]\n```'
 
         from utils.contextual import contextualize_chunks
 
@@ -170,15 +127,14 @@ class TestContextualizeChunks:
         assert result[0] == "[ctx for chunk 0]\nchunk 0"
         assert result[1] == "[ctx for chunk 1]\nchunk 1"
 
-    @patch("core.utils.contextual.httpx")
+    @patch("core.utils.llm_client.call_llm", new_callable=AsyncMock)
     @patch("core.utils.contextual.config")
-    def test_metadata_passed_to_prompt(self, mock_config, mock_httpx):
+    def test_metadata_passed_to_prompt(self, mock_config, mock_call_llm):
         """Filename and domain from metadata are included in the LLM prompt."""
         mock_config.ENABLE_CONTEXTUAL_CHUNKS = True
         mock_config.CONTEXTUAL_CHUNKS_MODEL = "test-model"
-        mock_config.BIFROST_URL = "http://bifrost:8080/v1"
 
-        mock_httpx.post.return_value = _mock_response(["ctx"])
+        mock_call_llm.return_value = json.dumps(["ctx"])
 
         from utils.contextual import contextualize_chunks
 
@@ -187,30 +143,28 @@ class TestContextualizeChunks:
             metadata={"filename": "report.pdf", "domain": "finance"},
         )
 
-        call_args = mock_httpx.post.call_args
-        body = call_args.kwargs.get("json") or call_args[1].get("json")
-        prompt = body["messages"][0]["content"]
+        # First positional arg to call_llm is the messages list
+        messages = mock_call_llm.call_args[0][0]
+        prompt = messages[0]["content"]
         assert "report.pdf" in prompt
         assert "finance" in prompt
 
-    @patch("core.utils.contextual.httpx")
+    @patch("core.utils.llm_client.call_llm", new_callable=AsyncMock)
     @patch("core.utils.contextual.config")
-    def test_doc_preview_truncated(self, mock_config, mock_httpx):
+    def test_doc_preview_truncated(self, mock_config, mock_call_llm):
         """Full text is truncated to ~3000 chars in the LLM prompt."""
         mock_config.ENABLE_CONTEXTUAL_CHUNKS = True
         mock_config.CONTEXTUAL_CHUNKS_MODEL = "test-model"
-        mock_config.BIFROST_URL = "http://bifrost:8080/v1"
 
-        mock_httpx.post.return_value = _mock_response(["ctx"])
+        mock_call_llm.return_value = json.dumps(["ctx"])
 
         from utils.contextual import contextualize_chunks
 
         long_text = "x" * 5000
         contextualize_chunks(["chunk"], long_text)
 
-        call_args = mock_httpx.post.call_args
-        body = call_args.kwargs.get("json") or call_args[1].get("json")
-        prompt = body["messages"][0]["content"]
+        messages = mock_call_llm.call_args[0][0]
+        prompt = messages[0]["content"]
         # Should contain truncation marker, not the full 5000 chars
         assert "[... document continues ...]" in prompt
         # Prompt should contain ≤ 3000 chars of original text (plus a few in boilerplate)
@@ -224,36 +178,26 @@ class TestContextualizeChunks:
 class TestGenerateContexts:
     """Tests for the internal _generate_contexts function."""
 
-    @patch("core.utils.contextual.httpx.post")
+    @patch("core.utils.llm_client.call_llm", new_callable=AsyncMock)
     @patch("core.utils.contextual.config")
-    def test_json_decode_error_returns_empty(self, mock_config, mock_post):
+    def test_json_decode_error_returns_empty(self, mock_config, mock_call_llm):
         """Invalid JSON from LLM returns empty strings."""
         mock_config.CONTEXTUAL_CHUNKS_MODEL = "test-model"
-        mock_config.BIFROST_URL = "http://bifrost:8080/v1"
 
-        resp = MagicMock()
-        resp.status_code = 200
-        resp.raise_for_status = MagicMock()
-        resp.json.return_value = {
-            "choices": [{
-                "message": {"content": "not valid json at all"},
-            }],
-        }
-        mock_post.return_value = resp
+        mock_call_llm.return_value = "not valid json at all"
 
         from core.utils.contextual import _generate_contexts
 
         result = _generate_contexts(["chunk"], "doc preview", "file.txt", "")
         assert result == [""]
 
-    @patch("core.utils.contextual.httpx.post")
+    @patch("core.utils.llm_client.call_llm", new_callable=AsyncMock)
     @patch("core.utils.contextual.config")
-    def test_chunk_preview_truncated(self, mock_config, mock_post):
+    def test_chunk_preview_truncated(self, mock_config, mock_call_llm):
         """Individual chunk previews are truncated to 300 chars in the prompt."""
         mock_config.CONTEXTUAL_CHUNKS_MODEL = "test-model"
-        mock_config.BIFROST_URL = "http://bifrost:8080/v1"
 
-        mock_post.return_value = _mock_response(["ctx"])
+        mock_call_llm.return_value = json.dumps(["ctx"])
 
         from core.utils.contextual import _generate_contexts
 
@@ -261,8 +205,7 @@ class TestGenerateContexts:
         long_chunk = "\u00e9" * 500
         _generate_contexts([long_chunk], "doc preview", "file.txt", "")
 
-        call_args = mock_post.call_args
-        body = call_args.kwargs.get("json") or call_args[1].get("json")
-        prompt = body["messages"][0]["content"]
+        messages = mock_call_llm.call_args[0][0]
+        prompt = messages[0]["content"]
         # Chunk preview should be truncated to 300 chars
         assert prompt.count("\u00e9") == 300

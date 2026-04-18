@@ -9,8 +9,8 @@
 #
 # Design goals:
 #   - Auth-aware probes (Redis password, Neo4j user/pass) driven by .env.
-#   - Tri-state HTTP check so optional services (e.g. Bifrost) never surface
-#     "HTTP 000" when they are simply not configured.
+#   - Tri-state HTTP check so optional services never surface "HTTP 000"
+#     when they are simply not configured.
 #   - Consistent visual symbols: ✓ OK / ✗ FAIL / ⚠ DEGRADED / ⊘ SKIP.
 #   - No side effects beyond stdout and the PASS/FAIL counters. Callers
 #     manage their own check numbering.
@@ -19,7 +19,7 @@
 #   source "$(dirname "$0")/lib/healthcheck.sh"
 #   check_container ai-companion-redis
 #   check_redis     ai-companion-redis "$REDIS_PASSWORD"
-#   check_http      Bifrost "${BIFROST_URL:-}"
+#   check_http      MCP "http://localhost:8888/health"
 #   check_neo4j     ai-companion-neo4j "$NEO4J_USER" "$NEO4J_PASSWORD"
 #   cleanup_zombies
 
@@ -54,7 +54,7 @@ _hc_load_env_var() {
     export "$key=$val"
 }
 
-for _hc_key in REDIS_PASSWORD NEO4J_USER NEO4J_PASSWORD BIFROST_URL; do
+for _hc_key in REDIS_PASSWORD NEO4J_USER NEO4J_PASSWORD; do
     _hc_load_env_var "$_hc_key"
 done
 unset _hc_key

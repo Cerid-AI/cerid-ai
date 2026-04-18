@@ -9,8 +9,6 @@ import json
 import logging
 from typing import Any
 
-import httpx
-
 import config
 from core.agents.rectify import find_stale_artifacts
 from core.utils.cache import log_event
@@ -28,7 +26,7 @@ def check_system_health(
     chroma_client: Any,
     redis_client,
 ) -> dict[str, Any]:
-    """Comprehensive health check — data integrity, collection counts, Bifrost reachability."""
+    """Comprehensive health check — data integrity, collection counts, LLM provider reachability."""
     health: dict[str, Any] = {
         "timestamp": utcnow_iso(),
         "services": {},
@@ -79,9 +77,9 @@ def check_system_health(
     except Exception as e:
         health["services"]["redis"] = f"error: {e}"
 
-    # Bifrost check is async-only; callers in async context (maintain())
-    # overwrite this with the real result after awaiting _check_bifrost_async().
-    health["services"]["bifrost"] = "skipped (sync context)"
+    # LLM provider check is async-only; callers in async context (maintain())
+    # overwrite this with the real result after awaiting check_llm_health().
+    health["services"]["llm"] = "skipped (sync context)"
 
     service_statuses = health["services"]
     all_ok = all(
@@ -93,29 +91,25 @@ def check_system_health(
     return health
 
 
-def _check_bifrost_sync() -> str:
-    """Synchronous Bifrost health check."""
-    import urllib.request
-    try:
-        url = config.BIFROST_URL.replace("/v1", "/health")
-        req = urllib.request.Request(url, method="GET")
-        with urllib.request.urlopen(req, timeout=5) as resp:  # nosec B310 — URL from config, not user input
-            if resp.status == 200:
-                return "connected"
-            return f"status {resp.status}"
-    except Exception as e:
-        return f"unreachable: {e}"
+async def check_llm_health() -> str:
+    """Async LLM provider health check via a minimal ``call_llm`` probe.
 
-
-async def check_bifrost_health() -> str:
-    """Async Bifrost health check."""
+    Uses the free Llama 3.3 model with a 1-token budget so the probe is
+    effectively free.  Any response (including an empty string) is treated
+    as reachable — we only care that the HTTP + auth path worked.
+    """
     try:
-        url = config.BIFROST_URL.replace("/v1", "/health")
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(url)
-            if resp.status_code == 200:
-                return "connected"
-            return f"status {resp.status_code}"
+        from core.utils.llm_client import call_llm
+
+        await call_llm(
+            [{"role": "user", "content": "ping"}],
+            model="openrouter/meta-llama/llama-3.3-70b-instruct:free",
+            temperature=0.0,
+            max_tokens=1,
+            timeout=5.0,
+            breaker_name="openrouter",
+        )
+        return "connected"
     except Exception as e:
         return f"unreachable: {e}"
 
@@ -265,8 +259,8 @@ async def maintain(
 
     if "health" in actions:
         health = check_system_health(neo4j_driver, chroma_client, redis_client)
-        bifrost_status = await check_bifrost_health()
-        health["services"]["bifrost"] = bifrost_status
+        llm_status = await check_llm_health()
+        health["services"]["llm"] = llm_status
         health["overall"] = "healthy" if all(
             v == "connected" for v in health["services"].values()
         ) else "degraded"

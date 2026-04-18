@@ -14,21 +14,43 @@ Example::
     After:  "[From Q3 2025 financial report — revenue growth section]
              The quarterly revenue increased by 15% compared to Q2."
 
-Runs synchronously (ingestion is sync) using a direct httpx POST to Bifrost.
+Runs synchronously (ingestion is sync).  LLM calls go through
+``core.utils.llm_client.call_llm`` (OpenRouter direct); we bridge sync→async
+by running the coroutine on a short-lived event loop inside a worker thread
+so we never touch the main thread's loop policy — this keeps pytest fixtures
+that rely on ``asyncio.get_event_loop()`` safe from pollution.
 """
 
+import asyncio
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
-
-import httpx
 
 import config
 
 logger = logging.getLogger("ai-companion.contextual")
 
-_BIFROST_URL = f"{config.BIFROST_URL}/v1/chat/completions"
 _TIMEOUT = 30.0
+
+
+def _run_coro_isolated(coro):
+    """Run an async coroutine from a sync context without disturbing the
+    calling thread's event-loop state.
+
+    Uses a thread-pool worker with a dedicated new loop so
+    ``asyncio.get_event_loop()`` on the caller's thread is unaffected.
+    """
+    def _runner():
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        return executor.submit(_runner).result()
 
 
 def contextualize_chunks(
@@ -78,7 +100,7 @@ def _generate_contexts(
     filename: str,
     domain: str,
 ) -> list[str]:
-    """Call Bifrost to generate situational contexts for a batch of chunks.
+    """Call the LLM to generate situational contexts for a batch of chunks.
 
     Returns a list of context strings (one per chunk).  On failure, returns
     empty strings so chunks pass through unchanged.
@@ -103,25 +125,19 @@ def _generate_contexts(
     )
 
     try:
-        resp = httpx.post(
-            _BIFROST_URL,
-            json={
-                "model": config.CONTEXTUAL_CHUNKS_MODEL,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.0,
-                "max_tokens": 300,
-            },
-            timeout=_TIMEOUT,
-        )
-        resp.raise_for_status()
+        from core.utils.llm_client import call_llm
 
-        data = resp.json()
-        content = (
-            data.get("choices", [{}])[0]
-            .get("message", {})
-            .get("content", "")
-            .strip()
+        content = _run_coro_isolated(
+            call_llm(
+                [{"role": "user", "content": prompt}],
+                model=config.CONTEXTUAL_CHUNKS_MODEL,
+                temperature=0.0,
+                max_tokens=300,
+                timeout=_TIMEOUT,
+                breaker_name="bifrost-synopsis",
+            )
         )
+        content = (content or "").strip()
 
         # Parse JSON array from response
         # Handle markdown code blocks
@@ -139,6 +155,9 @@ def _generate_contexts(
         )
         return [""] * len(chunks)
 
-    except (httpx.HTTPError, json.JSONDecodeError, KeyError, IndexError) as e:
+    except (json.JSONDecodeError, KeyError, IndexError) as e:
         logger.warning("Contextual chunk enrichment failed: %s", e)
+        return [""] * len(chunks)
+    except Exception as e:  # noqa: BLE001 — defensive catch for httpx/circuit-breaker errors
+        logger.warning("Contextual chunk enrichment failed (unexpected): %s", e)
         return [""] * len(chunks)

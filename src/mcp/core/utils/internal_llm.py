@@ -62,9 +62,9 @@ async def call_internal_llm(
     """Route internal LLM call to configured provider.
 
     Returns the assistant message content as a string.
-    Falls back through: Ollama → direct OpenRouter → Bifrost.
+    Providers: "ollama" (local) or "openrouter" (default).
     """
-    provider = getattr(config, "INTERNAL_LLM_PROVIDER", "bifrost")
+    provider = getattr(config, "INTERNAL_LLM_PROVIDER", "openrouter")
 
     if provider == "ollama":
         return await _call_ollama(

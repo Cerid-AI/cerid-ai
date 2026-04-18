@@ -100,32 +100,10 @@ class TestClientSingletonLocking:
         assert call_count == 1, f"Expected 1 client created, got {call_count}"
         assert all(r is mock_client for r in results)
 
-    @pytest.mark.asyncio
-    async def test_bifrost_client_concurrent_init(self):
-        """10 concurrent get_bifrost_client() calls create exactly 1 client."""
-        import core.utils.bifrost as mod
-
-        mod._client = None
-
-        mock_client = MagicMock()
-        mock_client.is_closed = False
-        call_count = 0
-
-        def fake_async_client(**kwargs):
-            nonlocal call_count
-            call_count += 1
-            return mock_client
-
-        with patch("core.utils.bifrost.httpx") as mock_httpx:
-            mock_httpx.AsyncClient = fake_async_client
-            mock_httpx.Limits = MagicMock()
-
-            results = await asyncio.gather(
-                *[mod.get_bifrost_client() for _ in range(10)]
-            )
-
-        assert call_count == 1, f"Expected 1 client created, got {call_count}"
-        assert all(r is mock_client for r in results)
+    # test_bifrost_client_concurrent_init removed: core.utils.bifrost was
+    # retired in the 2026-04-17 Bifrost cleanup. The equivalent pool now
+    # lives in core.utils.llm_client and is exercised by the
+    # test_llm_client_concurrent_init case above.
 
     @pytest.mark.asyncio
     async def test_ollama_client_concurrent_init(self):

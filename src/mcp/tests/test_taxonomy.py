@@ -253,30 +253,18 @@ class TestAICategorization:
     @pytest.mark.asyncio
     async def test_ai_categorize_returns_sub_category(self):
         """AI categorization returns sub_category and tags when available."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "choices": [{
-                "message": {
-                    "content": json.dumps({
-                        "domain": "coding",
-                        "sub_category": "python",
-                        "tags": ["web-scraping", "beautifulsoup"],
-                        "keywords": ["scraping", "html"],
-                        "summary": "A Python web scraping script",
-                    })
-                }
-            }]
-        }
-        mock_response.raise_for_status = MagicMock()
+        llm_content = json.dumps({
+            "domain": "coding",
+            "sub_category": "python",
+            "tags": ["web-scraping", "beautifulsoup"],
+            "keywords": ["scraping", "html"],
+            "summary": "A Python web scraping script",
+        })
 
-        mock_client = AsyncMock()
-        mock_client.post = AsyncMock(return_value=mock_response)
-
-        with patch("utils.metadata.httpx.AsyncClient") as MockAsyncClient:
-            MockAsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-            MockAsyncClient.return_value.__aexit__ = AsyncMock(return_value=None)
-
+        with patch(
+            "core.utils.llm_client.call_llm",
+            new=AsyncMock(return_value=llm_content),
+        ):
             from utils.metadata import ai_categorize
 
             result = await ai_categorize(
@@ -293,29 +281,17 @@ class TestAICategorization:
     @pytest.mark.asyncio
     async def test_ai_categorize_invalid_subcategory_defaults(self):
         """Invalid sub_category falls back to DEFAULT_SUB_CATEGORY."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "choices": [{
-                "message": {
-                    "content": json.dumps({
-                        "domain": "coding",
-                        "sub_category": "nonexistent_category",
-                        "keywords": ["test"],
-                        "summary": "A test",
-                    })
-                }
-            }]
-        }
-        mock_response.raise_for_status = MagicMock()
+        llm_content = json.dumps({
+            "domain": "coding",
+            "sub_category": "nonexistent_category",
+            "keywords": ["test"],
+            "summary": "A test",
+        })
 
-        mock_client = AsyncMock()
-        mock_client.post = AsyncMock(return_value=mock_response)
-
-        with patch("utils.metadata.httpx.AsyncClient") as MockAsyncClient:
-            MockAsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-            MockAsyncClient.return_value.__aexit__ = AsyncMock(return_value=None)
-
+        with patch(
+            "core.utils.llm_client.call_llm",
+            new=AsyncMock(return_value=llm_content),
+        ):
             from utils.metadata import ai_categorize
 
             result = await ai_categorize("test content", "test.py", "smart")
@@ -325,28 +301,16 @@ class TestAICategorization:
     @pytest.mark.asyncio
     async def test_ai_categorize_old_format_fallback(self):
         """Old-format AI response (domain only) still works with defaults."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "choices": [{
-                "message": {
-                    "content": json.dumps({
-                        "domain": "finance",
-                        "keywords": ["tax"],
-                        "summary": "Tax document",
-                    })
-                }
-            }]
-        }
-        mock_response.raise_for_status = MagicMock()
+        llm_content = json.dumps({
+            "domain": "finance",
+            "keywords": ["tax"],
+            "summary": "Tax document",
+        })
 
-        mock_client = AsyncMock()
-        mock_client.post = AsyncMock(return_value=mock_response)
-
-        with patch("utils.metadata.httpx.AsyncClient") as MockAsyncClient:
-            MockAsyncClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-            MockAsyncClient.return_value.__aexit__ = AsyncMock(return_value=None)
-
+        with patch(
+            "core.utils.llm_client.call_llm",
+            new=AsyncMock(return_value=llm_content),
+        ):
             from utils.metadata import ai_categorize
 
             result = await ai_categorize("tax deductions", "taxes.pdf", "smart")
