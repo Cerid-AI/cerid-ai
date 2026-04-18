@@ -185,6 +185,97 @@ class TestHNSWIndex:
         assert loaded is False
         assert idx.count == 0
 
+    def test_semcache_discards_mismatched_dim_blob(self):
+        """Audit V-5 / RC-G: a stored HNSW blob whose header dim does not
+        match the active embedder must NOT be loaded. load_from_redis must
+        drop the stale blob (and its label sidecar) and return False so the
+        cache rebuilds cold.
+        """
+        from core.retrieval.semantic_cache import _HNSW_KEY, _LABELS_KEY
+
+        redis = _mock_redis()
+        redis._r = redis  # route through the raw-bypass path
+
+        # 1. Seed Redis with a blob that carries our header but declares
+        #    dim=512 (the body bytes don't matter — the dim check must reject
+        #    it before hnswlib touches it).
+        stale_header = _HNSWIndex._encode_header(512)
+        stale_blob = stale_header + b"\x00" * 1024  # arbitrary body
+        redis.set(_HNSW_KEY, stale_blob)
+        redis.hset(_LABELS_KEY, "0", "ghost-entry")
+
+        # 2. Attempt to load into an index whose live dim is 768.
+        fresh = _HNSWIndex(dim=768, max_elements=100)
+        loaded = fresh.load_from_redis(redis)
+
+        # 3. The load must be rejected, the stale blob + labels deleted,
+        #    and the fresh index must be empty and usable.
+        assert loaded is False, (
+            "dim-mismatched blob was accepted — cache would emit garbage "
+            "similarity scores on the next query"
+        )
+        assert redis.get(_HNSW_KEY) is None, "stale blob was not deleted"
+        assert redis.hget(_LABELS_KEY, "0") is None, (
+            "stale label mapping was not deleted — lookups would resolve "
+            "garbage entry_ids"
+        )
+        assert fresh.count == 0
+
+        # The fresh index must still accept a 768-dim write cleanly.
+        emb768 = np.random.RandomState(1).randn(768).astype(np.float32)
+        emb768 /= np.linalg.norm(emb768)
+        label = fresh.add(emb768, "entry_new", redis)
+        assert label == 0
+        assert fresh.count == 1
+
+    def test_semcache_discards_legacy_blob_without_header(self):
+        """A pre-header blob (no magic prefix) is indistinguishable from a
+        corrupt one — both must be rejected and the key cleared.
+        """
+        from core.retrieval.semantic_cache import _HNSW_KEY
+
+        redis = _mock_redis()
+        redis._r = redis
+        # Any bytes not starting with the CERID magic — simulates a blob
+        # written by an older build that didn't tag the dim.
+        redis.set(_HNSW_KEY, b"raw-hnswlib-bytes-no-magic-here")
+
+        fresh = _HNSWIndex(dim=768, max_elements=100)
+        loaded = fresh.load_from_redis(redis)
+
+        assert loaded is False
+        assert redis.get(_HNSW_KEY) is None
+        assert fresh.count == 0
+
+    def test_semcache_accepts_matching_dim_blob(self):
+        """Positive control: a blob saved by this code path with the right
+        dim must round-trip through load_from_redis (not dropped as stale).
+        """
+        from core.retrieval.semantic_cache import _HNSW_KEY
+
+        redis = _mock_redis()
+        redis._r = redis
+
+        # Save path writes the header itself.
+        idx = _HNSWIndex(dim=32, max_elements=100)
+        emb = _random_embedding(dim=32, seed=11)
+        idx.add(emb, "good-entry", redis)
+        idx.flush(redis)
+
+        # The persisted blob must start with the CERID magic.
+        persisted = redis.get(_HNSW_KEY)
+        assert persisted is not None
+        from core.retrieval.semantic_cache import _HNSW_MAGIC
+        assert persisted.startswith(_HNSW_MAGIC), (
+            "save path did not prepend the dim header"
+        )
+
+        # Loading into an index of the same dim must succeed.
+        fresh = _HNSWIndex(dim=32, max_elements=100)
+        loaded = fresh.load_from_redis(redis)
+        assert loaded is True
+        assert fresh.count == 1
+
 
 # ---------------------------------------------------------------------------
 # Tests: cache_lookup / cache_store

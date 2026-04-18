@@ -37,6 +37,21 @@ _INDEX_KEY = _CACHE_PREFIX + "index"  # Legacy key (ignored, kept for clean migr
 _HNSW_KEY = _CACHE_PREFIX + "hnsw_index"
 _LABELS_KEY = _CACHE_PREFIX + "labels"  # Hash: label_id -> entry_id
 
+# Audit V-5 / RC-G: dim self-heal. Blobs saved by this version carry a fixed
+# 16-byte magic+dim header so stale blobs from a prior embedder can be
+# detected and discarded BEFORE being fed to hnswlib.load_index (which
+# will double-free / segfault on a dim mismatch).
+#
+# Header layout (16 bytes, little-endian):
+#   [0:12]  magic  : b"CERIDHNSW\x00v1"
+#   [12:16] dim    : uint32
+#
+# Blobs without this magic are treated as pre-header legacy blobs and
+# discarded on first load (cold-start is safer than feeding an unverified
+# binary to hnswlib).
+_HNSW_MAGIC = b"CERIDHNSW\x00v1"
+_HNSW_HEADER_LEN = 16
+
 # HNSW tuning parameters (sized for ~500-entry cache)
 _HNSW_SPACE = "cosine"
 _HNSW_EF_CONSTRUCTION = 100
@@ -96,6 +111,30 @@ class _HNSWIndex:
         )
         self._idx.set_ef(_HNSW_EF)
 
+    @staticmethod
+    def _encode_header(dim: int) -> bytes:
+        """Build the 16-byte dim header prefixed to every saved blob."""
+        import struct
+        return _HNSW_MAGIC + struct.pack("<I", int(dim))
+
+    @staticmethod
+    def _parse_header(data: bytes) -> int | None:
+        """Return the dim encoded in the blob header, or None if absent.
+
+        ``None`` signals either a pre-header legacy blob or a corrupt blob;
+        callers should treat both the same way (delete + cold-start).
+        """
+        if len(data) < _HNSW_HEADER_LEN:
+            return None
+        if data[: len(_HNSW_MAGIC)] != _HNSW_MAGIC:
+            return None
+        import struct
+        try:
+            (dim,) = struct.unpack("<I", data[len(_HNSW_MAGIC) : _HNSW_HEADER_LEN])
+            return int(dim)
+        except struct.error:
+            return None
+
     def load_from_redis(self, redis_client: Any) -> bool:
         """Load index from Redis. Returns True if loaded, False if not found
         OR if the stored blob is corrupt (in which case the bad key is
@@ -140,8 +179,41 @@ class _HNSWIndex:
             if not data:
                 return False
 
+            # Audit V-5 / RC-G: dim self-heal BEFORE touching hnswlib.
+            # hnswlib.load_index happily accepts a dim-mismatched blob and
+            # then corrupts memory on the first query. We refuse to feed it
+            # any blob we can't prove was built at the active dim.
+            header_dim = self._parse_header(data)
+            if header_dim is None or header_dim != self._dim:
+                if header_dim is None:
+                    logger.warning(
+                        "Semantic cache: HNSW blob at %s is missing the dim "
+                        "header (legacy or corrupt) — deleting and "
+                        "cold-starting",
+                        _HNSW_KEY,
+                    )
+                else:
+                    logger.warning(
+                        "Semantic cache: HNSW blob dim=%d does not match "
+                        "active embedder dim=%d — deleting stale blob at %s "
+                        "and cold-starting",
+                        header_dim, self._dim, _HNSW_KEY,
+                    )
+                try:
+                    raw.delete(_HNSW_KEY)
+                    # Labels and per-entry payloads were produced against the
+                    # stale index — drop them too so lookups can't resolve
+                    # garbage label→entry mappings.
+                    raw.delete(_LABELS_KEY)
+                except Exception:
+                    pass
+                return False
+
+            # Strip the header before handing the raw hnswlib bytes to disk.
+            body = data[_HNSW_HEADER_LEN:]
+
             with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as f:
-                f.write(data)
+                f.write(body)
                 tmp_path = f.name
 
             try:
@@ -186,7 +258,7 @@ class _HNSWIndex:
             return False
 
     def _save_to_redis(self, redis_client: Any) -> None:
-        """Serialize index and store in Redis."""
+        """Serialize index and store in Redis with a dim header prefix."""
         try:
             with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as f:
                 tmp_path = f.name
@@ -194,9 +266,12 @@ class _HNSWIndex:
             try:
                 self._idx.save_index(tmp_path)
                 with open(tmp_path, "rb") as f:
-                    data = f.read()
+                    body = f.read()
+                # Prefix the dim header so load_from_redis can validate this
+                # blob against the live embedder dim before handing it to
+                # hnswlib (audit V-5 / RC-G).
                 raw = getattr(redis_client, "_r", redis_client)
-                raw.set(_HNSW_KEY, data)
+                raw.set(_HNSW_KEY, self._encode_header(self._dim) + body)
             finally:
                 os.unlink(tmp_path)
         except Exception as e:
