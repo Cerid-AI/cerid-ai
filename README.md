@@ -53,7 +53,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 **Key Capabilities:**
 
 - **React GUI** at port 3000 — streaming chat, knowledge browser, monitoring & audit dashboards
-- **Multi-Provider LLM Access** via Bifrost gateway (Claude, GPT, Grok, Gemini, DeepSeek, Llama)
+- **Multi-Provider LLM Access** via OpenRouter (Claude, GPT, Grok, Gemini, DeepSeek, Llama)
 - **9 Intelligent Agents** — Query (LLM reranking), Triage (LangGraph), Rectification, Audit, Maintenance, Hallucination Detection, Memory Extraction, Curation, Self-RAG
 - **Trading Agent Integration** — 5 MCP tools + SDK endpoints for signal enrichment, herd detection, Kelly sizing, cascade confirmation, and longshot calibration (opt-in via `CERID_TRADING_ENABLED`)
 - **26 MCP Tools** for knowledge base, trading, web search, memory, and multi-modal operations via MCP protocol
@@ -78,7 +78,7 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
 - **Source Attribution** — collapsible source references with relevance scores on chat responses
 - **Model Context Breaks** — provider-colored model badges, switch dividers between model changes
 - **GitHub Actions CI/CD** with 3,100+ tests (2,413 pytest + 719 frontend)
-- **Three-Tier AI Categorization** (manual, smart, pro) via Bifrost
+- **Three-Tier AI Categorization** (manual, smart, pro) via OpenRouter
 - **Obsidian Vault Integration** — auto-sync vault notes into knowledge base
 - **Reproducible Builds** — pip-compile lock files with hashes, pinned Docker images, Dependabot
 - **Accessibility** — ARIA labels, keyboard navigation, screen reader support across 14 components
@@ -96,34 +96,35 @@ Cerid AI provides a unified interface for interacting with multiple LLM provider
                  │
     ┌────────────▼────────────┐
     │   React GUI (nginx)     │
-    │   Container: cerid-web  │──── /api/bifrost/ ───┐
-    │   Port: 3000            │                      │
-    └────────────┬────────────┘                      │
-                 │ direct API calls                   │
-                 ▼                                    ▼
-┌─────────────────────────────────┐    ┌─────────────────────────────┐
-│    AI Companion MCP Server      │    │    Bifrost Gateway          │
-│  Container: ai-companion-mcp    │    │  Container: bifrost         │
-│  Port: 8888                     │    │  Port: 8080                 │
-│                                 │    │  Routes to OpenRouter       │
-│  REST:  /health /collections    │    └──────────┬──────────────────┘
-│         /query /ingest          │               │
-│         /artifacts              │               ▼
-│  Agents: /agent/query           │    ┌──────────────────────────┐
-│          /agent/triage          │    │    OpenRouter API         │
-│          /agent/rectify         │    │  (Claude, GPT, Gemini,   │
-│          /agent/audit           │    │   Grok, DeepSeek, etc.)  │
-│          /agent/maintain        │    └──────────────────────────┘
+    │   Container: cerid-web  │
+    │   Port: 3000            │
+    └────────────┬────────────┘
+                 │ direct API calls
+                 ▼
+┌─────────────────────────────────┐
+│    AI Companion MCP Server      │
+│  Container: ai-companion-mcp    │
+│  Port: 8888                     │
+│                                 │
+│  REST:  /health /collections    │
+│         /query /ingest          │
+│         /artifacts              │
+│  Agents: /agent/query           │
+│          /agent/triage          │
+│          /agent/rectify         │
+│          /agent/audit           │
+│          /agent/maintain        │
 │  SSE:   /mcp/sse /mcp/messages  │
 │  Tools: 26 MCP tools (pkb_*)   │
 │  Search: Hybrid BM25 + vector   │
 │  Middleware: auth, rate-limit    │
 │  Scheduler: APScheduler         │
 └────────────┬────────────────────┘
-             │
-   ┌─────────┼─────────┐
-   │         │         │
-   ▼         ▼         ▼
+             │              ┌──────────────────────────┐
+             │              │    OpenRouter API         │
+   ┌─────────┼─────────┐    │  (Claude, GPT, Gemini,   │
+   │         │         │    │   Grok, DeepSeek, etc.)  │
+   ▼         ▼         ▼    └──────────────────────────┘
 ChromaDB   Neo4j     Redis
 :8001     :7474     :6379
 (vectors) (graph)   (cache+audit)
@@ -168,7 +169,7 @@ cp .env.example .env
 ### 3. Start Services
 
 ```bash
-# Start all 4 service groups (Infrastructure → Bifrost → MCP → React GUI)
+# Start all services (Infrastructure → MCP → React GUI)
 ./scripts/start-cerid.sh
 
 # Validate the environment
@@ -190,7 +191,6 @@ curl -s http://localhost:8888/health | python3 -m json.tool
 | **React GUI** | http://localhost:3000 | **Primary UI** — chat, KB, monitoring, audit |
 | MCP API | http://localhost:8888 | Knowledge base API |
 | API Docs | http://localhost:8888/docs | Swagger/OpenAPI docs |
-| Bifrost | http://localhost:8080 | LLM gateway dashboard |
 | Neo4j Browser | http://localhost:7474 | Graph database UI |
 
 ---
@@ -295,8 +295,8 @@ curl -X POST http://localhost:8888/ingest_file \
 | Mode | Model | Cost | When Used |
 |------|-------|------|-----------|
 | `manual` | None | Free | File in a known domain folder |
-| `smart` | Llama 3.1 8B (via Bifrost) | Free | Default for inbox/unknown |
-| `pro` | Claude Sonnet (via Bifrost) | Paid | Explicit request |
+| `smart` | Llama 3.3 70B Instruct (via OpenRouter) | Free | Default for inbox/unknown |
+| `pro` | Claude Sonnet 4 (via OpenRouter) | Paid | Explicit request |
 
 AI calls are token-efficient: only the first ~1,500 characters (~400 tokens) are sent for classification.
 
@@ -481,9 +481,9 @@ cerid-ai/
 ├── src/web/                           # React GUI (Phase 6+)
 │   ├── .nvmrc                         # Node version source of truth (22)
 │   ├── package.json                   # React 19, Vite 7, Tailwind v4, shadcn/ui
-│   ├── vite.config.ts                 # Bundle splitting, Bifrost proxy
+│   ├── vite.config.ts                 # Bundle splitting, dev proxy to MCP
 │   ├── Dockerfile                     # Multi-stage: node:22 build → nginx:1.27
-│   ├── nginx.conf                     # SPA fallback + Bifrost reverse proxy
+│   ├── nginx.conf                     # SPA fallback + MCP reverse proxy
 │   └── src/
 │       ├── App.tsx                    # Lazy-loaded pane routing
 │       ├── lib/                       # types.ts, api.ts, model-router.ts, utils.ts
@@ -507,10 +507,9 @@ cerid-ai/
 │           └── ui/                    # shadcn/ui primitives (14 components)
 │
 └── stacks/
-    ├── infrastructure/                # Neo4j, ChromaDB, Redis (pinned versions)
-    │   ├── docker-compose.yml
-    │   └── data/                      # Persistent DB data (.gitignored)
-    └── bifrost/                       # LLM Gateway
+    └── infrastructure/                # Neo4j, ChromaDB, Redis (pinned versions)
+        ├── docker-compose.yml
+        └── data/                      # Persistent DB data (.gitignored)
 ```
 
 ---
@@ -523,7 +522,6 @@ cerid-ai/
 |------|---------|
 | `.env` | All secrets (root, encrypted as `.env.age` with age) |
 | `src/mcp/config/` | Domains, file extensions, AI tiers, taxonomy, DB URLs |
-| `stacks/bifrost/data/config.json` | LLM routing, provider config |
 | `scripts/validate-env.sh` | Pre-flight environment validation (14 checks) |
 | `scripts/cerid-sync.py` | Knowledge base sync CLI (export/import/status) |
 | `Makefile` | lock-python, install-hooks, deps-check targets |
@@ -591,7 +589,7 @@ See `docs/DEPENDENCY_COUPLING.md` for constraints that span files (ChromaDB clie
 ### Start / Stop
 
 ```bash
-# Start (4-step: Infrastructure → Bifrost → MCP → React GUI)
+# Start (3-step: Infrastructure → MCP → React GUI)
 ./scripts/start-cerid.sh
 
 # Start with rebuild (after pulling code changes)
@@ -599,7 +597,6 @@ See `docs/DEPENDENCY_COUPLING.md` for constraints that span files (ChromaDB clie
 
 # Stop all stacks
 cd ~/cerid-ai/src/mcp && docker compose down
-cd ~/cerid-ai/stacks/bifrost && docker compose down
 cd ~/cerid-ai/stacks/infrastructure && docker compose down
 ```
 
@@ -617,7 +614,6 @@ cd ~/cerid-ai/src/web && docker compose up -d --build cerid-web
 
 ```bash
 docker logs ai-companion-mcp --tail 50 -f
-docker logs bifrost --tail 50 -f
 ```
 
 ### Backup
@@ -641,8 +637,7 @@ Manual backup (includes all persistent data):
 tar czf cerid-backup-$(date +%Y%m%d).tar.gz \
   ~/cerid-ai/src/mcp/data \
   ~/cerid-ai/stacks/infrastructure/data \
-  ~/cerid-ai/.env \
-  ~/cerid-ai/stacks/bifrost/data
+  ~/cerid-ai/.env
 ```
 
 ### Knowledge Base Sync (Multi-Machine)
@@ -675,7 +670,6 @@ Auto-import on startup: when MCP starts with an empty Neo4j database and a valid
 | Port | Service | Container | Image | Purpose |
 |------|---------|-----------|-------|---------|
 | 3000 | **React GUI** | cerid-web | node:22 → nginx:1.27 | **Primary UI** |
-| 8080 | Bifrost | bifrost | bifrost | LLM Gateway |
 | 8888 | MCP Server | ai-companion-mcp | python:3.11.14 | Knowledge Base API |
 | 8001 | ChromaDB | ai-companion-chroma | chroma:0.5.23 | Vector Store |
 | 7474 | Neo4j HTTP | ai-companion-neo4j | neo4j:5.26.21 | Graph DB Browser |

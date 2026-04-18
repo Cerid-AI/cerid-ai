@@ -189,7 +189,7 @@ Configured in `CONSUMER_REGISTRY` in `config/settings.py`. Rate limits are auto-
 
 - `manual` — Domain from folder name only, no AI
 - `smart` — Free model (Llama 3.3 70B Instruct via OpenRouter) for classification
-- `pro` — Premium model (Claude Sonnet via Bifrost)
+- `pro` — Premium model (Claude Sonnet 4 via OpenRouter)
 
 AI calls are token-efficient: only first ~1500 chars sent for classification. Response format enforced as JSON.
 
@@ -354,7 +354,7 @@ curl -X POST http://localhost:8888/agent/audit \
 Comprehensive system health checks and automated cleanup.
 
 **Actions:**
-- **health** — Full connectivity check (ChromaDB, Neo4j, Redis, Bifrost) + data counts
+- **health** — Full connectivity check (ChromaDB, Neo4j, Redis, OpenRouter) + data counts
 - **stale** — Detect artifacts older than N days with optional auto-purge
 - **collections** — Collection size analysis, missing/extra collection detection
 - **orphans** — Find and optionally clean orphaned ChromaDB chunks
@@ -404,13 +404,12 @@ curl -X POST http://localhost:8888/recategorize \
 
 - `.env` (repo root) — All secrets. Encrypted as `.env.age`. Never committed in plaintext.
 - `src/mcp/config/settings.py` — Domains, extensions, categorization tiers, DB URLs
-- `stacks/bifrost/config.yaml` — Intent classification, model routing, budget
 
 **Key env vars (docker-compose.yml):**
 - `CATEGORIZE_MODE=smart` — Default tier (manual/smart/pro)
-- `BIFROST_URL=http://bifrost:8080/v1`
+- `OPENROUTER_API_KEY` — API key for OpenRouter (required)
 - `ARCHIVE_PATH=/archive` — Container-side mount point
-- `INTERNAL_LLM_PROVIDER` — Internal LLM provider for pipeline tasks (`ollama` or `bifrost`, default: `bifrost`)
+- `INTERNAL_LLM_PROVIDER` — Internal LLM provider for pipeline tasks (`ollama` or `openrouter`, default: `openrouter`)
 - `INTERNAL_LLM_MODEL` — Internal LLM model ID (empty = auto-selected; set during Ollama setup wizard or via `OLLAMA_DEFAULT_MODEL`)
 - `OLLAMA_DEFAULT_MODEL` — Default Ollama model (auto-recommended based on hardware if not set; fallback: `llama3.2:3b`)
 
@@ -430,7 +429,7 @@ curl http://localhost:8888/ingest_log?limit=10
 # With API key auth enabled (set CERID_API_KEY env var):
 curl http://localhost:8888/artifacts \
   -H "X-API-Key: $CERID_API_KEY"
-# Exempt from auth: /health, /health/*, /api/v1/health, /, /docs, /openapi.json, /redoc, /mcp/*
+# Exempt from auth: /health, /health/*, /, /docs, /openapi.json, /redoc, /mcp/*
 ```
 
 ---
