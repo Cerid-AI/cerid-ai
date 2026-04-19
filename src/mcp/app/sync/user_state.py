@@ -6,9 +6,15 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import errno
 import json
 import logging
+import os
+import random
+import tempfile
+import threading
+import time
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -136,10 +142,44 @@ def _read_json(path: Path) -> dict[str, Any]:
         return {}
 
 
+_write_locks: dict[str, threading.Lock] = {}
+_write_locks_guard = threading.Lock()
+
+
+def _get_write_lock(path: Path) -> threading.Lock:
+    key = str(path.resolve())
+    with _write_locks_guard:
+        if key not in _write_locks:
+            _write_locks[key] = threading.Lock()
+        return _write_locks[key]
+
+
 def _write_json(path: Path, data: dict[str, Any]) -> None:
-    """Write data as JSON, creating parent dirs."""
+    """Write data as JSON atomically with retry on filesystem lock contention."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, default=str) + "\n", encoding="utf-8")
+    content = json.dumps(data, indent=2, default=str) + "\n"
+    lock = _get_write_lock(path)
+
+    for attempt in range(4):
+        try:
+            with lock:
+                fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+                try:
+                    os.write(fd, content.encode("utf-8"))
+                    os.fsync(fd)
+                    os.close(fd)
+                    os.replace(tmp, str(path))
+                except BaseException:
+                    os.close(fd)
+                    with contextlib.suppress(OSError):
+                        os.unlink(tmp)
+                    raise
+            return
+        except OSError as e:
+            if e.errno in (errno.EDEADLK, errno.EAGAIN, errno.EACCES) and attempt < 3:
+                time.sleep(0.05 * (2 ** attempt) + random.uniform(0, 0.02))
+                continue
+            raise
 
 
 def _is_conflict_copy(name: str) -> bool:
