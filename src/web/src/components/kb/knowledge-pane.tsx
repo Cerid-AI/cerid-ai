@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useCallback, useRef, useMemo, lazy, Suspense, useEffect } from "react"
+import { logSwallowedError } from "@/lib/log-swallowed"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Input } from "@/components/ui/input"
@@ -192,7 +193,7 @@ export function KnowledgePane() {
 
   const toggleView = (mode: "grid" | "list") => {
     setViewMode(mode)
-    try { localStorage.setItem("cerid-kb-view", mode) } catch { /* noop */ }
+    try { localStorage.setItem("cerid-kb-view", mode) } catch (err) { logSwallowedError(err, "localStorage.setItem", { key: "cerid-kb-view" }) }
   }
 
   // Load ingestion log from sessionStorage on mount
@@ -200,7 +201,7 @@ export function KnowledgePane() {
     try {
       const stored = sessionStorage.getItem("cerid-ingestion-log")
       if (stored) setIngestionLog(JSON.parse(stored))
-    } catch { /* ignore */ }
+    } catch (err) { logSwallowedError(err, "sessionStorage.getItem", { key: "cerid-ingestion-log" }) }
   }, [])
 
   // Reset pagination when filters change
@@ -212,7 +213,7 @@ export function KnowledgePane() {
   const addToIngestionLog = useCallback((name: string, status: "success" | "error") => {
     setIngestionLog((prev) => {
       const next = [{ name, time: Date.now(), status }, ...prev].slice(0, 10)
-      try { sessionStorage.setItem("cerid-ingestion-log", JSON.stringify(next)) } catch { /* ignore */ }
+      try { sessionStorage.setItem("cerid-ingestion-log", JSON.stringify(next)) } catch (err) { logSwallowedError(err, "sessionStorage.setItem", { key: "cerid-ingestion-log" }) }
       return next
     })
   }, [])

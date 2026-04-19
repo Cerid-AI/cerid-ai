@@ -1,6 +1,6 @@
 .PHONY: lock-python lock-python-dev lock-all install-hooks deps-check version-file \
        lint-frontend test-frontend typecheck-frontend build-frontend check-all \
-       test test-all test-eval smoke help
+       test test-all test-eval smoke slo help
 
 # -- Python deps --
 lock-python:
@@ -41,7 +41,7 @@ build-frontend:
 
 # -- Python tests (tiered) --
 test:
-	cd src/mcp && python -m pytest tests/ --ignore=tests/eval -x -q
+	cd src/mcp && python -m pytest tests/ --ignore=tests/eval -m "not benchmark_slo" -x -q
 
 test-all:
 	cd src/mcp && python -m pytest tests/ -x -q
@@ -56,6 +56,10 @@ check-all: deps-check lint-frontend typecheck-frontend test-frontend
 smoke:
 	@echo "[smoke] requires stack running (scripts/start-cerid.sh)"
 	python3 src/mcp/tests/load/smoke.py
+
+# -- Latency SLO benchmarks --
+slo: ## Run latency SLO benchmarks against localhost:8888 (requires running stack)
+	cd src/mcp && pytest tests/test_latency_slo.py -m benchmark_slo --benchmark-only -v
 
 help:
 	@echo "Available targets:"
@@ -73,3 +77,4 @@ help:
 	@echo "  test-eval          Run evaluation harness only (Monte Carlo, RAGAS)"
 	@echo "  check-all          Run deps-check + lint + typecheck + test"
 	@echo "  smoke              Run smoke/load harness (requires running stack)"
+	@echo "  slo                Run latency SLO benchmarks (requires running stack)"

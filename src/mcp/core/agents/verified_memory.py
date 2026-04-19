@@ -21,6 +21,8 @@ import hashlib
 import logging
 from typing import Any
 
+import sentry_sdk
+
 import config
 
 logger = logging.getLogger("ai-companion.verified_memory")
@@ -174,8 +176,23 @@ async def promote_verified_facts(
                                 mid=memory_id,
                                 rid=report_id,
                             )
+                            from core.reliability.read_after_write import assert_created
+                            assert_created(
+                                session,
+                                check_cypher=(
+                                    "MATCH (:Memory {id: $mid})-[:VERIFIED_BY]->"
+                                    "(:VerificationReport {conversation_id: $rid}) "
+                                    "RETURN count(*) > 0 AS exists"
+                                ),
+                                params={"mid": memory_id, "rid": report_id},
+                                event_name="verified_memory.verified_by_edge",
+                            )
                     except Exception:
-                        logger.debug("VERIFIED_BY link creation failed (non-blocking)")
+                        logger.exception(
+                            "verified_memory.verified_by_link_failed",
+                            extra={"memory_id": memory_id, "report_id": report_id},
+                        )
+                        sentry_sdk.capture_exception()
 
                 # Ingest the claim text into ChromaDB conversations collection
                 # so it appears in future memory recall queries
@@ -199,7 +216,11 @@ async def promote_verified_facts(
                         }],
                     )
                 except Exception:
-                    logger.debug("ChromaDB memory ingest failed (non-blocking)")
+                    logger.exception(
+                        "verified_memory.chroma_ingest_failed",
+                        extra={"memory_id": memory_id},
+                    )
+                    sentry_sdk.capture_exception()
 
                 counts["promoted"] += 1
                 logger.info(

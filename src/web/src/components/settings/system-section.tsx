@@ -40,6 +40,7 @@ import {
 import { SyncSection } from "./sync-section"
 import { StorageBar } from "./StorageBar"
 import { SectionHeading, InfoTip, LabelWithInfo, Row } from "./settings-primitives"
+import { logSwallowedError } from "@/lib/log-swallowed"
 
 function formatFlagName(flag: string): string {
   return flag.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
@@ -465,7 +466,7 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
               } else if (evt.status) {
                 setPullProgress(evt.status)
               }
-            } catch { /* ignore parse errors */ }
+            } catch (err) { logSwallowedError(err, "json.parse.ollama-pull-progress") }
           }
         }
       }

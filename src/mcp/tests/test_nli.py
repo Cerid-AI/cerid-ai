@@ -143,3 +143,18 @@ class TestNliScore:
 
         with patch("core.utils.nli._load_model", side_effect=RuntimeError("no network")):
             warmup()  # should not raise
+
+    def test_warmup_failure_captured_to_sentry(self):
+        """warmup() reports to Sentry when _load_model raises (R1-3)."""
+        import core.utils.nli as nli_mod
+        from core.utils.nli import warmup
+
+        nli_mod._session = None
+        nli_mod._MODEL_LOADED = False
+
+        with patch("core.utils.nli._load_model", side_effect=RuntimeError("no network")), \
+             patch("sentry_sdk.capture_exception") as mock_capture:
+            warmup()
+
+        mock_capture.assert_called_once()
+        assert nli_mod._MODEL_LOADED is False

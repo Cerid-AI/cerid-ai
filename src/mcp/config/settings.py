@@ -125,12 +125,14 @@ RETRIEVAL_QUALITY_THRESHOLD = float(os.getenv("RETRIEVAL_QUALITY_THRESHOLD", "0.
 #      (Pre-Task-8 this was _QUERY_SEMAPHORE(2); now path-partitioned
 #      so /health and /observability are immune to the queue depth.)
 #
-# 10s is the current sweet spot: long enough for a warm-cache smart RAG
-# on 6 domains to complete, short enough that a cold-start or
-# pathological query returns degraded results before the user loses
-# patience. Increase via env var if your hardware is slow enough that
-# this isn't enough budget for the happy path.
-AGENT_QUERY_BUDGET_SECONDS = float(os.getenv("AGENT_QUERY_BUDGET_SECONDS", "10.0"))
+# 20s is the post-0.84 sweet spot: the previous 10s ceiling was too tight
+# for cold caches + external sources (Wikipedia, DuckDuckGo, per-source
+# 5s timeouts) to complete before tripping the budget on the happy path,
+# which surfaced as "retrieval budget exceeded" even on healthy queries.
+# 20s leaves headroom under the 45s event-loop watchdog and still returns
+# a degraded response in time for the user. Increase via env var if
+# your hardware is slow enough that this isn't enough budget.
+AGENT_QUERY_BUDGET_SECONDS = float(os.getenv("AGENT_QUERY_BUDGET_SECONDS", "20.0"))
 
 # ---------------------------------------------------------------------------
 # Storage Monitoring

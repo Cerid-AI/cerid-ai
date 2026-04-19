@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react"
+import { logSwallowedError } from "@/lib/log-swallowed"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { MessageSquare, Database, Settings, Brain, Shield, ChevronRight, ChevronLeft, Sparkles } from "lucide-react"
@@ -112,7 +113,7 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
 
   const handleFinish = () => {
     setMode(selectedMode)
-    try { localStorage.setItem("cerid-onboarding-complete", "true") } catch { /* noop */ }
+    try { localStorage.setItem("cerid-onboarding-complete", "true") } catch (err) { logSwallowedError(err, "localStorage.setItem", { key: "cerid-onboarding-complete" }) }
     onComplete()
   }
 

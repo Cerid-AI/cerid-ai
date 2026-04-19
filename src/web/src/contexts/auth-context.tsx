@@ -18,6 +18,7 @@ import {
   authRegister,
 } from "@/lib/api"
 import type { AuthUser } from "@/lib/types"
+import { logSwallowedError } from "@/lib/log-swallowed"
 
 interface AuthState {
   user: AuthUser | null
@@ -38,14 +39,14 @@ function storeTokens(access: string, refresh: string) {
   try {
     localStorage.setItem(TOKEN_KEY, access)
     localStorage.setItem(REFRESH_KEY, refresh)
-  } catch { /* noop */ }
+  } catch (err) { logSwallowedError(err, "localStorage.setItem", { key: "cerid-tokens" }) }
 }
 
 function clearTokens() {
   try {
     localStorage.removeItem(TOKEN_KEY)
     localStorage.removeItem(REFRESH_KEY)
-  } catch { /* noop */ }
+  } catch (err) { logSwallowedError(err, "localStorage.removeItem", { key: "cerid-tokens" }) }
 }
 
 function getRefreshToken(): string | null {

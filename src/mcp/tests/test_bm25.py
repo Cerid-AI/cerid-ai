@@ -144,3 +144,44 @@ class TestBM25Index:
         added = idx.add_documents(["c1", "c2"], ["", "valid text here"])
         assert added == 1
         assert idx.size == 1
+
+
+# ---------------------------------------------------------------------------
+# Observability: Sentry capture tests (R1-3)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not is_available(), reason="bm25s not installed")
+class TestBM25SentryCapture:
+    """Assert Sentry.capture_exception fires at every silent-catch site."""
+
+    def test_index_load_failed_captured(self, tmp_path):
+        """_load() swallows corrupt corpus and reports to Sentry."""
+        from unittest.mock import patch
+
+        from core.retrieval.bm25 import BM25Index as _BM25Index
+
+        # Write a corrupt corpus file so _load() raises
+        corpus_file = tmp_path / "broken_domain.jsonl"
+        corpus_file.write_text("not valid json at all!!!")
+
+        with patch("sentry_sdk.capture_exception") as mock_capture:
+            idx = _BM25Index("broken_domain", data_dir=str(tmp_path))
+
+        # Index gracefully degrades to empty
+        assert idx._retriever is None
+        mock_capture.assert_called_once()
+
+    def test_persist_failed_captured(self, tmp_path):
+        """_append_to_disk() swallows write errors and reports to Sentry."""
+        from unittest.mock import patch
+
+        from core.retrieval.bm25 import BM25Index as _BM25Index
+
+        idx = _BM25Index("write_fail_domain", data_dir=str(tmp_path))
+        # Make the corpus file unwritable by patching open
+        with patch("builtins.open", side_effect=OSError("read-only fs")), \
+             patch("sentry_sdk.capture_exception") as mock_capture:
+            idx._append_to_disk([{"id": "c1", "text": "hello world"}])
+
+        mock_capture.assert_called_once()

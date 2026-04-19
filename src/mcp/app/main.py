@@ -15,19 +15,10 @@ import time
 import traceback
 from contextlib import asynccontextmanager
 
-import sentry_sdk
+# Must run before any FastAPI import for integration hooks to attach cleanly.
+from app.observability.sentry_init import init_sentry
 
-if os.environ.get("SENTRY_DSN_MCP"):
-    sentry_sdk.init(
-        dsn=os.environ["SENTRY_DSN_MCP"],
-        environment=os.environ.get("SENTRY_ENVIRONMENT", "development"),
-        release=os.environ.get("SENTRY_RELEASE"),
-        send_default_pii=False,  # Privacy-first: don't send API keys, IPs, or request bodies
-        traces_sample_rate=0.1,
-        profile_session_sample_rate=1.0,
-        profile_lifecycle="trace",
-        enable_logs=True,
-    )
+_sentry_enabled = init_sentry()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -59,6 +50,7 @@ from app.routers import (
     scanner,
     sdk,
     settings,
+    settings_secrets,
     setup,
     sync,
     taxonomy,
@@ -72,9 +64,17 @@ from core.utils.version import get_version
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    format="%(asctime)s - %(name)s - %(request_id)s - %(levelname)s - %(message)s",
 )
+# Attach the request-id filter to every handler so the %(request_id)s
+# placeholder always resolves — including for startup / background-task
+# logs where no request context exists (will render as "-").
+from app.observability.request_id_filter import RequestIdFilter  # noqa: I001
+_rid_filter = RequestIdFilter()
+for _handler in logging.getLogger().handlers:
+    _handler.addFilter(_rid_filter)
 logger = logging.getLogger("ai-companion")
+logger.info("sentry_tracing=%s", "on" if _sentry_enabled else "off")
 
 # Extension hooks — populated by bootstrap (internal features, plugins, etc.)
 _shutdown_hooks: list = []
@@ -708,6 +708,10 @@ for r in _api_routers:
 
 # Setup, provider, and model assignment routers — first-run wizard and BYOK configuration
 app.include_router(setup.router)
+app.include_router(settings_secrets.router)
+# R4-1 security invariant: redact 'input' from all FastAPI 422 validation error
+# responses so that a mis-typed API key is never echoed back to the caller.
+settings_secrets.register_redacted_validation_handler(app)
 app.include_router(providers.router)
 app.include_router(models.router)
 

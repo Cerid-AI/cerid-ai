@@ -30,6 +30,22 @@ const SUGGESTION_CHIPS = [
 
 const ACCEPTED_EXTS = ".pdf,.txt,.md,.docx"
 
+// Distinguish "backend actually unreachable" from "backend rejected this file"
+// so users get an actionable error rather than a wild goose chase. Network
+// errors throw without a status; HTTP errors throw with the body in the
+// message (see extractError in lib/api/common.ts).
+function formatIngestError(err: unknown, filename: string): string {
+  if (err instanceof TypeError) {
+    // fetch threw — genuine network failure, backend is unreachable
+    return `Cerid backend unreachable at ${filename}. Check that the MCP container is running.`
+  }
+  if (err instanceof Error && err.message) {
+    // HTTP error — surface the server's detail verbatim
+    return err.message
+  }
+  return "Ingestion failed — unknown error."
+}
+
 export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
   const [phase, setPhase] = useState<Phase>(state.ingested ? "chat" : "choose")
   const [ingestError, setIngestError] = useState<string | null>(null)
@@ -39,8 +55,15 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
   const [queryLoading, setQueryLoading] = useState(false)
   const [response, setResponse] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // React 19 strict mode can double-invoke event handlers during development.
+  // Logs showed back-to-back identical POST /upload calls for the same file
+  // during beta testing, both returning 400. The ref is cleared in finally so
+  // legitimate retries after an error still work.
+  const uploadInFlight = useRef(false)
 
   const handleIngestFile = useCallback(async (file: File) => {
+    if (uploadInFlight.current) return
+    uploadInFlight.current = true
     setPhase("ingesting")
     setIngestError(null)
     setFileName(file.name)
@@ -60,14 +83,18 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
       // (silent empty results) and pure latency on fast hardware.
       setPhase("chat")
       onChange({ ...state, ingested: true })
-    } catch {
-      setIngestError("Ingestion failed — check that the backend is running")
+    } catch (err) {
+      setIngestError(formatIngestError(err, file.name))
       setPhase("choose")
       setIngestProgress(null)
+    } finally {
+      uploadInFlight.current = false
     }
   }, [state, onChange])
 
   const handleSampleContent = useCallback(async () => {
+    if (uploadInFlight.current) return
+    uploadInFlight.current = true
     setPhase("ingesting")
     setIngestError(null)
     setFileName("sample-knowledge.md")
@@ -94,10 +121,12 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
       setIngestProgress(null)
       setPhase("chat")
       onChange({ ...state, ingested: true })
-    } catch {
-      setIngestError("Failed to ingest sample content")
+    } catch (err) {
+      setIngestError(formatIngestError(err, "sample-knowledge.md"))
       setPhase("choose")
       setIngestProgress(null)
+    } finally {
+      uploadInFlight.current = false
     }
   }, [state, onChange])
 

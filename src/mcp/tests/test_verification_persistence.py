@@ -94,8 +94,11 @@ class TestSaveVerificationReport:
 
         # Should have created VERIFIED relationships for both artifacts
         calls = session.run.call_args_list
-        verified_calls = [c for c in calls if "VERIFIED" in str(c)]
-        assert len(verified_calls) == 2
+        merge_verified_calls = [
+            c for c in calls
+            if "MERGE" in str(c) and "VERIFIED" in str(c)
+        ]
+        assert len(merge_verified_calls) == 2
 
     def test_deduplicates_artifact_ids(self, mock_neo4j):
         driver, session = mock_neo4j
@@ -113,8 +116,11 @@ class TestSaveVerificationReport:
             total=2,
         )
 
-        verified_calls = [c for c in session.run.call_args_list if "VERIFIED" in str(c)]
-        assert len(verified_calls) == 1  # Only one relationship created
+        merge_verified_calls = [
+            c for c in session.run.call_args_list
+            if "MERGE" in str(c) and "VERIFIED" in str(c)
+        ]
+        assert len(merge_verified_calls) == 1  # Only one relationship created
 
     def test_handles_claims_without_sources(self, mock_neo4j):
         driver, session = mock_neo4j

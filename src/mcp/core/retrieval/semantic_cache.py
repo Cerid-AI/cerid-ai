@@ -23,6 +23,7 @@ import threading
 from typing import Any
 
 import numpy as np
+import sentry_sdk
 
 from config.features import (
     SEMANTIC_CACHE_MAX_ENTRIES,
@@ -253,8 +254,9 @@ class _HNSWIndex:
             finally:
                 os.unlink(tmp_path)
 
-        except Exception as e:
-            logger.warning("Failed to load HNSW index from Redis: %s", e)
+        except Exception:
+            logger.exception("semantic_cache.hnsw_load_failed")
+            sentry_sdk.capture_exception()
             return False
 
     def _save_to_redis(self, redis_client: Any) -> None:
@@ -274,8 +276,9 @@ class _HNSWIndex:
                 raw.set(_HNSW_KEY, self._encode_header(self._dim) + body)
             finally:
                 os.unlink(tmp_path)
-        except Exception as e:
-            logger.warning("Failed to save HNSW index to Redis: %s", e)
+        except Exception:
+            logger.exception("semantic_cache.hnsw_save_failed")
+            sentry_sdk.capture_exception()
 
     def add(self, embedding: np.ndarray, entry_id: str, redis_client: Any) -> int:
         """Add an embedding to the index.  Returns the numeric label assigned.
@@ -444,8 +447,9 @@ def cache_lookup(
             )
             return json.loads(result_raw)
 
-    except Exception as e:
-        logger.warning("Semantic cache lookup failed: %s", e)
+    except Exception:
+        logger.exception("semantic_cache.lookup_failed")
+        sentry_sdk.capture_exception()
 
     return None
 

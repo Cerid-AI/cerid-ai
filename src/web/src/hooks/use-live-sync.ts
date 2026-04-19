@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { logSwallowedError } from "@/lib/log-swallowed"
 
 interface SyncMessage {
   type: 'delta' | 'presence' | 'ack' | 'error';
@@ -44,7 +45,7 @@ export function useLiveSync({ url, token, enabled = true, onDelta, onPresence }:
           const msg: SyncMessage = JSON.parse(event.data);
           if (msg.type === 'delta' && onDeltaRef.current) onDeltaRef.current(msg.payload);
           if (msg.type === 'presence' && onPresenceRef.current) onPresenceRef.current(msg.payload);
-        } catch { /* ignore malformed messages */ }
+        } catch (err) { logSwallowedError(err, "json.parse.websocket-message") }
       };
     } catch { setError('Failed to create WebSocket'); }
   }, [url, token, enabled]);

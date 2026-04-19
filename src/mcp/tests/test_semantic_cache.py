@@ -416,3 +416,65 @@ class TestEdgeCases:
     # C++ extension segfaults on invalid binary data (not catchable by Python).
     # In production, Redis guarantees atomic writes making corruption extremely
     # unlikely.  If it occurs, delete the semcache:hnsw_index key manually.
+
+
+# ---------------------------------------------------------------------------
+# Observability: Sentry capture tests (R1-3)
+# ---------------------------------------------------------------------------
+
+
+class TestSentryCapture:
+    """Assert Sentry.capture_exception fires at every silent-catch site."""
+
+    def test_hnsw_load_failed_captured(self):
+        """_HNSWIndex.load_from_redis swallows and reports to Sentry."""
+        from unittest.mock import patch
+
+        idx = _HNSWIndex(dim=768)
+        # Bypass the header+dim check so we reach the hnswlib path where
+        # we can inject the failure. We patch tempfile.NamedTemporaryFile
+        # to raise after the header is parsed.
+        #
+        # Simpler: a mock redis with no _r attribute (so raw == itself)
+        # whose .get() raises directly — this hits the outer except clause.
+        class _NoAttrRedis:
+            def get(self, key):
+                raise RuntimeError("redis gone")
+
+        with patch("sentry_sdk.capture_exception") as mock_capture:
+            result = idx.load_from_redis(_NoAttrRedis())
+
+        assert result is False
+        mock_capture.assert_called_once()
+
+    def test_hnsw_save_failed_captured(self):
+        """_HNSWIndex._save_to_redis swallows and reports to Sentry."""
+        from unittest.mock import patch
+
+        import core.retrieval.semantic_cache as sc_mod
+
+        idx = _HNSWIndex(dim=768)
+        bad_redis = MagicMock()
+        # Patch os.unlink inside the module to raise after save_index writes
+        # the tempfile — this triggers the outer except in _save_to_redis.
+        with patch.object(sc_mod.os, "unlink", side_effect=OSError("disk full")), \
+             patch("sentry_sdk.capture_exception") as mock_capture:
+            idx._save_to_redis(bad_redis)
+
+        mock_capture.assert_called_once()
+
+    def test_lookup_failed_captured(self):
+        """cache_lookup swallows and reports to Sentry on _get_index failure."""
+        from unittest.mock import patch
+
+        emb = np.random.randn(768).astype(np.float32)
+        emb /= np.linalg.norm(emb)
+
+        # Patch _get_index (used by both the core and utils versions) to raise,
+        # which triggers the outer except in cache_lookup.
+        with patch("core.retrieval.semantic_cache._get_index", side_effect=RuntimeError("index broken")), \
+             patch("sentry_sdk.capture_exception") as mock_capture:
+            result = cache_lookup(emb, MagicMock(), threshold=0.5)
+
+        assert result is None
+        mock_capture.assert_called_once()

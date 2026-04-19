@@ -16,6 +16,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import sentry_sdk
+
 import config
 
 logger = logging.getLogger("ai-companion.bm25")
@@ -180,8 +182,9 @@ class BM25Index:
                     f"BM25 corpus for {self.domain} uses old token format. "
                     "Consider re-ingesting for improved tokenization."
                 )
-        except Exception as e:
-            logger.error(f"Failed to load BM25 index for {self.domain}: {e}")
+        except Exception:
+            logger.exception("bm25.index_load_failed", extra={"domain": self.domain})
+            sentry_sdk.capture_exception()
             self._texts = []
             self._doc_ids = []
             self._doc_id_set = set()
@@ -192,8 +195,9 @@ class BM25Index:
             with open(self._corpus_file, "a") as f:
                 for entry in entries:
                     f.write(json.dumps(entry) + "\n")
-        except Exception as e:
-            logger.error(f"Failed to persist BM25 entries for {self.domain}: {e}")
+        except Exception:
+            logger.exception("bm25.persist_failed", extra={"domain": self.domain})
+            sentry_sdk.capture_exception()
 
 
 # ---------------------------------------------------------------------------

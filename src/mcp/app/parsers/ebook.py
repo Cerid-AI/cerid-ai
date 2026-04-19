@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from app.parsers._utils import _strip_html_tags, _strip_rtf
+from app.parsers._zip_safety import assert_safe_zip
 from app.parsers.registry import _MAX_TEXT_CHARS, logger, register_parser
 
 
@@ -17,6 +18,8 @@ def parse_epub(file_path: str) -> dict[str, Any]:
     """Parse EPUB — extract XHTML chapters in reading order via OPF manifest."""
     import xml.etree.ElementTree as ET
     import zipfile
+
+    assert_safe_zip(file_path)
 
     path = Path(file_path)
 

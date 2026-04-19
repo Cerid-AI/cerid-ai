@@ -9,6 +9,7 @@ import asyncio
 import errno
 import json
 import logging
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -162,36 +163,57 @@ def write_settings(sync_dir: str, settings: dict[str, Any]) -> None:
     logger.info("Wrote settings to %s", path)
 
 
-async def write_settings_with_retry(
-    sync_dir: str, settings: dict[str, Any]
+async def _write_with_edeadlk_retry(
+    writer: Callable[..., None],
+    *args: Any,
+    label: str,
+    user_message: str,
 ) -> bool:
-    """Async wrapper around :func:`write_settings` with EDEADLK retry.
+    """Run a synchronous file writer in a thread, retrying on EDEADLK.
 
-    Audit P1-11: on macOS, Dropbox holds an advisory lock on settings.json
-    while syncing. A write during that window fails with
+    Audit P1-11 (generalised): on macOS, Dropbox holds advisory locks on
+    synced files (``settings.json``, ``state.json``, etc.) while mirroring.
+    A write during that window fails with
     ``OSError(errno.EDEADLK, 'Resource deadlock avoided')`` (errno 35) and
     — because the caller previously logged and moved on — the user's
-    settings update would be silently lost.
+    update would be silently lost.
 
-    This wrapper retries up to three times with exponential backoff
-    (100 ms, 200 ms, 400 ms) specifically for EDEADLK. Other OSErrors are
-    re-raised immediately so genuine permission / disk issues are not
-    masked. After the final attempt, emits a structured warning the GUI
-    can surface so the user knows the write did not land.
+    This helper retries up to ``_EDEADLK_RETRY_ATTEMPTS`` times with
+    exponential backoff (100 ms, 200 ms, 400 ms) specifically for EDEADLK.
+    Other ``OSError``s re-raise immediately so genuine permission / disk
+    issues are not masked. After final exhaustion, emits a structured
+    warning with a caller-supplied ``user_message`` so the GUI can surface
+    a meaningful error to the user.
 
-    Returns True on success, False on final failure.
+    Parameters
+    ----------
+    writer : callable
+        The synchronous write function (e.g. :func:`write_settings`,
+        :func:`write_preferences`) to invoke on each attempt.
+    *args : Any
+        Positional arguments forwarded to ``writer``.
+    label : str
+        Short identifier used as a log-event prefix (e.g. ``"settings"``,
+        ``"preferences"``). Log events are named
+        ``{label}.sync_write_{state}`` for easy filtering.
+    user_message : str
+        Human-readable message attached to the final-failure log event so
+        the GUI can render it verbatim.
+
+    Returns
+    -------
+    bool
+        ``True`` on success (including recovered-after-retry), ``False``
+        after exhausting all attempts.
     """
     last_exc: OSError | None = None
     for attempt in range(_EDEADLK_RETRY_ATTEMPTS):
         try:
-            await asyncio.to_thread(write_settings, sync_dir, settings)
+            await asyncio.to_thread(writer, *args)
             if attempt > 0:
                 logger.info(
-                    "settings.sync_write_recovered",
-                    extra={
-                        "attempt": attempt + 1,
-                        "errno": errno.EDEADLK,
-                    },
+                    "%s.sync_write_recovered", label,
+                    extra={"attempt": attempt + 1, "errno": errno.EDEADLK},
                 )
             return True
         except OSError as exc:
@@ -204,27 +226,37 @@ async def write_settings_with_retry(
                 break
             delay = _EDEADLK_BACKOFF_BASE_S * (2**attempt)
             logger.info(
-                "settings.sync_write_edeadlk_retry",
+                "%s.sync_write_edeadlk_retry", label,
                 extra={"attempt": attempt + 1, "delay_s": delay},
             )
             await asyncio.sleep(delay)
 
-    # Exhausted retries — surface a structured warning the GUI can render.
     logger.warning(
-        "settings.sync_write_failed_edeadlk",
+        "%s.sync_write_failed_edeadlk", label,
         extra={
-            "sync_dir": sync_dir,
             "attempts": _EDEADLK_RETRY_ATTEMPTS,
             "errno": errno.EDEADLK,
             "error": str(last_exc) if last_exc else "EDEADLK",
-            "user_message": (
-                "Settings were not saved to cloud sync — another process "
-                "(likely Dropbox) held the file lock. Try again or pause "
-                "Dropbox briefly."
-            ),
+            "user_message": user_message,
         },
     )
     return False
+
+
+async def write_settings_with_retry(
+    sync_dir: str, settings: dict[str, Any]
+) -> bool:
+    """EDEADLK-retrying wrapper for :func:`write_settings`. See
+    :func:`_write_with_edeadlk_retry` for retry semantics."""
+    return await _write_with_edeadlk_retry(
+        write_settings, sync_dir, settings,
+        label="settings",
+        user_message=(
+            "Settings were not saved to cloud sync — another process "
+            "(likely Dropbox) held the file lock. Try again or pause "
+            "Dropbox briefly."
+        ),
+    )
 
 
 def read_settings(sync_dir: str) -> dict[str, Any]:
@@ -300,6 +332,28 @@ def write_preferences(sync_dir: str, preferences: dict[str, Any]) -> None:
     existing["machine_id"] = config.MACHINE_ID
     _write_json(path, _encrypt_dict(existing))
     logger.info("Wrote preferences to %s", path)
+
+
+async def write_preferences_with_retry(
+    sync_dir: str, preferences: dict[str, Any]
+) -> bool:
+    """EDEADLK-retrying wrapper for :func:`write_preferences`. See
+    :func:`_write_with_edeadlk_retry` for retry semantics.
+
+    Beta-test regression (2026-04-18): ``PATCH /user-state/preferences``
+    was returning HTTP 500 on macOS because ``state.json`` shares the same
+    Dropbox-lock-collision pattern as ``settings.json``. This wrapper
+    brings preferences onto the same retry path as settings.
+    """
+    return await _write_with_edeadlk_retry(
+        write_preferences, sync_dir, preferences,
+        label="preferences",
+        user_message=(
+            "UI preferences were not saved to cloud sync — another process "
+            "(likely Dropbox) held the file lock. Try again or pause "
+            "Dropbox briefly."
+        ),
+    )
 
 
 def read_preferences(sync_dir: str) -> dict[str, Any]:

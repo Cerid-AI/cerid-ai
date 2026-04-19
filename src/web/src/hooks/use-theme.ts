@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useCallback } from "react"
 import type { Theme } from "@/lib/types"
+import { logSwallowedError } from "@/lib/log-swallowed"
 
 export function useTheme() {
   const [theme, setThemeState] = useState<Theme>(() => {
@@ -18,7 +19,7 @@ export function useTheme() {
   useEffect(() => {
     const root = document.documentElement
     root.classList.toggle("dark", theme === "dark")
-    try { localStorage.setItem("cerid-theme", theme) } catch { /* noop */ }
+    try { localStorage.setItem("cerid-theme", theme) } catch (err) { logSwallowedError(err, "localStorage.setItem", { key: "cerid-theme" }) }
   }, [theme])
 
   const toggleTheme = useCallback(() => {

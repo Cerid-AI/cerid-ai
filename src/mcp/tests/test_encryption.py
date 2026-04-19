@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import os
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -348,3 +348,56 @@ class TestEncryptionConfig:
         """SYNC_BACKEND defaults to 'local'."""
         import config
         assert config.SYNC_BACKEND == "local"
+
+
+# ---------------------------------------------------------------------------
+# Observability: Sentry capture tests (R1-3)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not HAS_CRYPTOGRAPHY, reason="cryptography not installed")
+class TestEncryptionSentryCapture:
+    """Assert Sentry.capture_exception fires at every silent-catch site."""
+
+    def _make_encryptor(self):
+        from utils.encryption import FieldEncryptor
+        key = Fernet.generate_key().decode()
+        return FieldEncryptor(key)
+
+    def test_decrypt_failed_captured_returns_ciphertext(self):
+        """decrypt() reports to Sentry and returns raw ciphertext on failure."""
+        from unittest.mock import patch
+
+        enc = self._make_encryptor()
+        # Patch the internal fernet to raise on decrypt
+        enc._fernet.decrypt = MagicMock(side_effect=ValueError("bad token"))
+
+        fake_ciphertext = "enc:v1:AAAABADBAD=="
+        with patch("sentry_sdk.capture_exception") as mock_capture:
+            result = enc.decrypt(fake_ciphertext)
+
+        # Fallback: must return raw ciphertext, not raise
+        assert result == fake_ciphertext
+        mock_capture.assert_called_once()
+
+    def test_init_failed_captured_returns_none(self):
+        """get_encryptor() reports to Sentry and returns None when init fails."""
+        from unittest.mock import patch
+
+        import utils.encryption as enc_mod
+
+        # Reset singleton so get_encryptor() re-runs the init path
+        enc_mod._encryptor = None
+        enc_mod._initialized = False
+
+        with patch.dict("os.environ", {"CERID_ENCRYPTION_KEY": "bad-key-not-base64"}), \
+             patch("sentry_sdk.capture_exception") as mock_capture:
+            result = enc_mod.get_encryptor()
+
+        # Encryptor should be None on bad key
+        assert result is None
+        mock_capture.assert_called_once()
+
+        # Restore for other tests
+        enc_mod._encryptor = None
+        enc_mod._initialized = False

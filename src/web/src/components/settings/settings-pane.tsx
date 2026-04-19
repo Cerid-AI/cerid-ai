@@ -22,6 +22,7 @@ import { EssentialsSection } from "./essentials-section"
 import { PipelineSection } from "./pipeline-section"
 import { SystemSection } from "./system-section"
 import type { SectionKey } from "./settings-primitives"
+import { logSwallowedError } from "@/lib/log-swallowed"
 
 type LoadState = "loading" | "error" | "ready"
 
@@ -45,7 +46,7 @@ function readSectionState(): Record<SectionKey, boolean> {
         ) }
       }
     }
-  } catch { /* noop */ }
+  } catch (err) { logSwallowedError(err, "localStorage.getItem", { key: "cerid-settings-sections" }) }
   return defaults
 }
 
@@ -53,7 +54,7 @@ function persistSectionState(state: Record<SectionKey, boolean>) {
   try {
     localStorage.setItem("cerid-settings-sections", JSON.stringify(state))
     localStorage.setItem("cerid-settings-sections-v", String(SETTINGS_SECTIONS_VERSION))
-  } catch { /* noop */ }
+  } catch (err) { logSwallowedError(err, "localStorage.setItem", { key: "cerid-settings-sections" }) }
 }
 
 export default function SettingsPane() {
@@ -81,13 +82,13 @@ export default function SettingsPane() {
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab)
-    try { localStorage.setItem("cerid-settings-tab", tab) } catch { /* noop */ }
+    try { localStorage.setItem("cerid-settings-tab", tab) } catch (err) { logSwallowedError(err, "localStorage.setItem", { key: "cerid-settings-tab" }) }
   }
 
   const applyUserPreset = async (preset: typeof USER_PRESETS[number]) => {
     setUIMode(preset.uiMode)
     for (const [key, value] of Object.entries(preset.local)) {
-      try { localStorage.setItem(key, value) } catch { /* noop */ }
+      try { localStorage.setItem(key, value) } catch (err) { logSwallowedError(err, "localStorage.setItem", { key }) }
     }
     await patch(preset.settings)
   }

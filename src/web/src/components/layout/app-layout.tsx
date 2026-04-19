@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useEffect, useCallback, useMemo } from "react"
+import { logSwallowedError } from "@/lib/log-swallowed"
 import { Sidebar, type Pane } from "./sidebar"
 import { StatusBar } from "./status-bar"
 import { AgentConsole } from "@/components/console/AgentConsole"
@@ -34,7 +35,7 @@ export function AppLayout({ children, featureTier, onCycleTier }: AppLayoutProps
   const toggleConsole = useCallback(() => {
     setConsoleOpen((prev) => {
       const next = !prev
-      try { localStorage.setItem("cerid-agent-console", String(next)) } catch { /* noop */ }
+      try { localStorage.setItem("cerid-agent-console", String(next)) } catch (err) { logSwallowedError(err, "localStorage.setItem", { key: "cerid-agent-console" }) }
       return next
     })
   }, [])

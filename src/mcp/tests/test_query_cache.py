@@ -305,3 +305,34 @@ class TestCachedFlag:
         assert out is not None
         # Internal field should be stripped on the way out
         assert "_cache_stored_at" not in out
+
+
+# ---------------------------------------------------------------------------
+# Observability: Sentry capture tests (R1-3)
+# ---------------------------------------------------------------------------
+
+
+class TestQueryCacheSentryCapture:
+    """Assert Sentry.capture_exception fires at every silent-catch site."""
+
+    @patch("utils.query_cache.get_redis", side_effect=RuntimeError("redis down"))
+    @patch("sentry_sdk.capture_exception")
+    def test_read_failed_captured(self, mock_capture, _mock_redis):
+        """get_cached() reports to Sentry and returns None on failure."""
+        result = get_cached("q", "dom", 5)
+        assert result is None
+        mock_capture.assert_called_once()
+
+    @patch("utils.query_cache.get_redis", side_effect=OSError("write error"))
+    @patch("sentry_sdk.capture_exception")
+    def test_write_failed_captured(self, mock_capture, _mock_redis):
+        """set_cached() reports to Sentry on failure (no exception raised)."""
+        set_cached("q", "dom", 5, {"results": [], "answer": "x"})
+        mock_capture.assert_called_once()
+
+    @patch("utils.query_cache.get_redis", side_effect=RuntimeError("scan error"))
+    @patch("sentry_sdk.capture_exception")
+    def test_invalidation_failed_captured(self, mock_capture, _mock_redis):
+        """invalidate_all() reports to Sentry on failure."""
+        invalidate_all()
+        mock_capture.assert_called_once()

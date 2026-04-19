@@ -50,6 +50,18 @@ logger = logging.getLogger("ai-companion.hallucination")
 
 _CGROUP_MEMORY_MAX = pathlib.Path("/sys/fs/cgroup/memory.max")
 _CGROUP_MEMORY_CURRENT = pathlib.Path("/sys/fs/cgroup/memory.current")
+_CGROUP_MEMORY_STAT = pathlib.Path("/sys/fs/cgroup/memory.stat")
+
+# Fields in cgroup v2 memory.stat that represent memory the kernel can reclaim
+# on demand without OOM-killing the container. Adding these to raw headroom
+# gives the true "allocatable without OOM" budget — raw headroom alone is
+# wrong because page cache and reclaimable slab look "used" but aren't pinned.
+_RECLAIMABLE_STAT_KEYS = frozenset({"file", "slab_reclaimable"})
+
+# Maximum time _wait_for_memory will block before giving up. The claim-verify
+# semaphore + per-claim asyncio timeout are the real pressure regulators;
+# this guard is observability + gentle backpressure, never a hard gate.
+_MEMORY_WAIT_MAX_SECONDS = 5.0
 
 # Task 12 / audit V-3: extract URLs the LLM cited inline in a claim so the
 # verifier can check them *first* instead of re-searching from claim text.
@@ -142,21 +154,60 @@ async def _extract_response_context(response_text: str, user_query: str | None) 
     return heuristic
 
 
+def _read_reclaimable_bytes() -> int:
+    """Sum cgroup v2 memory.stat fields that represent reclaimable memory.
+
+    Returns 0 when memory.stat is unavailable or unparseable — the caller
+    treats that as "no reclaimable memory detected" which is a safe under-
+    estimate (biases toward pausing rather than overcommit).
+    """
+    try:
+        stat = _CGROUP_MEMORY_STAT.read_text()
+    except OSError:
+        return 0
+    total = 0
+    for line in stat.splitlines():
+        key, _, value = line.partition(" ")
+        if key in _RECLAIMABLE_STAT_KEYS:
+            try:
+                total += int(value)
+            except ValueError:
+                continue
+    return total
+
+
 def _container_memory_available_mb() -> float | None:
-    """Return available memory in MB within the container cgroup, or None if not in a cgroup."""
+    """Return memory allocatable without OOM, in MB, or None outside a cgroup.
+
+    "Available" = raw headroom (``memory.max - memory.current``) plus
+    reclaimable memory reported in ``memory.stat`` (file cache, reclaimable
+    slab). The raw-headroom-only formula is wrong for long-running Python
+    services: page cache and slab look "used" in ``memory.current`` but the
+    kernel can evict them on demand without OOM-killing the container.
+    """
     try:
         max_bytes = _CGROUP_MEMORY_MAX.read_text().strip()
         if max_bytes == "max":
             return None  # no limit set
         current_bytes = int(_CGROUP_MEMORY_CURRENT.read_text().strip())
-        return (int(max_bytes) - current_bytes) / (1024 * 1024)
     except (FileNotFoundError, ValueError):
         return None  # not running in a cgroup-limited container
+    headroom = int(max_bytes) - current_bytes
+    return (headroom + _read_reclaimable_bytes()) / (1024 * 1024)
 
 
 async def _wait_for_memory(floor_mb: int, label: str) -> None:
-    """Block until available container memory exceeds floor_mb. No-op outside containers."""
-    while True:
+    """Briefly wait for container memory to clear ``floor_mb``; proceed regardless.
+
+    Fail-open by design: after ``_MEMORY_WAIT_MAX_SECONDS`` the verifier runs
+    even if the floor is still unmet. Verification is a lightweight I/O-bound
+    workload (HTTP + small ONNX call, <10 MB per claim) so the semaphore and
+    per-claim timeout are the real pressure regulators. An unbounded wait here
+    deadlocks the verifier forever when steady-state memory legitimately sits
+    near the cgroup cap.
+    """
+    deadline = time.monotonic() + _MEMORY_WAIT_MAX_SECONDS
+    while time.monotonic() < deadline:
         available = _container_memory_available_mb()
         if available is None or available >= floor_mb:
             return
@@ -165,6 +216,10 @@ async def _wait_for_memory(floor_mb: int, label: str) -> None:
             label, available, floor_mb,
         )
         await asyncio.sleep(1.0)
+    logger.warning(
+        "Verification memory floor (%dMB) not cleared within %.1fs — proceeding anyway (%s)",
+        floor_mb, _MEMORY_WAIT_MAX_SECONDS, label,
+    )
 
 
 # ---------------------------------------------------------------------------

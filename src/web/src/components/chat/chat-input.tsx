@@ -11,6 +11,7 @@ import { DomainBadge } from "@/components/ui/domain-badge"
 import { useDragDrop } from "@/hooks/use-drag-drop"
 import { cn } from "@/lib/utils"
 import type { KBQueryResult } from "@/lib/types"
+import { logSwallowedError } from "@/lib/log-swallowed"
 
 interface InjectedSource {
   filename: string
@@ -60,7 +61,7 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount
       try {
         const artifact = JSON.parse(data) as KBQueryResult
         onArtifactDrop?.(artifact)
-      } catch { /* ignore malformed data */ }
+      } catch (err) { logSwallowedError(err, "json.parse.artifact-drop") }
     }
   }, [onArtifactDrop])
 

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useEffect, useRef, useCallback } from "react"
+import { logSwallowedError } from "@/lib/log-swallowed"
 import { MCP_BASE } from "@/lib/api/common"
 
 export interface AgentEvent {
@@ -93,7 +94,7 @@ export function useAgentConsole(enabled: boolean) {
           if (rafRef.current === null) {
             rafRef.current = requestAnimationFrame(flushBuffer)
           }
-        } catch { /* ignore unparseable */ }
+        } catch (err) { logSwallowedError(err, "json.parse.sse-agent-event") }
       }
 
       es.onerror = () => {

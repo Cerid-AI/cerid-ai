@@ -23,6 +23,7 @@ from typing import Any
 
 import httpx
 
+from app.reliability.url_safety import guard_or_log
 from errors import CeridError, IngestionError
 
 from .base import DataSource, DataSourceResult
@@ -332,6 +333,12 @@ async def poll_feed(feed_config: dict[str, Any]) -> dict[str, Any]:
 
     breaker = get_breaker("rss-feed")
     summary: dict[str, Any] = {"feed_id": feed_id, "new_entries": 0, "errors": []}
+
+    # SSRF guard: reject feeds whose host resolves to private / loopback /
+    # link-local / metadata addresses before any network call is made.
+    if not guard_or_log(url, source_name="rss_feed"):
+        summary["errors"].append(f"ssrf_blocked: {url}")
+        return summary
 
     try:
         # Fetch with conditional headers

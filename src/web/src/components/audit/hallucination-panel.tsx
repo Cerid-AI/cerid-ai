@@ -12,6 +12,7 @@ import type { HallucinationReport, HallucinationClaim, StreamingClaim } from "@/
 import type { VerificationPhase, ActivityLogEntry } from "@/hooks/use-verification-stream"
 import { getClaimDisplayStatus, DISPLAY_STATUS_COLORS, verificationMethodLabel, verificationMethodColor, stripMarkdown } from "@/lib/verification-utils"
 import { cn } from "@/lib/utils"
+import { logSwallowedError } from "@/lib/log-swallowed"
 
 function VerificationMethodBadge({ method, model }: { method?: string; model?: string }) {
   const label = verificationMethodLabel(method)
@@ -493,7 +494,7 @@ export function HallucinationPanel({
       if (result) {
         onClaimUpdate?.(index, result)
       }
-    } catch { /* ignore */ }
+    } catch (err) { logSwallowedError(err, "claim.verify.retry", { index }) }
     setRetryingClaims((prev) => { const next = new Set(prev); next.delete(index); return next })
   }, [report?.claims, conversationId, onClaimUpdate])
 

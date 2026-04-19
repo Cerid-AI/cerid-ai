@@ -280,6 +280,168 @@ async def test_cb_trip_after_flap(client):
         )
 
 
+async def check_verification_lifecycle_lands(
+    client: httpx.AsyncClient,
+    *,
+    timeout_s: float = 30.0,
+) -> dict:
+    """R5-2 invariant: a real hallucination-check flow lands a VerificationReport + VERIFIED edge.
+
+    Posts a short response text to /agent/hallucination with a stable conversation_id,
+    then polls Neo4j for up to timeout_s seconds to confirm a VerificationReport node
+    and at least one [:VERIFIED]->(Artifact) edge landed.
+
+    Returns {"pass": bool, "details": {...}}.
+
+    Skips gracefully when ENABLE_HALLUCINATION_CHECK=false or neo4j is unreachable.
+    """
+    import os
+    import time
+    import uuid
+
+    # Conditional gate: skip when feature is off.
+    enable_check = os.getenv("ENABLE_HALLUCINATION_CHECK", "true").lower() in ("true", "1", "yes")
+    if not enable_check:
+        return {
+            "pass": True,
+            "skipped": True,
+            "details": {"reason": "ENABLE_HALLUCINATION_CHECK=false — invariant not applicable"},
+        }
+
+    conversation_id = str(uuid.uuid4())
+    t_start = time.monotonic()
+
+    # Trigger a hallucination-check via POST /agent/hallucination with a minimal payload.
+    # This is the same route the ingestion pipeline calls — it extracts claims, verifies
+    # them, and saves a VerificationReport with VERIFIED edges to referenced Artifacts.
+    body = {
+        "response_text": (
+            "The speed of light in a vacuum is approximately 299,792 kilometres per second. "
+            "Water freezes at 0 degrees Celsius at standard atmospheric pressure."
+        ),
+        "conversation_id": conversation_id,
+        "user_query": "What is the speed of light?",
+    }
+    _, post_status, post_json = await post(client, "/agent/hallucination", body)
+    if post_status not in (200, 202):
+        return {
+            "pass": False,
+            "details": {
+                "conversation_id": conversation_id,
+                "reason": f"POST /agent/hallucination returned HTTP {post_status}",
+                "body": str(post_json)[:200],
+            },
+        }
+
+    # Import Neo4j driver inline — smoke.py runs as a standalone script with no
+    # project-level imports available. neo4j is a dep of the MCP container.
+    try:
+        from neo4j import GraphDatabase  # type: ignore[import]
+    except ImportError:
+        return {
+            "pass": True,
+            "skipped": True,
+            "details": {"reason": "neo4j driver not installed in this environment — skipping Neo4j poll"},
+        }
+
+    neo4j_uri = os.getenv("NEO4J_URI", "bolt://ai-companion-neo4j:7687")
+    neo4j_user = os.getenv("NEO4J_USER", "neo4j")
+    neo4j_password = os.getenv("NEO4J_PASSWORD", "")
+
+    try:
+        driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
+    except Exception as exc:
+        return {
+            "pass": True,
+            "skipped": True,
+            "details": {"reason": f"Neo4j driver init failed: {exc} — skipping Neo4j poll"},
+        }
+
+    edges_found = 0
+    report_found = False
+    deadline = time.monotonic() + timeout_s
+    try:
+        with driver.session() as session:
+            while time.monotonic() < deadline:
+                # Check for the VerificationReport node first
+                r_node = session.run(
+                    "MATCH (v:VerificationReport {conversation_id: $cid}) RETURN count(v) AS n",
+                    cid=conversation_id,
+                ).single()
+                if r_node and r_node["n"] > 0:
+                    report_found = True
+                    # Now check for VERIFIED edges
+                    r_edges = session.run(
+                        "MATCH (v:VerificationReport {conversation_id: $cid})"
+                        "-[:VERIFIED]->(a) "
+                        "RETURN count(a) AS edges",
+                        cid=conversation_id,
+                    ).single()
+                    if r_edges is not None:
+                        edges_found = r_edges["edges"]
+                        if edges_found > 0:
+                            elapsed = time.monotonic() - t_start
+                            return {
+                                "pass": True,
+                                "details": {
+                                    "conversation_id": conversation_id,
+                                    "edges_landed": edges_found,
+                                    "elapsed_s": round(elapsed, 2),
+                                },
+                            }
+                await asyncio.sleep(1.0)
+    except Exception as exc:
+        return {
+            "pass": False,
+            "details": {
+                "conversation_id": conversation_id,
+                "reason": f"Neo4j poll error: {exc}",
+                "edges_landed": edges_found,
+            },
+        }
+    finally:
+        driver.close()
+
+    # Timed out without finding edges.
+    # Note: it's possible claims were verified but no Artifact nodes existed to link
+    # (e.g. KB is empty). In that case report_found=True but edges_found=0 is expected.
+    # We still fail to catch regressions where the MERGE itself is broken.
+    return {
+        "pass": False,
+        "details": {
+            "conversation_id": conversation_id,
+            "report_node_found": report_found,
+            "edges_landed": edges_found,
+            "timeout_s": timeout_s,
+            "reason": (
+                "VerificationReport node found but no [:VERIFIED] edges within timeout"
+                if report_found
+                else "No VerificationReport node found within timeout — check R4-2 Sentry events"
+            ),
+        },
+    }
+
+
+async def test_verification_lifecycle(client):
+    print("\n== TEST I: R5-2 verification lifecycle — VerificationReport + VERIFIED edge ==")
+    result = await check_verification_lifecycle_lands(client, timeout_s=30.0)
+    if result.get("skipped"):
+        print(f"  SKIPPED — {result['details']['reason']}")
+    elif result["pass"]:
+        d = result["details"]
+        print(
+            f"  PASS — conversation_id={d['conversation_id'][:8]}... "
+            f"edges_landed={d['edges_landed']} elapsed={d['elapsed_s']}s"
+        )
+    else:
+        d = result["details"]
+        print(
+            f"  FAIL — {d.get('reason', 'unknown')} "
+            f"(conversation_id={d.get('conversation_id', '?')[:8]}...)"
+        )
+        assert False, f"R5-2 verification lifecycle invariant failed: {d}"
+
+
 async def main():
     async with httpx.AsyncClient(timeout=30.0) as client:
         await test_health_latency(client, 20)
@@ -289,6 +451,7 @@ async def main():
         await test_head_of_line_blocking(client)
         await test_cb_trip_after_flap(client)
         await test_rate_limit(client)
+        await test_verification_lifecycle(client)
     await test_sse_chat_stream()
 
 

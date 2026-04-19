@@ -21,6 +21,7 @@ import { Database, ToggleLeft, CreditCard, ExternalLink, Globe, Shield, AlertTri
 import { fetchDataSources, enableDataSource, disableDataSource, fetchSetupStatus, fetchHealthStatus, fetchSystemCheck } from "@/lib/api"
 import { SectionHeading, LabelWithInfo, Row, ToggleRow, SliderRow } from "./settings-primitives"
 import { assessRuntime, fromHealthStatus, CAPABILITY_STATUS_DOT, COST_PROFILE_LABELS } from "@/lib/provider-capabilities"
+import { OpenRouterKeyField } from "./openrouter-key-field"
 
 /** Shows hardware-based recommendation for the current UI mode. */
 function HardwareRecommendation() {
@@ -129,6 +130,8 @@ export function EssentialsSection({ settings, sections, toggleSection, patch, cr
                 No OpenRouter API key configured.
               </p>
             )}
+            <div className="my-1 h-px bg-border" />
+            <OpenRouterKeyField />
           </CardContent>
         </Card>
       )}

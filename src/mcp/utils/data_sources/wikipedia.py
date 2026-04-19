@@ -14,6 +14,33 @@ from .base import DataSource, DataSourceResult, logger
 
 _PROPER_NOUN_RE = re.compile(r"\b([A-Z][a-z]{2,}(?:\s[A-Z][a-z]{2,}){0,4})\b")
 
+# Lightweight tokenizer for query↔result overlap scoring. Alphanumeric runs,
+# lowercased, minus common stop words and tokens ≤2 chars. Stays zero-dep on
+# purpose — spaCy / tiktoken would be overkill inside a per-result scoring hot
+# path that runs for every Wikipedia hit on every RAG call.
+_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
+_STOP_WORDS = frozenset({
+    "the", "and", "for", "are", "but", "not", "you", "all", "any", "can",
+    "had", "has", "have", "her", "his", "its", "may", "one", "our", "out",
+    "she", "was", "way", "were", "will", "with", "your", "this", "that",
+    "these", "those", "what", "when", "where", "why", "how", "who", "which",
+    "into", "from", "about", "above", "below", "between", "among", "does",
+    "did", "would", "could", "should", "must", "shall", "might", "been",
+    "being", "they", "them", "their", "there", "then", "than",
+})
+
+
+def _content_tokens(text: str) -> set[str]:
+    """Return lowercase significant tokens from ``text``.
+
+    Significant = alphanumeric, >2 chars, not a stop word. The >2 cutoff drops
+    common fillers ("is", "of", "to") without spaCy-weight tokenization.
+    """
+    return {
+        t.lower() for t in _TOKEN_RE.findall(text)
+        if len(t) > 2 and t.lower() not in _STOP_WORDS
+    }
+
 
 class WikipediaSource(DataSource):
     name = "wikipedia"
@@ -24,16 +51,41 @@ class WikipediaSource(DataSource):
     _QUESTION_WORDS = {"What", "When", "Where", "Who", "Why", "How", "Which", "Does", "Can", "Could", "Would", "Should", "Are", "Were", "Was", "The"}
 
     def score_confidence(self, raw_query: str, result: "DataSourceResult") -> float:
-        """Boost when title closely matches query entities; reduce for disambiguation."""
+        """Scale confidence by query-to-title+summary token overlap.
+
+        Three-tier scoring, strongest signal first:
+
+        1. **Title-in-query short-circuit** — if the title appears verbatim as
+           a substring of the query (e.g. "Tokyo" in "what is the population
+           of Tokyo?"), that's a high-confidence entity match. Apply the +0.05
+           boost and skip overlap scaling; the query is clearly about this.
+        2. **Token-overlap gradient** — Wikipedia search for "best rag" returns
+           "Ragtime" with the same 0.85 as a semantically valid hit. Without
+           gradient scoring, these pollute the context window. Scale base
+           confidence by query↔(title+content) token overlap: zero overlap →
+           30% of base (0.15 floor); full overlap → unchanged. Short queries
+           (<2 significant tokens) skip this tier — too little signal.
+        3. **Disambiguation / stub penalty** — unchanged.
+        """
         title_lower = result.title.lower()
         query_lower = raw_query.lower()
-        # Boost if result title appears as a substring in the query
+
+        # Tier 1: strong entity match dominates lexical gradient.
         if title_lower and title_lower in query_lower:
             return min(1.0, result.confidence + 0.05)
-        # Reduce for disambiguation or stub articles
+
+        # Tier 2: gradient overlap scoring for everything else.
+        base = result.confidence
+        q_tokens = _content_tokens(raw_query)
+        if len(q_tokens) >= 2:
+            c_tokens = _content_tokens(f"{result.title} {result.content[:500]}")
+            overlap = len(q_tokens & c_tokens) / len(q_tokens)
+            base = max(0.15, base * (0.3 + 0.7 * overlap))
+
+        # Tier 3: disambiguation / stub penalty.
         if "(disambiguation)" in title_lower or len(result.content) < 50:
-            return max(0.0, result.confidence - 0.15)
-        return result.confidence
+            return max(0.0, base - 0.15)
+        return base
 
     def adapt_query(self, raw_query: str, keywords: list[str]) -> str:
         """Wikipedia works best with entity names rather than keyword soup."""

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useCallback } from "react"
+import { logSwallowedError } from "@/lib/log-swallowed"
 import { useQuery } from "@tanstack/react-query"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
@@ -233,7 +234,7 @@ function readLocalBool(key: string, fallback: boolean): boolean {
 }
 
 function readLocalNumber(key: string, fallback: number): number {
-  try { const v = localStorage.getItem(key); if (v !== null) { const n = parseFloat(v); if (!isNaN(n)) return n } } catch { /* noop */ }
+  try { const v = localStorage.getItem(key); if (v !== null) { const n = parseFloat(v); if (!isNaN(n)) return n } } catch (err) { logSwallowedError(err, "localStorage.getItem", { key }) }
   return fallback
 }
 
@@ -249,7 +250,7 @@ function ConsoleConfigBar({
   const [topK, setTopK] = useState(() => readLocalNumber("cerid-console-top-k", 10))
 
   const persistBool = useCallback((key: string, value: boolean, serverKey?: string) => {
-    try { localStorage.setItem(key, String(value)) } catch { /* noop */ }
+    try { localStorage.setItem(key, String(value)) } catch (err) { logSwallowedError(err, "localStorage.setItem", { key }) }
     if (serverKey) updateSettings({ [serverKey]: value } as Record<string, boolean>).catch(() => { /* noop */ })
   }, [])
 
@@ -271,7 +272,7 @@ function ConsoleConfigBar({
   const handleTopK = useCallback((v: number[]) => {
     const val = v[0]
     setTopK(val)
-    try { localStorage.setItem("cerid-console-top-k", String(val)) } catch { /* noop */ }
+    try { localStorage.setItem("cerid-console-top-k", String(val)) } catch (err) { logSwallowedError(err, "localStorage.setItem", { key: "cerid-console-top-k" }) }
   }, [])
 
   return (

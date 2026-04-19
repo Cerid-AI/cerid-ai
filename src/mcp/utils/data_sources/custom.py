@@ -9,6 +9,7 @@ from typing import Any, Literal
 
 import httpx
 
+from app.reliability.url_safety import guard_or_log
 from utils.data_sources.base import DataSource, DataSourceResult
 
 logger = logging.getLogger("ai-companion.data_sources.custom")
@@ -77,6 +78,9 @@ class CustomApiSource(DataSource):
 
     async def query(self, query: str, **kwargs: Any) -> list[DataSourceResult]:
         """Query the custom API and return parsed results."""
+        # SSRF prevention: reject private/internal hosts before any network I/O
+        if not guard_or_log(self.base_url, source_name="custom_source"):
+            return []
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.get(
@@ -106,6 +110,9 @@ class CustomApiSource(DataSource):
 
     async def test_connection(self) -> tuple[bool, str | None]:
         """Test connectivity to the custom API."""
+        # SSRF prevention: reject private/internal hosts before any network I/O
+        if not guard_or_log(self.base_url, source_name="custom_source"):
+            return False, "ssrf_blocked"
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 resp = await client.get(

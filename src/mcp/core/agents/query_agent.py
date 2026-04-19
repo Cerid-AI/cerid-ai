@@ -19,6 +19,7 @@ import numpy as np
 import config
 from config import DOMAINS
 from core.contracts.stores import GraphStore
+from core.observability.span_helpers import breadcrumb, span
 from core.utils.cache import log_event
 from core.utils.circuit_breaker import CircuitOpenError
 from core.utils.embeddings import l2_distance_to_relevance
@@ -543,7 +544,8 @@ async def _rerank_cross_encoder(
         from core.retrieval.reranker import rerank as ce_rerank
 
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, ce_rerank, query, results)
+        with span("retrieval.rerank", "cross_encoder", k=len(results)):
+            return await loop.run_in_executor(None, ce_rerank, query, results)
     except Exception as e:
         logger.warning(
             "Cross-encoder reranking failed — returning results in original "
@@ -924,13 +926,13 @@ async def agent_query(
     """Budget-gated public entry for multi-domain query.
 
     Wraps ``_agent_query_impl`` in ``asyncio.wait_for`` with the configured
-    wall-clock ceiling (``AGENT_QUERY_BUDGET_SECONDS``, default 25s) so a
+    wall-clock ceiling (``AGENT_QUERY_BUDGET_SECONDS``, default 20s) so a
     pathologically slow retrieval can never block the event loop past the
     45s watchdog. On timeout, returns a structured "degraded" response
     rather than raising — the caller (frontend or downstream pipeline) can
     surface a helpful message and let the user retry or narrow the query.
     """
-    budget = getattr(config, "AGENT_QUERY_BUDGET_SECONDS", 25.0)
+    budget = getattr(config, "AGENT_QUERY_BUDGET_SECONDS", 20.0)
     try:
         return await asyncio.wait_for(
             _agent_query_impl(
@@ -1100,13 +1102,15 @@ async def _agent_query_impl(
                     _skip_normal_retrieval = True
 
         if not _skip_normal_retrieval:
-            results = await multi_domain_query(
-                query=search_query,
-                domains=effective_domains,
-                top_k=effective_top_k,
-                chroma_client=chroma_client,
-                metadata_filter=metadata_filter,
-            )
+            with span("retrieval.chroma", "multi_domain_query", domains=len(effective_domains or []), top_k=effective_top_k):
+                results = await multi_domain_query(
+                    query=search_query,
+                    domains=effective_domains,
+                    top_k=effective_top_k,
+                    chroma_client=chroma_client,
+                    metadata_filter=metadata_filter,
+                )
+        breadcrumb(f"vector search complete: {len(results)} results", category="retrieval")
 
     # CRAG quality gate lives at the router layer (app/routers/agents.py).
     # The router owns the single-source-of-truth decision for firing external
@@ -1162,13 +1166,14 @@ async def _agent_query_impl(
                 len(_high_conf), effective_top_k,
             )
         else:
-            results = await graph_expand_results(
-                results=results,
-                query=query,
-                chroma_client=chroma_client,
-                neo4j_driver=neo4j_driver,
-                graph_store=graph_store,
-            )
+            with span("graph.expand", "neighbour_lookup", seed_count=len(results)):
+                results = await graph_expand_results(
+                    results=results,
+                    query=query,
+                    chroma_client=chroma_client,
+                    neo4j_driver=neo4j_driver,
+                    graph_store=graph_store,
+                )
         graph_results_added = len(results) - graph_count_before
 
     from utils.temporal import is_within_window, parse_temporal_intent, recency_score
@@ -1271,15 +1276,18 @@ async def _agent_query_impl(
         if ENABLE_INTELLIGENT_ASSEMBLY and results:
             try:
                 from core.retrieval.context_assembler import intelligent_assemble
-                context, sources, coverage_meta = intelligent_assemble(
-                    results=results, query=query, max_chars=ctx_budget,
-                )
+                with span("retrieval.assembly", "intelligent_assemble", budget=ctx_budget, n_results=len(results)):
+                    context, sources, coverage_meta = intelligent_assemble(
+                        results=results, query=query, max_chars=ctx_budget,
+                    )
                 char_count = len(context)
             except Exception as e:
                 logger.warning("Intelligent assembly failed, falling back: %s", e)
-                context, sources, char_count = assemble_context(results, max_chars=ctx_budget)
+                with span("retrieval.assembly", "token_budget_pack_fallback", budget=ctx_budget, n_results=len(results)):
+                    context, sources, char_count = assemble_context(results, max_chars=ctx_budget)
         else:
-            context, sources, char_count = assemble_context(results, max_chars=ctx_budget)
+            with span("retrieval.assembly", "token_budget_pack", budget=ctx_budget, n_results=len(results)):
+                context, sources, char_count = assemble_context(results, max_chars=ctx_budget)
 
     # Step 7: Calculate confidence (average relevance of included sources)
     confidence = 0.0

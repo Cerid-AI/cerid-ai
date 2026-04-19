@@ -47,6 +47,7 @@ markers = [
     "unit: Fast tests with no external dependencies",
     "integration: Tests requiring Docker services (Neo4j, ChromaDB, Redis)",
     "eval: Evaluation harness — Monte Carlo, RAGAS, benchmarks (slow, optional)",
+    "benchmark_slo: Latency SLO benchmarks — require a running MCP stack (excluded from default pytest run)",
 ]
 
 [tool.importlinter]

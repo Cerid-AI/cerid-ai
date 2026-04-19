@@ -9,15 +9,22 @@ import json
 from pathlib import Path
 from typing import Any
 
+from fastapi import HTTPException
+
+from app.parsers._zip_safety import assert_safe_zip
 from app.parsers.registry import _MAX_TEXT_CHARS, logger, register_parser
 
 
 @register_parser([".docx"])
 def parse_docx(file_path: str) -> dict[str, Any]:
+    assert_safe_zip(file_path)
+
     import docx
 
     try:
         doc = docx.Document(file_path)
+    except HTTPException:
+        raise
     except Exception as e:
         raise ValueError(
             f"Failed to read DOCX '{Path(file_path).name}': {e}. "
@@ -52,10 +59,14 @@ def parse_docx(file_path: str) -> dict[str, Any]:
 @register_parser([".xlsx"])
 def parse_xlsx(file_path: str) -> dict[str, Any]:
     """Parse XLSX with header auto-detection and Markdown table formatting."""
+    assert_safe_zip(file_path)
+
     from openpyxl import load_workbook
 
     try:
         wb = load_workbook(file_path, read_only=True, data_only=True)
+    except HTTPException:
+        raise
     except Exception as e:
         raise ValueError(
             f"Failed to read XLSX '{Path(file_path).name}': {e}. "

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react"
+import { logSwallowedError } from "@/lib/log-swallowed"
 import { useQuery } from "@tanstack/react-query"
 import {
   MessageSquare, Database, HeartPulse, BarChart3, Brain, Settings,
@@ -94,7 +95,7 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
   const toggleHistory = () => {
     setHistoryExpanded((prev) => {
       const next = !prev
-      try { localStorage.setItem("cerid-sidebar-history", String(next)) } catch { /* noop */ }
+      try { localStorage.setItem("cerid-sidebar-history", String(next)) } catch (err) { logSwallowedError(err, "localStorage.setItem", { key: "cerid-sidebar-history" }) }
       return next
     })
   }

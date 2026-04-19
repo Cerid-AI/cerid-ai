@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useReducer, useCallback, useEffect, useRef, useState, useMemo } from "react"
+import { logSwallowedError } from "@/lib/log-swallowed"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import {
@@ -217,7 +218,7 @@ function saveProgress(state: WizardState) {
       ts: Date.now(),
     }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
-  } catch { /* noop */ }
+  } catch (err) { logSwallowedError(err, "localStorage.setItem", { key: STORAGE_KEY }) }
 }
 
 function loadProgress(): { step: number; skippedSteps: number[]; applied?: boolean } | null {
@@ -237,7 +238,7 @@ function loadProgress(): { step: number; skippedSteps: number[]; applied?: boole
 }
 
 function clearProgress() {
-  try { localStorage.removeItem(STORAGE_KEY) } catch { /* noop */ }
+  try { localStorage.removeItem(STORAGE_KEY) } catch (err) { logSwallowedError(err, "localStorage.removeItem", { key: STORAGE_KEY }) }
 }
 
 // ---------------------------------------------------------------------------

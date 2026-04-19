@@ -2,23 +2,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useCallback, useEffect, useRef } from "react"
+import { logSwallowedError } from "@/lib/log-swallowed"
 import { fetchSettings, updateSettings, syncPreferences, fetchUserState, fetchPrivateMode, enablePrivateMode, disablePrivateMode } from "@/lib/api"
 import type { RagMode, RoutingMode, SettingsUpdate } from "@/lib/types"
 
 function readBool(key: string): boolean {
-  try { return localStorage.getItem(key) === "true" } catch { return false }
+  try { return localStorage.getItem(key) === "true" } catch (err) { logSwallowedError(err, "localStorage.getItem", { key }); return false }
 }
 
 function readFloat(key: string, fallback: number): number {
   try {
     const v = localStorage.getItem(key)
     if (v !== null) { const n = parseFloat(v); if (!isNaN(n)) return n }
-  } catch { /* noop */ }
+  } catch (err) { logSwallowedError(err, "localStorage.getItem", { key }) }
   return fallback
 }
 
 function persist(key: string, value: string): void {
-  try { localStorage.setItem(key, value) } catch { /* noop */ }
+  try { localStorage.setItem(key, value) } catch (err) { logSwallowedError(err, "localStorage.setItem", { key }) }
 }
 
 // ── Version-vector reconciliation (audit F-7) ───────────────────────────────
@@ -37,7 +38,7 @@ function readSettingsUpdatedAt(): number {
       const n = parseInt(v, 10)
       if (!isNaN(n) && n > 0) return n
     }
-  } catch { /* noop */ }
+  } catch (err) { logSwallowedError(err, "localStorage.getItem", { key: SETTINGS_UPDATED_AT_KEY }) }
   return 0
 }
 
@@ -87,7 +88,7 @@ function useSyncedToggle(
   const hydrate = useCallback((v: boolean, force: boolean = false) => {
     try {
       if (!force && localStorage.getItem(localKey) !== null) return
-    } catch { /* noop */ }
+    } catch (err) { logSwallowedError(err, "localStorage.getItem", { key: localKey }) }
     setValue(v)
     persist(localKey, String(v))
   }, [localKey])
@@ -116,7 +117,7 @@ export function useSettings() {
       if (v === "manual" || v === "recommend" || v === "auto") return v
       const old = localStorage.getItem("cerid-auto-model-switch")
       if (old === "true") return "recommend"
-    } catch { /* noop */ }
+    } catch (err) { logSwallowedError(err, "localStorage.getItem", { key: "cerid-routing-mode" }) }
     return "manual"
   })
   const [autoInjectThreshold, setAutoInjectThresholdState] = useState(() => readFloat("cerid-auto-inject-threshold", 0.55))
@@ -149,7 +150,7 @@ export function useSettings() {
     try {
       const v = localStorage.getItem("cerid-rag-mode")
       if (v === "manual" || v === "smart" || v === "custom_smart") return v
-    } catch { /* noop */ }
+    } catch (err) { logSwallowedError(err, "localStorage.getItem", { key: "cerid-rag-mode" }) }
     return "manual"
   })
 
@@ -166,7 +167,7 @@ export function useSettings() {
     try {
       const v = localStorage.getItem("cerid-private-mode-level")
       if (v !== null) { const n = parseInt(v, 10); if (!isNaN(n) && n >= 0 && n <= 4) return n }
-    } catch { /* noop */ }
+    } catch (err) { logSwallowedError(err, "localStorage.getItem", { key: "cerid-private-mode-level" }) }
     return 0
   })
 
@@ -252,7 +253,7 @@ export function useSettings() {
               if (stored !== null && (stored === "true") !== serverVal) {
                 assign(reconcile, stored === "true")
               }
-            } catch { /* noop */ }
+            } catch (err) { logSwallowedError(err, "localStorage.getItem", { key: localKey }) }
           }
           pushBool("cerid-feedback-loop", s.enable_feedback_loop, (r, v) => { r.enable_feedback_loop = v })
           pushBool("cerid-auto-inject", s.enable_auto_inject, (r, v) => { r.enable_auto_inject = v })

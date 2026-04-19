@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { fetchHealthStatus, retestServices } from "@/lib/api"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { logSwallowedError } from "@/lib/log-swallowed"
 import type { DegradationTier } from "@/lib/provider-capabilities"
 
 const DISMISS_KEY = "cerid:degradation-banner-dismissed-tier"
@@ -136,7 +137,7 @@ export function DegradationBanner() {
       queueMicrotask(() => {
         setShowRecoveryToast(true)
         setDismissedTier(null)
-        try { sessionStorage.removeItem(DISMISS_KEY) } catch { /* noop */ }
+        try { sessionStorage.removeItem(DISMISS_KEY) } catch (err) { logSwallowedError(err, "sessionStorage.removeItem", { key: DISMISS_KEY }) }
       })
       recoveryTimerRef.current = setTimeout(() => {
         setShowRecoveryToast(false)
@@ -152,7 +153,7 @@ export function DegradationBanner() {
       setDismissedTier(tier)
       try {
         sessionStorage.setItem(DISMISS_KEY, tier)
-      } catch { /* noop */ }
+      } catch (err) { logSwallowedError(err, "sessionStorage.setItem", { key: DISMISS_KEY }) }
     }
   }, [tier])
 

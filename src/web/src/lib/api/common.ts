@@ -25,6 +25,7 @@ export const MCP_BASE = _resolveBaseUrl(_rawMcpUrl)
 const API_KEY = _env?.VITE_CERID_API_KEY || ""
 
 import { uuid } from "@/lib/utils"
+import { logSwallowedError } from "@/lib/log-swallowed"
 
 export function mcpHeaders(extra: Record<string, string> = {}): Record<string, string> {
   const headers: Record<string, string> = { ...extra }
@@ -35,7 +36,7 @@ export function mcpHeaders(extra: Record<string, string> = {}): Record<string, s
   try {
     const token = localStorage.getItem("cerid-access-token")
     if (token) headers["Authorization"] = `Bearer ${token}`
-  } catch { /* noop */ }
+  } catch (err) { logSwallowedError(err, "localStorage.getItem", { key: "cerid-access-token" }) }
   return headers
 }
 

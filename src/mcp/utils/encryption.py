@@ -10,6 +10,8 @@ import logging
 import os
 import threading
 
+import sentry_sdk
+
 from errors import ConfigError
 
 logger = logging.getLogger("ai-companion.encryption")
@@ -81,9 +83,10 @@ class FieldEncryptor:
         token = ciphertext[len(ENCRYPTED_PREFIX):]
         try:
             return self._fernet.decrypt(token.encode("ascii")).decode("utf-8")
-        except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
-            logger.error(f"Decryption failed: {e}")
-            return ciphertext  # return raw value for key rotation debugging
+        except (ConfigError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
+            logger.exception("encryption.decrypt_failed")
+            sentry_sdk.capture_exception()
+            return ciphertext  # preserved: key-rotation debugging fallback
 
     def encrypt_dict(self, data: dict, fields: list[str]) -> dict:
         """Encrypt specified fields in a dictionary."""
@@ -129,8 +132,9 @@ def get_encryptor() -> FieldEncryptor | None:
             logger.info(f"Encryption enabled (key hash: {_encryptor.key_hash})")
             _initialized = True
             return _encryptor
-        except (ImportError, ValueError) as e:
-            logger.error(f"Encryption initialization failed: {e}")
+        except (ImportError, ValueError):
+            logger.exception("encryption.init_failed")
+            sentry_sdk.capture_exception()
             _encryptor = None
             _initialized = True
             return None

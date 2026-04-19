@@ -18,7 +18,7 @@ from app.sync.user_state import (
     read_preferences,
     read_settings,
     write_conversation,
-    write_preferences,
+    write_preferences_with_retry,
 )
 
 router = APIRouter(prefix="/user-state", tags=["user-state"])
@@ -103,10 +103,25 @@ def remove_conversation(conv_id: str):
 
 
 @router.patch("/preferences")
-def save_preferences(body: dict[str, Any]):
-    """Merge UI preferences into the stored state."""
+async def save_preferences(body: dict[str, Any]):
+    """Merge UI preferences into the stored state.
+
+    Runs the write through :func:`write_preferences_with_retry` so macOS
+    Dropbox lock collisions (EDEADLK) recover transparently. After the
+    retry budget exhausts, returns 503 with a user-readable message
+    rather than a generic 500.
+    """
     sd = _sync_dir()
     if not sd:
         raise HTTPException(status_code=503, detail="Sync directory not configured")
-    write_preferences(sd, body)
+    ok = await write_preferences_with_retry(sd, body)
+    if not ok:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "UI preferences were not saved to cloud sync — another "
+                "process (likely Dropbox) held the file lock. Retry in a "
+                "moment or pause Dropbox briefly."
+            ),
+        )
     return {"ok": True}

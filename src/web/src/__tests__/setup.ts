@@ -2,8 +2,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import "@testing-library/jest-dom/vitest"
-import { afterEach } from "vitest"
+import { afterEach, vi } from "vitest"
 import { cleanup } from "@testing-library/react"
+
+// Global mock for sonner so any test that renders a component using
+// toast (or the <Toaster /> in main.tsx) doesn't throw in jsdom.
+vi.mock("sonner", () => ({
+  toast: {
+    error: vi.fn(),
+    success: vi.fn(),
+    info: vi.fn(),
+    warning: vi.fn(),
+    message: vi.fn(),
+  },
+  Toaster: () => null,
+}))
 
 // Ensure React Testing Library cleanup runs after every test and flush
 // pending requestAnimationFrame callbacks to avoid jsdom teardown errors.

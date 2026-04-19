@@ -23,10 +23,12 @@ from typing import Any
 
 import numpy as np
 import onnxruntime as ort
+import sentry_sdk
 from huggingface_hub import hf_hub_download
 from tokenizers import Tokenizer
 
 import config
+from core.observability.span_helpers import span
 
 logger = logging.getLogger("ai-companion.nli")
 
@@ -112,13 +114,13 @@ def warmup() -> None:
         return
     try:
         _load_model()
-    except Exception as exc:
+    except Exception:
         _MODEL_LOADED = False
-        logger.warning(
-            "NLI warmup failed: %s — /health will report unhealthy until a "
-            "lazy load on first use succeeds",
-            exc,
+        logger.exception(
+            "nli.warmup_failed — /health will report unhealthy until a "
+            "lazy load on first use succeeds"
         )
+        sentry_sdk.capture_exception()
 
 
 def nli_score(premise: str, hypothesis: str) -> dict[str, Any]:
@@ -193,7 +195,8 @@ def batch_nli_score(pairs: list[tuple[str, str]]) -> list[dict[str, Any]]:
     if "token_type_ids" in expected:
         feeds["token_type_ids"] = token_type_ids
 
-    logits = session.run(None, feeds)[0]  # shape: (N, 3)
+    with span("retrieval.nli", "onnx_entail", batch_size=len(pairs)):
+        logits = session.run(None, feeds)[0]  # shape: (N, 3)
     probs = _softmax(logits)  # shape: (N, 3)
 
     results: list[dict[str, Any]] = []

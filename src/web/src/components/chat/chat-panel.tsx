@@ -41,6 +41,7 @@ import type { ChatMessage } from "@/lib/types"
 import { MODELS } from "@/lib/types"
 import { externalToKBResult } from "@/lib/kb-utils"
 import { uuid } from "@/lib/utils"
+import { logSwallowedError } from "@/lib/log-swallowed"
 
 const NARROW_MQ = "(max-width: 1024px)"
 const narrowSubscribe = (cb: () => void) => {
@@ -242,7 +243,7 @@ export function ChatPanel() {
       setTimeout(() => {
         setOllamaSetupActive(false)
         setOllamaDismissed(true)
-        try { localStorage.setItem("cerid-ollama-dismissed", "1") } catch { /* noop */ }
+        try { localStorage.setItem("cerid-ollama-dismissed", "1") } catch (err) { logSwallowedError(err, "localStorage.setItem", { key: "cerid-ollama-dismissed" }) }
       }, 3000)
     } catch (err) {
       const activeIdx = steps.findIndex(s => s.status === "active")
@@ -684,7 +685,7 @@ export function ChatPanel() {
                 <button onClick={() => runOllamaSetup()} className="rounded-md border border-teal-500/40 px-2.5 py-1 text-[11px] font-medium text-teal-400 hover:bg-teal-500/10">
                   Retry
                 </button>
-                <button onClick={() => { setOllamaSetupActive(false); setOllamaDismissed(true); try { localStorage.setItem("cerid-ollama-dismissed", "1") } catch { /* noop */ } }} className="ml-auto text-[10px] text-muted-foreground hover:text-foreground">
+                <button onClick={() => { setOllamaSetupActive(false); setOllamaDismissed(true); try { localStorage.setItem("cerid-ollama-dismissed", "1") } catch (err) { logSwallowedError(err, "localStorage.setItem", { key: "cerid-ollama-dismissed" }) } }} className="ml-auto text-[10px] text-muted-foreground hover:text-foreground">
                   Dismiss
                 </button>
               </div>
@@ -712,7 +713,7 @@ export function ChatPanel() {
                 I&apos;ve installed it
               </button>
               <button
-                onClick={() => { setOllamaShowSetup(false); setOllamaDismissed(true); try { localStorage.setItem("cerid-ollama-dismissed", "1") } catch { /* noop */ } }}
+                onClick={() => { setOllamaShowSetup(false); setOllamaDismissed(true); try { localStorage.setItem("cerid-ollama-dismissed", "1") } catch (err) { logSwallowedError(err, "localStorage.setItem", { key: "cerid-ollama-dismissed" }) } }}
                 className="text-[10px] text-muted-foreground hover:text-foreground"
               >
                 Dismiss
@@ -734,7 +735,7 @@ export function ChatPanel() {
                 Enable
               </button>
               <button
-                onClick={() => { setOllamaDismissed(true); try { localStorage.setItem("cerid-ollama-dismissed", "1") } catch { /* noop */ } }}
+                onClick={() => { setOllamaDismissed(true); try { localStorage.setItem("cerid-ollama-dismissed", "1") } catch (err) { logSwallowedError(err, "localStorage.setItem", { key: "cerid-ollama-dismissed" }) } }}
                 className="shrink-0 text-muted-foreground hover:text-foreground"
               >
                 <X className="h-3.5 w-3.5" />

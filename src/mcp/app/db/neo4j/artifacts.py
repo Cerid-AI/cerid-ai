@@ -9,6 +9,8 @@ import json
 import logging
 from typing import Any
 
+import sentry_sdk
+
 import config
 from utils.time import utcnow_iso
 
@@ -559,6 +561,8 @@ def save_verification_report(
             verification_methods=sorted(methods),
         )
 
+        from core.reliability.read_after_write import assert_created
+
         for aid in artifact_ids:
             try:
                 session.run(
@@ -571,8 +575,28 @@ def save_verification_report(
                     cid=conversation_id,
                     aid=aid,
                 )
-            except Exception as e:
-                logger.debug("Failed to create report edges for %s: %s", aid, e)
+            except Exception:
+                logger.exception(
+                    "verification_report.edge_merge_failed",
+                    extra={"conversation_id": conversation_id, "aid": aid},
+                )
+                sentry_sdk.capture_exception()
+                continue
+
+            # Read-after-write: if the MATCH-MATCH-MERGE pattern silently no-op'd
+            # because the Artifact didn't exist, the edges are never created.
+            # Catch that here rather than waiting for operators to notice
+            # zero VERIFIED rels in prod weeks later.
+            assert_created(
+                session,
+                check_cypher=(
+                    "MATCH (:VerificationReport {conversation_id: $cid})"
+                    "-[:VERIFIED]->(:Artifact {id: $aid}) "
+                    "RETURN count(*) > 0 AS exists"
+                ),
+                params={"cid": conversation_id, "aid": aid},
+                event_name="verification_report.verified_edge",
+            )
 
     logger.info(
         "Saved verification report %s for conversation %s (%d artifacts, %d urls, methods=%s)",

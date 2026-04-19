@@ -20,6 +20,8 @@ import logging
 import time
 from typing import Any
 
+import sentry_sdk
+
 from deps import get_redis
 from errors import RetrievalError
 
@@ -53,8 +55,9 @@ def get_cached(query: str, domain: str, top_k: int, context_hint: str = "") -> d
                 stored["cached"] = True
                 stored["cache_age_ms"] = age_ms
             return stored
-    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
-        logger.warning(f"Cache read failed: {e}")
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
+        logger.exception("query_cache.read_failed")
+        sentry_sdk.capture_exception()
     return None
 
 
@@ -69,8 +72,9 @@ def set_cached(
         payload: dict[str, Any] = dict(result)
         payload[_STORED_AT_FIELD] = time.time()
         get_redis().setex(key, ttl, json.dumps(payload, default=str))
-    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
-        logger.warning(f"Cache write failed: {e}")
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
+        logger.exception("query_cache.write_failed")
+        sentry_sdk.capture_exception()
 
 
 def invalidate_all() -> None:
@@ -91,8 +95,9 @@ def invalidate_all() -> None:
                 break
         if count:
             logger.info(f"Invalidated {count} cached queries")
-    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
-        logger.warning(f"Cache invalidation failed: {e}")
+    except (RetrievalError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError):
+        logger.exception("query_cache.invalidation_failed")
+        sentry_sdk.capture_exception()
 
 
 async def invalidate_cache_non_blocking() -> None:

@@ -70,6 +70,12 @@ async def upload_file_endpoint(
     if len(content) == 0:
         raise HTTPException(status_code=400, detail="Empty file")
 
+    # Magic-byte validation: guard against a .pdf that's actually a ZIP bomb,
+    # a .docx that is not actually a ZIP, etc. Text-only extensions are
+    # bypassed — they have no magic signature.
+    from app.parsers.magic_bytes import validate_magic_bytes
+    validate_magic_bytes(suffix, content, filename=file.filename)
+
     # Save to /tmp (always writable) — the archive mount may be read-only on macOS Docker
     tmp_path = None
     try:
@@ -90,7 +96,18 @@ async def upload_file_endpoint(
         parsed = await asyncio.to_thread(_parse_file, tmp_path)
         text = parsed.get("text", "")
         if not text.strip():
-            raise ValueError(f"No text extracted from '{file.filename}'")
+            # 422 (not 400) because the request itself was well-formed — the
+            # document just contained no extractable text (image-only PDF,
+            # empty .docx, scanned document without OCR). Distinguishing this
+            # from a truly bad request lets the GUI render a meaningful message
+            # instead of the generic "backend unreachable" it used to show.
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"No extractable text in '{file.filename}'. "
+                    f"Image-only or scanned documents need OCR."
+                ),
+            )
 
         # Honor skip_metadata: the wizard's fast-path swaps the spaCy + tiktoken
         # pipeline for filename-derived keywords so Try-It-Out doesn't block

@@ -743,3 +743,46 @@ export async function fetchIngestHistory(
   if (!res.ok) return { items: [], total: 0, next_cursor: null }
   return res.json()
 }
+
+// ---------------------------------------------------------------------------
+// Write-only OpenRouter key API (R4-1)
+// The raw key value NEVER appears in any response body.
+// ---------------------------------------------------------------------------
+
+export interface OpenRouterKeyStatus {
+  configured: boolean
+  last4: string | null
+  updated_at: string | null
+}
+
+export interface OpenRouterKeyTestResult {
+  valid: boolean
+  credits_remaining: number | null
+  error: string | null
+}
+
+export async function fetchOpenRouterKeyStatus(): Promise<OpenRouterKeyStatus> {
+  const res = await fetch(`${MCP_BASE}/settings/openrouter-key`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to fetch OpenRouter key status"))
+  return res.json()
+}
+
+export async function putOpenRouterKey(api_key: string): Promise<OpenRouterKeyStatus> {
+  const res = await fetch(`${MCP_BASE}/settings/openrouter-key`, {
+    method: "PUT",
+    headers: { ...mcpHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ api_key }),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to save OpenRouter key"))
+  return res.json()
+}
+
+export async function testOpenRouterKey(api_key?: string): Promise<OpenRouterKeyTestResult> {
+  const res = await fetch(`${MCP_BASE}/settings/openrouter-key/test`, {
+    method: "POST",
+    headers: { ...mcpHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(api_key ? { api_key } : {}),
+  })
+  if (!res.ok) throw new Error(await extractError(res, "Failed to test OpenRouter key"))
+  return res.json()
+}
