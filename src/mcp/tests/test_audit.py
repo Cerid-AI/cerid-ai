@@ -7,7 +7,7 @@ import asyncio
 import json
 from unittest.mock import MagicMock, patch
 
-from agents.audit import (
+from core.agents.audit import (
     AVG_TOKENS,
     COST_PER_1K_TOKENS,
     MODEL_COST_RATES,

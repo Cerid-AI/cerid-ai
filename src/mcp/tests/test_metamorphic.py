@@ -63,7 +63,7 @@ class TestGenerateMutations:
     async def test_returns_dict_with_keys(self):
         mock_response = '{"synonym": "The sky appears blue", "antonym": "The sky appears green"}'
         with patch(
-            "utils.internal_llm.call_internal_llm",
+            "core.utils.internal_llm.call_internal_llm",
             new_callable=AsyncMock,
             return_value=mock_response,
         ):
@@ -78,7 +78,7 @@ class TestGenerateMutations:
     @pytest.mark.asyncio
     async def test_fallback_on_llm_failure(self):
         with patch(
-            "utils.internal_llm.call_internal_llm",
+            "core.utils.internal_llm.call_internal_llm",
             new_callable=AsyncMock,
             side_effect=RuntimeError("LLM unavailable"),
         ):
@@ -94,7 +94,7 @@ class TestStubDelegation:
     @pytest.mark.asyncio
     async def test_skips_when_plugin_not_loaded(self):
         """Stub returns skip sentinel when no handler is registered."""
-        from agents.hallucination.metamorphic import metamorphic_score, set_metamorphic_handler
+        from app.agents.hallucination.metamorphic import metamorphic_score, set_metamorphic_handler
 
         # Ensure no handler is set
         set_metamorphic_handler(None)  # type: ignore[arg-type]
@@ -106,7 +106,7 @@ class TestStubDelegation:
     @pytest.mark.asyncio
     async def test_delegates_when_plugin_loaded(self):
         """Stub delegates to the injected handler when set."""
-        from agents.hallucination.metamorphic import metamorphic_score, set_metamorphic_handler
+        from app.agents.hallucination.metamorphic import metamorphic_score, set_metamorphic_handler
 
         async def mock_handler(*args, **kwargs):
             return {"score": 0.42, "from_plugin": True}
@@ -146,7 +146,7 @@ class TestMetamorphicScore:
                 return_value=True,
             ),
             patch(
-                "utils.internal_llm.call_internal_llm",
+                "core.utils.internal_llm.call_internal_llm",
                 new_callable=AsyncMock,
                 return_value=mock_llm,
             ),
@@ -186,7 +186,7 @@ class TestMetamorphicScore:
                 return_value=True,
             ),
             patch(
-                "utils.internal_llm.call_internal_llm",
+                "core.utils.internal_llm.call_internal_llm",
                 new_callable=AsyncMock,
                 return_value=mock_llm,
             ),

@@ -41,7 +41,7 @@ class DegradationTier(Enum):
 def _is_breaker_open(name: str) -> bool:
     """Check whether a named circuit breaker is in the OPEN state."""
     try:
-        from utils.circuit_breaker import CircuitState, get_breaker
+        from core.utils.circuit_breaker import CircuitState, get_breaker
         return get_breaker(name).state == CircuitState.OPEN
     except Exception:  # noqa: BLE001
         return False  # assume healthy if we can't check

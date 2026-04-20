@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from services.ingestion import ingest_content
+from app.services.ingestion import ingest_content
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -82,7 +82,7 @@ class TestIngestionPipeline:
     patch services.ingestion.get_redis/get_neo4j/get_chroma + graph module.
     """
 
-    @patch("routers.system_monitor.get_redis", return_value=MagicMock())
+    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.cache")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
@@ -107,7 +107,7 @@ class TestIngestionPipeline:
         collection.add.assert_called_once()
         g.create_artifact.assert_called_once()
 
-    @patch("routers.system_monitor.get_redis", return_value=MagicMock())
+    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")
@@ -127,7 +127,7 @@ class TestIngestionPipeline:
         assert result["duplicate_of"] == "adr-001.md"
         collection.add.assert_not_called()
 
-    @patch("routers.system_monitor.get_redis", return_value=MagicMock())
+    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.cache")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
@@ -148,7 +148,7 @@ class TestIngestionPipeline:
         assert result["status"] == "success"
         assert result["domain"] == "coding"
 
-    @patch("routers.system_monitor.get_redis", return_value=MagicMock())
+    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.cache")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
@@ -171,7 +171,7 @@ class TestIngestionPipeline:
         ids = add_call.kwargs.get("ids") or add_call.args[0]
         assert len(ids) == result["chunks"]
 
-    @patch("routers.system_monitor.get_redis", return_value=MagicMock())
+    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")
@@ -187,7 +187,7 @@ class TestIngestionPipeline:
         with pytest.raises(RuntimeError, match="ChromaDB connection timeout"):
             ingest_content("some content to ingest", domain="coding")
 
-    @patch("routers.system_monitor.get_redis", return_value=MagicMock())
+    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.cache")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
@@ -215,15 +215,15 @@ class TestQueryRetrievalPipeline:
     """Tests for query -> retrieval pipeline.
 
     Patches target agents.decomposer (where multi_domain_query lives) and
-    utils.bm25 (which multi_domain_query calls internally).
+    core.retrieval.bm25 (which multi_domain_query calls internally).
     """
 
     def _run(self, coro):
         import asyncio
         return asyncio.get_event_loop().run_until_complete(coro)
 
-    @patch("agents.decomposer.config")
-    @patch("agents.decomposer.DOMAINS", ["coding", "general"])
+    @patch("app.agents.decomposer.config")
+    @patch("app.agents.decomposer.DOMAINS", ["coding", "general"])
     def test_query_returns_relevant_chunks(self, mock_config):
         mock_config.DOMAINS = ["coding", "general"]
         mock_config.collection_name = lambda d: f"domain_{d}"
@@ -243,8 +243,8 @@ class TestQueryRetrievalPipeline:
         chroma_client.get_collection.return_value = collection
         chroma_client.list_collections.return_value = []
 
-        from agents.decomposer import multi_domain_query
-        with patch("utils.bm25.is_available", return_value=False):
+        from app.agents.decomposer import multi_domain_query
+        with patch("core.retrieval.bm25.is_available", return_value=False):
             results = self._run(multi_domain_query(
                 "What database did we choose?", domains=["coding"],
                 chroma_client=chroma_client))
@@ -254,8 +254,8 @@ class TestQueryRetrievalPipeline:
         assert results[0]["content"] == "PostgreSQL uses MVCC"
         assert results[0]["relevance"] > results[1]["relevance"]
 
-    @patch("agents.decomposer.config")
-    @patch("agents.decomposer.DOMAINS", ["coding"])
+    @patch("app.agents.decomposer.config")
+    @patch("app.agents.decomposer.DOMAINS", ["coding"])
     def test_query_hybrid_search(self, mock_config):
         mock_config.DOMAINS = ["coding"]
         mock_config.collection_name = lambda d: f"domain_{d}"
@@ -274,9 +274,9 @@ class TestQueryRetrievalPipeline:
         chroma_client.get_collection.return_value = collection
         chroma_client.list_collections.return_value = []
 
-        from agents.decomposer import multi_domain_query
-        with patch("utils.bm25.is_available", return_value=True), \
-             patch("utils.bm25.search_bm25", return_value=[("chunk_1", 0.9)]):
+        from app.agents.decomposer import multi_domain_query
+        with patch("core.retrieval.bm25.is_available", return_value=True), \
+             patch("core.retrieval.bm25.search_bm25", return_value=[("chunk_1", 0.9)]):
             results = self._run(multi_domain_query(
                 "PostgreSQL MVCC", domains=["coding"],
                 chroma_client=chroma_client))
@@ -320,15 +320,15 @@ class TestQueryRetrievalPipeline:
             "retrieval_method": "private_mode",
             "timing": {}, "rerank_mode": "none",
         }
-        with patch("agents.query_agent.agent_query",
+        with patch("core.agents.query_agent.agent_query",
                     new_callable=AsyncMock, return_value=private_result) as mock_aq:
             result = await mock_aq("test query", domains=["coding"])
 
         assert result["total_results"] == 0
         assert result["context"] == ""
 
-    @patch("agents.decomposer.config")
-    @patch("agents.decomposer.DOMAINS", ["coding"])
+    @patch("app.agents.decomposer.config")
+    @patch("app.agents.decomposer.DOMAINS", ["coding"])
     def test_query_empty_collection(self, mock_config):
         mock_config.DOMAINS = ["coding"]
         mock_config.collection_name = lambda d: f"domain_{d}"
@@ -343,14 +343,14 @@ class TestQueryRetrievalPipeline:
         chroma_client.get_collection.return_value = collection
         chroma_client.list_collections.return_value = []
 
-        from agents.decomposer import multi_domain_query
-        with patch("utils.bm25.is_available", return_value=False):
+        from app.agents.decomposer import multi_domain_query
+        with patch("core.retrieval.bm25.is_available", return_value=False):
             results = self._run(multi_domain_query(
                 "anything", domains=["coding"], chroma_client=chroma_client))
         assert results == []
 
-    @patch("agents.decomposer.config")
-    @patch("agents.decomposer.DOMAINS", ["coding", "finance"])
+    @patch("app.agents.decomposer.config")
+    @patch("app.agents.decomposer.DOMAINS", ["coding", "finance"])
     def test_query_domain_filtering(self, mock_config):
         mock_config.DOMAINS = ["coding", "finance"]
         mock_config.collection_name = lambda d: f"domain_{d}"
@@ -368,8 +368,8 @@ class TestQueryRetrievalPipeline:
         chroma_client.get_collection.return_value = coding_coll
         chroma_client.list_collections.return_value = []
 
-        from agents.decomposer import multi_domain_query
-        with patch("utils.bm25.is_available", return_value=False):
+        from app.agents.decomposer import multi_domain_query
+        with patch("core.retrieval.bm25.is_available", return_value=False):
             results = self._run(multi_domain_query(
                 "async patterns", domains=["coding"], chroma_client=chroma_client))
 
@@ -385,7 +385,7 @@ class TestVerificationPipeline:
     """Tests for response verification (hallucination detection).
 
     Patches target agents.hallucination.verification internals and
-    utils.internal_llm.call_internal_llm (the LLM call site).
+    core.utils.internal_llm.call_internal_llm (the LLM call site).
     """
 
     @pytest.mark.asyncio
@@ -403,9 +403,9 @@ class TestVerificationPipeline:
             "source_urls": [],
             "explanation": "Matches known PostgreSQL info",
         }
-        with patch("agents.hallucination.verification.verify_claim",
+        with patch("core.agents.hallucination.verification.verify_claim",
                     new_callable=AsyncMock, return_value=supported_result):
-            from agents.hallucination.verification import verify_claim
+            from core.agents.hallucination.verification import verify_claim
             result = await verify_claim("PostgreSQL uses MVCC",
                                         MagicMock(), MagicMock(), MagicMock())
 
@@ -422,9 +422,9 @@ class TestVerificationPipeline:
             "source_urls": [],
             "explanation": "No evidence found",
         }
-        with patch("agents.hallucination.verification.verify_claim",
+        with patch("core.agents.hallucination.verification.verify_claim",
                     new_callable=AsyncMock, return_value=uncertain_result):
-            from agents.hallucination.verification import verify_claim
+            from core.agents.hallucination.verification import verify_claim
             result = await verify_claim("The sky is made of cheese",
                                         MagicMock(), MagicMock(), MagicMock())
 
@@ -441,9 +441,9 @@ class TestVerificationPipeline:
             "source_urls": [],
             "explanation": "Exact match: 330 meters found in KB",
         }
-        with patch("agents.hallucination.verification.verify_claim",
+        with patch("core.agents.hallucination.verification.verify_claim",
                     new_callable=AsyncMock, return_value=numerical_result):
-            from agents.hallucination.verification import verify_claim
+            from core.agents.hallucination.verification import verify_claim
             result = await verify_claim("The Eiffel Tower is 330 meters tall",
                                         MagicMock(), MagicMock(), MagicMock())
 
@@ -453,7 +453,7 @@ class TestVerificationPipeline:
     @pytest.mark.asyncio
     async def test_verify_streaming_format(self):
         """SSE event format: extraction_complete, claim_extracted, claim results, summary."""
-        from agents.hallucination.streaming import verify_response_streaming
+        from core.agents.hallucination.streaming import verify_response_streaming
 
         chroma_client, collection = _chroma_mocks()
         collection.query.return_value = _chroma_query_result([], [], [], [])
@@ -464,10 +464,10 @@ class TestVerificationPipeline:
                          "It was first released in 1996. " * 5)
 
         events = []
-        with patch("agents.hallucination.streaming.extract_claims", new_callable=AsyncMock) as mock_ex, \
-             patch("agents.hallucination.streaming.verify_claim", new_callable=AsyncMock) as mock_vc, \
-             patch("agents.hallucination.streaming.config") as mc, \
-             patch("agents.hallucination.streaming._check_history_consistency",
+        with patch("core.agents.hallucination.streaming.extract_claims", new_callable=AsyncMock) as mock_ex, \
+             patch("core.agents.hallucination.streaming.verify_claim", new_callable=AsyncMock) as mock_vc, \
+             patch("core.agents.hallucination.streaming.config") as mc, \
+             patch("core.agents.hallucination.streaming._check_history_consistency",
                    new_callable=AsyncMock, return_value=None), \
              patch("utils.agent_events.emit_agent_event"):
             mc.HALLUCINATION_THRESHOLD = 0.6
@@ -510,7 +510,7 @@ class TestFullUserJourney:
     async def test_new_user_setup_query_verify(self):
         """Full journey: ingest a doc, query it, get results, verify a claim."""
         # --- Phase 1: Ingest (mock at service.ingestion level) ---
-        with patch("routers.system_monitor.get_redis", return_value=MagicMock()), \
+        with patch("app.routers.system_monitor.get_redis", return_value=MagicMock()), \
              patch("app.services.ingestion.cache"), \
              patch("app.services.ingestion.get_redis", return_value=MagicMock()), \
              patch("app.services.ingestion.get_neo4j") as mock_neo4j_fn, \
@@ -530,7 +530,7 @@ class TestFullUserJourney:
         artifact_id = ingest_result["artifact_id"]
 
         # --- Phase 2: Query (mock multi_domain_query at function level) ---
-        from agents.assembler import assemble_context
+        from app.agents.assembler import assemble_context
 
         mock_query_results = [
             {"content": "PostgreSQL uses MVCC for concurrent access and supports ACID",
@@ -541,9 +541,9 @@ class TestFullUserJourney:
              "sub_category": "", "tags_json": "[]", "keywords": "[]"},
         ]
 
-        with patch("agents.decomposer.multi_domain_query",
+        with patch("app.agents.decomposer.multi_domain_query",
                     new_callable=AsyncMock, return_value=mock_query_results):
-            from agents.decomposer import multi_domain_query
+            from app.agents.decomposer import multi_domain_query
             query_results = await multi_domain_query(
                 "What database did we choose and why?",
                 domains=["coding"])
@@ -562,9 +562,9 @@ class TestFullUserJourney:
             "claim": "We chose PostgreSQL because it uses MVCC",
             "method": "kb_similarity",
         }
-        with patch("agents.hallucination.verification.verify_claim",
+        with patch("core.agents.hallucination.verification.verify_claim",
                     new_callable=AsyncMock, return_value=mock_verify_result):
-            from agents.hallucination.verification import verify_claim
+            from core.agents.hallucination.verification import verify_claim
             verify_result = await verify_claim(
                 "We chose PostgreSQL because it uses MVCC",
                 MagicMock(), MagicMock(), MagicMock(), threshold=0.6)
@@ -592,10 +592,10 @@ class TestFullUserJourney:
             "sub_category": "", "tags_json": "[]", "keywords": "[]",
         }
 
-        with patch("agents.decomposer.multi_domain_query",
+        with patch("app.agents.decomposer.multi_domain_query",
                     new_callable=AsyncMock,
                     return_value=[coding_result, finance_result]):
-            from agents.decomposer import multi_domain_query
+            from app.agents.decomposer import multi_domain_query
             results = await multi_domain_query(
                 "How does API rate limiting affect our systems?",
                 domains=["coding", "finance"])
@@ -607,7 +607,7 @@ class TestFullUserJourney:
     @pytest.mark.asyncio
     async def test_memory_extraction_from_chat(self):
         """Chat produces memory artifacts via the memory agent."""
-        from agents.memory import extract_memories
+        from app.agents.memory import extract_memories
 
         response_text = (
             "Based on our analysis, we decided to use PostgreSQL 15 for the "

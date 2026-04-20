@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from starlette.testclient import TestClient
 
-from routers.health import health_check, router
+from app.routers.health import health_check, router
 
 
 def _make_app():

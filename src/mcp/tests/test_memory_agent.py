@@ -17,7 +17,7 @@ if "routers.ingestion" not in sys.modules:
     import routers
     routers.ingestion = _stub
 
-from agents.memory import extract_memories
+from app.agents.memory import extract_memories
 
 # ---------------------------------------------------------------------------
 # Tests: extract_memories
@@ -82,7 +82,7 @@ class TestExtractAndStoreMemories:
     @patch("core.agents.memory.config")
     async def test_disabled_returns_skipped(self, mock_config):
         """Should skip when ENABLE_MEMORY_EXTRACTION is False."""
-        from agents.memory import extract_and_store_memories
+        from app.agents.memory import extract_and_store_memories
 
         mock_config.ENABLE_MEMORY_EXTRACTION = False
         result = await extract_and_store_memories("text", "conv-123")
@@ -93,7 +93,7 @@ class TestExtractAndStoreMemories:
     @patch("core.agents.memory.extract_memories", new_callable=AsyncMock)
     async def test_no_memories_extracted(self, mock_extract, mock_config):
         """When no memories are extracted, should report zero."""
-        from agents.memory import extract_and_store_memories
+        from app.agents.memory import extract_and_store_memories
 
         mock_config.ENABLE_MEMORY_EXTRACTION = True
         mock_extract.return_value = []

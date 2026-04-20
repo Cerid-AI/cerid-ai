@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agents.memory import calculate_memory_score
+from app.agents.memory import calculate_memory_score
 
 # ---------------------------------------------------------------------------
 # calculate_memory_score — decay curves per type

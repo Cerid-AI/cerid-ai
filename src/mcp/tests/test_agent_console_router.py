@@ -18,7 +18,7 @@ def client():
     """Minimal FastAPI app wiring only the agent_console router + activity alias."""
     # Import inside the fixture so conftest's dependency stubs have already been
     # registered before the router module is imported.
-    from routers import agent_console
+    from app.routers import agent_console
 
     app = FastAPI()
     app.include_router(agent_console.router)
@@ -38,7 +38,7 @@ def test_activity_recent_returns_events(client):
             "metadata": {"intent": "factoid"},
         },
     ]
-    with patch("routers.agent_console.get_recent_events", return_value=fake):
+    with patch("app.routers.agent_console.get_recent_events", return_value=fake):
         response = client.get("/agents/activity/recent", params={"count": 10})
     assert response.status_code == 200
     body = response.json()
@@ -48,14 +48,14 @@ def test_activity_recent_returns_events(client):
 
 def test_activity_recent_validates_count(client):
     """count must be within 1..200 per Query(ge=1, le=200)."""
-    with patch("routers.agent_console.get_recent_events", return_value=[]):
+    with patch("app.routers.agent_console.get_recent_events", return_value=[]):
         bad = client.get("/agents/activity/recent", params={"count": 0})
     assert bad.status_code == 422
 
 
 def test_activity_clear_deletes_stream(client):
     """DELETE /agents/activity/clear calls clear_events() and reports count."""
-    with patch("routers.agent_console.clear_events", return_value=42) as mock_clear:
+    with patch("app.routers.agent_console.clear_events", return_value=42) as mock_clear:
         response = client.delete("/agents/activity/clear")
     assert response.status_code == 200
     assert response.json() == {"cleared": 42}
@@ -64,7 +64,7 @@ def test_activity_clear_deletes_stream(client):
 
 def test_legacy_agent_console_recent_still_works(client):
     """The legacy /agent-console/recent path is preserved for backward compat."""
-    with patch("routers.agent_console.get_recent_events", return_value=[]):
+    with patch("app.routers.agent_console.get_recent_events", return_value=[]):
         response = client.get("/agent-console/recent", params={"count": 1})
     assert response.status_code == 200
     assert response.json() == {"events": [], "count": 0}
@@ -82,7 +82,7 @@ def test_activity_stream_returns_sse_content_type(client):
     # the StreamingResponse terminates instead of looping on a MagicMock.
     fake_redis.xread.side_effect = [None, _asyncio.CancelledError()]
 
-    with patch("routers.agent_console.get_redis", return_value=fake_redis):
+    with patch("app.routers.agent_console.get_redis", return_value=fake_redis):
         with client.stream("GET", "/agents/activity/stream") as response:
             assert response.status_code == 200
             assert response.headers["content-type"].startswith("text/event-stream")

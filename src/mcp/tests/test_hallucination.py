@@ -11,27 +11,22 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-# Pre-seed heavy modules that verify_claim imports lazily
-# so @patch can target them without triggering real imports.
-if "agents.query_agent" not in sys.modules:
-    _stub = ModuleType("agents.query_agent")
+# Pre-seed heavy modules that verify_claim imports lazily so
+# ``@patch`` can target them without triggering real imports.
+# Post-Sprint E the canonical path is ``core.agents.query_agent`` —
+# pre-seeding against the old ``agents.query_agent`` bridge breaks
+# collection because that bridge no longer exists.
+if "core.agents.query_agent" not in sys.modules:
+    _stub = ModuleType("core.agents.query_agent")
     _stub.agent_query = None  # type: ignore[attr-defined]
     _stub.lightweight_kb_query = None  # type: ignore[attr-defined]
-    sys.modules["agents.query_agent"] = _stub
-    # Also register as attribute on the parent package so _dot_lookup works.
-    import agents
-    agents.query_agent = _stub  # type: ignore[attr-defined]
+    sys.modules["core.agents.query_agent"] = _stub
+    import core.agents as _core_agents
+    _core_agents.query_agent = _stub  # type: ignore[attr-defined]
 
 import config
-from agents.hallucination import (
-    REDIS_HALLUCINATION_PREFIX,
-    check_hallucinations,
-    extract_claims,
-    get_hallucination_report,
-    verify_claim,
-    verify_response_streaming,
-)
 from core.agents.hallucination import (
+    REDIS_HALLUCINATION_PREFIX,
     _build_verification_details,
     _check_history_consistency,
     _check_numeric_alignment,
@@ -52,6 +47,11 @@ from core.agents.hallucination import (
     _pick_verification_model,
     _query_memories,
     _verify_claim_externally,
+    check_hallucinations,
+    extract_claims,
+    get_hallucination_report,
+    verify_claim,
+    verify_response_streaming,
 )
 
 # ---------------------------------------------------------------------------
@@ -98,39 +98,77 @@ class TestExtractClaims:
         assert claims == []
         assert method == "none"
 
-    @pytest.mark.asyncio
-    @patch("core.utils.llm_client.call_llm", new_callable=AsyncMock)
-    async def test_successful_extraction(self, mock_call_llm):
-        """Valid LLM response should parse into claim list."""
-        mock_call_llm.return_value = '["Python was created in 1991", "The GIL limits threading"]'
+    # Patch target is the module-local name imported at extraction.py:38 —
+    # ``from core.utils.internal_llm import call_internal_llm``. Patching the
+    # source module has no effect because ``extract_claims`` resolves the name
+    # through ``core.agents.hallucination.extraction``.
+    _EXTRACTION_MOD = "core.agents.hallucination.extraction"
 
-        claims, method = await extract_claims("x" * (config.HALLUCINATION_MIN_RESPONSE_LENGTH + 1))
+    @pytest.mark.asyncio
+    @patch(f"{_EXTRACTION_MOD}.call_internal_llm", new_callable=AsyncMock)
+    async def test_successful_extraction(self, mock_internal):
+        """Valid LLM response should parse into claim list with method=llm."""
+        # Non-factual filler that cannot be picked up by the heuristic regex
+        # forces the LLM path rather than the heuristic fallback.
+        filler = "hello. world. foo. bar. " * 10
+        mock_internal.return_value = '{"claims": ["Python was created in 1991", "The GIL limits threading"]}'
+
+        claims, method = await extract_claims(filler)
         assert len(claims) == 2
         assert "Python" in claims[0]
         assert method == "llm"
 
     @pytest.mark.asyncio
-    @patch("core.utils.llm_client.call_llm", new_callable=AsyncMock)
-    async def test_extraction_handles_code_block(self, mock_call_llm):
+    @patch(f"{_EXTRACTION_MOD}.call_internal_llm", new_callable=AsyncMock)
+    async def test_extraction_handles_code_block(self, mock_internal):
         """LLM responses wrapped in markdown code blocks should parse correctly."""
-        mock_call_llm.return_value = '```json\n["claim one"]\n```'
+        filler = "hello. world. foo. bar. " * 10
+        mock_internal.return_value = '```json\n{"claims": ["claim one"]}\n```'
 
-        claims, method = await extract_claims("x" * (config.HALLUCINATION_MIN_RESPONSE_LENGTH + 1))
+        claims, method = await extract_claims(filler)
         assert len(claims) == 1
         assert claims[0] == "claim one"
         assert method == "llm"
 
     @pytest.mark.asyncio
-    @patch("core.utils.llm_client.call_llm", new_callable=AsyncMock)
-    async def test_handles_structured_claim_objects(self, mock_call_llm):
+    @patch(f"{_EXTRACTION_MOD}.call_internal_llm", new_callable=AsyncMock)
+    async def test_handles_structured_claim_objects(self, mock_internal):
         """LLM returning structured {claim, type} objects should extract claim text."""
-        mock_call_llm.return_value = '[{"claim": "Python was created in 1991", "type": "date"}, {"claim": "GIL limits threading", "type": "technical"}]'
+        filler = "hello. world. foo. bar. " * 10
+        mock_internal.return_value = (
+            '{"claims": [{"claim": "Python was created in 1991", "type": "date"}, '
+            '{"claim": "GIL limits threading", "type": "technical"}]}'
+        )
 
-        claims, method = await extract_claims("x" * (config.HALLUCINATION_MIN_RESPONSE_LENGTH + 1))
+        claims, method = await extract_claims(filler)
         assert len(claims) == 2
         assert claims[0] == "Python was created in 1991"
         assert claims[1] == "GIL limits threading"
         assert method == "llm"
+
+    @pytest.mark.asyncio
+    @patch(f"{_EXTRACTION_MOD}.call_llm", new_callable=AsyncMock)
+    @patch(f"{_EXTRACTION_MOD}.call_internal_llm", new_callable=AsyncMock)
+    async def test_falls_back_to_heuristic_when_llm_returns_empty(self, mock_internal, mock_external):
+        """When both LLM paths return no claims, the heuristic runs and method=heuristic.
+
+        Guards the ``extract_claims`` design intent: LLM first (internal,
+        then external fallback models), heuristic as the final fallback.
+        A regression that loses the heuristic fallback would fail here
+        with ``method != "heuristic"``.
+        """
+        # Both LLM layers return empty — forces heuristic fallback.
+        mock_internal.return_value = '{"claims": []}'
+        mock_external.return_value = '{"claims": []}'
+        factual = (
+            "The Eiffel Tower was completed in 1889. "
+            "Mount Everest is 8848 meters tall. "
+        ) * 3
+
+        claims, method = await extract_claims(factual)
+        assert method == "heuristic"
+        assert len(claims) >= 1  # heuristic should find the factual sentences
+        assert mock_internal.await_count >= 1  # LLM was tried first
 
 
 class TestHeuristicExtraction:
@@ -2498,7 +2536,7 @@ class TestVerificationErrorCaching:
     """Test the error caching functions in utils.cache."""
 
     def test_log_verification_error(self, mock_redis):
-        from utils.cache import log_verification_error
+        from core.utils.cache import log_verification_error
         log_verification_error(
             mock_redis,
             conversation_id="conv-err-1",
@@ -2516,7 +2554,7 @@ class TestVerificationErrorCaching:
         assert entry["phase"] == "verification"
 
     def test_log_verification_error_trims_old(self, mock_redis):
-        from utils.cache import log_verification_error
+        from core.utils.cache import log_verification_error
         log_verification_error(
             mock_redis,
             conversation_id="conv-err-2",
@@ -2530,7 +2568,7 @@ class TestVerificationErrorCaching:
         assert call_args[0][2] == -1
 
     def test_log_verification_error_handles_redis_failure(self, mock_redis):
-        from utils.cache import log_verification_error
+        from core.utils.cache import log_verification_error
         mock_redis.rpush.side_effect = Exception("Redis down")
         # Should not raise
         log_verification_error(

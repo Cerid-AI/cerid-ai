@@ -3,7 +3,7 @@
 
 """Tests for intelligent context assembly module."""
 
-from utils.context_assembler import extract_facets, intelligent_assemble
+from core.retrieval.context_assembler import extract_facets, intelligent_assemble
 
 
 class TestExtractFacets:

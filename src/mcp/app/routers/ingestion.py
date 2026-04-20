@@ -19,8 +19,8 @@ from pydantic import BaseModel, Field
 import config
 from app.deps import get_chroma, get_neo4j, get_redis
 from app.services.ingestion import ingest_batch, ingest_content, ingest_file
-from utils import cache
-from utils.time import utcnow
+from core.utils import cache
+from core.utils.time import utcnow
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion")
@@ -260,7 +260,7 @@ async def ingest_feedback_endpoint(req: FeedbackIngestRequest):
         # Trigger hallucination check if enabled (async, non-blocking)
         if config.ENABLE_HALLUCINATION_CHECK and result.get("status") == "success":
             try:
-                from agents.hallucination import check_hallucinations
+                from core.agents.hallucination import check_hallucinations
                 asyncio.get_running_loop().create_task(
                     check_hallucinations(
                         response_text=req.assistant_response,
@@ -277,7 +277,7 @@ async def ingest_feedback_endpoint(req: FeedbackIngestRequest):
         # Log conversation metrics if tokens provided
         if req.input_tokens or req.output_tokens:
             try:
-                from utils.cache import log_conversation_metrics
+                from core.utils.cache import log_conversation_metrics
                 log_conversation_metrics(
                     get_redis(),
                     conversation_id=req.conversation_id,

@@ -15,7 +15,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.deps import get_redis
-from utils.time import utcnow_iso
+from core.utils.time import utcnow_iso
 
 _logger = logging.getLogger("ai-companion.workflows")
 
@@ -256,23 +256,23 @@ async def _execute_agent_node(name: str, input_data: dict[str, Any]) -> dict[str
     query_text = input_data.get("query", input_data.get("text", ""))
 
     if name == "query":
-        from agents.query_agent import lightweight_kb_query
+        from core.agents.query_agent import lightweight_kb_query
         results = await lightweight_kb_query(query_text, top_k=input_data.get("top_k", 5))
         return {"results": results, "query": query_text}
 
     elif name == "curator":
-        from agents.curator import curate
+        from app.agents.curator import curate
         result = await curate(query_text) if asyncio.iscoroutinefunction(curate) else curate(query_text)
         return result if isinstance(result, dict) else {"status": str(result)}
 
     elif name == "triage":
-        from agents.triage import triage_file
+        from app.agents.triage import triage_file
         file_path = input_data.get("file_path", "")
         return await triage_file(file_path)
 
     elif name == "rectify":
-        from agents.rectify import rectify
         from app.deps import get_chroma, get_neo4j, get_redis
+        from core.agents.rectify import rectify
         return await rectify(
             neo4j_driver=get_neo4j(),
             chroma_client=get_chroma(),
@@ -280,15 +280,15 @@ async def _execute_agent_node(name: str, input_data: dict[str, Any]) -> dict[str
         )
 
     elif name == "audit":
-        from agents.audit import audit
         from app.deps import get_redis as _get_redis
+        from core.agents.audit import audit
         return await audit(redis_client=_get_redis())
 
     elif name == "maintenance":
-        from agents.maintenance import check_system_health
         from app.deps import get_chroma as _get_chroma
         from app.deps import get_neo4j as _get_neo4j
         from app.deps import get_redis as _get_redis2
+        from core.agents.maintenance import check_system_health
         result = check_system_health(
             neo4j_driver=_get_neo4j(),
             chroma_client=_get_chroma(),
@@ -297,10 +297,10 @@ async def _execute_agent_node(name: str, input_data: dict[str, Any]) -> dict[str
         return result if isinstance(result, dict) else {"status": str(result)}
 
     elif name == "hallucination":
-        from agents.hallucination import check_hallucinations
         from app.deps import get_chroma as _gc
         from app.deps import get_neo4j as _gn
         from app.deps import get_redis as _gr
+        from core.agents.hallucination import check_hallucinations
         return await check_hallucinations(
             response_text=query_text,
             conversation_id=input_data.get("conversation_id", "workflow"),
@@ -310,17 +310,17 @@ async def _execute_agent_node(name: str, input_data: dict[str, Any]) -> dict[str
         )
 
     elif name == "memory":
-        from agents.memory import extract_memories
+        from app.agents.memory import extract_memories
         return {"results": await extract_memories(
             response_text=query_text,
             conversation_id=input_data.get("conversation_id", "workflow"),
         )}
 
     elif name == "self_rag":
-        from agents.self_rag import self_rag_enhance
         from app.deps import get_chroma as _gc2
         from app.deps import get_neo4j as _gn2
         from app.deps import get_redis as _gr2
+        from core.agents.self_rag import self_rag_enhance
         return await self_rag_enhance(
             query_result=input_data,
             response_text=query_text,

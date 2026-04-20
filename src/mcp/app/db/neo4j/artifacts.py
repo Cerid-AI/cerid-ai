@@ -12,7 +12,7 @@ from typing import Any
 import sentry_sdk
 
 import config
-from utils.time import utcnow_iso
+from core.utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.graph")
 
@@ -507,31 +507,46 @@ def save_verification_report(
         external-verified claims retain provenance without an Artifact node.
       * ``(r)-[:EXTRACTED_FROM]->(:Artifact)`` for every referenced artifact.
       * ``(r)-[:VERIFIED]->(:Artifact)`` alias retained for backward compat.
+
+    Claim normalization is delegated to
+    ``core.agents.hallucination.models.ClaimVerification.from_legacy_dict``
+    so this writer handles every historical claim shape (pre-v0.84
+    legacy, v0.84 flat, speculative nested) through one adapter. Before
+    Sprint B, the same shape-detection logic lived duplicated in this
+    function, ``m0001``, and ``verified_memory``; the P1.4 bug landed
+    because only one of them was updated. The canonical model makes
+    that class of drift impossible.
     """
     import uuid
+
+    from core.agents.hallucination.models import ClaimVerification
 
     report_id = str(uuid.uuid4())
     claims_json = json.dumps(claims)
 
+    # Normalize incoming claims ONCE. All downstream reads go through
+    # the model, never the raw dict. If a new shape ever appears, the
+    # adapter is the single place to teach it.
+    canonical: list[ClaimVerification] = []
+    for raw in claims:
+        try:
+            canonical.append(ClaimVerification.from_legacy_dict(raw))
+        except Exception as exc:
+            logger.warning(
+                "verification_report.claim_normalize_failed: %s — keys=%s",
+                exc, list(raw.keys()) if isinstance(raw, dict) else type(raw).__name__,
+            )
+            # Best-effort: skip malformed claim rather than 500 the whole save.
+            continue
+
     artifact_ids: set[str] = set()
     source_urls: set[str] = set()
     methods: set[str] = set()
-    for claim in claims:
-        method = claim.get("verification_method", "")
-        if method:
-            methods.add(method)
-        # Claim-level flat URL list (actual shape emitted by verification pipeline)
-        for u in claim.get("source_urls", []) or []:
-            if isinstance(u, str) and u:
-                source_urls.add(u)
-        # Structured sources (future shape + KB matches with artifact_id)
-        for src in claim.get("sources", []) or []:
-            aid = src.get("artifact_id") or ""
-            if aid:
-                artifact_ids.add(aid)
-            url = src.get("url") or src.get("source_url") or ""
-            if url:
-                source_urls.add(url)
+    for c in canonical:
+        if c.verification_method:
+            methods.add(c.verification_method)
+        source_urls.update(u for u in c.source_urls if isinstance(u, str) and u)
+        artifact_ids.update(c.artifact_ids())
 
     with driver.session() as session:
         session.run(

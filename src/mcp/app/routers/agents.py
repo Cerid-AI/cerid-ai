@@ -112,6 +112,13 @@ class HallucinationCheckRequest(BaseModel):
     model: str | None = None
     user_query: str | None = None
     expert_mode: bool = False
+    # Sprint C: auto-persist to Neo4j :VerificationReport on successful
+    # return. Default True collapses the old two-endpoint dance
+    # (/agent/hallucination then /verification/save) into one call.
+    # External SDK consumers that manage their own persistence can
+    # opt out with persist=False; the standalone /verification/save
+    # remains available for that path.
+    persist: bool = True
 
 
 class MemoryExtractionRequest(BaseModel):
@@ -246,7 +253,7 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
         strict_domains = req.strict_domains if req.strict_domains else consumer_strict
 
         if req.rag_mode in ("smart", "custom_smart"):
-            from agents.retrieval_orchestrator import orchestrated_query
+            from app.agents.retrieval_orchestrator import orchestrated_query
             result = await orchestrated_query(
                 query=req.query,
                 rag_mode=req.rag_mode,
@@ -282,7 +289,7 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
                     "source_status": {"kb": "disabled"},
                 }
             else:
-                from agents.query_agent import agent_query
+                from core.agents.query_agent import agent_query
                 result = await agent_query(
                     query=req.query,
                     domains=req.domains,
@@ -308,7 +315,7 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
             ):
                 _ext_results: list = []
                 try:
-                    from agents.retrieval_orchestrator import _extract_search_terms
+                    from app.agents.retrieval_orchestrator import _extract_search_terms
                     from utils.data_sources import registry
                     _search_terms = _extract_search_terms(req.query)
                     _ext_results = await asyncio.wait_for(
@@ -345,7 +352,7 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
         # Self-RAG: validate claims and refine retrieval if enabled
         use_self_rag = req.enable_self_rag if req.enable_self_rag is not None else config.ENABLE_SELF_RAG
         if use_self_rag and req.response_text:
-            from agents.self_rag import self_rag_enhance
+            from core.agents.self_rag import self_rag_enhance
             result = await self_rag_enhance(
                 query_result=result,
                 response_text=req.response_text,
@@ -369,7 +376,7 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
 async def triage_file_endpoint(req: TriageFileRequest):
     try:
         validate_file_path(req.file_path)
-        from agents.triage import triage_file
+        from app.agents.triage import triage_file
         triage_result = await triage_file(
             file_path=req.file_path,
             domain=req.domain,
@@ -402,7 +409,7 @@ async def triage_file_endpoint(req: TriageFileRequest):
 @router.post("/agent/triage/batch")
 async def triage_batch_endpoint(req: TriageBatchRequest):
     try:
-        from agents.triage import triage_batch
+        from app.agents.triage import triage_batch
         triage_results = await triage_batch(
             files=req.files,
             default_mode=req.default_mode,
@@ -449,9 +456,9 @@ async def triage_batch_endpoint(req: TriageBatchRequest):
 @router.post("/agent/hallucination")
 async def hallucination_check_endpoint(req: HallucinationCheckRequest):
     try:
-        from agents.hallucination import check_hallucinations
         from app.db.neo4j.memory import create_memory_node
-        return await check_hallucinations(
+        from core.agents.hallucination import check_hallucinations
+        result = await check_hallucinations(
             response_text=req.response_text,
             conversation_id=req.conversation_id,
             chroma_client=get_chroma(),
@@ -463,6 +470,52 @@ async def hallucination_check_endpoint(req: HallucinationCheckRequest):
             expert_mode=req.expert_mode,
             create_memory_fn=create_memory_node,
         )
+
+        # Sprint C auto-persist: collapse the old FE two-call dance
+        # (/agent/hallucination -> /verification/save). The standalone
+        # /verification/save endpoint stays available for consumers
+        # with explicit persistence workflows.
+        result["persisted"] = False
+        if req.persist and not result.get("skipped"):
+            claims_payload = result.get("claims") or []
+            if claims_payload:
+                try:
+                    from app.db.neo4j.artifacts import (
+                        save_verification_report as _save,
+                    )
+                    summary = result.get("summary") or {}
+                    _save(
+                        get_neo4j(),
+                        conversation_id=req.conversation_id,
+                        claims=claims_payload,
+                        overall_score=float(
+                            summary.get("overall_confidence")
+                            or result.get("overall_score")
+                            or 0.0
+                        ),
+                        verified=int(summary.get("verified", 0)),
+                        unverified=int(summary.get("unverified", 0)),
+                        uncertain=int(summary.get("uncertain", 0)),
+                        total=int(summary.get("total", len(claims_payload))),
+                    )
+                    result["persisted"] = True
+                except Exception:
+                    # Persistence failure must not break verification —
+                    # the claims are already in the response. Surface
+                    # via log_swallowed_error so dashboards catch
+                    # systematic save failures.
+                    from core.utils.swallowed import log_swallowed_error
+                    log_swallowed_error(
+                        "agent.hallucination.auto_persist",
+                        Exception("save_verification_report failed"),
+                        context={"conversation_id": req.conversation_id},
+                        redis_client=get_redis(),
+                    )
+                    logger.exception("auto_persist_failed", extra={
+                        "conversation_id": req.conversation_id,
+                    })
+
+        return result
     except Exception as e:
         logger.error(f"Hallucination check error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -471,7 +524,7 @@ async def hallucination_check_endpoint(req: HallucinationCheckRequest):
 @router.get("/agent/hallucination/{conversation_id}")
 async def hallucination_report_endpoint(conversation_id: str):
     try:
-        from agents.hallucination import get_hallucination_report
+        from core.agents.hallucination import get_hallucination_report
         report = get_hallucination_report(get_redis(), conversation_id)
         if not report:
             raise HTTPException(status_code=404, detail="No hallucination report found")
@@ -493,8 +546,12 @@ class ClaimFeedbackRequest(BaseModel):
 async def claim_feedback_endpoint(req: ClaimFeedbackRequest):
     """Record user feedback on a verification claim."""
     try:
-        from agents.hallucination import REDIS_HALLUCINATION_PREFIX, REDIS_HALLUCINATION_TTL, get_hallucination_report
-        from utils.cache import log_claim_feedback
+        from core.agents.hallucination import (
+            REDIS_HALLUCINATION_PREFIX,
+            REDIS_HALLUCINATION_TTL,
+            get_hallucination_report,
+        )
+        from core.utils.cache import log_claim_feedback
 
         redis = get_redis()
         report = get_hallucination_report(redis, req.conversation_id)
@@ -527,7 +584,7 @@ async def claim_feedback_endpoint(req: ClaimFeedbackRequest):
 @router.post("/agent/memory/extract")
 async def memory_extract_endpoint(req: MemoryExtractionRequest):
     try:
-        from agents.memory import extract_and_store_memories
+        from app.agents.memory import extract_and_store_memories
         return await extract_and_store_memories(
             response_text=req.response_text,
             conversation_id=req.conversation_id,
@@ -544,7 +601,7 @@ async def memory_extract_endpoint(req: MemoryExtractionRequest):
 @router.post("/agent/memory/archive")
 async def memory_archive_endpoint(req: MemoryArchiveRequest):
     try:
-        from agents.memory import archive_old_memories
+        from app.agents.memory import archive_old_memories
         return await archive_old_memories(
             neo4j_driver=get_neo4j(),
             retention_days=req.retention_days,
@@ -564,7 +621,7 @@ class MemoryRecallRequest(BaseModel):
 async def memory_recall_endpoint(req: MemoryRecallRequest):
     """Recall memories relevant to a query."""
     try:
-        from agents.memory import recall_memories
+        from app.agents.memory import recall_memories
         results = await recall_memories(
             query=req.query,
             chroma_client=get_chroma(),
@@ -625,8 +682,8 @@ async def verify_stream_endpoint(req: VerifyStreamRequest):
         event_count = 0
         keepalive_count = 0
         try:
-            from agents.hallucination import verify_response_streaming
             from app.db.neo4j.memory import create_memory_node as _create_mem_fn
+            from core.agents.hallucination import verify_response_streaming
 
             logger.info(
                 "Verify stream started for conversation=%s (model=%s, query_len=%d)",
@@ -799,7 +856,7 @@ async def get_verification_report(conversation_id: str):
 @router.post("/agent/rectify")
 async def rectify_endpoint(req: RectifyRequest):
     try:
-        from agents.rectify import rectify
+        from core.agents.rectify import rectify
         return await rectify(
             neo4j_driver=get_neo4j(),
             chroma_client=get_chroma(),
@@ -816,7 +873,7 @@ async def rectify_endpoint(req: RectifyRequest):
 @router.post("/agent/audit")
 async def audit_endpoint(req: AuditRequest):
     try:
-        from agents.audit import audit
+        from core.agents.audit import audit
         return await audit(
             redis_client=get_redis(),
             reports=req.reports,
@@ -830,7 +887,7 @@ async def audit_endpoint(req: AuditRequest):
 @router.post("/agent/maintain")
 async def maintain_endpoint(req: MaintenanceRequest):
     try:
-        from agents.maintenance import maintain
+        from core.agents.maintenance import maintain
         return await maintain(
             neo4j_driver=get_neo4j(),
             chroma_client=get_chroma(),
@@ -847,7 +904,7 @@ async def maintain_endpoint(req: MaintenanceRequest):
 @router.post("/agent/curate")
 async def curate_endpoint(req: CurateRequest):
     try:
-        from agents.curator import curate
+        from app.agents.curator import curate
         return await curate(
             neo4j_driver=get_neo4j(),
             mode=req.mode,
@@ -865,7 +922,7 @@ async def curate_endpoint(req: CurateRequest):
 @router.post("/agent/curate/estimate")
 async def curate_estimate_endpoint(req: CurateEstimateRequest):
     try:
-        from agents.curator import estimate_synopsis_run
+        from app.agents.curator import estimate_synopsis_run
         return await estimate_synopsis_run(
             neo4j_driver=get_neo4j(),
             chroma_client=get_chroma(),

@@ -13,7 +13,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from utils.time import utcnow_iso
+from core.utils.time import utcnow_iso
 from utils.typed_redis import TypedRedis as Redis
 
 logger = logging.getLogger("ai-companion.dlq")

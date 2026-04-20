@@ -3,7 +3,7 @@
 
 """Tests for adaptive retrieval gate."""
 
-from utils.retrieval_gate import classify_retrieval_need
+from core.retrieval.retrieval_gate import classify_retrieval_need
 
 
 class TestClassifyRetrievalNeed:

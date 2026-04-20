@@ -84,7 +84,7 @@ class TestGenerateHypotheticalDocument:
     @pytest.mark.asyncio
     async def test_generate_returns_none_on_failure(self):
         with patch(
-            "utils.internal_llm.call_internal_llm",
+            "core.utils.internal_llm.call_internal_llm",
             new_callable=AsyncMock,
             side_effect=RuntimeError("LLM unavailable"),
         ):
@@ -94,7 +94,7 @@ class TestGenerateHypotheticalDocument:
     @pytest.mark.asyncio
     async def test_generate_returns_text_on_success(self):
         with patch(
-            "utils.internal_llm.call_internal_llm",
+            "core.utils.internal_llm.call_internal_llm",
             new_callable=AsyncMock,
             return_value="RAG combines retrieval with generation.",
         ):
@@ -104,7 +104,7 @@ class TestGenerateHypotheticalDocument:
     @pytest.mark.asyncio
     async def test_generate_returns_none_on_empty(self):
         with patch(
-            "utils.internal_llm.call_internal_llm",
+            "core.utils.internal_llm.call_internal_llm",
             new_callable=AsyncMock,
             return_value="   ",
         ):
@@ -114,7 +114,7 @@ class TestGenerateHypotheticalDocument:
     @pytest.mark.asyncio
     async def test_generate_uses_domain(self):
         mock_llm = AsyncMock(return_value="Answer about finance.")
-        with patch("utils.internal_llm.call_internal_llm", mock_llm):
+        with patch("core.utils.internal_llm.call_internal_llm", mock_llm):
             await generate_hypothetical_document("budget question", domain="finance")
             call_args = mock_llm.call_args[0][0]
             user_msg = call_args[1]["content"]

@@ -2,11 +2,20 @@
 VerificationReport nodes written prior to the Task-2 fix.
 
 Idempotent. Safe to re-run.
+
+Claim-shape normalization is delegated to
+``core.agents.hallucination.models.ClaimVerification.from_legacy_dict``
+— same adapter the production writer uses. Before Sprint B of the
+consolidation program, this migration carried a duplicate copy of
+the "flat vs nested vs legacy" shape-detection logic and got out
+of sync with the writer (P1.4). One adapter, one source of truth.
 """
 from __future__ import annotations
 
 import json
 import logging
+
+from core.agents.hallucination.models import ClaimVerification
 
 logger = logging.getLogger("ai-companion.migrations.m0001")
 
@@ -20,26 +29,21 @@ def run(driver) -> dict:
         stats["reports_scanned"] = len(rows)
         for row in rows:
             try:
-                claims = json.loads(row["claims"] or "[]")
+                raw_claims = json.loads(row["claims"] or "[]")
             except Exception:
                 continue
             aids: set[str] = set()
             urls: set[str] = set()
             methods: set[str] = set()
-            for c in claims:
-                if c.get("verification_method"):
-                    methods.add(c["verification_method"])
-                # Claim-level flat URL list (actual shape emitted by pipeline)
-                for u in c.get("source_urls", []) or []:
-                    if isinstance(u, str) and u:
-                        urls.add(u)
-                # Structured sources (future shape + KB matches)
-                for s in c.get("sources", []) or []:
-                    if s.get("artifact_id"):
-                        aids.add(s["artifact_id"])
-                    url = s.get("url") or s.get("source_url")
-                    if url:
-                        urls.add(url)
+            for raw in raw_claims:
+                try:
+                    c = ClaimVerification.from_legacy_dict(raw)
+                except Exception:
+                    continue
+                if c.verification_method:
+                    methods.add(c.verification_method)
+                urls.update(u for u in c.source_urls if isinstance(u, str) and u)
+                aids.update(c.artifact_ids())
             if aids:
                 r = session.run(
                     """

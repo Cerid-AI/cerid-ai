@@ -18,8 +18,8 @@ import httpx
 
 import config
 from app.reliability.url_safety import guard_or_log
+from core.utils.time import utcnow_iso
 from errors import CeridError
-from utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.webhooks")
 

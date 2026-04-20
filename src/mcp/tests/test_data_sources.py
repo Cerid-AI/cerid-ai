@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from utils.circuit_breaker import CircuitState
+from core.utils.circuit_breaker import CircuitState
 from utils.data_sources import registry
 from utils.data_sources.base import DataSource, DataSourceRegistry, DataSourceResult
 from utils.data_sources.finance import ExchangeRatesSource
@@ -119,7 +119,7 @@ async def test_circuit_breaker_wraps_queries():
     failing_source = _StubSource("cb_test_fail", exc=RuntimeError("boom"))
     test_registry.register(failing_source)
 
-    from utils.circuit_breaker import get_breaker
+    from core.utils.circuit_breaker import get_breaker
     breaker = get_breaker("datasource-cb_test_fail")
     breaker.reset()
 
@@ -146,7 +146,7 @@ async def test_timeout_on_slow_source():
     slow_source = _StubSource("slow_source", delay=10.0)
     test_registry.register(slow_source)
 
-    from utils.circuit_breaker import get_breaker
+    from core.utils.circuit_breaker import get_breaker
     get_breaker("datasource-slow_source").reset()
 
     start = asyncio.get_event_loop().time()
@@ -220,7 +220,7 @@ async def test_query_all_parallel():
     test_registry.register(source_a)
     test_registry.register(source_b)
 
-    from utils.circuit_breaker import get_breaker
+    from core.utils.circuit_breaker import get_breaker
     get_breaker("datasource-parallel_a").reset()
     get_breaker("datasource-parallel_b").reset()
 
@@ -247,7 +247,7 @@ async def test_query_all_partial_failure():
     test_registry.register(source_fail1)
     test_registry.register(source_fail2)
 
-    from utils.circuit_breaker import get_breaker
+    from core.utils.circuit_breaker import get_breaker
     get_breaker("datasource-partial_good").reset()
     get_breaker("datasource-partial_fail1").reset()
     get_breaker("datasource-partial_fail2").reset()
@@ -282,7 +282,7 @@ def test_source_enable_disable():
 
     # Re-enable
     source.enabled = True
-    from utils.circuit_breaker import get_breaker
+    from core.utils.circuit_breaker import get_breaker
     get_breaker("datasource-toggle_test").reset()
     results = asyncio.get_event_loop().run_until_complete(test_registry.query_all("test"))
     assert len(results) == 1

@@ -324,7 +324,7 @@ async def poll_feed(feed_config: dict[str, Any]) -> dict[str, Any]:
 
     Returns a summary dict: ``{feed_id, new_entries, errors}``.
     """
-    from utils.circuit_breaker import CircuitOpenError, get_breaker
+    from core.utils.circuit_breaker import CircuitOpenError, get_breaker
 
     feed_id = feed_config["id"]
     url = feed_config["url"]
@@ -380,7 +380,7 @@ async def poll_feed(feed_config: dict[str, Any]) -> dict[str, Any]:
         items = _parse_atom_entries(root)
 
     # Process entries
-    from services.ingestion import ingest_content
+    from app.services.ingestion import ingest_content
 
     for item in items:
         guid = item.get("guid") or item.get("link") or item.get("title", "")

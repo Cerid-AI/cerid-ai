@@ -95,7 +95,7 @@ class RagasMetricsResponse(BaseModel):
 
 
 def _iso_now() -> str:
-    from utils.time import utcnow_iso
+    from core.utils.time import utcnow_iso
     return utcnow_iso()
 
 

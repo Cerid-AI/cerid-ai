@@ -169,7 +169,7 @@ async def graph_retrieve(
     if not driver or not entities:
         return []
 
-    from utils.circuit_breaker import get_breaker
+    from core.utils.circuit_breaker import get_breaker
 
     breaker = get_breaker("neo4j")
     try:

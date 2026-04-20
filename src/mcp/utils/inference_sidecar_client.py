@@ -18,7 +18,7 @@ import time
 
 import httpx
 
-from utils.circuit_breaker import get_breaker
+from core.utils.circuit_breaker import get_breaker
 
 logger = logging.getLogger("ai-companion.sidecar")
 

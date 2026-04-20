@@ -9,31 +9,33 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-# Pre-seed heavy modules that self_rag imports lazily
-# so @patch can target them without triggering real imports.
-if "agents.query_agent" not in sys.modules:
-    _stub = ModuleType("agents.query_agent")
+# Pre-seed heavy modules that self_rag imports lazily so ``@patch``
+# can target them without triggering real imports. Post-Sprint E the
+# canonical path is ``core.agents.*`` — pre-seeding against the old
+# ``agents.*`` bridge breaks collection because that bridge is gone.
+if "core.agents.query_agent" not in sys.modules:
+    _stub = ModuleType("core.agents.query_agent")
     _stub.agent_query = None  # type: ignore[attr-defined]
     _stub.multi_domain_query = None  # type: ignore[attr-defined]
     _stub.assemble_context = None  # type: ignore[attr-defined]
-    sys.modules["agents.query_agent"] = _stub
-    import agents
-    agents.query_agent = _stub  # type: ignore[attr-defined]
+    sys.modules["core.agents.query_agent"] = _stub
+    import core.agents as _core_agents
+    _core_agents.query_agent = _stub  # type: ignore[attr-defined]
 
-if "agents.hallucination" not in sys.modules:
-    _hall_stub = ModuleType("agents.hallucination")
+if "core.agents.hallucination" not in sys.modules:
+    _hall_stub = ModuleType("core.agents.hallucination")
     _hall_stub.extract_claims = None  # type: ignore[attr-defined]
-    sys.modules["agents.hallucination"] = _hall_stub
-    import agents as _agents_pkg
-    _agents_pkg.hallucination = _hall_stub  # type: ignore[attr-defined]
+    sys.modules["core.agents.hallucination"] = _hall_stub
+    import core.agents as _core_agents_pkg2
+    _core_agents_pkg2.hallucination = _hall_stub  # type: ignore[attr-defined]
 
 import config
-from agents.self_rag import self_rag_enhance  # noqa: E402
 from core.agents.self_rag import (  # noqa: E402
     _assess_claims,
     _merge_results,
     _retrieve_for_claims,
     _with_metadata,
+    self_rag_enhance,  # noqa: E402
 )
 
 # ---------------------------------------------------------------------------

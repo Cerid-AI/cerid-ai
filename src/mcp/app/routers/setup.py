@@ -454,7 +454,7 @@ async def _post_configure_warmup() -> None:
     except Exception as e:
         _logger.debug("Post-configure: Ollama warmup failed: %s", e)
     try:
-        from utils.reranker import warmup as reranker_warmup
+        from core.retrieval.reranker import warmup as reranker_warmup
         reranker_warmup()
         _logger.info("Post-configure: Reranker pre-warmed")
     except Exception as e:
@@ -473,7 +473,7 @@ async def _post_configure_warmup() -> None:
     # startup-time "fail" result (cached up to 1h) in the health panel, and
     # has no in-product way to know the system is actually healthy.
     try:
-        from agents.hallucination.startup_self_test import run_verification_self_test
+        from app.agents.hallucination.startup_self_test import run_verification_self_test
         from app.deps import get_redis
         result = await run_verification_self_test(get_redis())
         _logger.info(
@@ -500,7 +500,7 @@ async def retest_verification() -> dict:
     "healthy".
     """
     try:
-        from agents.hallucination.startup_self_test import run_verification_self_test
+        from app.agents.hallucination.startup_self_test import run_verification_self_test
         from app.deps import get_redis
         result = await run_verification_self_test(get_redis())
         return {"ok": True, "result": result}

@@ -2,12 +2,21 @@
 """CI-visible regression test: .env.example must match settings.py."""
 import subprocess
 import sys
-from pathlib import Path
+
+import pytest
+
+from ._helpers import scripts_dir
 
 
 def test_env_example_is_in_sync():
-    repo_root = Path(__file__).resolve().parents[3]
-    script = repo_root / "scripts" / "gen_env_example.py"
+    # Skip in environments where the repo-root ``scripts/`` dir isn't
+    # reachable (e.g. the ai-companion-mcp container with only
+    # ``src/mcp`` bind-mounted at ``/app``). CI's full checkout always
+    # has it, so the drift gate still fires there.
+    sd = scripts_dir()
+    if sd is None:
+        pytest.skip("scripts/ dir not reachable from test env (repo-root not mounted)")
+    script = sd / "gen_env_example.py"
     result = subprocess.run(
         [sys.executable, str(script), "--check"],
         capture_output=True,

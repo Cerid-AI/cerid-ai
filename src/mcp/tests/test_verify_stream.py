@@ -240,7 +240,7 @@ class TestStreamingTimeouts:
     @pytest.mark.asyncio
     async def test_per_claim_timeout_returns_uncertain(self):
         """A claim that exceeds the per-claim timeout should return 'uncertain'."""
-        from agents.hallucination import verify_response_streaming
+        from core.agents.hallucination import verify_response_streaming
 
         async def _mock_verify_claim(*args, **kwargs):
             """Raise TimeoutError directly — simulates what asyncio.wait_for
@@ -282,7 +282,7 @@ class TestStreamingTimeouts:
     @pytest.mark.asyncio
     async def test_total_timeout_produces_summary(self):
         """When total deadline expires, stream should still emit a summary."""
-        from agents.hallucination import verify_response_streaming
+        from core.agents.hallucination import verify_response_streaming
 
         call_count = 0
 
@@ -348,7 +348,7 @@ class TestStreamingTimeouts:
         """After removing the streaming exclusion from staleness escalation,
         both streaming and non-streaming modes should behave identically
         with respect to web search escalation."""
-        from agents.hallucination import verify_claim
+        from core.agents.hallucination import verify_claim
 
         external_calls = []
 
@@ -429,7 +429,7 @@ class TestExtractionErrorHandling:
     @pytest.mark.asyncio
     async def test_streaming_extraction_crash_yields_summary(self):
         """When extraction crashes, streaming should still emit a summary."""
-        from agents.hallucination import verify_response_streaming
+        from core.agents.hallucination import verify_response_streaming
 
         # The streaming path calls individual extraction functions directly.
         # When heuristic returns nothing and LLM extraction crashes, the
@@ -466,7 +466,7 @@ class TestExtractionErrorHandling:
         """When LLM extraction hangs (heuristic found nothing), the
         asyncio.wait_for timeout catches it and the generator still
         produces a summary event with extraction_method='timeout'."""
-        from agents.hallucination import verify_response_streaming
+        from core.agents.hallucination import verify_response_streaming
 
         async def _timeout_llm(*args, **kwargs):
             """Simulate what asyncio.wait_for does when _extract_claims_llm

@@ -5,7 +5,7 @@
 
 from unittest.mock import MagicMock, patch
 
-from agents.rectify import (
+from core.agents.rectify import (
     analyze_domain_distribution,
     cleanup_orphaned_chunks,
     find_duplicate_artifacts,

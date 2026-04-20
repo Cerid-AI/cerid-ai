@@ -10,13 +10,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-# test_hallucination.py may inject a stub agents.query_agent with only
-# `agent_query` — clear it so the real module loads.
-_existing = sys.modules.get("agents.query_agent")
+# test_hallucination.py may inject a stub core.agents.query_agent with
+# only ``agent_query`` — clear it so the real module loads.
+# Post-Sprint E, canonical path is ``core.agents.query_agent``.
+_existing = sys.modules.get("core.agents.query_agent")
 if _existing is not None and not hasattr(_existing, "_get_adjacent_domains"):
-    del sys.modules["agents.query_agent"]
+    del sys.modules["core.agents.query_agent"]
 
-from agents.query_agent import (  # noqa: E402
+from core.agents.query_agent import (  # noqa: E402  # noqa: E402
+    _enrich_query,
+    _get_adjacent_domains,
     agent_query,
     apply_metadata_boost,
     apply_quality_boost,
@@ -24,10 +27,6 @@ from agents.query_agent import (  # noqa: E402
     deduplicate_results,
     multi_domain_query,
     rerank_results,
-)
-from core.agents.query_agent import (  # noqa: E402
-    _enrich_query,
-    _get_adjacent_domains,
 )
 
 # ---------------------------------------------------------------------------
@@ -301,7 +300,7 @@ class TestRerankResults:
 
     @patch("core.agents.query_agent.config")
     def test_cross_encoder_rerank(self, mock_config):
-        """Cross-encoder mode dispatches to utils.reranker and blends scores."""
+        """Cross-encoder mode dispatches to core.retrieval.reranker and blends scores."""
         mock_config.RERANK_MODE = "cross_encoder"
         mock_config.QUERY_RERANK_CANDIDATES = 15
         mock_config.RERANK_CE_WEIGHT = 0.6
@@ -395,11 +394,11 @@ class TestRerankResults:
 
 class TestRerankerModule:
     def test_rerank_empty_returns_empty(self):
-        from utils.reranker import rerank
+        from core.retrieval.reranker import rerank
         assert rerank("test", []) == []
 
     def test_rerank_single_returns_unchanged(self):
-        from utils.reranker import rerank
+        from core.retrieval.reranker import rerank
         results = [_make_result(relevance=0.5)]
         reranked = rerank("test", results)
         assert len(reranked) == 1
@@ -419,7 +418,7 @@ class TestRerankerModule:
         """Verify score blending formula: CE_WEIGHT * ce + ORIGINAL_WEIGHT * original."""
         import numpy as np
 
-        from utils.reranker import rerank
+        from core.retrieval.reranker import rerank
 
         # Mock ONNX session that returns known logits
         mock_session = MagicMock()
@@ -503,8 +502,8 @@ class TestAgentQuery:
         mock_graph.return_value = [result_item]
         mock_rerank.return_value = [result_item]
 
-        with patch("utils.temporal.parse_temporal_intent", return_value=None), \
-             patch("utils.temporal.recency_score", return_value=0.0):
+        with patch("core.utils.temporal.parse_temporal_intent", return_value=None), \
+             patch("core.utils.temporal.recency_score", return_value=0.0):
             response = asyncio.get_event_loop().run_until_complete(
                 agent_query(
                     "test query",
@@ -551,7 +550,7 @@ class TestAgentQuery:
 
         redis = MagicMock()
 
-        with patch("utils.temporal.parse_temporal_intent", return_value=None):
+        with patch("core.utils.temporal.parse_temporal_intent", return_value=None):
             asyncio.get_event_loop().run_until_complete(
                 agent_query("test", redis_client=redis, chroma_client=MagicMock())
             )
@@ -586,7 +585,7 @@ class TestAgentQuery:
         mock_graph.return_value = []
         mock_rerank.return_value = []
 
-        with patch("utils.temporal.parse_temporal_intent", return_value=None):
+        with patch("core.utils.temporal.parse_temporal_intent", return_value=None):
             response = asyncio.get_event_loop().run_until_complete(
                 agent_query("test", domains=["coding"], chroma_client=MagicMock())
             )

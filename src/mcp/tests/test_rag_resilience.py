@@ -242,7 +242,7 @@ class TestChromaDBCircuitBreaker:
 
     def test_chromadb_breaker_registered(self):
         """get_breaker('chromadb') returns a valid AsyncCircuitBreaker."""
-        from utils.circuit_breaker import AsyncCircuitBreaker, get_breaker
+        from core.utils.circuit_breaker import AsyncCircuitBreaker, get_breaker
         breaker = get_breaker("chromadb")
         assert isinstance(breaker, AsyncCircuitBreaker)
         assert breaker.name == "chromadb"
@@ -250,7 +250,7 @@ class TestChromaDBCircuitBreaker:
     @pytest.mark.asyncio
     async def test_query_domain_raises_on_circuit_open(self):
         """When chromadb breaker is OPEN, CircuitOpenError propagates to caller."""
-        from utils.circuit_breaker import CircuitOpenError, CircuitState, get_breaker
+        from core.utils.circuit_breaker import CircuitOpenError, CircuitState, get_breaker
 
         breaker = get_breaker("chromadb")
         breaker._state = CircuitState.OPEN
@@ -263,11 +263,11 @@ class TestChromaDBCircuitBreaker:
         mock_chroma.list_collections.return_value = [col_stub]
         mock_chroma.get_collection.return_value = mock_collection
 
-        from agents.decomposer import multi_domain_query
+        from app.agents.decomposer import multi_domain_query
 
-        with patch("agents.decomposer.get_chroma", return_value=mock_chroma), \
-             patch("agents.decomposer.DOMAINS", ["general"]), \
-             patch("agents.decomposer.config") as mock_config:
+        with patch("app.agents.decomposer.get_chroma", return_value=mock_chroma), \
+             patch("app.agents.decomposer.DOMAINS", ["general"]), \
+             patch("app.agents.decomposer.config") as mock_config:
             mock_config.collection_name = lambda d: f"kb_{d}"
             # CircuitOpenError propagates — the caller (query_agent) handles degradation
             with pytest.raises(CircuitOpenError):
@@ -279,7 +279,7 @@ class TestChromaDBCircuitBreaker:
     @pytest.mark.asyncio
     async def test_chromadb_failures_trip_breaker(self):
         """5 consecutive failures trip the chromadb breaker to OPEN."""
-        from utils.circuit_breaker import CircuitState, get_breaker
+        from core.utils.circuit_breaker import CircuitState, get_breaker
 
         breaker = get_breaker("chromadb")
         breaker.reset()
@@ -319,13 +319,13 @@ class TestParallelExecution:
         # agent_query is imported lazily inside orchestrated_query, so
         # we patch at the source module where it's defined.
         # Also mock external source query to avoid network overhead.
-        with patch("agents.query_agent.agent_query",
+        with patch("core.agents.query_agent.agent_query",
                     new=AsyncMock(side_effect=slow_agent_query)), \
-             patch("agents.memory.recall_memories",
+             patch("app.agents.memory.recall_memories",
                     new=AsyncMock(side_effect=slow_recall)), \
-             patch("agents.retrieval_orchestrator._query_external_sources",
+             patch("app.agents.retrieval_orchestrator._query_external_sources",
                     new=AsyncMock(return_value=[])):
-            from agents.retrieval_orchestrator import orchestrated_query
+            from app.agents.retrieval_orchestrator import orchestrated_query
 
             start = time.monotonic()
             result = await orchestrated_query(
@@ -347,11 +347,11 @@ class TestParallelExecution:
         async def failing_recall(**kwargs):
             raise RuntimeError("memory exploded")
 
-        with patch("agents.query_agent.agent_query",
+        with patch("core.agents.query_agent.agent_query",
                     new=AsyncMock(side_effect=ok_agent_query)), \
-             patch("agents.memory.recall_memories",
+             patch("app.agents.memory.recall_memories",
                     new=AsyncMock(side_effect=failing_recall)):
-            from agents.retrieval_orchestrator import orchestrated_query
+            from app.agents.retrieval_orchestrator import orchestrated_query
             result = await orchestrated_query(query="test", rag_mode="smart")
 
         assert result["source_status"]["kb"] == "ok"
@@ -371,12 +371,12 @@ class TestParallelExecution:
         async def mock_query(**kwargs):
             return {"results": [], "context": "", "strategy": "test"}
 
-        with patch("agents.query_agent.agent_query",
+        with patch("core.agents.query_agent.agent_query",
                     new=AsyncMock(side_effect=mock_query)), \
-             patch("agents.memory.recall_memories",
+             patch("app.agents.memory.recall_memories",
                     new=AsyncMock(return_value=[])), \
              patch("asyncio.create_task", side_effect=tracking_create_task):
-            from agents.retrieval_orchestrator import orchestrated_query
+            from app.agents.retrieval_orchestrator import orchestrated_query
             await orchestrated_query(query="test", rag_mode="smart")
 
         # smart mode creates at least 2 tasks (kb + memory)
@@ -399,14 +399,14 @@ class TestParallelExecution:
         mock_chroma.list_collections.return_value = [col_stub]
         mock_chroma.get_collection.return_value = mock_collection
 
-        from agents.decomposer import multi_domain_query
-        from utils.circuit_breaker import get_breaker
+        from app.agents.decomposer import multi_domain_query
+        from core.utils.circuit_breaker import get_breaker
         breaker = get_breaker("chromadb")
         breaker.reset()
 
-        with patch("agents.decomposer.get_chroma", return_value=mock_chroma), \
-             patch("agents.decomposer.DOMAINS", ["general"]), \
-             patch("agents.decomposer.config") as mock_config:
+        with patch("app.agents.decomposer.get_chroma", return_value=mock_chroma), \
+             patch("app.agents.decomposer.DOMAINS", ["general"]), \
+             patch("app.agents.decomposer.config") as mock_config:
 
             mock_config.collection_name = lambda d: f"kb_{d}"
             mock_config.HYBRID_VECTOR_WEIGHT = 0.7
@@ -432,7 +432,7 @@ class TestRerankerWarmup:
 
     def test_warmup_loads_model(self):
         """warmup() calls _load_model() when session is None."""
-        import utils.reranker as reranker_mod
+        import core.retrieval.reranker as reranker_mod
         reranker_mod._session = None
         with patch.object(reranker_mod, "_load_model") as mock_load:
             mock_load.return_value = (MagicMock(), MagicMock())
@@ -441,7 +441,7 @@ class TestRerankerWarmup:
 
     def test_warmup_failure_is_nonfatal(self):
         """warmup() swallows exceptions from _load_model()."""
-        import utils.reranker as reranker_mod
+        import core.retrieval.reranker as reranker_mod
         reranker_mod._session = None
         with patch.object(reranker_mod, "_load_model",
                           side_effect=RuntimeError("model download failed")):
@@ -459,28 +459,28 @@ class TestTechnicalQueryClassifier:
 
     def test_what_is_algorithm_upgraded_to_full(self):
         """'What is the algorithm' -> full (technical term upgrade)."""
-        from utils.retrieval_gate import classify_retrieval_need
+        from core.retrieval.retrieval_gate import classify_retrieval_need
         decision = classify_retrieval_need("What is the algorithm")
         assert decision.action == "full"
         assert decision.reason == "technical_term_upgrade"
 
     def test_simple_greeting_stays_light(self):
         """'What is the weather?' -> light (no technical terms)."""
-        from utils.retrieval_gate import classify_retrieval_need
+        from core.retrieval.retrieval_gate import classify_retrieval_need
         decision = classify_retrieval_need("What is the weather?")
         assert decision.action == "light"
         assert decision.reason == "simple_lookup"
 
     def test_define_protocol_upgraded(self):
         """'Define the HTTP protocol' -> full (technical term)."""
-        from utils.retrieval_gate import classify_retrieval_need
+        from core.retrieval.retrieval_gate import classify_retrieval_need
         decision = classify_retrieval_need("Define the HTTP protocol")
         assert decision.action == "full"
         assert decision.reason == "technical_term_upgrade"
 
     def test_complex_query_unaffected(self):
         """Already-complex query stays full regardless of technical terms."""
-        from utils.retrieval_gate import classify_retrieval_need
+        from core.retrieval.retrieval_gate import classify_retrieval_need
         decision = classify_retrieval_need(
             "How does quantum entanglement work in multi-qubit systems?"
         )

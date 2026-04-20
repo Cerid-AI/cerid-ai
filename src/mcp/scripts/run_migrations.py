@@ -7,7 +7,10 @@ import sys
 
 from app.deps import get_neo4j
 
-MIGRATIONS = ["app.db.neo4j.migrations.m0001_backfill_verification_edges"]
+MIGRATIONS = [
+    "app.db.neo4j.migrations.m0001_backfill_verification_edges",
+    "app.db.neo4j.migrations.m0002_cleanup_orphan_verification_reports",
+]
 
 
 def main() -> int:

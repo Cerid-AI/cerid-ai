@@ -47,7 +47,7 @@ def handle_errors(
             )
             if breaker_name:
                 try:
-                    from utils.circuit_breaker import get_breaker
+                    from core.utils.circuit_breaker import get_breaker
 
                     get_breaker(breaker_name)._on_failure_sync(exc)
                 except Exception as _cb_err:

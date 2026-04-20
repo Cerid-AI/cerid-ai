@@ -327,7 +327,7 @@ def export_all(
     artifacts modified after that timestamp. If *domains* is given, limits
     to those domains.
     """
-    from utils.time import utcnow_iso as _utcnow
+    from core.utils.time import utcnow_iso as _utcnow
 
     chroma_url = chroma_url or config.CHROMA_URL
     sync_dir = sync_dir or _default_sync_dir()

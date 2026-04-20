@@ -15,7 +15,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.deps import get_redis
-from utils.time import utcnow_iso
+from core.utils.time import utcnow_iso
 
 _logger = logging.getLogger("ai-companion.automations")
 
@@ -205,7 +205,7 @@ async def execute_automation(automation: Automation) -> AutomationRun:
     start = time.time()
     try:
         # Run query through agent pipeline
-        from agents.query_agent import agent_query
+        from core.agents.query_agent import agent_query
 
         result = await agent_query(
             query=automation.prompt,

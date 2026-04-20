@@ -308,7 +308,7 @@ async def poll_email() -> dict[str, Any]:
 
     Returns a summary dict with counts and any errors.
     """
-    from utils.circuit_breaker import CircuitOpenError, get_breaker
+    from core.utils.circuit_breaker import CircuitOpenError, get_breaker
 
     # Load config — prefer Redis, fall back to env vars
     config = await _load_email_config()
@@ -345,7 +345,7 @@ async def poll_email() -> dict[str, Any]:
     # Ingest each message
     ingested = 0
     errors: list[str] = []
-    from services.ingestion import ingest_content
+    from app.services.ingestion import ingest_content
 
     for msg_data in messages:
         try:
@@ -398,7 +398,7 @@ async def poll_email() -> dict[str, Any]:
 
 async def import_emlx(path: str) -> dict[str, Any]:
     """Import a single .emlx file into the KB."""
-    from services.ingestion import ingest_content
+    from app.services.ingestion import ingest_content
 
     parsed = await asyncio.to_thread(parse_emlx_file, path)
     content = _format_email_for_ingestion(parsed)

@@ -7,12 +7,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agents.maintenance import (
+from core.agents.maintenance import (
     analyze_collections,
+    check_llm_health,
     check_system_health,
     purge_artifacts,
 )
-from core.agents.maintenance import check_llm_health
 
 # ---------------------------------------------------------------------------
 # Tests: check_system_health

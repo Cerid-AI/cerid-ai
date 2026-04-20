@@ -152,7 +152,7 @@ def compute_quality_score(artifact: dict[str, Any]) -> dict[str, Any]:
     s_completeness = score_completeness(artifact)
 
     # Use shared utility for the aggregate score
-    from utils.quality import compute_quality_score as _shared_score
+    from core.utils.quality import compute_quality_score as _shared_score
     total = _shared_score(
         summary=artifact.get("summary", ""),
         keywords=artifact.get("keywords", "[]"),

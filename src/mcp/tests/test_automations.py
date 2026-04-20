@@ -12,7 +12,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from routers.automations import (
+from app.routers.automations import (
     Automation,
     AutomationAction,
     AutomationRun,
@@ -414,7 +414,7 @@ class TestExecuteAutomation:
         }
         with (
             patch("app.routers.automations.get_redis", return_value=redis),
-            patch("agents.query_agent.agent_query", new_callable=AsyncMock, return_value=mock_result),
+            patch("core.agents.query_agent.agent_query", new_callable=AsyncMock, return_value=mock_result),
         ):
             run = await execute_automation(auto)
             assert run.status == "success"
@@ -438,7 +438,7 @@ class TestExecuteAutomation:
         )
         with (
             patch("app.routers.automations.get_redis", return_value=redis),
-            patch("agents.query_agent.agent_query", new_callable=AsyncMock, side_effect=RuntimeError("boom")),
+            patch("core.agents.query_agent.agent_query", new_callable=AsyncMock, side_effect=RuntimeError("boom")),
         ):
             run = await execute_automation(auto)
             assert run.status == "error"

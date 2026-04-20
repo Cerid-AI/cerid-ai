@@ -20,15 +20,16 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-# Mirror the stub setup used in test_hallucination.py so patch targets resolve
-# without triggering real (heavy) imports at module import time.
-if "agents.query_agent" not in sys.modules:
-    _stub = ModuleType("agents.query_agent")
+# Mirror the stub setup used in test_hallucination.py so patch targets
+# resolve without triggering real (heavy) imports at module import time.
+# Post-Sprint E canonical path is ``core.agents.query_agent``.
+if "core.agents.query_agent" not in sys.modules:
+    _stub = ModuleType("core.agents.query_agent")
     _stub.agent_query = None  # type: ignore[attr-defined]
     _stub.lightweight_kb_query = None  # type: ignore[attr-defined]
-    sys.modules["agents.query_agent"] = _stub
-    import agents
-    agents.query_agent = _stub  # type: ignore[attr-defined]
+    sys.modules["core.agents.query_agent"] = _stub
+    import core.agents as _core_agents
+    _core_agents.query_agent = _stub  # type: ignore[attr-defined]
 
 
 @pytest.mark.asyncio

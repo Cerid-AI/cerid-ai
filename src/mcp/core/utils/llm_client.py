@@ -32,7 +32,7 @@ from core.utils.circuit_breaker import get_breaker
 from core.utils.tracing import tracing_headers
 
 if TYPE_CHECKING:
-    from utils.smart_router import RouteDecision
+    from core.routing.smart_router import RouteDecision
 
 _logger = logging.getLogger("ai-companion.llm_client")
 
@@ -344,7 +344,7 @@ async def route_and_call(
 
     Returns ``(content, route_decision)`` tuple.
     """
-    from utils.smart_router import TaskType, route
+    from core.routing.smart_router import TaskType, route
 
     task = TaskType(task_type)
     decision = await route(

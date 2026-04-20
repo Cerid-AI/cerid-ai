@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 
 import config
-from utils.time import utcnow_iso
+from core.utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.graph")
 

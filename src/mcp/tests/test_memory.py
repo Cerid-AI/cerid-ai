@@ -23,7 +23,7 @@ if "routers.ingestion" not in sys.modules:
     _routers_pkg = sys.modules["routers"]
     _routers_pkg.ingestion = _stub  # type: ignore[attr-defined]
 
-from agents.memory import (
+from app.agents.memory import (
     archive_old_memories,
     extract_and_store_memories,
     extract_memories,

@@ -1,8 +1,22 @@
 # src/mcp/tests/test_lint_no_silent_catch.py
 """Tests for the silent-catch linter."""
-from pathlib import Path
-
 import pytest
+
+from ._helpers import scripts_dir
+
+# Skip the whole module if the repo-root ``scripts/`` directory isn't
+# reachable (container run with only ``src/mcp`` bind-mounted). The
+# lint script lives at repo root, outside the Docker build context.
+pytestmark = pytest.mark.skipif(
+    scripts_dir() is None,
+    reason="scripts/ dir not reachable from test env (repo-root not mounted)",
+)
+
+
+def _lint_script_path():
+    sd = scripts_dir()
+    assert sd is not None, "scripts_dir() is None — skip guard should have fired"
+    return sd / "lint-no-silent-catch.py"
 
 
 @pytest.fixture
@@ -12,7 +26,7 @@ def run_linter(tmp_path, monkeypatch):
     import sys
 
     # Dynamic import of the script (not a package)
-    script = Path(__file__).resolve().parents[3] / "scripts" / "lint-no-silent-catch.py"
+    script = _lint_script_path()
     spec = importlib.util.spec_from_file_location("lint_silent_catch", script)
     module = importlib.util.module_from_spec(spec)
     sys.modules["lint_silent_catch"] = module
@@ -98,7 +112,7 @@ def test_allowlist_entry_suppresses_violation(tmp_path):
     import sys
 
     # Load the linter module
-    script = Path(__file__).resolve().parents[3] / "scripts" / "lint-no-silent-catch.py"
+    script = _lint_script_path()
     spec = importlib.util.spec_from_file_location("lint_silent_catch", script)
     module = importlib.util.module_from_spec(spec)
     sys.modules["lint_silent_catch"] = module
@@ -127,7 +141,7 @@ def test_allowlist_unmatched_lineno_does_not_suppress(tmp_path):
     import importlib.util
     import sys
 
-    script = Path(__file__).resolve().parents[3] / "scripts" / "lint-no-silent-catch.py"
+    script = _lint_script_path()
     spec = importlib.util.spec_from_file_location("lint_silent_catch", script)
     module = importlib.util.module_from_spec(spec)
     sys.modules["lint_silent_catch"] = module

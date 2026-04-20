@@ -11,7 +11,7 @@ import os
 import tempfile
 from unittest.mock import patch
 
-from agents.triage import (
+from app.agents.triage import (
     chunk_node,
     extract_metadata_node,
     parse_node,

@@ -36,8 +36,14 @@ def _strip_html_tags(html: str) -> str:
         stripper = _Stripper()
         stripper.feed(html)
         return "".join(stripper._parts).strip()
-    except Exception:
-        # Last resort: regex strip
+    except Exception as exc:  # noqa: BLE001 — html.parser raises various; regex is the safety net
+        # Log the fallback so "we degraded to regex-strip on N% of docs"
+        # becomes a visible signal (cerid:swallowed:parsers.html_strip).
+        try:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error("parsers.html_strip", exc)
+        except Exception:  # noqa: BLE001 — observability must not block the fallback
+            pass
         return re.sub(r"<[^>]+>", " ", html).strip()
 
 

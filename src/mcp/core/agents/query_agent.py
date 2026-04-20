@@ -1176,7 +1176,7 @@ async def _agent_query_impl(
                 )
         graph_results_added = len(results) - graph_count_before
 
-    from utils.temporal import is_within_window, parse_temporal_intent, recency_score
+    from core.utils.temporal import is_within_window, parse_temporal_intent, recency_score
     temporal_days = parse_temporal_intent(query)
 
     if temporal_days is not None:
@@ -1232,7 +1232,7 @@ async def _agent_query_impl(
     with timer.step("mmr_diversity"):
         if ENABLE_MMR_DIVERSITY and len(results) > 1:
             try:
-                from utils.diversity import mmr_reorder
+                from core.utils.diversity import mmr_reorder
                 results = mmr_reorder(results=results, query=query)
             except Exception as e:
                 logger.warning("MMR diversity reordering failed: %s", e)

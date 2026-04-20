@@ -13,8 +13,8 @@ from pydantic import BaseModel
 import config
 from app.db import neo4j as graph
 from app.deps import get_chroma, get_neo4j, get_redis
-from utils import cache
-from utils.time import utcnow_iso
+from core.utils import cache
+from core.utils.time import utcnow_iso
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion")

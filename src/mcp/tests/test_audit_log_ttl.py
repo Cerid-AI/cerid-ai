@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 def test_log_event_sets_ttl():
     """log_event should set a TTL on the ingest log key via pipeline."""
-    from utils.cache import log_event
+    from core.utils.cache import log_event
 
     mock_pipe = MagicMock()
     mock_redis = MagicMock()

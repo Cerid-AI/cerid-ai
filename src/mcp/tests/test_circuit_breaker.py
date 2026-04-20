@@ -5,7 +5,7 @@ import asyncio
 
 import pytest
 
-from utils.circuit_breaker import (
+from core.utils.circuit_breaker import (
     AsyncCircuitBreaker,
     CircuitOpenError,
     CircuitState,
@@ -169,7 +169,7 @@ def test_external_datasource_breakers_are_tolerant():
     already bounds hang cost, so tolerating a couple of flakes avoids
     punishing the user for transient network blips.
     """
-    from utils.circuit_breaker import get_breaker
+    from core.utils.circuit_breaker import get_breaker
     for name in (
         "datasource-wikipedia",
         "datasource-duckduckgo",

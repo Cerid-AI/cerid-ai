@@ -41,3 +41,22 @@ def tokenize_lower(text: str) -> list[str]:
     Returns a list (preserving order) of lowercase non-stopword tokens.
     """
     return [w for w in (m.lower() for m in WORD_RE.findall(text)) if w not in STOPWORDS]
+
+
+def extract_keywords_simple(text: str, max_keywords: int = 10) -> list[str]:
+    """Frequency-based keyword extraction — pure-regex fallback.
+
+    Counts word frequencies after stopword removal and returns the top
+    ``max_keywords`` terms. Used by the authoritative-verification path
+    to reduce a claim to its searchable terms without invoking an LLM.
+
+    Canonical location as of Sprint D (2026-04-19). Previously lived as
+    ``utils.metadata._extract_keywords_simple``; that name remains as a
+    thin pass-through in metadata.py for legacy import-path compat.
+    """
+    from collections import Counter
+
+    # Scan at most 5k chars to cap worst-case cost on very long inputs.
+    words = re.findall(r"\b[a-zA-Z]{3,}\b", text[:5000].lower())
+    filtered = [w for w in words if w not in STOPWORDS]
+    return [word for word, _ in Counter(filtered).most_common(max_keywords)]

@@ -607,7 +607,7 @@ async def execute_tool(name: str, arguments: dict) -> Any:
     elif name == "pkb_collections":
         return await asyncio.to_thread(list_collections)
     elif name == "pkb_agent_query":
-        from agents.query_agent import agent_query
+        from core.agents.query_agent import agent_query
         return await agent_query(
             query=arguments.get("query", ""),
             domains=arguments.get("domains"),
@@ -630,7 +630,7 @@ async def execute_tool(name: str, arguments: dict) -> Any:
             tags=arguments.get("tags", ""),
         )
     elif name == "pkb_triage":
-        from agents.triage import triage_file
+        from app.agents.triage import triage_file
         triage_result = await triage_file(
             file_path=arguments.get("file_path", ""),
             domain=arguments.get("domain", ""),
@@ -649,7 +649,7 @@ async def execute_tool(name: str, arguments: dict) -> Any:
         result["triage_status"] = triage_result["status"]
         return result
     elif name == "pkb_rectify":
-        from agents.rectify import rectify
+        from core.agents.rectify import rectify
         return await rectify(
             neo4j_driver=get_neo4j(),
             chroma_client=get_chroma(),
@@ -659,14 +659,14 @@ async def execute_tool(name: str, arguments: dict) -> Any:
             stale_days=arguments.get("stale_days", 90),
         )
     elif name == "pkb_audit":
-        from agents.audit import audit
+        from core.agents.audit import audit
         return await audit(
             redis_client=get_redis(),
             reports=arguments.get("reports"),
             hours=arguments.get("hours", 24),
         )
     elif name == "pkb_maintain":
-        from agents.maintenance import maintain
+        from core.agents.maintenance import maintain
         return await maintain(
             neo4j_driver=get_neo4j(),
             chroma_client=get_chroma(),
@@ -676,7 +676,7 @@ async def execute_tool(name: str, arguments: dict) -> Any:
             auto_purge=arguments.get("auto_purge", False),
         )
     elif name == "pkb_curate":
-        from agents.curator import curate
+        from app.agents.curator import curate
         return await curate(
             neo4j_driver=get_neo4j(),
             domains=arguments.get("domains"),
@@ -689,7 +689,7 @@ async def execute_tool(name: str, arguments: dict) -> Any:
         from app.scheduler import get_job_status
         return get_job_status()
     elif name == "pkb_check_hallucinations":
-        from agents.hallucination import check_hallucinations
+        from core.agents.hallucination import check_hallucinations
         return await check_hallucinations(
             response_text=arguments.get("response_text", ""),
             conversation_id=arguments.get("conversation_id", ""),
@@ -699,7 +699,7 @@ async def execute_tool(name: str, arguments: dict) -> Any:
             threshold=arguments.get("threshold"),
         )
     elif name == "pkb_memory_extract":
-        from agents.memory import extract_and_store_memories
+        from app.agents.memory import extract_and_store_memories
         return await extract_and_store_memories(
             response_text=arguments.get("response_text", ""),
             conversation_id=arguments.get("conversation_id", ""),
@@ -709,14 +709,14 @@ async def execute_tool(name: str, arguments: dict) -> Any:
             neo4j_driver=get_neo4j(),
         )
     elif name == "pkb_memory_archive":
-        from agents.memory import archive_old_memories
+        from app.agents.memory import archive_old_memories
         return await archive_old_memories(
             neo4j_driver=get_neo4j(),
             retention_days=arguments.get("retention_days", 180),
         )
     elif name == "pkb_memory_recall":
-        from agents.memory import recall_memories
-        from utils.time import utcnow_iso as _utcnow_iso
+        from app.agents.memory import recall_memories
+        from core.utils.time import utcnow_iso as _utcnow_iso
         results = await recall_memories(
             query=arguments.get("query", ""),
             chroma_client=get_chroma(),

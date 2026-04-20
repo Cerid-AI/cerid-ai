@@ -20,8 +20,8 @@ from apscheduler.triggers.cron import CronTrigger
 
 import config
 from app.deps import get_chroma, get_neo4j, get_redis
-from utils.cache import log_event
-from utils.time import utcnow_iso
+from core.utils.cache import log_event
+from core.utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.scheduler")
 
@@ -58,7 +58,7 @@ async def _run_rectify() -> None:
     """Run the rectification agent to find duplicates, orphans, etc."""
     start = time.time()
     try:
-        from agents.rectify import rectify
+        from core.agents.rectify import rectify
         result = await rectify(
             neo4j_driver=get_neo4j(),
             chroma_client=get_chroma(),
@@ -103,7 +103,7 @@ async def _run_stale_detection() -> None:
     """Detect stale artifacts that haven't been accessed recently."""
     start = time.time()
     try:
-        from agents.maintenance import maintain
+        from core.agents.maintenance import maintain
         result = await maintain(
             neo4j_driver=get_neo4j(),
             chroma_client=get_chroma(),

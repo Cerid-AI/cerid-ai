@@ -11,8 +11,8 @@ from fastapi import APIRouter, Query
 
 from app.deps import get_neo4j, get_redis
 from app.routers.health import health_check
-from utils.cache import get_log
-from utils.time import utcnow, utcnow_iso
+from core.utils.cache import get_log
+from core.utils.time import utcnow, utcnow_iso
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion")

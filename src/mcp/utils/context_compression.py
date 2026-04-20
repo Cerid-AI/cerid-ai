@@ -20,8 +20,8 @@ import os
 
 import httpx
 
-from utils.circuit_breaker import CircuitOpenError
-from utils.llm_client import call_llm
+from core.utils.circuit_breaker import CircuitOpenError
+from core.utils.llm_client import call_llm
 
 logger = logging.getLogger("ai-companion.context_compression")
 

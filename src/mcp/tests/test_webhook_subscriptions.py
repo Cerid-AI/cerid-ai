@@ -15,14 +15,14 @@ class TestHMACSigning:
 
     def test_sign_payload_produces_hex_digest(self):
         """sign_payload should produce a valid SHA-256 HMAC hex string."""
-        from routers.webhook_subscriptions import sign_payload
+        from app.routers.webhook_subscriptions import sign_payload
 
         sig = sign_payload({"event": "test"}, "my-secret")
         assert isinstance(sig, str)
         assert len(sig) == 64  # sha256 hex
 
     def test_sign_payload_deterministic(self):
-        from routers.webhook_subscriptions import sign_payload
+        from app.routers.webhook_subscriptions import sign_payload
 
         payload = {"key": "value", "num": 42}
         sig1 = sign_payload(payload, "secret")
@@ -30,7 +30,7 @@ class TestHMACSigning:
         assert sig1 == sig2
 
     def test_sign_payload_changes_with_secret(self):
-        from routers.webhook_subscriptions import sign_payload
+        from app.routers.webhook_subscriptions import sign_payload
 
         payload = {"event": "test"}
         sig1 = sign_payload(payload, "secret-a")
@@ -38,7 +38,7 @@ class TestHMACSigning:
         assert sig1 != sig2
 
     def test_sign_payload_empty_secret_returns_empty(self):
-        from routers.webhook_subscriptions import sign_payload
+        from app.routers.webhook_subscriptions import sign_payload
 
         sig = sign_payload({"event": "test"}, "")
         assert sig == ""
@@ -52,7 +52,7 @@ class TestHMACSigning:
 class TestSubscriptionModels:
 
     def test_create_request_valid(self):
-        from routers.webhook_subscriptions import WebhookSubscriptionCreate
+        from app.routers.webhook_subscriptions import WebhookSubscriptionCreate
 
         req = WebhookSubscriptionCreate(
             url="https://example.com/hook",
@@ -64,20 +64,20 @@ class TestSubscriptionModels:
     def test_create_request_requires_url(self):
         from pydantic import ValidationError
 
-        from routers.webhook_subscriptions import WebhookSubscriptionCreate
+        from app.routers.webhook_subscriptions import WebhookSubscriptionCreate
 
         with pytest.raises(ValidationError):
             WebhookSubscriptionCreate(events=["test"])  # type: ignore[call-arg]
 
     def test_create_request_events_optional(self):
         """events defaults to empty list (empty = subscribe to all events)."""
-        from routers.webhook_subscriptions import WebhookSubscriptionCreate
+        from app.routers.webhook_subscriptions import WebhookSubscriptionCreate
 
         req = WebhookSubscriptionCreate(url="https://example.com")
         assert req.events == []
 
     def test_subscription_has_defaults(self):
-        from routers.webhook_subscriptions import WebhookSubscription
+        from app.routers.webhook_subscriptions import WebhookSubscription
 
         sub = WebhookSubscription(
             id="abc-123",
@@ -107,7 +107,7 @@ class TestRedisStorage:
         assert key == "cerid:webhooks:deliveries:test-123"
 
     def test_subscription_serializes_to_json(self):
-        from routers.webhook_subscriptions import WebhookSubscription
+        from app.routers.webhook_subscriptions import WebhookSubscription
 
         sub = WebhookSubscription(
             id="abc",

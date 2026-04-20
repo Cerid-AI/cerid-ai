@@ -13,7 +13,7 @@ import logging
 import uuid
 from typing import Any
 
-from utils.time import utcnow_iso
+from core.utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.graph.agents")
 
@@ -242,6 +242,6 @@ def list_agents(
 
 def list_templates() -> list[dict[str, Any]]:
     """Return built-in agent templates (delegates to agents.templates module)."""
-    from agents.templates import list_templates as _list
+    from app.agents.templates import list_templates as _list
 
     return _list()

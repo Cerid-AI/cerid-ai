@@ -48,7 +48,7 @@ class TestExtractionSymbols:
     """Symbols from extraction.py."""
 
     def test_extract_claims(self):
-        from agents.hallucination import extract_claims
+        from core.agents.hallucination import extract_claims
         assert callable(extract_claims)
 
     def test_internal_extraction_functions(self):
@@ -68,7 +68,7 @@ class TestVerificationSymbols:
     """Symbols from verification.py."""
 
     def test_verify_claim(self):
-        from agents.hallucination import verify_claim
+        from core.agents.hallucination import verify_claim
         assert callable(verify_claim)
 
     def test_system_prompts(self):
@@ -127,11 +127,11 @@ class TestStreamingSymbols:
     """Symbols from streaming.py."""
 
     def test_check_hallucinations(self):
-        from agents.hallucination import check_hallucinations
+        from core.agents.hallucination import check_hallucinations
         assert callable(check_hallucinations)
 
     def test_verify_response_streaming(self):
-        from agents.hallucination import verify_response_streaming
+        from core.agents.hallucination import verify_response_streaming
         assert callable(verify_response_streaming)
 
 
@@ -139,11 +139,11 @@ class TestPersistenceSymbols:
     """Symbols from persistence.py."""
 
     def test_get_hallucination_report(self):
-        from agents.hallucination import get_hallucination_report
+        from core.agents.hallucination import get_hallucination_report
         assert callable(get_hallucination_report)
 
     def test_redis_constants(self):
-        from agents.hallucination import (
+        from core.agents.hallucination import (
             REDIS_HALLUCINATION_PREFIX,
             REDIS_HALLUCINATION_TTL,
         )
@@ -183,11 +183,13 @@ class TestSubmoduleAccess:
         detail, so it isn't carried over.  Flagged by Task 12 subagent as
         pre-existing / non-blocking.  Re-skin rather than treat as regression.
         """
-        import agents.hallucination
+        import core.agents.hallucination as agents_hallucination
 
-        # Accept either the bridge providing httpx directly or the core
-        # submodule (patched sites use one or the other).
-        has_direct = hasattr(agents.hallucination, "httpx")
+        # Accept either the package providing httpx directly or the
+        # submodule exposing it (patched sites may use either form).
+        # Post-Sprint E the old ``agents.hallucination`` bridge is gone;
+        # ``core.agents.hallucination`` is the canonical path.
+        has_direct = hasattr(agents_hallucination, "httpx")
         try:
             from core.agents.hallucination import verification as _v
             has_via_core = hasattr(_v, "httpx")

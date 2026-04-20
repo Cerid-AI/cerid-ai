@@ -152,8 +152,8 @@ async def fetch_and_compare_models() -> dict[str, Any]:
     """Fetch current OpenRouter catalog, compare with cached version, store updates in Redis."""
     import json as _json
 
+    from core.utils.time import utcnow_iso
     from deps import get_redis
-    from utils.time import utcnow_iso
 
     redis = get_redis()
     catalog_key = "cerid:models:catalog"

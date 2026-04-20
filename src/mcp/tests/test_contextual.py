@@ -17,7 +17,7 @@ class TestContextualizeChunks:
     def test_disabled_returns_original(self, mock_config):
         """When ENABLE_CONTEXTUAL_CHUNKS is False, chunks pass through unchanged."""
         mock_config.ENABLE_CONTEXTUAL_CHUNKS = False
-        from utils.contextual import contextualize_chunks
+        from core.utils.contextual import contextualize_chunks
 
         chunks = ["chunk one", "chunk two"]
         result = contextualize_chunks(chunks, "full doc text")
@@ -27,7 +27,7 @@ class TestContextualizeChunks:
     def test_empty_chunks_returns_empty(self, mock_config):
         """Empty input returns empty output."""
         mock_config.ENABLE_CONTEXTUAL_CHUNKS = True
-        from utils.contextual import contextualize_chunks
+        from core.utils.contextual import contextualize_chunks
 
         result = contextualize_chunks([], "full text")
         assert result == []
@@ -42,7 +42,7 @@ class TestContextualizeChunks:
         contexts = ["revenue discussion in Q3 report", "API auth setup guide"]
         mock_call_llm.return_value = json.dumps(contexts)
 
-        from utils.contextual import contextualize_chunks
+        from core.utils.contextual import contextualize_chunks
 
         chunks = ["Revenue increased 15%", "Set up API key in config.yaml"]
         result = contextualize_chunks(chunks, "Full document text here", {"filename": "report.pdf"})
@@ -68,7 +68,7 @@ class TestContextualizeChunks:
             json.dumps(batch2_contexts),
         ]
 
-        from utils.contextual import contextualize_chunks
+        from core.utils.contextual import contextualize_chunks
 
         result = contextualize_chunks(chunks, "doc text")
         assert len(result) == 7
@@ -86,7 +86,7 @@ class TestContextualizeChunks:
         import httpx as real_httpx
         mock_call_llm.side_effect = real_httpx.ConnectError("Connection refused")
 
-        from utils.contextual import contextualize_chunks
+        from core.utils.contextual import contextualize_chunks
 
         chunks = ["chunk one", "chunk two"]
         result = contextualize_chunks(chunks, "doc text")
@@ -103,7 +103,7 @@ class TestContextualizeChunks:
         # Return 1 context for 3 chunks
         mock_call_llm.return_value = json.dumps(["only one context"])
 
-        from utils.contextual import contextualize_chunks
+        from core.utils.contextual import contextualize_chunks
 
         chunks = ["chunk 1", "chunk 2", "chunk 3"]
         result = contextualize_chunks(chunks, "doc text")
@@ -120,7 +120,7 @@ class TestContextualizeChunks:
         # Simulate LLM wrapping output in markdown code block
         mock_call_llm.return_value = '```json\n["ctx for chunk 0", "ctx for chunk 1"]\n```'
 
-        from utils.contextual import contextualize_chunks
+        from core.utils.contextual import contextualize_chunks
 
         chunks = ["chunk 0", "chunk 1"]
         result = contextualize_chunks(chunks, "doc text")
@@ -136,7 +136,7 @@ class TestContextualizeChunks:
 
         mock_call_llm.return_value = json.dumps(["ctx"])
 
-        from utils.contextual import contextualize_chunks
+        from core.utils.contextual import contextualize_chunks
 
         contextualize_chunks(
             ["chunk"], "doc text",
@@ -158,7 +158,7 @@ class TestContextualizeChunks:
 
         mock_call_llm.return_value = json.dumps(["ctx"])
 
-        from utils.contextual import contextualize_chunks
+        from core.utils.contextual import contextualize_chunks
 
         long_text = "x" * 5000
         contextualize_chunks(["chunk"], long_text)

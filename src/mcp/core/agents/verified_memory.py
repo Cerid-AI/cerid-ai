@@ -165,28 +165,37 @@ async def promote_verified_facts(
                     "artifact_id": primary_artifact_id,
                 })
 
-                # Link to VerificationReport via VERIFIED_BY relationship
+                # Link to VerificationReport via VERIFIED_BY relationship.
+                #
+                # Sprint C change: MATCH-only, no MERGE. Pre-Sprint C this
+                # block did ``MERGE (r:VerificationReport {conversation_id:
+                # $rid})`` which created stub nodes with nothing but a
+                # conversation_id — the exact orphan pattern m0002
+                # cleans up and I1 preservation gates detect. With auto-
+                # persist on /agent/hallucination (Sprint C), the real
+                # report is written AFTER this path runs; if we can't
+                # find one yet, we skip the link (memory still carries
+                # its own provenance via RELATES_TO). The link is a
+                # cross-reference convenience, not required for any
+                # retrieval correctness.
                 if report_id and neo4j_driver:
                     try:
                         with neo4j_driver.session() as session:
-                            session.run(
-                                "MATCH (m:Memory {id: $mid}) "
-                                "MERGE (r:VerificationReport {conversation_id: $rid}) "
-                                "MERGE (m)-[:VERIFIED_BY]->(r)",
+                            linked = session.run(
+                                "MATCH (m:Memory {id: $mid}), "
+                                "      (r:VerificationReport {conversation_id: $rid}) "
+                                "MERGE (m)-[:VERIFIED_BY]->(r) "
+                                "RETURN count(*) AS n",
                                 mid=memory_id,
                                 rid=report_id,
-                            )
-                            from core.reliability.read_after_write import assert_created
-                            assert_created(
-                                session,
-                                check_cypher=(
-                                    "MATCH (:Memory {id: $mid})-[:VERIFIED_BY]->"
-                                    "(:VerificationReport {conversation_id: $rid}) "
-                                    "RETURN count(*) > 0 AS exists"
-                                ),
-                                params={"mid": memory_id, "rid": report_id},
-                                event_name="verified_memory.verified_by_edge",
-                            )
+                            ).single()
+                            if not linked or linked["n"] == 0:
+                                # Report not persisted yet — expected when
+                                # auto-persist runs after this path.
+                                logger.debug(
+                                    "verified_memory.verified_by_skipped_no_report",
+                                    extra={"memory_id": memory_id, "report_id": report_id},
+                                )
                     except Exception:
                         logger.exception(
                             "verified_memory.verified_by_link_failed",

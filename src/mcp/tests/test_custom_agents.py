@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from agents.templates import AGENT_TEMPLATES
+from app.agents.templates import AGENT_TEMPLATES
 from models.agents import AgentCreateRequest, AgentDefinition
 
 # ---------------------------------------------------------------------------

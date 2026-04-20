@@ -58,13 +58,30 @@ async def call_internal_llm(
     temperature: float = 0.1,
     max_tokens: int = 500,
     response_format: dict | None = None,
+    stage: str | None = None,
 ) -> str:
     """Route internal LLM call to configured provider.
 
     Returns the assistant message content as a string.
     Providers: "ollama" (local) or "openrouter" (default).
+
+    The *stage* argument is a first-class observability breadcrumb: every
+    internal-LLM call is attributed to a named pipeline stage (e.g.
+    ``"topic_extraction"``, ``"claim_extraction"``, ``"contextual_summary"``).
+    It flows into log records and, when the Sentry SDK is active, into
+    the current scope as a tag. Callers are encouraged — but not required —
+    to supply it.
     """
     provider = getattr(config, "INTERNAL_LLM_PROVIDER", "openrouter")
+    log = logger
+    if stage:
+        log = logging.LoggerAdapter(logger, {"llm_stage": stage})
+        try:
+            import sentry_sdk  # type: ignore[import-not-found]
+            sentry_sdk.set_tag("llm_stage", stage)
+        except ImportError:
+            pass
+        log.debug("internal LLM call provider=%s stage=%s", provider, stage)
 
     if provider == "ollama":
         return await _call_ollama(

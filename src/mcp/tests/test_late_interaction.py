@@ -8,8 +8,6 @@ import numpy as np
 from core.retrieval.late_interaction import (
     _cosine_similarity,
     _sliding_windows,
-)
-from utils.late_interaction import (
     compute_maxsim,
     late_interaction_rerank,
 )

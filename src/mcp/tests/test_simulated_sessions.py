@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from services.ingestion import ingest_content
+from app.services.ingestion import ingest_content
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -79,7 +79,7 @@ def _make_verify_result(claim, status="verified", confidence=0.95, method="kb_cr
 
 # Ingestion patch stack — shared across all ingestion-dependent tests
 _INGEST_PATCHES = [
-    patch("routers.system_monitor.get_redis", return_value=MagicMock()),
+    patch("app.routers.system_monitor.get_redis", return_value=MagicMock()),
     patch("app.services.ingestion.cache"),
     patch("app.services.ingestion.get_redis", return_value=MagicMock()),
 ]
@@ -154,7 +154,7 @@ class TestMultiTurnConversation:
 
         with patch("core.agents.memory.call_internal_llm", new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = json.dumps(mock_memories)
-            from agents.memory import extract_memories
+            from app.agents.memory import extract_memories
             memories = await extract_memories(response_text, conversation_id="conv-session-1")
 
         assert len(memories) >= 1
@@ -208,10 +208,10 @@ class TestMultiTurnConversation:
 
         assert "MVCC" in query_result["context"]
 
-        with patch("agents.hallucination.verification.verify_claim",
+        with patch("core.agents.hallucination.verification.verify_claim",
                     new_callable=AsyncMock,
                     return_value=_make_verify_result("PostgreSQL uses MVCC")):
-            from agents.hallucination.verification import verify_claim
+            from core.agents.hallucination.verification import verify_claim
             vr = await verify_claim("PostgreSQL uses MVCC", MagicMock(), MagicMock(), MagicMock())
 
         assert vr["status"] == "verified"
@@ -297,12 +297,12 @@ class TestSyntheticKBInjection:
             "FFT was published by Cooley and Tukey in 1965",
         ]
 
-        with patch("agents.hallucination.verification.verify_claim",
+        with patch("core.agents.hallucination.verification.verify_claim",
                     new_callable=AsyncMock) as mock_vc:
             mock_vc.side_effect = [
                 _make_verify_result(c, "verified", 0.95) for c in correct_claims
             ]
-            from agents.hallucination.verification import verify_claim
+            from core.agents.hallucination.verification import verify_claim
             results = []
             for claim in correct_claims:
                 r = await verify_claim(claim, MagicMock(), MagicMock(), MagicMock())
@@ -320,12 +320,12 @@ class TestSyntheticKBInjection:
             ("Human Genome Project was declared complete in June 2000", "conflated_event"),
         ]
 
-        with patch("agents.hallucination.verification.verify_claim",
+        with patch("core.agents.hallucination.verification.verify_claim",
                     new_callable=AsyncMock) as mock_vc:
             mock_vc.side_effect = [
                 _make_verify_result(c, "unverified", 0.3) for c, _ in wrong_claims
             ]
-            from agents.hallucination.verification import verify_claim
+            from core.agents.hallucination.verification import verify_claim
             results = []
             for claim, _ in wrong_claims:
                 r = await verify_claim(claim, MagicMock(), MagicMock(), MagicMock())
@@ -360,7 +360,7 @@ class TestSyntheticKBInjection:
 class TestDataIntegrity:
     """Verify data correctness throughout the ingestion pipeline."""
 
-    @patch("routers.system_monitor.get_redis", return_value=MagicMock())
+    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")
@@ -391,7 +391,7 @@ class TestDataIntegrity:
         assert r2["status"] == "duplicate"
         assert r2["artifact_id"] == r1["artifact_id"]
 
-    @patch("routers.system_monitor.get_redis", return_value=MagicMock())
+    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.cache")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
@@ -419,7 +419,7 @@ class TestDataIntegrity:
         assert result["domain"] == "coding"
         assert result["chunks"] > 0
 
-    @patch("routers.system_monitor.get_redis", return_value=MagicMock())
+    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.cache")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
@@ -444,7 +444,7 @@ class TestDataIntegrity:
         assert long_r["chunks"] > 1
         assert long_r["chunks"] > short["chunks"]
 
-    @patch("routers.system_monitor.get_redis", return_value=MagicMock())
+    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.cache")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
@@ -469,7 +469,7 @@ class TestDataIntegrity:
         assert call_kwargs.kwargs.get("domain") == "coding" or call_kwargs.args[2] == "coding" if len(call_kwargs.args) > 2 else True
         assert call_kwargs.kwargs.get("artifact_id") == result["artifact_id"]
 
-    @patch("routers.system_monitor.get_redis", return_value=MagicMock())
+    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.cache")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
@@ -511,7 +511,7 @@ class TestEdgeCases:
         assert result["confidence"] == 0.0
         assert result["total_results"] == 0
 
-    @patch("routers.system_monitor.get_redis", return_value=MagicMock())
+    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.cache")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
@@ -534,7 +534,7 @@ class TestEdgeCases:
         assert result["status"] == "success"
         assert result["chunks"] > 1
 
-    @patch("routers.system_monitor.get_redis", return_value=MagicMock())
+    @patch("app.routers.system_monitor.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.cache")
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
@@ -602,12 +602,12 @@ class TestVerificationWithKBData:
     @pytest.mark.asyncio
     async def test_claim_verified_against_kb_content(self):
         """KB has 'Python created by Guido van Rossum in 1991' -> claim matches -> verified."""
-        with patch("agents.hallucination.verification.verify_claim",
+        with patch("core.agents.hallucination.verification.verify_claim",
                     new_callable=AsyncMock) as mock_vc:
             mock_vc.return_value = _make_verify_result(
                 "Python was created by Guido van Rossum in 1991",
                 "verified", 0.96, "kb_cross_model")
-            from agents.hallucination.verification import verify_claim
+            from core.agents.hallucination.verification import verify_claim
             result = await verify_claim(
                 "Python was created by Guido van Rossum in 1991",
                 MagicMock(), MagicMock(), MagicMock())
@@ -618,12 +618,12 @@ class TestVerificationWithKBData:
     @pytest.mark.asyncio
     async def test_claim_contradicted_by_kb(self):
         """KB has revenue $847.3M, claim says $900M -> flagged."""
-        with patch("agents.hallucination.verification.verify_claim",
+        with patch("core.agents.hallucination.verification.verify_claim",
                     new_callable=AsyncMock) as mock_vc:
             mock_vc.return_value = _make_verify_result(
                 "Meridian revenue was $900M",
                 "unverified", 0.25, "kb_contradiction")
-            from agents.hallucination.verification import verify_claim
+            from core.agents.hallucination.verification import verify_claim
             result = await verify_claim(
                 "Meridian revenue was $900M",
                 MagicMock(), MagicMock(), MagicMock())
@@ -634,12 +634,12 @@ class TestVerificationWithKBData:
     @pytest.mark.asyncio
     async def test_numerical_claim_precision(self):
         """KB has '62% improvement'; exact match verified, wrong number flagged."""
-        with patch("agents.hallucination.verification.verify_claim",
+        with patch("core.agents.hallucination.verification.verify_claim",
                     new_callable=AsyncMock) as mock_vc:
             # Exact match
             mock_vc.return_value = _make_verify_result(
                 "Nexoril showed 62% responder rate", "verified", 0.97)
-            from agents.hallucination.verification import verify_claim
+            from core.agents.hallucination.verification import verify_claim
             exact = await verify_claim(
                 "Nexoril showed 62% responder rate",
                 MagicMock(), MagicMock(), MagicMock())
@@ -658,12 +658,12 @@ class TestVerificationWithKBData:
     @pytest.mark.asyncio
     async def test_verification_with_no_kb_match(self):
         """Claim about topic not in KB -> uncertain/external fallback."""
-        with patch("agents.hallucination.verification.verify_claim",
+        with patch("core.agents.hallucination.verification.verify_claim",
                     new_callable=AsyncMock) as mock_vc:
             mock_vc.return_value = _make_verify_result(
                 "The population of Mars colony is 50,000",
                 "uncertain", 0.4, "external")
-            from agents.hallucination.verification import verify_claim
+            from core.agents.hallucination.verification import verify_claim
             result = await verify_claim(
                 "The population of Mars colony is 50,000",
                 MagicMock(), MagicMock(), MagicMock())

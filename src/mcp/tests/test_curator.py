@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agents.curator import (
+from app.agents.curator import (
     _store_quality_scores,
     compute_quality_score,
     curate,
@@ -343,7 +343,7 @@ class TestScoreCompleteness:
 # ---------------------------------------------------------------------------
 
 class TestComputeQualityScore:
-    @patch("utils.quality._utcnow")
+    @patch("core.utils.quality._utcnow")
     @patch("core.agents.curator.utcnow")
     def test_weighted_sum_matches_manual(self, mock_utcnow, mock_quality_utcnow):
         """Verify weighted sum calculation with known inputs."""
@@ -477,7 +477,7 @@ class TestComputeQualityScore:
         result = compute_quality_score(artifact)
         assert "stale" in result["issues"]
 
-    @patch("utils.quality._utcnow")
+    @patch("core.utils.quality._utcnow")
     @patch("core.agents.curator.utcnow")
     def test_all_dimensions_contribute(self, mock_utcnow, mock_quality_utcnow):
         """Verify each dimension contributes proportionally to weighted total."""

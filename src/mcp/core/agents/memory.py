@@ -169,7 +169,7 @@ async def extract_and_store_memories(
         from config.features import FEATURE_TOGGLES
         consolidation_enabled = FEATURE_TOGGLES.get("enable_memory_consolidation", False)
         if consolidation_enabled:
-            from utils.memory_consolidation import (
+            from core.agents.memory_consolidation import (
                 classify_memory,
                 mark_superseded,
             )

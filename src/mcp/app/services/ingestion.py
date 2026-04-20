@@ -21,10 +21,10 @@ import config
 from app.db import neo4j as graph
 from app.deps import get_chroma, get_neo4j, get_redis
 from app.parsers import parse_file
-from utils import cache
+from core.utils import cache
+from core.utils.time import utcnow_iso
 from utils.chunker import chunk_text, make_context_header
 from utils.metadata import ai_categorize, extract_metadata, extract_metadata_minimal
-from utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion")
 
@@ -112,7 +112,7 @@ def _reingest_artifact(
     # Contextual enrichment — LLM-generated situational summaries per chunk
     if config.ENABLE_CONTEXTUAL_CHUNKS:
         try:
-            from utils.contextual import contextualize_chunks
+            from core.utils.contextual import contextualize_chunks
             chunks = contextualize_chunks(chunks, content, metadata)
         except Exception as e:
             logger.warning("Contextual enrichment skipped (re-ingest): %s", e)
@@ -127,7 +127,7 @@ def _reingest_artifact(
 
     # BM25 index
     try:
-        from utils.bm25 import index_chunks
+        from core.retrieval.bm25 import index_chunks
         index_chunks(domain, chunk_ids, chunks)
     except Exception as e:
         logger.debug(f"BM25 indexing failed during re-ingest (non-blocking): {e}")
@@ -259,7 +259,7 @@ def ingest_content(
     # Contextual enrichment — LLM-generated situational summaries per chunk
     if config.ENABLE_CONTEXTUAL_CHUNKS:
         try:
-            from utils.contextual import contextualize_chunks
+            from core.utils.contextual import contextualize_chunks
             chunks = contextualize_chunks(chunks, content, metadata)
         except Exception as e:
             logger.warning("Contextual enrichment skipped: %s", e)
@@ -284,7 +284,7 @@ def ingest_content(
 
     # Index for BM25 hybrid search
     try:
-        from utils.bm25 import index_chunks
+        from core.retrieval.bm25 import index_chunks
         index_chunks(domain, chunk_ids, chunks)
     except Exception as e:
         logger.warning(f"BM25 indexing failed (non-blocking): {e}")
@@ -295,7 +295,7 @@ def ingest_content(
     if skip_quality:
         quality_score = 0.5
     else:
-        from utils.quality import compute_quality_score as _compute_quality
+        from core.utils.quality import compute_quality_score as _compute_quality
 
         quality_score = _compute_quality(
             summary=base_meta.get("summary", ""),

@@ -2,6 +2,177 @@
 
 All notable changes to cerid-ai are documented here.
 
+## v0.90.0 — Consolidation Program (2026-04-19)
+
+Nine-sprint structural cleanup (A → I) executed from a single planning
+document: [`tasks/2026-04-19-consolidation-program.md`](tasks/2026-04-19-consolidation-program.md).
+The release ships a codebase where three classes of ambiguity
+identified in the 2026-04-19 critical-eye audit are now extinct:
+
+1. **Shape-contract drift** — one canonical `ClaimVerification`
+   Pydantic model, adapter at every boundary. AST-walking contract
+   test guards kwarg validity on the 15+ LLM call sites.
+2. **"Which of N paths?"** — `src/mcp/services/` and `src/mcp/agents/`
+   directories deleted. `src/mcp/utils/` retains only 35 standalone
+   modules (21 pure-reexport bridges retired). `src/mcp/routers/`
+   is billing-only.
+3. **Silent degradation** — `log_swallowed_error` helper + Redis
+   counter surface every broad-catch site at
+   `/health.invariants.swallowed_errors_last_hour`.
+
+### Preservation harness (Sprint A)
+- 8 capability invariants (I1-I8) with 35 integration tests against
+  a live stack. Merge gate for every subsequent sprint.
+- New `preservation` CI job boots docker-compose, runs the harness,
+  dumps logs on failure. Currently `continue-on-error: true`; flip
+  to blocking post-v0.90.0 after two consecutive green runs on main.
+- `make preservation-check` for local developer loop (~60s).
+
+### Canonical claim model (Sprint B)
+- `core.agents.hallucination.models.ClaimVerification` Pydantic
+  model with `from_legacy_dict()` adapter normalizing three
+  historical claim shapes (flat singular, nested sources, pre-v0.84
+  legacy).
+- `save_verification_report` + `m0001` migration now share one
+  shape-detection path — the duplication that caused P1.4 (every
+  saved report was orphaned because the writer ignored the flat
+  `source_artifact_id` shape) can no longer produce class-of-bug
+  divergence.
+
+### Verification write-path (Sprint C)
+- `/agent/hallucination` auto-persists by default (`persist=True`).
+  Collapses the former "call two endpoints" dance. `persist=False`
+  opt-out preserved for SDK consumers managing their own storage.
+- Stub `:VerificationReport` MERGE in `promote_verified_facts`
+  removed — switched to `MATCH` so failed persists no longer
+  leave orphan nodes.
+
+### Layer-violation cleanup (Sprint D)
+- Seven `core → utils.*` backward imports resolved by moving the
+  target modules into `core/utils/` (temporal, diversity, quality,
+  text.extract_keywords_simple) or `core/agents/` (memory_consolidation).
+- One documented exception: `utils.data_sources` (12-file external-
+  API package depending on `app.reliability.url_safety`). Moving
+  it would worsen the layer contract; scheduled for a post-v0.90.0
+  sprint that relocates the whole package to `app/data_sources/`
+  with DI for the registry.
+
+### Bridge retirement (Sprint E)
+- `src/mcp/services/` deleted entirely (3 pure re-export bridges).
+- `src/mcp/agents/` deleted entirely (7 pure bridges + 5 standalones
+  relocated to `app/agents/` + 1 hallucination subpackage of 5
+  bridges + 4 standalones).
+- 21 pure re-export bridges in `src/mcp/utils/` deleted; 35
+  standalone implementations survive.
+- ~185 consumer files mechanically rewritten to canonical
+  `core.*` / `app.*` paths.
+
+### Router consolidation (Sprint F)
+- 32 stub re-exports under `src/mcp/routers/` deleted.
+- 11 legacy real routers (agent_console, custom_agents, data_sources,
+  dlq, mcp_client, plugin_registry, sdk_openapi, system_monitor,
+  watched_folders, webhook_subscriptions, widget) relocated to
+  `src/mcp/app/routers/`.
+- `src/mcp/routers/` is now billing.py-only; `.sync-manifest.yaml`
+  strips the whole directory from public, which is the simplest way
+  to keep Stripe/Pro code out of the OSS distribution.
+- `main.py` legacy router import block rewritten.
+- `gen_router_registry.py` covers both directories; 282 routes.
+
+### Sync tooling (Sprint G)
+- New `--track-deletions` flag on `sync-repos.py to-public` closes
+  the never-propagated-file-deletions failure mode. Surfaces 131
+  real orphans on current dry-run (Bifrost leftovers, build
+  artifacts, pre-v0.84 KB data).
+- `.sync-manifest.yaml` re-categorized with headers explaining the
+  three-rule hierarchy. Stale Sprint E/F entries purged.
+- New `docs/SYNC_PROTOCOL.md` (100-line operator guide).
+- New `scripts/lint-sync-manifest.py` CI gate asserts every
+  `*_internal.*` file has `internal_only` coverage and every
+  `forbidden_in_public` pattern matches at least one file.
+
+### Doc consolidation (Sprint H)
+- `CLAUDE.md` shrunk from 396 lines (~35 KB / ~9000 tokens) to 173
+  lines (~5 KB / ~1500 tokens). **~7500 tokens back in the agent
+  context window every turn.**
+- New `docs/ARCHITECTURE.md` (163 lines) — canonical stack layout +
+  Phase C layer contract + quick-index.
+- New `docs/CONVENTIONS.md` (109 lines) — project-specific
+  style/approach rules, with a closing "when to retire" rule that
+  forces graduation to lint rules over time.
+- `docs/ISSUES.md` renamed to `ISSUES_HISTORICAL.md` with archival
+  header; pointer to three successors (`tasks/todo.md`,
+  `docs/PRESERVATION.md`, `docs/COMPLETED_PHASES.md`).
+
+### New CI jobs
+- `preservation` — boot stack + run 35 integration tests
+- `sync-manifest-drift` — consistency check on the sync manifest
+- `router-registry-drift` — already landed in v0.84.x, stays active
+
+All three run as warnings (`continue-on-error: true`) for the v0.90.0
+shakedown; flipped to blocking in a follow-up once we have two
+consecutive green runs on main.
+
+### Ship-criteria scorecard
+
+| Criterion | Target | Actual |
+|---|---|---|
+| All 8 preservation invariants automated | yes | 35 tests, all green |
+| `src/mcp/services/` file count | 0 | 0 ✓ |
+| `src/mcp/agents/` file count | 0 | 0 ✓ |
+| `src/mcp/routers/` non-billing file count | 0 | 0 ✓ (billing only) |
+| `src/mcp/utils/` pure re-exports | 0 | 0 ✓ |
+| `except Exception: pass` count in src/mcp/ | ≤3 | 0 ✓ |
+| Canonical write path for :VerificationReport | yes | yes ✓ |
+| `import-linter` CI gate enforces layer contract | yes | yes (pre-existing) ✓ |
+| `sync-repos.py --track-deletions` idempotent | yes | yes ✓ |
+| `CLAUDE.md` line count | <150 | 173 (close; 5 mechanical overrides kept inline) |
+| `tasks/lessons.md` line count | <250 | 655 (deferred — every entry is a recipe) |
+| Net-negative repo LOC across program | yes | +3616 (honest miss — see below) |
+
+### Honest notes on the LOC criterion
+
+The program plan aimed for net-negative LOC across all nine sprints.
+Actual diff over 37 commits: +5005 / -1389 = **+3616 LOC**. The
+overshoot comes from:
+
+- Sprint A preservation harness: +~1100 LOC of new integration tests
+- Sprint B canonical model + 9 contract tests: +~440 LOC
+- Sprint G/H new operator docs (SYNC_PROTOCOL, ARCHITECTURE,
+  CONVENTIONS, PRESERVATION, lint-sync-manifest): +~700 LOC
+- Sprint B/C/D/E/F consumer rewrites across 185 files: near-neutral
+  (canonical path is slightly longer than bridge path)
+
+The program shifted cost FROM ambiguous-code-surface TO
+observable-guards-and-operator-docs. That's a legitimate net win
+for reliability even though the line counter disagrees. Post-v0.90.0
+retrospective should either (a) revise the criterion to LOC-per-
+structural-class, or (b) pay down the doc debt by graduating
+lessons.md entries to lint rules.
+
+### Capability compatibility
+
+All 8 preservation invariants pass. Wire formats unchanged. External
+SDK consumers require no code changes for the happy path (the
+auto-persist addition is backward-compatible — old clients that
+already call `/verification/save` after `/agent/hallucination` get
+an idempotent double-save). Public repo sync via `sync-repos.py
+to-public --track-deletions` cleanly propagates all changes.
+
+### What's next
+
+Post-v0.90.0 roadmap (tracked in the freshly-cleared `tasks/todo.md`):
+
+- Chat messages virtualization (Task 18 deferred from v0.84.0)
+- `utils/data_sources/` move to `app/data_sources/` + DI
+- `/agent/verify-stream` SSE auto-persist (parallel of Sprint C's
+  non-streaming /agent/hallucination change)
+- Tighten the three drift CI jobs from warning to blocking
+- `tasks/lessons.md` entries → lint rules / contract tests where
+  feasible
+- Dependency major upgrades (chromadb, neo4j, Python 3.12, ESLint 10)
+  — each their own test matrix, not bundled with structural work
+
 ## v0.84.0 — Reliability Remediation (2026-04-17 → 2026-04-18)
 
 Audit-driven reliability, data-wiring, UX, and LLM-integration fixes across 32 commits. Every P0/P1 concern from the 2026-04-17 live beta audit addressed. Full plan at [`tasks/2026-04-17-reliability-remediation-plan.md`](tasks/2026-04-17-reliability-remediation-plan.md).

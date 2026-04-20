@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from utils.claim_cache import (
+from core.utils.claim_cache import (
     cache_verdict,
     claim_hash,
     get_cached_verdict,

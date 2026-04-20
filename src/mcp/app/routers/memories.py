@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app.deps import get_chroma, get_neo4j, get_redis
-from utils import cache
+from core.utils import cache
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion")
@@ -278,7 +278,7 @@ async def extract_memories_endpoint(req: MemoryExtractRequest):
 
         response_text = "\n\n".join(response_parts)
 
-        from agents.memory import extract_and_store_memories
+        from app.agents.memory import extract_and_store_memories
 
         return await extract_and_store_memories(
             response_text=response_text,

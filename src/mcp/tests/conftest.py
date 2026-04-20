@@ -132,9 +132,9 @@ def _reset_llm_client():
     """
     import os
 
-    import utils.llm_client as _llm_mod
+    import core.utils.llm_client as _llm_mod
     from core.utils.circuit_breaker import get_breaker
-    from utils.claim_cache import clear_l1_cache
+    from core.utils.claim_cache import clear_l1_cache
 
     # Ensure LLM calls use the direct OpenRouter path (mockable via httpx.AsyncClient)
     old_key = os.environ.get("OPENROUTER_API_KEY")

@@ -27,7 +27,7 @@ def _disable_ollama():
 @pytest.fixture(autouse=True)
 def _reset_ollama_breaker():
     """Ensure the ollama circuit breaker starts closed for each test."""
-    from utils.circuit_breaker import CircuitState, get_breaker
+    from core.utils.circuit_breaker import CircuitState, get_breaker
 
     b = get_breaker("ollama")
     b._state = CircuitState.CLOSED
@@ -217,7 +217,7 @@ class TestChatSync:
         from fastapi import HTTPException
 
         from app.routers.ollama_proxy import ChatMessage, ChatRequest, chat_completion
-        from utils.circuit_breaker import CircuitState, get_breaker
+        from core.utils.circuit_breaker import CircuitState, get_breaker
 
         # Force circuit breaker open
         breaker = get_breaker("ollama")
@@ -246,7 +246,7 @@ class TestChatStream:
         from fastapi import HTTPException
 
         from app.routers.ollama_proxy import ChatMessage, ChatRequest, chat_completion
-        from utils.circuit_breaker import CircuitState, get_breaker
+        from core.utils.circuit_breaker import CircuitState, get_breaker
 
         breaker = get_breaker("ollama")
         breaker._state = CircuitState.OPEN

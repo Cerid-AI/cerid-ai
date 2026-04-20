@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from utils.circuit_breaker import AsyncCircuitBreaker, CircuitOpenError, CircuitState
+from core.utils.circuit_breaker import AsyncCircuitBreaker, CircuitOpenError, CircuitState
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -83,7 +83,7 @@ async def test_tavily_provider_success():
         from utils.web_search import TavilyProvider
         provider = TavilyProvider()
         # Reset the breaker to ensure clean state
-        from utils.circuit_breaker import get_breaker
+        from core.utils.circuit_breaker import get_breaker
         get_breaker("tavily").reset()
 
         results = await provider.search("test query", max_results=5)
@@ -108,7 +108,7 @@ async def test_tavily_provider_timeout():
     with patch.dict("os.environ", {"TAVILY_API_KEY": "test-key"}), \
          patch("utils.web_search.TAVILY_API_KEY", "test-key"), \
          patch("utils.web_search._get_search_client", return_value=mock_client):
-        from utils.circuit_breaker import get_breaker
+        from core.utils.circuit_breaker import get_breaker
         from utils.web_search import TavilyProvider
         breaker = get_breaker("tavily")
         breaker.reset()
@@ -134,7 +134,7 @@ async def test_searxng_provider_success():
     with patch.dict("os.environ", {"SEARXNG_URL": "http://localhost:8080"}), \
          patch("utils.web_search.SEARXNG_URL", "http://localhost:8080"), \
          patch("utils.web_search._get_search_client", return_value=mock_client):
-        from utils.circuit_breaker import get_breaker
+        from core.utils.circuit_breaker import get_breaker
         from utils.web_search import SearxngProvider
         get_breaker("searxng").reset()
 
@@ -205,7 +205,7 @@ async def test_cascading_failover():
          patch("utils.web_search.SEARXNG_URL", ""), \
          patch("utils.web_search._get_search_client", return_value=mock_client), \
          patch("utils.web_search._rate_window", []):
-        from utils.circuit_breaker import get_breaker
+        from core.utils.circuit_breaker import get_breaker
         from utils.web_search import get_search_provider
         get_breaker("tavily").reset()
 
@@ -285,7 +285,7 @@ async def test_web_search_returns_structured_results():
     with patch("utils.web_search.TAVILY_API_KEY", "test-key"), \
          patch("utils.web_search._get_search_client", return_value=mock_client), \
          patch("utils.web_search._rate_window", []):
-        from utils.circuit_breaker import get_breaker
+        from core.utils.circuit_breaker import get_breaker
         from utils.web_search import search_and_verify
         get_breaker("tavily").reset()
 

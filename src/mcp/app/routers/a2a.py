@@ -146,7 +146,7 @@ async def agent_card():
 
 async def _execute_query(input_data: dict) -> dict:
     """Wrap the agent query pipeline."""
-    from agents.query_agent import agent_query
+    from core.agents.query_agent import agent_query
 
     result = await agent_query(
         query=input_data.get("text", input_data.get("query", "")),
@@ -173,7 +173,7 @@ async def _execute_ingest(input_data: dict) -> dict:
 
 async def _execute_recall(input_data: dict) -> dict:
     """Wrap memory recall with decay scoring."""
-    from agents.memory import recall_memories
+    from app.agents.memory import recall_memories
 
     memories = await recall_memories(
         query=input_data.get("text", input_data.get("query", "")),
@@ -199,7 +199,7 @@ async def _execute_web_search(input_data: dict) -> dict:
 
 async def _execute_verification(input_data: dict) -> dict:
     """Wrap hallucination checking."""
-    from agents.hallucination import check_hallucinations
+    from core.agents.hallucination import check_hallucinations
 
     result = await check_hallucinations(
         response_text=input_data.get("text", input_data.get("response_text", "")),

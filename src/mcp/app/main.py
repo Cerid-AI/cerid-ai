@@ -544,7 +544,7 @@ async def lifespan(app: FastAPI):
     # run_in_executor keeps the event loop (and uvicorn) responsive while ONNX
     # loads — without this the loop blocks for several seconds on cold start.
     try:
-        from utils.reranker import warmup as reranker_warmup
+        from core.retrieval.reranker import warmup as reranker_warmup
         await asyncio.get_running_loop().run_in_executor(None, reranker_warmup)
         logger.info("Reranker ONNX model pre-warmed")
     except Exception as e:
@@ -604,7 +604,7 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("Scheduler shutdown failed: %s", exc)
     try:
-        from utils.llm_client import close_client
+        from core.utils.llm_client import close_client
         await close_client()
     except Exception as exc:
         logger.warning("LLM client shutdown failed: %s", exc)
@@ -614,7 +614,7 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("Chat client shutdown failed: %s", exc)
     try:
-        from utils.internal_llm import close_ollama_client
+        from core.utils.internal_llm import close_ollama_client
         await close_ollama_client()
     except Exception as exc:
         logger.warning("Ollama client shutdown failed: %s", exc)
@@ -632,7 +632,7 @@ async def lifespan(app: FastAPI):
     # Flush semantic cache HNSW index to Redis before closing Redis
     try:
         from app.deps import get_redis
-        from utils.semantic_cache import flush_cache
+        from core.retrieval.semantic_cache import flush_cache
         flush_cache(get_redis())
     except Exception:
         logger.debug("Semantic cache flush skipped during shutdown")
@@ -735,8 +735,11 @@ if CERID_MULTI_USER:
     from app.routers import auth as auth_router
     app.include_router(auth_router.router)
 
-# Routers from bridge layer (not yet extracted to app/routers/ — Phase C follow-up)
-from routers import (  # noqa: E402,I001
+# Former bridge-layer routers (Sprint F.2 of the 2026-04-19 consolidation
+# program moved them from src/mcp/routers/ to src/mcp/app/routers/).
+# src/mcp/routers/ now holds only billing.py, which stays there because
+# .sync-manifest.yaml strips it for the public distribution.
+from app.routers import (  # noqa: E402,I001
     agent_console,
     custom_agents,
     data_sources,
@@ -750,7 +753,7 @@ from routers import (  # noqa: E402,I001
     widget,
 )
 
-_bridge_routers = [
+_legacy_routers = [
     data_sources.router,
     watched_folders.router,
     system_monitor.router,
@@ -763,7 +766,7 @@ _bridge_routers = [
     plugin_registry.router,
     widget.router,
 ]
-for r in _bridge_routers:
+for r in _legacy_routers:
     app.include_router(r)
 
 # SDK OpenAPI spec (serves at /sdk/v1/openapi.json — no versioned prefix needed)

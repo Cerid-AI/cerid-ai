@@ -3,7 +3,7 @@
 
 """Tests for MMR diversity reordering module."""
 
-from utils.diversity import _extract_terms, jaccard_similarity, mmr_reorder
+from core.utils.diversity import _extract_terms, jaccard_similarity, mmr_reorder
 
 
 class TestExtractTerms:

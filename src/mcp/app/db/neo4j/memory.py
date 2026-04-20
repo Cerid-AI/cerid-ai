@@ -13,7 +13,7 @@ import logging
 import uuid
 from typing import Any
 
-from utils.time import utcnow_iso
+from core.utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.graph")
 

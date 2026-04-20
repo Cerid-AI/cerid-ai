@@ -8,15 +8,18 @@
  *
  * Extracted from ChatPanel to keep verification concerns cohesive.
  *
- * TODO: Verification scoping — show verification for the most recent assistant
- * response only. When user clicks a previous assistant reply, swap to that
- * message's verification cards. Currently verification state persists across
- * all messages and doesn't clear on new responses. This requires:
- *   1. Track "selectedVerificationMessageId" in this hook
- *   2. Auto-set to latest assistant message ID when a new response completes
- *   3. When user clicks a previous message bubble, update selectedVerificationMessageId
- *   4. Filter allVerificationReports / streaming state by selectedVerificationMessageId
- *   5. Clear streaming verification state when a new user message is sent
+ * Per-message scoping contract (guarded by
+ * ``src/web/src/__tests__/verification-orchestrator.test.ts``):
+ *   1. ``selectedMsgId`` state holds the user's manual selection; ``null``
+ *      falls back to the latest assistant message via ``effectiveMsgId``.
+ *   2. On new assistant completion, ``selectedMsgId`` is reset to ``null``
+ *      so the panel auto-tracks the latest turn.
+ *   3. ``setSelectedVerificationMsgId`` lets consumers (chat-messages.tsx)
+ *      swap to any prior message that has a stored report.
+ *   4. ``halReport`` / ``halLoading`` filter by ``effectiveMsgId`` —
+ *      live streaming only appears on the latest; saved reports for older.
+ *   5. A new stream start clears ``savedReport``, ``selectedMsgId``, and
+ *      the expert re-verification state so nothing bleeds across turns.
  */
 
 import { useState, useMemo, useEffect, useCallback, useRef } from "react"

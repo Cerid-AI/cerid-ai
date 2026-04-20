@@ -49,7 +49,7 @@ async def generate_hypothetical_document(
     Returns None on any failure — HyDE must never block retrieval.
     """
     try:
-        from utils.internal_llm import call_internal_llm
+        from core.utils.internal_llm import call_internal_llm
 
         prompt = _HYDE_PROMPT.format(
             query=query,

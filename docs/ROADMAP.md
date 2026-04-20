@@ -1,7 +1,8 @@
 # Cerid AI -- Development Roadmap
 
-> **Last updated:** 2026-04-05
+> **Last updated:** 2026-04-19 (post-v0.84.0)
 > **For completed work:** See `docs/COMPLETED_PHASES.md`
+> **Current sprint:** `tasks/todo.md`
 
 ---
 
@@ -22,42 +23,37 @@ _All P0 items completed._
 
 ## P1 -- High Priority
 
-### Private Mode (Ephemeral Sessions)
-- Toggle in toolbar: "Private Mode" -- nothing remembered, nothing saved
-- 4 configurable security levels:
-  1. No history, no memory extraction
-  2. Also disable KB context injection
-  3. Also force local-only models (Ollama)
-  4. Also clear Redis query cache on session end
-- Visual lock indicator, session data wiped on close
+### ✅ Private Mode (Ephemeral Sessions) -- SHIPPED v0.84.0
 
-### Conversation Management UX
-- Archived conversations view toggle
-- Bulk select/delete for history cleanup
-- Search within conversation history
+Toggle in chat toolbar; 4 configurable security levels; `CERID_PRIVATE_MODE` + `CERID_PRIVATE_MODE_LEVEL` env vars wired through `features.py`, `settings.py`, `chat-toolbar.tsx`, `chat-panel.tsx`, `use-chat.ts`, `use-conversations.ts`. Visual lock indicator in toolbar. Session data wiped on close.
 
-### Agent Communication Console
-- Optional real-time console panel showing agent activity
-- Ticker-scroll with humanized agent messages
-- Color-coded by agent, filterable, collapsible/dockable
-- Transparency into the intelligence pipeline
+**Follow-up (P2):** Level 4 ("clear Redis query cache on session end") validation sweep — confirm the cache flush path works end-to-end on session close.
 
-### Model Management & Auto-Update Detection
-- Auto-detection of new model releases via OpenRouter API polling
-- Notification badge when new models available
-- Deprecation warnings for outdated models
-- Cost comparison view: current model vs alternatives
+### ✅ Conversation Management UX -- SHIPPED v0.84.0
 
-### Pro Tier Purchase Path
-- Stripe integration for Pro tier licensing
-- License key validation endpoint
-- Self-serve upgrade flow Core -> Pro in Settings
-- **Pro anchor feature:** Audio transcription (meeting notes, interviews, lectures)
+Archive/unarchive, bulk select/delete/archive, and conversation search all landed. Files: `src/web/src/components/chat/conversation-list.tsx` (search + archive toggles), `src/web/src/components/layout/sidebar.tsx` (bulk ops at lines 70 + 240), `src/web/src/hooks/use-conversations.ts` (archived-default migration for pre-existing records).
 
-### Pro Mode Configuration & Feature Access
-- Clear Pro settings pane showing all Pro-gated features with status
-- Feature discovery: show what Pro unlocks with preview
-- License key entry and validation
+### ✅ Agent Communication Console -- SHIPPED v0.84.0
+
+Real-time activity panel with humanized agent messages. Files: `src/web/src/components/agents/agent-console.tsx` (105 LOC), `agents-pane.tsx`, `agent-cards.tsx`. SSE exponential backoff with abort-on-unmount (landed in v0.83.0 bug-hunt).
+
+### ✅ Model Management & Auto-Update Detection -- SHIPPED v0.84.0
+
+`src/web/src/components/settings/model-management.tsx` renders "N new models available" banners and deprecation warnings. `system-section.tsx:1174+` contains the Model Updates subsection. OpenRouter catalog polling in place.
+
+**Follow-up (P2):** Cost-comparison view (current model vs alternatives) — catalog data is already fetched; needs a UI surface in settings.
+
+### ✅ Pro Tier Purchase Path -- SHIPPED (backend scaffolding) v0.83.0+
+
+Billing integration backend in the internal-only distribution (not synced public). Configured via env vars documented in the internal `.env.example`. License-key validation endpoint in place.
+
+**Follow-up (P1):** Self-serve upgrade flow in settings UI + license-key entry field. Pro-anchor feature (audio transcription) still pending.
+
+### 🔲 Pro Mode Configuration & Feature Access -- OPEN
+
+- Pro settings pane listing all Pro-gated features with status indicators
+- Feature discovery: "preview what Pro unlocks" surface
+- License key entry + validation wired to backend
 
 ---
 
@@ -66,7 +62,7 @@ _All P0 items completed._
 ### Expanded File Type Handling
 - Specialized parsers for code (AST extraction for Python, JS/TS)
 - Image OCR for scanned PDFs (Pro tier)
-- Audio transcription for meeting notes (Pro tier)
+- Audio transcription for meeting notes (Pro tier — anchor feature for Pro path)
 - Markdown frontmatter extraction (YAML/TOML headers -> metadata)
 
 ### Bulk Import Enhancements
@@ -79,7 +75,7 @@ _All P0 items completed._
 - Dead-letter queue, BM25 rollback, triage-to-ingest bridge, per-file status
 
 #### Core Data Sources
-- IMAP email, RSS feeds, browser bookmarks, inbound webhooks, clipboard, macOS Quick Actions
+- IMAP email (env vars scaffolded in settings.py), RSS feeds, browser bookmarks, inbound webhooks, clipboard, macOS Quick Actions
 
 #### Pro Data Sources
 - Gmail OAuth, Outlook Graph, Apple Notes, Calendar sync, Docling parser
@@ -98,7 +94,7 @@ _All P0 items completed._
 - SAML 2.0 SP with IdP metadata import
 - Common IdPs: Okta, Azure AD, OneLogin
 - Tenant-scoped SSO configuration
-- Currently scaffolded as feature flag only
+- Currently scaffolded as feature flag only (SSO env vars documented in the internal `.env.example`)
 
 ### Enterprise Feature Scaffolding
 - All Vault features get endpoint stubs returning 403 with upgrade message
@@ -110,3 +106,12 @@ _All P0 items completed._
 - Type hints on all public APIs, mypy strict mode
 - Parent-child hierarchical RAG (currently feature-flagged off)
 - Graph RAG with entity extraction and query rewriting
+
+### Chat Messages Virtualization (deferred from v0.84.0)
+- First attempt broke 46 jsdom measurement-dependent tests — needs `@tanstack/react-virtual` approach with jsdom-safe measure shim. See `tasks/todo.md` L2.
+
+---
+
+## Next Sprint Candidates
+
+See `tasks/todo.md` for the 7 validated post-v0.84.0 open items with fix plans and effort estimates.

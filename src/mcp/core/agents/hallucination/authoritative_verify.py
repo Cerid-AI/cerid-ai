@@ -176,10 +176,18 @@ async def verify_claim_authoritatively(
     # Step 1: Query authoritative external sources via the DataSourceRegistry
     external_results: list[dict] = []
     try:
+        # ``utils.data_sources`` is an explicit, narrow exception to the
+        # core → utils restriction. The package imports from
+        # ``app.reliability.url_safety`` (see custom.py), which makes a
+        # "move to core/" infeasible — the right long-term fix is to move
+        # the whole package to ``app/data_sources/`` and use dependency
+        # injection to hand the registry to authoritative_verify. Tracked
+        # as a post-v0.90.0 follow-up (see
+        # tasks/2026-04-19-consolidation-program.md § Out of scope).
+        from core.utils.text import extract_keywords_simple
         from utils.data_sources import registry
-        from utils.metadata import _extract_keywords_simple
 
-        keywords = _extract_keywords_simple(claim, max_keywords=5)
+        keywords = extract_keywords_simple(claim, max_keywords=5)
         search_terms = " ".join(keywords) if keywords else claim
 
         raw_results = await asyncio.wait_for(

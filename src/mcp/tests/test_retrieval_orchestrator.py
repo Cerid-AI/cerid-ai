@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agents.retrieval_orchestrator import (
+from app.agents.retrieval_orchestrator import (
     _format_memory_context,
     orchestrated_query,
 )
@@ -107,7 +107,7 @@ class TestManualMode:
         """Manual mode should call agent_query() and return its result unchanged."""
         fake_result = _fake_kb_result()
 
-        with patch("agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
+        with patch("core.agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
             mock_aq.return_value = fake_result
             result = _run(orchestrated_query(query="test", rag_mode="manual"))
 
@@ -117,7 +117,7 @@ class TestManualMode:
 
     def test_manual_mode_passes_all_kwargs(self):
         """Manual mode should forward all kwargs to agent_query()."""
-        with patch("agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
+        with patch("core.agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
             mock_aq.return_value = _fake_kb_result()
             _run(orchestrated_query(
                 query="test",
@@ -143,8 +143,8 @@ class TestSmartMode:
     def test_smart_mode_parallel_execution(self):
         """Smart mode should call both agent_query and recall_memories."""
         with (
-            patch("agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq,
-            patch("agents.retrieval_orchestrator._recall_with_timeout", new_callable=AsyncMock) as mock_recall,
+            patch("core.agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq,
+            patch("app.agents.retrieval_orchestrator._recall_with_timeout", new_callable=AsyncMock) as mock_recall,
         ):
             mock_aq.return_value = _fake_kb_result()
             mock_recall.return_value = _fake_memory_results()
@@ -159,8 +159,8 @@ class TestSmartMode:
     def test_smart_mode_source_breakdown_structure(self):
         """source_breakdown should have kb, memory, and external keys."""
         with (
-            patch("agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq,
-            patch("agents.retrieval_orchestrator._recall_with_timeout", new_callable=AsyncMock) as mock_recall,
+            patch("core.agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq,
+            patch("app.agents.retrieval_orchestrator._recall_with_timeout", new_callable=AsyncMock) as mock_recall,
         ):
             mock_aq.return_value = _fake_kb_result()
             mock_recall.return_value = _fake_memory_results()
@@ -175,9 +175,9 @@ class TestSmartMode:
     def test_smart_mode_separates_external_from_kb(self):
         """External results (with source_url) should be in external, not kb."""
         with (
-            patch("agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq,
-            patch("agents.retrieval_orchestrator._recall_with_timeout", new_callable=AsyncMock) as mock_recall,
-            patch("agents.retrieval_orchestrator._query_external_sources", new_callable=AsyncMock, return_value=[]),
+            patch("core.agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq,
+            patch("app.agents.retrieval_orchestrator._recall_with_timeout", new_callable=AsyncMock) as mock_recall,
+            patch("app.agents.retrieval_orchestrator._query_external_sources", new_callable=AsyncMock, return_value=[]),
         ):
             mock_aq.return_value = _fake_kb_result()
             mock_recall.return_value = []
@@ -193,8 +193,8 @@ class TestSmartMode:
     def test_smart_mode_memory_sources_formatted(self):
         """Memory results should be formatted with source_type: memory."""
         with (
-            patch("agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq,
-            patch("agents.retrieval_orchestrator._recall_with_timeout", new_callable=AsyncMock) as mock_recall,
+            patch("core.agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq,
+            patch("app.agents.retrieval_orchestrator._recall_with_timeout", new_callable=AsyncMock) as mock_recall,
         ):
             mock_aq.return_value = _fake_kb_result()
             mock_recall.return_value = _fake_memory_results()
@@ -210,8 +210,8 @@ class TestSmartMode:
     def test_smart_mode_appends_memory_context(self):
         """Memory results should be appended to the context string."""
         with (
-            patch("agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq,
-            patch("agents.retrieval_orchestrator._recall_with_timeout", new_callable=AsyncMock) as mock_recall,
+            patch("core.agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq,
+            patch("app.agents.retrieval_orchestrator._recall_with_timeout", new_callable=AsyncMock) as mock_recall,
         ):
             mock_aq.return_value = _fake_kb_result()
             mock_recall.return_value = _fake_memory_results()
@@ -224,8 +224,8 @@ class TestSmartMode:
     def test_smart_mode_no_memory_no_context_append(self):
         """When no memories match, context should remain unchanged."""
         with (
-            patch("agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq,
-            patch("agents.retrieval_orchestrator._recall_with_timeout", new_callable=AsyncMock) as mock_recall,
+            patch("core.agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq,
+            patch("app.agents.retrieval_orchestrator._recall_with_timeout", new_callable=AsyncMock) as mock_recall,
         ):
             original = _fake_kb_result()
             mock_aq.return_value = original
@@ -247,9 +247,9 @@ class TestCustomSmartMode:
     def test_custom_smart_disables_sources(self):
         """source_config can disable individual source types."""
         with (
-            patch("agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq,
-            patch("agents.retrieval_orchestrator._recall_with_timeout", new_callable=AsyncMock) as mock_recall,
-            patch("agents.retrieval_orchestrator._custom_rag_fn", _apply_source_config),
+            patch("core.agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq,
+            patch("app.agents.retrieval_orchestrator._recall_with_timeout", new_callable=AsyncMock) as mock_recall,
+            patch("app.agents.retrieval_orchestrator._custom_rag_fn", _apply_source_config),
         ):
             mock_aq.return_value = _fake_kb_result()
             mock_recall.return_value = _fake_memory_results()
@@ -308,13 +308,13 @@ class TestMemoryRecallTimeout:
 
     def test_timeout_returns_empty(self):
         """Timeout should return empty list, not raise."""
-        from agents.retrieval_orchestrator import _recall_with_timeout
+        from app.agents.retrieval_orchestrator import _recall_with_timeout
 
         async def slow_recall(**kwargs):
             await asyncio.sleep(10)
             return [{"text": "never returned"}]
 
-        with patch("agents.memory.recall_memories", side_effect=slow_recall):
+        with patch("app.agents.memory.recall_memories", side_effect=slow_recall):
             result = _run(_recall_with_timeout(
                 query="test", chroma_client=None, neo4j_driver=None,
                 top_k=5, min_score=0.4, timeout_ms=50,
@@ -324,9 +324,9 @@ class TestMemoryRecallTimeout:
 
     def test_error_returns_empty(self):
         """Exception in recall should return empty list."""
-        from agents.retrieval_orchestrator import _recall_with_timeout
+        from app.agents.retrieval_orchestrator import _recall_with_timeout
 
-        with patch("agents.memory.recall_memories", new_callable=AsyncMock) as mock:
+        with patch("app.agents.memory.recall_memories", new_callable=AsyncMock) as mock:
             mock.side_effect = RuntimeError("Neo4j down")
             result = _run(_recall_with_timeout(
                 query="test", chroma_client=None, neo4j_driver=None,

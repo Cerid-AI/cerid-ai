@@ -115,7 +115,7 @@ class DataSourceRegistry:
         ``is_relevant()`` can skip irrelevant sources entirely.  If omitted,
         ``query`` is passed through unchanged (backward-compatible).
         """
-        from utils.circuit_breaker import CircuitOpenError, get_breaker
+        from core.utils.circuit_breaker import CircuitOpenError, get_breaker
 
         sources = self.get_enabled_sources(domain)
         if not sources:

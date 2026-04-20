@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 import config
 from app.deps import get_chroma
-from utils.time import utcnow_iso
+from core.utils.time import utcnow_iso
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion")
@@ -39,7 +39,7 @@ def query_knowledge(query: str, domain: str = "general", top_k: int = 3) -> dict
     # BM25 hybrid scoring
     bm25_scores: dict = {}
     try:
-        from utils import bm25 as bm25_mod
+        from core.retrieval import bm25 as bm25_mod
         if bm25_mod.is_available():
             bm25_hits = bm25_mod.search_bm25(domain, query, top_k=top_k)
             if bm25_hits:

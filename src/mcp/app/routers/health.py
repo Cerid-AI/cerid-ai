@@ -58,14 +58,14 @@ def health_check() -> dict:
         status["neo4j"] = f"error: {exc}"
     # Circuit breaker states
     try:
-        from utils.circuit_breaker import get_breaker as _gb
+        from core.utils.circuit_breaker import get_breaker as _gb
         ollama_cb_state = _gb("ollama").state.value
     except (ValueError, ImportError):
         ollama_cb_state = "unknown"
 
     # OpenRouter circuit breaker — covers verification and LLM calls
     try:
-        from utils.circuit_breaker import get_breaker as _gb2
+        from core.utils.circuit_breaker import get_breaker as _gb2
         openrouter_cb_state = _gb2("openrouter").state.value
     except (ValueError, ImportError):
         openrouter_cb_state = "unknown"

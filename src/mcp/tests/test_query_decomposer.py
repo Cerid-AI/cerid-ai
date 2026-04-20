@@ -5,7 +5,7 @@
 
 import pytest
 
-from utils.query_decomposer import (
+from core.retrieval.query_decomposer import (
     decompose_heuristic,
     decompose_query,
     needs_decomposition,

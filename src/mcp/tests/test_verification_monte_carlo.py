@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from agents.hallucination import (
+from core.agents.hallucination import (
     _check_numeric_alignment,
     _compute_adjusted_confidence,
     _detect_evasion,
@@ -32,7 +32,7 @@ from agents.hallucination import (
     _is_recency_claim,
     _parse_verification_verdict,
 )
-from agents.hallucination.extraction import _reclassify_recency
+from core.agents.hallucination.extraction import _reclassify_recency
 
 # ---------------------------------------------------------------------------
 # Synthetic claim corpus — ground-truth labeled

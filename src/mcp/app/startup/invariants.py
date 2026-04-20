@@ -25,14 +25,22 @@ from typing import Any
 
 logger = logging.getLogger("ai-companion.invariants")
 
-# Cypher reused from migrations/m0001 — a :VerificationReport is "orphan"
-# when it has no outgoing provenance edge AND no source_urls array.  This
-# matches the writer's post-Task-2 contract (every new report must have at
-# least one of the two).
+# The writer contract guarantees that every saved :VerificationReport
+# carries provenance via at least ONE of three channels:
+#
+#   1. [:VERIFIED] / [:EXTRACTED_FROM] edges      (kb_nli path)
+#   2. ``source_urls`` array                      (web_search path)
+#   3. ``verification_methods`` array             (cross_model + any path)
+#
+# An orphan is a node missing ALL THREE. Keeping the probe aligned with
+# the writer's contract (and with the m0002 cleanup migration) means the
+# count is a true regression signal: a non-zero result after v0.84.1
+# implies a writer regression, nothing else.
 _ORPHAN_CYPHER = """
 MATCH (v:VerificationReport)
 WHERE NOT (v)-[:VERIFIED|EXTRACTED_FROM]->()
   AND (v.source_urls IS NULL OR size(v.source_urls) = 0)
+  AND (v.verification_methods IS NULL OR size(v.verification_methods) = 0)
 RETURN count(v) AS orphans
 """
 
@@ -186,6 +194,39 @@ def _probe_nli() -> dict[str, Any]:
         return {"nli_model_loaded": False, "nli_error": str(exc)}
 
 
+def _probe_internal_modules() -> dict[str, Any]:
+    """Probe: which internal-only bootstrap modules loaded at startup?
+
+    Tells operators — via ``/health.invariants.internal_modules`` —
+    whether the running server is the internal build (Pro/Enterprise
+    plus trading/boardroom) or the public build. A partial result
+    (some True, some False) indicates a **build regression**: an
+    internal-only module went missing between the build and the run.
+    """
+    try:
+        from app.internal_modules import snapshot
+        return {"internal_modules": snapshot()}
+    except Exception as exc:
+        return {"internal_modules": {}, "internal_modules_error": str(exc)}
+
+
+def _probe_swallowed_errors(redis: Any) -> dict[str, Any]:
+    """Probe: count of swallowed exceptions per module in the last hour.
+
+    Exposed at ``/health.invariants.swallowed_errors_last_hour`` as a
+    ``{module: count}`` dict. A rising count on a specific module
+    ("ingestion.ai_categorize" spikes to 500/hr) is the visible signal
+    that a silent-degradation class is actually firing — the whole
+    point of ``log_swallowed_error``. Dashboards can alert on
+    module-specific thresholds.
+    """
+    try:
+        from core.utils.swallowed import swallowed_error_counts
+        return {"swallowed_errors_last_hour": swallowed_error_counts(redis)}
+    except Exception as exc:
+        return {"swallowed_errors_last_hour": {}, "swallowed_errors_error": str(exc)}
+
+
 def run_invariants(chroma: Any, redis: Any, neo4j: Any) -> dict[str, Any]:
     """Build a snapshot of observable invariants.
 
@@ -222,6 +263,20 @@ def run_invariants(chroma: Any, redis: Any, neo4j: Any) -> dict[str, Any]:
         logger.warning("nli invariant probe failed: %s", exc)
         snapshot["errors"].append(f"nli: {exc}")
         snapshot["nli_model_loaded"] = False
+
+    try:
+        snapshot.update(_probe_internal_modules())
+    except Exception as exc:
+        logger.warning("internal_modules invariant probe failed: %s", exc)
+        snapshot["errors"].append(f"internal_modules: {exc}")
+        snapshot["internal_modules"] = {}
+
+    try:
+        snapshot.update(_probe_swallowed_errors(redis))
+    except Exception as exc:
+        logger.warning("swallowed_errors invariant probe failed: %s", exc)
+        snapshot["errors"].append(f"swallowed_errors: {exc}")
+        snapshot["swallowed_errors_last_hour"] = {}
 
     # Criticality gate — /health uses this to choose HTTP status.
     healthy = True

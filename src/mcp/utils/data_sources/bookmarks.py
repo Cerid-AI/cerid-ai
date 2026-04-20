@@ -333,7 +333,7 @@ async def import_bookmarks(browser: str = "all") -> dict[str, Any]:
     Returns:
         Dict with import counts (imported, skipped, errors).
     """
-    from services.ingestion import ingest_content
+    from app.services.ingestion import ingest_content
 
     if browser == "all":
         targets = list(_READERS.keys())

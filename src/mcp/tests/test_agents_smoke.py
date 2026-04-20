@@ -39,7 +39,7 @@ class TestRectifyImports:
     def test_bridge_module_exports_rectify(self):
         # The agents/rectify.py bridge re-exports from core; a circular
         # import or missing symbol would surface here.
-        from agents.rectify import rectify  # noqa: F401
+        from core.agents.rectify import rectify  # noqa: F401
         assert callable(rectify)
 
     def test_helper_functions_callable(self):
@@ -84,7 +84,7 @@ class TestAuditImports:
         from core.agents import audit  # noqa: F401
 
     def test_bridge_exports_audit(self):
-        from agents.audit import audit  # noqa: F401
+        from core.agents.audit import audit  # noqa: F401
         assert callable(audit)
 
     def test_helper_functions_callable(self):
@@ -125,7 +125,7 @@ class TestMaintenanceImports:
         from core.agents import maintenance  # noqa: F401
 
     def test_bridge_exports_maintain(self):
-        from agents.maintenance import maintain  # noqa: F401
+        from core.agents.maintenance import maintain  # noqa: F401
         assert callable(maintain)
 
     def test_helper_functions_callable(self):

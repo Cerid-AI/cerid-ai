@@ -27,7 +27,7 @@ from app.sync._helpers import (
     _default_sync_dir,
     _sha256_file,
 )
-from utils.time import utcnow_iso
+from core.utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.sync")
 

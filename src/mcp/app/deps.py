@@ -76,7 +76,7 @@ class _EmbeddingAwareClient:
         ef = object.__getattribute__(self, "_ef")
         if ef is not None:
             return ef
-        from utils.embeddings import get_embedding_function
+        from core.utils.embeddings import get_embedding_function
         ef = get_embedding_function()
         object.__setattr__(self, "_ef", ef)
         return ef

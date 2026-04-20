@@ -18,7 +18,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest"
-import { renderHook, waitFor } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 import type { ChatMessage } from "@/lib/types"
 import { MODELS } from "@/lib/types"
 
@@ -176,5 +176,92 @@ describe("useVerificationOrchestrator — length gate (Bug #11)", () => {
 
     // No trigger: lastKnownCount initializes to current count, so no delta.
     expect(lastTriggerKey()).toBe(0)
+  })
+})
+
+/**
+ * Per-message verification scoping — the orchestrator exposes
+ * ``selectedVerificationMsgId`` and ``setSelectedVerificationMsgId`` so a user
+ * can click a prior assistant reply and swap the verification cards to that
+ * message. The feature was shipped in v0.84.0 but had no dedicated tests;
+ * these guard the three invariants documented in the hook header.
+ */
+function makeMultiTurnMessages(): ChatMessage[] {
+  return [
+    { id: "u1", role: "user", content: "q1", timestamp: 1 },
+    { id: "a1", role: "assistant", content: "First response is long enough for verification.", timestamp: 2, model: currentModel.id },
+    { id: "u2", role: "user", content: "q2", timestamp: 3 },
+    { id: "a2", role: "assistant", content: "Second response is also long enough for verification.", timestamp: 4, model: currentModel.id },
+  ]
+}
+
+describe("useVerificationOrchestrator — per-message scoping", () => {
+  beforeEach(() => {
+    mockStreamHook.mockClear()
+  })
+
+  it("defaults selectedVerificationMsgId to the latest assistant message", () => {
+    const { result } = renderHook(() =>
+      useVerificationOrchestrator({
+        activeMessages: makeMultiTurnMessages(),
+        activeId: "conv-scope-default",
+        isStreaming: false,
+        hallucinationEnabled: true,
+        currentModel,
+      }),
+    )
+
+    // With no manual selection, the effective id falls through to the latest
+    // assistant message so the panel renders current-turn verification by
+    // default. Regression would show a stale prior-message id here.
+    expect(result.current.lastAssistantMsgId).toBe("a2")
+    expect(result.current.selectedVerificationMsgId).toBe("a2")
+  })
+
+  it("setSelectedVerificationMsgId swaps the selected message", () => {
+    const { result } = renderHook(() =>
+      useVerificationOrchestrator({
+        activeMessages: makeMultiTurnMessages(),
+        activeId: "conv-scope-swap",
+        isStreaming: false,
+        hallucinationEnabled: true,
+        currentModel,
+      }),
+    )
+
+    expect(result.current.selectedVerificationMsgId).toBe("a2")
+
+    act(() => {
+      result.current.setSelectedVerificationMsgId("a1")
+    })
+
+    expect(result.current.selectedVerificationMsgId).toBe("a1")
+  })
+
+  it("resets to the latest message when a new stream begins", () => {
+    const { result, rerender } = renderHook(
+      ({ isStreaming }: { isStreaming: boolean }) =>
+        useVerificationOrchestrator({
+          activeMessages: makeMultiTurnMessages(),
+          activeId: "conv-scope-reset",
+          isStreaming,
+          hallucinationEnabled: true,
+          currentModel,
+        }),
+      { initialProps: { isStreaming: false } },
+    )
+
+    // User clicks an older message to inspect its verification.
+    act(() => {
+      result.current.setSelectedVerificationMsgId("a1")
+    })
+    expect(result.current.selectedVerificationMsgId).toBe("a1")
+
+    // New response starts streaming — selection resets so the streaming
+    // card doesn't appear attached to the wrong (older) bubble. This is
+    // the 5th TODO step from the original hook header: "clear streaming
+    // verification state when a new user message is sent."
+    rerender({ isStreaming: true })
+    expect(result.current.selectedVerificationMsgId).toBe("a2")
   })
 })

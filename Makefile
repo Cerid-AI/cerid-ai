@@ -57,6 +57,15 @@ smoke:
 	@echo "[smoke] requires stack running (scripts/start-cerid.sh)"
 	python3 src/mcp/tests/load/smoke.py
 
+# -- Preservation harness --
+# Gates every sprint in the consolidation program. Runs against the
+# live stack at http://127.0.0.1:8888 (override with
+# CERID_PRESERVATION_MCP). NEO4J_PASSWORD must be in the env or in .env.
+preservation-check: ## Run capability-preservation invariants (I1-I8) against a live stack
+	@echo "[preservation] requires stack running (scripts/start-cerid.sh)"
+	@test -n "$$NEO4J_PASSWORD" || set -a && . .env && set +a; \
+	docker exec ai-companion-mcp python -m pytest tests/integration/ -m preservation -v --tb=short
+
 # -- Latency SLO benchmarks --
 slo: ## Run latency SLO benchmarks against localhost:8888 (requires running stack)
 	cd src/mcp && pytest tests/test_latency_slo.py -m benchmark_slo --benchmark-only -v

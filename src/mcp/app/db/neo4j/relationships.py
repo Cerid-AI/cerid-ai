@@ -12,7 +12,7 @@ import re
 from typing import Any
 
 import config
-from utils.time import utcnow_iso
+from core.utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.graph")
 

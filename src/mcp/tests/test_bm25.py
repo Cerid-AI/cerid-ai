@@ -7,8 +7,7 @@ import json
 
 import pytest
 
-from core.retrieval.bm25 import _tokenize
-from utils.bm25 import BM25Index, is_available
+from core.retrieval.bm25 import BM25Index, _tokenize, is_available
 
 
 def test_tokenize_basic():

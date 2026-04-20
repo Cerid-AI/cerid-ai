@@ -19,8 +19,8 @@ from typing import Any
 import tiktoken
 
 import config
+from core.utils.time import utcnow_iso
 from errors import IngestionError
-from utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.metadata")
 
@@ -159,36 +159,14 @@ def _extract_keywords(text: str, max_keywords: int = 10) -> list[str]:
 
 
 def _extract_keywords_simple(text: str, max_keywords: int = 10) -> list[str]:
-    """Fallback keyword extraction using word frequency."""
-    import re
-    from collections import Counter
+    """Thin pass-through to the canonical core.utils.text helper.
 
-    stop_words = {
-        "the", "a", "an", "is", "it", "in", "on", "at", "to", "for",
-        "of", "and", "or", "but", "with", "this", "that", "from", "by",
-        "as", "are", "was", "were", "be", "been", "being", "have", "has",
-        "had", "do", "does", "did", "will", "would", "could", "should",
-        "may", "might", "can", "not", "no", "so", "if", "then", "than",
-        "its", "my", "your", "we", "they", "he", "she", "i", "you",
-        "also", "just", "more", "very", "when", "where", "what", "how",
-        "all", "each", "every", "both", "few", "most", "other", "some",
-        "such", "only", "own", "same", "too", "any", "about", "after",
-        "before", "between", "into", "through", "during", "above", "below",
-        "out", "off", "over", "under", "again", "further", "once", "here",
-        "there", "why", "which", "who", "whom", "these", "those", "them",
-        "their", "our", "his", "her", "up", "down", "get", "got", "make",
-        "like", "use", "used", "using", "new", "one", "two", "see", "way",
-        "well", "back", "even", "give", "take", "come", "still", "know",
-        "need", "want", "try", "ask", "work", "first", "last", "long",
-        "great", "little", "right", "big", "high", "low", "small", "large",
-        "next", "early", "young", "old", "important", "public", "bad",
-        "good", "much", "many", "set", "say", "said", "let", "keep",
-        "put", "think", "thought", "tell", "told", "find", "found",
-    }
-    words = re.findall(r"\b[a-zA-Z]{3,}\b", text[:5000].lower())
-    filtered = [w for w in words if w not in stop_words]
-    common = Counter(filtered).most_common(max_keywords)
-    return [word for word, _ in common]
+    Kept as a legacy alias so existing ``from utils.metadata import
+    _extract_keywords_simple`` callers continue to work. New code should
+    import from ``core.utils.text`` directly.
+    """
+    from core.utils.text import extract_keywords_simple
+    return extract_keywords_simple(text, max_keywords)
 
 
 # ---------------------------------------------------------------------------
@@ -262,8 +240,8 @@ async def ai_categorize(
     try:
         # Route via internal LLM when configured (e.g. Ollama for free local inference)
         if config.INTERNAL_LLM_PROVIDER == "ollama":
-            from utils.internal_llm import call_internal_llm
-            content = await call_internal_llm(  # type: ignore[call-arg]
+            from core.utils.internal_llm import call_internal_llm
+            content = await call_internal_llm(
                 [{"role": "user", "content": prompt}],
                 temperature=0.1,
                 max_tokens=200,
@@ -281,7 +259,7 @@ async def ai_categorize(
                 response_format={"type": "json_object"},
                 breaker_name="bifrost-claims",
             )
-        from utils.llm_parsing import parse_llm_json
+        from core.utils.llm_parsing import parse_llm_json
         result = parse_llm_json(content)
         suggested = result.get("domain", "").lower().strip()
         if suggested not in config.DOMAINS:
@@ -312,10 +290,22 @@ async def ai_categorize(
         }
 
     except (IngestionError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as e:
-        logger.error("AI categorization failed: %s", e)
+        from core.utils.swallowed import log_swallowed_error
+        try:
+            from app.deps import get_redis
+            _redis = get_redis()
+        except Exception:  # noqa: BLE001 — Redis optional in some test contexts
+            _redis = None
+        log_swallowed_error("ingestion.ai_categorize", e, redis_client=_redis)
         return {}
     except Exception as e:  # noqa: BLE001 — defensive catch for httpx/circuit-breaker errors
-        logger.error("AI categorization failed (unexpected): %s", e)
+        from core.utils.swallowed import log_swallowed_error
+        try:
+            from app.deps import get_redis
+            _redis = get_redis()
+        except Exception:  # noqa: BLE001
+            _redis = None
+        log_swallowed_error("ingestion.ai_categorize", e, redis_client=_redis)
         return {}
 
 

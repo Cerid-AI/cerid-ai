@@ -18,7 +18,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from utils.circuit_breaker import CircuitOpenError, get_breaker
+from core.utils.circuit_breaker import CircuitOpenError, get_breaker
 
 router = APIRouter(prefix="/ollama", tags=["ollama"])
 logger = logging.getLogger("ai-companion.ollama")
@@ -256,7 +256,7 @@ async def _stream_chat(
 
     # Check circuit breaker before starting stream
     current_state = breaker.state
-    from utils.circuit_breaker import CircuitState
+    from core.utils.circuit_breaker import CircuitState
 
     if current_state == CircuitState.OPEN:
         raise HTTPException(

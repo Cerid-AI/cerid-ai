@@ -16,7 +16,7 @@ import pytest
 
 class TestOnnxEmbeddingFunction:
     def test_empty_input_returns_empty(self):
-        from utils.embeddings import OnnxEmbeddingFunction
+        from core.utils.embeddings import OnnxEmbeddingFunction
 
         ef = OnnxEmbeddingFunction(model_id="test-model")
         assert ef([]) == []
@@ -26,7 +26,7 @@ class TestOnnxEmbeddingFunction:
     @patch("core.utils.embeddings.Tokenizer.from_file")
     def test_mean_pooling_and_normalization(self, mock_tok_cls, mock_session_cls, mock_dl):
         """Verify mean pooling + L2 normalization produces unit-length vectors."""
-        from utils.embeddings import OnnxEmbeddingFunction
+        from core.utils.embeddings import OnnxEmbeddingFunction
 
         mock_dl.return_value = "/fake/model.onnx"
 
@@ -67,7 +67,7 @@ class TestOnnxEmbeddingFunction:
     @patch("core.utils.embeddings.Tokenizer.from_file")
     def test_matryoshka_truncation(self, mock_tok_cls, mock_session_cls, mock_dl):
         """Matryoshka truncation reduces dimensions and re-normalizes."""
-        from utils.embeddings import OnnxEmbeddingFunction
+        from core.utils.embeddings import OnnxEmbeddingFunction
 
         mock_dl.return_value = "/fake/model.onnx"
 
@@ -102,7 +102,7 @@ class TestOnnxEmbeddingFunction:
 class TestGetEmbeddingFunction:
     def test_server_default_returns_none(self):
         """When EMBEDDING_MODEL is all-MiniLM-L6-v2, return None (server handles it)."""
-        import utils.embeddings as mod
+        import core.utils.embeddings as mod
 
         # Reset singleton
         mod._embedding_fn = None
@@ -111,7 +111,7 @@ class TestGetEmbeddingFunction:
 
     def test_custom_model_returns_function(self):
         """When EMBEDDING_MODEL differs, return an OnnxEmbeddingFunction."""
-        import utils.embeddings as mod
+        import core.utils.embeddings as mod
 
         mod._embedding_fn = None
         with patch.object(mod.config, "EMBEDDING_MODEL", "Snowflake/snowflake-arctic-embed-m-v1.5"):
@@ -142,7 +142,7 @@ class TestEmbeddingAwareClient:
         wrapper = _EmbeddingAwareClient(mock_client)
 
         fake_ef = MagicMock()
-        with patch("utils.embeddings.get_embedding_function", return_value=fake_ef):
+        with patch("core.utils.embeddings.get_embedding_function", return_value=fake_ef):
             wrapper.get_or_create_collection(name="test_coll")
 
         call_kwargs = mock_client.get_or_create_collection.call_args[1]
@@ -155,7 +155,7 @@ class TestEmbeddingAwareClient:
         mock_client = MagicMock()
         wrapper = _EmbeddingAwareClient(mock_client)
 
-        with patch("utils.embeddings.get_embedding_function", return_value=None):
+        with patch("core.utils.embeddings.get_embedding_function", return_value=None):
             wrapper.get_or_create_collection(name="test_coll")
 
         call_kwargs = mock_client.get_or_create_collection.call_args[1]
@@ -180,7 +180,7 @@ class TestEmbeddingAwareClient:
         wrapper = _EmbeddingAwareClient(mock_client)
 
         fake_ef = MagicMock()
-        with patch("utils.embeddings.get_embedding_function", return_value=fake_ef):
+        with patch("core.utils.embeddings.get_embedding_function", return_value=fake_ef):
             wrapper.get_collection(name="test_coll")
 
         call_kwargs = mock_client.get_collection.call_args[1]

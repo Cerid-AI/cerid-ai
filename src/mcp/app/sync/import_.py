@@ -36,7 +36,7 @@ from app.sync.conflicts import (
     resolve_conflicts,
     write_conflict_log,
 )
-from utils.time import utcnow_iso
+from core.utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.sync")
 
@@ -661,7 +661,7 @@ def import_all(
     bm25_chunks_added = bm25_result.get("chunks_added", 0) if isinstance(bm25_result, dict) else 0
     if bm25_chunks_added > 0:
         try:
-            from utils.bm25 import rebuild_all as bm25_rebuild_all
+            from core.retrieval.bm25 import rebuild_all as bm25_rebuild_all
             rebuilt = bm25_rebuild_all()
             logger.info("BM25 indexes rebuilt for %d domains after import", rebuilt)
         except Exception as exc:

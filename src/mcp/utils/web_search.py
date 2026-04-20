@@ -24,9 +24,9 @@ from typing import Any
 import httpx
 
 import config.settings as config
+from core.utils.circuit_breaker import get_breaker
+from core.utils.llm_client import call_llm
 from errors import RetrievalError
-from utils.circuit_breaker import get_breaker
-from utils.llm_client import call_llm
 
 _logger = logging.getLogger("ai-companion.web_search")
 
@@ -373,7 +373,7 @@ async def search_and_verify(
     verified_results: list[dict] | None = None
     if chroma_client and neo4j_driver and redis_client and raw_results:
         try:
-            from agents.self_rag import self_rag_enhance
+            from core.agents.self_rag import self_rag_enhance
 
             # Build a pseudo query_result for Self-RAG
             combined_text = "\n\n".join(
@@ -402,7 +402,7 @@ async def search_and_verify(
     should_ingest = auto_ingest and ENABLE_AUTO_LEARN
     if should_ingest and raw_results:
         try:
-            from services.ingestion import ingest_content
+            from app.services.ingestion import ingest_content
 
             for r in raw_results:
                 if not r.snippet.strip():

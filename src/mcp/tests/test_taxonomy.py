@@ -261,7 +261,14 @@ class TestAICategorization:
             "summary": "A Python web scraping script",
         })
 
+        # Under INTERNAL_LLM_PROVIDER=ollama, ai_categorize() calls
+        # ``call_internal_llm`` first. Patch both layers so the test is
+        # provider-independent (Ollama path and direct-OpenRouter path
+        # both return the fixture content).
         with patch(
+            "core.utils.internal_llm.call_internal_llm",
+            new=AsyncMock(return_value=llm_content),
+        ), patch(
             "core.utils.llm_client.call_llm",
             new=AsyncMock(return_value=llm_content),
         ):
@@ -288,7 +295,14 @@ class TestAICategorization:
             "summary": "A test",
         })
 
+        # Under INTERNAL_LLM_PROVIDER=ollama, ai_categorize() calls
+        # ``call_internal_llm`` first. Patch both layers so the test is
+        # provider-independent (Ollama path and direct-OpenRouter path
+        # both return the fixture content).
         with patch(
+            "core.utils.internal_llm.call_internal_llm",
+            new=AsyncMock(return_value=llm_content),
+        ), patch(
             "core.utils.llm_client.call_llm",
             new=AsyncMock(return_value=llm_content),
         ):
@@ -307,7 +321,14 @@ class TestAICategorization:
             "summary": "Tax document",
         })
 
+        # Under INTERNAL_LLM_PROVIDER=ollama, ai_categorize() calls
+        # ``call_internal_llm`` first. Patch both layers so the test is
+        # provider-independent (Ollama path and direct-OpenRouter path
+        # both return the fixture content).
         with patch(
+            "core.utils.internal_llm.call_internal_llm",
+            new=AsyncMock(return_value=llm_content),
+        ), patch(
             "core.utils.llm_client.call_llm",
             new=AsyncMock(return_value=llm_content),
         ):

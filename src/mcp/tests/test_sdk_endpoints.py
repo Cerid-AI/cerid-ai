@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi import FastAPI
 from starlette.testclient import TestClient
 
-from routers.sdk import router
+from app.routers.sdk import router
 
 
 def _make_app() -> FastAPI:

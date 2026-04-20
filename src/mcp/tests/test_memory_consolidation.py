@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from utils.memory_consolidation import (
+from core.agents.memory_consolidation import (
     SIMILARITY_THRESHOLD,
     MemoryAction,
     classify_memory,
@@ -94,7 +94,7 @@ class TestClassifyMemoryWithCandidates:
         }
 
     @pytest.mark.asyncio
-    @patch("utils.memory_consolidation.call_internal_llm", new_callable=AsyncMock)
+    @patch("core.agents.memory_consolidation.call_internal_llm", new_callable=AsyncMock)
     async def test_llm_returns_noop(self, mock_llm, mock_chroma):
         client, collection = mock_chroma
         collection.query.return_value = self._make_chroma_results()
@@ -105,7 +105,7 @@ class TestClassifyMemoryWithCandidates:
         assert "duplicate" in result.reason
 
     @pytest.mark.asyncio
-    @patch("utils.memory_consolidation.call_internal_llm", new_callable=AsyncMock)
+    @patch("core.agents.memory_consolidation.call_internal_llm", new_callable=AsyncMock)
     async def test_llm_returns_update(self, mock_llm, mock_chroma):
         client, collection = mock_chroma
         collection.query.return_value = self._make_chroma_results()
@@ -115,7 +115,7 @@ class TestClassifyMemoryWithCandidates:
         assert result.target_id == "art-existing-1"
 
     @pytest.mark.asyncio
-    @patch("utils.memory_consolidation.call_internal_llm", new_callable=AsyncMock)
+    @patch("core.agents.memory_consolidation.call_internal_llm", new_callable=AsyncMock)
     async def test_llm_returns_add(self, mock_llm, mock_chroma):
         client, collection = mock_chroma
         collection.query.return_value = self._make_chroma_results()
@@ -124,7 +124,7 @@ class TestClassifyMemoryWithCandidates:
         assert result.action == "ADD"
 
     @pytest.mark.asyncio
-    @patch("utils.memory_consolidation.call_internal_llm", new_callable=AsyncMock)
+    @patch("core.agents.memory_consolidation.call_internal_llm", new_callable=AsyncMock)
     async def test_invalid_llm_action_defaults_to_add(self, mock_llm, mock_chroma):
         client, collection = mock_chroma
         collection.query.return_value = self._make_chroma_results()
@@ -133,7 +133,7 @@ class TestClassifyMemoryWithCandidates:
         assert result.action == "ADD"
 
     @pytest.mark.asyncio
-    @patch("utils.memory_consolidation.call_internal_llm", new_callable=AsyncMock)
+    @patch("core.agents.memory_consolidation.call_internal_llm", new_callable=AsyncMock)
     async def test_update_invalid_target_falls_back_to_most_similar(self, mock_llm, mock_chroma):
         """UPDATE with unknown target_id should fall back to most similar candidate."""
         client, collection = mock_chroma
@@ -144,7 +144,7 @@ class TestClassifyMemoryWithCandidates:
         assert result.target_id == "art-existing-1"  # fallback to first candidate
 
     @pytest.mark.asyncio
-    @patch("utils.memory_consolidation.call_internal_llm", new_callable=AsyncMock)
+    @patch("core.agents.memory_consolidation.call_internal_llm", new_callable=AsyncMock)
     async def test_non_dict_llm_response_returns_add(self, mock_llm, mock_chroma):
         client, collection = mock_chroma
         collection.query.return_value = self._make_chroma_results()
@@ -170,7 +170,7 @@ class TestClassifyMemoryLLMFailures:
         }
 
     @pytest.mark.asyncio
-    @patch("utils.memory_consolidation.call_internal_llm", new_callable=AsyncMock)
+    @patch("core.agents.memory_consolidation.call_internal_llm", new_callable=AsyncMock)
     async def test_bifrost_http_error(self, mock_llm, mock_chroma):
         import httpx
         client, collection = mock_chroma
@@ -183,9 +183,9 @@ class TestClassifyMemoryLLMFailures:
         assert "LLM call failed" in result.reason
 
     @pytest.mark.asyncio
-    @patch("utils.memory_consolidation.call_internal_llm", new_callable=AsyncMock)
+    @patch("core.agents.memory_consolidation.call_internal_llm", new_callable=AsyncMock)
     async def test_circuit_open_defaults_to_add(self, mock_llm, mock_chroma):
-        from utils.circuit_breaker import CircuitOpenError
+        from core.utils.circuit_breaker import CircuitOpenError
         client, collection = mock_chroma
         collection.query.return_value = self._make_chroma_results()
         mock_llm.side_effect = CircuitOpenError("bifrost-memory", retry_after=30.0)
@@ -202,7 +202,7 @@ class TestClassifyMemoryMultipleCandidates:
     """Tests with multiple similar memories returned from ChromaDB."""
 
     @pytest.mark.asyncio
-    @patch("utils.memory_consolidation.call_internal_llm", new_callable=AsyncMock)
+    @patch("core.agents.memory_consolidation.call_internal_llm", new_callable=AsyncMock)
     async def test_multiple_candidates_sent_to_llm(self, mock_llm, mock_chroma):
         client, collection = mock_chroma
         collection.query.return_value = {
@@ -221,7 +221,7 @@ class TestClassifyMemoryMultipleCandidates:
         assert result.target_id == "art-2"
 
     @pytest.mark.asyncio
-    @patch("utils.memory_consolidation.call_internal_llm", new_callable=AsyncMock)
+    @patch("core.agents.memory_consolidation.call_internal_llm", new_callable=AsyncMock)
     async def test_mixed_similarity_filters_low(self, mock_llm, mock_chroma):
         """Only candidates above threshold should be sent to LLM."""
         client, collection = mock_chroma
@@ -318,7 +318,7 @@ class TestMemoryConsolidationIntegration:
     @patch("config.features.FEATURE_TOGGLES", {
         "enable_memory_consolidation": True,
     })
-    @patch("utils.memory_consolidation.classify_memory", new_callable=AsyncMock)
+    @patch("core.agents.memory_consolidation.classify_memory", new_callable=AsyncMock)
     async def test_noop_skips_storage(
         self, mock_classify, mock_extract, mock_config, mock_chroma
     ):
@@ -332,7 +332,7 @@ class TestMemoryConsolidationIntegration:
         )
         mock_ingest = MagicMock(return_value={"status": "success", "artifact_id": "art-1"})
 
-        from agents.memory import extract_and_store_memories
+        from app.agents.memory import extract_and_store_memories
         result = await extract_and_store_memories(
             "x" * 200, "conv-123", "claude",
             chroma_client=mock_chroma[0],
@@ -349,8 +349,8 @@ class TestMemoryConsolidationIntegration:
     @patch("config.features.FEATURE_TOGGLES", {
         "enable_memory_consolidation": True,
     })
-    @patch("utils.memory_consolidation.classify_memory", new_callable=AsyncMock)
-    @patch("utils.memory_consolidation.mark_superseded")
+    @patch("core.agents.memory_consolidation.classify_memory", new_callable=AsyncMock)
+    @patch("core.agents.memory_consolidation.mark_superseded")
     async def test_update_stores_and_marks_superseded(
         self, mock_mark, mock_classify, mock_extract, mock_config,
         mock_chroma, mock_neo4j,
@@ -365,7 +365,7 @@ class TestMemoryConsolidationIntegration:
         )
         mock_ingest = MagicMock(return_value={"status": "success", "artifact_id": "art-new"})
 
-        from agents.memory import extract_and_store_memories
+        from app.agents.memory import extract_and_store_memories
         result = await extract_and_store_memories(
             "x" * 200, "conv-123", "claude",
             chroma_client=mock_chroma[0],
@@ -392,7 +392,7 @@ class TestMemoryConsolidationIntegration:
         ]
         mock_ingest = MagicMock(return_value={"status": "success", "artifact_id": "art-1"})
 
-        from agents.memory import extract_and_store_memories
+        from app.agents.memory import extract_and_store_memories
         result = await extract_and_store_memories(
             "x" * 200, "conv-123",
             chroma_client=mock_chroma[0],

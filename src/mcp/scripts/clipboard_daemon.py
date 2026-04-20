@@ -207,7 +207,7 @@ def _ingest_via_api(text: str, domain: str) -> dict | None:
 def _ingest_in_process(text: str, domain: str) -> dict | None:
     """Directly call ingest_content() when running in the MCP process."""
     try:
-        from services.ingestion import ingest_content
+        from app.services.ingestion import ingest_content
         meta = {
             "client_source": "clipboard-daemon",
             "webhook_source": "clipboard-daemon",

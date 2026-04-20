@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from services.ingestion import validate_file_path
+from app.services.ingestion import validate_file_path
 
 # ---------------------------------------------------------------------------
 # Tests: validate_file_path (pure function)
@@ -72,7 +72,7 @@ class TestIngestContent:
 
         mock_redis.return_value = MagicMock()
 
-        from services.ingestion import ingest_content
+        from app.services.ingestion import ingest_content
 
         result = ingest_content(
             content="def hello(): pass",
@@ -95,7 +95,7 @@ class TestIngestFile:
         mock_redis.return_value = MagicMock()
 
         # We just verify parse_file gets called; full pipeline tested above
-        from services.ingestion import ingest_file
+        from app.services.ingestion import ingest_file
 
         test_file = tmp_path / "test.txt"
         test_file.write_text("hello world")
