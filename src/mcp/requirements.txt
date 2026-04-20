@@ -49,3 +49,7 @@ python-multipart>=0.0.9,<1
 # optional (Pro OCR plugin): pytesseract>=0.3.10
 # optional (Pro OCR plugin): Pillow>=10.0
 # Vision: uses httpx (already in core) + Bifrost/OpenRouter — no extra deps
+
+
+# Security — content-type sniffing for upload validation (magic-byte guard)
+filetype>=1.2,<2

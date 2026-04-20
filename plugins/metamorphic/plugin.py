@@ -14,7 +14,7 @@ import logging
 import re
 from typing import Any
 
-from utils.llm_parsing import parse_llm_json
+from core.utils.llm_parsing import parse_llm_json
 
 __all__ = [
     "check_entailment",

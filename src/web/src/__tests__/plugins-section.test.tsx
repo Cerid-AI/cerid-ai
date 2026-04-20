@@ -121,7 +121,7 @@ describe("PluginsSection", () => {
 
   it("loads config lazily when a plugin card is expanded", async () => {
     vi.mocked(fetchPlugins).mockResolvedValue({ plugins: mockPlugins, total: mockPlugins.length })
-    vi.mocked(getPluginConfig).mockResolvedValue({ values: { api_key: "xxx", verbose: true } })
+    vi.mocked(getPluginConfig).mockResolvedValue({ values: { api_key: "xxx", verbose: true } })  // pragma: allowlist secret
     const user = userEvent.setup()
     render(<PluginsSection />)
     await screen.findByText("ocr-plugin")

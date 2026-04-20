@@ -73,7 +73,7 @@ async def call_internal_llm(
     to supply it.
     """
     provider = getattr(config, "INTERNAL_LLM_PROVIDER", "openrouter")
-    log = logger
+    log: logging.Logger | logging.LoggerAdapter = logger
     if stage:
         log = logging.LoggerAdapter(logger, {"llm_stage": stage})
         try:
