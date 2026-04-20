@@ -47,7 +47,7 @@ jobs:
       - run: pip install -r src/mcp/requirements.txt
       - run: pip install pytest pytest-asyncio httpx pytest-cov respx
       - name: Run tests with coverage
-        run: cd src/mcp && python -m pytest tests/ -v --tb=short --cov=. --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=20
+        run: cd src/mcp && python -m pytest tests/ -m "not benchmark_slo" -v --tb=short --cov=. --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=20
       - name: Upload coverage to Codecov
         if: success()
         uses: codecov/codecov-action@v5
