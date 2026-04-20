@@ -244,7 +244,7 @@ class OutlookConnector:
             Sync summary with counts of ingested/skipped messages.
         """
         from config.features import check_feature
-        from utils.circuit_breaker import get_breaker
+        from core.utils.circuit_breaker import get_breaker
 
         check_feature("outlook_connector")
         breaker = get_breaker("outlook")

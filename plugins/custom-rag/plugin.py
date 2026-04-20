@@ -75,6 +75,6 @@ def register() -> None:
     Sets the module-level handler in the core stub so that
     ``retrieval_orchestrator.py`` can delegate to this implementation.
     """
-    from agents.retrieval_orchestrator import set_custom_rag_handler
+    from app.agents.retrieval_orchestrator import set_custom_rag_handler
     set_custom_rag_handler(apply_source_config)
     logger.info("Custom Smart RAG plugin registered")

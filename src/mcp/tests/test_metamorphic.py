@@ -151,7 +151,7 @@ class TestMetamorphicScore:
                 return_value=mock_llm,
             ),
             patch(
-                "agents.hallucination.extraction._extract_claims_heuristic",
+                "core.agents.hallucination.extraction._extract_claims_heuristic",
                 return_value=["Python was created by Guido van Rossum in 1991"],
             ),
         ):
@@ -191,7 +191,7 @@ class TestMetamorphicScore:
                 return_value=mock_llm,
             ),
             patch(
-                "agents.hallucination.extraction._extract_claims_heuristic",
+                "core.agents.hallucination.extraction._extract_claims_heuristic",
                 return_value=claims,
             ),
         ):
@@ -208,7 +208,7 @@ class TestMetamorphicScore:
                 return_value=True,
             ),
             patch(
-                "agents.hallucination.extraction._extract_claims_heuristic",
+                "core.agents.hallucination.extraction._extract_claims_heuristic",
                 return_value=[],
             ),
         ):

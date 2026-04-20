@@ -63,7 +63,7 @@ def check_entailment(variant: str, context: str) -> bool:
 
 async def generate_mutations(factoid: str) -> dict[str, str]:
     """Return ``{"synonym": ..., "antonym": ...}``; falls back on LLM failure."""
-    from utils.internal_llm import call_internal_llm
+    from core.utils.internal_llm import call_internal_llm
 
     prompt = _MUTATION_PROMPT.format(factoid=factoid)
     try:
@@ -95,7 +95,7 @@ async def metamorphic_score(answer: str, context: str) -> dict[str, Any]:
             "skipped": True,
         }
 
-    from agents.hallucination.extraction import _extract_claims_heuristic
+    from core.agents.hallucination.extraction import _extract_claims_heuristic
 
     factoids = _extract_claims_heuristic(answer)[:_MAX_FACTOIDS]
     if not factoids:
@@ -156,6 +156,6 @@ def register() -> None:
     Sets the module-level handler in the core stub so that
     ``streaming.py`` can delegate to this implementation.
     """
-    from agents.hallucination.metamorphic import set_metamorphic_handler
+    from app.agents.hallucination.metamorphic import set_metamorphic_handler
     set_metamorphic_handler(metamorphic_score)
     logger.info("Metamorphic verification plugin registered")
