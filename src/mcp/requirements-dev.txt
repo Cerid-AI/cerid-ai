@@ -6,4 +6,4 @@ respx
 mypy>=1.10
 types-redis
 import-linter
-pytest-benchmark>=4.0.0,<5
+pytest-benchmark>=4.0.0,<6
