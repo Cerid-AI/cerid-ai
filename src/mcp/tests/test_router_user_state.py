@@ -164,22 +164,25 @@ def test_summary_includes_conversation_ids(client: TestClient):
     assert set(ids) == {"s1", "s2"}
 
 
-# -- 503 when sync_dir is empty -----------------------------------------------
+# -- 412 when sync_dir is empty -----------------------------------------------
+# 412 Precondition Failed (not 503) because the missing sync directory is a
+# user-configuration state the client can resolve, not a transient server
+# unavailability — and 4xx keeps the error out of Sentry's default 5xx capture.
 
 
-def test_write_503_when_no_sync_dir():
+def test_write_412_when_no_sync_dir():
     _app = FastAPI()
     _app.include_router(router)
     with patch("app.routers.user_state._sync_dir", return_value=""):
         c = TestClient(_app)
         resp = c.post("/user-state/conversations", json={"id": "x", "title": "y"})
-        assert resp.status_code == 503
+        assert resp.status_code == 412
 
         resp = c.post("/user-state/conversations/bulk", json=[{"id": "x"}])
-        assert resp.status_code == 503
+        assert resp.status_code == 412
 
         resp = c.delete("/user-state/conversations/x")
-        assert resp.status_code == 503
+        assert resp.status_code == 412
 
         resp = c.patch("/user-state/preferences", json={"a": 1})
-        assert resp.status_code == 503
+        assert resp.status_code == 412

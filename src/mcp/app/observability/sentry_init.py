@@ -11,10 +11,19 @@ from typing import Any
 import sentry_sdk
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sentry_sdk.integrations.httpx import HttpxIntegration
-from sentry_sdk.integrations.logging import LoggingIntegration
+from sentry_sdk.integrations.logging import LoggingIntegration, ignore_logger
 from sentry_sdk.integrations.redis import RedisIntegration
 from sentry_sdk.integrations.starlette import StarletteIntegration
 from sentry_sdk.scrubber import DEFAULT_DENYLIST, EventScrubber
+
+# Third-party loggers whose errors are cosmetic and should never reach Sentry.
+# chromadb 0.5.x ships a posthog-based ClientStartEvent telemetry call that
+# crashes on newer posthog releases even when anonymized_telemetry=False is set
+# (chromadb instantiates the telemetry module at import time). Ignoring the
+# logger drops the event from Sentry without affecting stdout logging.
+_IGNORED_LOGGERS = (
+    "chromadb.telemetry.product.posthog",
+)
 
 # Provider API keys — not covered by DEFAULT_DENYLIST (which covers generic "api_key").
 # Session / cookie data — defensive for the planned multi-user mode.
@@ -62,6 +71,9 @@ def init_sentry() -> bool:
         return False
 
     profiles_rate = float(os.getenv("SENTRY_PROFILES_SAMPLE_RATE", "0.1"))
+
+    for logger_name in _IGNORED_LOGGERS:
+        ignore_logger(logger_name)
 
     sentry_sdk.init(
         dsn=dsn,
