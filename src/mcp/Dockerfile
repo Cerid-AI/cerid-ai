@@ -31,6 +31,12 @@ hf_hub_download('Snowflake/snowflake-arctic-embed-m-v1.5', 'tokenizer.json')"; \
 # Stage 3: Runtime — slim image without build tools
 FROM python:3.11.14-slim
 
+# Disable chromadb's client-side posthog telemetry. Chromadb reads these at
+# module import time, before any Python code can override via Settings(...).
+# Aligns with cerid's self-hosted privacy-first default.
+ENV ANONYMIZED_TELEMETRY=false \
+    CHROMA_ANONYMIZED_TELEMETRY=false
+
 # Pro plugins requiring tesseract-ocr and ffmpeg should install them in a
 # plugin-specific layer or via the sidecar.  Core image stays minimal.
 RUN apt-get update && apt-get install -y --no-install-recommends \

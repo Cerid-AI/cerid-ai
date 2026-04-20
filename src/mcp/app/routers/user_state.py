@@ -72,7 +72,7 @@ def save_conversation(body: dict[str, Any]):
     """Save a single conversation. Body must contain an 'id' field."""
     sd = _sync_dir()
     if not sd:
-        raise HTTPException(status_code=503, detail="Sync directory not configured")
+        raise HTTPException(status_code=412, detail="Sync directory not configured")
     if "id" not in body:
         raise HTTPException(status_code=400, detail="Conversation must have an 'id' field")
     write_conversation(sd, body)
@@ -84,7 +84,7 @@ def save_conversations_bulk(body: list[dict[str, Any]]):
     """Save multiple conversations. Each dict must contain an 'id' field."""
     sd = _sync_dir()
     if not sd:
-        raise HTTPException(status_code=503, detail="Sync directory not configured")
+        raise HTTPException(status_code=412, detail="Sync directory not configured")
     for conv in body:
         if "id" not in conv:
             raise HTTPException(status_code=400, detail="Each conversation must have an 'id' field")
@@ -97,7 +97,7 @@ def remove_conversation(conv_id: str):
     """Delete a conversation by ID."""
     sd = _sync_dir()
     if not sd:
-        raise HTTPException(status_code=503, detail="Sync directory not configured")
+        raise HTTPException(status_code=412, detail="Sync directory not configured")
     delete_conversation(sd, conv_id)
     return {"deleted": conv_id}
 
@@ -113,7 +113,7 @@ async def save_preferences(body: dict[str, Any]):
     """
     sd = _sync_dir()
     if not sd:
-        raise HTTPException(status_code=503, detail="Sync directory not configured")
+        raise HTTPException(status_code=412, detail="Sync directory not configured")
     ok = await write_preferences_with_retry(sd, body)
     if not ok:
         raise HTTPException(
