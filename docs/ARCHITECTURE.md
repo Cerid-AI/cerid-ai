@@ -1,6 +1,6 @@
 # Cerid AI — Architecture
 
-> **Last refresh:** 2026-04-19 (post-Sprint E/F consolidation)
+> **Last refresh:** 2026-04-21 (v0.90 release: consolidation + structural cleanup tail)
 > **Scope:** System layout, service topology, Phase C layer contract, data flow
 > **Owner:** Anyone modifying the stack topology, adding a service, or splitting core/app boundaries
 
@@ -59,12 +59,13 @@ cerid-ai-internal/
 │   │   ├── routing/         # Smart router, model providers
 │   │   └── utils/           # Embeddings, circuit breaker, LLM client, temporal, diversity, text, etc.
 │   ├── app/                 # Application layer (concrete implementations)
-│   │   ├── routers/         # 48 FastAPI routers (post-Sprint F consolidation)
+│   │   ├── routers/         # 47 FastAPI routers (post-Sprint F consolidation)
 │   │   ├── agents/          # Orchestration wrappers: assembler, curator, decomposer, memory,
 │   │   │                    #                        retrieval_orchestrator, templates, triage,
 │   │   │                    #                        hallucination/{confidence, verdict_parsing, ...}
 │   │   ├── stores/          # ChromaVectorStore, Neo4jGraphStore, RedisCacheStore (internal-only)
-│   │   ├── db/neo4j/        # Cypher queries, schema, artifacts, migrations (m0001, m0002)
+│   │   ├── db/neo4j/        # Canonical Neo4j code: artifacts, memory, relationships, schema,
+│   │   │                    # taxonomy, users, agents (CustomAgent CRUD), migrations (m0001, m0002)
 │   │   ├── services/        # ingestion.py (ingest_content, ingest_file, dedup)
 │   │   ├── middleware/      # auth, rate_limit, request_id, jwt, tenant_context
 │   │   ├── parsers/         # PDF, office, structured, email, ebook
@@ -103,8 +104,9 @@ cerid-ai-internal/
 | `src/mcp/agents/` | 14 files: 7 bridges + 5 standalones + 1 adapter + 1 subpackage | **deleted** — standalones moved to `app/agents/` |
 | `src/mcp/utils/` | 56 files (21 bridges + 35 standalones) | 35 standalones only |
 | `src/mcp/routers/` | 43 files: 32 bridge stubs + 11 legacy real + billing | **billing only** (internal-strip target) |
+| `src/mcp/db/neo4j/` | 8 bridge shims + 2 orphan implementations (`agents.py`, `graph_rag.py`) | **deleted** — canonical at `app/db/neo4j/`; `agents.py` relocated, `graph_rag.py` deleted as dead code (2026-04-21) |
 
-Consumer code imports canonical paths (`core.utils.*`, `app.routers.*`, `app.agents.*`). No more "which of three paths?" ambiguity.
+Consumer code imports canonical paths (`core.utils.*`, `app.routers.*`, `app.agents.*`, `app.db.neo4j.*`). No more "which of three paths?" ambiguity. A `lint / no-legacy-neo4j-tree` CI guard prevents resurrection of the old shim tree.
 
 ## Phase C layer contract
 

@@ -87,7 +87,15 @@ CHROMA_URL = os.getenv("CHROMA_URL", "http://ai-companion-chroma:8000")
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://ai-companion-neo4j:7687")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "")
-_redis_password = os.getenv("REDIS_PASSWORD", "")
+# docker-compose.yml uses required-form ${REDIS_PASSWORD:?...} so an empty
+# value fails boot. Ship a non-empty dev default so `cp .env.example .env`
+# followed by `docker compose up` works out of the box. Rotate in production.
+_redis_password = os.getenv("REDIS_PASSWORD", "changeme-redis")
+# OpenRouter API key — required unless running Ollama-only. Declared here so
+# scripts/gen_env_example.py surfaces it in .env.example (the generator only
+# scans this file). Actual reads happen in core/utils/llm_client.py and the
+# /providers, /health, /setup routers.
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 REDIS_URL = os.getenv(
     "REDIS_URL",
     f"redis://:{_redis_password}@ai-companion-redis:6379"

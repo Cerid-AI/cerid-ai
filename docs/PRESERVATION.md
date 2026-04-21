@@ -1,9 +1,9 @@
 # Preservation Harness
 
 > **What:** Automated gates asserting the 8 capability invariants that MUST survive every consolidation sprint.
-> **Why:** Prevent the "we broke chat while cleaning up" class of regression during the v0.84.1 → v0.90.0 program.
+> **Why:** Prevent the "we broke chat while cleaning up" class of regression during the v0.84.1 → v0.90 program. Kept in force post-v0.90 as the merge gate for future architectural work.
 > **Where:** [`src/mcp/tests/integration/test_preservation_*.py`](../src/mcp/tests/integration/)
-> **When:** Every sprint's merge gate + on every PR via the `preservation` CI job.
+> **When:** Every sprint's merge gate + on every PR via the `preservation` CI job (blocking since Phase 1C, 2026-04-20).
 > **Program context:** [`tasks/2026-04-19-consolidation-program.md`](../tasks/2026-04-19-consolidation-program.md)
 
 ---
@@ -21,7 +21,7 @@
 | I7 | KB ingest → fetch → listing → delete round-trip | Indexer wiring regression | `test_preservation_i7_kb.py` |
 | I8 | `/user-state/conversations` CRUD + bulk + validation | Sync-dir persistence loss | `test_preservation_i8_conversations.py` |
 
-Total: **33 individual test cases** across 8 invariant files.
+Total: **35 individual test cases** across 8 invariant files.
 
 ---
 
@@ -43,7 +43,7 @@ NEO4J_PASSWORD=$(grep NEO4J_PASSWORD .env | cut -d= -f2) \
   python -m pytest src/mcp/tests/integration/ -m preservation -v
 ```
 
-**Runtime:** ~60s for the full 33-test suite against a warm stack.
+**Runtime:** ~60s for the full 35-test suite against a warm stack.
 
 ---
 
@@ -58,7 +58,7 @@ The `preservation` job in `.github/workflows/ci.yml` runs on every PR and on eve
 5. On failure, dumps the last 500 lines of every container's log
 6. Always tears down the stack
 
-The job is initially `continue-on-error: true` — surfaces as a warning but does not block merges — until it's been green for two consecutive runs on main. Flip to blocking by removing that line in ci.yml.
+The job is **blocking** as of Phase 1C (2026-04-20) — `continue-on-error` removed, preservation added to `docker` `needs[]`. Any preservation failure fails CI and blocks merge.
 
 ---
 

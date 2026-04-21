@@ -1,6 +1,6 @@
 # Cerid AI — Conventions
 
-> **Last refresh:** 2026-04-19 (Sprint H — extracted from CLAUDE.md, pruned duplicates)
+> **Last refresh:** 2026-04-21 (v0.90 release: Neo4j tree unification, post-Sprint-E bridge paths list updated)
 > **Scope:** Project-specific style/approach conventions not enforced by lint rules
 > **Owner:** New contributors read this first; senior maintainers amend as patterns solidify
 
@@ -15,7 +15,7 @@ Conventions that ARE enforceable by tools live in `.ruff.toml`, `pyproject.toml`
 ## Architecture
 
 - **Layer boundary is absolute:** `core/` must never import from `app/`, `routers/`, `services/`, etc. Violations fail CI via `import-linter`.
-- **Canonical import paths only:** `from core.utils.X import ...` and `from app.routers.X import ...`. The old bridge paths (`from utils.X`, `from agents.X`) no longer exist after Sprint E.
+- **Canonical import paths only:** `from core.utils.X import ...`, `from app.routers.X import ...`, `from app.db.neo4j.X import ...`. The old bridge paths (`from utils.X`, `from agents.X`, `from db.neo4j.X`) no longer exist — Sprint E retired `utils/` + `agents/`; the 2026-04-21 Neo4j unification retired the `db.neo4j` shim tree. `lint / no-legacy-neo4j-tree` CI job enforces the last one.
 - **New routers live in `app/routers/`** — not `src/mcp/routers/`, which is reserved for `billing.py` (internal-strip target).
 - **New agents live in `core/agents/`** if they're portable algorithm logic; in `app/agents/` if they're orchestration wrappers.
 
@@ -80,6 +80,13 @@ Conventions that ARE enforceable by tools live in `.ruff.toml`, `pyproject.toml`
 
 - Use `127.0.0.1` not `localhost` in Alpine healthchecks — Alpine resolves `localhost` to `::1` (IPv6), many services bind `0.0.0.0` (IPv4) only.
 - Always verify Docker build success — `docker compose build` can return 0 with a cached fallback when the real build exits code 2. Grep the `--progress=plain` output for `error`.
+
+## CI drift gates
+
+- **Adding a new drift-gate CI job?** Decide whether it's deterministic or has environmental variability before picking the rollout shape:
+  - **Deterministic checks** (path-existence, pure-Python AST walks, file-hash comparisons) — ship blocking from day one and add to `docker` `needs[]` immediately. No flakiness exposure that soft-gating would absorb. Example: `lint / no-legacy-neo4j-tree` (2026-04-21).
+  - **Environmentally-variable checks** (anything that runs `pip-compile`, docker-compose, or a live-stack boot) — ship with `continue-on-error: true`, watch two consecutive green runs on `main`, then flip to blocking. Example: `lint / sdk-openapi-drift` (2026-04-21; four-run wait for extra confidence).
+- Either shape must end up blocking in `docker` `needs[]`. Soft-warning CI gates do not exist in this repo by policy (re-check: `grep 'continue-on-error' .github/workflows/ci.yml` should match zero drift jobs).
 
 ## Frontend
 
