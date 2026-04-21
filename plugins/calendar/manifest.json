@@ -1,0 +1,12 @@
+{
+  "name": "cerid-calendar",
+  "version": "0.1.0",
+  "type": "ingestion",
+  "tier": "pro",
+  "description": "Calendar integration — ICS file parsing and Apple Calendar reader",
+  "license": "BSL-1.1",
+  "requires": [],
+  "entry_point": "plugin.py",
+  "file_types": [".ics"],
+  "platforms": ["darwin", "linux", "win32"]
+}

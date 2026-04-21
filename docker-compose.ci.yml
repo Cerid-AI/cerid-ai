@@ -1,0 +1,28 @@
+# Copyright 2024-2026 Cerid AI — Licensed under the Apache License, Version 2.0
+#
+# CI-only overrides for docker-compose.yml.
+#
+# GitHub Actions ubuntu-24.04 runners have 2 CPUs. docker-compose.yml
+# sets neo4j cpus: '4.0' which is correct for local dev but hard-fails
+# on the runner with "range of CPUs is from 0.01 to 2.00".
+#
+# Layered via: docker compose -f docker-compose.yml -f docker-compose.ci.yml up
+#
+# Keep this file minimal — only resource limits that conflict with the
+# runner topology. Anything else belongs in the root compose.
+
+services:
+  neo4j:
+    environment:
+      # Root compose sets heap=1G + pagecache=2G = 3G, which exceeds the
+      # 2G cgroup limit we apply below — neo4j reads cgroup-aware memory
+      # and refuses to start with "Invalid memory configuration - exceeds
+      # physical memory". Shrink both knobs to fit a preservation-only
+      # workload inside the runner's tighter budget.
+      - NEO4J_server_memory_heap_max__size=512m
+      - NEO4J_server_memory_pagecache_size=512m
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G

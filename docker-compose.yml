@@ -1,0 +1,257 @@
+# Copyright 2024-2026 Cerid AI — Licensed under the Apache License, Version 2.0
+# See LICENSE file for full license text.
+#
+# Unified Docker Compose for Cerid AI
+#
+# Startup order (enforced via depends_on healthcheck conditions):
+#
+#   1. Infrastructure: neo4j, chromadb, redis  (no dependencies, start in parallel)
+#   2. MCP Server:     core API                (waits for neo4j, chromadb, redis)
+#   3. Cerid Web:      React frontend          (waits for mcp-server)
+#
+# Bifrost was retired 2026-04-17 (audit C-4). Chat + smart-router route
+# direct to OpenRouter via llm_client.py.
+#
+# Usage:
+#   docker compose up -d          # start all services
+#   docker compose up -d --build  # rebuild MCP + Web images
+#   docker compose logs -f        # tail all logs
+
+services:
+  # ──────────────────────────────────────────────
+  # Layer 1: Infrastructure (no dependencies)
+  # ──────────────────────────────────────────────
+
+  neo4j:
+    container_name: ai-companion-neo4j
+    image: neo4j:5.26.21-community
+    ports:
+      - "127.0.0.1:${CERID_PORT_NEO4J:-7474}:7474"
+      - "127.0.0.1:${CERID_PORT_NEO4J_BOLT:-7687}:7687"
+    volumes:
+      - ./stacks/infrastructure/data/neo4j:/data
+      - ./stacks/infrastructure/data/neo4j-logs:/logs
+    environment:
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD}
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_server_memory_heap_max__size=1G
+      - NEO4J_server_memory_pagecache_size=2G
+    networks:
+      - llm-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 4G
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:7474 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  chromadb:
+    container_name: ai-companion-chroma
+    image: chromadb/chroma:0.5.23
+    ports:
+      - "127.0.0.1:${CERID_PORT_CHROMA:-8001}:8000"
+    volumes:
+      - ./stacks/infrastructure/data/chroma:/chroma/chroma
+    environment:
+      - ANONYMIZED_TELEMETRY=false
+      - CHROMA_ANONYMIZED_TELEMETRY=false
+      - ALLOW_RESET=false
+      - IS_PERSISTENT=true
+      - LOG_LEVEL=WARNING
+    networks:
+      - llm-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/v1/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+
+  redis:
+    container_name: ai-companion-redis
+    image: redis:7.4.8-alpine
+    ports:
+      - "127.0.0.1:${CERID_PORT_REDIS:-6379}:6379"
+    volumes:
+      - ./stacks/infrastructure/data/redis:/data
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env} --maxmemory 1gb --maxmemory-policy allkeys-lru
+    networks:
+      - llm-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ──────────────────────────────────────────────
+  # Layer 2: Core API
+  # ──────────────────────────────────────────────
+
+  mcp-server:
+    container_name: ai-companion-mcp
+    build:
+      context: ./src/mcp
+      dockerfile: Dockerfile
+    ports:
+      - "${CERID_BIND_ADDR:-127.0.0.1}:${CERID_PORT_MCP:-8888}:8888"
+    volumes:
+      - ./src/mcp:/app
+      - ${HOME}/cerid-archive:/archive:cached
+      # Host-side mount source for the KB sync directory.
+      # CERID_SYNC_DIR_HOST is the canonical name (host path).
+      # CERID_SYNC_DIR is retained as a fallback for backward-compat, but note
+      # that inside the MCP container CERID_SYNC_DIR is ALWAYS /sync — if a user
+      # sets CERID_SYNC_DIR=/sync in .env (thinking container-side), the fallback
+      # would try to bind-mount /sync on the host. Prefer CERID_SYNC_DIR_HOST.
+      - ${CERID_SYNC_DIR_HOST:-${CERID_SYNC_DIR:-${HOME}/Dropbox/cerid-sync}}:/sync
+    env_file:
+      - .env
+    environment:
+      - CHROMA_URL=http://ai-companion-chroma:8000
+      - NEO4J_URI=bolt://ai-companion-neo4j:7687
+      - NEO4J_USER=neo4j
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}@ai-companion-redis:6379
+      # Suppress chromadb client-side posthog telemetry. Must be set before
+      # `import chromadb` since telemetry initializes at module load (Sentry MCP-1).
+      - ANONYMIZED_TELEMETRY=false
+      - CHROMA_ANONYMIZED_TELEMETRY=false
+      - ARCHIVE_PATH=/archive
+      - CERID_SYNC_DIR=/sync
+      - ENABLE_SEMANTIC_CACHE=true
+      - RERANK_ONNX_FILENAME=${RERANK_ONNX_FILENAME:-onnx/model.onnx}
+      - EMBEDDING_MODEL=Snowflake/snowflake-arctic-embed-m-v1.5
+      - SEMANTIC_CACHE_DIM=768
+      - SENTRY_DSN=${SENTRY_DSN_MCP}
+      - SENTRY_ENVIRONMENT=${SENTRY_ENVIRONMENT:-development}
+      - OLLAMA_ENABLED=${OLLAMA_ENABLED:-false}
+      - OLLAMA_URL=${OLLAMA_URL:-http://cerid-ollama:11434}
+      - INTERNAL_LLM_PROVIDER=${INTERNAL_LLM_PROVIDER:-openrouter}
+      - INTERNAL_LLM_MODEL=${INTERNAL_LLM_MODEL:-openrouter/openai/gpt-4o-mini}
+      - HOST_MEMORY_GB=${HOST_MEMORY_GB:-}
+      - HOST_OS=${HOST_OS:-}
+      - HOST_CPU=${HOST_CPU:-}
+      - HOST_CPU_CORES=${HOST_CPU_CORES:-}
+      - HOST_GPU=${HOST_GPU:-}
+      - HOST_GPU_ACCEL=${HOST_GPU_ACCEL:-}
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - NO_PROXY=${NO_PROXY:-}
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - llm-network
+    init: true
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 6G
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8888/health/ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 300s
+
+  # ──────────────────────────────────────────────
+  # Layer 3: Frontend
+  # ──────────────────────────────────────────────
+
+  cerid-web:
+    container_name: cerid-web
+    build:
+      context: ./src/web
+      dockerfile: Dockerfile
+    ports:
+      - "${CERID_BIND_ADDR:-127.0.0.1}:${CERID_PORT_GUI:-3000}:80"
+    environment:
+      - VITE_MCP_URL=${VITE_MCP_URL:-/api/mcp}
+    depends_on:
+      mcp-server:
+        condition: service_healthy
+    networks:
+      - llm-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 256M
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ──────────────────────────────────────────────
+  # Optional: Local LLM (Ollama Add-On)
+  # ──────────────────────────────────────────────
+  # Activated via: OLLAMA_ENABLED=true in .env (set by start-cerid.sh prompt)
+  # Start with: docker compose --profile ollama up -d
+  # macOS Apple Silicon: runs natively (not in Docker) for Metal acceleration
+
+  ollama:
+    container_name: cerid-ollama
+    image: ${CERID_OLLAMA_IMAGE:-ollama/ollama:latest}
+    profiles: ["ollama"]
+    ports:
+      - "${CERID_BIND_ADDR:-127.0.0.1}:11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    networks:
+      - llm-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 4G
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:11434/api/tags || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+networks:
+  llm-network:
+    external: true   # Created by start-cerid.sh before compose runs.
+    # All compose files (root + stacks/*) reference this same external network
+    # so every container — infra, mcp, web — shares one DNS namespace and can
+    # resolve each other by container name.  The former "driver: bridge" entry
+    # caused Docker Compose to create a project-scoped "cerid-ai_llm-network"
+    # that was invisible to the stacks/ compose files (which all use external: true),
+    # producing a network split where redis/neo4j/chroma were unreachable from MCP.
+
+volumes:
+  ollama-data:

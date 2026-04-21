@@ -1,0 +1,12 @@
+{
+  "name": "gmail-connector",
+  "version": "1.0.0",
+  "description": "Gmail OAuth connector for importing emails into Cerid KB",
+  "tier": "pro",
+  "license": "BSL-1.1",
+  "entry_point": "plugin.py",
+  "capabilities": ["email_sync"],
+  "config_schema": {
+    "poll_interval_minutes": {"type": "integer", "default": 15}
+  }
+}

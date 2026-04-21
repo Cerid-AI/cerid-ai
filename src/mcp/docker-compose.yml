@@ -1,0 +1,53 @@
+services:
+  mcp-server:
+    container_name: ai-companion-mcp
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${CERID_BIND_ADDR:-127.0.0.1}:${CERID_PORT_MCP:-8888}:8888"
+    volumes:
+      - .:/app
+      - ${HOME}/cerid-archive:/archive:cached
+      - ${CERID_SYNC_DIR:-${HOME}/Dropbox/cerid-sync}:/sync
+    env_file:
+      - ../../.env
+    environment:
+      # Container-specific overrides (point to Docker service names)
+      - CHROMA_URL=http://ai-companion-chroma:8000
+      - NEO4J_URI=bolt://ai-companion-neo4j:7687
+      - NEO4J_USER=neo4j
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}@ai-companion-redis:6379
+      - ARCHIVE_PATH=/archive
+      - CERID_SYNC_DIR=/sync
+      # Performance tuning
+      - ENABLE_SEMANTIC_CACHE=true
+      - RERANK_ONNX_FILENAME=${RERANK_ONNX_FILENAME:-onnx/model.onnx}
+      - EMBEDDING_MODEL=Snowflake/snowflake-arctic-embed-m-v1.5
+      - SEMANTIC_CACHE_DIM=768
+      # NEO4J_PASSWORD, CATEGORIZE_MODE, CERID_API_KEY, CORS_ORIGINS
+      # are loaded from env_file above — do NOT override here, as
+      # ${VAR} interpolation fails when running without --env-file.
+    networks:
+      - llm-network
+    init: true
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 6G
+    healthcheck:
+      # /health/live is instant (no Cypher query). The sentinel-guarded kill
+      # ensures auto-recovery from a hung uvicorn AFTER successful startup,
+      # without disrupting the first cold start (ONNX model downloads can take
+      # 3-5 minutes). init:true above prevents zombie PIDs.
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8888/health/live && touch /tmp/.health_ok || { [ -f /tmp/.health_ok ] && kill -s TERM 1; true; }"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 300s
+
+networks:
+  llm-network:
+    external: true

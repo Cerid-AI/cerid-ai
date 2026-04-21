@@ -1,0 +1,13 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.app.json" },
+    { "path": "./tsconfig.node.json" }
+  ],
+  "compilerOptions": {
+    // TS 6: baseUrl deprecated; paths are resolved relative to this config.
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  }
+}

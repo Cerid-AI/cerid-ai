@@ -1,0 +1,1302 @@
+# Copyright (c) 2026 Cerid AI. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Hallucination detection — streaming orchestration and batch verification.
+
+Provides:
+- ``check_hallucinations()`` — batch extraction + verification + Redis persistence
+- ``verify_response_streaming()`` — streaming generator yielding results as they complete
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import pathlib
+import re
+import time
+from typing import Any
+
+import config
+from core.agents.hallucination.extraction import (
+    _detect_evasion,
+    _extract_citation_claims,
+    _extract_claims_heuristic,
+    _extract_claims_llm,
+    _extract_ignorance_claims,
+    _merge_special_claims,
+    _reclassify_recency,
+    _resolve_pronouns_heuristic,
+    extract_claims,
+)
+from core.agents.hallucination.patterns import (
+    _get_claim_verify_semaphore,
+    _is_current_event_claim,
+    _is_ignorance_admission,
+    _is_recency_claim,
+)
+from core.agents.hallucination.persistence import (
+    REDIS_HALLUCINATION_PREFIX,
+    REDIS_HALLUCINATION_TTL,
+)
+from core.agents.hallucination.verification import (
+    _check_history_consistency,
+    verify_claim,
+)
+from core.utils.swallowed import log_swallowed_error
+from core.utils.time import utcnow_iso
+
+logger = logging.getLogger("ai-companion.hallucination")
+
+_CGROUP_MEMORY_MAX = pathlib.Path("/sys/fs/cgroup/memory.max")
+_CGROUP_MEMORY_CURRENT = pathlib.Path("/sys/fs/cgroup/memory.current")
+_CGROUP_MEMORY_STAT = pathlib.Path("/sys/fs/cgroup/memory.stat")
+
+# Fields in cgroup v2 memory.stat that represent memory the kernel can reclaim
+# on demand without OOM-killing the container. Adding these to raw headroom
+# gives the true "allocatable without OOM" budget — raw headroom alone is
+# wrong because page cache and reclaimable slab look "used" but aren't pinned.
+_RECLAIMABLE_STAT_KEYS = frozenset({"file", "slab_reclaimable"})
+
+# Maximum time _wait_for_memory will block before giving up. The claim-verify
+# semaphore + per-claim asyncio timeout are the real pressure regulators;
+# this guard is observability + gentle backpressure, never a hard gate.
+_MEMORY_WAIT_MAX_SECONDS = 5.0
+
+# Task 12 / audit V-3: extract URLs the LLM cited inline in a claim so the
+# verifier can check them *first* instead of re-searching from claim text.
+# Matches bare http(s)://... URLs; stops at whitespace or common trailing
+# punctuation. Conservative on purpose — the cost of a false positive is a
+# single extra HEAD-like fetch; the cost of a miss is letting a fabricated
+# citation through.
+_URL_IN_CLAIM_RE = re.compile(r"https?://[^\s<>\"')\]}]+")
+
+
+def _extract_source_urls_from_claim(claim_text: str) -> list[str]:
+    """Pull any http(s) URLs the LLM cited inline in the claim text.
+
+    These become ``source_urls`` for ``verify_claim`` which NLI-entails the
+    claim against the cited body before falling back to KB / web search.
+    De-duplicates preserving first-seen order; trims trailing punctuation.
+    """
+    if not claim_text or "http" not in claim_text:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for match in _URL_IN_CLAIM_RE.finditer(claim_text):
+        url = match.group(0).rstrip(".,;:!?")
+        if url and url not in seen:
+            seen.add(url)
+            out.append(url)
+    return out
+
+
+def _heuristic_response_context(response_text: str, user_query: str | None) -> str | None:
+    """Heuristic fallback: build topic context from user query + first heading."""
+    parts: list[str] = []
+    if user_query:
+        parts.append(user_query.strip()[:200])
+
+    heading_match = re.search(r"^#{1,3}\s+(.+)", response_text, re.MULTILINE)
+    if heading_match:
+        heading = heading_match.group(1).strip()
+        if heading and heading not in (user_query or ""):
+            parts.append(heading[:100])
+
+    if not parts:
+        # Last resort: first non-empty line (likely the topic)
+        for line in response_text.split("\n"):
+            stripped = line.strip().lstrip("#").strip()
+            if len(stripped) > 10:
+                parts.append(stripped[:120])
+                break
+
+    return "; ".join(parts) if parts else None
+
+
+async def _extract_response_context(response_text: str, user_query: str | None) -> str | None:
+    """Build a brief topic summary for claim verification context.
+
+    Attempts LLM-based extraction via the internal LLM (Ollama if available,
+    else lightweight OpenRouter model) for a precise one-line topic summary.
+    Falls back to heuristic extraction (user query + heading) on failure.
+    """
+    # Fast heuristic first — always available as fallback
+    heuristic = _heuristic_response_context(response_text, user_query)
+
+    # Try LLM-based extraction for higher quality context
+    try:
+        from core.utils.internal_llm import call_internal_llm
+
+        snippet = response_text[:800]
+        query_hint = f'\nUser asked: "{user_query}"' if user_query else ""
+        prompt = (
+            f"What is the main topic of this response? "
+            f"Reply with ONLY a brief noun phrase (e.g. 'the Eiffel Tower', "
+            f"'Python async programming', '2023 US tax filing'). "
+            f"No explanation.\n\n{snippet}{query_hint}"
+        )
+        result = await asyncio.wait_for(
+            call_internal_llm(
+                [{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_tokens=40,
+            ),
+            timeout=5.0,
+        )
+        topic = result.strip().strip('"').strip("'").strip(".")
+        if topic and 3 < len(topic) < 150:
+            logger.debug("LLM topic extraction: '%s'", topic)
+            return topic
+    except Exception as exc:
+        # Heuristic fallback still fires; LLM failures here are not load-bearing.
+        log_swallowed_error("core.agents.hallucination.streaming.extract_topic_llm", exc)
+
+    return heuristic
+
+
+def _read_reclaimable_bytes() -> int:
+    """Sum cgroup v2 memory.stat fields that represent reclaimable memory.
+
+    Returns 0 when memory.stat is unavailable or unparseable — the caller
+    treats that as "no reclaimable memory detected" which is a safe under-
+    estimate (biases toward pausing rather than overcommit).
+    """
+    try:
+        stat = _CGROUP_MEMORY_STAT.read_text()
+    except OSError:
+        return 0
+    total = 0
+    for line in stat.splitlines():
+        key, _, value = line.partition(" ")
+        if key in _RECLAIMABLE_STAT_KEYS:
+            try:
+                total += int(value)
+            except ValueError:
+                continue
+    return total
+
+
+def _container_memory_available_mb() -> float | None:
+    """Return memory allocatable without OOM, in MB, or None outside a cgroup.
+
+    "Available" = raw headroom (``memory.max - memory.current``) plus
+    reclaimable memory reported in ``memory.stat`` (file cache, reclaimable
+    slab). The raw-headroom-only formula is wrong for long-running Python
+    services: page cache and slab look "used" in ``memory.current`` but the
+    kernel can evict them on demand without OOM-killing the container.
+    """
+    try:
+        max_bytes = _CGROUP_MEMORY_MAX.read_text().strip()
+        if max_bytes == "max":
+            return None  # no limit set
+        current_bytes = int(_CGROUP_MEMORY_CURRENT.read_text().strip())
+    except (FileNotFoundError, ValueError):
+        return None  # not running in a cgroup-limited container
+    headroom = int(max_bytes) - current_bytes
+    return (headroom + _read_reclaimable_bytes()) / (1024 * 1024)
+
+
+async def _wait_for_memory(floor_mb: int, label: str) -> None:
+    """Briefly wait for container memory to clear ``floor_mb``; proceed regardless.
+
+    Fail-open by design: after ``_MEMORY_WAIT_MAX_SECONDS`` the verifier runs
+    even if the floor is still unmet. Verification is a lightweight I/O-bound
+    workload (HTTP + small ONNX call, <10 MB per claim) so the semaphore and
+    per-claim timeout are the real pressure regulators. An unbounded wait here
+    deadlocks the verifier forever when steady-state memory legitimately sits
+    near the cgroup cap.
+    """
+    deadline = time.monotonic() + _MEMORY_WAIT_MAX_SECONDS
+    while time.monotonic() < deadline:
+        available = _container_memory_available_mb()
+        if available is None or available >= floor_mb:
+            return
+        logger.warning(
+            "Verification paused (%s): container memory %.0fMB < %dMB floor",
+            label, available, floor_mb,
+        )
+        await asyncio.sleep(1.0)
+    logger.warning(
+        "Verification memory floor (%dMB) not cleared within %.1fs — proceeding anyway (%s)",
+        floor_mb, _MEMORY_WAIT_MAX_SECONDS, label,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Batch orchestration
+# ---------------------------------------------------------------------------
+
+async def check_hallucinations(
+    response_text: str,
+    conversation_id: str,
+    chroma_client,
+    neo4j_driver,
+    redis_client,
+    threshold: float | None = None,
+    model: str | None = None,
+    user_query: str | None = None,
+    expert_mode: bool = False,
+    create_memory_fn: Any = None,
+) -> dict[str, Any]:
+    """Extract claims, verify each against KB, and store results in Redis."""
+    if threshold is None:
+        threshold = config.HALLUCINATION_THRESHOLD
+    min_length = config.HALLUCINATION_MIN_RESPONSE_LENGTH
+
+    if len(response_text) < min_length:
+        return {
+            "conversation_id": conversation_id,
+            "timestamp": utcnow_iso(),
+            "skipped": True,
+            "reason": f"Response too short ({len(response_text)} chars < {min_length})",
+            "claims": [],
+            "summary": {"total": 0, "verified": 0, "unverified": 0, "uncertain": 0},
+        }
+
+    claims, method = await extract_claims(response_text, user_query=user_query)
+    if not claims:
+        return {
+            "conversation_id": conversation_id,
+            "timestamp": utcnow_iso(),
+            "skipped": True,
+            "reason": "No factual claims extracted",
+            "extraction_method": method,
+            "claims": [],
+            "summary": {"total": 0, "verified": 0, "unverified": 0, "uncertain": 0},
+        }
+
+    sem = _get_claim_verify_semaphore()
+
+    # Expert mode pays for a premium verifier (Grok 4) + authoritative
+    # external sources — give it a materially wider context window so the
+    # investment pays off. Standard mode stays at ±200 to keep prompt cost
+    # sane for gpt-4o-mini.
+    _ctx_radius = 600 if expert_mode else 200
+
+    def _extract_surrounding(claim_text: str) -> str | None:
+        """Surrounding ±N chars from response_text — parallels the streaming path
+        (`_extract_claim_context`) so cross-model verifiers see the same framing
+        in both SSE and non-streaming flows. Radius grows in expert mode."""
+        claim_start = response_text.find(claim_text[:40])
+        if claim_start < 0:
+            return None
+        ctx_start = max(0, claim_start - _ctx_radius)
+        ctx_end = min(len(response_text), claim_start + len(claim_text) + _ctx_radius)
+        surrounding = response_text[ctx_start:ctx_end].strip()
+        return surrounding if len(surrounding) > len(claim_text) + 20 else None
+
+    # --- Batch pre-verification for current-event claims ---
+    # Mirrors the streaming path's batch-optimization (see `streaming.py:485`):
+    # group time-sensitive claims going to the same web-search model and verify
+    # them in a single LLM call rather than N parallel calls. Reduces cost,
+    # latency, and rate-limit pressure against the same resource.
+    from core.agents.hallucination.verification import verify_claims_batch_external
+    from core.utils.claim_cache import get_cached_verdict
+
+    # Cache key (model, tier, response_context) must match what verify_claim
+    # writes in verification.py — otherwise this batch pre-check always misses.
+    # `verify_claim` below is invoked with `response_context=user_query`, so we
+    # use the same value here.
+    _cache_tier = "expert" if expert_mode else "standard"
+    _cache_context = user_query or ""
+    batch_results: dict[int, dict[str, Any]] = {}
+    current_event_claims: list[tuple[int, str]] = []
+    for idx, claim_text in enumerate(claims):
+        if _is_current_event_claim(claim_text) or _is_recency_claim(claim_text):
+            cached = await get_cached_verdict(
+                redis_client,
+                claim_text,
+                model=model or "",
+                method=_cache_tier,
+                response_context=_cache_context,
+            )
+            if cached and cached.get("status") in ("verified", "unverified"):
+                batch_results[idx] = cached
+            else:
+                current_event_claims.append((idx, claim_text))
+
+    if len(current_event_claims) >= 2:
+        batch_model = config.VERIFICATION_CURRENT_EVENT_MODEL
+        if expert_mode:
+            batch_model = config.VERIFICATION_EXPERT_MODEL + ":online"
+        try:
+            batch_verdicts = await asyncio.wait_for(
+                verify_claims_batch_external(
+                    current_event_claims,
+                    model=batch_model,
+                    response_context=user_query,
+                    timeout=config.STREAMING_EXPERT_CLAIM_TIMEOUT,
+                ),
+                timeout=config.STREAMING_EXPERT_CLAIM_TIMEOUT + 5,
+            )
+            batch_results.update(batch_verdicts)
+            logger.info(
+                "Non-streaming batch verified %d/%d current-event claims via %s",
+                len(batch_verdicts), len(current_event_claims), batch_model,
+            )
+        except (TimeoutError, Exception) as exc:
+            logger.warning(
+                "Non-streaming batch verification failed (%s) — falling back to individual",
+                exc,
+            )
+
+    async def _limited_verify(idx: int, claim_text: str) -> dict[str, Any]:
+        # Skip individual verification if batch already resolved this claim.
+        if idx in batch_results:
+            return batch_results[idx]
+        async with sem:
+            return await verify_claim(
+                claim_text, chroma_client, neo4j_driver, redis_client,
+                threshold, model=model, expert_mode=expert_mode,
+                # Context propagation — the streaming path threads these through;
+                # the non-streaming path must too, or claims get validated in
+                # isolation which produces false unverified verdicts on facts that
+                # only make sense with their surrounding response (e.g. pronoun
+                # references like "It is 8848.86 meters tall") or with the
+                # topical frame the user asked about.
+                response_context=user_query,
+                claim_context=_extract_surrounding(claim_text),
+                source_urls=_extract_source_urls_from_claim(claim_text),
+            )
+
+    results = await asyncio.gather(*[_limited_verify(i, c) for i, c in enumerate(claims)])
+
+    status_counts = {"verified": 0, "unverified": 0, "uncertain": 0, "error": 0}
+    for r in results:
+        status = r.get("status", "error")
+        if status in status_counts:
+            status_counts[status] += 1
+
+    report = {
+        "conversation_id": conversation_id,
+        "timestamp": utcnow_iso(),
+        "skipped": False,
+        "threshold": threshold,
+        "model": model,
+        "extraction_method": method,
+        "claims": list(results),
+        "summary": {
+            "total": len(results),
+            **status_counts,
+        },
+    }
+
+    try:
+        key = f"{REDIS_HALLUCINATION_PREFIX}{conversation_id}"
+        redis_client.setex(key, REDIS_HALLUCINATION_TTL, json.dumps(report))
+    except Exception as e:
+        logger.warning("Failed to store hallucination report in Redis: %s", e)
+
+    # --- Promote verified facts to empirical memories (non-streaming path) ---
+    verified_count = status_counts.get("verified", 0)
+    if config.ENABLE_VERIFIED_MEMORY_PROMOTION and verified_count > 0 and create_memory_fn is not None:
+        try:
+            from core.agents.verified_memory import promote_verified_facts
+
+            _task = asyncio.create_task(promote_verified_facts(
+                report,
+                chroma_client=chroma_client,
+                neo4j_driver=neo4j_driver,
+                redis_client=redis_client,
+                create_memory_fn=create_memory_fn,
+            ))
+            _task.add_done_callback(
+                lambda t: logger.warning("Verified memory promotion failed: %s", t.exception())
+                if not t.cancelled() and t.exception() else None
+            )
+        except Exception as exc:
+            # Dispatch-time failures (import error, bad kwargs) would prevent the
+            # coroutine from ever running. Surfacing via log_swallowed_error;
+            # proper narrowing + behavior decision tracked as a Phase 2A.3
+            # follow-up (shared with the streaming-path twin below).
+            log_swallowed_error(
+                "core.agents.hallucination.streaming.promote_verified_facts_dispatch",
+                exc,
+                redis_client=redis_client,
+            )
+
+    # Log verification metrics for analytics
+    try:
+        from core.utils.cache import log_verification_metrics
+        used_models: list[str] = list({
+            r.get("verification_model", "")
+            for r in results if r.get("verification_model")
+        })
+        log_verification_metrics(
+            redis_client,
+            conversation_id=conversation_id,
+            model=model,
+            verified=status_counts["verified"],
+            unverified=status_counts["unverified"],
+            uncertain=status_counts["uncertain"],
+            total=len(results),
+            verification_models=used_models or None,
+        )
+    except Exception as exc:
+        log_swallowed_error(
+            "core.agents.hallucination.streaming.log_verification_metrics",
+            exc,
+            redis_client=redis_client,
+        )
+
+    return report
+
+
+# ---------------------------------------------------------------------------
+# Streaming orchestration
+# ---------------------------------------------------------------------------
+
+async def verify_response_streaming(
+    response_text: str,
+    conversation_id: str,
+    chroma_client,
+    neo4j_driver,
+    redis_client,
+    threshold: float | None = None,
+    model: str | None = None,
+    user_query: str | None = None,
+    conversation_history: list[dict[str, str]] | None = None,
+    expert_mode: bool = False,
+    source_artifact_ids: list[str] | None = None,
+    create_memory_fn: Any = None,
+    save_report_fn: Any = None,
+):
+    """Streaming verification generator — yields claim results as they are verified.
+
+    Results are yielded as they complete (parallel execution), then persisted
+    to Redis after the final summary for audit analytics and conversation revisits.
+
+    When ``expert_mode`` is True, all claims are verified using the expert-tier
+    model (Grok 4) instead of the default model pool.
+
+    When ``source_artifact_ids`` is provided, KB results matching those IDs are
+    penalised during confidence scoring to prevent circular self-verification
+    (the KB confirming claims that were originally derived from it).
+
+    When ``save_report_fn`` is provided, it is invoked once after the retry
+    sweep and consistency checks complete with the final counts + collected
+    results. Layering: ``core/`` cannot import from ``app/`` (the Neo4j save
+    helper lives in ``app.db.neo4j.artifacts``), so the router threads a
+    bound closure here — mirrors the ``create_memory_fn`` DI pattern. A
+    ``{"type": "persisted", "success": bool}`` event is yielded after the
+    save attempt so the frontend can skip its own redundant save call.
+    """
+    if threshold is None:
+        threshold = config.HALLUCINATION_THRESHOLD
+    min_length = config.HALLUCINATION_MIN_RESPONSE_LENGTH
+
+    if len(response_text) < min_length:
+        yield {
+            "type": "summary",
+            "overall_confidence": 0,
+            "verified": 0,
+            "unverified": 0,
+            "uncertain": 0,
+            "total": 0,
+            "skipped": True,
+            "reason": f"Response too short ({len(response_text)} chars)",
+        }
+        return
+
+    # ── Stage 1: Synchronous heuristic extraction (<5ms) ──────────────
+    max_claims = config.HALLUCINATION_MAX_CLAIMS
+    ignorance_claims = _extract_ignorance_claims(response_text)
+    evasion_claims = _detect_evasion(response_text, user_query) if user_query else []
+    citation_claims = _extract_citation_claims(response_text)
+    heuristic_raw = _extract_claims_heuristic(response_text)
+    heuristic_claims = _resolve_pronouns_heuristic(heuristic_raw, response_text, user_query)
+    initial_claims = _merge_special_claims(
+        heuristic_claims, ignorance_claims, evasion_claims, citation_claims, max_claims,
+    )
+
+    # ── Stage 2: Decision ─────────────────────────────────────────────
+    # If heuristic found claims → use them immediately (zero LLM wait).
+    # If heuristic found nothing → fall back to LLM extraction (complex/conversational response).
+    if initial_claims:
+        method = "heuristic"
+    else:
+        # No heuristic claims — must wait for LLM
+        try:
+            llm_result = await asyncio.wait_for(
+                _extract_claims_llm(response_text, max_claims, user_query=user_query),
+                timeout=30,
+            )
+            initial_claims = _merge_special_claims(
+                llm_result or [], ignorance_claims, evasion_claims, citation_claims, max_claims,
+            )
+            method = "llm" if llm_result else "none"
+        except TimeoutError:
+            logger.error("Claim extraction timed out for conversation %s", conversation_id)
+            method = "timeout"
+        except Exception as exc:
+            logger.error("Claim extraction failed for %s: %s", conversation_id, exc)
+            method = "error"
+
+    claims = initial_claims
+    if not claims:
+        yield {
+            "type": "summary",
+            "overall_confidence": 0,
+            "verified": 0,
+            "unverified": 0,
+            "uncertain": 0,
+            "total": 0,
+            "skipped": True,
+            "reason": "No factual claims extracted" if method not in ("timeout", "error")
+                      else f"Extraction {method}: could not extract claims",
+            "extraction_method": method,
+        }
+        return
+
+    # Build topic context for claim verification (prevents ambiguous claims).
+    if user_query:
+        response_context = _heuristic_response_context(response_text, user_query)
+    else:
+        response_context = await _extract_response_context(response_text, user_query)
+
+    # Enrich context with the full claim list — when verifying "red: 620-750nm",
+    # the verifier needs to know the response listed ALL wavelengths in a table.
+    # This prevents false refutations on decontextualized numeric claims.
+    if claims and len(claims) > 1:
+        claim_list_ctx = " | ".join(c[:80] for c in claims[:10])
+        response_context = (
+            f"{response_context or ''}\n"
+            f"Other claims in the same response: {claim_list_ctx}"
+        ).strip()
+
+    # Classify each claim's type for frontend display
+    def _claim_type(claim_text: str) -> str:
+        if claim_text.startswith("[EVASION]"):
+            return "evasion"
+        if claim_text.startswith("[CITATION]"):
+            return "citation"
+        if _is_ignorance_admission(claim_text):
+            return "ignorance"
+        if _is_recency_claim(claim_text):
+            return "recency"
+        # Apply temporal reclassification for date-based claims
+        return _reclassify_recency(claim_text, "factual")
+
+    # Notify frontend of extraction method and all extracted claims
+    yield {"type": "extraction_complete", "method": method, "count": len(claims)}
+
+    for i, claim in enumerate(claims):
+        yield {
+            "type": "claim_extracted",
+            "claim": claim,
+            "index": i,
+            "claim_type": _claim_type(claim),
+        }
+
+    # --- Pre-fetch KB context for all claims in one batch ---
+    # Reduces per-claim KB query overhead by sharing a single warm retrieval.
+    batch_kb_context: list[dict[str, Any]] = []
+    try:
+        from core.agents.query_agent import lightweight_kb_query
+        batch_query = " ".join(c for c in claims[:10])
+        batch_kb_context = await lightweight_kb_query(
+            batch_query, chroma_client=chroma_client, top_k=15,
+        )
+    except Exception as kb_exc:
+        # Batch pre-fetch is an optimization; per-claim queries still run.
+        log_swallowed_error(
+            "core.agents.hallucination.streaming.batch_kb_prefetch",
+            kb_exc,
+            redis_client=redis_client,
+        )
+
+    # Track verification progress per claim for graceful timeout handling.
+    # When the total deadline fires, claims that completed KB evidence gathering
+    # (Phase 2) but were waiting for external verdict (Phase 3) can use their
+    # KB-only result as a fallback instead of blanket "uncertain".
+    _claim_evidence: dict[int, dict] = {}  # {claim_index: {"kb_results": [...], "kb_quality": float}}
+
+    # Populate _claim_evidence from batch KB pre-fetch so that timeout
+    # fallback can use KB-only verdicts for claims that gathered evidence.
+    if batch_kb_context:
+        for idx, claim_text in enumerate(claims):
+            claim_lower = claim_text.lower()
+            matching_results = [
+                r for r in batch_kb_context
+                if claim_lower[:40] in (r.get("content", "") or "").lower()
+            ]
+            if matching_results:
+                best_quality = max(
+                    (r.get("relevance", 0.0) for r in matching_results), default=0.0,
+                )
+                _claim_evidence[idx] = {
+                    "kb_results": matching_results[:5],
+                    "kb_quality": best_quality,
+                }
+
+    # Map claim indices to their best-matching KB result when confidence is
+    # very high (>0.85 relevance AND content overlap).  Pre-resolving these
+    # as "verified" avoids the full verify_claim pipeline (KB re-query,
+    # confidence calibration, external fallback) — a significant speedup
+    # when the batch pre-fetch already found strong evidence.
+    high_confidence_kb_claims: dict[int, dict[str, Any]] = {}
+    if batch_kb_context:
+        for idx, claim_text in enumerate(claims):
+            claim_lower = claim_text.lower()
+            for kb_result in batch_kb_context:
+                relevance = kb_result.get("relevance", 0.0)
+                content = (kb_result.get("content", "") or "").lower()
+                if relevance > 0.85 and claim_lower[:60] in content:
+                    high_confidence_kb_claims[idx] = {
+                        "claim": claim_text,
+                        "status": "verified",
+                        "similarity": round(relevance, 3),
+                        "source_artifact_id": kb_result.get("artifact_id", ""),
+                        "source_filename": kb_result.get("filename", ""),
+                        "source_domain": kb_result.get("domain", ""),
+                        "source_snippet": (kb_result.get("content", "") or "")[:200],
+                        "verification_method": "kb_batch",
+                        "memory_source": bool(kb_result.get("memory_source")),
+                    }
+                    break
+
+    # --- Batch pre-verification for current-event claims ---
+    # Group time-sensitive claims (prices, recency) going to the same web-search
+    # model and verify them in a single LLM call instead of N individual calls.
+    # This reduces API round-trips, avoids rate limits, and prevents timeouts.
+    from core.agents.hallucination.verification import verify_claims_batch_external
+
+    # Cache key (model, tier, response_context) must match what verify_claim
+    # writes in verification.py — otherwise this pre-check always misses.
+    _cache_tier = "expert" if expert_mode else "standard"
+    batch_results: dict[int, dict[str, Any]] = {}
+    current_event_claims: list[tuple[int, str]] = []
+    for idx, claim_text in enumerate(claims):
+        ct = _claim_type(claim_text)
+        if ct in ("recency",) or _is_current_event_claim(claim_text):
+            # Check cache first — don't re-batch already-cached claims
+            from core.utils.claim_cache import get_cached_verdict
+            cached = await get_cached_verdict(
+                redis_client,
+                claim_text,
+                model=model or "",
+                method=_cache_tier,
+                response_context=response_context or "",
+            )
+            if cached and cached.get("status") in ("verified", "unverified"):
+                batch_results[idx] = cached
+            else:
+                current_event_claims.append((idx, claim_text))
+
+    # Track which indices are batch candidates — they'll be resolved by
+    # the batch task running concurrently with individual verification.
+    batch_candidate_indices: set[int] = {idx for idx, _ in current_event_claims}
+    batch_task: asyncio.Task | None = None
+
+    if current_event_claims and len(current_event_claims) >= 2:
+        batch_model = config.VERIFICATION_CURRENT_EVENT_MODEL
+        if expert_mode:
+            batch_model = config.VERIFICATION_EXPERT_MODEL + ":online"
+
+        async def _run_batch() -> None:
+            """Run batch verification concurrently with individual claims."""
+            try:
+                batch_timeout = config.STREAMING_EXPERT_CLAIM_TIMEOUT
+                batch_verdicts = await asyncio.wait_for(
+                    verify_claims_batch_external(
+                        current_event_claims,
+                        model=batch_model,
+                        response_context=response_context,
+                        timeout=batch_timeout,
+                    ),
+                    timeout=batch_timeout + 5,
+                )
+                batch_results.update(batch_verdicts)
+                # Pre-fill collected_results so individual tasks can skip
+                for bidx, bresult in batch_verdicts.items():
+                    collected_results[bidx] = bresult
+                logger.info(
+                    "Batch verified %d/%d current-event claims via %s",
+                    len(batch_verdicts), len(current_event_claims), batch_model,
+                )
+            except (TimeoutError, Exception) as exc:
+                logger.warning("Batch verification failed (%s), falling back to individual", exc)
+
+        batch_task = asyncio.create_task(_run_batch())
+
+    # --- Parallel verification via asyncio.as_completed ---
+    verified_count = 0
+    unverified_count = 0
+    uncertain_count = 0
+    skipped_count = 0
+    assessed_confidence = 0.0  # Only accumulate for verified/unverified
+    assessed_count = 0
+    # NOTE: collected_results is shared with the concurrent batch_task
+    collected_results: list[dict[str, Any] | None] = [None] * len(claims)
+    stream_interrupted = False
+    credit_exhausted = False
+    credit_error_emitted = False
+
+    # Pre-fill collected_results with cached batch results (non-async, immediate)
+    for idx, result in batch_results.items():
+        collected_results[idx] = result
+
+    # Pre-fill high-confidence KB claims — these skip the full verify_claim
+    # pipeline entirely because the batch pre-fetch already found strong
+    # evidence (>0.85 relevance + content overlap).
+    for idx, result in high_confidence_kb_claims.items():
+        if collected_results[idx] is None:  # Don't overwrite batch verdicts
+            collected_results[idx] = result
+    if high_confidence_kb_claims:
+        logger.info(
+            "Pre-resolved %d/%d claims via high-confidence KB batch",
+            len(high_confidence_kb_claims), len(claims),
+        )
+
+    def _extract_claim_context(claim_text: str) -> str | None:
+        """Extract 1-2 sentences before and after the claim in the original response."""
+        # Find the claim in the response text
+        claim_start = response_text.find(claim_text[:40])
+        if claim_start < 0:
+            return None
+        # Get ~200 chars before and after for surrounding context
+        ctx_start = max(0, claim_start - 200)
+        ctx_end = min(len(response_text), claim_start + len(claim_text) + 200)
+        surrounding = response_text[ctx_start:ctx_end].strip()
+        return surrounding if len(surrounding) > len(claim_text) + 20 else None
+
+    async def _verify_indexed(idx: int, claim_text: str) -> tuple[int, dict[str, Any]]:
+        """Verify a single claim with a per-claim timeout and concurrency limit."""
+        # For batch candidates, wait briefly for the concurrent batch task
+        if idx in batch_candidate_indices and batch_task is not None:
+            try:
+                await asyncio.wait_for(asyncio.shield(batch_task), timeout=3.0)
+            except (TimeoutError, Exception):
+                pass  # batch not done yet or failed — proceed individually
+        # Skip if already resolved by batch verification or cache
+        if collected_results[idx] is not None:
+            return idx, collected_results[idx]  # type: ignore[return-value]
+
+        await _wait_for_memory(config.VERIFY_MEMORY_FLOOR_MB, f"claim-{idx}")
+        sem = _get_claim_verify_semaphore()
+        # Adaptive timeout based on verification strategy:
+        #   - Expert mode (Grok 4 + web search): longest (30s)
+        #   - Web search claims (temporal, current-event, citation): medium (25s)
+        #   - Cross-model (general factual): fastest (12s)
+        ct = _claim_type(claim_text)
+        needs_web = (
+            ct in ("recency", "evasion", "citation", "ignorance")
+            or _is_current_event_claim(claim_text)
+        )
+        if expert_mode:
+            per_claim_timeout = config.STREAMING_EXPERT_CLAIM_TIMEOUT  # 30s
+        elif needs_web:
+            per_claim_timeout = 25.0  # web search + reasoning
+        else:
+            per_claim_timeout = 12.0  # cross-model is fast
+        # Cap per-claim timeout to remaining global budget (leave 2s buffer for summary)
+        remaining = stream_deadline - time.monotonic()
+        claim_timeout = min(per_claim_timeout, max(remaining - 2.0, 3.0))
+        try:
+            async with sem:
+                result = await asyncio.wait_for(
+                    verify_claim(
+                        claim_text, chroma_client, neo4j_driver, redis_client,
+                        threshold, model=model, streaming=True,
+                        expert_mode=expert_mode,
+                        source_artifact_ids=source_artifact_ids,
+                        response_context=response_context,
+                        claim_context=_extract_claim_context(claim_text),
+                        conversation_context=conversation_history,
+                        source_urls=_extract_source_urls_from_claim(claim_text),
+                    ),
+                    timeout=claim_timeout,
+                )
+        except TimeoutError:
+            logger.warning(
+                "Claim %d verification timed out after %ds: '%s...'",
+                idx, claim_timeout, claim_text[:50],
+            )
+            result = {
+                "claim": claim_text,
+                "status": "uncertain",
+                "similarity": 0.0,
+                "reason": f"Verification timed out ({int(claim_timeout)}s)",
+                "verification_method": "timeout",
+            }
+        return idx, result
+
+    tasks = [_verify_indexed(i, claim) for i, claim in enumerate(claims)]
+
+    # Total deadline prevents the verification loop from running forever.
+    # Individual claims have per-claim timeouts, but the total deadline
+    # catches edge cases where many claims each take close to the limit.
+    stream_deadline = time.monotonic() + config.STREAMING_TOTAL_TIMEOUT
+
+    # Wrap verification loop in try/except to guarantee summary emission.
+    # Without this, an unhandled exception (e.g., task cancellation, httpx
+    # connection pool error) would terminate the async generator before the
+    # summary event is yielded, causing the frontend to show "stream interrupted".
+    try:
+        for coro in asyncio.as_completed(tasks):
+            # Check total deadline before awaiting the next result
+            remaining = stream_deadline - time.monotonic()
+            if remaining <= 0:
+                logger.warning(
+                    "Streaming verification total timeout reached (%ds) "
+                    "after %d/%d claims",
+                    config.STREAMING_TOTAL_TIMEOUT,
+                    verified_count + unverified_count + uncertain_count,
+                    len(claims),
+                )
+                stream_interrupted = True
+                # Phase-aware fallback: use KB-only verdict for claims with evidence
+                completed_indices: set[int] = {
+                    j for j in range(len(claims)) if collected_results[j] is not None
+                }
+                for j in range(len(claims)):
+                    if j in completed_indices:
+                        continue  # Already has a verdict
+                    evidence = _claim_evidence.get(j)
+                    if evidence and evidence["kb_quality"] >= 0.35:
+                        # Phase 2 completed — use KB-only verdict
+                        kb_status = "verified" if evidence["kb_quality"] >= 0.65 else "uncertain"
+                        yield {
+                            "type": "claim_verified",
+                            "index": j,
+                            "claim": claims[j],
+                            "verdict": {
+                                "status": kb_status,
+                                "confidence": evidence["kb_quality"],
+                                "reason": "KB-only verdict (verification timeout)",
+                                "sources": [
+                                    r.get("source", "") for r in evidence["kb_results"][:3]
+                                    if r.get("source")
+                                ],
+                            },
+                            "source": "kb_only_timeout",
+                        }
+                        if kb_status == "verified":
+                            verified_count += 1
+                        else:
+                            uncertain_count += 1
+                    else:
+                        uncertain_count += 1
+                        yield {
+                            "type": "claim_verified",
+                            "index": j,
+                            "claim": claims[j],
+                            "verdict": {
+                                "status": "uncertain",
+                                "confidence": 0.0,
+                                "reason": "Verification timeout — insufficient evidence",
+                            },
+                            "source": "timeout",
+                        }
+                break
+            try:
+                i, result = await asyncio.wait_for(coro, timeout=remaining)
+            except TimeoutError:
+                logger.warning(
+                    "Stream deadline expired waiting for claim result "
+                    "(%ds total)", config.STREAMING_TOTAL_TIMEOUT,
+                )
+                stream_interrupted = True
+                # Phase-aware fallback: use KB-only verdict for claims with evidence
+                completed_indices_2: set[int] = {
+                    j for j in range(len(claims)) if collected_results[j] is not None
+                }
+                for j in range(len(claims)):
+                    if j in completed_indices_2:
+                        continue
+                    evidence = _claim_evidence.get(j)
+                    if evidence and evidence["kb_quality"] >= 0.35:
+                        kb_status = "verified" if evidence["kb_quality"] >= 0.65 else "uncertain"
+                        yield {
+                            "type": "claim_verified",
+                            "index": j,
+                            "claim": claims[j],
+                            "verdict": {
+                                "status": kb_status,
+                                "confidence": evidence["kb_quality"],
+                                "reason": "KB-only verdict (verification timeout)",
+                                "sources": [
+                                    r.get("source", "") for r in evidence["kb_results"][:3]
+                                    if r.get("source")
+                                ],
+                            },
+                            "source": "kb_only_timeout",
+                        }
+                        if kb_status == "verified":
+                            verified_count += 1
+                        else:
+                            uncertain_count += 1
+                    else:
+                        uncertain_count += 1
+                        yield {
+                            "type": "claim_verified",
+                            "index": j,
+                            "claim": claims[j],
+                            "verdict": {
+                                "status": "uncertain",
+                                "confidence": 0.0,
+                                "reason": "Verification timeout — insufficient evidence",
+                            },
+                            "source": "timeout",
+                        }
+                break
+            except Exception as task_exc:
+                logger.warning("Verification task failed: %s", task_exc)
+                try:
+                    from core.utils.cache import log_verification_error
+                    log_verification_error(
+                        redis_client, conversation_id,
+                        error_type="claim_verification_failed",
+                        error_message=str(task_exc),
+                        model=model, phase="verification",
+                    )
+                except Exception as log_exc:
+                    log_swallowed_error(
+                        "core.agents.hallucination.streaming.log_claim_verification_failed",
+                        log_exc,
+                        redis_client=redis_client,
+                    )
+                continue
+
+            status = result.get("status", "error")
+            confidence = result.get("similarity", 0.0)
+
+            if status == "verified":
+                verified_count += 1
+                assessed_confidence += confidence
+                assessed_count += 1
+            elif status == "unverified":
+                unverified_count += 1
+                assessed_confidence += confidence
+                assessed_count += 1
+            elif status == "skipped":
+                skipped_count += 1
+                # Track credit exhaustion for one-time event emission
+                if result.get("credit_exhausted"):
+                    credit_exhausted = True
+            else:
+                # Uncertain/unassessable claims excluded from confidence avg
+                uncertain_count += 1
+
+            collected_results[i] = result
+
+            yield {
+                "type": "claim_verified",
+                "index": i,
+                "claim": claims[i],
+                "claim_type": _claim_type(claims[i]),
+                "status": status,
+                "confidence": confidence,
+                "source": result.get("source_filename", ""),
+                "source_artifact_id": result.get("source_artifact_id", ""),
+                "source_domain": result.get("source_domain", ""),
+                "source_snippet": result.get("source_snippet", ""),
+                "reason": result.get("reason", ""),
+                "verification_method": result.get("verification_method", "kb"),
+                "verification_model": result.get("verification_model"),
+                "source_urls": result.get("source_urls", []),
+                "verification_answer": result.get("verification_answer", ""),
+                # Expert-mode authoritative evidence — surfaces per-source NLI
+                # scores, domain classification, and KB-vs-external cross
+                # validation so the UI can show *why* a verdict was reached.
+                # Fields are omitted entirely when not in expert/authoritative path.
+                **(
+                    {"authoritative_sources": result["authoritative_sources"]}
+                    if result.get("authoritative_sources") else {}
+                ),
+                **(
+                    {"claim_domain": result["claim_domain"]}
+                    if result.get("claim_domain") else {}
+                ),
+                **(
+                    {"cross_validation": result["cross_validation"]}
+                    if result.get("cross_validation") else {}
+                ),
+                **(
+                    {"evidence_summary": result["evidence_summary"]}
+                    if result.get("evidence_summary") else {}
+                ),
+                **({"circular_source": True} if result.get("circular_source") else {}),
+            }
+
+            # Emit credit_error event once when first 402 is detected
+            if result.get("credit_exhausted") and not credit_error_emitted:
+                credit_error_emitted = True
+                yield {
+                    "type": "credit_error",
+                    "message": "OpenRouter credits exhausted. Add credits at https://openrouter.ai/settings/credits",
+                    "provider": "openrouter",
+                }
+    except Exception as loop_exc:
+        logger.error(
+            "Verification loop interrupted after %d/%d claims: %s",
+            verified_count + unverified_count + uncertain_count,
+            len(claims),
+            loop_exc,
+        )
+        stream_interrupted = True
+        try:
+            from core.utils.cache import log_verification_error
+            log_verification_error(
+                redis_client, conversation_id,
+                error_type="stream_interrupted",
+                error_message=str(loop_exc),
+                model=model, phase="verification",
+            )
+        except Exception as log_exc:
+            log_swallowed_error(
+                "core.agents.hallucination.streaming.log_stream_interrupted",
+                log_exc,
+                redis_client=redis_client,
+            )
+        # Explicit SSE error event — without this the frontend sees the stream
+        # end mid-verification with no diagnostic and has to guess whether it
+        # succeeded, failed, or is hung. The summary at the bottom of this
+        # generator is still emitted as a "guaranteed" terminator; this event
+        # tells the client *why* claims after this point are missing.
+        yield {
+            "type": "error",
+            "error_type": "stream_interrupted",
+            "phase": "verification",
+            "message": str(loop_exc)[:500],
+            "claims_seen": verified_count + unverified_count + uncertain_count,
+            "claims_total": len(claims),
+            "recoverable": True,
+        }
+
+    # --- Consistency checking (cross-turn + internal contradictions) ---
+    # Launch as a background task so it overlaps with summary emission and
+    # report persistence, rather than blocking the stream sequentially.
+    consistency_task: asyncio.Task[list[dict[str, Any]]] | None = None
+    if not stream_interrupted and (conversation_history or len(claims) >= 2):
+        consistency_task = asyncio.create_task(
+            _check_history_consistency(claims, conversation_history)
+        )
+
+    # GUARANTEED summary emission — the frontend relies on receiving this event
+    # to transition from "verifying" to "done".  Without it, the stream appears
+    # interrupted and the UI shows an error.
+    overall = (assessed_confidence / assessed_count) if assessed_count > 0 else 0
+    yield {
+        "type": "summary",
+        "overall_confidence": round(overall, 3),
+        "verified": verified_count,
+        "unverified": unverified_count,
+        "uncertain": uncertain_count,
+        "skipped": skipped_count,
+        "total": len(claims),
+        "assessed": assessed_count,
+        "extraction_method": method,
+        **({"interrupted": True} if stream_interrupted else {}),
+        **({"credit_exhausted": True} if credit_exhausted else {}),
+    }
+
+    # --- Persist to Redis (same format as batch path) ---
+    status_counts = {
+        "verified": verified_count,
+        "unverified": unverified_count,
+        "uncertain": uncertain_count,
+        "skipped": skipped_count,
+    }
+    report = {
+        "conversation_id": conversation_id,
+        "timestamp": utcnow_iso(),
+        "skipped": False,
+        "threshold": threshold,
+        "model": model,
+        "extraction_method": method,
+        "claims": [r for r in collected_results if r is not None],
+        "summary": {
+            "total": len(claims),
+            **status_counts,
+        },
+    }
+    try:
+        key = f"{REDIS_HALLUCINATION_PREFIX}{conversation_id}"
+        redis_client.setex(key, REDIS_HALLUCINATION_TTL, json.dumps(report))
+    except Exception as e:
+        logger.warning("Failed to persist streaming report to Redis: %s", e)
+
+    # --- Round 2 sweep: retry timed-out and errored claims ---
+    # Claims that timed out (sim=0.0, method=timeout) or errored were not
+    # properly evaluated. Retry them with a lightweight path (no streaming,
+    # tighter timeout) now that the main verification pressure is off.
+    retry_indices = [
+        i for i, r in enumerate(collected_results)
+        if r and r.get("verification_method") in ("timeout", "none")
+        or r and r.get("status") == "error"
+    ]
+    if retry_indices and not stream_interrupted:
+        retry_budget = min(15.0, config.STREAMING_TOTAL_TIMEOUT * 0.15)
+        retry_sem = asyncio.Semaphore(3)
+
+        async def _retry_claim(idx: int) -> None:
+            claim_text = claims[idx]
+            try:
+                async with retry_sem:
+                    result = await asyncio.wait_for(
+                        verify_claim(
+                            claim_text, chroma_client, neo4j_driver, redis_client,
+                            threshold, model=model, streaming=False,
+                            expert_mode=False,
+                            response_context=response_context,
+                            claim_context=_extract_claim_context(claim_text),
+                            source_urls=_extract_source_urls_from_claim(claim_text),
+                        ),
+                        timeout=retry_budget,
+                    )
+                    if result.get("status") in ("verified", "unverified"):
+                        collected_results[idx] = result
+                        old_status = "timeout/error"
+                        logger.info(
+                            "Sweep retry resolved claim %d: %s → %s ('%s...')",
+                            idx, old_status, result["status"], claim_text[:40],
+                        )
+            except (TimeoutError, Exception):
+                pass  # Keep the original timeout/error result
+
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*[_retry_claim(i) for i in retry_indices]),
+                timeout=retry_budget + 2.0,
+            )
+        except TimeoutError:
+            # Budget exhaustion is an expected fallback path, not an error.
+            logger.info("Sweep retry budget exhausted")
+
+        # Recount after sweep
+        verified_count = sum(1 for r in collected_results if r and r.get("status") == "verified")
+        unverified_count = sum(1 for r in collected_results if r and r.get("status") == "unverified")
+        uncertain_count = sum(
+            1 for r in collected_results
+            if r and r.get("status") not in ("verified", "unverified", "skipped", "error", None)
+        )
+
+    # --- Promote verified facts to empirical memories (fire-and-forget) ---
+    _create_mem_fn = create_memory_fn
+    if config.ENABLE_VERIFIED_MEMORY_PROMOTION and verified_count > 0 and _create_mem_fn is not None:
+        try:
+            from core.agents.verified_memory import promote_verified_facts
+
+            _task = asyncio.create_task(promote_verified_facts(
+                report,
+                chroma_client=chroma_client,
+                neo4j_driver=neo4j_driver,
+                redis_client=redis_client,
+                create_memory_fn=_create_mem_fn,
+            ))
+            _task.add_done_callback(
+                lambda t: logger.warning("Verified memory promotion failed: %s", t.exception())
+                if not t.cancelled() and t.exception() else None
+            )
+        except Exception as exc:
+            # Streaming-path twin of the dispatch swallow above; see that site
+            # for the 2A.3 follow-up rationale.
+            log_swallowed_error(
+                "core.agents.hallucination.streaming.promote_verified_facts_dispatch_streaming",
+                exc,
+                redis_client=redis_client,
+            )
+
+    try:
+        from core.utils.cache import log_verification_metrics
+        # Collect distinct verification models used across all claims
+        used_models: list[str] = list({
+            r.get("verification_model", "")
+            for r in collected_results if r and r.get("verification_model")
+        })
+        log_verification_metrics(
+            redis_client,
+            conversation_id=conversation_id,
+            model=model,
+            verified=verified_count,
+            unverified=unverified_count,
+            uncertain=uncertain_count,
+            total=len(claims),
+            verification_models=used_models or None,
+        )
+    except Exception as exc:
+        log_swallowed_error(
+            "core.agents.hallucination.streaming.log_streaming_verification_metrics",
+            exc,
+            redis_client=redis_client,
+        )
+
+    # --- Await consistency result (launched earlier as background task) ---
+    if consistency_task is not None:
+        try:
+            consistency_issues = await asyncio.wait_for(consistency_task, timeout=15.0)
+            if consistency_issues:
+                # Annotate collected_results with consistency issues
+                for issue in consistency_issues:
+                    idx = issue.get("claim_index", -1)
+                    if 0 <= idx < len(collected_results) and collected_results[idx] is not None:
+                        collected_results[idx]["consistency_issue"] = issue.get("contradiction", "")
+                yield {
+                    "type": "consistency_check",
+                    "issues": consistency_issues,
+                }
+                logger.info(
+                    "Consistency check found %d issues for conversation %s",
+                    len(consistency_issues),
+                    conversation_id,
+                )
+        except TimeoutError:
+            logger.warning("Consistency check timed out for conversation %s", conversation_id)
+        except Exception as e:
+            logger.warning("Consistency check failed: %s", e)
+            try:
+                from core.utils.cache import log_verification_error
+                log_verification_error(
+                    redis_client, conversation_id,
+                    error_type="consistency_check_failed",
+                    error_message=str(e),
+                    model=model, phase="consistency",
+                )
+            except Exception as log_exc:
+                log_swallowed_error(
+                    "core.agents.hallucination.streaming.log_consistency_check_failed",
+                    log_exc,
+                    redis_client=redis_client,
+                )
+
+    # --- Sprint C auto-persist (Neo4j artifact store) -----------------------
+    # Mirrors the non-streaming /agent/hallucination endpoint's behavior so
+    # the FE does not need to issue a redundant /verification/save call after
+    # consuming the stream. Save happens AFTER the retry-sweep recount and
+    # AFTER the consistency-check annotations are folded into collected_results,
+    # so the persisted claims reflect the final state of the pipeline. We
+    # skip persistence on interrupted / credit-exhausted / empty runs because
+    # the claim set is partial and saving it would pollute the artifact store
+    # with degraded data (matches the non-streaming ``result.get("skipped")``
+    # gate). Failure is logged via log_swallowed_error but never blocks the
+    # stream — the caller's claims are already in hand via the yielded events.
+    persisted = False
+    if (
+        save_report_fn is not None
+        and not stream_interrupted
+        and not credit_exhausted
+        and claims
+    ):
+        try:
+            save_report_fn(
+                conversation_id=conversation_id,
+                claims=[r for r in collected_results if r is not None],
+                overall_score=round(overall, 3),
+                verified=verified_count,
+                unverified=unverified_count,
+                uncertain=uncertain_count,
+                total=len(claims),
+            )
+            persisted = True
+        except Exception as exc:
+            log_swallowed_error(
+                "core.agents.hallucination.streaming.auto_persist",
+                exc,
+                context={"conversation_id": conversation_id},
+                redis_client=redis_client,
+            )
+    if save_report_fn is not None:
+        yield {"type": "persisted", "success": persisted}

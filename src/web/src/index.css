@@ -1,0 +1,423 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+/* --- Geist Sans (variable weight) — matches marketing site typography --- */
+@font-face {
+  font-family: "Geist Sans";
+  src: url("/fonts/Geist-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+/* --- Geist Mono (variable weight) --- */
+@font-face {
+  font-family: "Geist Mono";
+  src: url("/fonts/GeistMono-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --font-sans: "Geist Sans", system-ui, -apple-system, sans-serif;
+    --font-mono: "Geist Mono", ui-monospace, "SFMono-Regular", monospace;
+    --radius-sm: calc(var(--radius) - 4px);
+    --radius-md: calc(var(--radius) - 2px);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) + 4px);
+    --radius-2xl: calc(var(--radius) + 8px);
+    --radius-3xl: calc(var(--radius) + 12px);
+    --radius-4xl: calc(var(--radius) + 16px);
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
+    --color-card: var(--card);
+    --color-card-foreground: var(--card-foreground);
+    --color-popover: var(--popover);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-primary: var(--primary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-secondary: var(--secondary);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-muted: var(--muted);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-accent: var(--accent);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-destructive: var(--destructive);
+    --color-border: var(--border);
+    --color-input: var(--input);
+    --color-ring: var(--ring);
+    --color-chart-1: var(--chart-1);
+    --color-chart-2: var(--chart-2);
+    --color-chart-3: var(--chart-3);
+    --color-chart-4: var(--chart-4);
+    --color-chart-5: var(--chart-5);
+    --color-sidebar: var(--sidebar);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-ring: var(--sidebar-ring);
+    --color-brand: var(--brand);
+    --color-brand-foreground: var(--brand-foreground);
+}
+
+/* ================================================================
+   Light Mode — Cool Slate palette (high contrast)
+   Background: cool gray-blue undertones (hue 240 = slate)
+   Accents: teal brand (hue 185) — distinct from Claude/Anthropic warm beige
+   Surface hierarchy: bg 91% → card 97% → popover 98% (6%+ gap)
+   ================================================================ */
+:root {
+    --radius: 0.625rem;
+    --brand: oklch(0.46 0.14 185);
+    --brand-foreground: oklch(0.985 0 0);
+    /* Cool slate palette — WCAG AAA-targeted contrast */
+    --background: oklch(0.91 0.008 240);
+    --foreground: oklch(0.13 0.02 240);
+    --card: oklch(0.97 0.004 240);
+    --card-foreground: oklch(0.13 0.02 240);
+    --popover: oklch(0.98 0.003 240);
+    --popover-foreground: oklch(0.13 0.02 240);
+    --primary: oklch(0.20 0.025 240);
+    --primary-foreground: oklch(0.97 0.004 240);
+    /* Cool slate secondary/muted — darkened muted-fg for dashboard readability */
+    --secondary: oklch(0.87 0.008 240);
+    --secondary-foreground: oklch(0.20 0.025 240);
+    --muted: oklch(0.86 0.008 240);
+    --muted-foreground: oklch(0.30 0.02 240);
+    --accent: oklch(0.88 0.03 185);
+    --accent-foreground: oklch(0.15 0.025 240);
+    --destructive: oklch(0.45 0.24 27);
+    /* Strong cool borders — clearly visible */
+    --border: oklch(0.78 0.012 240);
+    --input: oklch(0.80 0.010 240);
+    --ring: oklch(0.46 0.12 185);
+    --chart-1: oklch(0.646 0.222 41.116);
+    --chart-2: oklch(0.6 0.118 184.704);
+    --chart-3: oklch(0.398 0.07 227.392);
+    --chart-4: oklch(0.828 0.189 84.429);
+    --chart-5: oklch(0.769 0.188 70.08);
+    /* Sidebar — darker slate with teal tint for clear separation */
+    --sidebar: oklch(0.89 0.018 200);
+    --sidebar-foreground: oklch(0.13 0.02 240);
+    --sidebar-primary: oklch(0.20 0.025 240);
+    --sidebar-primary-foreground: oklch(0.97 0.004 240);
+    --sidebar-accent: oklch(0.85 0.03 185);
+    --sidebar-accent-foreground: oklch(0.15 0.025 240);
+    --sidebar-border: oklch(0.78 0.015 210);
+    --sidebar-ring: oklch(0.708 0 0);
+}
+
+/* ================================================================
+   Dark Mode — Cerid Vault Navy palette
+   Background: deep authoritative navy (#0A1F3D)
+   Brand: vibrant teal/cyan (#00E5D8) — the glowing "C"
+   Gold: metallic gold (#D4AF37) — shield trim, premium accents
+   Text: light graphite (#A8B5C8) for body
+   ================================================================ */
+.dark {
+    --brand: oklch(0.82 0.16 178);        /* #00E5D8 vibrant teal */
+    --brand-foreground: oklch(0.12 0.03 240);
+    /* Navy deep backgrounds — #0A1F3D base */
+    --background: oklch(0.16 0.03 240);
+    --foreground: oklch(0.93 0.01 230);
+    --card: oklch(0.20 0.03 240);
+    --card-foreground: oklch(0.93 0.01 230);
+    --popover: oklch(0.20 0.03 240);
+    --popover-foreground: oklch(0.93 0.01 230);
+    --primary: oklch(0.90 0.01 230);
+    --primary-foreground: oklch(0.20 0.03 240);
+    /* Navy-tinted secondary/muted */
+    --secondary: oklch(0.25 0.03 240);
+    --secondary-foreground: oklch(0.93 0.01 230);
+    --muted: oklch(0.25 0.03 240);
+    --muted-foreground: oklch(0.72 0.02 230);  /* #A8B5C8 light graphite */
+    --accent: oklch(0.28 0.03 240);
+    --accent-foreground: oklch(0.93 0.01 230);
+    --destructive: oklch(0.704 0.191 22.216);
+    /* Navy borders with subtle teal tint */
+    --border: oklch(0.35 0.04 230 / 45%);
+    --input: oklch(0.38 0.04 230 / 40%);
+    --ring: oklch(0.72 0.14 178);           /* Teal ring */
+    --chart-1: oklch(0.82 0.16 178);        /* Teal */
+    --chart-2: oklch(0.78 0.10 85);         /* Gold */
+    --chart-3: oklch(0.55 0.18 255);        /* Cobalt */
+    --chart-4: oklch(0.627 0.265 303.9);
+    --chart-5: oklch(0.645 0.246 16.439);
+    /* Sidebar — deeper navy */
+    --sidebar: oklch(0.14 0.03 240);
+    --sidebar-foreground: oklch(0.93 0.01 230);
+    --sidebar-primary: oklch(0.82 0.16 178);
+    --sidebar-primary-foreground: oklch(0.93 0.01 230);
+    --sidebar-accent: oklch(0.28 0.03 240);
+    --sidebar-accent-foreground: oklch(0.93 0.01 230);
+    --sidebar-border: oklch(0.32 0.04 230 / 45%);
+    --sidebar-ring: oklch(0.50 0.03 240);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    }
+  body {
+    @apply bg-background text-foreground font-sans;
+    }
+  /* Global pointer cursor for all interactive elements */
+  button, [role="button"], a, [role="link"], [role="tab"],
+  [role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"],
+  [role="option"], [role="switch"], [role="checkbox"], [role="radio"],
+  select, summary, label[for], [tabindex="0"],
+  .cursor-pointer {
+    cursor: pointer;
+  }
+}
+
+/* --- Claim highlight variables (light mode: strong & visible, dark mode: softer) --- */
+:root {
+  --claim-verified-border: rgba(22, 163, 74, 0.65);
+  --claim-refuted-bg: rgba(220, 38, 38, 0.25);
+  --claim-refuted-border: rgba(185, 28, 28, 0.85);
+  --claim-unverified-bg: rgba(161, 98, 7, 0.12);
+  --claim-unverified-border: rgba(161, 98, 7, 0.6);
+  --claim-evasion-bg: rgba(194, 65, 12, 0.12);
+  --claim-citation-bg: rgba(126, 34, 206, 0.12);
+}
+.dark {
+  --claim-verified-border: rgba(34, 197, 94, 0.4);
+  --claim-refuted-bg: rgba(239, 68, 68, 0.18);
+  --claim-refuted-border: rgba(239, 68, 68, 0.6);
+  --claim-unverified-bg: rgba(234, 179, 8, 0.12);
+  --claim-unverified-border: rgba(234, 179, 8, 0.4);
+  --claim-evasion-bg: rgba(249, 115, 22, 0.12);
+  --claim-citation-bg: rgba(168, 85, 247, 0.12);
+}
+
+/* --- Code block background (brand-navy-derived) --- */
+:root {
+  --code-block-bg: oklch(0.18 0.01 240);   /* cool dark slate for light mode */
+}
+.dark {
+  --code-block-bg: oklch(0.14 0.03 240);   /* deeper navy, sits below card bg */
+}
+
+/* --- Brand gradient utility --- */
+.bg-brand-gradient {
+  background: linear-gradient(135deg, oklch(0.52 0.06 178 / 8%) 0%, oklch(0.52 0.04 200 / 4%) 100%);
+}
+.dark .bg-brand-gradient {
+  background: linear-gradient(135deg, oklch(0.82 0.08 178 / 8%) 0%, oklch(0.50 0.06 240 / 10%) 100%);
+}
+
+/* --- Dark mode navy + teal highlights --- */
+.dark .border-border {
+  border-color: oklch(0.35 0.04 230 / 45%);
+}
+/* Focused/active elements get a teal glow */
+.dark *:focus-visible {
+  outline-color: oklch(0.72 0.14 178 / 60%);
+  box-shadow: 0 0 0 3px oklch(0.72 0.10 178 / 20%);
+}
+/* Cards get a subtle navy edge glow on hover */
+.dark [data-slot="card"]:hover,
+.dark .group:hover > [data-slot="card"] {
+  border-color: oklch(0.45 0.06 230 / 50%);
+  box-shadow: 0 0 12px oklch(0.40 0.06 178 / 10%);
+}
+/* Active sidebar items get teal accent */
+.dark .border-brand {
+  border-color: oklch(0.72 0.14 178);
+}
+/* Selected verification message glow in dark mode */
+.dark .ring-brand\/40 {
+  --tw-ring-color: oklch(0.72 0.14 178 / 40%);
+  box-shadow: 0 0 20px oklch(0.60 0.10 178 / 18%), var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000);
+}
+/* Scrollbar navy tint */
+.dark ::-webkit-scrollbar-thumb {
+  background: oklch(0.35 0.04 230 / 50%);
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.45 0.06 230 / 60%);
+}
+.dark ::-webkit-scrollbar-track {
+  background: oklch(0.16 0.03 240 / 30%);
+}
+
+/* --- Gold accent utility (Pro badges, tier indicators, shield trim) --- */
+.text-gold { color: oklch(0.78 0.12 85); }       /* #D4AF37 */
+.text-gold-light { color: oklch(0.85 0.10 85); }  /* #E8C56A */
+.border-gold { border-color: oklch(0.78 0.12 85 / 50%); }
+.bg-gold\/10 { background: oklch(0.78 0.12 85 / 10%); }
+
+/* ===================================================================
+   Brand effects — ported from marketing, opacity ~40% lower for app
+   =================================================================== */
+
+/* Circuit-board dot-grid background — dark mode only */
+.bg-circuit { background-image: none; }
+.dark .bg-circuit {
+  background-image:
+    radial-gradient(circle at 25% 25%, rgba(0, 229, 216, 0.04) 1.5px, transparent 1.5px),
+    radial-gradient(circle at 75% 75%, rgba(0, 229, 216, 0.04) 1.5px, transparent 1.5px),
+    radial-gradient(circle at 50% 50%, rgba(0, 229, 216, 0.018) 2px, transparent 2px);
+  background-size: 60px 60px, 60px 60px, 120px 120px;
+}
+
+/* Teal glow pulse — dark mode only */
+@keyframes teal-pulse {
+  0%, 100% { box-shadow: 0 0 12px rgba(0, 229, 216, 0.09), 0 0 36px rgba(0, 229, 216, 0.03); }
+  50%       { box-shadow: 0 0 18px rgba(0, 229, 216, 0.15), 0 0 48px rgba(0, 229, 216, 0.06); }
+}
+.glow-teal { animation: none; }
+.dark .glow-teal { animation: teal-pulse 4s ease-in-out infinite; }
+
+/* Gold shimmer for premium elements */
+@keyframes gold-shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+.shimmer-gold {
+  background: linear-gradient(90deg, transparent 25%, rgba(212, 175, 55, 0.12) 50%, transparent 75%);
+  background-size: 200% 100%;
+  animation: gold-shimmer 3s ease-in-out infinite;
+}
+
+/* Wordmark shine sweep — static in light mode, animates in dark */
+@keyframes shine-sweep {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+.text-brand-shine {
+  background: linear-gradient(135deg, #00E5D8, #7FF9E8);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.dark .text-brand-shine {
+  background: linear-gradient(90deg, #00E5D8 0%, #7FF9E8 25%, rgba(255,255,255,0.5) 50%, #7FF9E8 75%, #00E5D8 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: shine-sweep 5s ease-in-out infinite;
+}
+
+/* Brand gradient text */
+.text-brand-gradient {
+  background: linear-gradient(135deg, #00E5D8, #7FF9E8);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Radial hero glow (behind empty-state headings, wizard) */
+.bg-hero-glow {
+  background:
+    radial-gradient(ellipse 50% 40% at 30% 35%, rgba(0, 229, 216, 0.06), transparent 70%),
+    radial-gradient(ellipse 30% 30% at 80% 70%, rgba(212, 175, 55, 0.024), transparent 60%);
+}
+
+/* Gold decorative line */
+.gold-line {
+  background: linear-gradient(90deg, transparent, rgba(212, 175, 55, 0.3), transparent);
+  height: 1px;
+}
+
+/* Gold border-image divider */
+.divider-gold {
+  border-image: linear-gradient(90deg, transparent, rgba(212, 175, 55, 0.3), transparent) 1;
+}
+
+/* Page vignette overlay — dark mode only */
+.vignette { pointer-events: none; position: fixed; inset: 0; z-index: 1; }
+.dark .vignette {
+  background: radial-gradient(ellipse 80% 70% at 50% 50%, transparent 50%, rgba(10, 31, 61, 0.18) 100%);
+}
+
+/* Floating animation */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-8px); }
+}
+.float { animation: float 6s ease-in-out infinite; }
+
+/* AI assistant bubble — subtle teal outline in dark mode */
+.dark .ai-bubble-glow {
+  box-shadow: inset 0 0 0 1px oklch(0.82 0.16 178 / 12%), 0 2px 8px oklch(0.82 0.16 178 / 4%);
+}
+
+/* --- Chat title hover-scroll (marquee) --- */
+@keyframes marquee-scroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(var(--scroll-distance, -50%)); }
+}
+.scroll-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.group:hover .scroll-title-inner {
+  display: inline-block;
+  animation: marquee-scroll 4s linear 0.5s infinite alternate;
+}
+
+/* KB artifact card action buttons — always show pointer cursor */
+.artifact-action-btn {
+  cursor: pointer;
+}
+
+/* --- Touch device overrides (iPad, phones) --- */
+
+/* Show hover-hidden controls on touch devices that lack a fine pointer */
+@media (hover: none) {
+  .group-hover\:opacity-100 {
+    opacity: 1 !important;
+  }
+}
+
+/* Enforce Apple HIG 44px minimum touch targets on coarse pointers */
+@media (pointer: coarse) {
+  .touch-target {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Expand small icon buttons to a tappable area via padding */
+  [data-slot="button"][data-size="icon-xs"],
+  [data-slot="button"][data-size="icon-sm"] {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Expand resizable panel separators to tappable size */
+  [data-panel-group-direction] > [data-resize-handle] {
+    min-height: 12px;
+  }
+
+  /* Expand small action buttons in KB cards for touch */
+  .artifact-action-btn {
+    min-width: 36px;
+    min-height: 36px;
+    cursor: pointer;
+  }
+
+  /* Prevent iOS Safari zoom on focused inputs (requires >=16px font) */
+  input,
+  textarea,
+  select {
+    font-size: max(16px, 1em);
+  }
+}
+
+/* Safe area insets for devices with rounded corners / notches */
+@supports (padding: env(safe-area-inset-top)) {
+  .safe-area-top { padding-top: env(safe-area-inset-top); }
+  .safe-area-bottom { padding-bottom: env(safe-area-inset-bottom); }
+  .safe-area-left { padding-left: env(safe-area-inset-left); }
+  .safe-area-right { padding-right: env(safe-area-inset-right); }
+}

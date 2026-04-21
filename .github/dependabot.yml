@@ -1,0 +1,110 @@
+version: 2
+updates:
+  # Python (pip)
+  - package-ecosystem: pip
+    directory: /src/mcp
+    schedule:
+      interval: weekly
+      day: monday
+    # Group non-major bumps; majors get their own PRs so they can be
+    # audited/tested individually (e.g. chromadb must stay pinned to <0.6
+    # until the server is upgraded).
+    groups:
+      python-deps:
+        patterns: ["*"]
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # Server pin (ChromaDB 0.5.23) dictates client version — no bumps
+      # until server upgrade is scheduled.
+      - dependency-name: "chromadb"
+    commit-message:
+      prefix: "deps(py):"
+
+  # NPM
+  - package-ecosystem: npm
+    directory: /src/web
+    schedule:
+      interval: weekly
+      day: monday
+    # Group non-major bumps; majors get their own PRs so each breaking-change
+    # migration (TypeScript 6, Vite 8, ESLint 10, etc.) can be staged and
+    # audited independently.
+    groups:
+      npm-deps:
+        patterns: ["*"]
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # ESLint 10 is blocked on eslint-plugin-react-hooks: its latest stable
+      # (v7.x) peer-requires eslint <=9. Only canary releases support
+      # ESLint 10. Revisit once a stable react-hooks plugin ships with
+      # `eslint: ^10` peer support.
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@eslint/js"
+        update-types: ["version-update:semver-major"]
+    commit-message:
+      prefix: "deps(npm):"
+
+  # GitHub Actions
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "deps(ci):"
+
+  # Docker — MCP
+  - package-ecosystem: docker
+    directory: /src/mcp
+    schedule:
+      interval: monthly
+    # Python runtime upgrades are platform-infrastructure changes with
+    # coordinated touches to Dockerfile + CI + pyproject.toml + mypy config
+    # + DEPENDENCY_COUPLING.md. They are tracked in docs/DEPENDENCY_UPGRADES.md
+    # and get their own dedicated PR (3.11 -> 3.12 first, not the jump to
+    # 3.14 dependabot keeps proposing). Ignore major + minor base-image bumps
+    # until scheduled; patch bumps (security) still land.
+    ignore:
+      - dependency-name: "python"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
+    commit-message:
+      prefix: "deps(docker):"
+
+  # Docker — Web
+  - package-ecosystem: docker
+    directory: /src/web
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "deps(docker):"
+
+  # Docker — Infrastructure (Neo4j, ChromaDB, Redis)
+  - package-ecosystem: docker
+    directory: /stacks/infrastructure
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "deps(docker):"
+
+  # Docker — Gateway (Caddy)
+  - package-ecosystem: docker
+    directory: /stacks/gateway
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "deps(docker):"
+
+  # Docker — Tunnel (Cloudflare)
+  - package-ecosystem: docker
+    directory: /stacks/tunnel
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "deps(docker):"

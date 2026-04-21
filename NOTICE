@@ -1,0 +1,21 @@
+Cerid AI
+Copyright 2024-2026 Cerid AI Contributors
+
+This product includes software developed by the Cerid AI project
+(https://github.com/cerid-ai/cerid-ai).
+
+Licensed under the Apache License, Version 2.0.
+
+Third-party software used by this project:
+
+- FastAPI (MIT License) - https://fastapi.tiangolo.com/
+- ChromaDB (Apache 2.0) - https://www.trychroma.com/
+- Neo4j Python Driver (Apache 2.0) - https://neo4j.com/
+- Redis (BSD License) - https://redis.io/
+- LangGraph (MIT License) - https://github.com/langchain-ai/langgraph
+- pdfplumber (MIT License) - https://github.com/jsvine/pdfplumber
+- React (MIT License) - https://react.dev/
+- Vite (MIT License) - https://vitejs.dev/
+- Tailwind CSS (MIT License) - https://tailwindcss.com/
+- shadcn/ui (MIT License) - https://ui.shadcn.com/
+- Bifrost (MIT License) - https://github.com/maximhq/bifrost
