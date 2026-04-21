@@ -24,8 +24,9 @@ identified in the 2026-04-19 critical-eye audit are now extinct:
 - 8 capability invariants (I1-I8) with 35 integration tests against
   a live stack. Merge gate for every subsequent sprint.
 - New `preservation` CI job boots docker-compose, runs the harness,
-  dumps logs on failure. Currently `continue-on-error: true`; flip
-  to blocking post-v0.90.0 after two consecutive green runs on main.
+  dumps logs on failure. Flipped to blocking during the structural
+  cleanup tail (Phase 1C, 2026-04-20) after two consecutive green
+  runs on main.
 - `make preservation-check` for local developer loop (~60s).
 
 ### Canonical claim model (Sprint B)
@@ -158,20 +159,6 @@ auto-persist addition is backward-compatible — old clients that
 already call `/verification/save` after `/agent/hallucination` get
 an idempotent double-save). Public repo sync via `sync-repos.py
 to-public --track-deletions` cleanly propagates all changes.
-
-### What's next
-
-Post-v0.90.0 roadmap (tracked in the freshly-cleared `tasks/todo.md`):
-
-- Chat messages virtualization (Task 18 deferred from v0.84.0)
-- `utils/data_sources/` move to `app/data_sources/` + DI
-- `/agent/verify-stream` SSE auto-persist (parallel of Sprint C's
-  non-streaming /agent/hallucination change)
-- Tighten the three drift CI jobs from warning to blocking
-- `tasks/lessons.md` entries → lint rules / contract tests where
-  feasible
-- Dependency major upgrades (chromadb, neo4j, Python 3.12, ESLint 10)
-  — each their own test matrix, not bundled with structural work
 
 ### Structural cleanup tail (2026-04-20 → 2026-04-21)
 

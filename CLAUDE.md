@@ -4,7 +4,7 @@
 
 Cerid AI is a self-hosted, privacy-first AI Knowledge Companion. RAG-powered retrieval, intelligent agents, and an extensible SDK. Apache-2.0 licensed.
 
-**Version:** 0.83.0 | **Docs:** [`docs/`](docs/) | **SDK:** [`docs/SDK_GUIDE.md`](docs/SDK_GUIDE.md)
+**Version:** 0.90 | **Docs:** [`docs/`](docs/) | **SDK:** [`docs/SDK_GUIDE.md`](docs/SDK_GUIDE.md)
 
 ## Quick Start
 
@@ -20,11 +20,12 @@ curl http://localhost:8888/health             # verify
 | Service | Port | Path |
 |---------|------|------|
 | MCP Server (API) | 8888 | `src/mcp/` |
-| Bifrost (LLM Gateway) | 8080 | `stacks/bifrost/` |
 | ChromaDB | 8001 | `stacks/infrastructure/` |
 | Neo4j | 7474 | `stacks/infrastructure/` |
 | Redis | 6379 | `stacks/infrastructure/` |
 | React GUI | 3000 | `src/web/` |
+
+Chat + smart-router traffic goes straight from `core/utils/llm_client.py` to OpenRouter. No proxy layer.
 
 ## Key Patterns
 
@@ -32,10 +33,11 @@ curl http://localhost:8888/health             # verify
 |---------|---------|----------|
 | Error handling | `@handle_errors()` | `utils/error_handler.py` |
 | Feature gating | `@require_feature()` | `config/features.py` |
-| Circuit breakers | `circuit_breaker(name)` | `utils/circuit_breaker.py` |
+| Circuit breakers | `circuit_breaker(name)` | `core/utils/circuit_breaker.py` |
 | Graceful degradation | `DegradationManager` | `utils/degradation.py` |
 | Inference detection | `detect_embedding_provider()` | `utils/inference_config.py` |
 | NLI entailment | `nli_entailment()` | `core/utils/nli.py` |
+| Swallowed-error observability | `log_swallowed_error(module, exc)` | `core/utils/swallowed.py` |
 
 **Rules:**
 - Typed errors only (`CeridError` subclasses). No `raise HTTPException` in business logic.
@@ -100,7 +102,7 @@ cd src/web && npx vitest run
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`DEVELOPMENT.md`](DEVELOPMENT.md).
+See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 **Sync points when making changes:**
 - New MCP tool → `tools.py` + tool count in README

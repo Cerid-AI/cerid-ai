@@ -1,162 +1,138 @@
 # Contributing to Cerid AI
 
-Thank you for your interest in contributing to Cerid AI!
+Thanks for your interest — contributions are welcome.
 
-## Development Setup
+## Development setup
 
 ### Prerequisites
-- Python 3.11+
-- Node.js 22+ (for React GUI development)
-- Docker & Docker Compose V2
 
-### Quick Start
+- Python 3.11+ (3.12 recommended; the dev venv is pinned to 3.12)
+- Node.js 22+ (for the React GUI and Electron app)
+- Docker + Docker Compose v2+
+
+### Get running
 
 ```bash
-# Clone and set up
-git clone https://github.com/YOUR_USERNAME/cerid-ai.git
-cd cerid-ai
-
-# One-command bootstrap (creates network, copies .env, starts services)
-./scripts/setup.sh
-
-# Or manually:
-cp .env.example .env          # Edit with your API keys
-docker network create llm-network
-./scripts/start-cerid.sh      # Starts all 5 service groups
+git clone https://github.com/Cerid-AI/cerid-ai.git && cd cerid-ai
+cp .env.example .env               # add OPENROUTER_API_KEY (or point at Ollama)
+./scripts/setup-archive.sh         # creates ~/cerid-archive/ watch dir
+./scripts/start-cerid.sh           # boots Neo4j + ChromaDB + Redis + MCP + GUI
 ```
 
-**Services after startup:**
-- React GUI: `http://localhost:3000`
-- MCP Server API: `http://localhost:8888`
-- API Docs: `http://localhost:8888/docs`
+Then open:
 
-### Running Tests
+- **React GUI:** http://localhost:3000
+- **MCP API:** http://localhost:8888 (docs at `/docs`)
+- **Health:** `curl http://localhost:8888/health`
 
-```bash
-# Unit tests (backend, ~1941 tests)
-cd src/mcp
-pip install pytest pytest-asyncio httpx
-pytest tests/ -v
+## Running the checks locally
 
-# Frontend tests (~611 tests)
-cd src/web && npx vitest run
-
-# All checks (lint + typecheck + tests)
-make check-all
-
-# Monte Carlo retrieval evaluation
-make test-eval
-
-# E2E pipeline integration tests (requires running Docker stack)
-python -m pytest tests/test_e2e_integration.py
-
-# RAG resilience testing (circuit breakers, degradation paths)
-python -m pytest tests/test_rag_resilience.py -v
-```
-
-Synthetic test fixture data lives in `tests/fixtures/synthetic/` and provides deterministic inputs for unit and integration tests.
-
-### Linting
+The whole CI matrix runs as these commands. Run them before you push.
 
 ```bash
-# Python
-pip install ruff
-ruff check src/mcp/
+# Python (inside src/mcp/)
+ruff check src/mcp/                                # lint (pinned 0.15.4)
+cd src/mcp && python -m mypy .                     # typecheck
+cd src/mcp && lint-imports                         # layer contract (core ↛ app)
+PYTHONPATH=src/mcp pytest src/mcp/tests/ -v        # 2,600+ unit tests
 
-# TypeScript
-cd src/web && npx tsc --noEmit
-```
-
-### React GUI Development
-
-```bash
+# Frontend
 cd src/web
 npm install
-npm run dev          # Vite dev server on port 5173
+npm run typecheck                                  # tsc --noEmit
+npx eslint .
+npx vitest run                                     # 750+ tests
+
+# Preservation harness (integration; needs a running stack)
+make preservation-check                            # 35 invariants in ~60s
 ```
 
-The Vite dev server proxies `/api/bifrost` to `localhost:8080` (Bifrost LLM gateway).
+### CI gates
 
-## Coding Standards
+Every PR runs: `lint`, `typecheck`, `test`, `security`, `lock-sync`, `frontend`, `docker`, plus the drift gates (`env-example-drift`, `router-registry-drift`, `sync-manifest-drift`, `sdk-openapi-drift`, `no-legacy-neo4j-tree`, `silent-catch`) and the `preservation` live-stack integration suite. All are blocking.
 
-- **Python 3.11+** with type hints on public functions
-- **FastAPI** routers in `src/mcp/app/routers/` (bridge re-exports at `src/mcp/routers/` preserved for backward-compat imports) with `APIRouter`
-- **React 19** + **Tailwind v4** + **shadcn/ui** (New York style, Zinc base)
-- **No hardcoded secrets** — use environment variables via `config.py`
-- **Cypher queries** live in `utils/graph.py`, never inline in routers
-- **ChromaDB metadata** values must be strings or ints (lists stored as JSON strings)
-- Keep functions focused and under ~50 lines where practical
-- Add logging for error paths: `logger.warning()` for recoverable, `logger.error()` for failures
-
-## Architecture Overview
+## Project layout
 
 ```
-src/mcp/
-  main.py           — FastAPI app setup + lifespan (plugin loading here)
-  config.py         — All configuration (single source of truth)
-  deps.py           — Database client singletons
-  scheduler.py      — APScheduler background jobs
-  routers/          — FastAPI endpoint modules
-  agents/           — LangGraph agent workflows (10 agents)
-  utils/            — Shared utilities (graph, BM25, parsers, features, etc.)
-  plugins/          — Plugin system (loader, base classes)
-  middleware/       — Auth + rate limiting
-  tests/            — pytest test suite (~1941 tests)
+src/mcp/                       FastAPI backend (Python 3.11+)
+├── core/                      Portable orchestrator — never imports app/
+│   ├── agents/                Query, memory, hallucination, self-RAG, …
+│   ├── contracts/             VectorStore, GraphStore, CacheStore, LLMClient ABCs
+│   ├── retrieval/             BM25, reranker, semantic cache, query decomposition
+│   └── utils/                 Embeddings, circuit breaker, LLM client, NLI, …
+├── app/                       Application layer (imports core + framework code)
+│   ├── routers/               47 FastAPI routers (new endpoints go here)
+│   ├── agents/                Orchestration wrappers (assembler, curator, triage, …)
+│   ├── db/neo4j/              The only Neo4j code path (artifacts, memory, schema,
+│   │                          relationships, taxonomy, users, agents, migrations/)
+│   ├── services/              ingestion.py (ingest_content, ingest_file, dedup)
+│   ├── parsers/               PDF, office, structured, email, ebook
+│   └── main.py                FastAPI entry + lifespan
+├── config/                    settings.py, features.py, taxonomy.py, providers.py
+└── tests/                     2,600+ unit tests + integration/ (preservation harness)
 
-src/web/
-  src/components/   — React components (layout, chat, kb, monitoring, audit, ui)
-  src/hooks/        — Custom React hooks
-  src/lib/          — API clients, types, model router
-  src/contexts/     — React contexts (KB injection, settings)
+src/web/src/                   React 19 + Vite 7 + Tailwind v4 + shadcn/ui
+├── components/                chat/, kb/, monitoring/, settings/, audit/, memories/
+├── hooks/                     use-chat, use-verification-orchestrator, use-kb-context
+├── contexts/                  Settings, KBInjection, Conversations, Auth
+└── __tests__/                 750+ vitest tests
 ```
 
-## Plugin Development
+### Layer contract (hard rule)
 
-Cerid AI supports plugins for extending functionality. See `src/mcp/plugins/base.py` for abstract base classes.
+`core/` never imports from `app/`. Enforced by `import-linter` in `src/mcp/.importlinter`. If you need a concrete implementation from inside `core/`, take it as a dependency-injected callback — see `core.agents.hallucination.streaming::verify_response_streaming` for the pattern.
 
-### Creating a Plugin
+## Coding standards
 
-1. Create a directory in `src/mcp/plugins/your_plugin/`
-2. Add `manifest.json`:
+- **Canonical imports only:** `from core.utils.X`, `from app.routers.X`, `from app.agents.X`, `from app.db.neo4j.X`. There are no bridge paths.
+- **Type-hint public functions.** `mypy` is clean on `src/mcp/`.
+- **Typed errors, not `HTTPException` in business logic.** Use `CeridError` subclasses from `errors.py`.
+- **`@require_feature()` is the only tier gate.** No inline `CERID_TIER` checks.
+- **Constants in `config/constants.py`.** No magic numbers.
+- **ChromaDB metadata values are strings or ints.** Lists are stored as JSON strings (see `keywords_json`).
+- **Every broad `except Exception:` in a hot path calls `log_swallowed_error(module, exc)`** from `core.utils.swallowed`. Failures surface at `/health.swallowed_errors_last_hour`. Lint: `scripts/lint-no-silent-catch.py`.
+- **HTTP client is `httpx` everywhere.** `requests` is not a dependency.
+- **Keep changes focused.** A bug fix touches only the bug; a refactor addresses the specific root cause.
+
+## Plugin development
+
+Plugins extend the backend via a manifest + `register()` hook. See [`docs/PLUGIN_DEVELOPMENT.md`](docs/PLUGIN_DEVELOPMENT.md) for the full guide.
+
+Minimal skeleton:
+
+1. Create `src/mcp/plugins/your_plugin/manifest.json`:
    ```json
    {
      "name": "your_plugin",
      "version": "1.0.0",
      "type": "parser",
-     "description": "What your plugin does",
+     "description": "What it does",
      "tier": "community",
      "requires": []
    }
    ```
-3. Add `plugin.py` with a `register()` function:
-   ```python
-   from utils.parsers import PARSER_REGISTRY
+2. Add `plugin.py` exporting a `register()` function that wires into the relevant registry (parser, agent, tool, connector, sync).
+3. Auto-discovered on server startup.
 
-   def register():
-       PARSER_REGISTRY[".xyz"] = parse_xyz
+**Tier gating:** set `"tier": "pro"` in the manifest to require `CERID_TIER=pro`. Licensing: plugins ship under BSL-1.1 and convert to Apache-2.0 after three years.
 
-   def parse_xyz(file_path):
-       return {"text": "...", "file_type": "xyz", "page_count": None}
-   ```
-4. The plugin is auto-discovered on server startup.
+## Pull request process
 
-**Plugin types:** `parser` (file parsers), `agent` (workflows), `sync` (sync backends), `middleware`
+1. Fork the repo; create a feature branch off `main`.
+2. Make focused commits. **Never** add `Co-Authored-By: Claude` / `Anthropic` / etc. — commits are authored by the human developer.
+3. Before pushing, run the full local check list in [Running the checks locally](#running-the-checks-locally). If you touched `core/` or `app/`, also run `make preservation-check`.
+4. Update docs in the same commit when you change:
+   - A route or SDK endpoint → update `docs/API_REFERENCE.md` and regenerate `docs/ROUTER_REGISTRY.md` (`python scripts/gen_router_registry.py`).
+   - A new env var → add it to `src/mcp/config/settings.py`, then `python scripts/gen_env_example.py` to regen `.env.example`.
+   - A Python dep → edit `src/mcp/requirements.txt`, then `./scripts/regen-lock.sh` (Docker-wrapped pip-compile).
+5. Open a PR with a clear description of what and why.
 
-**Tier gating:** Set `"tier": "pro"` in manifest to require `CERID_TIER=pro` environment variable.
+### Compliance check
 
-## Pull Request Process
-
-1. Fork the repository and create a feature branch from `main`
-2. Make your changes with clear, focused commits
-3. Ensure tests pass (`pytest`) and linting is clean (`ruff check`, `tsc --noEmit`)
-4. Update documentation if adding new endpoints, MCP tools, or plugins
-5. Open a PR with a clear description of what and why
-
-### Compliance Check
 - [ ] No Chinese-origin AI models referenced (DeepSeek, Qwen, Alibaba, etc.)
-- [ ] Default Ollama model is `llama3.2:3b` (Meta) — not Qwen
-- [ ] Run: `grep -rn "deepseek\|qwen\|alibaba" src/ --include="*.py" --include="*.ts"` → 0 results
+- [ ] Default Ollama model is `llama3.2:3b` (Meta)
+- [ ] `grep -rn "deepseek\|qwen\|alibaba" src/ --include="*.py" --include="*.ts"` → zero results
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the Apache License 2.0.
+By contributing, you agree that your contributions will be licensed under the Apache License 2.0 (or BSL-1.1 for plugins, which converts to Apache-2.0 after three years).
