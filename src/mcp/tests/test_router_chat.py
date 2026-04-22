@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import FastAPI
@@ -34,8 +35,39 @@ def _setup_mock_client(mock_client_cls, mock_response):
 class TestChatStreamEndpoint:
     """POST /chat/stream"""
 
+    def test_api_key_is_read_at_request_time_not_module_import(self):
+        """Regression: chat.py used to capture OPENROUTER_API_KEY at module-import
+        time. The setup wizard's ``/setup/configure`` endpoint patches
+        ``os.environ`` at runtime when a new key is saved — a module-level
+        capture would freeze the stale boot-time value and return 401 forever
+        even though ``/providers/credits`` (which reads ``os.getenv`` per call)
+        happily reported the new key as valid. Confirm chat.py now reads
+        fresh from os.environ on every request.
+        """
+        import app.routers.chat as chat_module
+
+        # Sanity: the module must NOT expose a top-level OPENROUTER_API_KEY
+        # constant that can diverge from os.environ. A bare module attribute
+        # named OPENROUTER_API_KEY is the anti-pattern.
+        assert not (
+            hasattr(chat_module, "OPENROUTER_API_KEY")
+            and isinstance(getattr(chat_module, "OPENROUTER_API_KEY"), str)
+        ), (
+            "chat.py must not expose a module-level OPENROUTER_API_KEY constant — "
+            "this freezes at module-import time and diverges from os.environ "
+            "when the setup wizard patches env at runtime. Read via os.getenv "
+            "or the _env_openrouter_key() helper instead."
+        )
+
+        # Behavioral check: resolve the key TWICE with different env values.
+        # Each call must return the current value, proving no stale capture.
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "first-key"}, clear=False):
+            assert chat_module._env_openrouter_key() == "first-key"
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "second-key"}, clear=False):
+            assert chat_module._env_openrouter_key() == "second-key"
+
     def test_returns_503_when_no_api_key(self):
-        with patch("app.routers.chat.OPENROUTER_API_KEY", ""):
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": ""}, clear=False):
             app = _make_app()
             client = TestClient(app)
             resp = client.post("/chat/stream", json={
@@ -58,7 +90,7 @@ class TestChatStreamEndpoint:
 
         mock_response.aiter_bytes = fake_aiter
 
-        with patch("app.routers.chat.OPENROUTER_API_KEY", "sk-test"):
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "sk-test"}, clear=False):
             app = _make_app()
             client = TestClient(app)
 
@@ -103,7 +135,7 @@ class TestChatStreamEndpoint:
 
         mock_response.aiter_bytes = fake_aiter
 
-        with patch("app.routers.chat.OPENROUTER_API_KEY", "sk-test"):
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "sk-test"}, clear=False):
             app = _make_app()
             client = TestClient(app)
 
@@ -143,7 +175,7 @@ class TestChatStreamEndpoint:
 
         mock_response.aiter_bytes = fake_aiter
 
-        with patch("app.routers.chat.OPENROUTER_API_KEY", "sk-test"):
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "sk-test"}, clear=False):
             app = _make_app()
             client = TestClient(app)
 
@@ -182,7 +214,7 @@ class TestChatRequestValidation:
     """Request body validation."""
 
     def test_rejects_missing_model(self):
-        with patch("app.routers.chat.OPENROUTER_API_KEY", "sk-test"):
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "sk-test"}, clear=False):
             app = _make_app()
             client = TestClient(app)
             resp = client.post("/chat/stream", json={
@@ -191,7 +223,7 @@ class TestChatRequestValidation:
             assert resp.status_code == 422  # Pydantic validation error
 
     def test_rejects_empty_messages(self):
-        with patch("app.routers.chat.OPENROUTER_API_KEY", "sk-test"):
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "sk-test"}, clear=False):
             app = _make_app()
             client = TestClient(app)
 
@@ -218,7 +250,7 @@ class TestChatRequestValidation:
 
     def test_accepts_optional_max_tokens(self):
         """max_tokens is optional and should be forwarded when present."""
-        with patch("app.routers.chat.OPENROUTER_API_KEY", "sk-test"):
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "sk-test"}, clear=False):
             app = _make_app()
             client = TestClient(app)
 

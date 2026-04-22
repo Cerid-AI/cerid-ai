@@ -29,7 +29,14 @@ from core.utils.swallowed import log_swallowed_error
 logger = logging.getLogger("ai-companion.chat")
 
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+
+# Resolve OPENROUTER_API_KEY at CALL TIME, not module-import time. The setup
+# wizard (`/setup/configure`) writes new keys to .env and patches
+# ``os.environ`` at runtime; a module-level capture would freeze the stale
+# compose-level value and cause chat to 401 while ``/providers/credits`` (which
+# reads ``os.getenv`` per-request) happily reports the new key as valid.
+def _env_openrouter_key() -> str:
+    return os.getenv("OPENROUTER_API_KEY", "")
 
 # ---------------------------------------------------------------------------
 # Shared connection pool — avoids per-request TCP/TLS handshake overhead
@@ -135,7 +142,7 @@ def _resolve_api_key(request: Request) -> str:
                     return decrypted
         except Exception as exc:
             log_swallowed_error("app.routers.chat.resolve_per_user_api_key", exc)
-    return OPENROUTER_API_KEY
+    return _env_openrouter_key()
 
 
 async def _success_gen(
@@ -260,7 +267,7 @@ async def _attempt_stream(
     Returns an async generator of SSE bytes on success or a non-retryable
     error, or an ``int`` HTTP status code when the error is retryable.
     """
-    effective_key = api_key or OPENROUTER_API_KEY
+    effective_key = api_key or _env_openrouter_key()
 
     payload_dict: dict = {
         "model": bare_model,
