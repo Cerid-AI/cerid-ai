@@ -2,7 +2,7 @@
 
 All notable changes to cerid-ai are documented here.
 
-## v0.90 — Consolidation Program + Structural Cleanup (2026-04-19 → 2026-04-21)
+## v0.90 — Consolidation Program + Structural Cleanup (2026-04-19 → 2026-04-22)
 
 Nine-sprint structural cleanup (A → I) executed from a single planning
 document: [`tasks/2026-04-19-consolidation-program.md`](tasks/2026-04-19-consolidation-program.md).
@@ -213,6 +213,68 @@ preserved existing locks; CI wrote to `/tmp` and always resolved fresh).
 
 2,653 backend tests + 750+ frontend tests green. import-linter "core
 must not import app" KEPT.
+
+### Beta-test fixes (2026-04-22)
+
+Issues caught by running the public repo through the new-user flow
+end-to-end. Each fix ships with regression coverage and a lesson in
+`tasks/lessons.md`.
+
+**Chat proxy — `OPENROUTER_API_KEY` captured at module-import time.**
+`app/routers/chat.py:32` had `OPENROUTER_API_KEY = os.getenv(...)` as a
+module-level constant. The setup wizard's `/setup/configure` endpoint
+patches `os.environ` at runtime (so new keys take effect without restart),
+but chat.py had frozen the old boot-time value. Every chat request used
+the stale key → 401 "Invalid API key" forever. `/providers/credits`
+(which reads `os.getenv` per request) reported the new key as valid,
+making the bug LOOK like "models won't switch" because every model ran
+through the same stale-key path and failed.
+Fix: drop the module-level constant; read via `_env_openrouter_key()`
+helper at each site. Regression test asserts no module-level
+`OPENROUTER_API_KEY` attribute exists.
+
+**Setup wizard wrote to an orphan file.** `setup.py::_find_env_file()`
+fell through to `/app/.env` inside the container — which, due to the
+`./src/mcp:/app` bind mount, was `src/mcp/.env` on the host. Compose's
+`env_file:` points at repo-root `.env`. So the wizard silently wrote to
+a file nothing loads; the key only "worked" in-memory until the next
+rebuild, then vanished.
+Fix: bind-mount host repo-root `.env` to `/host-env/.env` in the
+container (dedicated mountpoint — macOS virtiofs rejects nested bind
+mounts under `/app`); set `CERID_ENV_FILE=/host-env/.env`.
+
+**`.env.example` missing OPENROUTER_API_KEY; REDIS_PASSWORD empty.** The
+`gen_env_example.py` AST scanner only reads `settings.py`, but
+OPENROUTER_API_KEY was referenced in `llm_client.py` + routers — not
+settings. New users doing `cp .env.example .env` found no line to edit.
+Separately, REDIS_PASSWORD shipped empty and `docker-compose.yml` uses
+required-form `${REDIS_PASSWORD:?...}` — first `docker compose up`
+errored before any container started.
+Fix: declare `OPENROUTER_API_KEY = os.getenv(...)` in `settings.py` so
+the generator surfaces it; default `REDIS_PASSWORD` to `"changeme-redis"`
+so the example starts working out of the box.
+
+**External verification — singleton httpx client poisoned by a
+throwaway event loop.** `core/utils/contextual.py::_run_coro_isolated`
+runs sync ingestion code by spinning up a NEW event loop inside a
+ThreadPoolExecutor worker. The FIRST call bound the module-level
+`_client: httpx.AsyncClient` singleton in `llm_client.py` to that
+throwaway loop. Worker thread exited → loop closed → singleton dead.
+Every later verification on the main FastAPI loop reused the singleton
+→ `RuntimeError: Event loop is closed`. User saw "External verification
+failed: Event loop is closed" for every claim.
+Fix: `_get_client()` only caches on `threading.current_thread() is
+threading.main_thread()`. Worker threads get a one-shot client closed on
+context-manager exit via the new `_acquire_client()` helper.
+`call_llm` and `call_llm_raw` refactored to
+`async with _acquire_client() as client:`.
+
+**Wikipedia data source — stubs leaked, failures silent.** Wikipedia
+occasionally returned 20-30 char summary stubs that slid past the -0.15
+disambiguation penalty and wasted NLI calls. And HTTP failures went to
+`logger.debug`, invisible to `/health.swallowed_errors_last_hour`.
+Fix: `_MIN_CONTENT_LEN = 50` drops stubs at the source; failures route
+through `log_swallowed_error("app.data_sources.wikipedia.query", ...)`.
 
 ## v0.84.0 — Reliability Remediation (2026-04-17 → 2026-04-18)
 
