@@ -61,13 +61,13 @@ class TestChatStreamEndpoint:
 
         # Behavioral check: resolve the key TWICE with different env values.
         # Each call must return the current value, proving no stale capture.
-        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "first-key"}, clear=False):
-            assert chat_module._env_openrouter_key() == "first-key"
-        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "second-key"}, clear=False):
-            assert chat_module._env_openrouter_key() == "second-key"
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "placeholder-alpha"}, clear=False):  # pragma: allowlist secret
+            assert chat_module._env_openrouter_key() == "placeholder-alpha"
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "placeholder-bravo"}, clear=False):  # pragma: allowlist secret
+            assert chat_module._env_openrouter_key() == "placeholder-bravo"
 
     def test_returns_503_when_no_api_key(self):
-        with patch.dict(os.environ, {"OPENROUTER_API_KEY": ""}, clear=False):
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": ""}, clear=False):  # pragma: allowlist secret
             app = _make_app()
             client = TestClient(app)
             resp = client.post("/chat/stream", json={
@@ -90,7 +90,7 @@ class TestChatStreamEndpoint:
 
         mock_response.aiter_bytes = fake_aiter
 
-        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "sk-test"}, clear=False):
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "unit-test-placeholder"}, clear=False):  # pragma: allowlist secret
             app = _make_app()
             client = TestClient(app)
 
@@ -135,7 +135,7 @@ class TestChatStreamEndpoint:
 
         mock_response.aiter_bytes = fake_aiter
 
-        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "sk-test"}, clear=False):
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "unit-test-placeholder"}, clear=False):  # pragma: allowlist secret
             app = _make_app()
             client = TestClient(app)
 
@@ -175,7 +175,7 @@ class TestChatStreamEndpoint:
 
         mock_response.aiter_bytes = fake_aiter
 
-        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "sk-test"}, clear=False):
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "unit-test-placeholder"}, clear=False):  # pragma: allowlist secret
             app = _make_app()
             client = TestClient(app)
 
@@ -214,7 +214,7 @@ class TestChatRequestValidation:
     """Request body validation."""
 
     def test_rejects_missing_model(self):
-        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "sk-test"}, clear=False):
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "unit-test-placeholder"}, clear=False):  # pragma: allowlist secret
             app = _make_app()
             client = TestClient(app)
             resp = client.post("/chat/stream", json={
@@ -223,7 +223,7 @@ class TestChatRequestValidation:
             assert resp.status_code == 422  # Pydantic validation error
 
     def test_rejects_empty_messages(self):
-        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "sk-test"}, clear=False):
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "unit-test-placeholder"}, clear=False):  # pragma: allowlist secret
             app = _make_app()
             client = TestClient(app)
 
@@ -250,7 +250,7 @@ class TestChatRequestValidation:
 
     def test_accepts_optional_max_tokens(self):
         """max_tokens is optional and should be forwarded when present."""
-        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "sk-test"}, clear=False):
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "unit-test-placeholder"}, clear=False):  # pragma: allowlist secret
             app = _make_app()
             client = TestClient(app)
 
