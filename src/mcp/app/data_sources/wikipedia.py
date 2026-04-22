@@ -8,9 +8,10 @@ import re
 
 import httpx
 
+from core.utils.swallowed import log_swallowed_error
 from errors import RetrievalError
 
-from .base import DataSource, DataSourceResult, logger
+from .base import DataSource, DataSourceResult
 
 _PROPER_NOUN_RE = re.compile(r"\b([A-Z][a-z]{2,}(?:\s[A-Z][a-z]{2,}){0,4})\b")
 
@@ -96,11 +97,18 @@ class WikipediaSource(DataSource):
             return " ".join(entities[:3])
         return " ".join(keywords[:3]) if keywords else raw_query
 
+    # Minimum usable summary length. Wikipedia can return 20-30 char stub
+    # summaries that are useless for claim verification — they previously
+    # only triggered a -0.15 confidence penalty (line below), but still made
+    # it through to the NLI scorer and wasted a call. Drop stubs at the
+    # source. 50 chars matches the existing stub-penalty threshold.
+    _MIN_CONTENT_LEN = 50
+
     async def query(self, query: str, **kwargs) -> list[DataSourceResult]:
         try:
             async with httpx.AsyncClient(
                 timeout=5.0,
-                headers={"User-Agent": "CeridAI/0.82 (https://github.com/Cerid-AI/cerid-ai)"},
+                headers={"User-Agent": "CeridAI/0.90 (https://github.com/Cerid-AI/cerid-ai)"},
             ) as client:
                 resp = await client.get(
                     "https://en.wikipedia.org/w/api.php",
@@ -118,14 +126,24 @@ class WikipediaSource(DataSource):
                     )
                     if summary_resp.status_code == 200:
                         data = summary_resp.json()
+                        extract = data.get("extract", "")
+                        # Drop stubs — they entail nothing and waste an NLI call.
+                        if len(extract) < self._MIN_CONTENT_LEN:
+                            continue
                         results.append(DataSourceResult(
                             title=data.get("title", title),
-                            content=data.get("extract", ""),
+                            content=extract,
                             source_url=data.get("content_urls", {}).get("desktop", {}).get("page", ""),
                             source_name="Wikipedia",
                             confidence=0.85,
                         ))
                 return results
         except (RetrievalError, httpx.HTTPError, ValueError, OSError, RuntimeError, AttributeError, TypeError, KeyError) as exc:
-            logger.debug("Wikipedia query failed: %s", exc)
+            # Observability: surface Wikipedia failures at /health.swallowed_errors_last_hour
+            # so operators can see when external verification is silently empty.
+            log_swallowed_error(
+                "app.data_sources.wikipedia.query",
+                exc,
+                context={"query": query[:80]},
+            )
             return []

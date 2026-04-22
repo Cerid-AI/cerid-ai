@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import threading
 from typing import TYPE_CHECKING
 
 import httpx
@@ -41,6 +42,13 @@ _logger = logging.getLogger("ai-companion.llm_client")
 # ---------------------------------------------------------------------------
 
 _client: httpx.AsyncClient | None = None
+# Track the event loop the singleton was created on so we can detect
+# poisoning by transient loops (e.g. `core.utils.contextual._run_coro_isolated`
+# which spins up a throwaway loop in a worker thread for sync ingestion calls).
+# If a call arrives on a loop other than the owner, we return a one-shot
+# client instead of the singleton — preventing the throwaway loop from
+# binding the singleton and leaving it dead when the thread exits.
+_client_loop: asyncio.AbstractEventLoop | None = None
 _client_lock = asyncio.Lock()
 
 # Consecutive auth-failure counter — tracks 401/403 responses that indicate the
@@ -53,25 +61,96 @@ _consecutive_401s: int = 0
 _POOL_RECYCLE_401_THRESHOLD: int = 5
 
 
+def _new_openrouter_client() -> httpx.AsyncClient:
+    """Factory for a fresh httpx client configured for OpenRouter."""
+    return httpx.AsyncClient(
+        base_url="https://openrouter.ai/api/v1",
+        timeout=httpx.Timeout(connect=10, read=60, write=10, pool=10),
+        limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+    )
+
+
 async def _get_client() -> httpx.AsyncClient:
     """Get or create the shared httpx client for direct OpenRouter calls.
 
     Connection pool is sized for concurrent verification workloads
-    (up to 20 concurrent connections, 10 keep-alive).
-    Uses an asyncio.Lock to prevent duplicate client creation under
-    concurrent access.
+    (up to 20 concurrent connections, 10 keep-alive). Uses an asyncio.Lock
+    to prevent duplicate client creation under concurrent access.
+
+    Loop-safety: only the main thread — where uvicorn owns the persistent
+    FastAPI event loop — is allowed to create/read the singleton. Worker
+    threads (e.g. the ThreadPoolExecutor inside
+    ``core.utils.contextual._run_coro_isolated`` that spins up a throwaway
+    loop for sync ingestion calls) always get a one-shot client. Without
+    this guard, the throwaway loop would bind the singleton and leave it
+    dead when the thread exits, causing every later request on the main
+    loop to fail with ``RuntimeError: Event loop is closed``.
     """
-    global _client
-    if _client is not None and not _client.is_closed:
+    global _client, _client_loop
+    current_loop = asyncio.get_running_loop()
+
+    # Workers that use asyncio.run / new_event_loop in a non-main thread
+    # MUST NOT touch the singleton — their loop dies with the thread.
+    if threading.current_thread() is not threading.main_thread():
+        return _new_openrouter_client()
+
+    # Cheap fast-path: singleton still valid AND we're on its owner loop.
+    if (
+        _client is not None
+        and not _client.is_closed
+        and _client_loop is current_loop
+    ):
         return _client
+
+    # Owner-loop mismatch on the main thread (e.g. pytest changed loops
+    # between tests) — recycle, don't return a dead singleton.
     async with _client_lock:
-        if _client is None or _client.is_closed:
-            _client = httpx.AsyncClient(
-                base_url="https://openrouter.ai/api/v1",
-                timeout=httpx.Timeout(connect=10, read=60, write=10, pool=10),
-                limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
-            )
+        if _client is None or _client.is_closed or _client_loop is not current_loop:
+            _client = _new_openrouter_client()
+            _client_loop = current_loop
     return _client
+
+
+class _OpenRouterClientCtx:
+    """Async context manager yielding an httpx client safe for the current loop.
+
+    - Main thread (where uvicorn owns the persistent loop): yields the shared
+      singleton and does NOT close it on exit (preserves connection pool).
+    - Worker threads (ThreadPoolExecutor with a transient loop, as in
+      ``core.utils.contextual._run_coro_isolated``): yields a fresh one-shot
+      client and closes it on exit so no file descriptors are leaked when
+      the throwaway loop dies.
+
+    Callers should prefer this over calling :func:`_get_client` directly so
+    one-shot clients from non-main threads are guaranteed to be closed.
+    """
+
+    def __init__(self) -> None:
+        self._client: httpx.AsyncClient | None = None
+        self._is_one_shot = False
+
+    async def __aenter__(self) -> httpx.AsyncClient:
+        client = await _get_client()
+        # When _get_client returns a fresh (non-singleton) client for a
+        # non-main-thread caller, we own it and must close it on exit.
+        self._is_one_shot = client is not _client
+        self._client = client
+        return client
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        if self._is_one_shot and self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
+
+
+def _acquire_client() -> _OpenRouterClientCtx:
+    """Return a context manager that yields a loop-safe httpx client.
+
+    Usage::
+
+        async with _acquire_client() as client:
+            resp = await client.post(...)
+    """
+    return _OpenRouterClientCtx()
 
 
 async def close_client() -> None:
@@ -207,23 +286,23 @@ async def call_llm(
     breaker = get_breaker(breaker_name)
 
     async def _do_call() -> str:
-        client = await _get_client()
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-        # Merge tracing headers for observability
-        headers.update(tracing_headers())
+        async with _acquire_client() as client:
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            }
+            # Merge tracing headers for observability
+            headers.update(tracing_headers())
 
-        post_kwargs: dict = {"headers": headers, "json": payload}
-        if timeout is not None:
-            post_kwargs["timeout"] = timeout
+            post_kwargs: dict = {"headers": headers, "json": payload}
+            if timeout is not None:
+                post_kwargs["timeout"] = timeout
 
-        resp = await client.post("/chat/completions", **post_kwargs)
-        resp.raise_for_status()
-        reset_auth_failure_count()
-        data = resp.json()
-        return data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            resp = await client.post("/chat/completions", **post_kwargs)
+            resp.raise_for_status()
+            reset_auth_failure_count()
+            data = resp.json()
+            return data.get("choices", [{}])[0].get("message", {}).get("content", "")
 
     try:
         return await breaker.call(_do_call)
@@ -283,25 +362,25 @@ async def call_llm_raw(
     breaker = get_breaker(breaker_name)
 
     async def _do_call() -> dict:
-        client = await _get_client()
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-        headers.update(tracing_headers())
+        async with _acquire_client() as client:
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            }
+            headers.update(tracing_headers())
 
-        post_kwargs: dict = {"headers": headers, "json": payload}
-        if timeout is not None:
-            post_kwargs["timeout"] = timeout
+            post_kwargs: dict = {"headers": headers, "json": payload}
+            if timeout is not None:
+                post_kwargs["timeout"] = timeout
 
-        resp = await client.post("/chat/completions", **post_kwargs)
-        # 402 = credits exhausted — propagate as-is
-        if resp.status_code == 402:
-            from core.agents.hallucination.verification import CreditExhaustedError
-            raise CreditExhaustedError("openrouter")
-        resp.raise_for_status()
-        reset_auth_failure_count()
-        return resp.json()
+            resp = await client.post("/chat/completions", **post_kwargs)
+            # 402 = credits exhausted — propagate as-is
+            if resp.status_code == 402:
+                from core.agents.hallucination.verification import CreditExhaustedError
+                raise CreditExhaustedError("openrouter")
+            resp.raise_for_status()
+            reset_auth_failure_count()
+            return resp.json()
 
     try:
         return await breaker.call(_do_call)

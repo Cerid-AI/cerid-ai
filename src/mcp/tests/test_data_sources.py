@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from app.data_sources import registry
@@ -172,7 +173,13 @@ async def test_wikipedia_query_format():
     mock_summary_resp.status_code = 200
     mock_summary_resp.json.return_value = {
         "title": "Python (programming language)",
-        "extract": "Python is a high-level programming language.",
+        # Needs >=50 chars to pass the WikipediaSource stub-filter —
+        # real Wikipedia summaries are typically 200-400 chars.
+        "extract": (
+            "Python is a high-level, general-purpose programming language "
+            "that emphasizes code readability with the use of significant "
+            "indentation."
+        ),
         "content_urls": {"desktop": {"page": "https://en.wikipedia.org/wiki/Python"}},
     }
 
@@ -194,6 +201,87 @@ async def test_wikipedia_query_format():
     first_call = mock_client.get.call_args_list[0]
     assert "en.wikipedia.org/w/api.php" in first_call.args[0]
     assert first_call.kwargs["params"]["srsearch"] == "Python programming"
+
+
+@pytest.mark.asyncio
+async def test_wikipedia_drops_stub_results():
+    """Regression: short (< _MIN_CONTENT_LEN) Wikipedia summaries must be
+    dropped at the source, not scored and forwarded to NLI. Stubs add no
+    evidence value and used to slide past the -0.15 disambiguation penalty.
+    """
+    mock_search_resp = MagicMock()
+    mock_search_resp.status_code = 200
+    mock_search_resp.json.return_value = {
+        "query": {"search": [
+            {"title": "Real Article"},
+            {"title": "Stub Article"},
+        ]}
+    }
+    mock_search_resp.raise_for_status = MagicMock()
+
+    real_summary = MagicMock()
+    real_summary.status_code = 200
+    real_summary.json.return_value = {
+        "title": "Real Article",
+        "extract": (
+            "This is a long enough extract that should survive the stub "
+            "filter since it contains more than fifty characters of content."
+        ),
+        "content_urls": {"desktop": {"page": "https://en.wikipedia.org/wiki/Real"}},
+    }
+    stub_summary = MagicMock()
+    stub_summary.status_code = 200
+    stub_summary.json.return_value = {
+        "title": "Stub Article",
+        "extract": "Too short.",  # 10 chars — way under the 50-char floor
+        "content_urls": {"desktop": {"page": "https://en.wikipedia.org/wiki/Stub"}},
+    }
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(side_effect=[mock_search_resp, real_summary, stub_summary])
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("app.data_sources.wikipedia.httpx.AsyncClient", return_value=mock_client):
+        source = WikipediaSource()
+        results = await source.query("anything")
+
+    titles = [r.title for r in results]
+    assert "Real Article" in titles, "full-length extract should pass"
+    assert "Stub Article" not in titles, (
+        "Stub summary (len < WikipediaSource._MIN_CONTENT_LEN) slipped through the filter"
+    )
+
+
+@pytest.mark.asyncio
+async def test_wikipedia_failure_routes_through_log_swallowed_error(monkeypatch):
+    """Regression: Wikipedia HTTP failures must surface at /health.swallowed_errors_last_hour
+    via log_swallowed_error, not vanish into logger.debug."""
+    captured: list = []
+
+    def fake_log(module: str, exc: Exception, **kwargs):
+        captured.append((module, type(exc).__name__, str(exc), kwargs))
+
+    monkeypatch.setattr(
+        "app.data_sources.wikipedia.log_swallowed_error",
+        fake_log,
+    )
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(side_effect=httpx.ConnectError("DNS lookup failed"))
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("app.data_sources.wikipedia.httpx.AsyncClient", return_value=mock_client):
+        source = WikipediaSource()
+        results = await source.query("anything")
+
+    assert results == []
+    assert len(captured) == 1
+    module, exc_name, _, kwargs = captured[0]
+    assert module == "app.data_sources.wikipedia.query"
+    assert exc_name == "ConnectError"
+    assert "context" in kwargs and kwargs["context"].get("query") == "anything"
 
 
 def test_wolfram_needs_api_key():
