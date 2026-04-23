@@ -14,13 +14,11 @@ from pydantic import BaseModel, Field
 import config
 import config.features as features_mod
 from app.deps import get_redis
+from core.utils.version import get_version
 from utils.features import set_toggle
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion.settings")
-
-# Version constant (single source of truth for the API)
-_VERSION = "0.83.0"
 
 
 def _redact_url(url: str) -> str:
@@ -157,7 +155,7 @@ async def get_settings_endpoint():
         "storage_mode": config.STORAGE_MODE,
         "sync_backend": config.SYNC_BACKEND,
         "machine_id": config.MACHINE_ID,
-        "version": _VERSION,
+        "version": get_version(),
         "memory_config": {
             "min_response_length": 100,
             "memory_types": ["fact", "decision", "preference", "action_item"],
