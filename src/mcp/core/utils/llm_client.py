@@ -25,12 +25,13 @@ import asyncio
 import logging
 import os
 import threading
+import uuid
 from typing import TYPE_CHECKING
 
 import httpx
 
 from core.utils.circuit_breaker import get_breaker
-from core.utils.tracing import tracing_headers
+from core.utils.tracing import get_request_id, tracing_headers
 
 if TYPE_CHECKING:
     from core.routing.smart_router import RouteDecision
@@ -205,6 +206,34 @@ def get_consecutive_auth_failures() -> int:
     return _consecutive_401s
 
 
+def _new_idempotency_key() -> str:
+    """Per-call OpenRouter ``Idempotency-Key`` value.
+
+    Format: ``<request_id>-<uuid12>``. The key MUST be generated once per
+    logical ``call_llm`` invocation and reused on every transport-level
+    retry inside the breaker closure — that is how OpenRouter (and any
+    idempotency-aware proxy in front of it) deduplicates the cost-ledger
+    write so a retried POST doesn't double-bill the same logical request
+    or leave orphan verification rows for the m0002 cleanup to reconcile.
+
+    Including ``request_id`` in the key makes the OpenRouter-side dedupe
+    log line correlate to our request log without a second lookup.
+    """
+    req = get_request_id() or "no-req"
+    return f"{req}-{uuid.uuid4().hex[:12]}"
+
+
+def _build_openrouter_headers(api_key: str, idem_key: str) -> dict[str, str]:
+    """Standard OpenRouter request headers: auth, tracing, idempotency."""
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "Idempotency-Key": idem_key,
+    }
+    headers.update(tracing_headers())
+    return headers
+
+
 def _strip_openrouter_prefix(model: str) -> str:
     """Strip the ``openrouter/`` prefix from model IDs.
 
@@ -284,15 +313,13 @@ async def call_llm(
         payload.update(extra_payload)
 
     breaker = get_breaker(breaker_name)
+    # Generate ONCE per logical call so transport-level retries inside the
+    # breaker closure reuse the same key (the entire purpose of idempotency).
+    idem_key = _new_idempotency_key()
 
     async def _do_call() -> str:
         async with _acquire_client() as client:
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            }
-            # Merge tracing headers for observability
-            headers.update(tracing_headers())
+            headers = _build_openrouter_headers(api_key, idem_key)
 
             post_kwargs: dict = {"headers": headers, "json": payload}
             if timeout is not None:
@@ -360,14 +387,12 @@ async def call_llm_raw(
         payload.update(extra_payload)
 
     breaker = get_breaker(breaker_name)
+    # See call_llm: per-call key, stable across breaker-internal retries.
+    idem_key = _new_idempotency_key()
 
     async def _do_call() -> dict:
         async with _acquire_client() as client:
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            }
-            headers.update(tracing_headers())
+            headers = _build_openrouter_headers(api_key, idem_key)
 
             post_kwargs: dict = {"headers": headers, "json": payload}
             if timeout is not None:

@@ -21,6 +21,7 @@ import config
 from app.db import neo4j as graph
 from app.deps import get_chroma, get_neo4j, get_redis
 from app.parsers import parse_file
+from core.context.identity import get_tenant_id
 from core.utils import cache
 from core.utils.time import utcnow_iso
 from utils.chunker import chunk_text, make_context_header
@@ -117,9 +118,17 @@ def _reingest_artifact(
         except Exception as e:
             logger.warning("Contextual enrichment skipped (re-ingest): %s", e)
 
-    base_meta = {"domain": domain, "artifact_id": artifact_id, "ingested_at": utcnow_iso()}
+    base_meta = {
+        "domain": domain,
+        "artifact_id": artifact_id,
+        "ingested_at": utcnow_iso(),
+        "tenant_id": get_tenant_id(),
+    }
     if metadata:
         base_meta.update(metadata)
+    # Caller-supplied metadata cannot override tenant_id — that would let
+    # an upload escape its own tenant scope at retrieval time.
+    base_meta["tenant_id"] = get_tenant_id()
 
     chunk_ids = [f"{artifact_id}_chunk_{i}" for i in range(len(chunks))]
     chunk_metadatas = [{**base_meta, "chunk_index": i} for i in range(len(chunks))]
@@ -265,9 +274,17 @@ def ingest_content(
             logger.warning("Contextual enrichment skipped: %s", e)
 
     ingested_at = utcnow_iso()
-    base_meta = {"domain": domain, "artifact_id": artifact_id, "ingested_at": ingested_at}
+    base_meta = {
+        "domain": domain,
+        "artifact_id": artifact_id,
+        "ingested_at": ingested_at,
+        "tenant_id": get_tenant_id(),
+    }
     if metadata:
         base_meta.update(metadata)
+    # Caller-supplied metadata cannot override tenant_id — that would let
+    # an upload escape its own tenant scope at retrieval time.
+    base_meta["tenant_id"] = get_tenant_id()
 
     # Propagate client_source for provenance tracking
     if metadata and metadata.get("client_source"):

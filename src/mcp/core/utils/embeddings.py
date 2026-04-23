@@ -24,6 +24,7 @@ from huggingface_hub import hf_hub_download
 from tokenizers import Tokenizer
 
 import config
+from core.utils.onnx_providers import resolve_providers
 
 logger = logging.getLogger("ai-companion.embeddings")
 
@@ -113,7 +114,9 @@ class OnnxEmbeddingFunction:
             opts.intra_op_num_threads = min(4, os.cpu_count() or 1)
 
             self._session = ort.InferenceSession(
-                model_path, sess_options=opts, providers=["CPUExecutionProvider"],
+                model_path,
+                sess_options=opts,
+                providers=resolve_providers(config.ONNX_EXECUTION_PROVIDERS),
             )
             self._tokenizer = Tokenizer.from_file(tok_path)
             self._tokenizer.enable_truncation(max_length=512)

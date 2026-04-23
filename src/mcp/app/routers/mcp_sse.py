@@ -17,7 +17,7 @@ import uuid
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import StreamingResponse
 
-from app.tools import MCP_TOOLS, execute_tool
+from app.tools import execute_tool, get_all_tools
 
 router = APIRouter()
 logger = logging.getLogger("ai-companion")
@@ -48,7 +48,7 @@ async def build_response(msg_id, method: str, params: dict) -> dict:
             },
         }
     elif method == "tools/list":
-        return {"jsonrpc": "2.0", "id": msg_id, "result": {"tools": MCP_TOOLS}}
+        return {"jsonrpc": "2.0", "id": msg_id, "result": {"tools": get_all_tools()}}
     elif method == "tools/call":
         tool_name = params.get("name", "")
         tool_args = params.get("arguments", {})

@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.services.strict_agents_policy import enforce_strict_mode
 from deps import get_neo4j
 from models.agents import (
     AgentCreateRequest,
@@ -20,7 +21,12 @@ from models.agents import (
     AgentUpdateRequest,
 )
 
-router = APIRouter(tags=["custom-agents"])
+# Sprint 1C — STRICT_AGENTS_ONLY=true blocks every endpoint here with 403
+# before the body executes. Default off; regulated deployments turn it on.
+router = APIRouter(
+    tags=["custom-agents"],
+    dependencies=[Depends(enforce_strict_mode)],
+)
 logger = logging.getLogger("ai-companion.custom_agents")
 
 

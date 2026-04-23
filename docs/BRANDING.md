@@ -13,7 +13,7 @@
 
 ## Color Palette
 
-### Primary Palette (IC-authoritative, premium technical)
+### Primary Palette (institutional-authoritative, premium technical)
 
 | Role | Hex | OKLCH | Usage |
 |------|-----|-------|-------|

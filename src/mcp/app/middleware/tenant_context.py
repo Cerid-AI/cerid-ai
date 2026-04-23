@@ -1,11 +1,13 @@
 # Copyright (c) 2026 Justin Michaels. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tenant & user context middleware — propagates identity via contextvars.
+"""Tenant & user context middleware — populates contextvars from request state.
 
-The tenant ID and user ID are stored in ``contextvars.ContextVar`` instances
-so that any async code within the request lifecycle can access them via
-``get_tenant_id()`` / ``get_user_id()`` without explicit parameter passing.
+The ``ContextVar`` instances and their accessors live in
+``core.context.identity`` (so retrieval code in ``core/`` can read the active
+tenant without crossing the ``core must not import app`` boundary). This
+module owns only the Starlette middleware that *sets* them on every request,
+plus a re-export of the canonical accessors so legacy callers keep working.
 
 When multi-user is disabled (``CERID_MULTI_USER=false``), every request
 receives the ``DEFAULT_TENANT_ID`` and ``None`` for user — zero behavioral
@@ -13,30 +15,24 @@ change for single-user deployments.
 """
 from __future__ import annotations
 
-import contextvars
-
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
 from config.features import DEFAULT_TENANT_ID
-
-# ContextVars available to all async code within a request
-tenant_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "tenant_id", default=DEFAULT_TENANT_ID
-)
-user_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
-    "user_id", default=None
+from core.context.identity import (
+    get_tenant_id,
+    get_user_id,
+    tenant_id_var,
+    user_id_var,
 )
 
-
-def get_tenant_id() -> str:
-    """Return the current tenant ID (DEFAULT_TENANT_ID outside a request context)."""
-    return tenant_id_var.get()
-
-
-def get_user_id() -> str | None:
-    """Return the current user ID (None outside a request or in single-user mode)."""
-    return user_id_var.get()
+__all__ = [
+    "TenantContextMiddleware",
+    "get_tenant_id",
+    "get_user_id",
+    "tenant_id_var",
+    "user_id_var",
+]
 
 
 class TenantContextMiddleware(BaseHTTPMiddleware):

@@ -20,6 +20,7 @@ from huggingface_hub import hf_hub_download
 from tokenizers import Tokenizer
 
 import config
+from core.utils.onnx_providers import resolve_providers
 
 logger = logging.getLogger("ai-companion.reranker")
 
@@ -57,7 +58,7 @@ def _load_model() -> tuple[ort.InferenceSession, Tokenizer]:
         _session = ort.InferenceSession(
             model_path,
             sess_options=sess_opts,
-            providers=["CPUExecutionProvider"],
+            providers=resolve_providers(config.ONNX_EXECUTION_PROVIDERS),
         )
         _tokenizer = Tokenizer.from_file(tok_path)
         _tokenizer.enable_truncation(max_length=512)

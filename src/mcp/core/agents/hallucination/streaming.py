@@ -142,6 +142,7 @@ async def _extract_response_context(response_text: str, user_query: str | None) 
                 [{"role": "user", "content": prompt}],
                 temperature=0.0,
                 max_tokens=40,
+                stage="hallucination_topic",
             ),
             timeout=5.0,
         )

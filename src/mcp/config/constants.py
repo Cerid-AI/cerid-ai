@@ -20,6 +20,10 @@ OLLAMA_CONNECT_TIMEOUT = 10.0
 BIFROST_TIMEOUT = 30.0
 VERIFICATION_TIMEOUT = 30.0
 QUERY_CACHE_TTL = 300  # 5 minutes
+# Per-call store timeouts. Trip raises core.utils.timeouts.StoreTimeoutError so
+# the request surfaces a degraded result instead of hanging the event loop.
+CHROMA_QUERY_TIMEOUT = 10.0
+NEO4J_QUERY_TIMEOUT = 15.0
 
 # ── Budget & rate limits ────────────────────────────────────────────
 MONTHLY_BUDGET_USD = 20.0
@@ -91,6 +95,8 @@ __all__ = [
     "BIFROST_TIMEOUT",
     "VERIFICATION_TIMEOUT",
     "QUERY_CACHE_TTL",
+    "CHROMA_QUERY_TIMEOUT",
+    "NEO4J_QUERY_TIMEOUT",
     "MONTHLY_BUDGET_USD",
     "RATE_LIMIT_WINDOW_SECONDS",
     "DEFAULT_TOP_K",

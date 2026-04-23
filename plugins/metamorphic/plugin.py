@@ -71,6 +71,7 @@ async def generate_mutations(factoid: str) -> dict[str, str]:
             [{"role": "user", "content": prompt}],
             temperature=0.3,
             max_tokens=300,
+            stage="metamorphic_mutation",
         )
         parsed: dict[str, Any] = parse_llm_json(raw)
         return {

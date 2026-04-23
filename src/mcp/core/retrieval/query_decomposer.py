@@ -126,6 +126,7 @@ async def decompose_query(
                 [{"role": "user", "content": prompt}],
                 temperature=0.1,
                 max_tokens=200,
+                stage="query_decompose",
             )).strip()
             # Parse JSON array
             if content.startswith("["):

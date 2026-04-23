@@ -65,5 +65,36 @@ EMBEDDING_DIMENSIONS=384             # must match model output
 To swap models in the future:
 1. Set `EMBEDDING_MODEL` to the new model name
 2. Update `EMBEDDING_DIMENSIONS` to match
-3. Implement client-side embedding in `src/mcp/utils/embeddings.py`
+3. Confirm the model is wired in `src/mcp/core/utils/embeddings.py`
+   (the `OnnxEmbeddingFunction` is already generic — most HF models
+   work without code changes)
 4. Re-ingest all documents
+
+## ONNX execution provider
+
+Local inference goes through ONNX Runtime via
+[`src/mcp/core/utils/embeddings.py`](../src/mcp/core/utils/embeddings.py),
+which calls
+[`core.utils.onnx_providers.resolve_providers()`](../src/mcp/core/utils/onnx_providers.py)
+to pick the best available provider for the host. The default priority is:
+
+1. `CUDAExecutionProvider`   — Linux + NVIDIA GPU
+2. `ROCMExecutionProvider`   — Linux + AMD GPU
+3. `CoreMLExecutionProvider` — macOS Apple Silicon
+4. `DmlExecutionProvider`    — Windows DirectML
+5. `CPUExecutionProvider`    — universal fallback (always appended)
+
+Unavailable providers degrade gracefully — the resolver intersects the
+preference list with `ort.get_available_providers()`, so a CUDA host
+without the CUDA wheel installed silently lands on CPU instead of
+crashing on session creation.
+
+Operators can override the priority order via
+`ONNX_EXECUTION_PROVIDERS` (comma-separated, in order). The same
+resolver is reused by the cross-encoder reranker
+([`core.retrieval.reranker`](../src/mcp/core/retrieval/reranker.py)) so
+both inference paths track the same hardware policy.
+
+The session loads at first request; the chosen provider list is logged
+to `ai-companion.onnx_providers` at INFO so operators can confirm GPU
+pickup post-deploy.

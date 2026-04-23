@@ -55,6 +55,22 @@ def _src_dir() -> Path:
     return root / "src" / "mcp"
 
 
+def _scan_roots() -> list[Path]:
+    """Directories whose call sites are subject to this contract.
+
+    Always includes ``src/mcp``. Also includes ``plugins/`` when running
+    in a full checkout so first-party plugins (e.g. ``metamorphic``)
+    can't quietly drop the ``stage=`` breadcrumb either.
+    """
+    roots = [_src_dir()]
+    root = repo_root()
+    if root is not None:
+        plugins = root / "plugins"
+        if plugins.exists():
+            roots.append(plugins)
+    return roots
+
+
 def _allowed_kwargs(helper_name: str) -> set[str]:
     """Read the helper's current signature and return its accepted params."""
     mod_path = _HELPERS_UNDER_CONTRACT[helper_name]
@@ -104,27 +120,66 @@ def _py_files_under(root: Path) -> list[Path]:
 
 @pytest.mark.parametrize("helper", sorted(_HELPERS_UNDER_CONTRACT))
 def test_all_call_sites_pass_allowed_kwargs(helper: str) -> None:
-    """Every call site of ``helper`` in src/mcp uses only kwargs its signature accepts.
+    """Every call site of ``helper`` uses only kwargs its signature accepts.
 
-    Failure message includes file:line and the offending kwargs so
-    the fix is one grep away.
+    Walks both ``src/mcp/`` and ``plugins/`` (when present) so first-party
+    plugins are held to the same contract. Failure message includes
+    file:line and the offending kwargs so the fix is one grep away.
     """
     allowed = _allowed_kwargs(helper)
-    src = _src_dir()
     violations: list[str] = []
 
-    for path in _py_files_under(src):
-        try:
-            tree = ast.parse(path.read_text(), filename=str(path))
-        except (SyntaxError, UnicodeDecodeError):
-            continue
-        for lineno, kwargs in _iter_call_kwargs(tree, helper):
-            bad = kwargs - allowed
-            if bad:
-                rel = path.relative_to(src.parent) if src in path.parents else path
-                violations.append(f"{rel}:{lineno}  invalid kwargs: {sorted(bad)}")
+    for root in _scan_roots():
+        for path in _py_files_under(root):
+            try:
+                tree = ast.parse(path.read_text(), filename=str(path))
+            except (SyntaxError, UnicodeDecodeError):
+                continue
+            for lineno, kwargs in _iter_call_kwargs(tree, helper):
+                bad = kwargs - allowed
+                if bad:
+                    violations.append(f"{path}:{lineno}  invalid kwargs: {sorted(bad)}")
 
     assert not violations, (
         f"{helper}() called with kwargs outside its signature ({sorted(allowed)}):\n"
+        + "\n".join(violations)
+    )
+
+
+def test_every_call_internal_llm_site_passes_stage() -> None:
+    """Every ``call_internal_llm(...)`` call must include ``stage=``.
+
+    Why: ``stage`` is the breadcrumb that flows into structlog + Sentry,
+    and a missing tag silently degrades observability for one specific
+    pipeline stage. The helper signature accepts ``stage`` as Optional
+    so type checkers won't catch omission — this AST gate does.
+
+    Scope: ``src/mcp/`` and ``plugins/``. Tests are intentionally
+    skipped (they may construct calls dynamically). To opt out a
+    specific call site (e.g. an experimental fixture), add the literal
+    comment ``# stage-exempt`` on the same line as the call.
+    """
+    helper = "call_internal_llm"
+    violations: list[str] = []
+
+    for root in _scan_roots():
+        for path in _py_files_under(root):
+            try:
+                source = path.read_text()
+                tree = ast.parse(source, filename=str(path))
+            except (SyntaxError, UnicodeDecodeError):
+                continue
+            source_lines = source.splitlines()
+            for lineno, kwargs in _iter_call_kwargs(tree, helper):
+                if "stage" in kwargs:
+                    continue
+                # Same-line opt-out token for rare exemptions.
+                if 1 <= lineno <= len(source_lines) and "# stage-exempt" in source_lines[lineno - 1]:
+                    continue
+                violations.append(f"{path}:{lineno}  missing required kwarg: stage=")
+
+    assert not violations, (
+        "call_internal_llm() must always be called with stage=\"...\" "
+        "so the breadcrumb flows to structlog + Sentry. Missing at:\n"
         + "\n".join(violations)
     )

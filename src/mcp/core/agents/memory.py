@@ -71,6 +71,7 @@ async def extract_memories(
             temperature=0.1,
             max_tokens=1000,
             response_format={"type": "json_object"},
+            stage="memory_extract",
         )
         memories = parse_llm_json(content)
         # LLM may return a single object instead of an array — normalize
@@ -436,6 +437,7 @@ async def resolve_memory_conflict(
             temperature=0.0,
             max_tokens=500,
             response_format={"type": "json_object"},
+            stage="memory_conflict_resolve",
         )
         parsed = parse_llm_json(content)
 

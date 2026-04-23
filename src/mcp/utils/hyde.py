@@ -62,6 +62,7 @@ async def generate_hypothetical_document(
             ],
             temperature=0.3,
             max_tokens=200,
+            stage="hyde_expand",
         )
         if result and result.strip():
             logger.debug("HyDE generated hypothetical doc (%d chars)", len(result))

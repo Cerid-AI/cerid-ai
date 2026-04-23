@@ -457,6 +457,7 @@ async def _extract_claims_llm(
         content = await call_internal_llm(
             messages, temperature=0.1, max_tokens=800,
             response_format={"type": "json_object"},
+            stage="claim_extraction",
         )
         raw = parse_llm_json(content)
         if isinstance(raw, dict):

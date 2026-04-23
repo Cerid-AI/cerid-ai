@@ -267,6 +267,11 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "Snowflake/snowflake-arctic-embed
 EMBEDDING_DIMENSIONS = int(os.getenv("EMBEDDING_DIMENSIONS", "0"))
 EMBEDDING_ONNX_FILENAME = os.getenv("EMBEDDING_ONNX_FILENAME", "onnx/model.onnx")
 EMBEDDING_MODEL_CACHE_DIR = os.getenv("EMBEDDING_MODEL_CACHE_DIR", "")
+# ONNX Runtime execution providers (shared by embedding model and cross-encoder
+# reranker).  Empty = auto-detect best available; otherwise comma-separated
+# list in priority order (e.g. "CUDAExecutionProvider,CPUExecutionProvider").
+# CPU is always appended as the universally-available fallback.
+ONNX_EXECUTION_PROVIDERS = os.getenv("ONNX_EXECUTION_PROVIDERS", "")
 
 # ---------------------------------------------------------------------------
 # Hallucination Detection
@@ -749,6 +754,15 @@ CONSUMER_REGISTRY: dict[str, dict] = {
         },
         "allowed_domains": ["finance", "general"],
         "strict_domains": True,      # No bleed into personal/trading/coding data
+    },
+    "trading-agent": {
+        "description": "Cerid Trading Agent — autonomous crypto trading",
+        "rate_limits": {
+            "/sdk/": (80, 60),       # 80 req/min — 5 concurrent sessions burst
+            "/agent/": (80, 60),
+        },
+        "allowed_domains": ["trading"],
+        "strict_domains": True,      # No bleed into personal/finance/coding data
     },
     "folder_scanner": {
         "rate_limits": {

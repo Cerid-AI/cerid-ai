@@ -18,6 +18,7 @@ import numpy as np
 
 import config
 from config import DOMAINS
+from core.context.identity import chunk_matches_tenant, with_tenant_scope
 from core.contracts.stores import GraphStore
 from core.observability.span_helpers import breadcrumb, span
 from core.utils.cache import log_event
@@ -234,9 +235,8 @@ async def multi_domain_query(
                 "query_texts": [query],
                 "n_results": top_k,
                 "include": ["documents", "metadatas", "distances"],
+                "where": with_tenant_scope(metadata_filter),
             }
-            if metadata_filter:
-                query_kwargs["where"] = metadata_filter
             # ChromaDB client uses sync HTTP — offload to thread to avoid
             # blocking the event loop when multiple domains query in parallel.
             results = await asyncio.to_thread(collection.query, **query_kwargs)
@@ -284,6 +284,10 @@ async def multi_domain_query(
                                 if cid in seen_ids:
                                     continue
                                 meta = fetched["metadatas"][j] if fetched["metadatas"] else {}
+                                # Tenant scope is enforced at the BM25-only path too —
+                                # ChromaDB's where-clause was bypassed for these IDs.
+                                if not chunk_matches_tenant(meta):
+                                    continue
                                 # Enforce metadata_filter on BM25-only results too
                                 if metadata_filter and not all(
                                     meta.get(k) == v for k, v in metadata_filter.items()
@@ -433,7 +437,7 @@ async def graph_expand_results(
             collection.query,
             query_texts=[query],
             n_results=min(3, len(chunk_ids)),
-            where={"artifact_id": rel_artifact["id"]},
+            where=with_tenant_scope({"artifact_id": rel_artifact["id"]}),
             include=["documents", "metadatas", "distances"],
         )
 
@@ -587,6 +591,7 @@ async def _rerank_llm(
             [{"role": "user", "content": prompt}],
             temperature=0.0,
             max_tokens=200,
+            stage="rerank_llm",
         )
         ranking = parse_llm_json(content)
 

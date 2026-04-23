@@ -142,6 +142,7 @@ async def _rerank_llm(
             [{"role": "user", "content": prompt}],
             temperature=0.0,
             max_tokens=200,
+            stage="assembler_rerank",
         )
         ranking = parse_llm_json(content)
 

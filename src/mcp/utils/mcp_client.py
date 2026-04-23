@@ -304,6 +304,17 @@ class MCPClientManager:
         """Check if any external tools are available."""
         return bool(self._tools)
 
+    def get_tool_metadata(self, namespaced_name: str) -> ExternalTool | None:
+        """Look up a discovered external tool by its namespaced name.
+
+        Returns ``None`` when the name is unknown — callers (e.g. the
+        Sprint 1A.2 governance dispatcher) use this to resolve the
+        owning ``server_name`` for policy enforcement and audit logging
+        without parsing the namespaced string (server / tool names can
+        both contain underscores, so the split is ambiguous).
+        """
+        return self._tools.get(namespaced_name)
+
     # -- Lifecycle -----------------------------------------------------------
 
     async def reconnect(self, name: str) -> bool:
