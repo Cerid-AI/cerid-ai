@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 import config
 from app.deps import get_chroma
+from core.context.identity import with_tenant_scope
 from core.utils.swallowed import log_swallowed_error
 from core.utils.time import utcnow_iso
 
@@ -19,13 +20,21 @@ logger = logging.getLogger("ai-companion")
 
 
 def query_knowledge(query: str, domain: str = "general", top_k: int = 3) -> dict:
-    """Public — also called by mcp_sse.py execute_tool."""
+    """Public — also called by mcp_sse.py execute_tool.
+
+    Tenant-scoped via ``with_tenant_scope(None)``: no-op in single-user
+    mode (returns ``None`` → Chroma sees no ``where`` filter, current
+    behavior preserved); strict equality on the active tenant in
+    multi-user mode (closes a cross-tenant data-leak path that pre-dated
+    the 2026-04-22 retrieval-boundary patch).
+    """
     chroma = get_chroma()
     coll_name = config.collection_name(domain)
     collection = chroma.get_or_create_collection(name=coll_name)
     results = collection.query(
         query_texts=[query],
         n_results=top_k,
+        where=with_tenant_scope(None),
         include=["documents", "distances", "metadatas"],
     )
     timestamp = utcnow_iso()

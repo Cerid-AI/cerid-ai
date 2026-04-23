@@ -50,7 +50,16 @@ from core.context.identity import (
 
 
 class TestWithTenantScope:
-    """Fusion semantics for the ChromaDB ``where`` clause."""
+    """Fusion semantics for the ChromaDB ``where`` clause (multi-user mode).
+
+    The class-level autouse fixture sets ``CERID_MULTI_USER=true`` so each
+    test exercises the strict enforcement path. Single-user mode pass-through
+    is covered by :class:`TestSingleUserModePassthrough` below.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _multi_user(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("CERID_MULTI_USER", "true")
 
     def test_empty_filter_returns_tenant_only_clause(self):
         token = tenant_id_var.set("alice")
@@ -210,6 +219,7 @@ async def test_multi_domain_query_always_passes_tenant_in_where(
     """
     from core.agents import query_agent
 
+    monkeypatch.setenv("CERID_MULTI_USER", "true")
     _disable_bm25(monkeypatch)
 
     collection = _FakeCollection()
@@ -242,6 +252,7 @@ async def test_multi_domain_query_fuses_tenant_with_caller_filter(
     """Caller-supplied filters are AND-fused with the tenant clause."""
     from core.agents import query_agent
 
+    monkeypatch.setenv("CERID_MULTI_USER", "true")
     _disable_bm25(monkeypatch)
 
     collection = _FakeCollection()
@@ -276,6 +287,7 @@ async def test_multi_domain_query_blocks_caller_attempted_tenant_escape(
     """
     from core.agents import query_agent
 
+    monkeypatch.setenv("CERID_MULTI_USER", "true")
     _disable_bm25(monkeypatch)
 
     collection = _FakeCollection()
@@ -439,3 +451,117 @@ async def test_event_loop_uses_default_tenant_outside_request() -> None:
     from core.context.identity import get_tenant_id
 
     assert get_tenant_id() == DEFAULT_TENANT_ID
+
+
+# ---------------------------------------------------------------------------
+# Single-user mode pass-through (default deployment) — 2026-04-23 regression
+# ---------------------------------------------------------------------------
+
+
+class TestSingleUserModePassthrough:
+    """``with_tenant_scope`` is a pass-through when ``CERID_MULTI_USER=false``.
+
+    Regression coverage for the 2026-04-23 beta-test bug where the strict
+    ``{tenant_id: "default"}`` filter excluded chunks that lacked the
+    ``tenant_id`` metadata field (legacy / pre-migration chunks). The fix
+    keeps single-user mode permissive (no Chroma where filter at all)
+    and preserves multi-user enforcement.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _single_user(self, monkeypatch: pytest.MonkeyPatch):
+        # Explicitly clear so we don't depend on the host's environment.
+        monkeypatch.delenv("CERID_MULTI_USER", raising=False)
+
+    def test_none_returns_none(self):
+        """``with_tenant_scope(None)`` ⇒ ``None`` so callers omit the where clause."""
+        assert with_tenant_scope(None) is None
+
+    def test_empty_dict_returns_empty_dict(self):
+        """Empty caller filter passes through unchanged (Chroma sees no filter)."""
+        assert with_tenant_scope({}) == {}
+
+    def test_caller_filter_returns_unchanged(self):
+        """A real caller filter passes through verbatim — no tenant clause fused."""
+        assert with_tenant_scope({"domain": "general"}) == {"domain": "general"}
+        assert with_tenant_scope(
+            {"$and": [{"domain": "x"}, {"filename": "y.pdf"}]}
+        ) == {"$and": [{"domain": "x"}, {"filename": "y.pdf"}]}
+
+    def test_caller_supplied_tenant_id_passes_through_in_single_user_mode(self):
+        """Even an explicit ``tenant_id`` from the caller is left alone in single-user
+        mode — the violation check only fires when multi-user enforcement is on."""
+        assert with_tenant_scope({"tenant_id": "anything"}) == {"tenant_id": "anything"}
+
+
+# ---------------------------------------------------------------------------
+# End-to-end realistic Chroma test — REPRO of the 2026-04-23 beta-test bug
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_ingest_then_query_returns_chunk_in_default_tenant_single_user_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Real in-process Chroma. Two chunks:
+
+    1. ``chunk_post_migration`` — has ``tenant_id="default"`` metadata
+       (post-2026-04-22 patch ingestion).
+    2. ``chunk_legacy`` — no ``tenant_id`` field at all (pre-migration
+       ingest, simulating any chunk in the wild that pre-dates the patch).
+
+    Under single-user mode (``CERID_MULTI_USER=false``, the default),
+    BOTH chunks must be retrievable when the active tenant is ``default``.
+
+    On the BROKEN code (with strict equality filter
+    ``{tenant_id: "default"}``), chunk_legacy is dropped because Chroma's
+    metadata equality on a missing field returns no match. The fix
+    (single-user pass-through) restores both.
+    """
+    import chromadb
+
+    from config.features import DEFAULT_TENANT_ID
+
+    monkeypatch.delenv("CERID_MULTI_USER", raising=False)  # single-user
+
+    client = chromadb.EphemeralClient()
+    col = client.get_or_create_collection("regression_test_2026_04_23")
+
+    col.add(
+        ids=["chunk_post_migration"],
+        documents=["The capital of France is Paris."],
+        metadatas=[{"tenant_id": DEFAULT_TENANT_ID, "domain": "general"}],
+    )
+    col.add(
+        ids=["chunk_legacy"],
+        documents=["The Eiffel Tower is a wrought-iron lattice tower in Paris."],
+        metadatas=[{"domain": "general"}],
+    )
+
+    token = tenant_id_var.set(DEFAULT_TENANT_ID)
+    try:
+        scope = with_tenant_scope(None)
+    finally:
+        tenant_id_var.reset(token)
+
+    # In single-user mode, scope must be None so the where filter is omitted.
+    assert scope is None, (
+        "single-user mode must not emit a where filter; got %r" % (scope,)
+    )
+
+    results = col.query(
+        query_texts=["Paris"],
+        n_results=5,
+        where=scope,  # None ⇒ Chroma applies no metadata filter
+        include=["documents", "metadatas"],
+    )
+
+    ids = results["ids"][0] if results["ids"] else []
+    assert "chunk_post_migration" in ids, (
+        "post-migration chunk (tenant_id=default) was not returned"
+    )
+    assert "chunk_legacy" in ids, (
+        "legacy chunk (no tenant_id field) was not returned — this is the "
+        "exact bug from the 2026-04-23 beta test where /agent/query missed "
+        "freshly-ingested chunks"
+    )
