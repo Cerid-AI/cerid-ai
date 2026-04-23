@@ -763,3 +763,31 @@ async def execute_tool(name: str, arguments: dict) -> Any:
         if result is not None:
             return result
     raise ValueError(f"Unknown tool: {name}")
+
+
+# -- External MCP tools (Sprint 1A.1) ----------------------------------------
+# Register the external-MCP dispatcher so ``ext_*`` names served by
+# user-configured external servers are routable through ``execute_tool``
+# alongside built-in ``pkb_*`` tools. Schemas are merged at request time
+# via ``get_all_tools()`` because external tools are discovered on
+# server connect, not at module import.
+#
+# Lives ABOVE the trading-tools hook marker so it survives the to-public
+# sync truncation (everything below ``# -- Trading tools`` is stripped
+# for the public distribution).
+from app.services.external_mcp_dispatch import (  # noqa: E402
+    dispatch_external_mcp_tool,
+    get_external_tool_schemas,
+)
+
+_tool_dispatchers.append(dispatch_external_mcp_tool)
+
+
+def get_all_tools() -> list[dict]:
+    """Return the full tool palette: built-in ``MCP_TOOLS`` + discovered external tools.
+
+    The SSE ``tools/list`` response uses this so the LLM sees external
+    tools alongside ``pkb_*`` tools. Static built-in tools come first
+    so their relative order is stable across requests.
+    """
+    return [*MCP_TOOLS, *get_external_tool_schemas()]
