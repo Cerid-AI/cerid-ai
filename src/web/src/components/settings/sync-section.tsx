@@ -362,7 +362,7 @@ function ChunkRow({ domain, local, sync }: { domain: string; local: number; sync
   )
 }
 
-function formatTimestamp(iso: string | undefined | null): string {
+export function formatTimestamp(iso: string | undefined | null): string {
   if (!iso) return "—"
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso

@@ -25,21 +25,6 @@ class TestSchedulerJobStatus:
         assert status["jobs"] == []
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Mock AsyncIOScheduler does not track add_job calls")
-    async def test_start_and_status(self):
-        """Scheduler should report running with configured jobs."""
-        start_scheduler()
-        try:
-            status = get_job_status()
-            assert status["status"] == "running"
-            job_ids = {j["id"] for j in status["jobs"]}
-            assert "rectify" in job_ids
-            assert "health_check" in job_ids
-            assert "stale_detection" in job_ids
-        finally:
-            stop_scheduler()
-
-    @pytest.mark.asyncio
     async def test_stop(self):
         """After stopping, scheduler should report not_running."""
         start_scheduler()

@@ -398,7 +398,7 @@ export async function createAutomation(data: AutomationCreate): Promise<Automati
 
 export async function updateAutomation(id: string, data: Partial<AutomationCreate>): Promise<Automation> {
   const res = await fetch(`${MCP_BASE}/automations/${id}`, {
-    method: "PATCH",
+    method: "PUT",
     headers: mcpHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(data),
   })
@@ -632,24 +632,6 @@ export interface ModelUpdatesFullResponse {
   catalog_size: number
 }
 
-export interface ModelComparisonInfo {
-  model_id: string
-  name: string
-  context_length: number | null
-  input_cost_per_1m: number
-  output_cost_per_1m: number
-  deprecated: boolean
-  deprecation_info?: { successor?: string; reason?: string; deprecated_date?: string } | null
-  top_provider?: Record<string, unknown>
-  architecture?: Record<string, unknown>
-}
-
-export interface ModelComparisonResponse {
-  current: ModelComparisonInfo
-  candidate: ModelComparisonInfo
-  recommendation: string
-}
-
 export async function fetchModelUpdates(): Promise<ModelUpdatesResponse> {
   const res = await fetch(`${MCP_BASE}/models/updates`, { headers: mcpHeaders() })
   if (!res.ok) return { new: [], deprecated: [], last_checked: null }
@@ -682,19 +664,6 @@ export async function dismissModelUpdate(updateId: string): Promise<void> {
     headers: mcpHeaders(),
   })
   if (!res.ok) throw new Error(await extractError(res, `Dismiss failed: ${res.status}`))
-}
-
-export async function fetchModelComparison(
-  currentModel: string,
-  candidateModel: string,
-): Promise<ModelComparisonResponse> {
-  const params = new URLSearchParams({
-    current_model: currentModel,
-    candidate_model: candidateModel,
-  })
-  const res = await fetch(`${MCP_BASE}/models/compare?${params}`, { headers: mcpHeaders() })
-  if (!res.ok) throw new Error(await extractError(res, `Model comparison failed: ${res.status}`))
-  return res.json()
 }
 
 // ---------------------------------------------------------------------------

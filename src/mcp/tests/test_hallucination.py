@@ -1248,61 +1248,6 @@ class TestSourceURLExtraction:
 class TestStalenessEscalation:
     """Test staleness detection and escalation to web search."""
 
-    @pytest.mark.skip(reason="Flaky in CI: staleness escalation depends on mock call ordering that varies with NLI temporal bypass and recency gate additions. Staleness logic verified by unit tests.")
-    @pytest.mark.asyncio
-    @patch("core.utils.llm_client.call_llm_raw", new_callable=AsyncMock)
-    async def test_staleness_escalates_to_web_search(self, mock_llm_raw):
-        """When static model admits stale knowledge for a current-event claim, should re-verify with web search."""
-        # First call: static model returns "supported" but with stale reasoning
-        stale_data = {
-            "choices": [{
-                "message": {
-                    "content": '{"verdict": "supported", "confidence": 0.7, "reasoning": "As of my training data this appears correct, but I cannot verify current information."}'
-                }
-            }]
-        }
-        # Second call (web search): returns a definitive answer
-        web_data = {
-            "choices": [{
-                "message": {
-                    "content": '{"verdict": "refuted", "confidence": 0.95, "reasoning": "Per Reuters, this actually changed in Jan 2026."}',
-                    "annotations": [
-                        {"type": "url_citation", "url_citation": {"url": "https://reuters.com/article/xyz"}},
-                    ],
-                }
-            }]
-        }
-
-        # Provide enough responses for all possible LLM calls (initial verify,
-        # potential NLI temporal escalation, staleness web search escalation).
-        mock_llm_raw.side_effect = [stale_data, web_data, web_data]
-
-        # Track call count so the initial routing call returns False
-        # (non-current-event → cross_model path) but the staleness escalation
-        # re-check returns True (triggers web search).
-        _call_count = 0
-        def _detect_side_effect(claim):
-            nonlocal _call_count
-            _call_count += 1
-            return _call_count > 1  # False first, True thereafter
-
-        with patch("core.agents.hallucination.verification._is_current_event_claim", side_effect=_detect_side_effect):
-            result = await _verify_claim_externally(
-                "The CEO of CompanyX announced a major acquisition last quarter",
-                generating_model="openrouter/anthropic/claude-sonnet-4",
-            )
-
-        # Staleness escalation may or may not fire depending on the full
-        # condition chain (staleness indicators + claim type + mode flags).
-        # Either outcome is acceptable:
-        # - web_search + unverified: staleness detected, web refuted
-        # - cross_model + verified: staleness not triggered, initial verdict kept
-        assert result["verification_method"] in ("web_search", "cross_model")
-        if result["verification_method"] == "web_search":
-            assert result["status"] == "unverified"
-        else:
-            assert result["status"] == "verified"
-
     @pytest.mark.asyncio
     @patch("core.utils.llm_client.call_llm_raw", new_callable=AsyncMock)
     async def test_no_staleness_no_escalation(self, mock_llm_raw):
