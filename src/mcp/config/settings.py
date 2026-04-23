@@ -677,6 +677,11 @@ STORAGE_MODE = os.getenv("CERID_STORAGE_MODE", "extract_only")
 # Cross-platform: os.path.expanduser handles ~ on all platforms.
 # ---------------------------------------------------------------------------
 SYNC_DIR = os.path.expanduser(os.getenv("CERID_SYNC_DIR", "~/Dropbox/cerid-sync"))
+# CERID_SYNC_DIR_HOST is consumed by docker-compose.yml to parameterize the
+# /sync bind mount's HOST-side path. The Python app never reads it — the
+# declaration here exists so scripts/gen_env_example.py surfaces it in
+# .env.example (see docs/SANDBOX_TESTING.md for parallel-install workflow).
+_SYNC_DIR_HOST_FOR_ENV_EXAMPLE = os.getenv("CERID_SYNC_DIR_HOST", "~/Dropbox/cerid-sync")
 MACHINE_ID = os.getenv("CERID_MACHINE_ID", os.uname().nodename.split(".")[0])
 SYNC_BACKEND = os.getenv("CERID_SYNC_BACKEND", "local")
 SCHEDULE_SYNC_EXPORT = os.getenv("SCHEDULE_SYNC_EXPORT", "")  # cron string, empty = disabled

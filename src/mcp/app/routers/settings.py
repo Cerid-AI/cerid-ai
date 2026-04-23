@@ -26,6 +26,24 @@ def _redact_url(url: str) -> str:
     return re.sub(r"://([^@]*?)@", "://***@", url) if "@" in url else url
 
 
+def _current_mcp_client_mode() -> str:
+    """Read the current MCP_CLIENT_MODE for the GUI governance tab."""
+    from app.services.mcp_client_policy import current_mode
+    return current_mode().value
+
+
+def _current_mcp_client_allowlist() -> set[str]:
+    """Read the current MCP_CLIENT_ALLOWLIST for the GUI governance tab."""
+    from app.services.mcp_client_policy import current_allowlist
+    return current_allowlist()
+
+
+def _is_strict_agents_only() -> bool:
+    """Read the current STRICT_AGENTS_ONLY flag for the GUI governance tab."""
+    from app.services.strict_agents_policy import is_strict_mode
+    return is_strict_mode()
+
+
 # ── Pydantic models ──────────────────────────────────────────────────────────
 
 class SettingsUpdateRequest(BaseModel):
@@ -150,6 +168,11 @@ async def get_settings_endpoint():
         "feature_flags": config.FEATURE_FLAGS,
         "feature_toggles": config.FEATURE_TOGGLES,
         "multi_user": config.CERID_MULTI_USER,
+        # Sprint 1 governance flags (read live each call so operators flipping
+        # these without restart show the current state in the UI).
+        "mcp_client_mode": _current_mcp_client_mode(),
+        "mcp_client_allowlist": sorted(_current_mcp_client_allowlist()),
+        "strict_agents_only": _is_strict_agents_only(),
         "domains": config.DOMAINS,
         "taxonomy": config.TAXONOMY,
         "storage_mode": config.STORAGE_MODE,

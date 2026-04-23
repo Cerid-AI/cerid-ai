@@ -21,6 +21,7 @@ import { PaneErrorBoundary } from "@/components/ui/pane-error-boundary"
 import { EssentialsSection } from "./essentials-section"
 import { PipelineSection } from "./pipeline-section"
 import { SystemSection } from "./system-section"
+import { GovernanceSection } from "./governance-section"
 import type { SectionKey } from "./settings-primitives"
 import { logSwallowedError } from "@/lib/log-swallowed"
 
@@ -34,6 +35,7 @@ function readSectionState(): Record<SectionKey, boolean> {
     retrieval: true, search: true, taxonomy: false, infra_sync: true,
     ollama: true, kb_admin: true, credits: true, data_sources: false,
     rag_config: true, watched_folders: false, provider_status: true,
+    governance_mcp: true, governance_agents: true, governance_servers: true,
   }
   try {
     const ver = localStorage.getItem("cerid-settings-sections-v")
@@ -247,6 +249,7 @@ export default function SettingsPane() {
                 <TabsTrigger value="essentials" className="flex-1">Essentials</TabsTrigger>
                 <TabsTrigger value="pipeline" className="flex-1">Pipeline</TabsTrigger>
                 <TabsTrigger value="system" className="flex-1">System</TabsTrigger>
+                <TabsTrigger value="governance" className="flex-1">Governance</TabsTrigger>
                 <TabsTrigger value="plugins" className="flex-1">Plugins</TabsTrigger>
                 <TabsTrigger value="pro" className="flex-1">
                   <Crown className="mr-1 h-3 w-3" />Pro
@@ -283,6 +286,14 @@ export default function SettingsPane() {
                     setClearConfirmDomain={setClearConfirmDomain}
                     onRefresh={load}
                   />
+                </PaneErrorBoundary>
+              </TabsContent>
+
+              <TabsContent value="governance" className="space-y-1 pt-2">
+                <PaneErrorBoundary label="Governance">
+                  {settings && (
+                    <GovernanceSection settings={settings} sections={sections} toggleSection={toggleSection} />
+                  )}
                 </PaneErrorBoundary>
               </TabsContent>
 

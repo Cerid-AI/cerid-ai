@@ -724,6 +724,10 @@ export interface ServerSettings {
   }
   enable_self_rag?: boolean
   multi_user?: boolean
+  // Sprint 1 governance flags (read-only — env-var-controlled at deploy time)
+  mcp_client_mode?: "permissive" | "allowlist" | "disabled"
+  mcp_client_allowlist?: string[]
+  strict_agents_only?: boolean
   // Infrastructure (read-only)
   bifrost_url?: string
   bifrost_timeout?: number
