@@ -72,7 +72,14 @@ def list_mcp_servers():
 
 @router.post("", response_model=MCPServerInfo, summary="Add MCP Server", status_code=201)
 async def add_mcp_server(req: MCPServerAddRequest):
-    """Add and connect to a new external MCP server."""
+    """Add and connect to a new external MCP server.
+
+    Connection failure is non-fatal: the server is registered and the
+    response carries ``status="error"`` plus the failure message so the
+    UI can surface it instead of a 500.
+    """
+    import logging
+
     from utils.mcp_client import MCPServerConfig, mcp_client_manager
 
     cfg = MCPServerConfig(
@@ -86,16 +93,24 @@ async def add_mcp_server(req: MCPServerAddRequest):
     )
     mcp_client_manager.add_server(cfg)
 
-    # Attempt to connect immediately
-    await mcp_client_manager.connect_all()
+    connect_error: str | None = None
+    try:
+        await mcp_client_manager.connect_all()
+    except BaseException as exc:  # noqa: BLE001 — anyio cleanup raises ExceptionGroup
+        connect_error = str(exc) or exc.__class__.__name__
+        logging.getLogger("ai-companion.mcp_client").warning(
+            "MCP server '%s' connect raised during add: %s", req.name, connect_error,
+        )
+
     servers = mcp_client_manager.list_servers()
     info = next((s for s in servers if s["name"] == req.name), {})
 
+    status = info.get("status") or ("error" if connect_error else "disconnected")
     return MCPServerInfo(
         name=req.name,
         transport=req.transport,
-        status=info.get("status", "disconnected"),
-        error=info.get("error"),
+        status=status,
+        error=info.get("error") or connect_error,
         tool_count=info.get("tool_count", 0),
         tools=info.get("tools", []),
     )

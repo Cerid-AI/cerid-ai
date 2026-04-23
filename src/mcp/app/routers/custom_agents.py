@@ -18,6 +18,7 @@ from models.agents import (
     AgentDefinition,
     AgentListResponse,
     AgentQueryRequest,
+    AgentTemplateOverrides,
     AgentUpdateRequest,
 )
 
@@ -46,7 +47,7 @@ async def list_templates():
 @router.post("/custom-agents/from-template/{template_id}", status_code=201, response_model=AgentDefinition)
 async def create_from_template(
     template_id: str,
-    overrides: AgentCreateRequest | None = None,
+    overrides: AgentTemplateOverrides | None = None,
 ):
     """Create a new custom agent pre-filled from a built-in template.
 

@@ -20,7 +20,7 @@ export interface CustomAgentDefinition {
 }
 
 export interface AgentTemplate {
-  id: string
+  template_id: string
   name: string
   description: string
   system_prompt: string

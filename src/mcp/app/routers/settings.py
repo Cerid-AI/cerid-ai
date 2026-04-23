@@ -71,7 +71,7 @@ class SettingsUpdateRequest(BaseModel):
         None, description="Toggle automatic KB context injection for high-confidence results"
     )
     auto_inject_threshold: float | None = Field(
-        None, ge=0.5, le=1.0, description="Minimum relevance score for auto-injection"
+        None, ge=0.0, le=1.0, description="Minimum relevance score for auto-injection"
     )
     enable_model_router: bool | None = Field(
         None, description="Toggle automatic model routing based on query complexity"

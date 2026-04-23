@@ -603,6 +603,102 @@ async def repair_collection(req: CollectionRepairRequest):
     )
 
 
+# ---------------------------------------------------------------------------
+# Near-duplicate detection (Sprint 2 stub: groups by exact content_hash)
+# ---------------------------------------------------------------------------
+
+
+class DuplicateArtifact(BaseModel):
+    id: str
+    filename: str
+    domain: str
+    summary: str = ""
+    quality_score: float | None = None
+    ingested_at: str = ""
+    chunk_count: int = 0
+
+
+class DuplicateGroup(BaseModel):
+    content_hash_prefix: str
+    similarity: float
+    artifacts: list[DuplicateArtifact]
+
+
+class DuplicatesResponse(BaseModel):
+    groups: list[DuplicateGroup]
+    total_groups: int
+
+
+class MergeDuplicatesRequest(BaseModel):
+    keep_id: str
+    remove_ids: list[str]
+
+
+class DismissDuplicatesRequest(BaseModel):
+    artifact_ids: list[str]
+
+
+@router.get("/admin/kb/duplicates", response_model=DuplicatesResponse)
+async def list_duplicates(min_similarity: float = 0.85):
+    """Group artifacts by exact ``content_hash``. Sprint 2 will add fuzzy similarity."""
+    from collections import defaultdict
+
+    neo4j = get_neo4j()
+    by_hash: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for domain in config.DOMAINS:
+        for art in list_artifacts(neo4j, domain=domain, limit=10000):
+            ch = art.get("content_hash") or ""
+            if ch:
+                by_hash[ch].append(art)
+
+    groups: list[DuplicateGroup] = []
+    for ch, arts in by_hash.items():
+        if len(arts) < 2:
+            continue
+        groups.append(DuplicateGroup(
+            content_hash_prefix=ch[:12],
+            similarity=1.0,
+            artifacts=[
+                DuplicateArtifact(
+                    id=a.get("id", ""),
+                    filename=a.get("filename", ""),
+                    domain=a.get("domain", ""),
+                    summary=a.get("summary", "") or "",
+                    quality_score=a.get("quality_score"),
+                    ingested_at=a.get("ingested_at", "") or "",
+                    chunk_count=int(a.get("chunk_count", 0) or 0),
+                )
+                for a in arts
+            ],
+        ))
+    return DuplicatesResponse(groups=groups, total_groups=len(groups))
+
+
+@router.post("/admin/kb/duplicates/merge")
+async def merge_duplicates(req: MergeDuplicatesRequest):
+    """Delete the ``remove_ids`` artifacts, keeping ``keep_id``."""
+    neo4j = get_neo4j()
+    merged = 0
+    for art_id in req.remove_ids:
+        if art_id == req.keep_id:
+            continue
+        try:
+            delete_artifact(neo4j, art_id)
+            merged += 1
+        except Exception as exc:  # noqa: BLE001
+            log_swallowed_error("app.routers.kb_admin.merge_duplicates", exc)
+    return {"status": "ok", "merged": merged}
+
+
+@router.post("/admin/kb/duplicates/dismiss")
+async def dismiss_duplicates(req: DismissDuplicatesRequest):
+    """Mark a duplicate group as dismissed (Sprint 2: persist to filter future fetches).
+
+    No-op for now; treated as acknowledged so the UI can hide the group locally.
+    """
+    return {"status": "ok", "dismissed": len(req.artifact_ids)}
+
+
 @router.get("/admin/kb/stats", response_model=KBStatsResponse)
 async def kb_stats():
     """Get KB statistics: artifact counts, chunk counts, per-domain breakdown."""

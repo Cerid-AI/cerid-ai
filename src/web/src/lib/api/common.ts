@@ -47,8 +47,18 @@ export async function extractError(res: Response, fallback: string): Promise<str
     if (body.error_code && body.message) {
       return `[${body.error_code}] ${body.message}`
     }
+    // FastAPI 422: detail is an array of { loc, msg, type } records.
+    if (Array.isArray(body.detail)) {
+      return body.detail
+        .map((d: { loc?: unknown[]; msg?: string }) => {
+          const field = Array.isArray(d.loc) ? d.loc.slice(1).join(".") : ""
+          return field ? `${field}: ${d.msg ?? ""}` : (d.msg ?? "")
+        })
+        .filter(Boolean)
+        .join("; ") || fallback
+    }
     // Legacy format: { detail: "..." }
-    return body.detail ?? fallback
+    return typeof body.detail === "string" ? body.detail : fallback
   } catch {
     return fallback
   }

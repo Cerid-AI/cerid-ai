@@ -71,6 +71,20 @@ class AgentCreateRequest(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict, description="Arbitrary metadata")
 
 
+class AgentTemplateOverrides(BaseModel):
+    """Partial overrides applied on top of a template — every field optional."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    description: str | None = Field(default=None, max_length=1024)
+    system_prompt: str | None = Field(default=None, max_length=8192)
+    tools: list[str] | None = Field(default=None)
+    domains: list[str] | None = Field(default=None)
+    rag_mode: str | None = Field(default=None)
+    model_override: str | None = Field(default=None)
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    metadata: dict[str, Any] | None = Field(default=None)
+
+
 class AgentUpdateRequest(BaseModel):
     """Partial update for a custom agent (PATCH semantics — all fields optional)."""
 

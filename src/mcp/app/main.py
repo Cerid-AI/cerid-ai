@@ -181,7 +181,7 @@ def _hydrate_settings_from_sync() -> None:
         # ── Numeric values with range validation ─────────────────────────
         _numeric = {
             "hallucination_threshold": (0.0, 1.0),
-            "auto_inject_threshold": (0.5, 1.0),
+            "auto_inject_threshold": (0.0, 1.0),
             "hybrid_vector_weight": (0.0, 1.0),
             "hybrid_keyword_weight": (0.0, 1.0),
             "rerank_llm_weight": (0.0, 1.0),

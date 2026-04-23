@@ -147,7 +147,7 @@ export function SyncSection() {
                 <div className="flex justify-between">
                   <span>Last export</span>
                   <span className="font-mono text-[10px]">
-                    {formatTimestamp(status.manifest.last_exported_at)}
+                    {formatTimestamp(status.manifest.last_exported_at || status.manifest.timestamp)}
                   </span>
                 </div>
                 <div className="flex justify-between">
@@ -362,16 +362,14 @@ function ChunkRow({ domain, local, sync }: { domain: string; local: number; sync
   )
 }
 
-function formatTimestamp(iso: string): string {
-  try {
-    const d = new Date(iso)
-    return d.toLocaleString(undefined, {
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    })
-  } catch {
-    return iso
-  }
+function formatTimestamp(iso: string | undefined | null): string {
+  if (!iso) return "—"
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
 }

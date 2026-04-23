@@ -282,12 +282,12 @@ function TemplatePicker({
         </div>
         <div className="grid gap-2">
           {templates.map((tpl) => {
-            const pending = actionPending === `create:${tpl.id}`
+            const pending = actionPending === `create:${tpl.template_id}`
             return (
               <Card
-                key={tpl.id}
+                key={tpl.template_id}
                 className={`cursor-pointer transition-colors ${pending ? "opacity-60" : "hover:border-primary/50"}`}
-                onClick={() => !pending && onPick(tpl.id)}
+                onClick={() => !pending && onPick(tpl.template_id)}
               >
                 <CardContent className="flex items-start gap-2 pt-3 pb-3">
                   <Bot className="mt-0.5 h-4 w-4 shrink-0 text-primary" />

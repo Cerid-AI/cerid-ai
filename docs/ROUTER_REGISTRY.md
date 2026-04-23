@@ -8,7 +8,7 @@ Every `@router.*` decorator shipped in the public (OSS Apache-2.0) distribution.
 Internal-only routers (billing, trading SDK, ops endpoints) are stripped and
 not documented here; see the internal repo for the full registry.
 
-**Total routes:** 244
+**Total routes:** 247
 
 | Method | Path | Handler | Module | Tags | Build |
 |--------|------|---------|--------|------|-------|
@@ -115,6 +115,9 @@ not documented here; see the internal repo for the full registry.
 | POST | `/admin/collections/repair` | `repair_collection` | `src/mcp/app/routers/kb_admin.py` | kb-admin |  |
 | GET | `/admin/kb/capabilities` | `get_parser_capabilities` | `src/mcp/app/routers/kb_admin.py` | kb-admin |  |
 | POST | `/admin/kb/clear-domain/{domain}` | `clear_domain` | `src/mcp/app/routers/kb_admin.py` | kb-admin |  |
+| GET | `/admin/kb/duplicates` | `list_duplicates` | `src/mcp/app/routers/kb_admin.py` | kb-admin |  |
+| POST | `/admin/kb/duplicates/dismiss` | `dismiss_duplicates` | `src/mcp/app/routers/kb_admin.py` | kb-admin |  |
+| POST | `/admin/kb/duplicates/merge` | `merge_duplicates` | `src/mcp/app/routers/kb_admin.py` | kb-admin |  |
 | POST | `/admin/kb/rebuild-index` | `rebuild_indexes` | `src/mcp/app/routers/kb_admin.py` | kb-admin |  |
 | POST | `/admin/kb/regenerate-summaries` | `regenerate_summaries` | `src/mcp/app/routers/kb_admin.py` | kb-admin |  |
 | POST | `/admin/kb/rescore` | `rescore_artifacts` | `src/mcp/app/routers/kb_admin.py` | kb-admin |  |
