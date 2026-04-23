@@ -438,7 +438,7 @@ Audit-driven reliability, data-wiring, UX, and LLM-integration fixes across 32 c
 
 ### Phase 5: Wiring Checks + Final Audit
 - All 8 subsystem wiring checks passed (setup, chat, KB, external API, settings, health, memory, analytics)
-- USG compliance verified (no Chinese-origin AI references)
+- Regulated-deployment compliance verified (no Chinese-origin AI references)
 - Documentation updated (CLAUDE.md, CHANGELOG.md)
 
 ### New Files

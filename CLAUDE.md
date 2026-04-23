@@ -112,7 +112,7 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Compliance
 
-No Chinese-origin AI models (USG alignment). Approved: OpenAI, Anthropic, Google, xAI, Meta, Microsoft, Mistral.
+No Chinese-origin AI models (regulated-deployment alignment). Approved providers: OpenAI, Anthropic, Google, xAI, Meta, Microsoft, Mistral.
 
 ## CI (7 jobs)
 
