@@ -8,6 +8,7 @@ import type { ModelUpdatesResponse } from "@/lib/api/settings"
 import type { WatchedFolder } from "@/lib/api/settings"
 import type { KBStats } from "@/lib/api"
 import type { ServerSettings, SettingsUpdate, ProviderCredits, OllamaStatus, OllamaRecommendations, HealthStatusResponse } from "@/lib/types"
+import { describeCapability } from "@/lib/capability-descriptions"
 import type { SectionKey } from "./settings-primitives"
 import { useUIMode } from "@/contexts/ui-mode-context"
 import { cn } from "@/lib/utils"
@@ -118,16 +119,38 @@ export function SystemSection({
             </div>
             {/* Inference Tier */}
             <InferenceTierRow />
-            {/* Tier-gated capabilities grid */}
+            {/* Tier-gated capabilities grid — hover any row for what the
+                capability does + which tier unlocks it. */}
             <div className="mt-1 rounded border bg-muted/30 p-3">
-              <p className="mb-2 text-[11px] font-medium text-muted-foreground">Platform Capabilities</p>
+              <p className="mb-2 text-[11px] font-medium text-muted-foreground">
+                Platform Capabilities
+                <span className="ml-1.5 font-normal text-muted-foreground/70">(hover for details)</span>
+              </p>
               <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-                {Object.entries(settings.feature_flags).map(([flag, enabled]) => (
-                  <div key={flag} className="flex items-center gap-1.5">
-                    <div className={cn("h-1.5 w-1.5 rounded-full", enabled ? "bg-green-500" : "bg-muted-foreground/30")} />
-                    <span className="text-[11px] text-muted-foreground">{formatFlagName(flag)}</span>
-                  </div>
-                ))}
+                {Object.entries(settings.feature_flags).map(([flag, enabled]) => {
+                  const desc = describeCapability(flag)
+                  return (
+                    <Tooltip key={flag}>
+                      <TooltipTrigger asChild>
+                        <div className="flex cursor-help items-center gap-1.5">
+                          <div className={cn("h-1.5 w-1.5 rounded-full", enabled ? "bg-green-500" : "bg-muted-foreground/30")} />
+                          <span className="text-[11px] text-muted-foreground">{formatFlagName(flag)}</span>
+                          {desc.tier && (
+                            <Badge variant="outline" className="px-1 py-0 text-[8px] font-mono uppercase tracking-wide">
+                              {desc.tier}
+                            </Badge>
+                          )}
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-72">
+                        <p className="text-xs">{desc.description}</p>
+                        {desc.tier && (
+                          <p className="mt-1 text-[10px] text-muted-foreground">Requires <strong>{desc.tier}</strong> tier.</p>
+                        )}
+                      </TooltipContent>
+                    </Tooltip>
+                  )
+                })}
               </div>
             </div>
           </CardContent>

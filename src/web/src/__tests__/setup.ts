@@ -2,8 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import "@testing-library/jest-dom/vitest"
-import { afterEach, vi } from "vitest"
+import { afterEach, expect, vi } from "vitest"
 import { cleanup } from "@testing-library/react"
+import { toHaveNoViolations } from "jest-axe"
+
+// jest-axe matcher — any test can call `await expect(container).toHaveNoViolations()`
+// after rendering. Backstop for the kind of affordance / labelling regressions
+// surfaced in the 2026-04-23 Settings UX walkthrough.
+expect.extend(toHaveNoViolations)
 
 // Global mock for sonner so any test that renders a component using
 // toast (or the <Toaster /> in main.tsx) doesn't throw in jsdom.

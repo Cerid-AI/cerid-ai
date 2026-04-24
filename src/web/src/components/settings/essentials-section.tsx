@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Database, ToggleLeft, CreditCard, ExternalLink, Globe, Shield, AlertTriangle, Cpu, Zap } from "lucide-react"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { fetchDataSources, enableDataSource, disableDataSource, fetchSetupStatus, fetchHealthStatus, fetchSystemCheck } from "@/lib/api"
 import { SectionHeading, LabelWithInfo, Row, ToggleRow, SliderRow } from "./settings-primitives"
 import { assessRuntime, fromHealthStatus, CAPABILITY_STATUS_DOT, COST_PROFILE_LABELS } from "@/lib/provider-capabilities"
@@ -374,45 +375,72 @@ function ProviderStatusPanel({ settings }: { settings: ServerSettings }) {
     fromHealthStatus(healthStatus ?? {}, configuredProviders, ollamaEnabled),
   )
 
-  const ALL_PROVIDERS = [
-    { id: "openrouter", label: "OpenRouter" },
-    { id: "openai", label: "OpenAI" },
-    { id: "anthropic", label: "Anthropic" },
-    { id: "xai", label: "xAI (Grok)" },
+  const ALL_PROVIDERS: { id: string; label: string; envVar: string }[] = [
+    { id: "openrouter", label: "OpenRouter", envVar: "OPENROUTER_API_KEY" },
+    { id: "openai", label: "OpenAI", envVar: "OPENAI_API_KEY" },
+    { id: "anthropic", label: "Anthropic", envVar: "ANTHROPIC_API_KEY" },
+    { id: "xai", label: "xAI (Grok)", envVar: "XAI_API_KEY" },
   ]
 
   return (
     <Card className="mb-4">
       <CardContent className="grid gap-3 pt-4">
-        {/* Provider badges */}
-        <div className="flex flex-wrap gap-1.5">
-          {ALL_PROVIDERS.map((p) => {
-            const configured = configuredProviders.includes(p.id)
-            return (
-              <div
-                key={p.id}
-                className={cn(
-                  "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px]",
-                  configured
-                    ? "border-green-500/30 bg-green-500/5 text-green-600 dark:text-green-400"
-                    : "border-muted text-muted-foreground",
+        {/* Provider status pills — hover any pill for what its state means
+            and how to change it. These are status badges, not buttons. */}
+        <div>
+          <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            Status
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {ALL_PROVIDERS.map((p) => {
+              const configured = configuredProviders.includes(p.id)
+              return (
+                <Tooltip key={p.id}>
+                  <TooltipTrigger asChild>
+                    <span
+                      className={cn(
+                        "flex cursor-help items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px]",
+                        configured
+                          ? "border-green-500/30 bg-green-500/5 text-green-600 dark:text-green-400"
+                          : "border-muted text-muted-foreground",
+                      )}
+                    >
+                      <span className={cn("h-1.5 w-1.5 rounded-full", configured ? "bg-green-500" : "bg-muted-foreground/30")} />
+                      {p.label}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-72">
+                    {configured ? (
+                      <p>{p.label} key is configured. To change it, edit <code className="font-mono">{p.envVar}</code> in <code className="font-mono">.env</code> and restart the MCP server.</p>
+                    ) : (
+                      <p>{p.label} not configured. Set <code className="font-mono">{p.envVar}</code> in <code className="font-mono">.env</code> and restart the MCP server to enable.</p>
+                    )}
+                  </TooltipContent>
+                </Tooltip>
+              )
+            })}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  className={cn(
+                    "flex cursor-help items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px]",
+                    ollamaEnabled
+                      ? "border-green-500/30 bg-green-500/5 text-green-600 dark:text-green-400"
+                      : "border-muted text-muted-foreground",
+                  )}
+                >
+                  <span className={cn("h-1.5 w-1.5 rounded-full", ollamaEnabled ? "bg-green-500" : "bg-muted-foreground/30")} />
+                  Ollama
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-72">
+                {ollamaEnabled ? (
+                  <p>Ollama is enabled and routing pipeline tasks locally. Manage in Settings &rarr; System &rarr; Local LLM (Ollama).</p>
+                ) : (
+                  <p>Ollama is not enabled. Install + enable in Settings &rarr; System &rarr; Local LLM (Ollama) to run pipeline tasks locally for free.</p>
                 )}
-              >
-                <span className={cn("h-1.5 w-1.5 rounded-full", configured ? "bg-green-500" : "bg-muted-foreground/30")} />
-                {p.label}
-              </div>
-            )
-          })}
-          <div
-            className={cn(
-              "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px]",
-              ollamaEnabled
-                ? "border-green-500/30 bg-green-500/5 text-green-600 dark:text-green-400"
-                : "border-muted text-muted-foreground",
-            )}
-          >
-            <span className={cn("h-1.5 w-1.5 rounded-full", ollamaEnabled ? "bg-green-500" : "bg-muted-foreground/30")} />
-            Ollama
+              </TooltipContent>
+            </Tooltip>
           </div>
         </div>
 

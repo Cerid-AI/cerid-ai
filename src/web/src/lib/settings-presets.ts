@@ -73,36 +73,34 @@ export const PRESETS: Record<string, SettingsPreset> = {
   },
 }
 
-/** Keys checked when determining which preset is active. */
-const PRESET_TOGGLE_KEYS = [
-  "enable_self_rag",
-  "enable_hallucination_check",
-  "enable_auto_inject",
-  "enable_adaptive_retrieval",
-  "enable_query_decomposition",
-  "enable_mmr_diversity",
-  "enable_intelligent_assembly",
-  "enable_late_interaction",
-  "enable_semantic_cache",
-  "enable_contextual_chunks",
-  "enable_memory_consolidation",
-  "enable_context_compression",
-] as const
-
 /**
  * Determine which preset (if any) matches the current settings.
- * Returns the preset key or `null` if settings are custom.
+ *
+ * Match rule: a preset matches when *every* key it explicitly sets equals
+ * the same key on ``settings``. When two presets both match, the more
+ * specific one (the one that sets more fields) wins. This prevents the
+ * pre-2026-04-24 bug where applying *Balanced* left *Efficient* highlighted:
+ * Efficient and Balanced share the same boolean toggles, but Efficient
+ * explicitly sets ``enable_contextual_chunks: false`` and Balanced sets
+ * ``auto_inject_threshold: 0.15`` + ``mmr_lambda: 0.7`` + others. The
+ * specificity tiebreaker steers the highlight to whichever preset the
+ * user just clicked rather than to whichever the iteration finds first.
+ *
+ * Returns the preset key or ``null`` if no preset matches exactly.
  */
 export function detectActivePreset(
   settings: Record<string, unknown>,
 ): string | null {
+  const matches: { key: string; specificity: number }[] = []
   for (const [key, preset] of Object.entries(PRESETS)) {
-    const match = PRESET_TOGGLE_KEYS.every((k) => {
-      const expected = preset.values[k as keyof SettingsUpdate]
-      if (expected === undefined) return true
-      return settings[k] === expected
-    })
-    if (match) return key
+    const allValuesMatch = Object.entries(preset.values).every(
+      ([k, expected]) => settings[k] === expected,
+    )
+    if (allValuesMatch) {
+      matches.push({ key, specificity: Object.keys(preset.values).length })
+    }
   }
-  return null
+  if (matches.length === 0) return null
+  matches.sort((a, b) => b.specificity - a.specificity)
+  return matches[0].key
 }

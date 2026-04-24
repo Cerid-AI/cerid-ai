@@ -50,7 +50,7 @@ import {
   type McpServerAddRequest,
 } from "@/lib/api/governance"
 import { logSwallowedError } from "@/lib/log-swallowed"
-import { SectionHeading, LabelWithInfo, Row } from "./settings-primitives"
+import { SectionHeading, LabelWithInfo, ReadOnlyEnvHint, Row } from "./settings-primitives"
 import type { SectionKey } from "./settings-primitives"
 
 interface GovernanceSectionProps {
@@ -110,12 +110,15 @@ export function GovernanceSection({ settings, sections, toggleSection }: Governa
       {sections.governance_mcp && (
         <Card className="mb-4">
           <CardContent className="grid gap-3 pt-4">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <LabelWithInfo
                 label="Mode"
                 info="Controls whether the agent runtime can call external MCP servers. Permissive = all configured servers callable. Allowlist = only servers in MCP_CLIENT_ALLOWLIST. Disabled = no external MCP calls (kill switch for compliance-sensitive deployments)."
               />
-              <ModeBadge mode={mode} />
+              <div className="flex items-center gap-1.5">
+                <ReadOnlyEnvHint envVar="MCP_CLIENT_MODE" />
+                <ModeBadge mode={mode} />
+              </div>
             </div>
             {mode === "allowlist" && (
               <div>
@@ -152,20 +155,23 @@ export function GovernanceSection({ settings, sections, toggleSection }: Governa
       {sections.governance_agents && (
         <Card className="mb-4">
           <CardContent className="grid gap-3 pt-4">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <LabelWithInfo
                 label="Status"
                 info="When enabled, every /custom-agents endpoint returns 403 — the kill switch for regulated deployments. Built-in 10 specialist agents remain available."
               />
-              {strictAgents ? (
-                <Badge className="bg-red-500/10 text-red-600 border border-red-500/30 dark:text-red-400">
-                  ENABLED — Custom agents disabled
-                </Badge>
-              ) : (
-                <Badge variant="outline" className="text-muted-foreground">
-                  Disabled — custom agents available
-                </Badge>
-              )}
+              <div className="flex items-center gap-1.5">
+                <ReadOnlyEnvHint envVar="STRICT_AGENTS_ONLY" />
+                {strictAgents ? (
+                  <Badge className="bg-red-500/10 text-red-600 border border-red-500/30 dark:text-red-400">
+                    ENABLED — Custom agents disabled
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-muted-foreground">
+                    Disabled — custom agents available
+                  </Badge>
+                )}
+              </div>
             </div>
             <EnvCopyRow envName="STRICT_AGENTS_ONLY" value={strictAgents ? "true" : "false"} />
           </CardContent>

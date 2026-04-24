@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
 import { Switch } from "@/components/ui/switch"
 import { Slider } from "@/components/ui/slider"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { ChevronDown, ChevronRight, Info, Lock } from "lucide-react"
+import { ChevronRight, Info, Lock } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 
@@ -39,19 +39,25 @@ export function SectionHeading({
   open: boolean
   onToggle: () => void
 }) {
+  // Stronger affordance than the prior 14-px chevron: a 16-px chevron with
+  // a 150ms rotation transition (so the click visibly *does* something),
+  // a slightly bolder hover background, and a left border accent on hover
+  // that signals "I am a disclosure row, not a navigation link".
   return (
     <button
       type="button"
-      className="mb-2 flex w-full cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-left hover:bg-muted/50"
+      className="mb-2 flex w-full cursor-pointer items-center gap-2 rounded-md border-l-2 border-transparent px-1 py-1 text-left transition-colors hover:border-primary/40 hover:bg-muted/60"
       onClick={onToggle}
       aria-expanded={open}
     >
-      {open ? (
-        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-      ) : (
-        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-      )}
-      <Icon className="h-4 w-4 text-muted-foreground" />
+      <ChevronRight
+        className={cn(
+          "h-4 w-4 text-muted-foreground transition-transform duration-150",
+          open && "rotate-90",
+        )}
+        aria-hidden="true"
+      />
+      <Icon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
       <h3 className="text-sm font-medium">{label}</h3>
     </button>
   )
@@ -76,6 +82,30 @@ export function LabelWithInfo({ label, info }: { label: string; info: string }) 
       {label}
       <InfoTip text={info} />
     </span>
+  )
+}
+
+/**
+ * Inline signal that a value is read-only at the UI level because it's
+ * controlled by a deployment-time env var. Shows a small lock + the env
+ * var name; hover reveals the canonical guidance ("Set via X in .env").
+ *
+ * Use anywhere a value LOOKS configurable but isn't — preventing the
+ * 2026-04-23 affordance failure where Governance modes appeared togglable.
+ */
+export function ReadOnlyEnvHint({ envVar }: { envVar: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex items-center gap-1 rounded-sm bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+          <Lock className="h-2.5 w-2.5" aria-hidden="true" />
+          {envVar}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-64">
+        <p>Read-only here — set via <code className="font-mono">{envVar}</code> in <code className="font-mono">.env</code> and restart the MCP server.</p>
+      </TooltipContent>
+    </Tooltip>
   )
 }
 
