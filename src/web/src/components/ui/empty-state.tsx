@@ -17,7 +17,7 @@ export function EmptyState({ icon: Icon, title, description }: EmptyStateProps) 
         <Icon className="mb-2 h-8 w-8 text-muted-foreground/50" />
         <p className="text-sm font-medium text-muted-foreground">{title}</p>
         {description && (
-          <p className="mt-1 text-xs text-muted-foreground/70">{description}</p>
+          <p className="mt-1 text-xs text-muted-foreground/80">{description}</p>
         )}
       </CardContent>
     </Card>

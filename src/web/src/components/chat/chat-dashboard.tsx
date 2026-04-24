@@ -93,7 +93,7 @@ export function ChatDashboard({ model, messages, injectedCount }: ChatDashboardP
             <p className="text-muted-foreground">Output: ~{metrics.outputTokens.toLocaleString()} tokens</p>
             <p className="text-muted-foreground">Total: ~{totalTokens.toLocaleString()} tokens</p>
             <p className="text-muted-foreground">Remaining: ~{remaining.toLocaleString()} tokens</p>
-            <p className="text-[10px] text-muted-foreground/70">When this reaches zero, older messages are summarized to free space. Your knowledge base is not affected.</p>
+            <p className="text-[10px] text-muted-foreground/80">When this reaches zero, older messages are summarized to free space. Your knowledge base is not affected.</p>
           </TooltipContent>
         </Tooltip>
 

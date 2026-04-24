@@ -276,7 +276,7 @@ export function KBContextPanel({
                 <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
                 <span className="text-xs font-medium">Searching knowledge base...</span>
               </div>
-              <div className="space-y-0.5 font-mono text-[10px] text-muted-foreground/70">
+              <div className="space-y-0.5 font-mono text-[10px] text-muted-foreground/80">
                 {kbStats ? (
                   <p>
                     {"\u2192"} Querying {activeDomains.size > 0 ? activeDomains.size : Object.keys(kbStats.domains).length}{" "}

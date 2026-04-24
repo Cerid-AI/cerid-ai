@@ -287,7 +287,12 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
                         {isSimple ? "Simple" : "Advanced"}
                       </span>
                     </span>
-                    <Switch checked={!isSimple} className="scale-75" />
+                    <Switch
+                      aria-hidden="true"
+                      tabIndex={-1}
+                      checked={!isSimple}
+                      className="pointer-events-none scale-75"
+                    />
                   </>
                 ) : (
                   <span className="text-[10px] font-medium text-muted-foreground">
@@ -363,7 +368,7 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
               it; hidden when the sidebar is collapsed to save vertical real
               estate (the info is also accessible via /health). */}
           {!collapsed && backendVersion && (
-            <p className="px-3 pt-1 text-[10px] font-mono text-muted-foreground/60">
+            <p className="px-3 pt-1 text-[10px] font-mono text-muted-foreground/80">
               v{backendVersion}
             </p>
           )}

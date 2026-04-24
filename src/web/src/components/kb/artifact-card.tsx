@@ -227,7 +227,7 @@ export function ArtifactCard({ result, isSelected, onSelect, onInject, domains, 
                   const isAuto = tag.startsWith("~")
                   const label = isAuto ? tag.slice(1) : tag
                   return (
-                    <span key={tag} className={`inline-flex items-center truncate max-w-[120px] rounded px-1.5 py-0.5 text-[10px] ${isAuto ? "bg-muted/50 italic text-muted-foreground/60" : "bg-muted text-muted-foreground"}`}>
+                    <span key={tag} className={`inline-flex items-center truncate max-w-[120px] rounded px-1.5 py-0.5 text-[10px] ${isAuto ? "bg-muted/50 italic text-muted-foreground/80" : "bg-muted text-muted-foreground"}`}>
                       {label}
                     </span>
                   )

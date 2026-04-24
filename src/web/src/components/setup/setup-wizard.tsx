@@ -503,7 +503,7 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                     <span>Privacy-first — your data never leaves your machine</span>
                   </div>
                 </div>
-                <p className="text-center text-xs text-muted-foreground/70">
+                <p className="text-center text-xs text-muted-foreground/80">
                   This wizard will walk you through connecting an LLM provider,
                   configuring your knowledge base, and ingesting your first document.
                 </p>
@@ -683,7 +683,7 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                         <span className="flex items-center gap-2">
                           <span className="text-xs text-muted-foreground">Not configured</span>
                           {provider !== "openrouter" && (
-                            <span className="text-[10px] text-muted-foreground/60">Optional</span>
+                            <span className="text-[10px] text-muted-foreground/80">Optional</span>
                           )}
                           <Button
                             variant="ghost"
@@ -905,7 +905,7 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                 <button
                   type="button"
                   onClick={handleFinish}
-                  className="text-[10px] text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+                  className="text-[10px] text-muted-foreground/80 hover:text-muted-foreground transition-colors"
                 >
                   Skip setup — I&apos;ve already configured Cerid
                 </button>
@@ -971,7 +971,7 @@ function CapabilitySummary({ assessment }: { assessment: CapabilityAssessment })
             ))}
         </div>
       )}
-      <p className="mt-1.5 text-[10px] text-muted-foreground/70">
+      <p className="mt-1.5 text-[10px] text-muted-foreground/80">
         {COST_PROFILE_LABELS[assessment.costProfile]}
       </p>
     </div>

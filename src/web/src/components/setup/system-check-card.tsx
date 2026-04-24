@@ -167,23 +167,23 @@ export function SystemCheckCard({ onCheckComplete }: SystemCheckCardProps) {
       {hardware && (
         <div className="border-t">
           <div className="px-3 py-1.5">
-            <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">Hardware Detected</p>
+            <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/80">Hardware Detected</p>
           </div>
           <div className="divide-y">
             <div className="flex items-center gap-3 px-3 py-1.5">
-              <Monitor className="h-3 w-3 shrink-0 text-muted-foreground/70" />
+              <Monitor className="h-3 w-3 shrink-0 text-muted-foreground/80" />
               <span className="flex-1 text-[11px] text-muted-foreground">OS</span>
               <span className="text-[11px] text-muted-foreground">{hardware.os}</span>
             </div>
             <div className="flex items-center gap-3 px-3 py-1.5">
-              <Cpu className="h-3 w-3 shrink-0 text-muted-foreground/70" />
+              <Cpu className="h-3 w-3 shrink-0 text-muted-foreground/80" />
               <span className="flex-1 text-[11px] text-muted-foreground">CPU</span>
               <span className="text-[11px] text-muted-foreground">
                 {hardware.cpu}{hardware.cpuCores != null ? ` (${hardware.cpuCores} cores)` : ""}
               </span>
             </div>
             <div className="flex items-center gap-3 px-3 py-1.5">
-              <Zap className="h-3 w-3 shrink-0 text-muted-foreground/70" />
+              <Zap className="h-3 w-3 shrink-0 text-muted-foreground/80" />
               <span className="flex-1 text-[11px] text-muted-foreground">GPU</span>
               <span className="text-[11px] text-muted-foreground">
                 {hardware.gpu}{hardware.gpuAcceleration && hardware.gpuAcceleration !== "none" ? ` (${hardware.gpuAcceleration})` : ""}

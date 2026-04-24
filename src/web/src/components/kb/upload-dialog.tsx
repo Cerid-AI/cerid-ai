@@ -162,7 +162,7 @@ export function UploadDialog({ files, defaultDomain, onConfirm, onCancel, tier, 
                     )}
                     {getFileTypeLabel(file.name)}
                   </Badge>
-                  <span className="tabular-nums text-[10px] text-muted-foreground/70">
+                  <span className="tabular-nums text-[10px] text-muted-foreground/80">
                     {formatFileSize(file.size)}
                   </span>
                 </div>

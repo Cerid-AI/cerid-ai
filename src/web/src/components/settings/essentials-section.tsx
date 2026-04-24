@@ -457,17 +457,17 @@ function ProviderStatusPanel({ settings }: { settings: ServerSettings }) {
                   <span className="text-[11px] text-muted-foreground">{cap.label}</span>
                 </div>
                 {cap.status !== "available" && cap.reason && (
-                  <p className="ml-3 text-[9px] text-muted-foreground/70">{cap.reason}</p>
+                  <p className="ml-3 text-[9px] text-muted-foreground/80">{cap.reason}</p>
                 )}
                 {cap.fix && cap.status !== "available" && cap.fix.command && (
-                  <code className="ml-3 mt-0.5 block text-[8px] font-mono text-muted-foreground/60">
+                  <code className="ml-3 mt-0.5 block text-[8px] font-mono text-muted-foreground/80">
                     {cap.fix.command}
                   </code>
                 )}
               </div>
             ))}
           </div>
-          <p className="mt-1.5 text-[10px] text-muted-foreground/70">
+          <p className="mt-1.5 text-[10px] text-muted-foreground/80">
             {COST_PROFILE_LABELS[assessment.costProfile]}
           </p>
         </div>
@@ -554,6 +554,7 @@ function DataSourcesPanel() {
                 </Badge>
               )}
               <Switch
+                aria-label={`Enable ${src.name} data source`}
                 checked={src.enabled}
                 onCheckedChange={() => handleToggle(src.name, src.enabled)}
                 disabled={toggling === src.name || (src.requires_api_key && !src.configured)}

@@ -130,7 +130,7 @@ export function SystemSection({
             <div className="mt-1 rounded border bg-muted/30 p-3">
               <p className="mb-2 text-[11px] font-medium text-muted-foreground">
                 Platform Capabilities
-                <span className="ml-1.5 font-normal text-muted-foreground/70">(hover for details)</span>
+                <span className="ml-1.5 font-normal text-muted-foreground/80">(hover for details)</span>
               </p>
               <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
                 {Object.entries(settings.feature_flags).map(([flag, enabled]) => {
@@ -643,7 +643,7 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   <span>{pullProgress || "Pulling model..."}</span>
                 </div>
-                <p className="text-[10px] text-muted-foreground/60">This may take a few minutes depending on your connection.</p>
+                <p className="text-[10px] text-muted-foreground/80">This may take a few minutes depending on your connection.</p>
               </div>
             ) : wizardPhase === "model-select" && modelRecs ? (
               <div className="space-y-3">
@@ -710,7 +710,7 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   <span>Waiting for Ollama to start...</span>
                 </div>
-                <p className="text-[10px] text-muted-foreground/60">
+                <p className="text-[10px] text-muted-foreground/80">
                   Checking every 3 seconds. Once detected, model download and setup will continue automatically.
                 </p>
                 <Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => { if (pollingRef.current) clearInterval(pollingRef.current); setWizardPhase(null) }}>
@@ -770,6 +770,7 @@ function OllamaSection({ settings, onRefresh }: { settings: ServerSettings; onRe
         <div className="flex items-center justify-between">
           <LabelWithInfo label="Route pipeline tasks to Ollama" info="When on, claim extraction, query decomposition, memory resolution, and topic extraction use the local model. When off, uses OpenRouter." />
           <Switch
+            aria-label="Route pipeline tasks to Ollama"
             checked={isActive}
             onCheckedChange={handleToggle}
             disabled={toggling || (!ollamaReachable && !isActive)}
@@ -1055,7 +1056,7 @@ function WatchedFoldersSection() {
         </p>
 
         {folders.length === 0 && !showAdd && (
-          <p className="text-xs text-muted-foreground/60 py-2">No watched folders configured.</p>
+          <p className="text-xs text-muted-foreground/80 py-2">No watched folders configured.</p>
         )}
 
         {folders.map((folder) => (
@@ -1192,6 +1193,7 @@ function DataSourcesSection({
                     )}
                   </div>
                   <Switch
+                    aria-label={`Enable ${source.name} data source`}
                     size="sm"
                     checked={source.enabled && source.configured}
                     disabled={!source.configured}

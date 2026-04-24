@@ -189,7 +189,7 @@ function ClaimBadge({
               </div>
             )}
             {claim.source_snippet && (
-              <p className="line-clamp-3 text-xs text-muted-foreground/70 italic leading-relaxed">
+              <p className="line-clamp-3 text-xs text-muted-foreground/80 italic leading-relaxed">
                 &ldquo;{claim.source_snippet.slice(0, 150)}&rdquo;
               </p>
             )}
@@ -352,7 +352,7 @@ export function StreamingClaimBadge({ claim }: { claim: StreamingClaim }) {
       {expanded && (
         <div className="mt-2 ml-7 space-y-1.5">
           {claim.source_snippet && (
-            <p className="line-clamp-3 text-xs text-muted-foreground/70 italic leading-relaxed">
+            <p className="line-clamp-3 text-xs text-muted-foreground/80 italic leading-relaxed">
               &ldquo;{claim.source_snippet.slice(0, 150)}&rdquo;
             </p>
           )}

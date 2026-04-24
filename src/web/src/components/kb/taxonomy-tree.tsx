@@ -55,7 +55,7 @@ export function TaxonomyTree({ filter, onFilterChange, artifactCounts, onRecateg
   // request completed and the taxonomy is genuinely unpopulated.
   if (!taxonomy?.domains || Object.keys(taxonomy.domains).length === 0) {
     return (
-      <div className="px-2 py-3 text-xs text-muted-foreground/70">
+      <div className="px-2 py-3 text-xs text-muted-foreground/80">
         No taxonomy yet — it builds as you ingest documents.
       </div>
     )

@@ -189,7 +189,7 @@ export function SliderRow({
         />
       </div>
       {recommended && (
-        <p className="text-[9px] text-muted-foreground/60 pl-0.5">{recommended}</p>
+        <p className="text-[9px] text-muted-foreground/80 pl-0.5">{recommended}</p>
       )}
     </div>
   )

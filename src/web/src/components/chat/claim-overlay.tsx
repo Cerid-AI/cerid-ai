@@ -261,7 +261,7 @@ export function ClaimOverlay({ container, claims, claimSpans, onClaimFocus, onAr
                 )}
               </div>
               {claim.source_snippet && (
-                <p className="mt-1.5 line-clamp-3 text-[11px] text-muted-foreground/70 italic leading-relaxed">
+                <p className="mt-1.5 line-clamp-3 text-[11px] text-muted-foreground/80 italic leading-relaxed">
                   &ldquo;{claim.source_snippet.slice(0, 150)}&rdquo;
                 </p>
               )}
@@ -280,7 +280,7 @@ export function ClaimOverlay({ container, claims, claimSpans, onClaimFocus, onAr
                 )}
               </div>
               {claim.reason && (
-                <p className="mt-1.5 text-[11px] text-muted-foreground/70 leading-relaxed">
+                <p className="mt-1.5 text-[11px] text-muted-foreground/80 leading-relaxed">
                   {claim.reason.slice(0, 200)}
                 </p>
               )}

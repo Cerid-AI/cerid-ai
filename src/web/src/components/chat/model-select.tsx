@@ -49,7 +49,7 @@ export function ModelSelect({ value, onChange }: ModelSelectProps) {
             </SelectItem>
           )
         })}
-        <div className="border-t px-2 py-1.5 text-[9px] text-muted-foreground/60">
+        <div className="border-t px-2 py-1.5 text-[9px] text-muted-foreground/80">
           All models via OpenRouter. Non-US models accessible but not bundled by default.
         </div>
       </SelectContent>

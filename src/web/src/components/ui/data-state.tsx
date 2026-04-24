@@ -112,7 +112,7 @@ export function DataState({
           <p className="text-sm font-medium text-muted-foreground">{emptyTitle}</p>
         )}
         {emptyDescription && (
-          <p className="mt-1 max-w-md text-xs text-muted-foreground/70">
+          <p className="mt-1 max-w-md text-xs text-muted-foreground/80">
             {emptyDescription}
           </p>
         )}

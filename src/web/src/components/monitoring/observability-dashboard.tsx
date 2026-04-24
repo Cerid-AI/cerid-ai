@@ -422,7 +422,7 @@ export function ObservabilityDashboard() {
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-muted-foreground/25 py-12 text-center">
           <Activity className="mb-3 h-8 w-8 text-muted-foreground/50" />
           <p className="text-sm font-medium text-muted-foreground">No metrics data available yet</p>
-          <p className="mt-1 max-w-xs text-xs text-muted-foreground/70">
+          <p className="mt-1 max-w-xs text-xs text-muted-foreground/80">
             Metrics are collected as queries are processed.
           </p>
         </div>

@@ -846,7 +846,7 @@ export function KnowledgePane() {
                       <p className="text-sm font-medium text-muted-foreground">
                         No artifacts yet
                       </p>
-                      <p className="mt-1 text-xs text-muted-foreground/70">
+                      <p className="mt-1 text-xs text-muted-foreground/80">
                         Drop files into the upload zone above, or click Upload to browse.
                       </p>
                     </>

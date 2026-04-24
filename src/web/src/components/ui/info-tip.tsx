@@ -107,7 +107,7 @@ export function InfoTip({
           <button
             type="button"
             className={
-              `inline-flex h-3.5 w-3.5 items-center justify-center rounded-full text-muted-foreground/60 align-middle hover:text-foreground focus:outline-none focus:ring-1 focus:ring-ring ${className ?? ""}`.trim()
+              `inline-flex h-3.5 w-3.5 items-center justify-center rounded-full text-muted-foreground/80 align-middle hover:text-foreground focus:outline-none focus:ring-1 focus:ring-ring ${className ?? ""}`.trim()
             }
             aria-label={`What is ${entry.label}?`}
           >
