@@ -118,7 +118,16 @@ export function Row({ label, value, mono, info, readOnly }: { label: string; val
         ) : (
           <span className="text-sm text-muted-foreground">{label}</span>
         )}
-        {readOnly && <Lock className="h-2.5 w-2.5 text-muted-foreground/40" />}
+        {readOnly && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Lock className="h-2.5 w-2.5 cursor-help text-muted-foreground/40" aria-label="Read-only" />
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-64">
+              <p>Read-only — this is reported by the server, not a user-editable setting.</p>
+            </TooltipContent>
+          </Tooltip>
+        )}
       </span>
       <span className={cn("text-sm", mono && "font-mono text-xs", readOnly && "text-muted-foreground")}>{value}</span>
     </div>

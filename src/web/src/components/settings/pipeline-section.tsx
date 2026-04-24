@@ -83,9 +83,17 @@ export function PipelineSection({ settings, sections, toggleSection, patch }: Pi
             })()}
 
             {!detectActivePreset(settings as unknown as Record<string, unknown>) && (
-              <p className="text-[11px] text-muted-foreground">
-                Custom configuration — doesn&apos;t match any preset
-              </p>
+              <div className="flex items-center gap-1.5">
+                <Badge
+                  variant="outline"
+                  className="border-amber-500/30 bg-amber-500/5 text-[10px] font-mono uppercase tracking-wide text-amber-600 dark:text-amber-400"
+                >
+                  Custom
+                </Badge>
+                <span className="text-[11px] text-muted-foreground">
+                  Doesn&apos;t match any preset — adjust below or pick one above to reset.
+                </span>
+              </div>
             )}
 
             {/* -- Customize disclosure -- */}

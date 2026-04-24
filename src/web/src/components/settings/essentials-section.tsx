@@ -173,7 +173,7 @@ export function EssentialsSection({ settings, sections, toggleSection, patch, cr
                 value={settings.rag_mode ?? "smart"}
                 onValueChange={(v) => patch({ rag_mode: v })}
               >
-                <SelectTrigger size="sm" className="w-36">
+                <SelectTrigger size="sm" className="w-36" aria-label="KB Injection Mode">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -192,7 +192,7 @@ export function EssentialsSection({ settings, sections, toggleSection, patch, cr
                 value={settings.categorize_mode}
                 onValueChange={(v) => patch({ categorize_mode: v })}
               >
-                <SelectTrigger size="sm" className="w-28">
+                <SelectTrigger size="sm" className="w-28" aria-label="Categorization Mode">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -213,7 +213,7 @@ export function EssentialsSection({ settings, sections, toggleSection, patch, cr
                 value={settings.storage_mode}
                 onValueChange={(v) => patch({ storage_mode: v })}
               >
-                <SelectTrigger size="sm" className="w-32">
+                <SelectTrigger size="sm" className="w-32" aria-label="Storage Mode">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -300,7 +300,7 @@ export function EssentialsSection({ settings, sections, toggleSection, patch, cr
                 value={routingMode}
                 onValueChange={(v) => setRoutingMode(v as RoutingMode)}
               >
-                <SelectTrigger size="sm" className="w-32">
+                <SelectTrigger size="sm" className="w-32" aria-label="Model Router">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -317,7 +317,7 @@ export function EssentialsSection({ settings, sections, toggleSection, patch, cr
                 value={settings.cost_sensitivity ?? "medium"}
                 onValueChange={(v) => patch({ cost_sensitivity: v })}
               >
-                <SelectTrigger size="sm" className="w-28">
+                <SelectTrigger size="sm" className="w-28" aria-label="Cost Sensitivity">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

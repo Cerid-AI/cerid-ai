@@ -2,8 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import type React from "react"
+import { render as rtlRender, screen, waitFor } from "@testing-library/react"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import MemoriesPane from "@/components/memories/memories-pane"
+
+// MemoriesPane uses Radix Tooltip (Round 4) — needs a TooltipProvider in the tree.
+const render = (ui: React.ReactElement) =>
+  rtlRender(<TooltipProvider delayDuration={0}>{ui}</TooltipProvider>)
 
 const mockMemories = [
   {

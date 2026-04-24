@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   Brain,
   Pencil,
@@ -280,13 +281,20 @@ export default function MemoriesPane() {
                   <CardContent className="min-w-0 p-3">
                     {/* Type badge + actions */}
                     <div className="flex items-start justify-between gap-2">
-                      <Badge
-                        variant="secondary"
-                        className={cn("gap-1 text-[11px]", cfg.bg, cfg.text)}
-                      >
-                        <cfg.icon className="h-3 w-3" />
-                        {cfg.label.replace(/s$/, "")}
-                      </Badge>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Badge
+                            variant="secondary"
+                            className={cn("cursor-help gap-1 text-[11px]", cfg.bg, cfg.text)}
+                          >
+                            <cfg.icon className="h-3 w-3" aria-hidden="true" />
+                            {cfg.label.replace(/s$/, "")}
+                          </Badge>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-64">
+                          <p>Memory type: <strong>{cfg.label}</strong>. Set at extraction time by the memory pipeline; not user-editable.</p>
+                        </TooltipContent>
+                      </Tooltip>
                       <div className="flex gap-0.5">
                         {!isEditing && !isDeleting && (
                           <>
@@ -374,12 +382,20 @@ export default function MemoriesPane() {
                       </div>
                     )}
 
-                    {/* Metadata footer */}
+                    {/* Metadata footer (read-only — provenance, not controls) */}
                     <div className="mt-2 flex items-center gap-2 text-[10px] text-muted-foreground">
-                      <span title={memory.conversation_id}>
-                        conv: {truncateId(memory.conversation_id)}
-                      </span>
-                      <span>{formatDate(memory.created_at)}</span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="cursor-help" aria-label={`Source conversation ${memory.conversation_id}`}>
+                            conv: {truncateId(memory.conversation_id)}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-72">
+                          <p className="font-mono text-[10px]">{memory.conversation_id}</p>
+                          <p className="mt-1 text-[10px] text-muted-foreground">Source conversation — open in the Chat sidebar to revisit.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                      <span aria-label={`Created ${memory.created_at}`}>{formatDate(memory.created_at)}</span>
                     </div>
                   </CardContent>
                 </Card>
