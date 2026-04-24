@@ -40,7 +40,7 @@ import {
 } from "lucide-react"
 import { SyncSection } from "./sync-section"
 import { StorageBar } from "./StorageBar"
-import { SectionHeading, InfoTip, LabelWithInfo, Row } from "./settings-primitives"
+import { SectionHeading, InfoTip, LabelWithInfo, ReadOnlyEnvHint, Row } from "./settings-primitives"
 import { logSwallowedError } from "@/lib/log-swallowed"
 
 function formatFlagName(flag: string): string {
@@ -68,7 +68,7 @@ function InferenceTierRow() {
     <div className="flex items-center justify-between">
       <LabelWithInfo
         label="Inference Tier"
-        info={`${inf.message}. Provider: ${inf.provider}, Platform: ${inf.platform}${inf.gpu_name ? `, GPU: ${inf.gpu_name}` : ""}`}
+        info={`How embedding + reranking run on this host. Optimal = GPU-accelerated (Metal/CUDA/ROCm). Good = Ollama or native CPU sidecar. CPU Only = ONNX in-Docker (slowest). Auto-detected from hardware. ${inf.message}. Provider: ${inf.provider}, Platform: ${inf.platform}${inf.gpu_name ? `, GPU: ${inf.gpu_name}` : ""}.`}
       />
       <div className="flex items-center gap-2">
         <Badge variant="outline" className={cn("text-[10px]", TIER_COLORS[inf.tier] ?? TIER_COLORS.unknown)}>
@@ -111,11 +111,17 @@ export function SystemSection({
           <CardContent className="grid gap-3 pt-4">
             <Row label="Server Version" value={settings.version} info="Current MCP server version" />
             <Row label="Machine ID" value={settings.machine_id} mono info="Unique identifier for this server instance" />
-            <div className="flex items-center justify-between">
-              <LabelWithInfo label="Feature Tier" info="Controls which platform capabilities are available. Set via CERID_TIER env var." />
-              <Badge variant={settings.feature_tier === "pro" ? "default" : "secondary"}>
-                {settings.feature_tier}
-              </Badge>
+            <div className="flex items-center justify-between gap-2">
+              <LabelWithInfo
+                label="Feature Tier"
+                info="Controls which platform capabilities are available. Community = baseline; Pro adds analytics + connectors + multi-step workflows; Vault adds compliance (multi-user, SSO, audit log, encryption)."
+              />
+              <div className="flex items-center gap-1.5">
+                <ReadOnlyEnvHint envVar="CERID_TIER" />
+                <Badge variant={settings.feature_tier === "pro" ? "default" : "secondary"}>
+                  {settings.feature_tier}
+                </Badge>
+              </div>
             </div>
             {/* Inference Tier */}
             <InferenceTierRow />
@@ -1082,14 +1088,26 @@ function WatchedFoldersSection() {
               </div>
             </div>
             <div className="flex items-center gap-4 text-[10px] text-muted-foreground">
-              <label className="flex items-center gap-1.5">
-                <Switch checked={folder.enabled} onCheckedChange={() => handleToggle(folder, "enabled")} disabled={actionId === folder.id} className="scale-[0.6]" />
+              <span className="flex items-center gap-1.5">
+                <Switch
+                  aria-label={`Active — ${folder.label}`}
+                  checked={folder.enabled}
+                  onCheckedChange={() => handleToggle(folder, "enabled")}
+                  disabled={actionId === folder.id}
+                  className="scale-[0.6]"
+                />
                 <span>Active</span>
-              </label>
-              <label className="flex items-center gap-1.5">
-                <Switch checked={folder.search_enabled} onCheckedChange={() => handleToggle(folder, "search_enabled")} disabled={actionId === folder.id} className="scale-[0.6]" />
+              </span>
+              <span className="flex items-center gap-1.5">
+                <Switch
+                  aria-label={`Searchable — ${folder.label}`}
+                  checked={folder.search_enabled}
+                  onCheckedChange={() => handleToggle(folder, "search_enabled")}
+                  disabled={actionId === folder.id}
+                  className="scale-[0.6]"
+                />
                 <span>Searchable</span>
-              </label>
+              </span>
               {folder.domain_override && (
                 <Badge variant="secondary" className="text-[9px]">{folder.domain_override}</Badge>
               )}

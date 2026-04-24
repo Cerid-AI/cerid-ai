@@ -143,7 +143,7 @@ export function ToggleRow({
       ) : (
         <span className="text-sm text-muted-foreground">{label}</span>
       )}
-      <Switch size="sm" checked={enabled} onCheckedChange={onToggle} />
+      <Switch size="sm" aria-label={label} checked={enabled} onCheckedChange={onToggle} />
     </div>
   )
 }
@@ -179,13 +179,13 @@ export function SliderRow({
           />
         </div>
         <Slider
+          aria-label={label}
           value={[value]}
           onValueChange={([v]) => onChange(v)}
           min={min}
           max={max}
           step={step}
           className="w-32"
-          aria-label={label}
         />
       </div>
       {recommended && (
@@ -220,7 +220,7 @@ export function PipelineToggle({
           </span>
           <span className="text-[11px] leading-tight text-muted-foreground">{description}</span>
         </div>
-        <Switch size="sm" checked={enabled} onCheckedChange={onToggle} />
+        <Switch size="sm" aria-label={label} checked={enabled} onCheckedChange={onToggle} />
       </div>
       {enabled && children && (
         <div className="ml-4 space-y-2 border-l-2 border-muted pl-3">
