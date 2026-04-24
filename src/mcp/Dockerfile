@@ -4,8 +4,9 @@
 # Stage 1: Builder — install Python deps with build tools
 FROM python:3.11.14-slim AS builder
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc build-essential libffi-dev \
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends gcc build-essential libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir --upgrade pip setuptools
@@ -39,8 +40,9 @@ ENV ANONYMIZED_TELEMETRY=false \
 
 # Pro plugins requiring tesseract-ocr and ffmpeg should install them in a
 # plugin-specific layer or via the sidecar.  Core image stays minimal.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -u 1000 cerid
