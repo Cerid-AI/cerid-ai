@@ -62,6 +62,7 @@ def _build_route_set() -> set[tuple[str, str]]:
     about, not "is it active in the current test process?".
     """
     import importlib
+
     from fastapi import APIRouter
 
     out: set[tuple[str, str]] = set()
