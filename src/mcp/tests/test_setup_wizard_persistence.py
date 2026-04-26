@@ -159,3 +159,45 @@ class TestUpdateEnvFilePersistence:
         contents = env_file.read_text(encoding="utf-8")
         assert "EXISTING=1" in contents
         assert "NEW_KEY=v" in contents
+
+
+# ---------------------------------------------------------------------------
+# Sentinel — display-only placeholders must not clobber real env values
+# ---------------------------------------------------------------------------
+
+
+class TestPlaceholderSentinel:
+    """Beta-test 2026-04-26: the wizard's masked API-key field showed
+    e.g. ``(from .env)`` as a display placeholder when an env-loaded key
+    was already present. The Apply button submitted that literal string,
+    and the configure handler wrote ``OPENROUTER_API_KEY=(from .env)``
+    back to .env, bricking auth on the next container restart for every
+    user who followed the recommended setup flow.
+
+    ``_accept_key`` is the guard: it must reject every display-only
+    sentinel so the existing env value stays untouched.
+    """
+
+    @pytest.mark.parametrize(
+        "value",
+        ["(from .env)", "(configured)", "__env__"],
+    )
+    def test_placeholder_strings_are_rejected(self, value: str) -> None:
+        from app.routers.setup import _accept_key
+        assert _accept_key(value) is False, (
+            f"placeholder {value!r} must NOT be persisted — "
+            "it would overwrite the real env-loaded key"
+        )
+
+    def test_whitespace_padded_placeholder_is_rejected(self) -> None:
+        from app.routers.setup import _accept_key
+        assert _accept_key("  (from .env)  ") is False
+
+    def test_real_keys_are_accepted(self) -> None:
+        from app.routers.setup import _accept_key
+        assert _accept_key("sk-or-v1-real-key-here") is True  # pragma: allowlist secret
+
+    def test_empty_and_none_are_rejected(self) -> None:
+        from app.routers.setup import _accept_key
+        assert _accept_key(None) is False
+        assert _accept_key("") is False

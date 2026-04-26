@@ -35,6 +35,20 @@ const TOTAL_STEPS = 8
 const SKIPPABLE_STEPS = new Set([2, 3, 6])
 const STORAGE_KEY = "cerid-setup-progress"
 
+// Display-only sentinels the masked API-key input renders when an
+// env-loaded key is already configured. Sending them on the wire would
+// cause the backend to literally write "(from .env)" over the real key.
+const PLACEHOLDER_KEYS = new Set(["(from .env)", "(configured)", "__env__"])
+
+// Display labels for providers whose brand casing isn't title-case.
+// React's `capitalize` would render "Openrouter" / "Openai" / "Xai".
+const PROVIDER_LABELS: Record<string, string> = {
+  openrouter: "OpenRouter",
+  openai: "OpenAI",
+  anthropic: "Anthropic",
+  xai: "xAI",
+}
+
 const STEP_DEFS: StepDef[] = [
   { label: "Welcome", shortLabel: "Welcome" },
   { label: "API Keys", shortLabel: "Keys" },
@@ -372,7 +386,11 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
     try {
       const config: Record<string, string> = {}
       for (const [provider, { key, valid }] of Object.entries(state.keys)) {
-        if (valid && key) config[provider] = key
+        // Skip the masked-input display sentinels — sending these would
+        // cause the backend to literally write "(from .env)" over the
+        // real env-loaded key. The backend has a sentinel guard too
+        // (defence-in-depth) but we never want this string on the wire.
+        if (valid && key && !PLACEHOLDER_KEYS.has(key)) config[provider] = key
       }
       const result = await applySetupConfig({
         keys: config,
@@ -521,7 +539,10 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                 </div>
               </div>
               <h3 className="mb-4 text-center text-lg font-semibold">API Keys</h3>
-              <div className="space-y-4">
+              {/* <form> wrapper required by Chrome's a11y check —
+                  password fields outside a form trip "Password field is
+                  not contained in a form" + screen-reader navigation. */}
+              <form className="space-y-4" onSubmit={(e) => e.preventDefault()}>
                 <p className="text-center text-xs text-muted-foreground">
                   OpenRouter is required — it&apos;s a unified gateway that connects Cerid to
                   hundreds of AI models (GPT-4o, Claude, Gemini, Llama, and more) through a
@@ -631,7 +652,7 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                 {hasInteractedWithKeys && assessment.warnings.length > 0 && (
                   <ProviderWarnings warnings={assessment.warnings} />
                 )}
-              </div>
+              </form>
             </>
           )}
 
@@ -673,7 +694,7 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                 <div className="space-y-1.5">
                   {Object.entries(state.keys).map(([provider, { valid }]) => (
                     <div key={provider} className="flex items-center justify-between rounded-lg border bg-card px-3 py-2">
-                      <span className="text-sm font-medium capitalize">{provider}</span>
+                      <span className="text-sm font-medium">{PROVIDER_LABELS[provider] ?? provider}</span>
                       {valid ? (
                         <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
                           <Check className="h-3 w-3" />

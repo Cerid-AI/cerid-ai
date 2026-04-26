@@ -263,8 +263,11 @@ for _rt in GRAPH_RELATIONSHIP_TYPES:
 # Default: Snowflake Arctic Embed M v1.5 (768d, 8192 ctx, client-side ONNX)
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "Snowflake/snowflake-arctic-embed-m-v1.5")
 # Target dimensions (0 = use model's native output).  Matryoshka-capable models
-# support truncation (e.g. 768→256 for speed).
-EMBEDDING_DIMENSIONS = int(os.getenv("EMBEDDING_DIMENSIONS", "0"))
+# support truncation (e.g. 768→256 for speed).  Defaulting to 768 matches the
+# native dim of the default Snowflake/arctic-embed-m model and prevents the
+# fresh-install dim-mismatch where ChromaDB locks the collection at a
+# truncated dim before the embedder reports its native size.
+EMBEDDING_DIMENSIONS = int(os.getenv("EMBEDDING_DIMENSIONS", "768"))
 EMBEDDING_ONNX_FILENAME = os.getenv("EMBEDDING_ONNX_FILENAME", "onnx/model.onnx")
 EMBEDDING_MODEL_CACHE_DIR = os.getenv("EMBEDDING_MODEL_CACHE_DIR", "")
 # ONNX Runtime execution providers (shared by embedding model and cross-encoder

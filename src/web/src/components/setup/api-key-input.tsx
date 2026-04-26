@@ -97,10 +97,17 @@ export function ApiKeyInput({
     }
   }
 
+  // Stable per-provider id/name so the password field is a labelled,
+  // named form field — fixes the Chrome a11y issues "Password field is
+  // not contained in a form" / "No label associated with a form field" /
+  // "A form field element should have an id or name attribute" that the
+  // 2026-04-26 beta-test surfaced on the wizard's API-keys step.
+  const inputId = `api-key-${provider}`
+
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <Label className="text-sm font-medium">
+        <Label htmlFor={inputId} className="text-sm font-medium">
           {label}
           {required && <span className="ml-1 text-destructive">*</span>}
         </Label>
@@ -120,9 +127,12 @@ export function ApiKeyInput({
       <div className="flex gap-2">
         <div className="relative flex-1">
           <Input
+            id={inputId}
+            name={inputId}
             type={visible ? "text" : "password"}
             value={value}
             onChange={handleChange}
+            autoComplete="off"
             placeholder={preconfigured && !value ? "(from .env)" : (placeholder ?? "sk-...")}
             className={cn(
               "pr-9 font-mono text-xs",

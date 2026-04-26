@@ -145,7 +145,13 @@ export function OllamaStep({ ollamaDetected, ollamaModels, state, onChange }: Ol
               <div className="space-y-1.5">
                 <p className="text-[11px] font-medium text-muted-foreground">Recommended Models</p>
                 {modelRecs.map((m) => {
-                  const installed = ollamaModels.some((om) => om.startsWith(m.id.split(":")[0]))
+                  // Match the full tag (`llama3.2:1b`) — not the base name —
+                  // so installing `llama3.2:3b` doesn't make `llama3.2:1b`
+                  // also show as "Installed". Trailing variant suffixes
+                  // (e.g. `llama3.1:8b-instruct-q4_K_M`) still match.
+                  const installed = ollamaModels.some(
+                    (om) => om === m.id || om.startsWith(`${m.id}-`),
+                  )
                   return (
                     <div key={m.id} className={`rounded-lg border bg-card p-3 ${!m.compatible ? "opacity-50" : ""}`}>
                       <div className="flex items-start justify-between gap-2">

@@ -380,6 +380,19 @@ async def _fallback_validate(provider: str, api_key: str) -> KeyValidationRespon
         return KeyValidationResponse(valid=False, error=str(exc))
 
 
+# Display-only sentinels the frontend round-trips when the user never
+# typed a real key (the field shows e.g. "(from .env)" as a masked
+# placeholder). Persisting these would clobber the real env value with
+# the literal placeholder string and brick auth on the next restart.
+_KEY_PLACEHOLDERS = {"(from .env)", "(configured)", "__env__"}
+
+
+def _accept_key(value: str | None) -> bool:
+    if not value:
+        return False
+    return value.strip() not in _KEY_PLACEHOLDERS
+
+
 @router.post("/configure", response_model=ConfigureResponse)
 async def configure(req: ConfigureRequest) -> ConfigureResponse:
     """Apply configuration by writing API keys to the .env file."""
@@ -387,14 +400,14 @@ async def configure(req: ConfigureRequest) -> ConfigureResponse:
     try:
         updates: dict[str, str] = {}
 
-        if req.openrouter_api_key:
-            updates["OPENROUTER_API_KEY"] = req.openrouter_api_key
-        if req.openai_api_key:
-            updates["OPENAI_API_KEY"] = req.openai_api_key
-        if req.anthropic_api_key:
-            updates["ANTHROPIC_API_KEY"] = req.anthropic_api_key
-        if req.xai_api_key:
-            updates["XAI_API_KEY"] = req.xai_api_key
+        if _accept_key(req.openrouter_api_key):
+            updates["OPENROUTER_API_KEY"] = req.openrouter_api_key  # type: ignore[assignment]
+        if _accept_key(req.openai_api_key):
+            updates["OPENAI_API_KEY"] = req.openai_api_key  # type: ignore[assignment]
+        if _accept_key(req.anthropic_api_key):
+            updates["ANTHROPIC_API_KEY"] = req.anthropic_api_key  # type: ignore[assignment]
+        if _accept_key(req.xai_api_key):
+            updates["XAI_API_KEY"] = req.xai_api_key  # type: ignore[assignment]
 
         if req.neo4j_password:
             if req.neo4j_password == "auto":  # pragma: allowlist secret
