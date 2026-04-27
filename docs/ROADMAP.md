@@ -2,6 +2,7 @@
 
 > **Last updated:** 2026-04-26 (post-v0.90.0)
 > **Shipped releases:** see [CHANGELOG.md](../CHANGELOG.md) and the [GitHub releases](https://github.com/Cerid-AI/cerid-ai/releases) page.
+> **Internal sprint backlog:** `tasks/todo.md` (internal-only).
 
 ---
 

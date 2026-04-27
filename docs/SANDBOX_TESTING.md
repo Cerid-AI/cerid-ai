@@ -82,10 +82,76 @@ writeup.
 
 ## Recipe 2 — parallel sandbox (prod stays up)
 
-Run sandbox alongside prod. Needs different ports + separate docker
-project name + separate container_names (currently hardcoded — requires
-a compose overlay, not yet shipped). Deferred to a future "parallel
-sandbox support" sprint; for now, use Recipe 1.
+Sandbox runs **side-by-side** with the live stack. Live keeps the
+canonical ports (3000/8888/7474/7687/8001/6379) and Dropbox mount;
+sandbox runs on offset ports (+10 across the board) on its own
+isolated Docker network with an isolated `/sync` mount. Useful for
+testing pulls before promoting to live.
+
+Shipped 2026-04-26. Three load-bearing pieces:
+
+**1. Compose overlay — `docker-compose.sandbox.yml`** (root of the
+canonical clone, internal-only). Suffixes container names with
+`-sandbox` (Docker container names are global so they can't collide
+with live), declares its own `llm-network` (overriding the canonical
+`external: true` so the bridge is sandbox-only — see lesson below),
+adds aliases on every service so the canonical hostnames the in-image
+configs expect (e.g. `bolt://ai-companion-neo4j:7687` from the MCP
+container, `proxy_pass http://ai-companion-mcp` from the web image's
+nginx) resolve to the sandbox containers, and disables Neo4j's per-IP
+auth rate-limit (the canonical healthcheck only probes HTTP — auth can
+still be initialising when MCP first retries).
+
+**2. Worktree — `~/Develop/cerid-ai-sandbox`** (git worktree on a
+`sandbox` branch tracking `origin/main`). Each pull-test starts with
+`git pull` from inside the worktree.
+
+**3. Wrapper — `scripts/start-sandbox.sh`** (internal-only). Sets the
+port-offset env vars, isolates `CERID_SYNC_DIR_HOST=/tmp/cerid-sandbox-sync`
+by default, and runs `docker compose -f docker-compose.yml -f
+docker-compose.sandbox.yml -p cerid-sandbox up -d`.
+
+Day-to-day:
+
+```bash
+# One-time setup
+cd ~/Develop/cerid-ai-internal
+git worktree add ~/Develop/cerid-ai-sandbox -b sandbox
+git -C ~/Develop/cerid-ai-sandbox branch --set-upstream-to=origin/main sandbox
+cp .env ~/Develop/cerid-ai-sandbox/.env       # sandbox needs its own .env
+# Edit ~/Develop/cerid-ai-sandbox/.env: change NEO4J_PASSWORD + 
+# CERID_SYNC_DIR_HOST so they don't collide with live.
+
+# Test a new internal pull
+cd ~/Develop/cerid-ai-sandbox
+git pull                                       # fetches latest internal main
+./scripts/start-sandbox.sh                     # boots on offset ports
+# add --build after code changes
+
+# When satisfied, restart live with the same change
+cd ~/Develop/cerid-ai-internal
+./scripts/start-cerid.sh --build
+```
+
+URLs once both stacks are up:
+
+| | Live | Sandbox |
+|---|---|---|
+| GUI | http://localhost:3000 | http://localhost:3010 |
+| MCP API | http://localhost:8888 | http://localhost:8898 |
+| Neo4j | http://localhost:7474 | http://localhost:7484 |
+| Bolt | bolt://localhost:7687 | bolt://localhost:7697 |
+| Chroma | http://localhost:8001 | http://localhost:8011 |
+| Redis | redis://localhost:6379 | redis://localhost:6389 |
+
+Tear down sandbox without touching live:
+`docker compose -p cerid-sandbox down`.
+
+**Note for downstream clients (cerid-trading, etc.):** if you containerise
+a downstream service that connects via the Docker hostname
+`ai-companion-mcp:8888`, attach it to **`cerid-ai_llm-network`** (live's
+bridge), not `cerid-sandbox-llm-network`. Each network only resolves
+its own service aliases.
 
 ## Recipe 3 — CI-style sandbox (fully isolated, ephemeral)
 
