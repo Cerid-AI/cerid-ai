@@ -51,7 +51,7 @@ describe("KBConfigStep", () => {
     expect(input).toBeInTheDocument()
   })
 
-  it("shows Watch for new files toggle", () => {
+  it("shows the auto-ingest opt-in toggle", () => {
     render(
       <KBConfigStep
         config={DEFAULT_CONFIG}
@@ -60,7 +60,10 @@ describe("KBConfigStep", () => {
         ramGb={16}
       />,
     )
-    expect(screen.getByText("Watch for new files")).toBeInTheDocument()
+    // Renamed from "Watch for new files" → "Auto-ingest new files" when
+    // the toggle was flipped to opt-in (default off). The toggle is
+    // unchecked by default per DEFAULT_CONFIG.watchFolder = false.
+    expect(screen.getByText("Auto-ingest new files")).toBeInTheDocument()
   })
 
   it("shows lightweight mode warning when lightweightRecommended is true", () => {
