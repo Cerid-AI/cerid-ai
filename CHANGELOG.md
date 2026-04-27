@@ -2,279 +2,57 @@
 
 All notable changes to cerid-ai are documented here.
 
-## v0.90 — Consolidation Program + Structural Cleanup (2026-04-19 → 2026-04-22)
+## v0.90.0 — 2026-04-22
 
-Nine-sprint structural cleanup (A → I) executed from a single planning
-document: [`tasks/2026-04-19-consolidation-program.md`](tasks/2026-04-19-consolidation-program.md).
-The release ships a codebase where three classes of ambiguity
-identified in the 2026-04-19 critical-eye audit are now extinct:
+Cerid 0.90 hardens the reliability story while keeping the install
+path one command.
 
-1. **Shape-contract drift** — one canonical `ClaimVerification`
-   Pydantic model, adapter at every boundary. AST-walking contract
-   test guards kwarg validity on the 15+ LLM call sites.
-2. **"Which of N paths?"** — `src/mcp/services/` and `src/mcp/agents/`
-   directories deleted. `src/mcp/utils/` retains only 35 standalone
-   modules (21 pure-reexport bridges retired). `src/mcp/routers/`
-   is billing-only.
-3. **Silent degradation** — `log_swallowed_error` helper + Redis
-   counter surface every broad-catch site at
-   `/health.invariants.swallowed_errors_last_hour`.
+### What's new
 
-### Preservation harness (Sprint A)
-- 8 capability invariants (I1-I8) with 35 integration tests against
-  a live stack. Merge gate for every subsequent sprint.
-- New `preservation` CI job boots docker-compose, runs the harness,
-  dumps logs on failure. Flipped to blocking during the structural
-  cleanup tail (Phase 1C, 2026-04-20) after two consecutive green
-  runs on main.
-- `make preservation-check` for local developer loop (~60s).
+- **First-run setup wizard.** Guided eight-step path (Welcome → Keys →
+  Storage → Ollama → Apply → Health → Try → Mode) replaces the
+  copy-edit-restart loop. System check probes Docker, configured keys,
+  and Ollama before you commit; hardware auto-detection sizes the
+  default mode for your machine.
+- **Verification pipeline hardens to one auto-persisting call.**
+  `/agent/hallucination` now persists by default — no second
+  `/verification/save` round-trip. Streaming verification emits a
+  `persisted:{success}` SSE event so the frontend can trust the result.
+- **Preservation harness — every release gates on real-stack tests.**
+  35 integration tests boot the full docker-compose stack and assert
+  end-to-end capability before a merge to main. The `preservation`
+  CI job is blocking from this release forward.
+- **Silent-error visibility.** Every broad-catch error path now flows
+  through `log_swallowed_error()` and surfaces at
+  `/health.invariants.swallowed_errors_last_hour`. No more hidden
+  degradation.
+- **SDK v1 with drift-guarded OpenAPI surface.** Twelve endpoints under
+  `/sdk/v1/` plus a committed `docs/openapi-sdk-v1.json` baseline; CI
+  fails on accidental shape changes. See [`docs/SDK_GUIDE.md`](docs/SDK_GUIDE.md).
+- **Plugin system — five plugin types.** `parser`, `agent`, `tool`,
+  `connector`, `sync`. See [`docs/PLUGIN_DEVELOPMENT.md`](docs/PLUGIN_DEVELOPMENT.md).
+- **Repo structure cleanup.** Re-export bridges retired
+  (`src/mcp/services/` and `src/mcp/agents/` removed; `src/mcp/utils/`
+  is implementation-only). `import-linter` enforces the layer
+  contract — `core/` never imports `app/`.
 
-### Canonical claim model (Sprint B)
-- `core.agents.hallucination.models.ClaimVerification` Pydantic
-  model with `from_legacy_dict()` adapter normalizing three
-  historical claim shapes (flat singular, nested sources, pre-v0.84
-  legacy).
-- `save_verification_report` + `m0001` migration now share one
-  shape-detection path — the duplication that caused P1.4 (every
-  saved report was orphaned because the writer ignored the flat
-  `source_artifact_id` shape) can no longer produce class-of-bug
-  divergence.
+### Reliability fixes from real-world testing
 
-### Verification write-path (Sprint C)
-- `/agent/hallucination` auto-persists by default (`persist=True`).
-  Collapses the former "call two endpoints" dance. `persist=False`
-  opt-out preserved for SDK consumers managing their own storage.
-- Stub `:VerificationReport` MERGE in `promote_verified_facts`
-  removed — switched to `MATCH` so failed persists no longer
-  leave orphan nodes.
+- Chat key reload: the setup wizard's key change now applies without
+  a container restart (was being captured at module-import time).
+- Env-file persistence: wizard writes are anchored to a dedicated
+  `CERID_ENV_FILE` mountpoint (was writing to an orphan path inside
+  the container).
+- Default secrets in `.env.example`: `OPENROUTER_API_KEY` is now
+  declared and `REDIS_PASSWORD` ships with a non-empty default so
+  first `docker compose up` works.
+- Fixed an event-loop poisoning bug in the external-verification
+  client when called from sync ingestion code.
 
-### Layer-violation cleanup (Sprint D)
-- Seven `core → utils.*` backward imports resolved by moving the
-  target modules into `core/utils/` (temporal, diversity, quality,
-  text.extract_keywords_simple) or `core/agents/` (memory_consolidation).
-- One documented exception: `utils.data_sources` (12-file external-
-  API package depending on `app.reliability.url_safety`). Moving
-  it would worsen the layer contract; scheduled for a post-v0.90.0
-  sprint that relocates the whole package to `app/data_sources/`
-  with DI for the registry.
-
-### Bridge retirement (Sprint E)
-- `src/mcp/services/` deleted entirely (3 pure re-export bridges).
-- `src/mcp/agents/` deleted entirely (7 pure bridges + 5 standalones
-  relocated to `app/agents/` + 1 hallucination subpackage of 5
-  bridges + 4 standalones).
-- 21 pure re-export bridges in `src/mcp/utils/` deleted; 35
-  standalone implementations survive.
-- ~185 consumer files mechanically rewritten to canonical
-  `core.*` / `app.*` paths.
-
-### Router consolidation (Sprint F)
-- 32 stub re-exports under `src/mcp/routers/` deleted.
-- 11 legacy real routers (agent_console, custom_agents, data_sources,
-  dlq, mcp_client, plugin_registry, sdk_openapi, system_monitor,
-  watched_folders, webhook_subscriptions, widget) relocated to
-  `src/mcp/app/routers/`.
-- `src/mcp/routers/` is now billing.py-only; `.sync-manifest.yaml`
-  strips the whole directory from public, which is the simplest way
-  to keep Stripe/Pro code out of the OSS distribution.
-- `main.py` legacy router import block rewritten.
-- `gen_router_registry.py` covers both directories; 282 routes.
-
-### Sync tooling (Sprint G)
-- New `--track-deletions` flag on `sync-repos.py to-public` closes
-  the never-propagated-file-deletions failure mode. Surfaces 131
-  real orphans on current dry-run (Bifrost leftovers, build
-  artifacts, pre-v0.84 KB data).
-- `.sync-manifest.yaml` re-categorized with headers explaining the
-  three-rule hierarchy. Stale Sprint E/F entries purged.
-- New `docs/SYNC_PROTOCOL.md` (100-line operator guide).
-- New `scripts/lint-sync-manifest.py` CI gate asserts every
-  `*_internal.*` file has `internal_only` coverage and every
-  `forbidden_in_public` pattern matches at least one file.
-
-### Doc consolidation (Sprint H)
-- `CLAUDE.md` shrunk from 396 lines (~35 KB / ~9000 tokens) to 173
-  lines (~5 KB / ~1500 tokens). **~7500 tokens back in the agent
-  context window every turn.**
-- New `docs/ARCHITECTURE.md` (163 lines) — canonical stack layout +
-  Phase C layer contract + quick-index.
-- New `docs/CONVENTIONS.md` (109 lines) — project-specific
-  style/approach rules, with a closing "when to retire" rule that
-  forces graduation to lint rules over time.
-- `docs/ISSUES.md` renamed to `ISSUES_HISTORICAL.md` with archival
-  header; pointer to three successors (`tasks/todo.md`,
-  `docs/PRESERVATION.md`, `docs/COMPLETED_PHASES.md`).
-
-### New CI jobs
-- `preservation` — boot stack + run 35 integration tests
-- `sync-manifest-drift` — consistency check on the sync manifest
-- `router-registry-drift` — already landed in v0.84.x, stays active
-
-All three run as warnings (`continue-on-error: true`) for the v0.90.0
-shakedown; flipped to blocking in a follow-up once we have two
-consecutive green runs on main.
-
-### Ship-criteria scorecard
-
-| Criterion | Target | Actual |
-|---|---|---|
-| All 8 preservation invariants automated | yes | 35 tests, all green |
-| `src/mcp/services/` file count | 0 | 0 ✓ |
-| `src/mcp/agents/` file count | 0 | 0 ✓ |
-| `src/mcp/routers/` non-billing file count | 0 | 0 ✓ (billing only) |
-| `src/mcp/utils/` pure re-exports | 0 | 0 ✓ |
-| `except Exception: pass` count in src/mcp/ | ≤3 | 0 ✓ |
-| Canonical write path for :VerificationReport | yes | yes ✓ |
-| `import-linter` CI gate enforces layer contract | yes | yes (pre-existing) ✓ |
-| `sync-repos.py --track-deletions` idempotent | yes | yes ✓ |
-| `CLAUDE.md` line count | <150 | 173 (close; 5 mechanical overrides kept inline) |
-| `tasks/lessons.md` line count | <250 | 655 (deferred — every entry is a recipe) |
-| Net-negative repo LOC across program | yes | +3616 (honest miss — see below) |
-
-### Honest notes on the LOC criterion
-
-The program plan aimed for net-negative LOC across all nine sprints.
-Actual diff over 37 commits: +5005 / -1389 = **+3616 LOC**. The
-overshoot comes from:
-
-- Sprint A preservation harness: +~1100 LOC of new integration tests
-- Sprint B canonical model + 9 contract tests: +~440 LOC
-- Sprint G/H new operator docs (SYNC_PROTOCOL, ARCHITECTURE,
-  CONVENTIONS, PRESERVATION, lint-sync-manifest): +~700 LOC
-- Sprint B/C/D/E/F consumer rewrites across 185 files: near-neutral
-  (canonical path is slightly longer than bridge path)
-
-The program shifted cost FROM ambiguous-code-surface TO
-observable-guards-and-operator-docs. That's a legitimate net win
-for reliability even though the line counter disagrees. Post-v0.90.0
-retrospective should either (a) revise the criterion to LOC-per-
-structural-class, or (b) pay down the doc debt by graduating
-lessons.md entries to lint rules.
-
-### Capability compatibility
-
-All 8 preservation invariants pass. Wire formats unchanged. External
-SDK consumers require no code changes for the happy path (the
-auto-persist addition is backward-compatible — old clients that
-already call `/verification/save` after `/agent/hallucination` get
-an idempotent double-save). Public repo sync via `sync-repos.py
-to-public --track-deletions` cleanly propagates all changes.
-
-### Structural cleanup tail (2026-04-20 → 2026-04-21)
-
-Follow-on work completing the v0.90 release window. Every item below
-reduces an ambiguity, tightens a CI gate, or eliminates structural
-debt that Sprint E left behind.
-
-**Neo4j tree unification (2026-04-21).** `src/mcp/db/neo4j/` shim tree
-(8 bridge re-exports + 2 orphan implementations) deleted. Single
-canonical path is now `src/mcp/app/db/neo4j/`. CustomAgent CRUD
-relocated to `app/db/neo4j/agents.py`; `graph_rag.py` deleted as dead
-code with its config flags (`ENABLE_GRAPH_RAG`, `GRAPH_RAG_MAX_HOPS`,
-`GRAPH_RAG_MAX_RESULTS`, `GRAPH_RAG_DEFAULT_*`, `GRAPH_RAG_FUZZY_THRESHOLD`)
-in the same commit. 17 shorthand `from db.neo4j.*` call-sites migrated
-to canonical; 6 stale `@patch("db.neo4j.*")` test strings fixed up.
-New `scripts/lint-no-legacy-neo4j-tree.py` path-existence guard + CI
-job `lint / no-legacy-neo4j-tree` ships blocking from day one (added
-to `docker` `needs[]`). Chosen over an import-linter contract because
-import-linter only fires when something imports the module — a
-resurrected tree with no callers would slip through. mypy source
-count 345 → 335 reflects the 10 deleted shim files.
-
-**Drift-gate flips (2026-04-20 → 2026-04-21).** `preservation`,
-`sync-manifest-drift`, and `router-registry-drift` flipped from
-`continue-on-error` to blocking. `sdk-openapi-drift` flipped after
-four green main runs. No soft-warning CI gates remain.
-
-**Silent-catch migrations (Phase 2A.1/2A.2/2A.3).** Allowlist shrunk
-127 → 64 across 63 call-site rewrites to `log_swallowed_error`. Phase
-2A.3 real-failure hiders surfaced as issues #50 (verified-memory
-promotion dispatch) and #51 (Phase 44 conflict detection).
-
-**SDK drift guard (Phase 2B).** `/sdk/v1/*` OpenAPI surface gained a
-committed baseline (`docs/openapi-sdk-v1.json`) + `scripts/gen_sdk_openapi.py
---check` drift script. `SDK_VERSION` consolidated to single source of
-truth in `app/routers/sdk_version.py`.
-
-**Streaming verification auto-persist (Sprint C parallel).**
-`verify_response_streaming` takes a `save_report_fn` DI callback
-mirroring `create_memory_fn`. `/agent/verify-stream` router threads a
-closure binding `save_verification_report` from `app.db.neo4j.artifacts`
-over `get_neo4j()`. Save fires after the retry sweep + consistency
-checks settle, using final post-sweep counts. New `persisted:{success}`
-SSE event yielded so FE can trust the backend. FE's redundant
-`saveVerificationReport` call in `use-verification-orchestrator.ts`
-removed.
-
-**Lock-sync hygiene.** `scripts/regen-lock.sh` now passes `--upgrade`
-to pip-compile so dev regen matches CI's fresh-resolve behaviour
-(prevents silent drift: dev kept stale pins because pip-compile
-preserved existing locks; CI wrote to `/tmp` and always resolved fresh).
-
-2,653 backend tests + 750+ frontend tests green. import-linter "core
-must not import app" KEPT.
-
-### Beta-test fixes (2026-04-22)
-
-Issues caught by running the public repo through the new-user flow
-end-to-end. Each fix ships with regression coverage and a lesson in
-`tasks/lessons.md`.
-
-**Chat proxy — `OPENROUTER_API_KEY` captured at module-import time.**
-`app/routers/chat.py:32` had `OPENROUTER_API_KEY = os.getenv(...)` as a
-module-level constant. The setup wizard's `/setup/configure` endpoint
-patches `os.environ` at runtime (so new keys take effect without restart),
-but chat.py had frozen the old boot-time value. Every chat request used
-the stale key → 401 "Invalid API key" forever. `/providers/credits`
-(which reads `os.getenv` per request) reported the new key as valid,
-making the bug LOOK like "models won't switch" because every model ran
-through the same stale-key path and failed.
-Fix: drop the module-level constant; read via `_env_openrouter_key()`
-helper at each site. Regression test asserts no module-level
-`OPENROUTER_API_KEY` attribute exists.
-
-**Setup wizard wrote to an orphan file.** `setup.py::_find_env_file()`
-fell through to `/app/.env` inside the container — which, due to the
-`./src/mcp:/app` bind mount, was `src/mcp/.env` on the host. Compose's
-`env_file:` points at repo-root `.env`. So the wizard silently wrote to
-a file nothing loads; the key only "worked" in-memory until the next
-rebuild, then vanished.
-Fix: bind-mount host repo-root `.env` to `/host-env/.env` in the
-container (dedicated mountpoint — macOS virtiofs rejects nested bind
-mounts under `/app`); set `CERID_ENV_FILE=/host-env/.env`.
-
-**`.env.example` missing OPENROUTER_API_KEY; REDIS_PASSWORD empty.** The
-`gen_env_example.py` AST scanner only reads `settings.py`, but
-OPENROUTER_API_KEY was referenced in `llm_client.py` + routers — not
-settings. New users doing `cp .env.example .env` found no line to edit.
-Separately, REDIS_PASSWORD shipped empty and `docker-compose.yml` uses
-required-form `${REDIS_PASSWORD:?...}` — first `docker compose up`
-errored before any container started.
-Fix: declare `OPENROUTER_API_KEY = os.getenv(...)` in `settings.py` so
-the generator surfaces it; default `REDIS_PASSWORD` to `"changeme-redis"`
-so the example starts working out of the box.
-
-**External verification — singleton httpx client poisoned by a
-throwaway event loop.** `core/utils/contextual.py::_run_coro_isolated`
-runs sync ingestion code by spinning up a NEW event loop inside a
-ThreadPoolExecutor worker. The FIRST call bound the module-level
-`_client: httpx.AsyncClient` singleton in `llm_client.py` to that
-throwaway loop. Worker thread exited → loop closed → singleton dead.
-Every later verification on the main FastAPI loop reused the singleton
-→ `RuntimeError: Event loop is closed`. User saw "External verification
-failed: Event loop is closed" for every claim.
-Fix: `_get_client()` only caches on `threading.current_thread() is
-threading.main_thread()`. Worker threads get a one-shot client closed on
-context-manager exit via the new `_acquire_client()` helper.
-`call_llm` and `call_llm_raw` refactored to
-`async with _acquire_client() as client:`.
-
-**Wikipedia data source — stubs leaked, failures silent.** Wikipedia
-occasionally returned 20-30 char summary stubs that slid past the -0.15
-disambiguation penalty and wasted NLI calls. And HTTP failures went to
-`logger.debug`, invisible to `/health.swallowed_errors_last_hour`.
-Fix: `_MIN_CONTENT_LEN = 50` drops stubs at the source; failures route
-through `log_swallowed_error("app.data_sources.wikipedia.query", ...)`.
+For architecture, contributor conventions, and the preservation
+harness, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md),
+[`docs/CONVENTIONS.md`](docs/CONVENTIONS.md), and
+[`docs/PRESERVATION.md`](docs/PRESERVATION.md).
 
 ## v0.84.0 — Reliability Remediation (2026-04-17 → 2026-04-18)
 

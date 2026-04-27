@@ -110,10 +110,6 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 - New env var → `settings.py` + `.env.example`
 - Python deps → `requirements.txt` then `make lock-python`
 
-## Compliance
-
-No Chinese-origin AI models (regulated-deployment alignment). Approved providers: OpenAI, Anthropic, Google, xAI, Meta, Microsoft, Mistral.
-
 ## CI (7 jobs)
 
 lint, typecheck, test (20% floor), security, lock-sync, frontend, docker.
