@@ -139,7 +139,7 @@ function createInitialState(): WizardState {
       archivePath: "~/cerid-archive",
       domains: ["general"],
       lightweightMode: false,
-      watchFolder: true,
+      watchFolder: false,
     },
     ollama: {
       detected: false,

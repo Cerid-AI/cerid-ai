@@ -100,12 +100,17 @@ export function KBConfigStep({ config, onChange, lightweightRecommended, ramGb }
           </div>
         )}
 
-        {/* Watch Folder */}
+        {/* Watch Folder — opt-in. Default OFF so a fresh install never
+            silently scoops up files the user didn't expect. They pick
+            the folder above, then explicitly turn this on if they want
+            new files auto-ingested. */}
         <div className="flex items-center justify-between rounded-lg border bg-card px-3 py-2.5">
           <div>
-            <p className="text-xs font-medium">Watch for new files</p>
+            <p className="text-xs font-medium">Auto-ingest new files</p>
             <p className="text-[10px] text-muted-foreground">
-              Auto-ingest files dropped into your archive folder
+              Off by default. When on, files added to the archive folder
+              are ingested automatically. You can change this any time in
+              Settings.
             </p>
           </div>
           <Switch
