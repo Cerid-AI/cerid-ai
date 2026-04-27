@@ -1,8 +1,7 @@
-# Cerid AI -- Development Roadmap
+# Cerid AI — Development Roadmap
 
-> **Last updated:** 2026-04-19 (post-v0.84.0)
-> **For completed work:** See `docs/COMPLETED_PHASES.md`
-> **Current sprint:** `tasks/todo.md`
+> **Last updated:** 2026-04-26 (post-v0.90.0)
+> **Shipped releases:** see [CHANGELOG.md](../CHANGELOG.md) and the [GitHub releases](https://github.com/Cerid-AI/cerid-ai/releases) page.
 
 ---
 
