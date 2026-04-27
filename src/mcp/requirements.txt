@@ -5,7 +5,7 @@ uvicorn[standard]>=0.20,<1
 pydantic>=2.0,<3
 
 # MCP protocol
-mcp>=1.0,<2
+mcp>=1.27.0,<2
 
 # HTTP client
 httpx>=0.24,<0.29
