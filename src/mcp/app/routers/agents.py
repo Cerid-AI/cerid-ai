@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -583,9 +584,10 @@ async def claim_feedback_endpoint(req: ClaimFeedbackRequest):
 
 @router.post("/agent/memory/extract")
 async def memory_extract_endpoint(req: MemoryExtractionRequest):
+    started = time.perf_counter()
     try:
         from app.agents.memory import extract_and_store_memories
-        return await extract_and_store_memories(
+        result = await extract_and_store_memories(
             response_text=req.response_text,
             conversation_id=req.conversation_id,
             model=req.model,
@@ -593,8 +595,28 @@ async def memory_extract_endpoint(req: MemoryExtractionRequest):
             neo4j_driver=get_neo4j(),
             redis_client=get_redis(),
         )
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        logger.info(
+            "memory_extract_ok",
+            extra={
+                "stage": "memory_extract",
+                "model": req.model,
+                "response_len": len(req.response_text or ""),
+                "elapsed_ms": round(elapsed_ms, 1),
+            },
+        )
+        return result
     except Exception as e:
-        logger.error(f"Memory extraction error: {e}")
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        logger.error(
+            "memory_extract_failed",
+            extra={
+                "stage": "memory_extract",
+                "model": req.model,
+                "elapsed_ms": round(elapsed_ms, 1),
+                "exc_type": type(e).__name__,
+            },
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 

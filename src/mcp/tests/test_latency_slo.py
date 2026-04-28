@@ -130,3 +130,90 @@ def test_chat_stream_ttft_under_2s(benchmark):
     assert benchmark.stats.stats.max < 2.0, (
         f"chat/stream TTFT exceeded 2s SLO: max={benchmark.stats.stats.max:.2f}s"
     )
+
+
+# ---------------------------------------------------------------------------
+# Cross-project SLOs (Workstream A — 2026-04-28-cross-project-slo-hardening)
+# ---------------------------------------------------------------------------
+# These budgets gate the trading-agent SDK paths surfaced in the 2026-04-28
+# soak. They are marked ``xfail(strict=True)`` until Phase 1.2 of the
+# workstream lands the latency fixes — Phase 1.1 only adds observability,
+# so the budgets are expected to FAIL on the live stack until the fix
+# (Neo4j index / per-stage timeout) ships. ``strict=True`` flips the
+# semantics so the ``xfail`` itself fails when the budget unexpectedly
+# passes — that's the signal to remove the marker and treat the budget
+# as a hard gate.
+
+_LONGSHOT_BUDGET_S = 0.5  # p50 < 500ms target per workstream §A1
+_MEMORY_EXTRACT_BUDGET_S = 10.0  # p99 < 10s target per workstream §A2
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="Workstream A Phase 1.1: budget set; fix in Phase 1.2",
+)
+@pytest.mark.benchmark(group="longshot_surface", min_rounds=5, disable_gc=True)
+def test_longshot_surface_under_500ms(benchmark):
+    """Workstream A §A1 STRICT: /sdk/v1/trading/longshot-surface p50 < 500ms.
+
+    Trading-agent observed 25.6s mean cycle time. Target p50 < 500ms;
+    the test asserts max < 500ms which is conservative since p95 ~ p50
+    for a small fixed result-set.
+    """
+    payload = {"asset": "*", "date_range": "30d"}
+    with httpx.Client(base_url=MCP_URL, timeout=30.0) as client:
+
+        def _run():
+            response = client.post(
+                "/sdk/v1/trading/longshot-surface",
+                json=payload,
+                headers={"X-Client-ID": "slo-harness"},
+            )
+            response.raise_for_status()
+            return response
+
+        benchmark.pedantic(_run, rounds=5, iterations=1, warmup_rounds=1)
+    assert benchmark.stats.stats.max < _LONGSHOT_BUDGET_S, (
+        f"longshot-surface exceeded {_LONGSHOT_BUDGET_S*1000:.0f}ms SLO: "
+        f"max={benchmark.stats.stats.max*1000:.0f}ms, "
+        f"mean={benchmark.stats.stats.mean*1000:.0f}ms"
+    )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="Workstream A Phase 1.1: budget set; fix in Phase 1.2",
+)
+@pytest.mark.benchmark(group="memory_extract", min_rounds=3, disable_gc=True)
+def test_memory_extract_under_10s(benchmark):
+    """Workstream A §A2 STRICT: /sdk/v1/memory/extract p99 < 10s.
+
+    Trading-agent soak observed 5.7% ReadTimeout rate at the httpx 20s
+    default. Tightening to p99 < 10s with a synthetic 200-token response
+    (representative of memory-extract workloads in the soak).
+    """
+    payload = {
+        "response_text": (
+            "The trading agent reduced position sizing by 20 percent "
+            "after the 2025-Q4 drawdown. Risk caps now scale with rolling "
+            "Sharpe. Polymarket fan-out latency is the next bottleneck."
+        ),
+        "conversation_id": f"slo-{uuid.uuid4().hex[:12]}",
+        "model": "openai/gpt-4o-mini",
+    }
+    with httpx.Client(base_url=MCP_URL, timeout=30.0) as client:
+
+        def _run():
+            response = client.post(
+                "/sdk/v1/memory/extract",
+                json=payload,
+                headers={"X-Client-ID": "slo-harness"},
+            )
+            response.raise_for_status()
+            return response
+
+        benchmark.pedantic(_run, rounds=3, iterations=1, warmup_rounds=0)
+    assert benchmark.stats.stats.max < _MEMORY_EXTRACT_BUDGET_S, (
+        f"memory/extract exceeded {_MEMORY_EXTRACT_BUDGET_S}s SLO: "
+        f"max={benchmark.stats.stats.max:.2f}s"
+    )
