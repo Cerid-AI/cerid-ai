@@ -4,6 +4,10 @@
 .env.local
 .env*.local
 .env.meta.json
+.env.*.bak
+.env.*.backup
+.env.pre-live-*
+.env.post-live-*
 !.env.example
 *.key
 OPENROUTER_API_KEY*
