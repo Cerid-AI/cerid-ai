@@ -15,6 +15,10 @@ import time
 import traceback
 from contextlib import asynccontextmanager
 
+# Must run before any module that imports chromadb (directly or transitively).
+# See module docstring for the chromadb-vs-posthog signature mismatch this fixes.
+from app import _startup_compat  # noqa: F401  -- side-effect import
+
 # Must run before any FastAPI import for integration hooks to attach cleanly.
 from app.observability.sentry_init import init_sentry
 

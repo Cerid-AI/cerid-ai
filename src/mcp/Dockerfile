@@ -64,5 +64,4 @@ USER cerid
 EXPOSE 8888
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8888", \
      "--timeout-keep-alive", "30", \
-     "--limit-max-requests", "10000", \
      "--timeout-graceful-shutdown", "30"]

@@ -43,17 +43,15 @@ Real-time activity panel with humanized agent messages. Files: `src/web/src/comp
 
 **Follow-up (P2):** Cost-comparison view (current model vs alternatives) — catalog data is already fetched; needs a UI surface in settings.
 
-### ✅ Pro Tier Purchase Path -- SHIPPED (backend scaffolding) v0.83.0+
+### ✅ Pro Tier Purchase Path -- SHIPPED v0.84.0+ (Stripe checkout still open)
 
-Billing integration backend in the internal-only distribution (not synced public). Configured via env vars documented in the internal `.env.example`. License-key validation endpoint in place.
+Billing backend (license-key generation/validation, waitlist, status) lives in the internal-only distribution. Pro Settings pane (`src/web/src/components/settings/pro-section.tsx`) ships license-key entry, waitlist join, current-plan display, and Pro/Community/Enterprise feature matrices.
 
-**Follow-up (P1):** Self-serve upgrade flow in settings UI + license-key entry field. Pro-anchor feature (audio transcription) still pending.
+**Follow-up (P1):** Stripe checkout end-to-end (interim flow is email waitlist + manual key issuance). Pro-anchor feature (audio transcription) still pending.
 
-### 🔲 Pro Mode Configuration & Feature Access -- OPEN
+### ✅ Pro Mode Configuration & Feature Access -- SHIPPED v0.84.0
 
-- Pro settings pane listing all Pro-gated features with status indicators
-- Feature discovery: "preview what Pro unlocks" surface
-- License key entry + validation wired to backend
+Settings → Pro tab renders feature status indicators per tier, license-key entry with backend validation, current-plan display, waitlist join, and a feature-discovery matrix listing all Pro-gated capabilities.
 
 ---
 
@@ -108,10 +106,10 @@ Billing integration backend in the internal-only distribution (not synced public
 - Graph RAG with entity extraction and query rewriting
 
 ### Chat Messages Virtualization (deferred from v0.84.0)
-- First attempt broke 46 jsdom measurement-dependent tests — needs `@tanstack/react-virtual` approach with jsdom-safe measure shim. See `tasks/todo.md` L2.
+- First attempt broke 46 jsdom measurement-dependent tests — needs `@tanstack/react-virtual` approach with jsdom-safe measure shim. Named-sprint candidate; high risk.
 
 ---
 
 ## Next Sprint Candidates
 
-See `tasks/todo.md` for the 7 validated post-v0.84.0 open items with fix plans and effort estimates.
+Released work is tracked in [CHANGELOG.md](../CHANGELOG.md) and the [GitHub releases](https://github.com/Cerid-AI/cerid-ai/releases) page; the canonical sprint backlog lives in the internal repo.
