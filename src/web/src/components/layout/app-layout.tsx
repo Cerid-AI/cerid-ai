@@ -6,6 +6,7 @@ import { logSwallowedError } from "@/lib/log-swallowed"
 import { Sidebar, type Pane } from "./sidebar"
 import { StatusBar } from "./status-bar"
 import { AgentConsole } from "@/components/console/AgentConsole"
+import { ModelDownloadBanner } from "@/components/model-download-banner"
 import { useAgentConsole } from "@/hooks/use-agent-console"
 import { useTheme } from "@/hooks/use-theme"
 
@@ -62,6 +63,11 @@ export function AppLayout({ children, featureTier, onCycleTier }: AppLayoutProps
   return (
     <div className="flex h-screen flex-col bg-background text-foreground bg-circuit safe-area-top safe-area-bottom safe-area-left safe-area-right">
       <div className="vignette" aria-hidden="true" />
+      {/* Phase E.6.6: first-query model-download notification —
+          self-suppressing when both ONNX models are cached or the user
+          has dismissed the banner. Sits above the main flex row so the
+          layout shifts down when shown rather than overlapping. */}
+      <ModelDownloadBanner />
       <div className="flex flex-1 overflow-hidden">
         <Sidebar
           activePane={activePane}

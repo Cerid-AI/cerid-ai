@@ -22,6 +22,7 @@ import { EssentialsSection } from "./essentials-section"
 import { PipelineSection } from "./pipeline-section"
 import { SystemSection } from "./system-section"
 import { GovernanceSection } from "./governance-section"
+import { InferenceModelsCard } from "./inference-models-card"
 import type { SectionKey } from "./settings-primitives"
 import { logSwallowedError } from "@/lib/log-swallowed"
 
@@ -268,7 +269,10 @@ export default function SettingsPane() {
                 </PaneErrorBoundary>
               </TabsContent>
 
-              <TabsContent value="system" className="space-y-1 pt-2">
+              <TabsContent value="system" className="space-y-3 pt-2">
+                <PaneErrorBoundary label="Inference Models">
+                  <InferenceModelsCard />
+                </PaneErrorBoundary>
                 <PaneErrorBoundary label="System">
                   <SystemSection
                     settings={settings}

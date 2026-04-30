@@ -130,6 +130,18 @@ def warmup() -> None:
         logger.warning("Reranker warmup failed — model will be loaded on first query")
 
 
+def is_loading() -> bool:
+    """True when ``_load_model()`` is currently in flight on another thread.
+
+    Workstream E Phase E.6.6 — surfaces "model is downloading right now"
+    state to the GUI so users on lean Docker images get a "first-query
+    download is in progress (one-time setup)" notification instead of a
+    silent stall. A locked mutex with no session yet means a worker is
+    inside the download + ONNX init block.
+    """
+    return _lock.locked() and _session is None
+
+
 def rerank(
     query: str,
     results: list[dict[str, Any]],

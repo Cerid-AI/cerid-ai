@@ -135,9 +135,25 @@ class OnnxEmbeddingFunction:
     # -- embedding ----------------------------------------------------------
 
     def __call__(self, input: list[str]) -> list[list[float]]:  # noqa: A002
-        """Embed a batch of texts.  ChromaDB ``EmbeddingFunction`` protocol."""
+        """Embed a batch of texts.  ChromaDB ``EmbeddingFunction`` protocol.
+
+        Workstream E Phase E.6.4: when the inference auto-detector says
+        ``provider == "fastembed-sidecar"`` and the sidecar is reachable,
+        route through it for GPU acceleration. On any sidecar failure
+        (timeout, bad response, dim mismatch) silently fall through to
+        the local ONNX path so the call still produces an embedding —
+        operators don't lose ingest because the GPU sidecar restarted.
+        """
         if not input:
             return []
+
+        # Sidecar fast-path — only when explicitly preferred by inference
+        # detection AND reachable. Sync-bridge to async via the proven
+        # ThreadPoolExecutor pattern (mirrors core.utils.contextual and
+        # app.queue.tasks; chromadb's EmbeddingFunction.__call__ is sync).
+        sidecar_result = self._maybe_embed_via_sidecar(input)
+        if sidecar_result is not None:
+            return sidecar_result
 
         session, tokenizer = self._load()
         encodings = tokenizer.encode_batch(input)
@@ -186,6 +202,51 @@ class OnnxEmbeddingFunction:
         text = self._query_prefix + query if self._query_prefix else query
         return self.__call__([text])[0]
 
+    # -- sidecar fast-path (Workstream E Phase E.6.4) ----------------------
+
+    def _maybe_embed_via_sidecar(self, texts: list[str]) -> list[list[float]] | None:
+        """If the auto-detected provider is the sidecar AND it's reachable,
+        embed via HTTP and return the result. Returns ``None`` to signal
+        "fall through to local ONNX" — never raises.
+        """
+        try:
+            from utils.inference_config import get_inference_config
+        except Exception:  # noqa: BLE001 — module load failure → local ONNX
+            return None
+        try:
+            cfg = get_inference_config()
+        except Exception:  # noqa: BLE001
+            return None
+        if cfg.provider != "fastembed-sidecar" or not cfg.sidecar_available:
+            return None
+
+        # Sync-bridge to the async sidecar client. ThreadPoolExecutor +
+        # fresh event loop in a worker thread is the same pattern
+        # core.utils.contextual + app.queue.tasks use to call async APIs
+        # from sync ChromaDB code paths without polluting the caller's
+        # asyncio state.
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+
+        def _runner() -> list[list[float]]:
+            from utils.inference_sidecar_client import sidecar_embed
+            loop = asyncio.new_event_loop()
+            try:
+                asyncio.set_event_loop(loop)
+                return loop.run_until_complete(sidecar_embed(texts))
+            finally:
+                loop.close()
+
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                return executor.submit(_runner).result()
+        except Exception as exc:  # noqa: BLE001 — observability boundary
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error(
+                "core.utils.embeddings.sidecar_fallthrough", exc,
+            )
+            return None
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -193,6 +254,22 @@ class OnnxEmbeddingFunction:
 
 _embedding_fn: OnnxEmbeddingFunction | None = None
 _ef_lock = threading.Lock()
+
+
+def is_loading() -> bool:
+    """True when the embedder model is currently downloading on another thread.
+
+    Workstream E Phase E.6.6 — pairs with :func:`reranker.is_loading` so
+    the GUI's "first-query model download in progress" notification can
+    distinguish in-flight downloads from "not yet cached, idle" states.
+    Returns False when the singleton hasn't been instantiated yet (no
+    download has started); True when the singleton's per-instance lock
+    is held with the session not yet ready (worker is inside the
+    hf_hub_download + ONNX init block).
+    """
+    if _embedding_fn is None:
+        return False
+    return _embedding_fn._lock.locked() and _embedding_fn._session is None
 
 # Server default output dim (all-MiniLM-L6-v2 → 384). Used by get_embedding_dim()
 # when EMBEDDING_MODEL == _SERVER_DEFAULT_MODEL (server-side embedding path).

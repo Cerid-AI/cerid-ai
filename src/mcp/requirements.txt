@@ -35,6 +35,22 @@ PyStemmer>=2.2
 # Scheduling
 apscheduler>=3.10,<4
 
+# Queue (Workstream E Phase 5a — opt-in via INGEST_QUEUE_MODE=async; reuses Redis already in stack)
+rq>=2.0,<3
+
+# Markdown header-hierarchy chunker (Workstream E Phase 2b.2)
+langchain-text-splitters>=0.3,<1
+
+# Code AST chunker (Workstream E Phase 2b.3) — Python grammar today;
+# tree-sitter-{javascript,typescript,go,rust} added per future sub-phase.
+tree-sitter>=0.23,<1
+tree-sitter-python>=0.23,<1
+
+# Email parser (Workstream E Phase 2b.4) — RFC822 header preservation +
+# reply-chain stripping. Both libs zero-transitive-dep, pure Python.
+mail-parser>=4.0,<5
+quotequail>=0.4,<1
+
 # Logging (used by trading agent + internal tests)
 
 # Auth (optional — only needed for multi-user mode)

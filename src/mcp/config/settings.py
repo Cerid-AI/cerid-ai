@@ -116,6 +116,25 @@ HYBRID_VECTOR_WEIGHT = float(os.getenv("HYBRID_VECTOR_WEIGHT", "0.5"))
 HYBRID_KEYWORD_WEIGHT = float(os.getenv("HYBRID_KEYWORD_WEIGHT", "0.5"))
 BM25_DATA_DIR = os.path.join(os.getenv("DATA_DIR", "data"), "bm25")
 
+# Hybrid fusion mode (Workstream E Phase 3 — module shipped, wire-in
+# follows after eval validates lift). "weighted_sum" is the legacy
+# behaviour (HYBRID_VECTOR_WEIGHT * vec + HYBRID_KEYWORD_WEIGHT * bm25).
+# "rrf" uses Reciprocal Rank Fusion (Cormack/Clarke/Buettcher 2009 — the
+# 2026 default in Elastic, OpenSearch, Azure AI Search, neo4j-graphrag).
+HYBRID_FUSION_MODE = os.getenv("HYBRID_FUSION_MODE", "weighted_sum")
+HYBRID_RRF_K = int(os.getenv("HYBRID_RRF_K", "60"))
+HYBRID_RRF_VECTOR_WEIGHT = float(os.getenv("HYBRID_RRF_VECTOR_WEIGHT", "1.0"))
+HYBRID_RRF_BM25_WEIGHT = float(os.getenv("HYBRID_RRF_BM25_WEIGHT", "1.0"))
+
+# Contextual retrieval per-tenant monthly USD budget (Workstream E
+# Phase 3). When breached, the circuit breaker disables further
+# contextual generation for that tenant for the rest of the calendar
+# month. Configurable; default $50 aligns with the Anthropic-published
+# cost model (~$1.02/M ingested tokens with prompt-cache hits).
+CONTEXTUAL_BUDGET_USD_PER_TENANT_PER_MONTH = float(
+    os.getenv("CONTEXTUAL_BUDGET_USD_PER_TENANT_PER_MONTH", "50.0"),
+)
+
 # CRAG-style retrieval quality gate — if top result relevance is below this
 # threshold after initial retrieval, supplement with external sources before
 # proceeding to expensive reranking/generation.
@@ -559,6 +578,69 @@ RERANK_PREFER_LOCAL = os.getenv("RERANK_PREFER_LOCAL", "true").lower() == "true"
 # Parallel retrieval: max concurrent domain queries
 PARALLEL_RETRIEVAL_MAX = int(os.getenv("PARALLEL_RETRIEVAL_MAX", "4"))
 
+# ---------------------------------------------------------------------------
+# Ingestion control plane (Workstream E Phase 0)
+# ---------------------------------------------------------------------------
+# Concurrent ingestion limit (semaphore). Replaces hardcoded `Semaphore(3)`
+# in app/routers/ingestion.py. Increase when scaling ingestion workers; keep
+# low on memory-constrained hosts (each in-flight ingest holds parser +
+# embedder + Neo4j + ChromaDB connections).
+INGEST_CONCURRENCY = int(os.getenv("INGEST_CONCURRENCY", "3"))
+
+# Parent/child chunking tunables (Workstream E Phase 0.5). The actual
+# read-points live in utils/chunker.py to avoid a config↔chunker import
+# cycle; these are mirrored here for callsites (e.g. the markdown
+# header-hierarchy chunker) that read sizing via the ``config`` package.
+PARENT_CHUNK_TOKENS = int(os.getenv("PARENT_CHUNK_TOKENS", "512"))
+CHILD_CHUNK_TOKENS = int(os.getenv("CHILD_CHUNK_TOKENS", "128"))
+CHILD_CHUNK_OVERLAP_PCT = float(os.getenv("CHILD_CHUNK_OVERLAP_PCT", "0.1"))
+
+# Layout-aware parser dispatch (Workstream E Phase 2b wire-in). When true,
+# ingest_file routes supported extensions (.csv, .md, .markdown, .py) through
+# the new core/ingest/parsers/ + chunker registry — each CSV row, Markdown
+# section, and Python function/class becomes its own chunk with structural
+# metadata (column_headers, heading_path, file:start_line:end_line) preserved.
+# Default false so existing deployments keep the legacy flat-text path until
+# operators flip the env after eval validates the lift.
+ENABLE_LAYOUT_AWARE_PARSING = os.getenv(
+    "ENABLE_LAYOUT_AWARE_PARSING", "false",
+).lower() in ("true", "1", "yes")
+
+# Ingestion mode (Workstream E Phase 5a). "sync" (default — no behavior
+# change for desktop or existing server deployments) processes ingestion
+# inline within the request semaphore. "async" enqueues onto the RQ
+# queue for processing by the cerid-ingest-worker (must run separately
+# via `python -m app.queue.worker` or as a compose service). The
+# /ingest/progress contract is preserved across both modes via a Redis
+# hash that both the router and worker write to.
+INGEST_QUEUE_MODE = os.getenv("INGEST_QUEUE_MODE", "sync").lower()
+
+# Embedding model version stamp — written to chunk metadata at ingest time
+# so downstream re-embed migrations (Phase 5c) can identify which chunks
+# need re-encoding when the embedding model changes. Defaults to the
+# EMBEDDING_MODEL string for backward compat with existing un-stamped data.
+EMBEDDING_MODEL_VERSION = os.getenv("EMBEDDING_MODEL_VERSION", EMBEDDING_MODEL)
+
+# Per-domain embedding-model version overrides (Workstream E Phase 5c).
+# Empty by default — the global EMBEDDING_MODEL_VERSION applies. During a
+# dual-collection migration, the operator stages the new version here for
+# the target domain, runs scripts/reembed_collection.py to dual-write,
+# then keeps the override post-cutover so query routing reads from the
+# versioned collection. See docs/EMBEDDING_MIGRATIONS.md for the full
+# playbook.
+EMBEDDING_MODEL_VERSIONS_PER_DOMAIN: dict[str, str] = {}
+
+
+def embedding_version_for_domain(domain: str) -> str:
+    """Return the embedding-model version label for a given KB domain.
+
+    Falls back to the global EMBEDDING_MODEL_VERSION when no per-domain
+    override is set. Used by the chunk-write path to stamp metadata and
+    by the query-routing path (Phase 5c cutover) to pick the correct
+    versioned ChromaDB collection.
+    """
+    return EMBEDDING_MODEL_VERSIONS_PER_DOMAIN.get(domain, EMBEDDING_MODEL_VERSION)
+
 # Smart routing: when enabled, "auto" model selection in chat uses the smart
 # router to pick the best model based on query complexity and availability.
 SMART_ROUTING_ENABLED = os.getenv("SMART_ROUTING_ENABLED", "true").lower() == "true"
@@ -594,6 +676,15 @@ INFERENCE_MODE = os.getenv("INFERENCE_MODE", "auto")
 CERID_SIDECAR_PORT = int(os.getenv("CERID_SIDECAR_PORT", "8889"))
 CERID_SIDECAR_URL = os.getenv("CERID_SIDECAR_URL", f"http://localhost:{CERID_SIDECAR_PORT}")
 INFERENCE_RECHECK_INTERVAL = int(os.getenv("INFERENCE_RECHECK_INTERVAL", "300"))
+
+# CERID_PRELOAD_MODELS is a Docker build-arg consumed by src/mcp/Dockerfile
+# (stage 2: models). The Python app never reads it at runtime — model
+# downloading is governed by the lazy-load paths in core/retrieval/reranker.py
+# and core/utils/embeddings.py. The declaration here exists so
+# scripts/gen_env_example.py surfaces it in .env.example, where
+# docker-compose.yml's build.args block reads it via ${CERID_PRELOAD_MODELS:-true}.
+# See docs/MODEL_PRELOAD.md for the trade-off.
+_PRELOAD_MODELS_FOR_ENV_EXAMPLE = os.getenv("CERID_PRELOAD_MODELS", "false")
 
 PIPELINE_PROVIDERS: dict[str, str] = {
     "claim_extraction": os.getenv("PROVIDER_CLAIM_EXTRACTION", _global_provider),

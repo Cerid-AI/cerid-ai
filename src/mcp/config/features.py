@@ -118,6 +118,11 @@ ENABLE_AUTO_INJECT = os.getenv("ENABLE_AUTO_INJECT", "true").lower() == "true"
 ENABLE_SELF_RAG = os.getenv("ENABLE_SELF_RAG", "true").lower() == "true"
 ENABLE_CONTEXTUAL_CHUNKS = os.getenv("ENABLE_CONTEXTUAL_CHUNKS", "false").lower() == "true"
 ENABLE_MEMORY_RECALL = os.getenv("ENABLE_MEMORY_RECALL", "true").lower() == "true"
+# Step-timing instrumentation for the 22-step query pipeline (Workstream E
+# Phase 0). When true, every query records per-step elapsed times and emits
+# them as a `timings` field on the response. Per-request overrides via the
+# `X-Debug-Timing` header still work; this flag controls the default.
+ENABLE_STEP_TIMING = os.getenv("ENABLE_STEP_TIMING", "true").lower() == "true"
 # CERID_ENCRYPTION_KEY is read directly from env by utils/encryption.py
 # Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 

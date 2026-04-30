@@ -13,12 +13,15 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import warnings
 from pathlib import Path
 from typing import Any
 
 import sentry_sdk
 
 import config
+from core.utils.swallowed import log_swallowed_error
 
 logger = logging.getLogger("ai-companion.bm25")
 
@@ -63,14 +66,31 @@ class BM25Index:
         self._texts: list[str] = []
         self._doc_ids: list[str] = []
         self._doc_id_set: set = set()
+        # Workstream E Phase 0: tenant-scoped BM25 search. Each chunk_id
+        # carries its tenant_id so search(tenant_id=...) can post-filter at
+        # the index layer instead of relying on the caller-side post-filter.
+        self._doc_tenant: dict[str, str] = {}
         self._retriever: Any | None = None
 
         self._load()
 
-    def add_documents(self, chunk_ids: list[str], texts: list[str]) -> int:
-        """Add documents to the index. Skips duplicates. Returns count added."""
+    def add_documents(
+        self,
+        chunk_ids: list[str],
+        texts: list[str],
+        tenant_id: str | None = None,
+    ) -> int:
+        """Add documents to the index. Skips duplicates. Returns count added.
+
+        ``tenant_id`` (Workstream E Phase 0) is stamped on each document so
+        :meth:`search` can scope results at the index layer. Defaults to
+        ``config.DEFAULT_TENANT_ID`` for backward compatibility with callers
+        that don't yet pass tenant.
+        """
         if not _bm25s_available:
             return 0
+
+        tenant = tenant_id if tenant_id is not None else config.DEFAULT_TENANT_ID
 
         new_entries: list[dict] = []
         for chunk_id, text in zip(chunk_ids, texts):
@@ -81,7 +101,8 @@ class BM25Index:
             self._texts.append(text)
             self._doc_ids.append(chunk_id)
             self._doc_id_set.add(chunk_id)
-            new_entries.append({"id": chunk_id, "text": text})
+            self._doc_tenant[chunk_id] = tenant
+            new_entries.append({"id": chunk_id, "text": text, "tenant_id": tenant})
 
         if new_entries:
             self._rebuild()
@@ -89,10 +110,20 @@ class BM25Index:
 
         return len(new_entries)
 
-    def search(self, query: str, top_k: int = 10) -> list[tuple[str, float]]:
+    def search(
+        self,
+        query: str,
+        top_k: int = 10,
+        tenant_id: str | None = None,
+    ) -> list[tuple[str, float]]:
         """
         Search the index. Returns (chunk_id, normalized_score) tuples.
         Scores are normalized to [0, 1] by dividing by the max score.
+
+        When ``tenant_id`` is provided (Workstream E Phase 0), results are
+        filtered at the index layer to match. When ``None``, all tenants
+        are returned and the caller is expected to apply
+        :func:`core.context.identity.chunk_matches_tenant` (deprecated path).
         """
         if not _bm25s_available or self._retriever is None or not self._texts:
             return []
@@ -106,8 +137,10 @@ class BM25Index:
         if len(query_tokens[0]) == 0:
             return []
 
-        k = min(top_k, len(self._texts))
-        results, scores = self._retriever.retrieve(query_tokens, k=k)
+        # Over-fetch slightly when tenant filtering is on so we still return
+        # ~top_k matches after the post-filter trims cross-tenant hits.
+        fetch_k = min(top_k * 4 if tenant_id is not None else top_k, len(self._texts))
+        results, scores = self._retriever.retrieve(query_tokens, k=fetch_k)
 
         # results shape: (1, k) - indices into corpus
         # scores shape: (1, k) - BM25 scores (descending)
@@ -124,7 +157,14 @@ class BM25Index:
             if score <= 0:
                 break
             idx = int(results[0, i])
-            output.append((self._doc_ids[idx], round(score / max_score, 4)))
+            chunk_id = self._doc_ids[idx]
+            if tenant_id is not None:
+                doc_tenant = self._doc_tenant.get(chunk_id, config.DEFAULT_TENANT_ID)
+                if doc_tenant != tenant_id:
+                    continue
+            output.append((chunk_id, round(score / max_score, 4)))
+            if len(output) >= top_k:
+                break
 
         return output
 
@@ -171,6 +211,12 @@ class BM25Index:
                     self._texts.append(text)
                     self._doc_ids.append(chunk_id)
                     self._doc_id_set.add(chunk_id)
+                    # Workstream E Phase 0: pre-tenant corpus entries default
+                    # to DEFAULT_TENANT_ID for backward compat. New ingest
+                    # writes always carry an explicit tenant_id field.
+                    self._doc_tenant[chunk_id] = entry.get(
+                        "tenant_id", config.DEFAULT_TENANT_ID,
+                    )
 
             self._rebuild()
             if self._doc_ids:
@@ -188,6 +234,7 @@ class BM25Index:
             self._texts = []
             self._doc_ids = []
             self._doc_id_set = set()
+            self._doc_tenant = {}
             self._retriever = None
 
     def _append_to_disk(self, entries: list[dict]) -> None:
@@ -195,6 +242,16 @@ class BM25Index:
             with open(self._corpus_file, "a") as f:
                 for entry in entries:
                     f.write(json.dumps(entry) + "\n")
+                # Workstream E Phase 0: explicit flush+fsync to close the
+                # crash-window where a kill -9 between append and OS flush
+                # left the BM25 corpus drifted ahead of ChromaDB. fsync
+                # gets its own try/except because it can fail spuriously
+                # on macOS under heavy I/O without invalidating the write.
+                f.flush()
+                try:
+                    os.fsync(f.fileno())
+                except OSError as fsync_exc:
+                    log_swallowed_error("core.retrieval.bm25.fsync", fsync_exc)
         except Exception:
             logger.exception("bm25.persist_failed", extra={"domain": self.domain})
             sentry_sdk.capture_exception()
@@ -214,18 +271,46 @@ def get_index(domain: str) -> BM25Index:
     return _indexes[domain]
 
 
-def index_chunks(domain: str, chunk_ids: list[str], texts: list[str]) -> int:
-    """Index chunks for BM25 search. Called during ingestion."""
+def index_chunks(
+    domain: str,
+    chunk_ids: list[str],
+    texts: list[str],
+    tenant_id: str | None = None,
+) -> int:
+    """Index chunks for BM25 search. Called during ingestion.
+
+    ``tenant_id`` (Workstream E Phase 0) is forwarded to
+    :meth:`BM25Index.add_documents`. None defaults to
+    ``config.DEFAULT_TENANT_ID``.
+    """
     idx = get_index(domain)
-    return idx.add_documents(chunk_ids, texts)
+    return idx.add_documents(chunk_ids, texts, tenant_id=tenant_id)
 
 
 def search_bm25(
-    domain: str, query: str, top_k: int = 10
+    domain: str,
+    query: str,
+    top_k: int = 10,
+    tenant_id: str | None = None,
 ) -> list[tuple[str, float]]:
-    """Search a domain's BM25 index. Returns (chunk_id, score) tuples."""
+    """Search a domain's BM25 index. Returns (chunk_id, score) tuples.
+
+    ``tenant_id`` (Workstream E Phase 0) scopes results at the index
+    layer. Calling without ``tenant_id`` emits a :class:`DeprecationWarning`
+    — the index-layer filter is the canonical path; callers should migrate
+    off the post-filter at ``query_agent.py`` (chunk_matches_tenant).
+    """
+    if tenant_id is None:
+        warnings.warn(
+            "search_bm25 called without tenant_id; tenant scoping will be "
+            "enforced at the caller layer via chunk_matches_tenant. "
+            "Pass tenant_id to scope at the BM25 index instead. This "
+            "deprecation will be removed after Workstream E Phase 0.5.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
     idx = get_index(domain)
-    return idx.search(query, top_k)
+    return idx.search(query, top_k, tenant_id=tenant_id)
 
 
 def rebuild_all() -> int:
@@ -237,6 +322,7 @@ def rebuild_all() -> int:
             idx._texts.clear()
             idx._doc_ids.clear()
             idx._doc_id_set.clear()
+            idx._doc_tenant.clear()
             idx._retriever = None
             idx._load()
         else:

@@ -8,7 +8,7 @@ Every `@router.*` decorator shipped in the public (OSS Apache-2.0) distribution.
 Internal-only routers (billing, trading SDK, ops endpoints) are stripped and
 not documented here; see the internal repo for the full registry.
 
-**Total routes:** 247
+**Total routes:** 249
 
 | Method | Path | Handler | Module | Tags | Build |
 |--------|------|---------|--------|------|-------|
@@ -208,6 +208,8 @@ not documented here; see the internal repo for the full registry.
 | POST | `/settings/openrouter-key/test` | `test_openrouter_key` | `src/mcp/app/routers/settings_secrets.py` | settings-secrets |  |
 | POST | `/configure` | `configure` | `src/mcp/app/routers/setup.py` | setup |  |
 | GET | `/health` | `setup_health` | `src/mcp/app/routers/setup.py` | setup |  |
+| POST | `/models/preload` | `models_preload` | `src/mcp/app/routers/setup.py` | setup |  |
+| GET | `/models/status` | `models_status` | `src/mcp/app/routers/setup.py` | setup |  |
 | POST | `/retest-services` | `retest_services` | `src/mcp/app/routers/setup.py` | setup |  |
 | POST | `/retest-verification` | `retest_verification` | `src/mcp/app/routers/setup.py` | setup |  |
 | GET | `/status` | `setup_status` | `src/mcp/app/routers/setup.py` | setup |  |

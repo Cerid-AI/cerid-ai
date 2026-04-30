@@ -7,3 +7,7 @@ mypy>=1.10
 types-redis
 import-linter
 pytest-benchmark>=4.0.0,<5
+# Workstream E Phase 2b.5 — generates synthetic PDFs in test fixtures
+# (the runtime PDF parser is pdfplumber, already in requirements.txt;
+# reportlab only writes test files and never ships in production).
+reportlab>=4.0,<5

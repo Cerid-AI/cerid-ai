@@ -15,11 +15,21 @@ COPY requirements.lock .
 RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 
 # Stage 2: Models — pre-download ONNX models into HuggingFace cache
-# Set CERID_PRELOAD_MODELS=false to skip (saves ~3GB, models download on first use)
+# Workstream E Phase E.6.5: default flipped to false (~3 GB lighter image).
+# Set CERID_PRELOAD_MODELS=true to bake models in for offline / air-gapped
+# deployments. Operators on the default lean image warm the cache via the
+# Settings → Inference Models panel ("Download models" button) or by
+# running `curl -X POST http://localhost:8888/setup/models/preload`.
+# See docs/MODEL_PRELOAD.md for the trade-off and the GPU sidecar path.
 FROM builder AS models
 
-ARG CERID_PRELOAD_MODELS=true
-RUN if [ "$CERID_PRELOAD_MODELS" = "true" ]; then \
+ARG CERID_PRELOAD_MODELS=false
+# Always create the cache dir — the runtime stage's COPY --from=models
+# requires a source path to exist, even when preload is skipped (lean
+# image case). Without this, the COPY fails with "ENOENT" and the
+# build aborts with no useful diagnostic.
+RUN mkdir -p /root/.cache/huggingface && \
+    if [ "$CERID_PRELOAD_MODELS" = "true" ]; then \
     python -c "\
 from huggingface_hub import hf_hub_download; \
 hf_hub_download('cross-encoder/ms-marco-MiniLM-L-6-v2', 'onnx/model.onnx'); \
