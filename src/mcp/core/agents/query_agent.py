@@ -25,6 +25,7 @@ from core.utils.cache import log_event
 from core.utils.circuit_breaker import CircuitOpenError
 from core.utils.embeddings import l2_distance_to_relevance
 from core.utils.llm_parsing import parse_llm_json
+from core.utils.swallowed import log_swallowed_error
 from core.utils.text import STOPWORDS as _STOPWORDS
 from core.utils.text import WORD_RE as _WORD_RE
 
@@ -264,14 +265,51 @@ async def multi_domain_query(
                 if bm25_hits:
                     bm25_map = dict(bm25_hits)
 
-                    for entry in formatted:
-                        kw_score = bm25_map.pop(entry["chunk_id"], 0.0)
-                        vector_score = entry["relevance"]
-                        entry["relevance"] = round(
-                            config.HYBRID_VECTOR_WEIGHT * vector_score
-                            + config.HYBRID_KEYWORD_WEIGHT * kw_score,
-                            4,
+                    # Workstream E Phase 3 wire-in: HYBRID_FUSION_MODE selects
+                    # between the legacy weighted-sum blend and Reciprocal
+                    # Rank Fusion (Cormack/Clarke/Buettcher 2009; the 2026
+                    # default in Elastic, OpenSearch, Azure AI Search,
+                    # neo4j-graphrag). Default stays "weighted_sum" so this
+                    # commit is a pure plumbing change — flip
+                    # HYBRID_FUSION_MODE=rrf to enable.
+                    fusion_mode = getattr(config, "HYBRID_FUSION_MODE", "weighted_sum")
+                    fused_map: dict[str, float] = {}
+
+                    if fusion_mode == "rrf":
+                        from core.retrieval.rrf import rrf_fuse
+                        vector_ranking = [
+                            (entry["chunk_id"], entry["relevance"])
+                            for entry in formatted
+                        ]
+                        # bm25_hits already sorted descending per search_bm25 contract
+                        fused = rrf_fuse(
+                            [vector_ranking, bm25_hits],
+                            k=config.HYBRID_RRF_K,
+                            weights=[
+                                config.HYBRID_RRF_VECTOR_WEIGHT,
+                                config.HYBRID_RRF_BM25_WEIGHT,
+                            ],
                         )
+                        fused_map = dict(fused)
+                        for entry in formatted:
+                            entry["relevance"] = round(
+                                fused_map.get(entry["chunk_id"], 0.0), 6,
+                            )
+                        # Drop entries already represented from bm25_map so
+                        # the bm25-only fetch below only fires on net-new
+                        # chunk_ids — same shape as the legacy path.
+                        for entry in formatted:
+                            bm25_map.pop(entry["chunk_id"], None)
+                    else:
+                        # Legacy weighted-sum blend (default).
+                        for entry in formatted:
+                            kw_score = bm25_map.pop(entry["chunk_id"], 0.0)
+                            vector_score = entry["relevance"]
+                            entry["relevance"] = round(
+                                config.HYBRID_VECTOR_WEIGHT * vector_score
+                                + config.HYBRID_KEYWORD_WEIGHT * kw_score,
+                                4,
+                            )
 
                     if bm25_map:
                         try:
@@ -293,16 +331,28 @@ async def multi_domain_query(
                                     meta.get(k) == v for k, v in metadata_filter.items()
                                 ):
                                     continue
+                                # In RRF mode the bm25-only chunk's fused
+                                # score already accounts for its rank; in
+                                # legacy mode use the keyword-weighted bm25.
+                                if fusion_mode == "rrf":
+                                    rel = round(
+                                        fused_map.get(cid, bm25_map[cid]),
+                                        6,
+                                    )
+                                else:
+                                    rel = config.HYBRID_KEYWORD_WEIGHT * bm25_map[cid]
                                 formatted.append(_format_chroma_result(
                                     content=fetched["documents"][j],
-                                    relevance=config.HYBRID_KEYWORD_WEIGHT * bm25_map[cid],
+                                    relevance=rel,
                                     chunk_id=cid,
                                     domain=domain,
                                     metadata=meta,
                                 ))
                                 seen_ids.add(cid)
-                        except Exception as e:
-                            logger.debug(f"BM25-only fetch failed for {domain}: {e}")
+                        except Exception as e:  # noqa: BLE001 — observability boundary
+                            log_swallowed_error(
+                                "core.agents.query_agent.bm25_only_fetch", e,
+                            )
 
             return formatted
 
@@ -535,15 +585,24 @@ async def _rerank_cross_encoder(
     results: list[dict[str, Any]],
     query: str,
 ) -> list[dict[str, Any]]:
-    """Rerank via local cross-encoder model (ONNX, ~50 ms for 15 candidates).
+    """Rerank via cross-encoder. Workstream E Phase E.6.4 routes through
+    the GPU sidecar when auto-detection picks ``fastembed-sidecar`` and
+    the sidecar is reachable; otherwise falls through to local ONNX
+    (~50 ms for 15 candidates on CPU).
 
     On failure, returns results in their input order (already sorted by
     relevance upstream) and tags each with ``reranker_status =
     'onnx_failed_no_fallback'`` so the caller can surface the degraded state.
     The former LLM fallback routed through Bifrost; after Bifrost retirement
-    (audit C-4/C-9) a single ONNX load failure would otherwise crash every
+    (audit C-4/C-9) a single load failure would otherwise crash every
     query, so we prefer an honest no-op over a broken alternative path.
     """
+    # ── Sidecar fast-path (Phase E.6.4) ───────────────────────────────────
+    sidecar_result = await _maybe_rerank_via_sidecar(results, query)
+    if sidecar_result is not None:
+        return sidecar_result
+
+    # ── Local ONNX fallback (default) ─────────────────────────────────────
     try:
         from core.retrieval.reranker import rerank as ce_rerank
 
@@ -559,6 +618,37 @@ async def _rerank_cross_encoder(
         for r in results:
             r["reranker_status"] = "onnx_failed_no_fallback"
         return results
+
+
+async def _maybe_rerank_via_sidecar(
+    results: list[dict[str, Any]],
+    query: str,
+) -> list[dict[str, Any]] | None:
+    """If the auto-detected provider is the sidecar AND it's reachable,
+    rerank via HTTP and return scored+sorted results. Returns ``None``
+    to signal "fall through to local ONNX" — never raises into the
+    query path.
+    """
+    try:
+        from utils.inference_config import get_inference_config
+        cfg = get_inference_config()
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("core.agents.query_agent.sidecar_detect", exc)
+        return None
+    if cfg.provider != "fastembed-sidecar" or not cfg.sidecar_available:
+        return None
+    try:
+        from utils.inference_sidecar_client import sidecar_rerank
+        documents = [r.get("content", "") for r in results]
+        with span("retrieval.rerank", "sidecar", k=len(results)):
+            scores = await sidecar_rerank(query, documents)
+        for r, s in zip(results, scores, strict=False):
+            r["relevance"] = float(s)
+            r["reranker_status"] = "sidecar"
+        return sorted(results, key=lambda r: r.get("relevance", 0.0), reverse=True)
+    except Exception as exc:  # noqa: BLE001 — fall through to local ONNX
+        log_swallowed_error("core.agents.query_agent.sidecar_rerank", exc)
+        return None
 
 
 async def _rerank_llm(
@@ -1023,8 +1113,10 @@ async def _agent_query_impl(
                     if cached is not None:
                         cached["semantic_cache_hit"] = True
                         return cached
-            except Exception as e:
-                logger.debug("Semantic cache lookup skipped: %s", e)
+            except Exception as e:  # noqa: BLE001 — observability boundary
+                log_swallowed_error(
+                    "core.agents.query_agent.semantic_cache_lookup", e,
+                )
 
     search_query = query
     if conversation_messages:
@@ -1260,8 +1352,10 @@ async def _agent_query_impl(
             # Keep any results beyond top 15 (not NLI-checked, low-ranked)
             _nli_filtered.extend(results[15:])
             results = _nli_filtered
-        except Exception:
-            logger.debug("NLI gate unavailable — skipping")
+        except Exception as nli_exc:  # noqa: BLE001 — observability boundary
+            log_swallowed_error(
+                "core.agents.query_agent.nli_gate", nli_exc,
+            )
 
     # Step 5.7: Filter low-relevance results below minimum threshold
     # When metadata_filter is set, the caller explicitly scoped to a file —
@@ -1337,7 +1431,9 @@ async def _agent_query_impl(
         try:
             from core.retrieval.semantic_cache import cache_store
             cache_store(query, _query_embedding, result_dict, redis_client)
-        except Exception as e:
-            logger.debug("Semantic cache store failed: %s", e)
+        except Exception as e:  # noqa: BLE001 — observability boundary
+            log_swallowed_error(
+                "core.agents.query_agent.semantic_cache_store", e,
+            )
 
     return result_dict

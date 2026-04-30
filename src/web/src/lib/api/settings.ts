@@ -45,6 +45,53 @@ export async function fetchHealthStatus(): Promise<HealthStatusResponse> {
   return res.json()
 }
 
+// --- Model preload (Workstream E Phase E.6.3) -------------------------------
+// Surfaces the CERID_PRELOAD_MODELS choice in the UI: /setup/models/status
+// is a non-blocking probe; /setup/models/preload triggers the HuggingFace
+// download for the reranker + embedder so users on lean Docker images
+// don't hit a silent 5-15s stall on their first semantic query.
+
+export type ModelCacheStatus = {
+  repo: string
+  cached: boolean
+  files: Record<string, string | null>
+  // Workstream E Phase E.6.6: true when a worker thread is currently
+  // inside `_load_model()` — drives the first-query notification banner.
+  // Absent on older server builds; treat undefined as `false`.
+  loading?: boolean
+}
+
+export type ModelsStatusResponse = {
+  reranker: ModelCacheStatus
+  embedder: ModelCacheStatus
+}
+
+export type ModelsPreloadResponse = {
+  status: "ok" | "partial"
+  reranker_status: "loaded" | "failed" | "skipped_server_side"
+  reranker_ms?: number
+  reranker_error?: string
+  embedder_status: "loaded" | "failed" | "skipped_server_side"
+  embedder_ms?: number
+  embedder_error?: string
+  total_ms: number
+}
+
+export async function fetchModelsStatus(): Promise<ModelsStatusResponse> {
+  const res = await fetch(`${MCP_BASE}/setup/models/status`, { headers: mcpHeaders() })
+  if (!res.ok) throw new Error(await extractError(res, `Models status fetch failed: ${res.status}`))
+  return res.json()
+}
+
+export async function preloadModels(): Promise<ModelsPreloadResponse> {
+  const res = await fetch(`${MCP_BASE}/setup/models/preload`, {
+    method: "POST",
+    headers: mcpHeaders(),
+  })
+  if (!res.ok) throw new Error(await extractError(res, `Model preload failed: ${res.status}`))
+  return res.json()
+}
+
 // --- Settings ---
 
 export async function fetchSettings(): Promise<ServerSettings> {

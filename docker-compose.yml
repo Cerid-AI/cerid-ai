@@ -113,6 +113,18 @@ services:
     build:
       context: ./src/mcp
       dockerfile: Dockerfile
+      args:
+        # Workstream E Phase E.6.5: default flipped to false (~3 GB
+        # lighter image). The reranker + embedder ONNX models download
+        # lazily on first inference (5-15s stall), or operators warm
+        # the cache from Settings → Inference Models in the GUI, the
+        # setup wizard, or `curl -X POST /setup/models/preload`.
+        # GPU-equipped hosts get the speedup via the sidecar fast-path
+        # wired in Phase E.6.4 (no per-query latency).
+        # Flip back to true for offline / air-gapped / CI builds:
+        #   CERID_PRELOAD_MODELS=true
+        # See docs/MODEL_PRELOAD.md for the full trade-off.
+        CERID_PRELOAD_MODELS: ${CERID_PRELOAD_MODELS:-false}
     ports:
       - "${CERID_BIND_ADDR:-127.0.0.1}:${CERID_PORT_MCP:-8888}:8888"
     volumes:

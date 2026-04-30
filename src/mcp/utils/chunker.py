@@ -212,15 +212,18 @@ PARENT_CHILD_ENABLED = os.getenv(
     "ENABLE_PARENT_CHILD_RETRIEVAL", "false"
 ).lower() in ("true", "1")
 
-# Child chunk size: parent max // 4 (~128 tokens for 512-token parents)
-_CHILD_CHUNK_TOKENS = 128
-_CHILD_OVERLAP_RATIO = 0.1  # 10% overlap for small child chunks
+# Child chunk size: parent max // 4 (~128 tokens for 512-token parents).
+# Workstream E Phase 0.5 — exposed as settings so operators can tune
+# without a code change. Defaults preserve prior behaviour.
+_CHILD_CHUNK_TOKENS = int(os.getenv("CHILD_CHUNK_TOKENS", "128"))
+_CHILD_OVERLAP_RATIO = float(os.getenv("CHILD_CHUNK_OVERLAP_PCT", "0.1"))
+_PARENT_CHUNK_TOKENS = int(os.getenv("PARENT_CHUNK_TOKENS", "512"))
 
 
 def chunk_with_parents(
     text: str,
     artifact_id: str,
-    max_tokens: int = 512,
+    max_tokens: int = _PARENT_CHUNK_TOKENS,
     overlap: float = CHUNK_OVERLAP_RATIO,
     mode: str | None = None,
     context_header: str = "",

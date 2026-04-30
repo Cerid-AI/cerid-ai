@@ -1,0 +1,89 @@
+# Langfuse self-hosted observability stack (Workstream E Phase 5b).
+#
+# Optional. Bring up alongside the main cerid stack to capture LLM traces
+# and sampled LLM-judge faithfulness scores from the MCP server. Defaults
+# to loopback exposure — *nothing leaves the box* unless an operator
+# changes LANGFUSE_HOST in the MCP env.
+#
+# Usage:
+#   make langfuse-up       # bring up Langfuse + its private postgres
+#   make langfuse-down     # tear down (postgres volume retained)
+#   make langfuse-purge    # tear down and drop the volume
+#
+# After bring-up:
+#   1. Visit http://localhost:3000 to create the first org + project
+#   2. Generate public + secret keys for the project
+#   3. Set LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY in the MCP container env
+#   4. Restart MCP — traces start flowing
+#
+# Privacy posture: all data stays inside this docker network. The Postgres
+# below holds Langfuse's internal data (projects, users, trace metadata) —
+# *not* cerid-ai user data. Cerid chunks/queries pass through Langfuse
+# only as trace payloads; review docs/OBSERVABILITY.md before exposing to
+# the public internet.
+
+services:
+  langfuse-postgres:
+    image: postgres:16-alpine
+    container_name: cerid-langfuse-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD:?set LANGFUSE_DB_PASSWORD in .env}
+      POSTGRES_DB: langfuse
+    volumes:
+      - langfuse-postgres-data:/var/lib/postgresql/data
+    networks:
+      - langfuse-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse -d langfuse"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  langfuse:
+    image: langfuse/langfuse:2  # pin to v2; v3 broke self-host backward compat (2025-04)
+    container_name: cerid-langfuse
+    restart: unless-stopped
+    depends_on:
+      langfuse-postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://langfuse:${LANGFUSE_DB_PASSWORD}@langfuse-postgres:5432/langfuse
+      NEXTAUTH_URL: ${LANGFUSE_PUBLIC_URL:-http://localhost:3000}
+      NEXTAUTH_SECRET: ${LANGFUSE_AUTH_SECRET:?set LANGFUSE_AUTH_SECRET in .env}
+      SALT: ${LANGFUSE_SALT:?set LANGFUSE_SALT in .env}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:?set LANGFUSE_ENCRYPTION_KEY in .env}
+      TELEMETRY_ENABLED: "false"             # don't phone home to Langfuse cloud
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
+      # Disable the public sign-up form so the host running this can keep
+      # the Langfuse UI loopback-only without worrying about drive-by accounts
+      AUTH_DISABLE_SIGNUP: "true"
+    ports:
+      # Bind to loopback only on host port 3100 (3000 is taken by cerid-web).
+      # The MCP container reaches us via the docker network on `langfuse:3000`
+      # — the internal port is unchanged; only the host-side mapping moved.
+      # Operators who want the UI on a private network change this to
+      # ${LANGFUSE_HOST_IFACE:-127.0.0.1}.
+      - "127.0.0.1:3100:3000"
+    networks:
+      - langfuse-internal
+      - llm-network                          # shared with cerid stack so MCP can reach us
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:3000/api/public/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+volumes:
+  langfuse-postgres-data:
+    driver: local
+
+networks:
+  langfuse-internal:
+    driver: bridge
+  llm-network:
+    external: true
+    # External network created by start-cerid.sh before any compose runs.
+    # Same network the main docker-compose.yml + stacks/gateway,infrastructure,tunnel
+    # all join — every container resolves siblings by container name.

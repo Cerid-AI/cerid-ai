@@ -23,11 +23,28 @@ from app.deps import get_chroma, get_neo4j, get_redis
 from app.parsers import parse_file
 from core.context.identity import get_tenant_id
 from core.utils import cache
+from core.utils.swallowed import log_swallowed_error
 from core.utils.time import utcnow_iso
 from utils.chunker import chunk_text, make_context_header
 from utils.metadata import ai_categorize, extract_metadata, extract_metadata_minimal
 
 logger = logging.getLogger("ai-companion")
+
+
+def _coerce_chroma_meta(value: Any) -> Any:
+    """Coerce a metadata value into ChromaDB-compatible primitives.
+
+    ChromaDB rejects ``list``/``dict``/``set``/``tuple`` values (its
+    metadata schema is ``str | int | float | bool | None``). The Phase 2b
+    parsers emit Python-native ``column_headers: list[str]``,
+    ``heading_path: list[str]``, ``cells: list[str]``, etc. — JSON-encode
+    those at the write boundary so retrieval code can decode back when
+    needed (and so the legacy chunk_text path with primitive-only
+    metadata is unaffected).
+    """
+    if isinstance(value, (list, dict, set, tuple)):
+        return json.dumps(value if not isinstance(value, set) else sorted(value))
+    return value
 
 
 def validate_file_path(file_path: str) -> Path:
@@ -138,8 +155,10 @@ def _reingest_artifact(
     try:
         from core.retrieval.bm25 import index_chunks
         index_chunks(domain, chunk_ids, chunks)
-    except Exception as e:
-        logger.debug(f"BM25 indexing failed during re-ingest (non-blocking): {e}")
+    except Exception as e:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "app.services.ingestion.bm25_index_reingest", e,
+        )
 
     # Compute quality_score for re-ingested content
     _summary = base_meta.get("summary", "")
@@ -198,6 +217,7 @@ def ingest_content(
     metadata: dict[str, Any] | None = None,
     *,
     skip_quality: bool = False,
+    pre_chunked: list[dict[str, Any]] | None = None,
 ) -> dict:
     """Core ingest path. Called by REST endpoints, agents, and MCP tool dispatcher.
 
@@ -205,6 +225,16 @@ def ingest_content(
     skipped (neutral 0.5 stored) — used by wizard / bulk paths that don't
     have the summary/keywords the quality function expects. The curator
     agent can re-score later when artifact metadata is enriched.
+
+    ``pre_chunked`` (Workstream E Phase 2b wire-in) accepts an already-
+    dispatched chunk list of ``[{"text": str, "metadata": dict}, ...]``
+    from :func:`core.ingest.dispatch.layout_aware_parse`. When supplied,
+    the inline ``chunk_text`` + ``contextualize_chunks`` step is skipped
+    and the per-chunk metadata (column_headers, heading_path,
+    file:start_line:end_line, etc.) is merged into ChromaDB metadata so
+    retrieval can filter by structural shape. ``content`` is still the
+    canonical artifact text used for content_hash / AI categorization /
+    Neo4j summary — ``pre_chunked`` only overrides the chunk-write step.
     """
     chroma = get_chroma()
     coll_name = config.collection_name(domain)
@@ -242,8 +272,10 @@ def ingest_content(
                 domain=domain,
                 chroma_client=get_chroma(),
             )
-    except Exception as e:
-        logger.debug(f"Semantic dedup check skipped: {e}")
+    except Exception as e:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "app.services.ingestion.semantic_dedup", e,
+        )
 
     # Re-ingestion check: same filename, different content
     fname = (metadata or {}).get("filename", "text_input")
@@ -255,23 +287,35 @@ def ingest_content(
         except Exception as e:
             logger.warning(f"Re-ingest check failed (proceeding as new): {e}")
 
-    fname_for_header = (metadata or {}).get("filename", "")
-    sub_cat_for_header = (metadata or {}).get("sub_category", "")
-    ctx_header = make_context_header(
-        filename=fname_for_header, domain=domain, sub_category=sub_cat_for_header,
-    )
-    chunks = chunk_text(
-        content, max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP,
-        context_header=ctx_header,
-    )
+    # Workstream E Phase 2b wire-in: when caller supplies layout-aware
+    # pre-chunked text + per-chunk metadata, skip the token-chunker and
+    # contextual-enrichment passes. The pre-chunked path already shaped
+    # each row / section / function as its own chunk with structural
+    # metadata that downstream retrieval depends on.
+    pre_chunk_metadatas: list[dict[str, Any]] = []
+    if pre_chunked:
+        chunks = [c["text"] for c in pre_chunked]
+        pre_chunk_metadatas = [
+            dict(c.get("metadata", {})) for c in pre_chunked
+        ]
+    else:
+        fname_for_header = (metadata or {}).get("filename", "")
+        sub_cat_for_header = (metadata or {}).get("sub_category", "")
+        ctx_header = make_context_header(
+            filename=fname_for_header, domain=domain, sub_category=sub_cat_for_header,
+        )
+        chunks = chunk_text(
+            content, max_tokens=config.CHUNK_MAX_TOKENS, overlap=config.CHUNK_OVERLAP,
+            context_header=ctx_header,
+        )
 
-    # Contextual enrichment — LLM-generated situational summaries per chunk
-    if config.ENABLE_CONTEXTUAL_CHUNKS:
-        try:
-            from core.utils.contextual import contextualize_chunks
-            chunks = contextualize_chunks(chunks, content, metadata)
-        except Exception as e:
-            logger.warning("Contextual enrichment skipped: %s", e)
+        # Contextual enrichment — LLM-generated situational summaries per chunk
+        if config.ENABLE_CONTEXTUAL_CHUNKS:
+            try:
+                from core.utils.contextual import contextualize_chunks
+                chunks = contextualize_chunks(chunks, content, metadata)
+            except Exception as e:
+                logger.warning("Contextual enrichment skipped: %s", e)
 
     ingested_at = utcnow_iso()
     base_meta = {
@@ -296,7 +340,22 @@ def ingest_content(
         base_meta["near_duplicate_similarity"] = str(near_dup["similarity"])
 
     chunk_ids = [f"{artifact_id}_chunk_{i}" for i in range(len(chunks))]
-    chunk_metadatas = [{**base_meta, "chunk_index": i} for i in range(len(chunks))]
+    if pre_chunk_metadatas:
+        # Per-chunk structural metadata (column_headers, heading_path,
+        # file:start_line:end_line) merges over base_meta. tenant_id is
+        # re-asserted last so a malformed parser metadata entry can't
+        # escape its own tenant scope. Values are JSON-coerced because
+        # ChromaDB rejects list/dict metadata.
+        chunk_metadatas = []
+        for i, extras in enumerate(pre_chunk_metadatas):
+            merged: dict[str, Any] = {**base_meta}
+            for k, v in extras.items():
+                merged[k] = _coerce_chroma_meta(v)
+            merged["chunk_index"] = i
+            merged["tenant_id"] = base_meta["tenant_id"]
+            chunk_metadatas.append(merged)
+    else:
+        chunk_metadatas = [{**base_meta, "chunk_index": i} for i in range(len(chunks))]
     collection.add(ids=chunk_ids, documents=chunks, metadatas=chunk_metadatas)
 
     # Index for BM25 hybrid search
@@ -400,8 +459,10 @@ def ingest_content(
         )
     except RuntimeError:
         pass  # no running loop (e.g. sync context) — webhook skipped
-    except Exception as e:
-        logger.debug(f"Webhook notification failed (non-blocking): {e}")
+    except Exception as e:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "app.services.ingestion.webhook_notify", e,
+        )
 
     # Surface related artifacts in response
     related = []
@@ -415,8 +476,10 @@ def ingest_content(
                  "relationship_type": r.get("relationship_type", "")}
                 for r in found
             ]
-        except Exception as e:
-            logger.debug(f"Related artifacts lookup failed (non-blocking): {e}")
+        except Exception as e:  # noqa: BLE001 — observability boundary
+            log_swallowed_error(
+                "app.services.ingestion.related_lookup", e,
+            )
 
     result = {
         "status": "success",
@@ -462,9 +525,33 @@ async def ingest_file(
     """
     validate_file_path(file_path)
     filename = Path(file_path).name
-    # Run sync parser in thread pool to avoid blocking the event loop
-    # (CPU-bound: PDF/DOCX parsing can take 100ms–2s per file)
-    parsed = await asyncio.to_thread(parse_file, file_path)
+
+    # Workstream E Phase 2b wire-in: when ENABLE_LAYOUT_AWARE_PARSING is on,
+    # supported extensions (.csv, .md, .markdown, .py) route through
+    # core/ingest/parsers/ so each row / section / function becomes its own
+    # chunk with structural metadata. Falls through to the legacy parse_file
+    # path on any failure or unsupported extension.
+    pre_chunked: list[dict[str, Any]] | None = None
+    parsed: dict[str, Any]
+    if config.ENABLE_LAYOUT_AWARE_PARSING:
+        from core.ingest.dispatch import layout_aware_parse
+        layout_result = await asyncio.to_thread(layout_aware_parse, file_path)
+        if layout_result is not None:
+            raw_text, pre_chunked = layout_result
+            ext = Path(file_path).suffix.lstrip(".").lower()
+            parsed = {
+                "text": raw_text,
+                "file_type": ext,
+                "page_count": None,
+                "parser": "layout_aware",
+            }
+        else:
+            # Run sync parser in thread pool to avoid blocking the event loop
+            parsed = await asyncio.to_thread(parse_file, file_path)
+    else:
+        # Run sync parser in thread pool to avoid blocking the event loop
+        # (CPU-bound: PDF/DOCX parsing can take 100ms–2s per file)
+        parsed = await asyncio.to_thread(parse_file, file_path)
     text = parsed["text"]
     if skip_metadata:
         meta = extract_metadata_minimal(text, filename, domain or config.DEFAULT_DOMAIN)
@@ -504,9 +591,14 @@ async def ingest_file(
     if client_source:
         meta["client_source"] = client_source
     # Run sync ingest_content in thread pool to avoid blocking the event loop
-    # (I/O-bound: Neo4j, ChromaDB, Redis writes + CPU-bound tiktoken chunking)
+    # (I/O-bound: Neo4j, ChromaDB, Redis writes + CPU-bound tiktoken chunking).
+    # Forward layout-aware pre_chunked through so per-chunk structural
+    # metadata (column_headers, heading_path, ...) reaches ChromaDB.
     result = await asyncio.to_thread(
-        ingest_content, text, domain, meta, skip_quality=skip_quality,
+        ingest_content,
+        text, domain, meta,
+        skip_quality=skip_quality,
+        pre_chunked=pre_chunked,
     )
     result["filename"] = filename
     result["categorize_mode"] = mode

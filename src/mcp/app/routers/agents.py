@@ -242,7 +242,15 @@ async def _agent_query_inner(req: AgentQueryRequest, request: Request):
                 # warm from cold without timing the call (audit RC-G).
                 return cached
 
-        debug_timing = request.headers.get("X-Debug-Timing", "").lower() == "true"
+        # Workstream E Phase 0: per-request header overrides the default;
+        # absent header → ENABLE_STEP_TIMING env (default true) so production
+        # traces always include per-stage elapsed times for the cost
+        # telemetry contract.
+        _dbg_header = request.headers.get("X-Debug-Timing", "").lower()
+        debug_timing = (
+            _dbg_header == "true" if _dbg_header in ("true", "false")
+            else config.ENABLE_STEP_TIMING
+        )
 
         # Consumer domain isolation: look up allowed_domains and strict_domains
         from config.settings import CONSUMER_REGISTRY

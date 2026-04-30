@@ -26,8 +26,9 @@ from core.utils.time import utcnow
 router = APIRouter()
 logger = logging.getLogger("ai-companion")
 
-# Concurrency limiter for ingestion
-_ingest_semaphore = asyncio.Semaphore(3)
+# Concurrency limiter for ingestion (Workstream E Phase 0 — env-configurable
+# via INGEST_CONCURRENCY; see config/settings.py).
+_ingest_semaphore = asyncio.Semaphore(config.INGEST_CONCURRENCY)
 
 # ── In-flight progress tracking ───────────────────────────────────────────────
 

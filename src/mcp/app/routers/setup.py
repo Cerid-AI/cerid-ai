@@ -657,3 +657,157 @@ async def system_check(response: Response) -> dict:
         "archive_path_exists": Path(archive_path).exists(),
         "default_archive_path": default_archive,
     }
+
+
+# ---------------------------------------------------------------------------
+# Model preload — Workstream E Phase E.6.2
+#
+# When CERID_PRELOAD_MODELS=false (lean Docker image, ~3GB lighter),
+# the reranker and embedder ONNX models download from HuggingFace on
+# the first inference call (5-15s blocking stall, no UX feedback).
+# These endpoints surface the option in the setup wizard so operators
+# can warm the cache explicitly instead of paying the cost on a real
+# user query. The React Settings panel (Phase E.6.3) consumes them.
+# ---------------------------------------------------------------------------
+
+
+_RERANKER_FILES = ("onnx/model.onnx", "tokenizer.json")
+_EMBEDDER_FILES = ("onnx/model.onnx", "tokenizer.json")
+
+
+def _model_cache_status(repo_id: str, filenames: tuple[str, ...],
+                       cache_dir: str | None) -> dict:
+    """Probe whether a HuggingFace model is cached locally.
+
+    Uses ``try_to_load_from_cache`` which is read-only and never
+    triggers a download. Returns a dict with the per-file cache
+    paths (None when not cached) plus a roll-up ``cached`` boolean.
+    """
+    from huggingface_hub import try_to_load_from_cache
+
+    files: dict[str, str | None] = {}
+    for filename in filenames:
+        try:
+            path = try_to_load_from_cache(
+                repo_id=repo_id, filename=filename, cache_dir=cache_dir,
+            )
+        except Exception:  # noqa: BLE001 — observability boundary
+            log_swallowed_error(
+                "app.routers.setup.model_cache_probe",
+                Exception(f"try_to_load_from_cache repo={repo_id} file={filename}"),
+            )
+            path = None
+        files[filename] = str(path) if path else None
+    return {
+        "repo": repo_id,
+        "cached": all(p is not None for p in files.values()),
+        "files": files,
+    }
+
+
+def _is_loading(module_path: str) -> bool:
+    """Probe a model module's ``is_loading()`` helper without raising.
+
+    Workstream E Phase E.6.6 — surfaces in-flight download state to the
+    GUI's first-query notification banner. Returns ``False`` when the
+    helper isn't reachable (import error, attribute missing) — the GUI
+    treats absence as "not loading" and falls back to the cached/not-cached
+    signal alone.
+    """
+    try:
+        if module_path == "reranker":
+            from core.retrieval.reranker import is_loading
+        else:
+            from core.utils.embeddings import is_loading
+        return bool(is_loading())
+    except Exception:  # noqa: BLE001 — observability boundary
+        log_swallowed_error(
+            "app.routers.setup.is_loading_probe",
+            Exception(f"is_loading probe failed for {module_path}"),
+        )
+        return False
+
+
+@router.get("/models/status")
+async def models_status() -> dict:
+    """Report whether the reranker + embedder ONNX models are cached.
+
+    Non-blocking — never triggers a download. The React Settings
+    panel polls this to decide whether to show "Models cached" or
+    "Download models (38MB)" in the Models card. The ``loading``
+    field (Workstream E Phase E.6.6) is true when a worker is
+    currently inside ``_load_model()`` — drives the first-query
+    notification banner so users know a stall is a one-time setup
+    cost rather than a hung query.
+    """
+    import config
+
+    rerank_cache = config.RERANK_MODEL_CACHE_DIR or None
+    embed_cache = config.EMBEDDING_MODEL_CACHE_DIR or None
+    reranker = _model_cache_status(
+        config.RERANK_CROSS_ENCODER_MODEL, _RERANKER_FILES, rerank_cache,
+    )
+    embedder = _model_cache_status(
+        config.EMBEDDING_MODEL, _EMBEDDER_FILES, embed_cache,
+    )
+    reranker["loading"] = _is_loading("reranker")
+    embedder["loading"] = _is_loading("embedder")
+    return {"reranker": reranker, "embedder": embedder}
+
+
+@router.post("/models/preload")
+async def models_preload() -> dict:
+    """Eagerly load the reranker + embedder, downloading from HuggingFace
+    if not yet cached.
+
+    Runs the same code paths the lazy first-call would trigger — this
+    endpoint just makes the cost explicit rather than charging it to
+    the next user query. Blocks until both models are loaded; on
+    typical broadband: ~10-15s for ~38MB.
+
+    Returns per-model timing so the GUI can render a meaningful
+    progress / completion message.
+    """
+    import asyncio
+    import time
+
+    started = time.perf_counter()
+    result: dict = {"status": "ok"}
+
+    # Reranker
+    try:
+        from core.retrieval.reranker import _load_model as _load_reranker
+
+        rt0 = time.perf_counter()
+        await asyncio.to_thread(_load_reranker)
+        result["reranker_ms"] = round((time.perf_counter() - rt0) * 1000, 1)
+        result["reranker_status"] = "loaded"
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("app.routers.setup.preload_reranker", exc)
+        result["reranker_status"] = "failed"
+        result["reranker_error"] = str(exc)
+        result["status"] = "partial"
+
+    # Embedder — only when EMBEDDING_MODEL is a HuggingFace ONNX model
+    # (when it equals the ChromaDB server default the embedding happens
+    # server-side and there's nothing to preload here).
+    try:
+        from core.utils.embeddings import get_embedding_function
+
+        ef = await asyncio.to_thread(get_embedding_function)
+        if ef is None:
+            result["embedder_status"] = "skipped_server_side"
+            result["embedder_ms"] = 0.0
+        else:
+            et0 = time.perf_counter()
+            await asyncio.to_thread(ef._load)
+            result["embedder_ms"] = round((time.perf_counter() - et0) * 1000, 1)
+            result["embedder_status"] = "loaded"
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("app.routers.setup.preload_embedder", exc)
+        result["embedder_status"] = "failed"
+        result["embedder_error"] = str(exc)
+        result["status"] = "partial"
+
+    result["total_ms"] = round((time.perf_counter() - started) * 1000, 1)
+    return result
