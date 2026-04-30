@@ -121,6 +121,11 @@ jobs:
           # CVE-2026-3219: pip concatenated tar+ZIP confusion — no upstream fix released; every install path
           #                uses requirements.lock with --generate-hashes so an attacker can't smuggle a poly-glot
           #                archive. Affects the pre-installed pip on the CI runner only. Re-eval 2026-09-30.
+          # GHSA-fv5p-p927-qmxr: SSRF via redirect bypass in langchain-text-splitters
+          #                      HTMLHeaderTextSplitter.split_text_from_url(). We only call
+          #                      MarkdownHeaderTextSplitter.split_text(text) — no URL fetching, no HTML
+          #                      splitter usage anywhere in the codebase. Fix in 1.1.2+ requires
+          #                      langchain-core 1.x. Re-eval 2026-06-30 (Phase 11 langchain-core 0.3→1.2).
           # Migration planned for Phase 11
           pip-audit --desc \
             --ignore-vuln CVE-2026-26013 \
@@ -128,7 +133,8 @@ jobs:
             --ignore-vuln CVE-2026-27794 \
             --ignore-vuln CVE-2026-28277 \
             --ignore-vuln CVE-2026-4539 \
-            --ignore-vuln CVE-2026-3219
+            --ignore-vuln CVE-2026-3219 \
+            --ignore-vuln GHSA-fv5p-p927-qmxr
       - name: ReDoS regex audit (dlint)
         run: |
           pip install dlint flake8
