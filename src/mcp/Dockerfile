@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Stage 1: Builder — install Python deps with build tools
-FROM python:3.11.14-slim AS builder
+FROM python:3.11.15-slim AS builder
 
 RUN apt-get update \
     && apt-get upgrade -y \
@@ -40,7 +40,7 @@ hf_hub_download('Snowflake/snowflake-arctic-embed-m-v1.5', 'tokenizer.json')"; \
     else echo "Skipping model preload (CERID_PRELOAD_MODELS=false)"; fi
 
 # Stage 3: Runtime — slim image without build tools
-FROM python:3.11.14-slim
+FROM python:3.11.15-slim
 
 # Disable chromadb's client-side posthog telemetry. Chromadb reads these at
 # module import time, before any Python code can override via Settings(...).
