@@ -75,3 +75,53 @@ class SDKHealthResponse(_SDKBase):
     version: str = Field(description="API version string")
     services: dict[str, str] = Field(description="Per-service connectivity status")
     features: dict[str, bool] = Field(default_factory=dict, description="Consumer-relevant feature toggles")
+
+
+# ---------------------------------------------------------------------------
+# LLM completion endpoint (smart-routed)
+# ---------------------------------------------------------------------------
+
+
+class SDKLLMCompleteRequest(BaseModel):
+    """Request for ``POST /sdk/v1/llm/complete`` — smart-routed LLM completion.
+
+    Consumers describe the task; the smart_router selects the appropriate
+    model tier (FREE / CHEAP / CAPABLE / RESEARCH / EXPERT) based on
+    task_type, complexity, and cost_sensitivity. Falls back to Ollama
+    when available and suitable.
+    """
+
+    messages: list[dict[str, str]] = Field(
+        description="OpenAI-format messages: [{role, content}, ...]",
+    )
+    task_type: str = Field(
+        default="internal",
+        description="Task category: chat | internal | verification | classification | research",
+    )
+    query: str = Field(
+        default="",
+        description="Optional query summary for the router's complexity classifier",
+    )
+    cost_sensitivity: str = Field(
+        default="medium",
+        description="Cost preference: low (cheapest) | medium | high (best quality)",
+    )
+    temperature: float = Field(default=0.1, ge=0.0, le=2.0)
+    max_tokens: int = Field(default=500, ge=1, le=8000)
+    response_format: dict[str, Any] | None = Field(
+        default=None,
+        description="OpenAI-compatible response format spec (e.g., {'type': 'json_object'})",
+    )
+
+
+class SDKLLMCompleteResponse(_SDKBase):
+    """Response from ``POST /sdk/v1/llm/complete``."""
+
+    content: str = Field(description="LLM-generated text content")
+    model: str = Field(description="Model ID actually used (after smart-routing)")
+    provider: str = Field(description="Routing provider: ollama | openrouter_free | openrouter_paid")
+    reason: str = Field(default="", description="Why this model was selected")
+    estimated_cost_per_1k: float = Field(
+        default=0.0, ge=0.0,
+        description="Estimated cost in USD per 1K tokens (0 for free / Ollama)",
+    )
