@@ -20,6 +20,8 @@ import config
 from app.models.sdk import (
     SDKHallucinationResponse,
     SDKHealthResponse,
+    SDKLLMCompleteRequest,
+    SDKLLMCompleteResponse,
     SDKMemoryExtractResponse,
     SDKQueryResponse,
 )
@@ -84,6 +86,41 @@ async def sdk_hallucination(req: HallucinationCheckRequest):
 )
 async def sdk_memory_extract(req: MemoryExtractionRequest):
     return await memory_extract_endpoint(req)
+
+
+@router.post(
+    "/llm/complete",
+    response_model=SDKLLMCompleteResponse,
+    summary="Smart-routed LLM completion",
+    description=(
+        "Tier-aware LLM completion. Consumers describe the task "
+        "(`task_type`, `cost_sensitivity`); the smart_router selects the "
+        "best model from FREE / CHEAP / CAPABLE / RESEARCH / EXPERT tiers, "
+        "preferring Ollama when available. Returns content plus the model "
+        "actually used and an estimated cost-per-1K-tokens for budget tracking."
+    ),
+    responses={422: _422, 503: _503},
+)
+async def sdk_llm_complete(req: SDKLLMCompleteRequest) -> SDKLLMCompleteResponse:
+    from core.routing.smart_router import EXPERT_MODELS  # noqa: F401  (import for cost lookup)
+    from core.utils.llm_client import route_and_call
+
+    content, decision = await route_and_call(
+        messages=req.messages,
+        query=req.query or (req.messages[-1].get("content", "")[:200] if req.messages else ""),
+        task_type=req.task_type,
+        temperature=req.temperature,
+        max_tokens=req.max_tokens,
+        response_format=req.response_format,
+        cost_sensitivity=req.cost_sensitivity,
+    )
+    return SDKLLMCompleteResponse(
+        content=content,
+        model=decision.model,
+        provider=decision.provider,
+        reason=decision.reason,
+        estimated_cost_per_1k=decision.estimated_cost_per_1k,
+    )
 
 
 @router.get(
