@@ -33,7 +33,7 @@ bm25s>=0.3,<1.0
 PyStemmer>=2.2
 
 # Scheduling
-apscheduler>=3.10,<4
+apscheduler>=3.11.2,<4
 
 # Queue (Workstream E Phase 5a — opt-in via INGEST_QUEUE_MODE=async; reuses Redis already in stack)
 rq>=2.0,<3
