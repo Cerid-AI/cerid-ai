@@ -36,7 +36,7 @@ PyStemmer>=2.2
 apscheduler>=3.10,<4
 
 # Queue (Workstream E Phase 5a — opt-in via INGEST_QUEUE_MODE=async; reuses Redis already in stack)
-rq>=2.0,<3
+rq>=2.8.0,<3
 
 # Markdown header-hierarchy chunker (Workstream E Phase 2b.2)
 langchain-text-splitters>=0.3,<1
