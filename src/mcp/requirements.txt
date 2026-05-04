@@ -2,7 +2,7 @@
 fastapi>=0.100,<0.136
 sentry-sdk[fastapi]>=2.35.0
 uvicorn[standard]>=0.46.0,<1
-pydantic>=2.0,<3
+pydantic>=2.13.3,<3
 
 # MCP protocol
 mcp>=1.27.0,<2
