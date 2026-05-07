@@ -54,6 +54,11 @@ services:
       NEXTAUTH_SECRET: ${LANGFUSE_AUTH_SECRET:?set LANGFUSE_AUTH_SECRET in .env}
       SALT: ${LANGFUSE_SALT:?set LANGFUSE_SALT in .env}
       ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:?set LANGFUSE_ENCRYPTION_KEY in .env}
+      # Next.js standalone reads HOSTNAME to choose its bind interface.
+      # Docker auto-sets HOSTNAME to the container ID, which makes the app
+      # bind only to that interface and breaks loopback healthchecks. Force
+      # 0.0.0.0 so the in-container `wget http://localhost:3000/...` succeeds.
+      HOSTNAME: 0.0.0.0
       TELEMETRY_ENABLED: "false"             # don't phone home to Langfuse cloud
       LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
       # Disable the public sign-up form so the host running this can keep
@@ -70,7 +75,9 @@ services:
       - langfuse-internal
       - llm-network                          # shared with cerid stack so MCP can reach us
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:3000/api/public/health"]
+      # 127.0.0.1 (not localhost) — busybox wget resolves localhost to ::1 first
+      # and the Next.js standalone server only listens on IPv4 even with HOSTNAME=0.0.0.0.
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:3000/api/public/health"]
       interval: 10s
       timeout: 5s
       retries: 6

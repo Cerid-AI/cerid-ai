@@ -13,7 +13,10 @@ from core.retrieval.budget import RetrievalBudget
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # asyncio.run replaces the deprecated get_event_loop().run_until_complete
+    # pattern. Python 3.12 raises "no current event loop" from main thread
+    # when no loop has been created yet; asyncio.run creates one.
+    return asyncio.run(coro)
 
 
 async def _slow(name: str, delay: float, value: str = "ok") -> str:

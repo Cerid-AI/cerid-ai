@@ -198,37 +198,37 @@ class TestTemplates:
 
 class TestConditionEvaluation:
     def test_numeric_gt(self):
-        assert asyncio.get_event_loop().run_until_complete(
+        assert asyncio.run(
             _evaluate_condition("confidence > 0.5", {"confidence": 0.8})
         )
 
     def test_numeric_lt(self):
-        assert not asyncio.get_event_loop().run_until_complete(
+        assert not asyncio.run(
             _evaluate_condition("confidence > 0.5", {"confidence": 0.3})
         )
 
     def test_string_eq(self):
-        assert asyncio.get_event_loop().run_until_complete(
+        assert asyncio.run(
             _evaluate_condition("status == 'ok'", {"status": "ok"})
         )
 
     def test_string_neq(self):
-        assert asyncio.get_event_loop().run_until_complete(
+        assert asyncio.run(
             _evaluate_condition("status != 'error'", {"status": "ok"})
         )
 
     def test_missing_key_returns_false(self):
-        assert not asyncio.get_event_loop().run_until_complete(
+        assert not asyncio.run(
             _evaluate_condition("missing > 0", {})
         )
 
     def test_invalid_expression_returns_true(self):
-        assert asyncio.get_event_loop().run_until_complete(
+        assert asyncio.run(
             _evaluate_condition("nonsense!!!", {})
         )
 
     def test_gte(self):
-        assert asyncio.get_event_loop().run_until_complete(
+        assert asyncio.run(
             _evaluate_condition("count >= 5", {"count": 5})
         )
 

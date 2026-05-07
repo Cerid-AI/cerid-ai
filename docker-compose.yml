@@ -145,6 +145,13 @@ services:
       # sets CERID_SYNC_DIR=/sync in .env (thinking container-side), the fallback
       # would try to bind-mount /sync on the host. Prefer CERID_SYNC_DIR_HOST.
       - ${CERID_SYNC_DIR_HOST:-${CERID_SYNC_DIR:-${HOME}/Dropbox/cerid-sync}}:/sync
+      # Workstream E Phase 1.2: read-only mount for the eval corpus.
+      # The corpus lives at the repo root in data/eval-corpus/ (committed),
+      # but the src/mcp:/app bind-mount only exposes src/mcp/. Adding the
+      # corpus as a separate :ro mount lets scripts/seed-eval-corpus.sh
+      # POST container-visible file paths to /ingest_file without polluting
+      # the user's ${HOME}/cerid-archive KB.
+      - ./data/eval-corpus:/eval-corpus:ro
     env_file:
       - .env
     environment:

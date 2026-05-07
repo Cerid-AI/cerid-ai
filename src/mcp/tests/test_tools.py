@@ -70,7 +70,7 @@ class TestToolRegistry:
 class TestExecuteToolUnknown:
     def test_unknown_tool_raises(self):
         with pytest.raises(ValueError, match="Unknown tool"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 execute_tool("nonexistent_tool", {})
             )
 
@@ -83,7 +83,7 @@ class TestExecuteToolSync:
     @patch("app.tools.query_knowledge")
     def test_pkb_query(self, mock_qk):
         mock_qk.return_value = {"results": []}
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             execute_tool("pkb_query", {"query": "test"})
         )
         mock_qk.assert_called_once_with(query="test")
@@ -91,7 +91,7 @@ class TestExecuteToolSync:
     @patch("app.tools.ingest_content")
     def test_pkb_ingest(self, mock_ic):
         mock_ic.return_value = {"status": "success"}
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             execute_tool("pkb_ingest", {"content": "hello", "domain": "coding"})
         )
         mock_ic.assert_called_once_with("hello", "coding")
@@ -99,7 +99,7 @@ class TestExecuteToolSync:
     @patch("app.tools.ingest_content")
     def test_pkb_ingest_defaults(self, mock_ic):
         mock_ic.return_value = {"status": "success"}
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             execute_tool("pkb_ingest", {})
         )
         mock_ic.assert_called_once_with("", "general")
@@ -107,7 +107,7 @@ class TestExecuteToolSync:
     @patch("app.tools.health_check")
     def test_pkb_health(self, mock_hc):
         mock_hc.return_value = {"status": "healthy"}
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             execute_tool("pkb_health", {})
         )
         assert result["status"] == "healthy"
@@ -115,7 +115,7 @@ class TestExecuteToolSync:
     @patch("app.tools.list_collections")
     def test_pkb_collections(self, mock_lc):
         mock_lc.return_value = {"collections": []}
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             execute_tool("pkb_collections", {})
         )
         mock_lc.assert_called_once()
@@ -133,7 +133,7 @@ class TestExecuteToolArtifacts:
         mock_get_neo4j.return_value = mock_driver
         mock_graph.list_artifacts.return_value = []
 
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             execute_tool("pkb_artifacts", {"domain": "coding", "limit": 10})
         )
         mock_graph.list_artifacts.assert_called_once_with(
@@ -146,7 +146,7 @@ class TestExecuteToolArtifacts:
         mock_get_neo4j.return_value = MagicMock()
         mock_graph.list_artifacts.return_value = []
 
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             execute_tool("pkb_artifacts", {"domain": ""})
         )
         # Empty string should convert to None
@@ -162,7 +162,7 @@ class TestExecuteToolRecategorize:
     @patch("app.tools.recategorize")
     def test_pkb_recategorize(self, mock_recat):
         mock_recat.return_value = {"status": "success"}
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             execute_tool("pkb_recategorize", {
                 "artifact_id": "a1",
                 "new_domain": "finance",
@@ -176,7 +176,7 @@ class TestExecuteToolRecategorize:
     @patch("app.tools.recategorize")
     def test_pkb_recategorize_missing_required_raises(self, mock_recat):
         with pytest.raises(KeyError):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 execute_tool("pkb_recategorize", {})
             )
 
@@ -192,7 +192,7 @@ class TestExecuteToolTriage:
 
         with patch("app.agents.triage.triage_file", new_callable=AsyncMock) as mock_tf:
             mock_tf.return_value = triage_result
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 execute_tool("pkb_triage", {"file_path": os.path.join(tempfile.gettempdir(), "nope.txt")})
             )
 
@@ -214,7 +214,7 @@ class TestExecuteToolTriage:
 
         with patch("app.agents.triage.triage_file", new_callable=AsyncMock) as mock_tf:
             mock_tf.return_value = triage_result
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 execute_tool("pkb_triage", {"file_path": os.path.join(tempfile.gettempdir(), "test.py")})
             )
 
@@ -238,7 +238,7 @@ class TestExecuteToolAgents:
 
         with patch("core.agents.query_agent.agent_query", new_callable=AsyncMock) as mock_aq:
             mock_aq.return_value = {"context": "result", "sources": []}
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 execute_tool("pkb_agent_query", {"query": "test"})
             )
         assert result["context"] == "result"
@@ -249,7 +249,7 @@ class TestExecuteToolAgents:
 
         with patch("core.agents.audit.audit", new_callable=AsyncMock) as mock_audit:
             mock_audit.return_value = {"timestamp": "2026-01-01"}
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 execute_tool("pkb_audit", {"reports": ["activity"], "hours": 12})
             )
         mock_audit.assert_called_once()
@@ -265,7 +265,7 @@ class TestExecuteToolAgents:
 
         with patch("core.agents.rectify.rectify", new_callable=AsyncMock) as mock_rect:
             mock_rect.return_value = {"findings": {}}
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 execute_tool("pkb_rectify", {"auto_fix": True, "stale_days": 30})
             )
         call_kwargs = mock_rect.call_args.kwargs
@@ -282,7 +282,7 @@ class TestExecuteToolAgents:
 
         with patch("core.agents.maintenance.maintain", new_callable=AsyncMock) as mock_maint:
             mock_maint.return_value = {"actions_run": ["health"]}
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 execute_tool("pkb_maintain", {"actions": ["health"]})
             )
         mock_maint.assert_called_once()
