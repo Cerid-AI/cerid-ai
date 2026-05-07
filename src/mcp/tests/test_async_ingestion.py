@@ -36,6 +36,7 @@ def _ensure_real_router():
 class TestAsyncFileParsing:
     """Verify that ingest_file() uses asyncio.to_thread() for blocking calls."""
 
+    @patch("app.services.ingestion.config.ENABLE_LAYOUT_AWARE_PARSING", False)
     @patch("app.services.ingestion.asyncio")
     @patch("app.services.ingestion.ai_categorize", new_callable=AsyncMock)
     @patch("app.services.ingestion.extract_metadata")
@@ -43,7 +44,15 @@ class TestAsyncFileParsing:
     def test_parse_file_runs_in_thread(
         self, mock_validate, mock_meta, mock_ai_cat, mock_asyncio
     ):
-        """parse_file() should be called via asyncio.to_thread()."""
+        """Legacy parse_file() should be called via asyncio.to_thread()
+        when ENABLE_LAYOUT_AWARE_PARSING is OFF.
+
+        Workstream E Phase 2b shipped layout-aware parsing as the new
+        default — when on, the FIRST to_thread call is
+        layout_aware_parse, not parse_file. This test pins the legacy
+        parser path; layout-aware-on coverage lives in
+        tests/test_layout_aware_*.py.
+        """
         mock_validate.return_value = MagicMock()
         mock_meta.return_value = {"filename": "test.txt"}
         mock_ai_cat.return_value = {"suggested_domain": "coding", "keywords": [], "summary": ""}
@@ -69,6 +78,7 @@ class TestAsyncFileParsing:
         from app.parsers import parse_file
         assert first_call.args[0] is parse_file
 
+    @patch("app.services.ingestion.config.ENABLE_LAYOUT_AWARE_PARSING", False)
     @patch("app.services.ingestion.asyncio")
     @patch("app.services.ingestion.ai_categorize", new_callable=AsyncMock)
     @patch("app.services.ingestion.extract_metadata")
@@ -76,7 +86,11 @@ class TestAsyncFileParsing:
     def test_ingest_content_runs_in_thread(
         self, mock_validate, mock_meta, mock_ai_cat, mock_asyncio
     ):
-        """ingest_content() should be called via asyncio.to_thread()."""
+        """ingest_content() should be called via asyncio.to_thread().
+
+        Pinned to legacy parse path (Phase 2b layout-aware default flip
+        moved the first to_thread to layout_aware_parse).
+        """
         mock_validate.return_value = MagicMock()
         mock_meta.return_value = {"filename": "test.txt", "domain": "coding"}
         mock_ai_cat.return_value = {"suggested_domain": "coding", "keywords": [], "summary": ""}
@@ -97,6 +111,7 @@ class TestAsyncFileParsing:
         from app.services.ingestion import ingest_content
         assert second_call.args[0] is ingest_content
 
+    @patch("app.services.ingestion.config.ENABLE_LAYOUT_AWARE_PARSING", False)
     @patch("app.services.ingestion.asyncio")
     @patch("app.services.ingestion.ai_categorize", new_callable=AsyncMock)
     @patch("app.services.ingestion.extract_metadata")
@@ -104,7 +119,12 @@ class TestAsyncFileParsing:
     def test_parse_output_preserved(
         self, mock_validate, mock_meta, mock_ai_cat, mock_asyncio
     ):
-        """asyncio.to_thread() wrapping should not alter parse_file output."""
+        """asyncio.to_thread() wrapping should not alter parse_file output.
+
+        Pinned to legacy parse path (Phase 2b default flip changed
+        parse output shape when layout-aware fires — that path returns
+        a (text, chunks) tuple, not the legacy parsed dict).
+        """
         mock_validate.return_value = MagicMock()
         mock_meta.return_value = {"filename": "doc.pdf", "domain": "general"}
         mock_ai_cat.return_value = {"suggested_domain": "general", "keywords": [], "summary": ""}

@@ -106,8 +106,11 @@ class TestIngestFile:
             mock_config.DEFAULT_DOMAIN = "coding"
             import asyncio
             try:
-                asyncio.get_event_loop().run_until_complete(
-                    ingest_file(str(test_file), domain="coding")
+                # asyncio.run replaces deprecated get_event_loop().run_until_complete
+                # (Python 3.12 raises "no current event loop" on first call from
+                # main thread when no loop has been created).
+                asyncio.run(
+                    ingest_file(str(test_file), domain="coding"),
                 )
             except (AttributeError, TypeError, KeyError):
                 pass  # Expected — mocking is incomplete for full pipeline

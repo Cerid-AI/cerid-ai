@@ -372,6 +372,113 @@
         "title": "SDKHealthResponse",
         "type": "object"
       },
+      "SDKLLMCompleteRequest": {
+        "description": "Request for ``POST /sdk/v1/llm/complete`` \u2014 smart-routed LLM completion.\n\nConsumers describe the task; the smart_router selects the appropriate\nmodel tier (FREE / CHEAP / CAPABLE / RESEARCH / EXPERT) based on\ntask_type, complexity, and cost_sensitivity. Falls back to Ollama\nwhen available and suitable.",
+        "properties": {
+          "cost_sensitivity": {
+            "default": "medium",
+            "description": "Cost preference: low (cheapest) | medium | high (best quality)",
+            "title": "Cost Sensitivity",
+            "type": "string"
+          },
+          "max_tokens": {
+            "default": 500,
+            "maximum": 8000.0,
+            "minimum": 1.0,
+            "title": "Max Tokens",
+            "type": "integer"
+          },
+          "messages": {
+            "description": "OpenAI-format messages: [{role, content}, ...]",
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "query": {
+            "default": "",
+            "description": "Optional query summary for the router's complexity classifier",
+            "title": "Query",
+            "type": "string"
+          },
+          "response_format": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "OpenAI-compatible response format spec (e.g., {'type': 'json_object'})",
+            "title": "Response Format"
+          },
+          "task_type": {
+            "default": "internal",
+            "description": "Task category: chat | internal | verification | classification | research",
+            "title": "Task Type",
+            "type": "string"
+          },
+          "temperature": {
+            "default": 0.1,
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Temperature",
+            "type": "number"
+          }
+        },
+        "required": [
+          "messages"
+        ],
+        "title": "SDKLLMCompleteRequest",
+        "type": "object"
+      },
+      "SDKLLMCompleteResponse": {
+        "additionalProperties": true,
+        "description": "Response from ``POST /sdk/v1/llm/complete``.",
+        "properties": {
+          "content": {
+            "description": "LLM-generated text content",
+            "title": "Content",
+            "type": "string"
+          },
+          "estimated_cost_per_1k": {
+            "default": 0.0,
+            "description": "Estimated cost in USD per 1K tokens (0 for free / Ollama)",
+            "minimum": 0.0,
+            "title": "Estimated Cost Per 1K",
+            "type": "number"
+          },
+          "model": {
+            "description": "Model ID actually used (after smart-routing)",
+            "title": "Model",
+            "type": "string"
+          },
+          "provider": {
+            "description": "Routing provider: ollama | openrouter_free | openrouter_paid",
+            "title": "Provider",
+            "type": "string"
+          },
+          "reason": {
+            "default": "",
+            "description": "Why this model was selected",
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content",
+          "model",
+          "provider"
+        ],
+        "title": "SDKLLMCompleteResponse",
+        "type": "object"
+      },
       "SDKMemoryExtractResponse": {
         "additionalProperties": true,
         "description": "Response from ``POST /sdk/v1/memory/extract`` \u2014 memory extraction and storage.",
@@ -675,6 +782,44 @@
           }
         },
         "summary": "Ingest File",
+        "tags": [
+          "SDK"
+        ]
+      }
+    },
+    "/sdk/v1/llm/complete": {
+      "post": {
+        "description": "Tier-aware LLM completion. Consumers describe the task (`task_type`, `cost_sensitivity`); the smart_router selects the best model from FREE / CHEAP / CAPABLE / RESEARCH / EXPERT tiers, preferring Ollama when available. Returns content plus the model actually used and an estimated cost-per-1K-tokens for budget tracking.",
+        "operationId": "sdk_llm_complete_sdk_v1_llm_complete_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SDKLLMCompleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SDKLLMCompleteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Invalid request parameters"
+          },
+          "503": {
+            "description": "One or more backend services unavailable"
+          }
+        },
+        "summary": "Smart-routed LLM completion",
         "tags": [
           "SDK"
         ]

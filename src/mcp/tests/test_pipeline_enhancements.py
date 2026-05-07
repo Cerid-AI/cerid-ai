@@ -18,7 +18,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # asyncio.run replaces the deprecated get_event_loop().run_until_complete
+    # pattern. Equivalent semantics — creates a fresh loop, runs to completion,
+    # closes — but doesn't trigger Python 3.12's "no current event loop" runtime
+    # error when called from a thread without an active loop.
+    return asyncio.run(coro)
 
 
 # ===========================================================================

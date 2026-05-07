@@ -4,6 +4,36 @@
 > across pipeline phases so every later change reports a delta against
 > the same yardstick.
 
+## Public benchmark datasets — dual-gate strategy
+
+The repo ships six datasets under `src/mcp/app/eval/datasets/`. Five of them encode gold judgments as `expected_keywords` rather than the artifact-id / `relevant_paths` form the regression harness scores against. After the Phase 1.2 audit (2026-05-03), the decision is **dual-gate**:
+
+| Layer | What gates merges | What runs but doesn't gate |
+|---|---|---|
+| **Regression gate** (`tests/eval/test_retrieval_baselines.py`) | Self-authored 20-query corpus from `data/eval-corpus/v1/`. Scores artifact-id retrieval (Recall@10, MRR, NDCG@10/5, Precision@5). | n/a |
+| **Exploratory suite** (`app/eval/benchmark_suite.py`) | n/a | All 6 public datasets. Useful for *coverage analysis* (adversarial robustness, multi-hop, temporal currency, cross-domain synthesis) but the 5 keyword-based datasets currently produce all-zero IR metrics — they need a Phase 2 keyword-scoring extension to become meaningful. `load_benchmark` warns once per file when this happens. |
+
+**Why not gate on the public datasets today?**
+
+| Dataset | Format | Status | Why not in regression gate |
+|---|---|---|---|
+| `adversarial.jsonl` (21 queries) | `expected_keywords` | Loads, scores 0.0 | Needs Phase 2 keyword scorer |
+| `cross_domain.jsonl` (20) | `expected_keywords` | Loads, scores 0.0 | Needs Phase 2 keyword scorer |
+| `factual_recall.jsonl` (20) | `expected_keywords` | Loads, scores 0.0 | Needs Phase 2 keyword scorer |
+| `multi_hop.jsonl` (20) | `expected_keywords` | Loads, scores 0.0 | Needs Phase 2 keyword scorer |
+| `temporal.jsonl` (20) | `expected_keywords` | Loads, scores 0.0 | Needs Phase 2 keyword scorer |
+| `beir_subset.jsonl` (51) | `relevant_ids` | Schema-compatible | Needs corresponding seeded corpus (BEIR docs aren't in `data/eval-corpus/v1/`) |
+
+**Phase 2 candidates** (deferred, not committed):
+
+1. **Keyword scorer** — extend `EvalQuery` with `expected_keywords: list[str]`, add a keyword-validator scoring path that runs against the LLM response text rather than the artifact-id ranking. Estimated 2-3 days. Risk: noisier signal than artifact-id retrieval; better to keep separate from the regression gate.
+2. **BEIR corpus seeding** — author/curate a `data/eval-corpus/beir-v1/` matching the artifact_ids in `beir_subset.jsonl`, then capture a separate baseline. Estimated 1-2 days. Worth pursuing if the team needs cross-domain BEIR signal.
+3. **Nightly exploratory CI job** — run `benchmark_suite.run_suite()` nightly, post the per-category report to a dashboard / Slack. Doesn't gate merges but provides drift signal. Estimated 4 hours.
+
+**Why dual-gate over a single composite?**
+
+Artifact-id retrieval (Phase 1.2 gate) and keyword coverage (5 public datasets) validate different things — *ranking quality* vs *response coverage*. Merging them into one composite score muddies the regression signal. Keep them separate; if the exploratory suite consistently flags an issue the regression gate misses, that's the moment to invest in either Phase 2 candidate.
+
 ## Two gates, two baselines
 
 | Gate | Baseline file | What it scores | When it fires |
@@ -19,32 +49,71 @@ Every retrieval-side change records a row here so we can attribute lift (or regr
 
 | Date | Phase | Commit | Recall@10 | MRR | NDCG@10 | Faithfulness | Notes |
 |---|---|---|---|---|---|---|---|
-| 2026-04-28 | 0 (baseline) | _pending_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ | Initial capture; populate via `make eval-retrieval` after a clean stack boot. |
+| 2026-04-28 | 0 (baseline) | initial | 0.00 | 0.00 | 0.00 | n/a | benchmark.jsonl with `relevant_ids:[]` — IR signal undefined; latency-only floor. |
+| 2026-05-03 | 1.2 (gold judgments) | 90eba8c..d9e033b | 0.842 | 0.900 | 0.854 | n/a | 20 queries with `relevant_paths`; pipeline=hybrid_reranked; latency p50/p95/p99=3702/4172/5838ms. Captured against seeded eval-corpus v1. |
+| 2026-05-03 | 3a (RRF tested, REVERTED) | (no commit) | 0.567 | 0.600 | 0.574 | n/a | `HYBRID_FUSION_MODE=rrf` regressed every IR metric by 0.22-0.30 absolute and pushed latency p95 to 5544ms (+33%, over the +30% budget). Baseline kept at weighted_sum row above. RRF remains opt-in via env var. Likely root cause: rank-based fusion of CHUNK-level rankings rewards multiple chunks of the same artifact (vector + bm25 both surface them, RRF compounds the rank signal), which hurts artifact-level recall@K after the chunk→artifact dedup. Re-evaluate after Phase 4 (artifact-level rankings before fusion) or with a corpus large enough to dilute the chunk-redundancy effect. |
+| 2026-05-03 | 3b (contextual chunks tested, REVERTED) | (no commit) | 0.842 | 0.900 | 0.854 | n/a | `ENABLE_CONTEXTUAL_CHUNKS=true` produced ZERO change on the gated metrics (recall_10/MRR/NDCG_10/NDCG_5 all tied) but improved precision@5 by +0.05 (0.825 → 0.875). Latency p95 regressed +58.9% (4172 → 6629 ms), well over the +30% budget. Decision rule (lift on at least one gated metric AND latency within budget) failed on both criteria. Default kept OFF; contextual remains opt-in via env. Note: default `CONTEXTUAL_CHUNKS_MODEL` (`openrouter/meta-llama/llama-3.3-70b-instruct:free`) hit immediate 429 rate limits — measurement required overriding to `openrouter/openai/gpt-4o-mini`. Cost: ~$0.005 for 20-doc corpus. Root cause of latency regression: contextual prefixes lengthen each chunk by ~10-20 words, which slows embedding + reranker scoring proportionally. The precision@5 lift suggests contextual signal IS useful for top-k discrimination, just not on this small corpus where recall is already saturated. Re-evaluate when: (a) corpus expands to 100+ docs (recall headroom opens up), OR (b) a faster contextual model is available, OR (c) the production circuit-breaker work lands (CONTEXTUAL_BUDGET_USD_PER_TENANT_PER_MONTH enforcement). |
+| 2026-05-03 | 2b (layout-aware default flipped, SHIPPED) | 4dffb2a | 0.858 | 0.950 | 0.878 | n/a | `ENABLE_LAYOUT_AWARE_PARSING=true` improved every IR metric AND reduced every latency percentile. recall@10 +0.017, MRR +0.05, NDCG@10/5 +0.024, precision@5 +0.088. p50/p95/p99 latency went 3702→3170 (-14%), 4172→3955 (-5%), 5838→5389 (-8%). Decision rule passes cleanly. New baseline = layout-aware-on. Why it works: heading-bounded markdown chunks map naturally to query topics, are smaller/more focused (less noise per chunk), expose `heading_path` + `headers` + `level` metadata for filter/boost, and are FASTER because chunk size shrinks. Finance corpus went 8 → 24 chunks (3× denser, smaller per-chunk granularity). Required dependency: `langchain-text-splitters` (already in requirements.txt; was missing from running container — image rebuild needed). |
 
 When the baseline is captured the row's "Notes" column is updated to record the model versions in play (embedding model, reranker, LLM internal model) so future regressions can be attributed to the right knob.
 
-## Populating the retrieval baseline (first time)
+## Capturing baselines (Phase 1.2 procedure)
 
-Pre-flight:
+The baseline capture is a two-step procedure: seed the corpus, then run
+the harness against it. Both run against a live cerid stack.
+
+### 1. Seed the corpus
+
+The `scripts/seed-eval-corpus.sh` helper ingests every `*.md` file under
+`data/eval-corpus/v1/` via `/ingest_file`, classifying each by its parent
+directory name (`coding`, `finance`, `projects`, `personal`, `general`).
+The seeder is idempotent — re-running on an already-seeded corpus is a
+no-op (cerid dedupes by content_hash; the seeder treats `status=duplicate`
+as success).
 
 ```bash
 docker compose up -d   # bring up Chroma + Neo4j + Redis + MCP
-docker compose exec mcp-server bash
-# Inside the container:
-PYTHONPATH=src/mcp python -m tests.eval.test_retrieval_baselines
+scripts/seed-eval-corpus.sh
+# Output:
+#   OK   coding/python-type-hints.md (domain=coding)
+#   OK   coding/docker-networking.md (domain=coding)
+#   ...
+#   Done. total=20 ok=20 duplicate=0 failed=0
 ```
 
-The script runs the harness against `app/eval/benchmark.jsonl`, captures the per-metric averages, and overwrites `tests/eval/baselines/retrieval.json` with the new numbers + today's date. Review the diff:
+To target a different host: `CERID_HOST=http://otherhost:8888 scripts/seed-eval-corpus.sh`.
+
+### 2. Capture the IR baseline
+
+Once seeded, run the harness to populate `tests/eval/baselines/retrieval.json`:
+
+```bash
+docker exec ai-companion-mcp bash -c \
+  'cd /app && PYTHONPATH=/app python -m tests.eval.test_retrieval_baselines'
+```
+
+The script runs the harness against `app/eval/benchmark.jsonl`, captures the per-metric averages, and overwrites `tests/eval/baselines/retrieval.json` with the new numbers + today's date.
+
+### 3. Review and commit
 
 ```bash
 git diff src/mcp/tests/eval/baselines/retrieval.json
 ```
 
-If the numbers look reasonable (Recall@10 > 0.5 on a healthy 20-doc corpus is a sane floor; less means either the benchmark is harder than the corpus or the retrieval pipeline is broken — investigate before committing), commit the baseline:
+Sanity floor for a healthy 20-doc corpus on the default `hybrid_reranked` pipeline:
+
+| Metric | Sane floor | If lower |
+|---|---|---|
+| `avg_recall_10` | ≥ 0.6 | benchmark too hard, corpus not seeded, or retrieval pipeline regressed |
+| `avg_mrr` | ≥ 0.4 | rerank step likely failing |
+| `avg_ndcg_10` | ≥ 0.5 | ranking quality regressed |
+| `latency_ms.p95` | ≤ 7000 | inference path slow (cold model cache?) |
+
+If numbers look reasonable, commit:
 
 ```bash
 git add src/mcp/tests/eval/baselines/retrieval.json docs/EVAL_BASELINES.md
-git commit -m "chore(eval): capture Phase 0 retrieval baseline"
+git commit -m "chore(eval): capture Phase 1.2 retrieval baseline + update ledger"
 ```
 
 ## Populating the RAGAS baseline (first time)

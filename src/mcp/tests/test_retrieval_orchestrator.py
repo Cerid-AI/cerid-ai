@@ -42,8 +42,13 @@ if _repo_root is not None:
 # ---------------------------------------------------------------------------
 
 def _run(coro):
-    """Run an async coroutine synchronously."""
-    return asyncio.get_event_loop().run_until_complete(coro)
+    """Run an async coroutine synchronously.
+
+    asyncio.run replaces the deprecated get_event_loop().run_until_complete
+    pattern. Python 3.12 raises "no current event loop" from the main thread
+    when no loop has been created yet; asyncio.run handles loop creation.
+    """
+    return asyncio.run(coro)
 
 
 def _fake_kb_result(**overrides):

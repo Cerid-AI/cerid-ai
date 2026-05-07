@@ -116,9 +116,17 @@ HYBRID_VECTOR_WEIGHT = float(os.getenv("HYBRID_VECTOR_WEIGHT", "0.5"))
 HYBRID_KEYWORD_WEIGHT = float(os.getenv("HYBRID_KEYWORD_WEIGHT", "0.5"))
 BM25_DATA_DIR = os.path.join(os.getenv("DATA_DIR", "data"), "bm25")
 
-# Hybrid fusion mode (Workstream E Phase 3 — module shipped, wire-in
-# follows after eval validates lift). "weighted_sum" is the legacy
-# behaviour (HYBRID_VECTOR_WEIGHT * vec + HYBRID_KEYWORD_WEIGHT * bm25).
+# Hybrid fusion mode (Workstream E Phase 3a wire-in 2026-05-03 — REVERTED).
+# RRF was tested as the default against the seeded eval-corpus v1 and
+# regressed every IR metric by 0.22-0.30 absolute (recall@10 0.84→0.57,
+# MRR 0.90→0.60, NDCG@10 0.85→0.57) plus latency p95 +33%. Likely cause:
+# rank-based fusion of CHUNK-level rankings rewards chunks of the same
+# artifact over diversity, hurting artifact-level recall@K after the
+# chunk→artifact dedup. RRF remains opt-in (set HYBRID_FUSION_MODE=rrf).
+# Re-evaluate after Phase 4 (artifact-level rankings before fusion) or
+# with a corpus large enough to dilute the chunk-redundancy effect.
+# "weighted_sum" is the legacy behaviour and the validated default
+# (HYBRID_VECTOR_WEIGHT * vec + HYBRID_KEYWORD_WEIGHT * bm25).
 # "rrf" uses Reciprocal Rank Fusion (Cormack/Clarke/Buettcher 2009 — the
 # 2026 default in Elastic, OpenSearch, Azure AI Search, neo4j-graphrag).
 HYBRID_FUSION_MODE = os.getenv("HYBRID_FUSION_MODE", "weighted_sum")
@@ -595,15 +603,19 @@ PARENT_CHUNK_TOKENS = int(os.getenv("PARENT_CHUNK_TOKENS", "512"))
 CHILD_CHUNK_TOKENS = int(os.getenv("CHILD_CHUNK_TOKENS", "128"))
 CHILD_CHUNK_OVERLAP_PCT = float(os.getenv("CHILD_CHUNK_OVERLAP_PCT", "0.1"))
 
-# Layout-aware parser dispatch (Workstream E Phase 2b wire-in). When true,
-# ingest_file routes supported extensions (.csv, .md, .markdown, .py) through
-# the new core/ingest/parsers/ + chunker registry — each CSV row, Markdown
-# section, and Python function/class becomes its own chunk with structural
-# metadata (column_headers, heading_path, file:start_line:end_line) preserved.
-# Default false so existing deployments keep the legacy flat-text path until
-# operators flip the env after eval validates the lift.
+# Layout-aware parser dispatch (Workstream E Phase 2b — default flipped
+# 2026-05-03 after eval validation against seeded eval-corpus v1; see
+# docs/EVAL_BASELINES.md ledger for delta vs legacy chunker).
+# When true, ingest_file + ingest_content (when caller pre-dispatches)
+# route supported extensions (.csv, .md, .markdown, .py) through the
+# core/ingest/parsers/ + chunker registry — each CSV row, Markdown
+# section, and Python function/class becomes its own chunk with
+# structural metadata (column_headers, heading_path,
+# file:start_line:end_line) preserved.
+# Set ENABLE_LAYOUT_AWARE_PARSING=false to revert to the legacy
+# flat-text chunker.
 ENABLE_LAYOUT_AWARE_PARSING = os.getenv(
-    "ENABLE_LAYOUT_AWARE_PARSING", "false",
+    "ENABLE_LAYOUT_AWARE_PARSING", "true",
 ).lower() in ("true", "1", "yes")
 
 # Ingestion mode (Workstream E Phase 5a). "sync" (default — no behavior

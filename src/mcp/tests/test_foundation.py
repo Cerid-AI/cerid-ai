@@ -136,7 +136,7 @@ class TestHandleErrors:
             raise ValueError("async boom")
 
         with pytest.raises(RoutingError) as exc_info:
-            asyncio.get_event_loop().run_until_complete(fn())
+            asyncio.run(fn())
         assert exc_info.value.error_code == "UNHANDLED_ERROR"
 
     def test_async_cerid_error_reraises(self) -> None:
@@ -145,14 +145,14 @@ class TestHandleErrors:
             raise VerificationError("bad claim")
 
         with pytest.raises(VerificationError, match="bad claim"):
-            asyncio.get_event_loop().run_until_complete(fn())
+            asyncio.run(fn())
 
     def test_async_fallback(self) -> None:
         @handle_errors(fallback="default")
         async def fn():
             raise RuntimeError("async fail")
 
-        result = asyncio.get_event_loop().run_until_complete(fn())
+        result = asyncio.run(fn())
         assert result == "default"
 
 

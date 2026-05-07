@@ -8,7 +8,7 @@ Every `@router.*` decorator shipped in the public (OSS Apache-2.0) distribution.
 Internal-only routers (billing, trading SDK, ops endpoints) are stripped and
 not documented here; see the internal repo for the full registry.
 
-**Total routes:** 249
+**Total routes:** 250
 
 | Method | Path | Handler | Module | Tags | Build |
 |--------|------|---------|--------|------|-------|
@@ -190,6 +190,7 @@ not documented here; see the internal repo for the full registry.
 | GET | `/health/detailed` | `sdk_health_detailed` | `src/mcp/app/routers/sdk.py` | SDK |  |
 | POST | `/ingest` | `sdk_ingest` | `src/mcp/app/routers/sdk.py` | SDK |  |
 | POST | `/ingest/file` | `sdk_ingest_file` | `src/mcp/app/routers/sdk.py` | SDK |  |
+| POST | `/llm/complete` | `sdk_llm_complete` | `src/mcp/app/routers/sdk.py` | SDK |  |
 | POST | `/memory/extract` | `sdk_memory_extract` | `src/mcp/app/routers/sdk.py` | SDK |  |
 | GET | `/plugins` | `sdk_plugins` | `src/mcp/app/routers/sdk.py` | SDK |  |
 | POST | `/query` | `sdk_query` | `src/mcp/app/routers/sdk.py` | SDK |  |

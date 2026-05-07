@@ -196,7 +196,7 @@ class TestAssembleContext:
 class TestMultiDomainQuery:
     def test_invalid_domain_raises(self):
         with pytest.raises(ValueError, match="Invalid domains"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 multi_domain_query("test", domains=["nonexistent_domain_xyz"])
             )
 
@@ -220,7 +220,7 @@ class TestMultiDomainQuery:
 
         # Mock BM25 as unavailable
         with patch("core.retrieval.bm25.is_available", return_value=False):
-            results = asyncio.get_event_loop().run_until_complete(
+            results = asyncio.run(
                 multi_domain_query("test query", domains=["coding"], chroma_client=chroma_client)
             )
 
@@ -238,7 +238,7 @@ class TestMultiDomainQuery:
         chroma_client.get_collection.side_effect = Exception("Collection not found")
 
         with patch("core.retrieval.bm25.is_available", return_value=False):
-            results = asyncio.get_event_loop().run_until_complete(
+            results = asyncio.run(
                 multi_domain_query("test", domains=["coding"], chroma_client=chroma_client)
             )
 
@@ -251,7 +251,7 @@ class TestMultiDomainQuery:
 
 class TestRerankResults:
     def test_empty_results(self):
-        results = asyncio.get_event_loop().run_until_complete(
+        results = asyncio.run(
             rerank_results([], "test query")
         )
         assert results == []
@@ -262,7 +262,7 @@ class TestRerankResults:
             _make_result(relevance=0.9, artifact_id="a2"),
             _make_result(relevance=0.6, artifact_id="a3"),
         ]
-        reranked = asyncio.get_event_loop().run_until_complete(
+        reranked = asyncio.run(
             rerank_results(results, "test", use_reranking=False)
         )
         assert reranked[0]["relevance"] >= reranked[1]["relevance"]
@@ -270,7 +270,7 @@ class TestRerankResults:
 
     def test_single_candidate_skips_rerank(self):
         results = [_make_result(relevance=0.5)]
-        reranked = asyncio.get_event_loop().run_until_complete(
+        reranked = asyncio.run(
             rerank_results(results, "test", use_reranking=True)
         )
         assert len(reranked) == 1
@@ -292,7 +292,7 @@ class TestRerankResults:
             _make_result(relevance=0.3, artifact_id="a1"),
             _make_result(relevance=0.9, artifact_id="a2"),
         ]
-        reranked = asyncio.get_event_loop().run_until_complete(
+        reranked = asyncio.run(
             rerank_results(results, "test", use_reranking=True)
         )
         # Fallback: sorted by relevance descending
@@ -326,7 +326,7 @@ class TestRerankResults:
             return results_arg
 
         with patch("core.retrieval.reranker.rerank", side_effect=fake_rerank):
-            reranked = asyncio.get_event_loop().run_until_complete(
+            reranked = asyncio.run(
                 rerank_results(results, "Python programming", use_reranking=True)
             )
 
@@ -356,7 +356,7 @@ class TestRerankResults:
             "core.retrieval.reranker.rerank",
             side_effect=RuntimeError("model not found"),
         ):
-            reranked = asyncio.get_event_loop().run_until_complete(
+            reranked = asyncio.run(
                 rerank_results(results, "test", use_reranking=True)
             )
 
@@ -380,7 +380,7 @@ class TestRerankResults:
 
         with patch("core.agents.query_agent.config") as mock_config:
             mock_config.RERANK_MODE = "none"
-            reranked = asyncio.get_event_loop().run_until_complete(
+            reranked = asyncio.run(
                 rerank_results(results, "test", use_reranking=True)
             )
         # mode=none: pre-sorted by relevance but no reranking applied
@@ -504,7 +504,7 @@ class TestAgentQuery:
 
         with patch("core.utils.temporal.parse_temporal_intent", return_value=None), \
              patch("core.utils.temporal.recency_score", return_value=0.0):
-            response = asyncio.get_event_loop().run_until_complete(
+            response = asyncio.run(
                 agent_query(
                     "test query",
                     domains=["coding"],
@@ -551,7 +551,7 @@ class TestAgentQuery:
         redis = MagicMock()
 
         with patch("core.utils.temporal.parse_temporal_intent", return_value=None):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 agent_query("test", redis_client=redis, chroma_client=MagicMock())
             )
 
@@ -586,7 +586,7 @@ class TestAgentQuery:
         mock_rerank.return_value = []
 
         with patch("core.utils.temporal.parse_temporal_intent", return_value=None):
-            response = asyncio.get_event_loop().run_until_complete(
+            response = asyncio.run(
                 agent_query("test", domains=["coding"], chroma_client=MagicMock())
             )
 

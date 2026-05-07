@@ -18,3 +18,15 @@ CVE-2026-29111
 # OpenSSL DoS in Debian 13 — pending 3.5.5-1 patch from Debian security.
 # Re-evaluate: 2026-05-15 (Debian typically ships within 4-6 weeks of advisory).
 CVE-2026-28390
+
+# libcap TOCTOU privilege escalation in cap_set_file (race condition) — the
+# container is single-user, no other process calls cap_set_file, race not
+# reachable. No upstream fix yet.
+# Re-evaluate: 2026-06-30.
+CVE-2026-4878
+
+# GnuTLS DTLS zero-length fragment DoS — we use TLS only via httpx /
+# AsyncHTTPClient, never DTLS. No code path reaches the affected handler.
+# No upstream fix yet in Debian 13.
+# Re-evaluate: 2026-06-30.
+CVE-2026-33845
