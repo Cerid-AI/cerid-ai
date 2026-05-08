@@ -2,11 +2,55 @@
 
 All notable changes to cerid-ai are documented here.
 
-## Unreleased — Workstream A + C + E (2026-05-03 → 2026-05-08)
+## v0.91.0 — Workstream A close-out + C + D Phase 1 + E Phase 2 (2026-05-03 → 2026-05-08)
 
-Cross-project SLO hardening + Pro-tier checkout end-to-end + retrieval-quality
-work since v0.90.0. Tag a release when ready by bumping `pyproject.toml` +
-`core/utils/version.py` and resyncing.
+Cross-project SLO hardening (with `benchmark-slo` now PR-blocking) +
+Pro-tier checkout end-to-end + Python 3.12 runtime bump + retrieval-quality
+work + the systemic close-out of the trading-agent interface ledger.
+
+### Workstream A close-out gate flipped (2026-05-08)
+
+- **`benchmark-slo` promoted to PR-blocking.** After 4 consecutive green
+  main runs (matching the `sdk-openapi-drift` 2026-04-21 precedent),
+  `continue-on-error: true` removed and `benchmark-slo` added to the
+  `docker` job's `needs[]` list. Real-OpenRouter latency drift now
+  blocks merges, complementing the deterministic budget-plumbing tests
+  in `test_memory.py` / `test_memory_consolidation.py` that gate the
+  per-stage `asyncio.wait_for` wrappers.
+
+### Workstream D Phase 1 — Python 3.12 runtime (2026-05-08)
+
+- **Python 3.11 → 3.12.** Dockerfile (builder + runtime stages +
+  site-packages path), `pyproject.toml` (`requires-python`, ruff
+  `target-version`, mypy `python_version`), and 14 `setup-python`
+  blocks across `ci.yml` all converged on 3.12. The lock-sync job
+  was already running in `python:3.12-slim`; CI / Dockerfile / lock
+  now all match. Lock regenerated; no Python-side code changes
+  required (no `match` adoption needed for the bump itself).
+- **Neo4j Python driver pin tightened to `>=6,<7`.** Audit-verified
+  clean: all sessions use `with`, `Result.summary()` migrated to
+  `consume()`, no deprecated `read_transaction`/`write_transaction`,
+  no `Transaction.sync`. Driver 7.x doesn't exist on PyPI yet
+  (latest is 6.2.0); the next phase of the Neo4j upgrade is
+  server-side (5.26 → 7.x + GDS plugin), tracked separately due to
+  the one-way data-volume migration.
+
+### Deferred (multi-day, separate sessions)
+
+- **chromadb 0.5 → 1.x.** `semantic_cache.py` rewrite-class (~520 LOC),
+  `chroma-hnswlib` drops, REST v1→v2 path changes, one-way data-volume
+  migration. 4-phase plan documented in `tasks/todo.md`.
+- **Neo4j server 5 → 7 + GDS plugin.** Memory budget bump required for
+  GDS in-memory projections (heap 1G → 4G, container 4G → 8G).
+- **E.4a/4b GraphRAG.** Gated on Neo4j 7 + GDS. Spike resolved:
+  `ChromaNeo4jRetriever` subclass (~150 LOC) keeps vectors in Chroma
+  while entity graph lives in Neo4j 7 — preserves the
+  vectors-in-Chroma / graph-in-Neo4j architectural split documented in
+  `docs/COMPETITIVE_ANALYSIS.md`.
+- **ESLint 9 → 10.** Original blocker (`eslint-plugin-react-hooks`)
+  cleared; new blocker is `eslint-plugin-jsx-a11y@6.10.2` (peer caps
+  at ESLint 9, no release in ~18 months). ~1-hour task once jsx-a11y
+  ships.
 
 ### Cerid-AI interface contracts (closes the trading-agent ledger)
 

@@ -1,12 +1,12 @@
 [project]
 name = "cerid-ai"
-version = "0.90.0"
+version = "0.91.0"
 description = "Privacy-first Personal AI Knowledge Companion"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = "Apache-2.0"
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 line-length = 120
 src = ["src/mcp"]
 
@@ -28,7 +28,7 @@ ignore = ["E501"]  # line length handled by formatter
 "**/app/**" = ["BLE001"]  # app/ extracted from branch without BLE001 annotations; sweep planned
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 files = ["src/mcp"]
 exclude = ["scripts/", "tests/"]
 warn_return_any = false
