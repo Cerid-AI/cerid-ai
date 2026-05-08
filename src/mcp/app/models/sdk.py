@@ -55,6 +55,23 @@ class SDKHallucinationResponse(_SDKBase):
         default_factory=lambda: {"total": 0, "verified": 0, "unverified": 0, "uncertain": 0},
         description="Claim verification counts by status",
     )
+    mode: str = Field(
+        default="thorough",
+        description=(
+            "Verification depth that was actually applied. ``fast`` returns "
+            "extracted claims with status='uncertain' and ``nli_skipped=true`` "
+            "without paying NLI cost; ``thorough`` runs the full cross-model "
+            "pipeline. Set on the request via ``HallucinationCheckRequest.mode``."
+        ),
+    )
+    nli_skipped: bool = Field(
+        default=False,
+        description=(
+            "True when cross-model NLI verification was skipped (fast mode). "
+            "Consumers can use this to decide whether to display a hedged "
+            "warning vs. an authoritative verdict."
+        ),
+    )
 
 
 class SDKMemoryExtractResponse(_SDKBase):
@@ -66,6 +83,54 @@ class SDKMemoryExtractResponse(_SDKBase):
     memories_stored: int = Field(default=0, ge=0, description="Number successfully stored in KB")
     skipped_duplicates: int = Field(default=0, ge=0, description="Memories skipped due to deduplication")
     results: list[dict[str, Any]] = Field(default_factory=list, description="Per-memory outcome (status, type, summary)")
+
+
+class SDKMemoryExtractAcceptedResponse(_SDKBase):
+    """202 Accepted envelope when ``MEMORY_QUEUE_MODE=async``.
+
+    Returned from ``POST /sdk/v1/memory/extract`` when the request was
+    enqueued for background processing. Callers poll
+    ``GET /sdk/v1/memory/extract/jobs/{job_id}`` to retrieve the
+    completion result. Falls back to the synchronous
+    ``SDKMemoryExtractResponse`` when ``?wait=true`` is set or the
+    queue isn't enabled.
+    """
+
+    job_id: str = Field(description="RQ job identifier — opaque to callers, use as-is in the status URL")
+    status: str = Field(default="queued", description="Initial job status — always 'queued' on accept")
+    status_url: str = Field(
+        description="Path to GET for the job result. Relative to the SDK base URL.",
+    )
+    conversation_id: str = Field(default="", description="Mirrors the request field for client-side correlation")
+
+
+class SDKMemoryExtractJobStatus(_SDKBase):
+    """Status envelope for ``GET /sdk/v1/memory/extract/jobs/{job_id}``.
+
+    ``status`` transitions: ``queued → started → finished`` (success) or
+    ``queued → started → failed`` (worker error). ``result`` is populated
+    only when ``status='finished'``; ``error`` is populated only when
+    ``status='failed'``.
+    """
+
+    job_id: str = Field(description="RQ job identifier")
+    status: str = Field(
+        description=(
+            "Job lifecycle state — one of: queued | started | finished | "
+            "failed | deferred | scheduled | canceled | unknown"
+        ),
+    )
+    enqueued_at: str | None = Field(default=None, description="ISO 8601 timestamp when the job was accepted")
+    started_at: str | None = Field(default=None, description="ISO 8601 timestamp when the worker began processing")
+    ended_at: str | None = Field(default=None, description="ISO 8601 timestamp on completion (success or failure)")
+    result: SDKMemoryExtractResponse | None = Field(
+        default=None,
+        description="Worker output — populated only when status='finished'",
+    )
+    error: str | None = Field(
+        default=None,
+        description="Worker exception summary — populated only when status='failed'",
+    )
 
 
 class SDKHealthResponse(_SDKBase):
@@ -112,6 +177,17 @@ class SDKLLMCompleteRequest(BaseModel):
         default=None,
         description="OpenAI-compatible response format spec (e.g., {'type': 'json_object'})",
     )
+    slo_budget_ms: int | None = Field(
+        default=None, ge=100, le=600_000,
+        description=(
+            "Optional wall-clock budget in milliseconds. The smart_router "
+            "filters tiers by their empirical p95 latency profile; if no "
+            "tier fits the budget the response is HTTP 503 with a "
+            "Retry-After header carrying the floor p95. Lets fast-path "
+            "consumers (e.g. trading-agent) fail-fast and route to direct "
+            "providers instead of waiting on a slow tier."
+        ),
+    )
 
 
 class SDKLLMCompleteResponse(_SDKBase):
@@ -124,4 +200,12 @@ class SDKLLMCompleteResponse(_SDKBase):
     estimated_cost_per_1k: float = Field(
         default=0.0, ge=0.0,
         description="Estimated cost in USD per 1K tokens (0 for free / Ollama)",
+    )
+    tier_p95_ms: int = Field(
+        default=0, ge=0,
+        description=(
+            "Empirical p95 wall-clock for the tier this call was routed to. "
+            "0 when the tier has no measured profile yet. Useful for client-"
+            "side adaptive timeout tuning."
+        ),
     )

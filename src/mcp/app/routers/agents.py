@@ -8,6 +8,8 @@ import asyncio
 import json
 import logging
 import time
+from enum import Enum
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -106,13 +108,41 @@ class RectifyRequest(BaseModel):
     stale_days: int = Field(90, ge=1, le=3650)
 
 
+class HallucinationMode(str, Enum):
+    """Verification depth for ``/agent/hallucination``.
+
+    Class invariant: post-fact annotation handlers shouldn't make every
+    caller pay full NLI cost. Each mode is a distinct point on the
+    cost/quality curve, exposed explicitly so callers don't burn 60-100s
+    waiting on cross-model verification when a 2s heuristic is enough.
+    """
+
+    FAST = "fast"          # Claim extraction only — no cross-model NLI
+    THOROUGH = "thorough"  # Full extraction + cross-model NLI verification
+
+
 class HallucinationCheckRequest(BaseModel):
     response_text: str
-    conversation_id: str
+    # ``min_length=1`` enforces the requirement at Pydantic-validation time
+    # rather than at handler runtime. Without it an empty value reached the
+    # handler's "if not conversation_id" 422 branch — a guaranteed 422 that
+    # cost a request slot and a round-trip. With it Pydantic rejects up-front
+    # and the constraint is visible in the OpenAPI spec (the
+    # ``sdk-openapi-drift`` gate keeps it stable across releases).
+    conversation_id: str = Field(..., min_length=1, description="Required conversation identifier")
     threshold: float | None = Field(None, ge=0.0, le=1.0)
     model: str | None = None
     user_query: str | None = None
     expert_mode: bool = False
+    mode: HallucinationMode = Field(
+        default=HallucinationMode.THOROUGH,
+        description=(
+            "Verification depth. ``fast`` extracts claims and returns them "
+            "marked ``status='uncertain'`` with ``verification_skipped=True`` —"
+            " ~ms latency, no NLI calls, useful for post-fact annotations. "
+            "``thorough`` (default) runs the full cross-model NLI pipeline."
+        ),
+    )
     # Sprint C: auto-persist to Neo4j :VerificationReport on successful
     # return. Default True collapses the old two-endpoint dance
     # (/agent/hallucination then /verification/save) into one call.
@@ -124,7 +154,8 @@ class HallucinationCheckRequest(BaseModel):
 
 class MemoryExtractionRequest(BaseModel):
     response_text: str
-    conversation_id: str
+    # See HallucinationCheckRequest.conversation_id — same systemic shape.
+    conversation_id: str = Field(..., min_length=1, description="Required conversation identifier")
     model: str = ""
 
 
@@ -465,6 +496,47 @@ async def triage_batch_endpoint(req: TriageBatchRequest):
 @router.post("/agent/hallucination")
 async def hallucination_check_endpoint(req: HallucinationCheckRequest):
     try:
+        # Fast mode bypasses the cross-model NLI pipeline entirely — the
+        # handler runs claim extraction (the unique value this endpoint
+        # provides over a regex check) and returns claims marked
+        # ``status="uncertain"`` with ``verification_skipped=True``. The
+        # response shape stays identical to the thorough path so consumers
+        # don't have to switch models. Useful for post-fact annotations
+        # (e.g. trading-agent's ``[KB HALLUCINATION WARNING]`` prefix) that
+        # need the extracted claims but don't want to wait 60-100s on NLI.
+        if req.mode == HallucinationMode.FAST:
+            from core.agents.hallucination.extraction import extract_claims
+            from core.utils.time import utcnow_iso
+            claims_list, method = await extract_claims(
+                req.response_text, user_query=req.user_query,
+            )
+            uncertain_claims = [
+                {
+                    "text": c if isinstance(c, str) else (c.get("text") or c.get("claim") or ""),
+                    "status": "uncertain",
+                    "confidence": 0.0,
+                    "verification_skipped": True,
+                }
+                for c in claims_list
+            ]
+            return {
+                "conversation_id": req.conversation_id,
+                "timestamp": utcnow_iso(),
+                "skipped": False,
+                "reason": None,
+                "extraction_method": method,
+                "claims": uncertain_claims,
+                "summary": {
+                    "total": len(uncertain_claims),
+                    "verified": 0,
+                    "unverified": 0,
+                    "uncertain": len(uncertain_claims),
+                },
+                "mode": "fast",
+                "nli_skipped": True,
+                "persisted": False,
+            }
+
         from app.db.neo4j.memory import create_memory_node
         from core.agents.hallucination import check_hallucinations
         result = await check_hallucinations(
@@ -479,6 +551,7 @@ async def hallucination_check_endpoint(req: HallucinationCheckRequest):
             expert_mode=req.expert_mode,
             create_memory_fn=create_memory_node,
         )
+        result["mode"] = "thorough"
 
         # Sprint C auto-persist: collapse the old FE two-call dance
         # (/agent/hallucination -> /verification/save). The standalone
@@ -647,7 +720,32 @@ class MemoryRecallRequest(BaseModel):
     min_score: float = 0.4
 
 
-@router.post("/agent/memory/recall")
+class MemoryRecallResponse(BaseModel):
+    """Response from ``POST /agent/memory/recall``.
+
+    Wraps the result list in an envelope so consumers can rely on a single
+    shape (object) for both empty and non-empty cases. The previous bare-
+    list return broke naive ``body.get("result", body)`` parsers — an
+    AttributeError counted as an error on every empty success and inflated
+    consumers' error rates by tens of thousands of false-positive failures
+    (see cerid-trading-agent ``tasks/cerid-ai-interface-issues.md`` § D).
+
+    Class invariant: every endpoint consumed by an external SDK returns an
+    object, never a top-level array. Top-level arrays are valid JSON but
+    indistinguishable from "actual error" in clients that ``.get()`` on the
+    body. The systemic rule is enforced via ``response_model=`` on the
+    handler — Pydantic re-serializes the dict shape and FastAPI emits the
+    constraint into the OpenAPI spec.
+    """
+
+    memories: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Recalled memories scored by relevance + salience decay",
+    )
+    total: int = Field(default=0, ge=0, description="Number of memories returned (after min_score filter)")
+
+
+@router.post("/agent/memory/recall", response_model=MemoryRecallResponse)
 async def memory_recall_endpoint(req: MemoryRecallRequest):
     """Recall memories relevant to a query."""
     try:
@@ -658,11 +756,15 @@ async def memory_recall_endpoint(req: MemoryRecallRequest):
             neo4j_driver=get_neo4j(),
             top_k=req.top_k,
         )
-        # Filter by min_score and return
-        return [r for r in (results or []) if r.get("adjusted_score", r.get("score", 0)) >= req.min_score]
+        filtered = [
+            r for r in (results or [])
+            if r.get("adjusted_score", r.get("score", 0)) >= req.min_score
+        ]
+        return MemoryRecallResponse(memories=filtered, total=len(filtered))
     except Exception as e:
         logger.error(f"Memory recall error: {e}")
-        return []  # graceful degradation — empty recall, not 500
+        # Graceful degradation — empty recall, not 500. Still object-shaped.
+        return MemoryRecallResponse(memories=[], total=0)
 
 
 class VerifyStreamRequest(BaseModel):

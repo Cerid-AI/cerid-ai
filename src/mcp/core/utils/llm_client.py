@@ -438,6 +438,7 @@ async def route_and_call(
     cost_sensitivity: str = "medium",
     kb_injection_count: int = 0,
     total_chars: int = 0,
+    slo_budget_ms: int | None = None,
 ) -> tuple[str, "RouteDecision"]:
     """Smart-route a query to the best LLM, then call it.
 
@@ -445,6 +446,10 @@ async def route_and_call(
     user's cost preference influences model selection for this call.  See
     Task 17 audit C-6: this value used to get dropped at the router boundary
     and default to ``medium`` regardless of the user's setting.
+
+    ``slo_budget_ms`` (optional) is a wall-clock budget. Forwarded to
+    :func:`smart_router.route`; raises ``BudgetUnsatisfiableError`` (which
+    callers should let propagate) when no tier fits.
 
     Returns ``(content, route_decision)`` tuple.
     """
@@ -457,6 +462,7 @@ async def route_and_call(
         cost_sensitivity=cost_sensitivity,
         kb_injection_count=kb_injection_count,
         total_chars=total_chars,
+        slo_budget_ms=slo_budget_ms,
     )
 
     if decision.provider == "ollama":
