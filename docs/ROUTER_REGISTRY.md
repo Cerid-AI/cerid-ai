@@ -8,7 +8,7 @@ Every `@router.*` decorator shipped in the public (OSS Apache-2.0) distribution.
 Internal-only routers (billing, trading SDK, ops endpoints) are stripped and
 not documented here; see the internal repo for the full registry.
 
-**Total routes:** 250
+**Total routes:** 251
 
 | Method | Path | Handler | Module | Tags | Build |
 |--------|------|---------|--------|------|-------|
@@ -150,6 +150,7 @@ not documented here; see the internal repo for the full registry.
 | GET | `/quality` | `get_quality_metrics` | `src/mcp/app/routers/observability.py` | observability |  |
 | GET | `/queue-depth` | `queue_depth_endpoint` | `src/mcp/app/routers/observability.py` | observability |  |
 | GET | `/ragas` | `get_ragas_metrics` | `src/mcp/app/routers/observability.py` | observability |  |
+| GET | `/restarts` | `get_restart_info` | `src/mcp/app/routers/observability.py` | observability |  |
 | POST | `/chat` | `chat_completion` | `src/mcp/app/routers/ollama_proxy.py` | ollama |  |
 | GET | `/models` | `list_ollama_models` | `src/mcp/app/routers/ollama_proxy.py` | ollama |  |
 | POST | `/pull` | `pull_model` | `src/mcp/app/routers/ollama_proxy.py` | ollama |  |

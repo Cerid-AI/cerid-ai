@@ -180,17 +180,16 @@ def test_longshot_surface_under_500ms(benchmark):
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Workstream A Phase 1.1: budget set; fix in Phase 1.2",
-)
 @pytest.mark.benchmark(group="memory_extract", min_rounds=3, disable_gc=True)
 def test_memory_extract_under_10s(benchmark):
     """Workstream A §A2 STRICT: /sdk/v1/memory/extract p99 < 10s.
 
     Trading-agent soak observed 5.7% ReadTimeout rate at the httpx 20s
-    default. Tightening to p99 < 10s with a synthetic 200-token response
-    (representative of memory-extract workloads in the soak).
+    default. Tightened to p99 < 10s after Phase 1.2 landed per-stage
+    ``asyncio.wait_for(8s)`` budgets on the three LLM call sites
+    (extract / consolidation / conflict-resolution). The bound catches
+    the long-tail hangs that the 20s default was absorbing and surfaces
+    them via ``log_swallowed_error``.
     """
     payload = {
         "response_text": (
