@@ -2,11 +2,27 @@
 
 All notable changes to cerid-ai are documented here.
 
-## Unreleased — Workstream A Phase 1.2/1.3 + Workstream E Phase 2 (2026-05-03 → 2026-05-07)
+## Unreleased — Workstream A + C + E (2026-05-03 → 2026-05-08)
 
-Cross-project SLO hardening + retrieval-quality work since v0.90.0.
-Tag a release when ready by bumping `pyproject.toml` + `core/utils/version.py`
-and resyncing.
+Cross-project SLO hardening + Pro-tier checkout end-to-end + retrieval-quality
+work since v0.90.0. Tag a release when ready by bumping `pyproject.toml` +
+`core/utils/version.py` and resyncing.
+
+### Pro tier checkout (Workstream C)
+
+- **Stripe Checkout end-to-end shipped.** The Pro Settings pane's
+  upgrade button now opens a Stripe-hosted Checkout URL in a new
+  tab; manual license-key entry remains as the offline-activation
+  fallback.
+- **Webhook coverage expanded** to handle the full subscription
+  lifecycle. The previously-unhandled `customer.subscription.updated`
+  event now deactivates the license on `past_due` / `unpaid` /
+  `canceled` / `incomplete_expired` statuses; `active` / `trialing` /
+  `paused` no-op (paused is a customer-initiated vacation hold —
+  entitlement is preserved during the pause window).
+- **Comprehensive unit-test coverage** added for the billing router
+  (every endpoint and every webhook branch, deterministic, < 1 s,
+  no live Stripe required).
 
 ### Cross-project SLOs (Workstream A)
 

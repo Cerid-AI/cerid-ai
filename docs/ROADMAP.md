@@ -43,11 +43,11 @@ Real-time activity panel with humanized agent messages. Files: `src/web/src/comp
 
 **Follow-up (P2):** Cost-comparison view (current model vs alternatives) — catalog data is already fetched; needs a UI surface in settings.
 
-### ✅ Pro Tier Purchase Path -- SHIPPED v0.84.0+ (Stripe checkout still open)
+### ✅ Pro Tier Purchase Path -- SHIPPED (Stripe checkout end-to-end)
 
-Billing backend (license-key generation/validation, waitlist, status) lives in the internal-only distribution. Pro Settings pane (`src/web/src/components/settings/pro-section.tsx`) ships license-key entry, waitlist join, current-plan display, and Pro/Community/Enterprise feature matrices.
+Billing backend (Stripe Checkout session creation, webhook event handling across the subscription lifecycle, license-key generation/validation, waitlist, status) lives in the internal-only distribution. The Pro Settings pane (`src/web/src/components/settings/pro-section.tsx`) wires the upgrade button to the billing endpoint and opens the Stripe-hosted Checkout URL; manual license-key entry remains as a fallback for offline activation.
 
-**Follow-up (P1):** Stripe checkout end-to-end (interim flow is email waitlist + manual key issuance). Pro-anchor feature (audio transcription) still pending.
+**Follow-up (P2):** Pro-anchor feature (audio transcription) still pending.
 
 ### ✅ Pro Mode Configuration & Feature Access -- SHIPPED v0.84.0
 
