@@ -50,3 +50,15 @@ CVE-2026-3833
 # code). No upstream fix yet.
 # Re-evaluate: 2026-06-30.
 CVE-2026-7598
+
+# GnuTLS authentication bypass via NUL character in cert names — we
+# don't perform certificate subject-name matching against attacker-
+# controlled input. No upstream fix yet.
+# Re-evaluate: 2026-06-30.
+CVE-2026-42010
+
+# GnuTLS security bypass via incorrect name handling — same attack
+# surface as CVE-2026-42010; we don't process attacker-controlled
+# cert names anywhere in the codebase. No upstream fix yet.
+# Re-evaluate: 2026-06-30.
+CVE-2026-42011
