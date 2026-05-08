@@ -39,7 +39,7 @@ Most self-hosted AI tools are either basic RAG wrappers or bloated agent framewo
 | **9 specialized agents**       | ✅ Query, Triage, Rectify, Audit, Hallucination, Memory, etc. | Limited           | None             | None             |
 | **Tiered local inference**     | ✅ Ollama + GPU sidecar + auto-fallback | Basic             | None             | Basic            |
 | **Graph + vector + BM25**      | ✅ Full hybrid with Neo4j relationships | Vector only       | Vector only      | Vector only      |
-| **Clean architecture (v0.90)** | ✅ 35 integration tests + canonical models | Growing           | Growing          | Older            |
+| **Clean architecture (v0.91)** | ✅ 35 integration tests + canonical models | Growing           | Growing          | Older            |
 | **5-min Docker start**         | ✅ One-command                    | ✅                   | ✅                | ✅                |
 | **Multi-domain KB**            | ✅ coding / finance / projects / personal | ✅                | Limited          | ✅                |
 
@@ -106,16 +106,24 @@ Full list in [API_REFERENCE.md](docs/API_REFERENCE.md). Highlights:
 
 ---
 
-## Recent Highlights (v0.90 — April 2026)
+## Recent Highlights (v0.91 — May 2026)
 
-- **Nine-sprint consolidation.** Zero shape-contract drift. Canonical `ClaimVerification` Pydantic model. Bridge modules retired. `src/mcp/services/` and `src/mcp/agents/` directories deleted.
-- **One canonical data-layer path.** Neo4j code lives at `app/db/neo4j/` only; the legacy `db/neo4j/` shim tree is gone, guarded by a CI path-existence check (`lint / no-legacy-neo4j-tree`).
-- **35 preservation invariants as a merge gate.** Integration tests boot a live stack and run on every PR. `preservation`, `sync-manifest-drift`, `router-registry-drift`, `sdk-openapi-drift`, `env-example-drift`, and `silent-catch` are all blocking — no soft-warning CI gates remain.
-- **Observability contract, enforced.** Silent-catch allowlist shrunk 127 → 64 across 63 call-site rewrites to `log_swallowed_error`; every broad-catch surfaces at `/health.swallowed_errors_last_hour`.
-- **`/sdk/v1/*` under contract.** Committed OpenAPI baseline + drift check; a single source of truth for `SDK_VERSION`.
-- **Streaming verification auto-persist.** `verify_response_streaming` now saves reports after the retry-sweep + consistency checks settle; new `persisted:{success}` SSE event.
-- **Clean inference routing.** Full Bifrost retirement; Ollama + sidecar path is the only supported shape.
-- **Agent-friendly context.** `CLAUDE.md` trimmed to just architectural directives — the long form lives in `docs/ARCHITECTURE.md` / `docs/CONVENTIONS.md` / `docs/PRESERVATION.md`.
+- **`benchmark-slo` is a PR-blocking merge gate.** Real-OpenRouter latency drift now fails CI alongside the deterministic budget-plumbing tests. Closes Workstream A's SLO close-out gate after 4 consecutive green main runs.
+- **`/sdk/v1/memory/extract` SLO bounded.** Per-stage `asyncio.wait_for` budgets on the three internal LLM calls + a server-side `MEMORY_QUEUE_MODE=async` path that returns 202 + `Location` header; callers poll `GET /sdk/v1/memory/extract/jobs/{job_id}`. The sync `?wait=true` escape hatch preserves binary compatibility.
+- **Pro-tier Stripe checkout end-to-end.** Hosted Checkout flow shipped; webhook coverage extends to `customer.subscription.updated` (deactivates on `past_due` / `unpaid` / `canceled` / `incomplete_expired`).
+- **`mode=fast | thorough` on `/agent/hallucination`.** Fast mode skips cross-model NLI entirely, returns claims marked `status='uncertain'` with `nli_skipped=true` — useful for post-fact annotations that don't want to wait 60-100s.
+- **`slo_budget_ms` on `/sdk/v1/llm/complete`.** Smart-router filters tiers by their empirical p95 latency profile; if no tier fits, returns `503` + `Retry-After`. Never silently downgrades.
+- **Schema contracts hardened.** Object envelope on `/agent/memory/recall`; `min_length=1` on required `conversation_id` fields. Drift gate keeps every constraint stable across releases.
+- **Python 3.12 runtime.** Dockerfile `python:3.12.13-slim-trixie`, pyproject `requires-python = ">=3.12"`, full CI matrix on 3.12.
+- **Layout-aware retrieval default ON.** `+0.05 MRR / +0.024 NDCG@10 / faster latency` against the live eval-corpus; nightly `eval-exploratory.yml` workflow + BEIR seed plumbing for ongoing drift detection.
+
+### Previously (v0.90 — April 2026)
+
+- Nine-sprint consolidation: canonical `ClaimVerification` Pydantic model, bridge modules retired, `src/mcp/services/` + `src/mcp/agents/` directories deleted.
+- 35 preservation invariants as a merge gate; `preservation` + every drift gate are blocking.
+- `/sdk/v1/*` OpenAPI contract baseline + drift check.
+- Silent-catch observability contract enforced.
+- Streaming verification auto-persist.
 
 ---
 

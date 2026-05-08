@@ -1,6 +1,6 @@
 # Cerid AI — Conventions
 
-> **Last refresh:** 2026-04-21 (v0.90 release: Neo4j tree unification, post-Sprint-E bridge paths list updated)
+> **Last refresh:** 2026-05-08 (v0.91 release: Python 3.12; defensive imports for internal-only modules in mixed-files; min_length on required identifiers; object-envelope SDK contracts)
 > **Scope:** Project-specific style/approach conventions not enforced by lint rules
 > **Owner:** New contributors read this first; senior maintainers amend as patterns solidify
 
