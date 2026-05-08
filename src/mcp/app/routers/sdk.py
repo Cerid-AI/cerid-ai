@@ -50,6 +50,36 @@ _422 = {"description": "Invalid request parameters"}
 
 
 # ---------------------------------------------------------------------------
+# Queue-availability probes (defensive imports for the public distribution)
+# ---------------------------------------------------------------------------
+#
+# ``app.queue`` is internal-only per .sync-manifest.yaml — community/public
+# installs ship without it. The async memory_extract path is internal-only
+# by design ("community installs without queue workers don't pay the cost"
+# — app/queue/__init__.py docstring); the sync path is the universal
+# contract. Detect the gap once at module import time and short-circuit
+# the async branches accordingly.
+
+try:
+    from app.queue import (  # noqa: F401  — re-exported via _queue_avail
+        _rq_available,
+        get_memory_queue,
+        is_memory_async_mode,
+    )
+    _queue_avail = True
+except ImportError:
+    _queue_avail = False
+    _rq_available = False  # type: ignore[assignment]
+
+    def is_memory_async_mode() -> bool:  # type: ignore[no-redef]
+        """Public-distribution stub — async queue isn't shipped here."""
+        return False
+
+    def get_memory_queue():  # type: ignore[no-redef]
+        raise RuntimeError("Async memory queue is internal-only.")
+
+
+# ---------------------------------------------------------------------------
 # Core endpoints
 # ---------------------------------------------------------------------------
 
@@ -116,8 +146,6 @@ async def sdk_memory_extract(req: MemoryExtractionRequest, wait: bool = False):
     """
     from fastapi.responses import JSONResponse
 
-    from app.queue import get_memory_queue, is_memory_async_mode
-
     if wait or not is_memory_async_mode():
         return await memory_extract_endpoint(req)
 
@@ -163,9 +191,7 @@ async def sdk_memory_extract(req: MemoryExtractionRequest, wait: bool = False):
     responses={404: {"description": "Unknown job_id"}, 503: _503},
 )
 async def sdk_memory_extract_job_status(job_id: str) -> SDKMemoryExtractJobStatus:
-    from app.queue import _rq_available, get_memory_queue
-
-    if not _rq_available:
+    if not _queue_avail or not _rq_available:
         raise HTTPException(
             status_code=503,
             detail="Async memory queue is not configured (rq not installed).",

@@ -126,6 +126,11 @@ jobs:
           #                      MarkdownHeaderTextSplitter.split_text(text) — no URL fetching, no HTML
           #                      splitter usage anywhere in the codebase. Fix in 1.1.2+ requires
           #                      langchain-core 1.x. Re-eval 2026-06-30 (Phase 11 langchain-core 0.3→1.2).
+          # CVE-2026-6357: pip self-update check ran AFTER installing wheels, letting a newly-installed
+          #                wheel's code import during the self-update path. Fixed in pip 26.1. Not
+          #                reachable here — installs use --require-hashes against requirements.lock
+          #                and self-update is disabled in the container. Affects only the pre-installed
+          #                pip on the CI runner. Re-eval 2026-08-31 (after pip 26.1 lands on hosted runners).
           # Migration planned for Phase 11
           pip-audit --desc \
             --ignore-vuln CVE-2026-26013 \
@@ -134,7 +139,8 @@ jobs:
             --ignore-vuln CVE-2026-28277 \
             --ignore-vuln CVE-2026-4539 \
             --ignore-vuln CVE-2026-3219 \
-            --ignore-vuln GHSA-fv5p-p927-qmxr
+            --ignore-vuln GHSA-fv5p-p927-qmxr \
+            --ignore-vuln CVE-2026-6357
       - name: ReDoS regex audit (dlint)
         run: |
           pip install dlint flake8
