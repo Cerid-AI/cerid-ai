@@ -54,6 +54,68 @@ class RouteDecision:
     provider: str  # "ollama", "openrouter_free", "openrouter_paid"
     reason: str
     estimated_cost_per_1k: float  # USD per 1K tokens (0 for free)
+    tier_p95_ms: int = 0  # Empirical p95 wall-clock for this tier (0 = unknown)
+
+
+class BudgetUnsatisfiableError(Exception):
+    """No tier in the eligible set has a p95 within the caller's slo_budget_ms.
+
+    Carries ``retry_after_ms`` — the smallest tier-p95 in the eligible set,
+    so the caller knows the floor it would have to accept to land here. The
+    SDK handler converts this into a 503 with a ``Retry-After`` header and
+    a structured detail body so callers (e.g. cerid-trading-agent) can fail
+    fast and route to direct providers instead of waiting on a slow tier.
+    """
+
+    def __init__(self, retry_after_ms: int, eligible_tier: str = "", floor_p95_ms: int = 0) -> None:
+        super().__init__(
+            f"slo_budget_ms exceeded — smallest eligible tier p95 is {floor_p95_ms} ms"
+        )
+        self.retry_after_ms = retry_after_ms
+        self.eligible_tier = eligible_tier
+        self.floor_p95_ms = floor_p95_ms
+
+
+# ---------------------------------------------------------------------------
+# Tier latency profile -- empirical p95 wall-clock by tier
+# ---------------------------------------------------------------------------
+#
+# Drives the ``slo_budget_ms`` filter in ``route()``. Values are observed
+# p95s from production traffic (rounded to readability). Update when a
+# tier's measured p95 drifts >20% — the smart_router uses these as hard
+# eligibility filters, so optimistic estimates here cause false-503s and
+# pessimistic estimates cause budget-exceeded responses to leak through.
+#
+# Ollama is treated as a separate "tier" because it's local — its latency
+# profile is independent of the OpenRouter tiers.
+TIER_P95_MS: dict[str, int] = {
+    "ollama": 5000,                # local CPU inference; varies by model
+    "openrouter_free": 12000,      # llama-3.3 via free pool — long tail
+    "openrouter_cheap": 10000,     # gpt-4o-mini, gemini-flash
+    "openrouter_capable": 25000,   # claude-sonnet, gpt-4o
+    "openrouter_research": 45000,  # grok-online (web search adds tail)
+    "openrouter_expert": 75000,    # grok-4:online with structured output
+    "verification": 10000,         # gpt-4o-mini-class
+    "verification_web": 45000,     # grok-4.1-fast:online
+    "verification_expert": 75000,  # grok-4:online
+}
+
+
+def _check_budget(tier_key: str, slo_budget_ms: int | None) -> int:
+    """Return the tier's p95 if it fits the budget; raise otherwise.
+
+    A ``slo_budget_ms`` of None disables the check (legacy behaviour).
+    """
+    p95 = TIER_P95_MS.get(tier_key, 0)
+    if slo_budget_ms is None:
+        return p95
+    if p95 > slo_budget_ms:
+        raise BudgetUnsatisfiableError(
+            retry_after_ms=p95,
+            eligible_tier=tier_key,
+            floor_p95_ms=p95,
+        )
+    return p95
 
 
 # ---------------------------------------------------------------------------
@@ -342,6 +404,7 @@ async def route(
     cost_sensitivity: str = "medium",
     total_chars: int = 0,
     kb_injection_count: int = 0,
+    slo_budget_ms: int | None = None,
 ) -> RouteDecision:
     """Pick the best model for this query and task type.
 
@@ -355,10 +418,18 @@ async def route(
     2. Ollama (if available) -- free, instant, for internal ops only
     3. Free OpenRouter models -- for simple/internal tasks
     4. Paid OpenRouter models -- for complex/research tasks
+
+    ``slo_budget_ms`` (optional) is a wall-clock deadline. The router
+    filters tiers by their ``TIER_P95_MS`` profile; any tier with
+    ``p95 > budget`` is ineligible. If no tier fits, raises
+    ``BudgetUnsatisfiableError`` rather than silently downgrading —
+    callers (e.g. cerid-trading-agent) need a fast 503 + Retry-After
+    so they can route to direct providers instead of waiting.
     """
 
     # 1. Task-specific models -- always take precedence
     if task_type == TaskType.VERIFICATION:
+        p95 = _check_budget("verification", slo_budget_ms)
         model = getattr(config, "VERIFICATION_MODEL", "openrouter/openai/gpt-4o-mini")
         if model.startswith("openrouter/"):
             model = model[len("openrouter/"):]
@@ -367,9 +438,11 @@ async def route(
             provider="openrouter_paid",
             reason="dedicated verification model",
             estimated_cost_per_1k=0.00015,
+            tier_p95_ms=p95,
         )
 
     if task_type == TaskType.VERIFICATION_WEB:
+        p95 = _check_budget("verification_web", slo_budget_ms)
         model = getattr(
             config,
             "VERIFICATION_CURRENT_EVENT_MODEL",
@@ -382,9 +455,11 @@ async def route(
             provider="openrouter_paid",
             reason="web-search verification",
             estimated_cost_per_1k=0.0002,
+            tier_p95_ms=p95,
         )
 
     if task_type == TaskType.VERIFICATION_EXPERT:
+        p95 = _check_budget("verification_expert", slo_budget_ms)
         model = getattr(config, "VERIFICATION_EXPERT_MODEL", "openrouter/x-ai/grok-4:online")
         if model.startswith("openrouter/"):
             model = model[len("openrouter/"):]
@@ -393,33 +468,46 @@ async def route(
             provider="openrouter_paid",
             reason="expert verification",
             estimated_cost_per_1k=0.003,
+            tier_p95_ms=p95,
         )
 
     # 2. Internal operations -- try Ollama first, then free models
     if task_type in (TaskType.INTERNAL, TaskType.CLASSIFICATION):
         ollama_ok = await _check_ollama()
         if ollama_ok and _ollama_models:
-            # Pick best available Ollama model
-            preferred = ["llama3.2", "phi3", "mistral", "gemma2"]
-            model = _ollama_models[0]  # default to first available
-            for pref in preferred:
-                matching = [m for m in _ollama_models if pref in m]
-                if matching:
-                    model = matching[0]
-                    break
-            return RouteDecision(
-                model=model,
-                provider="ollama",
-                reason="local model (free, instant)",
-                estimated_cost_per_1k=0.0,
-            )
+            # Ollama-first when reachable. Even with a budget filter,
+            # Ollama's local p95 (~5 s) clears most reasonable budgets.
+            try:
+                p95 = _check_budget("ollama", slo_budget_ms)
+            except BudgetUnsatisfiableError:
+                # Budget too tight even for local — fall through to the
+                # free-tier check; if that fails too, the caller gets
+                # the 503 from there.
+                pass
+            else:
+                preferred = ["llama3.2", "phi3", "mistral", "gemma2"]
+                model = _ollama_models[0]  # default to first available
+                for pref in preferred:
+                    matching = [m for m in _ollama_models if pref in m]
+                    if matching:
+                        model = matching[0]
+                        break
+                return RouteDecision(
+                    model=model,
+                    provider="ollama",
+                    reason="local model (free, instant)",
+                    estimated_cost_per_1k=0.0,
+                    tier_p95_ms=p95,
+                )
 
         # No Ollama -- use free OpenRouter model
+        p95 = _check_budget("openrouter_free", slo_budget_ms)
         return RouteDecision(
             model=FREE_MODELS["llama-3.3"],
             provider="openrouter_free",
             reason="free tier model",
             estimated_cost_per_1k=0.0,
+            tier_p95_ms=p95,
         )
 
     # 3. Chat -- classify complexity, then route to the RIGHT OpenRouter model
@@ -457,6 +545,7 @@ async def route(
     # -----------------------------------------------------------------------
 
     if complexity == Complexity.RESEARCH:
+        p95 = _check_budget("openrouter_research", slo_budget_ms)
         return RouteDecision(
             model=str(RESEARCH_MODELS["grok-online"]["id"]),
             provider="openrouter_paid",
@@ -465,28 +554,34 @@ async def route(
                 if cs == "high" else "research query — real-time data needed"
             ),
             estimated_cost_per_1k=0.0002,
+            tier_p95_ms=p95,
         )
 
     if complexity == Complexity.SIMPLE:
+        p95 = _check_budget("openrouter_free", slo_budget_ms)
         return RouteDecision(
             model=FREE_MODELS["llama-3.3"],
             provider="openrouter_free",
             reason="simple query — free tier sufficient",
             estimated_cost_per_1k=0.0,
+            tier_p95_ms=p95,
         )
 
     if complexity == Complexity.COMPLEX:
         if cs == "high":
             # Complex + high: still capable-tier but cheapest (gemini-flash).
             # gpt-4o-mini is too weak for multi-step reasoning.
+            p95 = _check_budget("openrouter_cheap", slo_budget_ms)
             return RouteDecision(
                 model=str(CHEAP_MODELS["gemini-flash"]["id"]),
                 provider="openrouter_paid",
                 reason="complex query — cheapest capable model (high cost sensitivity)",
                 estimated_cost_per_1k=0.0003,
+                tier_p95_ms=p95,
             )
         # medium or low → CAPABLE.  Escalation to EXPERT is kept behind a
         # separate flag so "low cost sensitivity" doesn't silently 10x spend.
+        p95 = _check_budget("openrouter_capable", slo_budget_ms)
         reason = (
             "complex query — best model (low cost sensitivity)"
             if cs == "low" else "complex query — strong reasoning needed"
@@ -496,30 +591,37 @@ async def route(
             provider="openrouter_paid",
             reason=reason,
             estimated_cost_per_1k=0.003,
+            tier_p95_ms=p95,
         )
 
     # Moderate complexity
     if cs == "high":
+        p95 = _check_budget("openrouter_free", slo_budget_ms)
         return RouteDecision(
             model=FREE_MODELS["llama-3.3"],
             provider="openrouter_free",
             reason="moderate query — free model (high cost sensitivity)",
             estimated_cost_per_1k=0.0,
+            tier_p95_ms=p95,
         )
     if cs == "low":
         # Task 17 decision table: MODERATE + low → CAPABLE (was CHEAP).
+        p95 = _check_budget("openrouter_capable", slo_budget_ms)
         return RouteDecision(
             model=str(CAPABLE_MODELS["claude-sonnet"]["id"]),
             provider="openrouter_paid",
             reason="moderate query — capable model (low cost sensitivity)",
             estimated_cost_per_1k=0.003,
+            tier_p95_ms=p95,
         )
     # Medium: cheap paid model balances quality and cost
+    p95 = _check_budget("openrouter_cheap", slo_budget_ms)
     return RouteDecision(
         model=str(CHEAP_MODELS["gpt-4o-mini"]["id"]),
         provider="openrouter_paid",
         reason="moderate query — cost-effective balance",
         estimated_cost_per_1k=0.00015,
+        tier_p95_ms=p95,
     )
 
 

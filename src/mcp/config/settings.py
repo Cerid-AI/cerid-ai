@@ -627,6 +627,17 @@ ENABLE_LAYOUT_AWARE_PARSING = os.getenv(
 # hash that both the router and worker write to.
 INGEST_QUEUE_MODE = os.getenv("INGEST_QUEUE_MODE", "sync").lower()
 
+# Memory-extract mode (Workstream A interface issue A close-out). "sync"
+# (default — preserves the existing response envelope inline) runs the
+# full extract → consolidate → store pipeline on the request thread.
+# "async" enqueues onto the RQ memory queue, returning 202 + job_id
+# immediately and exposing the result via
+# ``GET /sdk/v1/memory/extract/jobs/{job_id}``. Worker config: same
+# ``python -m app.queue.worker`` process drains both the ingest and
+# memory queues — it subscribes to whichever queues have ``*_QUEUE_MODE
+# =async`` set. Independent of INGEST_QUEUE_MODE.
+MEMORY_QUEUE_MODE = os.getenv("MEMORY_QUEUE_MODE", "sync").lower()
+
 # Embedding model version stamp — written to chunk metadata at ingest time
 # so downstream re-embed migrations (Phase 5c) can identify which chunks
 # need re-encoding when the embedding model changes. Defaults to the

@@ -192,9 +192,24 @@
         "title": "AgentQueryRequest",
         "type": "object"
       },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
       "HallucinationCheckRequest": {
         "properties": {
           "conversation_id": {
+            "description": "Required conversation identifier",
+            "minLength": 1,
             "title": "Conversation Id",
             "type": "string"
           },
@@ -202,6 +217,11 @@
             "default": false,
             "title": "Expert Mode",
             "type": "boolean"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/HallucinationMode",
+            "default": "thorough",
+            "description": "Verification depth. ``fast`` extracts claims and returns them marked ``status='uncertain'`` with ``verification_skipped=True`` \u2014 ~ms latency, no NLI calls, useful for post-fact annotations. ``thorough`` (default) runs the full cross-model NLI pipeline."
           },
           "model": {
             "anyOf": [
@@ -255,9 +275,20 @@
         "title": "HallucinationCheckRequest",
         "type": "object"
       },
+      "HallucinationMode": {
+        "description": "Verification depth for ``/agent/hallucination``.\n\nClass invariant: post-fact annotation handlers shouldn't make every\ncaller pay full NLI cost. Each mode is a distinct point on the\ncost/quality curve, exposed explicitly so callers don't burn 60-100s\nwaiting on cross-model verification when a 2s heuristic is enough.",
+        "enum": [
+          "fast",
+          "thorough"
+        ],
+        "title": "HallucinationMode",
+        "type": "string"
+      },
       "MemoryExtractionRequest": {
         "properties": {
           "conversation_id": {
+            "description": "Required conversation identifier",
+            "minLength": 1,
             "title": "Conversation Id",
             "type": "string"
           },
@@ -296,6 +327,18 @@
             "description": "Conversation identifier",
             "title": "Conversation Id",
             "type": "string"
+          },
+          "mode": {
+            "default": "thorough",
+            "description": "Verification depth that was actually applied. ``fast`` returns extracted claims with status='uncertain' and ``nli_skipped=true`` without paying NLI cost; ``thorough`` runs the full cross-model pipeline. Set on the request via ``HallucinationCheckRequest.mode``.",
+            "title": "Mode",
+            "type": "string"
+          },
+          "nli_skipped": {
+            "default": false,
+            "description": "True when cross-model NLI verification was skipped (fast mode). Consumers can use this to decide whether to display a hedged warning vs. an authoritative verdict.",
+            "title": "Nli Skipped",
+            "type": "boolean"
           },
           "reason": {
             "anyOf": [
@@ -418,6 +461,20 @@
             "description": "OpenAI-compatible response format spec (e.g., {'type': 'json_object'})",
             "title": "Response Format"
           },
+          "slo_budget_ms": {
+            "anyOf": [
+              {
+                "maximum": 600000.0,
+                "minimum": 100.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional wall-clock budget in milliseconds. The smart_router filters tiers by their empirical p95 latency profile; if no tier fits the budget the response is HTTP 503 with a Retry-After header carrying the floor p95. Lets fast-path consumers (e.g. trading-agent) fail-fast and route to direct providers instead of waiting on a slow tier.",
+            "title": "Slo Budget Ms"
+          },
           "task_type": {
             "default": "internal",
             "description": "Task category: chat | internal | verification | classification | research",
@@ -469,6 +526,13 @@
             "description": "Why this model was selected",
             "title": "Reason",
             "type": "string"
+          },
+          "tier_p95_ms": {
+            "default": 0,
+            "description": "Empirical p95 wall-clock for the tier this call was routed to. 0 when the tier has no measured profile yet. Useful for client-side adaptive timeout tuning.",
+            "minimum": 0.0,
+            "title": "Tier P95 Ms",
+            "type": "integer"
           }
         },
         "required": [
@@ -477,6 +541,121 @@
           "provider"
         ],
         "title": "SDKLLMCompleteResponse",
+        "type": "object"
+      },
+      "SDKMemoryExtractAcceptedResponse": {
+        "additionalProperties": true,
+        "description": "202 Accepted envelope when ``MEMORY_QUEUE_MODE=async``.\n\nReturned from ``POST /sdk/v1/memory/extract`` when the request was\nenqueued for background processing. Callers poll\n``GET /sdk/v1/memory/extract/jobs/{job_id}`` to retrieve the\ncompletion result. Falls back to the synchronous\n``SDKMemoryExtractResponse`` when ``?wait=true`` is set or the\nqueue isn't enabled.",
+        "properties": {
+          "conversation_id": {
+            "default": "",
+            "description": "Mirrors the request field for client-side correlation",
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "job_id": {
+            "description": "RQ job identifier \u2014 opaque to callers, use as-is in the status URL",
+            "title": "Job Id",
+            "type": "string"
+          },
+          "status": {
+            "default": "queued",
+            "description": "Initial job status \u2014 always 'queued' on accept",
+            "title": "Status",
+            "type": "string"
+          },
+          "status_url": {
+            "description": "Path to GET for the job result. Relative to the SDK base URL.",
+            "title": "Status Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "status_url"
+        ],
+        "title": "SDKMemoryExtractAcceptedResponse",
+        "type": "object"
+      },
+      "SDKMemoryExtractJobStatus": {
+        "additionalProperties": true,
+        "description": "Status envelope for ``GET /sdk/v1/memory/extract/jobs/{job_id}``.\n\n``status`` transitions: ``queued \u2192 started \u2192 finished`` (success) or\n``queued \u2192 started \u2192 failed`` (worker error). ``result`` is populated\nonly when ``status='finished'``; ``error`` is populated only when\n``status='failed'``.",
+        "properties": {
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO 8601 timestamp on completion (success or failure)",
+            "title": "Ended At"
+          },
+          "enqueued_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO 8601 timestamp when the job was accepted",
+            "title": "Enqueued At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Worker exception summary \u2014 populated only when status='failed'",
+            "title": "Error"
+          },
+          "job_id": {
+            "description": "RQ job identifier",
+            "title": "Job Id",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SDKMemoryExtractResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Worker output \u2014 populated only when status='finished'"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO 8601 timestamp when the worker began processing",
+            "title": "Started At"
+          },
+          "status": {
+            "description": "Job lifecycle state \u2014 one of: queued | started | finished | failed | deferred | scheduled | canceled | unknown",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "status"
+        ],
+        "title": "SDKMemoryExtractJobStatus",
         "type": "object"
       },
       "SDKMemoryExtractResponse": {
@@ -596,6 +775,46 @@
           }
         },
         "title": "SDKQueryResponse",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
         "type": "object"
       }
     }
@@ -827,8 +1046,20 @@
     },
     "/sdk/v1/memory/extract": {
       "post": {
-        "description": "Extract facts, decisions, and preferences from conversation text and store as KB artifacts. Deduplicates against existing memories automatically.",
+        "description": "Extract facts, decisions, and preferences from conversation text and store as KB artifacts. Deduplicates against existing memories.\n\nWhen ``MEMORY_QUEUE_MODE=async`` is set on the server (and a worker is running), the default behaviour is **fire-and-forget**: returns ``202 Accepted`` immediately with a ``job_id`` and a ``status_url``. Poll ``GET /sdk/v1/memory/extract/jobs/{job_id}`` for the result.\n\nPass ``?wait=true`` to force the synchronous path (waits for the full extract \u2192 consolidate \u2192 store pipeline before responding) \u2014 use for callers that need the result envelope inline.",
         "operationId": "sdk_memory_extract_sdk_v1_memory_extract_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "wait",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Wait",
+              "type": "boolean"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -848,7 +1079,17 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Sync result (wait=true or queue disabled)"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SDKMemoryExtractAcceptedResponse"
+                }
+              }
+            },
+            "description": "Accepted for async processing"
           },
           "422": {
             "description": "Invalid request parameters"
@@ -858,6 +1099,55 @@
           }
         },
         "summary": "Memory Extraction",
+        "tags": [
+          "SDK"
+        ]
+      }
+    },
+    "/sdk/v1/memory/extract/jobs/{job_id}": {
+      "get": {
+        "description": "Poll for the result of an async memory_extract job. Status transitions: ``queued \u2192 started \u2192 finished`` (success) or ``queued \u2192 started \u2192 failed`` (worker error). The ``result`` field is populated only when ``status='finished'``; ``error`` is populated only when ``status='failed'``.",
+        "operationId": "sdk_memory_extract_job_status_sdk_v1_memory_extract_jobs__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SDKMemoryExtractJobStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Unknown job_id"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "description": "One or more backend services unavailable"
+          }
+        },
+        "summary": "Memory Extract Job Status",
         "tags": [
           "SDK"
         ]

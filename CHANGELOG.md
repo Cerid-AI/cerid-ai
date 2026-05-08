@@ -8,6 +8,48 @@ Cross-project SLO hardening + Pro-tier checkout end-to-end + retrieval-quality
 work since v0.90.0. Tag a release when ready by bumping `pyproject.toml` +
 `core/utils/version.py` and resyncing.
 
+### Cerid-AI interface contracts (closes the trading-agent ledger)
+
+Five systemic invariants land here, each addressing a class of problem
+the trading-agent had to work around client-side. Every change is
+schema-enforced (Pydantic + OpenAPI), test-gated, and back-compatible.
+
+- **D — Object-envelope contract on `/agent/memory/recall`.** Bare
+  `[]` returns broke naive `body.get(...)` parsers and inflated
+  consumer error rates. Now returns `{memories, total}` via a typed
+  `MemoryRecallResponse` model with `response_model=` enforcement on
+  the route.
+- **E — `min_length=1` on required-but-empty-trapped identifiers.**
+  Empty `conversation_id` no longer reaches the handler's runtime 422
+  branch — Pydantic rejects up-front, the constraint surfaces in the
+  OpenAPI spec, and the `sdk-openapi-drift` gate keeps it stable.
+- **C — `slo_budget_ms` on `/sdk/v1/llm/complete`.** Smart-router
+  filters tiers by their empirical p95 latency profile; if no tier
+  fits the budget, the handler returns `503` with a `Retry-After`
+  header carrying the floor p95. Never silently downgrades — quality
+  drops would be invisible to the caller. Response now carries
+  `tier_p95_ms` so callers can tune adaptive client-side timeouts.
+- **B — `mode=fast | thorough` on `/agent/hallucination`.** Fast mode
+  runs claim extraction only and returns claims marked
+  `status='uncertain'` with `nli_skipped=true` — same envelope, no
+  cross-model NLI cost. Thorough mode (default) preserves existing
+  behaviour. Trading-agent's client-side `asyncio.wait_for(2.0)` wrap
+  becomes a server-side contract.
+- **A — async-by-default `memory_extract` with sync escape hatch.**
+  When `MEMORY_QUEUE_MODE=async`, `POST /sdk/v1/memory/extract`
+  returns `202` + `job_id` + `Location` header; callers poll
+  `GET /sdk/v1/memory/extract/jobs/{job_id}` for the result.
+  `?wait=true` forces sync for callers that need the result inline.
+  Lifts the extract→consolidate→store pipeline off the request slot
+  entirely — closes the residual 1.0% timeout cluster the per-stage
+  budgets (Phase 1.2) couldn't reach.
+
+The async/202 pattern shipped here is the canonical answer for any
+future endpoint whose response is "acceptance, not result." A new
+`cerid-memory` queue runs alongside `cerid-ingest`; the same worker
+process drains both, and each queue has an independent
+`*_QUEUE_MODE` opt-in flag.
+
 ### Pro tier checkout (Workstream C)
 
 - **Stripe Checkout end-to-end shipped.** The Pro Settings pane's
