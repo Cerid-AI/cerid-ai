@@ -16,7 +16,7 @@ Microservices on a shared `llm-network` Docker bridge network. Services communic
 
 | Service | Port | Tech | Location |
 |---|---|---|---|
-| MCP Server (API) | 8888 | FastAPI / Python 3.11 | `src/mcp/` |
+| MCP Server (API) | 8888 | FastAPI / Python 3.12 | `src/mcp/` |
 | ChromaDB | 8001 | Vector DB | `stacks/infrastructure/` |
 | Neo4j | 7474, 7687 | Graph DB | `stacks/infrastructure/` |
 | Redis | 6379 | Cache + audit log | `stacks/infrastructure/` |
@@ -51,7 +51,7 @@ cerid-ai-internal/
 ├── docs/                    # ARCHITECTURE.md (this), API_REFERENCE.md, SYNC_PROTOCOL.md,
 │                            # PRESERVATION.md, CONVENTIONS.md, ROUTER_REGISTRY.md
 ├── plugins/                 # BSL-1.1 pro-tier plugins
-├── src/mcp/                 # FastAPI MCP server (Python 3.11)
+├── src/mcp/                 # FastAPI MCP server (Python 3.12)
 │   ├── core/                # Portable orchestrator core (Apache-2.0)
 │   │   ├── agents/          # Query, memory, hallucination, curator, self_rag, memory_consolidation
 │   │   ├── contracts/       # ABCs: VectorStore, GraphStore, CacheStore, LLMClient
