@@ -1,6 +1,6 @@
 # Cerid AI — Architecture
 
-> **Last refresh:** 2026-04-21 (v0.90 release: consolidation + structural cleanup tail)
+> **Last refresh:** 2026-05-08 (v0.91 release: Python 3.12 runtime; cerid-ai interface ledger closed; async memory_extract path)
 > **Scope:** System layout, service topology, Phase C layer contract, data flow
 > **Owner:** Anyone modifying the stack topology, adding a service, or splitting core/app boundaries
 

@@ -1,6 +1,6 @@
 # Cerid AI — Development Roadmap
 
-> **Last updated:** 2026-04-26 (post-v0.90.0)
+> **Last updated:** 2026-05-08 (post-v0.91.0 — close-out gate flipped, Pro-tier Stripe shipped, Python 3.12, interface ledger closed)
 > **Shipped releases:** see [CHANGELOG.md](../CHANGELOG.md) and the [GitHub releases](https://github.com/Cerid-AI/cerid-ai/releases) page.
 > **Internal sprint backlog:** `tasks/todo.md` (internal-only).
 
