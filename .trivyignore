@@ -30,3 +30,23 @@ CVE-2026-4878
 # No upstream fix yet in Debian 13.
 # Re-evaluate: 2026-06-30.
 CVE-2026-33845
+
+# GnuTLS DTLS heap buffer overflow during handshake — same DTLS surface
+# as CVE-2026-33845 above. We don't initiate or accept DTLS connections.
+# No upstream fix yet in Debian 13.
+# Re-evaluate: 2026-06-30.
+CVE-2026-33846
+
+# GnuTLS nameConstraints case-sensitive comparison policy bypass — affects
+# certificate-validation paths that enforce X.509 nameConstraints. We use
+# httpx's default verify path against well-known CAs (no custom name-
+# constraint policies). No upstream fix yet in Debian 13.
+# Re-evaluate: 2026-06-30.
+CVE-2026-3833
+
+# libssh2 vulnerability up to 1.11.1 — libssh2 is pulled in transitively
+# by the base image but we never invoke SSH from inside the container
+# (no paramiko, no asyncssh, no system ssh client used by application
+# code). No upstream fix yet.
+# Re-evaluate: 2026-06-30.
+CVE-2026-7598
