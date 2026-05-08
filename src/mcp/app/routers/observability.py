@@ -15,11 +15,46 @@ Provides real-time observability data for the React dashboard:
 from __future__ import annotations
 
 import logging
+import time
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from core.utils.swallowed import log_swallowed_error
+from core.utils.time import utcnow_iso
+
 logger = logging.getLogger("ai-companion.observability")
+
+# Process-start markers — captured at module import (which happens once
+# per process boot). Surface them via /observability/restarts so trading-
+# agent and other consumers can detect MCP restarts (Workstream A Phase
+# 1.3 defence-in-depth). No Redis dependency for the in-process signal;
+# the Redis-backed monotonic counter below is a nice-to-have when Redis
+# is reachable.
+_PROCESS_START_MONOTONIC = time.monotonic()
+_PROCESS_START_ISO = utcnow_iso()
+_RESTART_COUNTER_KEY = "cerid:mcp:restart_count"
+_LAST_RESTART_ISO_KEY = "cerid:mcp:last_restart_iso"
+
+
+def increment_restart_counter() -> int | None:
+    """Bump the persistent restart counter on app boot.
+
+    Best-effort. Called from the FastAPI lifespan during startup so the
+    counter monotonically increases across container restarts. Returns
+    the post-increment value or None if Redis is unreachable.
+    """
+    try:
+        from app.deps import get_redis
+        redis = get_redis()
+        new_value = int(redis.incr(_RESTART_COUNTER_KEY))
+        redis.set(_LAST_RESTART_ISO_KEY, _PROCESS_START_ISO)
+        logger.info("MCP restart counter bumped to %d", new_value)
+        return new_value
+    except Exception as exc:
+        log_swallowed_error("observability.increment_restart_counter", exc)
+        return None
+
 
 router = APIRouter(prefix="/observability", tags=["observability"])
 
@@ -341,5 +376,44 @@ def get_claim_accuracy(
         },
         "note": "Per-type breakdown pending — currently shows overall average for each type",
         "sample_count": verif.get("count", 0),
+        "timestamp": _iso_now(),
+    }
+
+
+@router.get("/restarts")
+async def get_restart_info() -> dict:
+    """Process-restart visibility (Workstream A Phase 1.3).
+
+    Exposes:
+      - ``process_start_iso`` and ``uptime_seconds`` — always available
+        from in-process state; useful for "did MCP restart since the
+        last poll?" detection.
+      - ``restart_count`` — monotonic counter incremented at app boot
+        and persisted in Redis. ``None`` when Redis is unreachable.
+      - ``last_restart_iso`` — mirror of ``process_start_iso`` written
+        to Redis on the same boot. ``None`` when Redis is unreachable.
+
+    Trading-agent and other dependents can poll this endpoint to align
+    their circuit-breakers with real MCP restart events.
+    """
+    uptime_s = round(time.monotonic() - _PROCESS_START_MONOTONIC, 2)
+    counter: int | None = None
+    last_restart: str | None = None
+    try:
+        from app.deps import get_redis
+        redis = get_redis()
+        raw_counter = redis.get(_RESTART_COUNTER_KEY)
+        if raw_counter is not None:
+            counter = int(raw_counter)
+        raw_last = redis.get(_LAST_RESTART_ISO_KEY)
+        if raw_last is not None:
+            last_restart = raw_last.decode() if isinstance(raw_last, bytes) else str(raw_last)
+    except Exception as exc:
+        log_swallowed_error("observability.get_restart_info", exc)
+    return {
+        "process_start_iso": _PROCESS_START_ISO,
+        "uptime_seconds": uptime_s,
+        "restart_count": counter,
+        "last_restart_iso": last_restart,
         "timestamp": _iso_now(),
     }

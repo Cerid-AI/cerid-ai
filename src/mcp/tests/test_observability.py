@@ -412,3 +412,71 @@ class TestMetricNames:
 
     def test_is_frozenset(self):
         assert isinstance(METRIC_NAMES, frozenset)
+
+
+# ---------------------------------------------------------------------------
+# Tests: /observability/restarts (Workstream A Phase 1.3)
+# ---------------------------------------------------------------------------
+
+
+class TestRestartsEndpoint:
+    @pytest.mark.asyncio
+    async def test_returns_process_state_when_redis_unavailable(self, monkeypatch):
+        """Endpoint must always return in-process state even if Redis is down."""
+        from app.routers.observability import (
+            _PROCESS_START_ISO,
+            get_restart_info,
+        )
+
+        def _broken_get_redis():
+            raise RuntimeError("redis pool not initialised")
+
+        monkeypatch.setattr(
+            "app.deps.get_redis", _broken_get_redis, raising=False
+        )
+        result = await get_restart_info()
+        assert result["process_start_iso"] == _PROCESS_START_ISO
+        assert isinstance(result["uptime_seconds"], float)
+        assert result["uptime_seconds"] >= 0
+        assert result["restart_count"] is None
+        assert result["last_restart_iso"] is None
+
+    @pytest.mark.asyncio
+    async def test_returns_redis_counter_when_available(self, monkeypatch):
+        from app.routers.observability import get_restart_info
+
+        fake_redis = MagicMock()
+        fake_redis.get.side_effect = lambda key: {
+            "cerid:mcp:restart_count": b"42",
+            "cerid:mcp:last_restart_iso": b"2026-05-07T12:00:00Z",
+        }.get(key)
+        monkeypatch.setattr(
+            "app.deps.get_redis", lambda: fake_redis, raising=False
+        )
+        result = await get_restart_info()
+        assert result["restart_count"] == 42
+        assert result["last_restart_iso"] == "2026-05-07T12:00:00Z"
+
+    def test_increment_swallows_redis_failure(self, monkeypatch):
+        """increment_restart_counter must not raise on Redis errors."""
+        from app.routers.observability import increment_restart_counter
+
+        def _broken_get_redis():
+            raise RuntimeError("redis down")
+
+        monkeypatch.setattr(
+            "app.deps.get_redis", _broken_get_redis, raising=False
+        )
+        assert increment_restart_counter() is None
+
+    def test_increment_returns_redis_value(self, monkeypatch):
+        from app.routers.observability import increment_restart_counter
+
+        fake_redis = MagicMock()
+        fake_redis.incr.return_value = 7
+        monkeypatch.setattr(
+            "app.deps.get_redis", lambda: fake_redis, raising=False
+        )
+        assert increment_restart_counter() == 7
+        fake_redis.incr.assert_called_once_with("cerid:mcp:restart_count")
+        fake_redis.set.assert_called_once()

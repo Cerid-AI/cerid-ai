@@ -2,10 +2,29 @@
 
 All notable changes to cerid-ai are documented here.
 
-## Unreleased — Workstream E Phase 2 (2026-05-03 → 2026-05-07)
+## Unreleased — Workstream A Phase 1.2/1.3 + Workstream E Phase 2 (2026-05-03 → 2026-05-07)
 
-Eval-quality work since v0.90.0. Tag a release when ready by bumping
-`pyproject.toml` + `core/utils/version.py` and resyncing.
+Cross-project SLO hardening + retrieval-quality work since v0.90.0.
+Tag a release when ready by bumping `pyproject.toml` + `core/utils/version.py`
+and resyncing.
+
+### Cross-project SLOs (Workstream A)
+
+- **Phase 1.2 — `/sdk/v1/memory/extract` per-stage budgets.** Three
+  unbounded LLM call sites (`extract_memories`, `_llm_classify`,
+  `resolve_memory_conflict`) now wrapped in `asyncio.wait_for` with
+  empirically sized budgets (12s on the load-bearing extract, 8s on
+  the consolidation/conflict siblings) and `log_swallowed_error` on
+  the timeout branch. Replaces the httpx 20s default that was
+  absorbing the 5.7% long tail observed in trading-agent's 20.4h soak.
+  Removes `xfail(strict=True)` from the SLO test
+  `test_memory_extract_under_10s` so the budget is now a hard CI gate.
+- **Phase 1.3 — `/observability/restarts` endpoint + 10s healthcheck
+  timeout.** New endpoint exposes process start time, uptime, and a
+  Redis-backed monotonic restart counter so trading-agent and other
+  dependents can detect MCP boots in one call. Healthcheck timeout
+  bumped 5s → 10s so a slow `/sdk/v1/*` response under peak load
+  can't false-positive into a restart.
 
 ### Retrieval quality
 

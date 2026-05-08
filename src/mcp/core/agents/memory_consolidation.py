@@ -14,6 +14,7 @@ bridge remains there until Sprint E retires the bridge dir.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass
@@ -26,8 +27,14 @@ from core.utils.circuit_breaker import CircuitOpenError
 from core.utils.embeddings import l2_distance_to_relevance
 from core.utils.internal_llm import call_internal_llm
 from core.utils.llm_parsing import parse_llm_json
+from core.utils.swallowed import log_swallowed_error
 from core.utils.time import utcnow_iso
 from errors import RetrievalError
+
+# Per-stage LLM budget (Workstream A Phase 1.2). Mirrors the bound in
+# core.agents.memory; consolidation is the heaviest fan-out call inside
+# extract_and_store_memories so this is the most-load-bearing budget.
+CONSOLIDATION_LLM_BUDGET_S = 8.0
 
 logger = logging.getLogger("ai-companion.memory_consolidation")
 
@@ -117,11 +124,14 @@ async def _llm_classify(
     )
 
     try:
-        content = await call_internal_llm(
-            [{"role": "user", "content": prompt}],
-            temperature=0.0,
-            max_tokens=200,
-            stage="memory_consolidation",
+        content = await asyncio.wait_for(
+            call_internal_llm(
+                [{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_tokens=200,
+                stage="memory_consolidation",
+            ),
+            timeout=CONSOLIDATION_LLM_BUDGET_S,
         )
         parsed = parse_llm_json(content)
 
@@ -149,6 +159,13 @@ async def _llm_classify(
     except CircuitOpenError:
         logger.warning("LLM circuit open, defaulting to ADD")
         return MemoryAction(action="ADD", reason="circuit open")
+    except asyncio.TimeoutError as exc:
+        log_swallowed_error("core.agents.memory_consolidation.classify_timeout", exc)
+        logger.warning(
+            "Memory consolidation exceeded %.1fs budget — defaulting to ADD",
+            CONSOLIDATION_LLM_BUDGET_S,
+        )
+        return MemoryAction(action="ADD", reason="timeout")
     except (httpx.HTTPStatusError, json.JSONDecodeError, KeyError) as e:
         logger.warning("Memory consolidation LLM call failed: %s", e)
         return MemoryAction(action="ADD", reason=f"LLM call failed: {e}")

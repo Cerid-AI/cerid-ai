@@ -532,6 +532,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Redis PING pre-warm failed (cache may be unavailable): %s", e)
 
+    # Bump the monotonic restart counter so /observability/restarts can
+    # tell consumers (trading-agent etc.) when MCP last booted. Best-
+    # effort — Redis-down doesn't gate startup. (Workstream A Phase 1.3.)
+    from app.routers.observability import increment_restart_counter
+    increment_restart_counter()
+
     # Pre-warm LLM client pool (direct OpenRouter)
     try:
         from core.utils.llm_client import _get_client

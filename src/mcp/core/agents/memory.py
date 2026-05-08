@@ -9,6 +9,7 @@ scoring, and context-aware recall with access-count reinforcement.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import math
@@ -34,6 +35,21 @@ logger = logging.getLogger("ai-companion.memory")
 # Constants
 # ---------------------------------------------------------------------------
 MIN_RESPONSE_LENGTH = 100
+
+# Per-stage LLM call budgets (Workstream A Phase 1.2). Bound individual
+# OpenRouter / Ollama calls so a single stalled request can't tie up the
+# /sdk/v1/memory/extract endpoint past its 10s SLO. Sized empirically
+# against current OpenRouter p95 generation latency:
+#   - extract is the load-bearing call (max_tokens=1000); 12s catches
+#     genuine hangs while letting typical 3-7s generations complete.
+#   - conflict-resolution caps max_tokens=500; 8s is comfortable.
+# Consolidation (max_tokens=200) gets the same 8s in memory_consolidation.py.
+# Soak data: 5.7% ReadTimeouts at the httpx 20s default — these bounds
+# replace that ceiling and surface the timeout branch via
+# log_swallowed_error.
+MEMORY_LLM_BUDGET_S = 12.0
+MEMORY_CONFLICT_LLM_BUDGET_S = 8.0
+
 MEMORY_TYPES = {
     "empirical", "decision", "preference", "project_context", "temporal", "conversational",
     "fact", "action_item",  # Legacy aliases
@@ -66,12 +82,15 @@ async def extract_memories(
     )
 
     try:
-        content = await call_internal_llm(
-            [{"role": "user", "content": prompt}],
-            temperature=0.1,
-            max_tokens=1000,
-            response_format={"type": "json_object"},
-            stage="memory_extract",
+        content = await asyncio.wait_for(
+            call_internal_llm(
+                [{"role": "user", "content": prompt}],
+                temperature=0.1,
+                max_tokens=1000,
+                response_format={"type": "json_object"},
+                stage="memory_extract",
+            ),
+            timeout=MEMORY_LLM_BUDGET_S,
         )
         memories = parse_llm_json(content)
         # LLM may return a single object instead of an array — normalize
@@ -98,6 +117,13 @@ async def extract_memories(
 
     except CircuitOpenError:
         logger.warning("Bifrost memory circuit open, skipping memory extraction")
+        return []
+    except asyncio.TimeoutError as exc:
+        log_swallowed_error("core.agents.memory.extract_memories_timeout", exc)
+        logger.warning(
+            "Memory extraction LLM call exceeded %.1fs budget — returning []",
+            MEMORY_LLM_BUDGET_S,
+        )
         return []
     except Exception as e:
         logger.warning("Memory extraction LLM call failed: %s", e)
@@ -432,12 +458,15 @@ async def resolve_memory_conflict(
     )
 
     try:
-        content = await call_internal_llm(
-            [{"role": "user", "content": prompt}],
-            temperature=0.0,
-            max_tokens=500,
-            response_format={"type": "json_object"},
-            stage="memory_conflict_resolve",
+        content = await asyncio.wait_for(
+            call_internal_llm(
+                [{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_tokens=500,
+                response_format={"type": "json_object"},
+                stage="memory_conflict_resolve",
+            ),
+            timeout=MEMORY_CONFLICT_LLM_BUDGET_S,
         )
         parsed = parse_llm_json(content)
 
@@ -490,6 +519,13 @@ async def resolve_memory_conflict(
     except CircuitOpenError:
         logger.warning("Bifrost circuit open during conflict resolution, defaulting to coexist")
         return {"action": "coexist", "reason": "circuit open", "merged_text": None}
+    except asyncio.TimeoutError as exc:
+        log_swallowed_error("core.agents.memory.resolve_conflict_timeout", exc)
+        logger.warning(
+            "Memory conflict resolution exceeded %.1fs budget — defaulting to coexist",
+            MEMORY_CONFLICT_LLM_BUDGET_S,
+        )
+        return {"action": "coexist", "reason": "timeout", "merged_text": None}
     except (httpx.HTTPStatusError, json.JSONDecodeError, KeyError) as e:
         logger.warning("Memory conflict resolution LLM call failed: %s", e)
         return {"action": "coexist", "reason": f"LLM call failed: {e}", "merged_text": None}
