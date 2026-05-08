@@ -61,6 +61,85 @@ class TestExtractMemories:
         assert result[0]["memory_type"] == "empirical"
 
 
+# ---------------------------------------------------------------------------
+# Budget-plumbing contract (Workstream A Phase 1.2)
+# ---------------------------------------------------------------------------
+#
+# These tests gate the per-stage ``asyncio.wait_for`` budgets that bound
+# /sdk/v1/memory/extract under its 10s SLO. They run inside the default
+# ``test`` job — so they catch a "someone removed the wait_for" regression
+# on every PR, complementing the live ``benchmark-slo`` job that catches
+# real-OpenRouter regressions on the nightly schedule.
+#
+# Strategy: monkey-patch the module budget constant down to a fast value
+# (50 ms), make the mocked LLM call take 200 ms, and assert the wait_for
+# fires before the call completes. ~250 ms total runtime per test.
+
+
+class TestExtractMemoriesBudget:
+    @pytest.mark.asyncio
+    async def test_extract_memories_returns_empty_on_timeout(self, monkeypatch):
+        """If the extract LLM call exceeds MEMORY_LLM_BUDGET_S, the
+        endpoint must return [] via the timeout-fallback branch — not
+        propagate a TimeoutError."""
+        import asyncio as _asyncio
+
+        async def _slow_llm(*args, **kwargs):
+            await _asyncio.sleep(0.2)
+            return "[]"
+
+        monkeypatch.setattr("core.agents.memory.MEMORY_LLM_BUDGET_S", 0.05)
+        monkeypatch.setattr(
+            "core.agents.memory.call_internal_llm", _slow_llm
+        )
+        result = await extract_memories("x" * 200, "conv-budget-test")
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_extract_memories_completes_under_budget(self, monkeypatch):
+        """Sanity: a fast mocked LLM call inside the budget still succeeds —
+        proves the wait_for wrapper passes the result through unchanged."""
+        import asyncio as _asyncio
+
+        async def _fast_llm(*args, **kwargs):
+            await _asyncio.sleep(0.01)
+            return '[{"content":"fast","memory_type":"fact","summary":"fast"}]'
+
+        monkeypatch.setattr("core.agents.memory.MEMORY_LLM_BUDGET_S", 1.0)
+        monkeypatch.setattr(
+            "core.agents.memory.call_internal_llm", _fast_llm
+        )
+        result = await extract_memories("x" * 200, "conv-fast")
+        assert len(result) == 1
+        assert result[0]["memory_type"] == "empirical"
+
+    @pytest.mark.asyncio
+    async def test_extract_memories_logs_swallowed_on_timeout(
+        self, monkeypatch, caplog
+    ):
+        """A budget-driven timeout must surface via ``log_swallowed_error``
+        so /health.swallowed_errors_last_hour reflects it. Without this
+        log, the long tail goes invisible — exactly the regression that
+        Phase 1.2 was lifting."""
+        import asyncio as _asyncio
+        import logging
+
+        async def _slow_llm(*args, **kwargs):
+            await _asyncio.sleep(0.2)
+            return "[]"
+
+        monkeypatch.setattr("core.agents.memory.MEMORY_LLM_BUDGET_S", 0.05)
+        monkeypatch.setattr(
+            "core.agents.memory.call_internal_llm", _slow_llm
+        )
+        with caplog.at_level(logging.WARNING):
+            await extract_memories("x" * 200, "conv-log-test")
+        assert any(
+            "extract_memories_timeout" in rec.message
+            for rec in caplog.records
+        ), f"Expected swallowed log; got: {[r.message for r in caplog.records]}"
+
+
 class TestExtractAndStoreMemories:
     """Test full extraction + storage pipeline."""
 

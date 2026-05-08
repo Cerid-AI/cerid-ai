@@ -627,6 +627,34 @@ class TestNLIConsolidationGuard:
         assert result["action"] == "merge"
         assert result["merged_text"] == "combined fact"
 
+    def test_budget_timeout_defaults_to_coexist(self, monkeypatch):
+        """Budget-plumbing contract (Workstream A Phase 1.2): when the
+        conflict-resolution LLM call exceeds MEMORY_CONFLICT_LLM_BUDGET_S,
+        the wait_for must fire and the fallback must return coexist with
+        reason='timeout'. Catches accidental removal of the wait_for
+        wrapper on every PR."""
+        import asyncio as _asyncio
+
+        from core.agents.memory import resolve_memory_conflict
+
+        async def _slow_llm(*args, **kwargs):
+            await _asyncio.sleep(0.2)
+            return '{"action":"merge"}'
+
+        monkeypatch.setattr(
+            "core.agents.memory.MEMORY_CONFLICT_LLM_BUDGET_S", 0.05
+        )
+        monkeypatch.setattr(
+            "core.agents.memory.call_internal_llm", _slow_llm
+        )
+        result = _run(resolve_memory_conflict(
+            "New fact",
+            {"memory_id": "m1", "text": "Old fact"},
+        ))
+        assert result["action"] == "coexist"
+        assert result["reason"] == "timeout"
+        assert result["merged_text"] is None
+
 
 # ===========================================================================
 # 8. NLI Threshold (Self-RAG)

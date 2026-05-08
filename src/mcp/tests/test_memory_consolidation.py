@@ -193,6 +193,31 @@ class TestClassifyMemoryLLMFailures:
         assert result.action == "ADD"
         assert "circuit open" in result.reason
 
+    @pytest.mark.asyncio
+    async def test_budget_timeout_defaults_to_add(self, monkeypatch, mock_chroma):
+        """Budget-plumbing contract (Workstream A Phase 1.2): when the
+        consolidation LLM call exceeds CONSOLIDATION_LLM_BUDGET_S, the
+        wait_for must fire and the fallback must return ADD with
+        reason='timeout'. Catches accidental removal of the wait_for
+        wrapper on every PR."""
+        import asyncio as _asyncio
+
+        async def _slow_llm(*args, **kwargs):
+            await _asyncio.sleep(0.2)
+            return '{"action":"NOOP"}'
+
+        client, collection = mock_chroma
+        collection.query.return_value = self._make_chroma_results()
+        monkeypatch.setattr(
+            "core.agents.memory_consolidation.CONSOLIDATION_LLM_BUDGET_S", 0.05
+        )
+        monkeypatch.setattr(
+            "core.agents.memory_consolidation.call_internal_llm", _slow_llm
+        )
+        result = await classify_memory("some fact", chroma_client=client)
+        assert result.action == "ADD"
+        assert result.reason == "timeout"
+
 
 # ---------------------------------------------------------------------------
 # classify_memory — multiple candidates

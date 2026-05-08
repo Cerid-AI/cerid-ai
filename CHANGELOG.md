@@ -25,6 +25,22 @@ and resyncing.
   dependents can detect MCP boots in one call. Healthcheck timeout
   bumped 5s → 10s so a slow `/sdk/v1/*` response under peak load
   can't false-positive into a restart.
+- **Phase 1 close-out gate — split-test design.** Replace the original
+  "promote `benchmark-slo` to PR-blocking after 7 consecutive green
+  main runs" plan with a two-test approach:
+  * **Deterministic budget-plumbing tests** in `test_memory.py` /
+    `test_memory_consolidation.py` / `test_pipeline_enhancements.py`
+    monkey-patch the per-stage budget down to 50 ms and assert the
+    `asyncio.wait_for` actually fires + the fallback path runs +
+    `log_swallowed_error` is called. Run inside the default `test`
+    job — already PR-blocking, so budget regressions are caught on
+    every PR.
+  * **Live `benchmark-slo` job** soft-promoted onto the PR pipeline
+    with `continue-on-error: true`. Surfaces real-OpenRouter latency
+    drift via job-summary + JSON artifact without gating merges.
+    Promote to blocking by removing `continue-on-error` and adding
+    to the `docker` job's `needs[]` once 4 consecutive green main
+    runs accumulate (matching the `sdk-openapi-drift` precedent).
 
 ### Retrieval quality
 
