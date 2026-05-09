@@ -50,13 +50,49 @@ requires a tarball snapshot restore.
 5. Verify `/api/v2/heartbeat` 200 + collections survived (preservation
    harness)
 
-### Known follow-ups
-- **Neo4j Phase 2 plan re-scoped.** Docker Hub has no `neo4j:7.x`
-  community tag — the project moved to calendar versioning. Latest
-  stable is `neo4j:2026.04.0-community`. The previous "5.26 → 7"
-  target was wrong; revised plan in `docs/DEPENDENCY_UPGRADES.md`
-  § Neo4j requires driver-vs-server compat verification before any
-  docker-compose edit lands.
+### Neo4j Phase 2 — server bump 5.26 → 2026.04.0 + GDS plugin
+
+`docker-compose.yml` neo4j block: image `neo4j:5.26.21-community` →
+`neo4j:2026.04.0-community`; plugins
+`["apoc"]` → `["apoc","graph-data-science"]`; heap `1G → 4G` (GDS in-memory
+projections); container memory `4G → 8G`; healthcheck `start_period`
+`30s → 60s` (longer cold-boot with GDS catalog registration).
+
+**Pre-edit verification (empirical, against `neo4j:2026.04.0-community`):**
+- Driver `neo4j>=6,<7` (currently 6.1.0) speaks the calver Bolt
+  protocol cleanly: auth probe `RETURN 1` works; `CREATE CONSTRAINT
+  ... IF NOT EXISTS FOR ... REQUIRE` works; `MERGE` + `MATCH` +
+  relationship writes work.
+- `CALL gds.version()` returns `2026.04.0` (synced version line).
+- `apoc.version()` returns `2026.04.0`.
+- Plugin name correction: `gds` short form is rejected by calver
+  (accepted: `apoc`, `apoc-extended`, `bloom`, `fleet-management`,
+  `genai`, `graph-data-science`). Earlier migration plan had the
+  short form; corrected to full name.
+- Direct in-place upgrade 5.26 → 2026.x is supported (Neo4j docs;
+  no intermediate version, no store-format change between 4.4 and
+  2026.x); existing databases default to Cypher 5 on first 2026.x
+  boot.
+
+**Operator runbook before activation** (also in
+`docs/DEPENDENCY_UPGRADES.md` § Neo4j Phase 2):
+
+1. `docker compose stop cerid-web mcp-server neo4j`
+2. `./scripts/backup-kb.sh` (snapshot all three volumes)
+3. `git pull` (after maintainer pushes the Phase 2 commit)
+4. `docker compose pull neo4j`
+5. `docker compose up -d neo4j` — wait for healthy (cold boot ~45–60s
+   with GDS plugin install on first boot)
+6. `docker compose up -d mcp-server cerid-web`
+7. Verify `curl -s http://127.0.0.1:8888/health` shows
+   `services.neo4j == "connected"` + `healthy_invariants == true`
+8. Verify GDS available:
+   `cypher-shell` → `CALL gds.version()` returns `2026.04.0`
+
+Rollback: stop neo4j, restore the snapshot tarball over
+`./stacks/infrastructure/data/neo4j`, revert the docker-compose neo4j
+block to the 5.26.21 image + `["apoc"]` plugins + 1G heap + 4G memory,
+restart.
 
 ## v0.91.0 — Workstream A close-out + C + D Phase 1 + E Phase 2 (2026-05-03 → 2026-05-08)
 

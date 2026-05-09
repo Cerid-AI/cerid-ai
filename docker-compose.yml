@@ -24,7 +24,11 @@ services:
 
   neo4j:
     container_name: ai-companion-neo4j
-    image: neo4j:5.26.21-community
+    # Calver release line — Neo4j skipped semver after 5.26 LTS.
+    # Direct upgrade from 5.26 is supported (no intermediate version, no
+    # store-format change between 4.4 and 2026.x; existing databases
+    # default to Cypher 5 on first 2026.x boot — backward compatible).
+    image: neo4j:2026.04.0-community
     ports:
       - "127.0.0.1:${CERID_PORT_NEO4J:-7474}:7474"
       - "127.0.0.1:${CERID_PORT_NEO4J_BOLT:-7687}:7687"
@@ -33,8 +37,17 @@ services:
       - ./stacks/infrastructure/data/neo4j-logs:/logs
     environment:
       - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD}
-      - NEO4J_PLUGINS=["apoc"]
-      - NEO4J_server_memory_heap_max__size=1G
+      # Plugin name is the FULL form on calver — `gds` short form was
+      # accepted on 5.x but rejected on 2026.x ("not a known plugin";
+      # accepted options: apoc, apoc-extended, bloom, fleet-management,
+      # genai, graph-data-science). Verified empirically against
+      # neo4j:2026.04.0-community.
+      - NEO4J_PLUGINS=["apoc","graph-data-science"]
+      # Heap bumped 1G -> 4G for GDS in-memory graph projections (Leiden
+      # community detection planned for E.4b; loads the entire graph into
+      # RAM during algorithm execution). Pagecache stays at 2G — covers
+      # the on-disk dataset hot pages.
+      - NEO4J_server_memory_heap_max__size=4G
       - NEO4J_server_memory_pagecache_size=2G
     networks:
       - llm-network
@@ -43,13 +56,19 @@ services:
       resources:
         limits:
           cpus: '4.0'
-          memory: 4G
+          # 4G heap + 2G pagecache + ~512M JVM overhead + ~256M OS = ~6.8G
+          # working set; 8G container limit gives the JVM headroom under
+          # GDS Leiden peak before the OOM-killer fires.
+          memory: 8G
     healthcheck:
+      # wget IS present in neo4j:2026.04.0-community (verified). Bumped
+      # start_period 30s -> 60s — calver+APOC+GDS init takes longer than
+      # 5.26+APOC alone (GDS catalog registration adds 5-8s on cold boot).
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:7474 || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 30s
+      start_period: 60s
 
   chromadb:
     container_name: ai-companion-chroma
