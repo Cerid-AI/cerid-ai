@@ -150,7 +150,7 @@ def cache_lookup(
             # unbounded as TTLs cycle.
             try:
                 backend.delete(ids=[entry_id])
-            except Exception:
+            except Exception:  # silent-catch-allowed: best-effort lazy orphan eviction; failure does not affect the lookup return value
                 logger.debug("semantic_cache.orphan_evict_failed", exc_info=True)
             return None
 
@@ -237,7 +237,7 @@ def invalidate_cache(redis_client: Any) -> int:
             try:
                 # Empty `where` clears the whole collection in chromadb 0.5+.
                 backend.delete(where={})
-            except Exception:
+            except Exception:  # silent-catch-allowed: best-effort backend clear; redis side already wiped, return value reflects that
                 logger.debug("semantic_cache.backend_clear_failed", exc_info=True)
 
         if count:
