@@ -2,11 +2,15 @@
 
 All notable changes to cerid-ai are documented here.
 
-## Unreleased — chromadb 0.5 → 1.x migration (post-v0.91.0)
+## v0.91.1 — Infrastructure migrations + GraphRAG retrieval (2026-05-09)
 
-In-progress structural upgrade. Phases 1, 2a, 2b, 2c landed; Phase 3
-(server image bump) committed locally but NOT pushed — awaits operator
-data-volume snapshot.
+Chromadb 0.5 → 1.x (client + server) + Neo4j 5.26 → 2026.04.0 calver
+(server + APOC + GDS plugin) + the full Workstream E Phase 4 GraphRAG
+arc (entity layer + community layer + auto query routing) all landed
+end-to-end on top of v0.91.0. The shared compose stack on the
+maintainer machine has been migrated lossless (chromadb: 13,264
+chunks; Neo4j: 11,672 artifacts + 12,840 nodes + 46,622 rels), and
+both internal and public CIs are green.
 
 ### What's already on `main`
 - **Phase 1 (`5040e96`)** — `core/retrieval/semantic_cache.py` rewritten
