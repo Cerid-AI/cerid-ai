@@ -35,7 +35,6 @@ import time
 from typing import Any
 
 import chromadb
-from chromadb.api.types import IncludeEnum
 
 import config
 
@@ -169,7 +168,7 @@ def reembed(
         batch = source.get(
             limit=batch_size,
             offset=offset,
-            include=[IncludeEnum.documents, IncludeEnum.metadatas],
+            include=["documents", "metadatas"],
         )
         ids = batch.get("ids", []) or []
         if not ids:

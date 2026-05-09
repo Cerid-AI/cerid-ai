@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 
 import config
 from app.sync._helpers import (
@@ -39,6 +40,17 @@ from app.sync.conflicts import (
 from core.utils.time import utcnow_iso
 
 logger = logging.getLogger("ai-companion.sync")
+
+
+def _v2_collections_base(chroma_url: str) -> str:
+    """Return the chromadb 1.x v2 collections base path for the default
+    tenant/database. The 0.5-era /api/v1/collections endpoints were
+    retired; 1.x scopes every collection under tenant + database.
+    """
+    return (
+        f"{chroma_url}/api/v2/tenants/{DEFAULT_TENANT}"
+        f"/databases/{DEFAULT_DATABASE}/collections"
+    )
 
 
 def import_neo4j(
@@ -337,7 +349,7 @@ def import_chroma(
                     return 0
                 try:
                     resp = httpx.post(
-                        f"{chroma_url}/api/v1/collections/{collection_id}/add",
+                        f"{_v2_collections_base(chroma_url)}/{collection_id}/add",
                         json={
                             "ids": batch_ids,
                             "documents": batch_docs,
@@ -409,14 +421,16 @@ def import_chroma(
 
 def _chroma_ensure_collection(chroma_url: str, collection_name: str) -> None:
     """Create a ChromaDB collection if it does not already exist."""
+    base = _v2_collections_base(chroma_url)
     try:
-        resp = httpx.get(f"{chroma_url}/api/v1/collections/{collection_name}", timeout=15.0)
+        resp = httpx.get(f"{base}/{collection_name}", timeout=15.0)
         if resp.status_code == 200:
             return
-        # ChromaDB 0.5.x returns 400 (not 404) for non-existent collections
+        # ChromaDB 1.x returns 404 for non-existent (0.5 returned 400 — both
+        # treated identically here so the create path triggers in either era).
         if resp.status_code in (400, 404):
             httpx.post(
-                f"{chroma_url}/api/v1/collections",
+                base,
                 json={"name": collection_name},
                 timeout=15.0,
             ).raise_for_status()
@@ -429,7 +443,7 @@ def _chroma_get_collection_id(chroma_url: str, collection_name: str) -> str | No
     """Return the UUID for a named ChromaDB collection, or None on failure."""
     try:
         resp = httpx.get(
-            f"{chroma_url}/api/v1/collections/{collection_name}",
+            f"{_v2_collections_base(chroma_url)}/{collection_name}",
             timeout=15.0,
         )
         resp.raise_for_status()
@@ -446,7 +460,7 @@ def _chroma_get_all_ids(chroma_url: str, collection_id: str) -> set:
     while True:
         try:
             resp = httpx.post(
-                f"{chroma_url}/api/v1/collections/{collection_id}/get",
+                f"{_v2_collections_base(chroma_url)}/{collection_id}/get",
                 json={"include": [], "limit": CHROMA_BATCH_SIZE, "offset": offset},
                 timeout=60.0,
             )

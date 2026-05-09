@@ -2,6 +2,62 @@
 
 All notable changes to cerid-ai are documented here.
 
+## Unreleased — chromadb 0.5 → 1.x migration (post-v0.91.0)
+
+In-progress structural upgrade. Phases 1, 2a, 2b, 2c landed; Phase 3
+(server image bump) committed locally but NOT pushed — awaits operator
+data-volume snapshot.
+
+### What's already on `main`
+- **Phase 1 (`5040e96`)** — `core/retrieval/semantic_cache.py` rewritten
+  atop a chromadb collection. Drops the chroma-hnswlib transitive,
+  retires the 16-byte `_HNSW_MAGIC` dim self-heal protocol, adds lazy
+  orphan eviction. Public API preserved; layering preserved (no
+  chromadb import in `core/`).
+- **Phase 2a (`b169c91`)** — `OnnxEmbeddingFunction` gains the chromadb
+  1.x EF contract: `name()` / `get_config()` / `build_from_config()`.
+  No-op on 0.5; live the moment the pin lifts.
+- **Phase 2b (`2d5e5df`)** — `chromadb>=1,<2` in `requirements.txt` +
+  `requirements.lock` regenerated; `_startup_compat.py` deleted (1.x
+  retired the chromadb→posthog telemetry path so the shim is dead);
+  heartbeat probe paths in `app/main.py` + `app/routers/setup.py`
+  flipped `/api/v1/heartbeat` → `/api/v2/heartbeat`;
+  `scripts/reembed_collection.py` updated for `IncludeEnum` retirement.
+- **Phase 2c (`9ce7c54`)** — `app/sync/import_.py` migrated to the v2
+  REST path scheme `/api/v2/tenants/{tenant}/databases/{db}/collections/...`
+  via a single `_v2_collections_base()` helper.
+- **Cleanup (`d582cfb`)** — dead `SEMANTIC_CACHE_HNSW_EF` env var removed.
+
+### Phase 3 — committed locally, **not pushed**
+
+`docker-compose.yml` chromadb block: image
+`chromadb/chroma:0.5.23` → `chromadb/chroma:1.5.9`; volume mount target
+`:/chroma/chroma` → `:/data` (1.x persistence path moved); healthcheck
+`/api/v1/heartbeat` → `/api/v2/heartbeat`.
+
+**WARNING — destructive on first boot.** chromadb 1.x runs
+`migration_mode: "apply"` against the host data dir; the 0.5-era sqlite
++ segment files are transformed in place. **One-way.** Rollback
+requires a tarball snapshot restore.
+
+**Operator runbook before activating** (full version in
+`docs/DEPENDENCY_UPGRADES.md` § ChromaDB Phase 3):
+
+1. `docker compose stop chromadb`
+2. `./scripts/backup-kb.sh` (snapshot all three volumes)
+3. `git pull` (after maintainer pushes the Phase 3 commit)
+4. `docker compose pull chromadb && docker compose up -d chromadb`
+5. Verify `/api/v2/heartbeat` 200 + collections survived (preservation
+   harness)
+
+### Known follow-ups
+- **Neo4j Phase 2 plan re-scoped.** Docker Hub has no `neo4j:7.x`
+  community tag — the project moved to calendar versioning. Latest
+  stable is `neo4j:2026.04.0-community`. The previous "5.26 → 7"
+  target was wrong; revised plan in `docs/DEPENDENCY_UPGRADES.md`
+  § Neo4j requires driver-vs-server compat verification before any
+  docker-compose edit lands.
+
 ## v0.91.0 — Workstream A close-out + C + D Phase 1 + E Phase 2 (2026-05-03 → 2026-05-08)
 
 Cross-project SLO hardening (with `benchmark-slo` now PR-blocking) +
