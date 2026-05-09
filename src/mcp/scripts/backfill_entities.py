@@ -56,14 +56,79 @@ def _save_checkpoint(processed: set[str]) -> None:
     CHECKPOINT_PATH.write_text(json.dumps({"processed": sorted(processed)}, indent=2))
 
 
-def _list_artifacts(driver, domain: str | None = None) -> list[tuple[str, str]]:
-    """Return [(artifact_id, domain), ...] in stable order."""
-    cypher = "MATCH (a:Artifact)"
+def _list_artifacts(
+    driver,
+    domain: str | None = None,
+    *,
+    domains: list[str] | None = None,
+    exclude_filename_patterns: list[str] | None = None,
+    max_age_days: int | None = None,
+    sort: str = "id",
+    limit: int | None = None,
+    ids_from_file: str | None = None,
+) -> list[tuple[str, str]]:
+    """Return [(artifact_id, domain), ...] in stable order.
+
+    Filtering knobs (compose freely) for the tiered backfill workflow:
+
+      - ``domain`` (single) or ``domains`` (list) — restrict to one or more
+        ``a.domain`` values.
+      - ``exclude_filename_patterns`` — drop artifacts whose filename
+        matches any of these regex patterns (Cypher ``=~``). Useful for
+        skipping the bulk PubMed/MED literature in Tier 1.
+      - ``max_age_days`` — keep only artifacts ingested within N days.
+        Used by Tier 2 (recent memory_*).
+      - ``sort`` — ``"id"`` (default), ``"quality_desc"``, or
+        ``"ingested_desc"``. Tier 3 uses ``quality_desc`` to skim the
+        top-quality bulk-literature subsample.
+      - ``limit`` — cap the result count (combine with ``sort`` for
+        "top-N by X").
+      - ``ids_from_file`` — read artifact IDs (one per line) from a file;
+        bypasses other filters. Lets the caller pre-compute a set via
+        ad-hoc Cypher and feed it back. Conflicts with the rest.
+    """
+    if ids_from_file:
+        with open(ids_from_file) as f:
+            wanted = {line.strip() for line in f if line.strip()}
+        cypher = (
+            "MATCH (a:Artifact) WHERE a.id IN $wanted "
+            "RETURN a.id AS id, a.domain AS domain ORDER BY a.id"
+        )
+        with driver.session() as session:
+            return [(row["id"], row["domain"]) for row in session.run(cypher, wanted=list(wanted))]
+
+    where_clauses: list[str] = []
     params: dict = {}
     if domain:
-        cypher += " WHERE a.domain = $domain"
+        where_clauses.append("a.domain = $domain")
         params["domain"] = domain
-    cypher += " RETURN a.id AS id, a.domain AS domain ORDER BY a.id"
+    if domains:
+        where_clauses.append("a.domain IN $domains")
+        params["domains"] = domains
+    if exclude_filename_patterns:
+        for i, pat in enumerate(exclude_filename_patterns):
+            key = f"excl_pat_{i}"
+            where_clauses.append(f"NOT a.filename =~ ${key}")
+            params[key] = pat
+    if max_age_days is not None:
+        from datetime import datetime, timedelta, timezone
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
+        where_clauses.append("a.ingested_at >= $ingested_cutoff")
+        params["ingested_cutoff"] = cutoff
+
+    cypher = "MATCH (a:Artifact)"
+    if where_clauses:
+        cypher += " WHERE " + " AND ".join(where_clauses)
+    if sort == "quality_desc":
+        cypher += " RETURN a.id AS id, a.domain AS domain ORDER BY coalesce(a.quality_score, 0.0) DESC, a.id"
+    elif sort == "ingested_desc":
+        cypher += " RETURN a.id AS id, a.domain AS domain ORDER BY a.ingested_at DESC, a.id"
+    else:
+        cypher += " RETURN a.id AS id, a.domain AS domain ORDER BY a.id"
+    if limit is not None:
+        cypher += " LIMIT $limit_n"
+        params["limit_n"] = int(limit)
+
     with driver.session() as session:
         return [(row["id"], row["domain"]) for row in session.run(cypher, **params)]
 
@@ -124,7 +189,16 @@ async def _run(args: argparse.Namespace) -> int:
         logger.info("Checkpoint cleared.")
 
     processed = _load_checkpoint()
-    artifacts = _list_artifacts(driver, domain=args.domain)
+    artifacts = _list_artifacts(
+        driver,
+        domain=args.domain,
+        domains=args.domains,
+        exclude_filename_patterns=args.exclude_filename_pattern or None,
+        max_age_days=args.max_age_days,
+        sort=args.sort,
+        limit=args.list_limit,
+        ids_from_file=args.ids_from_file,
+    )
     pending = [(aid, dom) for (aid, dom) in artifacts if aid not in processed]
 
     total = len(pending)
@@ -172,11 +246,28 @@ async def _run(args: argparse.Namespace) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Backfill entity layer")
-    parser.add_argument("--limit", type=int, default=0, help="Process at most N artifacts (default: all)")
+    parser.add_argument("--limit", type=int, default=0,
+                        help="Process at most N artifacts in this run (post-list-filter cap)")
     parser.add_argument("--domain", type=str, default=None, help="Restrict to one domain")
+    parser.add_argument("--domains", type=str, default=None,
+                        help="Comma-separated list of domains; OR'd in the WHERE clause")
+    parser.add_argument("--exclude-filename-pattern", action="append", default=[],
+                        help="Cypher regex (=~) to drop matching filenames; repeatable")
+    parser.add_argument("--max-age-days", type=int, default=None,
+                        help="Only artifacts ingested within the last N days")
+    parser.add_argument("--sort", choices=("id", "quality_desc", "ingested_desc"),
+                        default="id", help="Ordering for the candidate list")
+    parser.add_argument("--list-limit", type=int, default=None,
+                        help="Cap the candidate list pre-checkpoint-skip (use with --sort)")
+    parser.add_argument("--ids-from-file", type=str, default=None,
+                        help="One artifact_id per line; bypasses the filter knobs above")
     parser.add_argument("--max-chars", type=int, default=8000, help="Max chars per artifact extraction")
     parser.add_argument("--reset", action="store_true", help="Clear the checkpoint and start fresh")
     args = parser.parse_args()
+    if args.domains:
+        args.domains = [d.strip() for d in args.domains.split(",") if d.strip()]
+    else:
+        args.domains = None
     return asyncio.run(_run(args))
 
 
