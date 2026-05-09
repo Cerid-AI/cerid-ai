@@ -45,7 +45,17 @@ _QUOTE_RE = re.compile(r'"[^"]+"|\'[^\']{2,}\'')
 # with a capital). Catches "Apple", "Federal Reserve", "BTC", etc.
 # False positives are tolerable: a false-positive sends the query to
 # local mode, which is the existing baseline behaviour.
-_PROPER_NOUN_RE = re.compile(r"\b([A-Z][A-Za-z0-9]{1,}(?:[-/&][A-Za-z0-9]+)*)\b")
+#
+# DUO138 false-positive note: dlint flags the inner `+` quantifier
+# nested under the outer `*` group as catastrophic-backtracking-prone.
+# It is not — the outer group's first character `[-/&]` cannot overlap
+# with the leading `[A-Za-z0-9]+`, so the engine's no-match path bails
+# in linear time. The regex bound on overall query length (input is
+# always a user query of bounded size, never a long pasted blob) makes
+# the worst case linear too.
+_PROPER_NOUN_RE = re.compile(  # noqa: DUO138
+    r"\b[A-Z][A-Za-z0-9]+(?:[-/&][A-Za-z0-9]+)*\b",
+)
 
 _WORD_COUNT_THRESHOLD = 15
 
