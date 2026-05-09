@@ -151,7 +151,7 @@ async def _service_statuses() -> dict[str, str]:
 
     chroma_status = await _check_service(
         "chromadb",
-        os.environ.get("CHROMA_URL", "http://ai-companion-chroma:8000") + "/api/v1/heartbeat",
+        os.environ.get("CHROMA_URL", "http://ai-companion-chroma:8000") + "/api/v2/heartbeat",
     )
 
     mcp_status = "setup_mode" if not _is_configured() else "healthy"

@@ -1,24 +1,23 @@
 # Copyright (c) 2026 Cerid AI. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for HNSW-indexed semantic cache."""
+"""Tests for the chromadb-collection-backed semantic cache."""
 
 from __future__ import annotations
 
 import threading
-from unittest.mock import MagicMock
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
 
-import core.retrieval.semantic_cache as sc
 from core.retrieval.semantic_cache import (
-    _dequantize_int8,
-    _HNSWIndex,
-    _quantize_int8,
     cache_lookup,
     cache_store,
+    flush_cache,
     invalidate_cache,
+    set_cache_backend,
 )
 
 # ---------------------------------------------------------------------------
@@ -32,239 +31,124 @@ def _random_embedding(dim: int = 768, seed: int = 42) -> np.ndarray:
 
 
 def _mock_redis() -> MagicMock:
-    """Create a mock Redis client that simulates key-value + hash storage."""
-    store: dict[str, bytes | str] = {}
-    hash_store: dict[str, dict[str, str]] = {}
+    """Mock Redis with KV + scan; matches the contract semantic_cache uses."""
+    store: dict[str, str] = {}
 
     mock = MagicMock()
 
     def _get(key: str):
         return store.get(key)
 
-    def _set(key: str, value: bytes | str):
-        store[key] = value
-
     def _setex(key: str, ttl: int, value: str):
         store[key] = value
 
-    def _hset(name: str, key: str, value: str):
-        hash_store.setdefault(name, {})[key] = value
-
-    def _hget(name: str, key: str):
-        return hash_store.get(name, {}).get(key)
-
     def _delete(*keys: str):
+        n = 0
         for k in keys:
-            store.pop(k, None)
-            hash_store.pop(k, None)
+            if k in store:
+                del store[k]
+                n += 1
+        return n
 
     def _scan(cursor: int, match: str = "", count: int = 100):
         import fnmatch
-
         matched = [k for k in store if fnmatch.fnmatch(k, match)]
-        matched += [k for k in hash_store if fnmatch.fnmatch(k, match)]
-        return (0, list(set(matched)))
+        return (0, matched)
 
     mock.get = MagicMock(side_effect=_get)
-    mock.set = MagicMock(side_effect=_set)
     mock.setex = MagicMock(side_effect=_setex)
-    mock.hset = MagicMock(side_effect=_hset)
-    mock.hget = MagicMock(side_effect=_hget)
     mock.delete = MagicMock(side_effect=_delete)
     mock.scan = MagicMock(side_effect=_scan)
 
     return mock
 
 
+class _FakeBackend:
+    """Duck-typed _CacheBackend for tests.
+
+    Stores (id, embedding, metadata) and answers `query` via brute-force
+    cosine similarity — fast enough at test scales, lets us assert exact
+    nearest-neighbour returns without depending on chromadb.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._ids: list[str] = []
+        self._embs: list[np.ndarray] = []
+        self._meta: list[dict[str, Any]] = []
+
+    def upsert(self, *, ids, embeddings, metadatas=None) -> None:
+        with self._lock:
+            metas = metadatas or [{} for _ in ids]
+            for i, (eid, emb, m) in enumerate(zip(ids, embeddings, metas)):
+                arr = np.asarray(emb, dtype=np.float32)
+                if eid in self._ids:
+                    j = self._ids.index(eid)
+                    self._embs[j] = arr
+                    self._meta[j] = m
+                else:
+                    self._ids.append(eid)
+                    self._embs.append(arr)
+                    self._meta.append(m)
+
+    def query(self, *, query_embeddings, n_results=1, include=None):
+        with self._lock:
+            if not self._ids:
+                return {"ids": [[]], "distances": [[]]}
+            q = np.asarray(query_embeddings[0], dtype=np.float32)
+            qn = q / max(np.linalg.norm(q), 1e-12)
+            sims: list[tuple[str, float]] = []
+            for eid, emb in zip(self._ids, self._embs):
+                en = emb / max(np.linalg.norm(emb), 1e-12)
+                sims.append((eid, float(np.dot(qn, en))))
+            sims.sort(key=lambda t: t[1], reverse=True)
+            top = sims[: n_results]
+            return {
+                "ids": [[t[0] for t in top]],
+                "distances": [[1.0 - t[1] for t in top]],
+            }
+
+    def delete(self, ids=None, where=None) -> None:
+        with self._lock:
+            if where is not None and not ids:
+                # Empty-where == clear all (mirrors chromadb 0.5+ semantics)
+                self._ids.clear()
+                self._embs.clear()
+                self._meta.clear()
+                return
+            if ids:
+                for eid in ids:
+                    if eid in self._ids:
+                        j = self._ids.index(eid)
+                        del self._ids[j]
+                        del self._embs[j]
+                        del self._meta[j]
+
+    def count(self) -> int:
+        with self._lock:
+            return len(self._ids)
+
+
 @pytest.fixture(autouse=True)
-def _reset_singleton():
-    """Reset the process-level HNSW singleton between tests."""
-    sc._index = None
-    yield
-    sc._index = None
+def _reset_backend():
+    """Each test gets a fresh backend; cleared after."""
+    backend = _FakeBackend()
+    set_cache_backend(backend)
+    yield backend
+    set_cache_backend(None)
 
 
 # ---------------------------------------------------------------------------
-# Tests: Quantization (retained from original)
-# ---------------------------------------------------------------------------
-
-class TestQuantization:
-    def test_round_trip_preserves_approximate_values(self):
-        original = np.array([0.1, 0.5, 0.9, -0.3, 0.0], dtype=np.float32)
-        data, scale, zp = _quantize_int8(original)
-        recovered = _dequantize_int8(data, scale, zp)
-        np.testing.assert_allclose(original, recovered, atol=0.01)
-
-    def test_uniform_embedding(self):
-        original = np.array([0.5, 0.5, 0.5], dtype=np.float32)
-        data, scale, zp = _quantize_int8(original)
-        recovered = _dequantize_int8(data, scale, zp)
-        np.testing.assert_allclose(original, recovered, atol=0.01)
-
-    def test_output_is_bytes(self):
-        emb = np.array([0.1, 0.2, 0.3], dtype=np.float32)
-        data, _, _ = _quantize_int8(emb)
-        assert isinstance(data, bytes)
-        assert len(data) == 3
-
-
-# ---------------------------------------------------------------------------
-# Tests: _HNSWIndex
-# ---------------------------------------------------------------------------
-
-class TestHNSWIndex:
-    def test_init_empty(self):
-        idx = _HNSWIndex(dim=32, max_elements=100)
-        assert idx.count == 0
-
-    def test_add_and_query(self):
-        idx = _HNSWIndex(dim=32, max_elements=100)
-        redis = _mock_redis()
-
-        emb = _random_embedding(dim=32, seed=1)
-        label = idx.add(emb, "entry_a", redis)
-        assert label == 0
-        assert idx.count == 1
-
-        results = idx.query(emb, k=1)
-        assert len(results) == 1
-        assert results[0][0] == 0  # label
-        assert results[0][1] < 0.01  # near-zero distance (same vector)
-
-    def test_query_empty_index(self):
-        idx = _HNSWIndex(dim=32, max_elements=100)
-        emb = _random_embedding(dim=32)
-        results = idx.query(emb, k=1)
-        assert results == []
-
-    def test_multiple_entries(self):
-        idx = _HNSWIndex(dim=32, max_elements=100)
-        redis = _mock_redis()
-
-        emb1 = _random_embedding(dim=32, seed=1)
-        emb2 = _random_embedding(dim=32, seed=2)
-        emb3 = _random_embedding(dim=32, seed=3)
-
-        idx.add(emb1, "a", redis)
-        idx.add(emb2, "b", redis)
-        idx.add(emb3, "c", redis)
-        assert idx.count == 3
-
-        # Query with emb1 should return itself as nearest
-        results = idx.query(emb1, k=1)
-        assert results[0][0] == 0
-
-    def test_load_from_empty_redis(self):
-        idx = _HNSWIndex(dim=32, max_elements=100)
-        redis = _mock_redis()
-        loaded = idx.load_from_redis(redis)
-        assert loaded is False
-        assert idx.count == 0
-
-    def test_semcache_discards_mismatched_dim_blob(self):
-        """Audit V-5 / RC-G: a stored HNSW blob whose header dim does not
-        match the active embedder must NOT be loaded. load_from_redis must
-        drop the stale blob (and its label sidecar) and return False so the
-        cache rebuilds cold.
-        """
-        from core.retrieval.semantic_cache import _HNSW_KEY, _LABELS_KEY
-
-        redis = _mock_redis()
-        redis._r = redis  # route through the raw-bypass path
-
-        # 1. Seed Redis with a blob that carries our header but declares
-        #    dim=512 (the body bytes don't matter — the dim check must reject
-        #    it before hnswlib touches it).
-        stale_header = _HNSWIndex._encode_header(512)
-        stale_blob = stale_header + b"\x00" * 1024  # arbitrary body
-        redis.set(_HNSW_KEY, stale_blob)
-        redis.hset(_LABELS_KEY, "0", "ghost-entry")
-
-        # 2. Attempt to load into an index whose live dim is 768.
-        fresh = _HNSWIndex(dim=768, max_elements=100)
-        loaded = fresh.load_from_redis(redis)
-
-        # 3. The load must be rejected, the stale blob + labels deleted,
-        #    and the fresh index must be empty and usable.
-        assert loaded is False, (
-            "dim-mismatched blob was accepted — cache would emit garbage "
-            "similarity scores on the next query"
-        )
-        assert redis.get(_HNSW_KEY) is None, "stale blob was not deleted"
-        assert redis.hget(_LABELS_KEY, "0") is None, (
-            "stale label mapping was not deleted — lookups would resolve "
-            "garbage entry_ids"
-        )
-        assert fresh.count == 0
-
-        # The fresh index must still accept a 768-dim write cleanly.
-        emb768 = np.random.RandomState(1).randn(768).astype(np.float32)
-        emb768 /= np.linalg.norm(emb768)
-        label = fresh.add(emb768, "entry_new", redis)
-        assert label == 0
-        assert fresh.count == 1
-
-    def test_semcache_discards_legacy_blob_without_header(self):
-        """A pre-header blob (no magic prefix) is indistinguishable from a
-        corrupt one — both must be rejected and the key cleared.
-        """
-        from core.retrieval.semantic_cache import _HNSW_KEY
-
-        redis = _mock_redis()
-        redis._r = redis
-        # Any bytes not starting with the CERID magic — simulates a blob
-        # written by an older build that didn't tag the dim.
-        redis.set(_HNSW_KEY, b"raw-hnswlib-bytes-no-magic-here")
-
-        fresh = _HNSWIndex(dim=768, max_elements=100)
-        loaded = fresh.load_from_redis(redis)
-
-        assert loaded is False
-        assert redis.get(_HNSW_KEY) is None
-        assert fresh.count == 0
-
-    def test_semcache_accepts_matching_dim_blob(self):
-        """Positive control: a blob saved by this code path with the right
-        dim must round-trip through load_from_redis (not dropped as stale).
-        """
-        from core.retrieval.semantic_cache import _HNSW_KEY
-
-        redis = _mock_redis()
-        redis._r = redis
-
-        # Save path writes the header itself.
-        idx = _HNSWIndex(dim=32, max_elements=100)
-        emb = _random_embedding(dim=32, seed=11)
-        idx.add(emb, "good-entry", redis)
-        idx.flush(redis)
-
-        # The persisted blob must start with the CERID magic.
-        persisted = redis.get(_HNSW_KEY)
-        assert persisted is not None
-        from core.retrieval.semantic_cache import _HNSW_MAGIC
-        assert persisted.startswith(_HNSW_MAGIC), (
-            "save path did not prepend the dim header"
-        )
-
-        # Loading into an index of the same dim must succeed.
-        fresh = _HNSWIndex(dim=32, max_elements=100)
-        loaded = fresh.load_from_redis(redis)
-        assert loaded is True
-        assert fresh.count == 1
-
-
-# ---------------------------------------------------------------------------
-# Tests: cache_lookup / cache_store
+# Tests: cache_lookup
 # ---------------------------------------------------------------------------
 
 class TestCacheLookup:
     def test_empty_cache_returns_none(self):
         redis = _mock_redis()
         emb = _random_embedding()
-        result = cache_lookup(emb, redis)
-        assert result is None
+        assert cache_lookup(emb, redis) is None
 
-    def test_hit_above_threshold(self):
+    def test_hit_above_threshold(self, _reset_backend):
         redis = _mock_redis()
         emb = _random_embedding(seed=10)
         payload = {"context": "cached context", "sources": []}
@@ -281,20 +165,39 @@ class TestCacheLookup:
         emb2 = _random_embedding(seed=99)
 
         cache_store("query one", emb1, {"answer": "yes"}, redis, ttl=300)
-        result = cache_lookup(emb2, redis, threshold=0.99)
-        assert result is None
+        assert cache_lookup(emb2, redis, threshold=0.99) is None
 
+    def test_orphan_evicted_when_payload_expired(self, _reset_backend):
+        """Index entry whose Redis payload TTL'd should be lazy-deleted."""
+        redis = _mock_redis()
+        emb = _random_embedding(seed=7)
+
+        cache_store("ephemeral", emb, {"answer": "yes"}, redis, ttl=300)
+        assert _reset_backend.count() == 1
+
+        # Simulate Redis payload expiry: GET returns None for any entry
+        # key. The index entry is still present; lookup must return None
+        # AND delete the orphan.
+        redis.get = MagicMock(return_value=None)
+
+        assert cache_lookup(emb, redis, threshold=0.5) is None
+        assert _reset_backend.count() == 0, "orphan was not evicted from index"
+
+
+# ---------------------------------------------------------------------------
+# Tests: cache_store
+# ---------------------------------------------------------------------------
 
 class TestCacheStore:
-    def test_stores_entry(self):
+    def test_stores_payload_and_index(self, _reset_backend):
         redis = _mock_redis()
         emb = _random_embedding(seed=5)
         cache_store("test query", emb, {"context": "result"}, redis, ttl=60)
-        redis.setex.assert_called_once()
-        # HNSW label→entry_id mapping should be stored
-        redis.hset.assert_called()
 
-    def test_store_multiple_find_best(self):
+        redis.setex.assert_called_once()
+        assert _reset_backend.count() == 1
+
+    def test_store_multiple_find_best(self, _reset_backend):
         redis = _mock_redis()
         emb1 = _random_embedding(seed=1)
         emb2 = emb1 + np.random.RandomState(2).randn(768).astype(np.float32) * 0.01
@@ -307,29 +210,69 @@ class TestCacheStore:
         assert found is not None
         assert found["answer"] == "alpha"
 
+    def test_idempotent_same_query(self, _reset_backend):
+        """Storing the same query twice upserts (no duplicate index entries)."""
+        redis = _mock_redis()
+        emb = _random_embedding(seed=3)
+        cache_store("dup query", emb, {"v": 1}, redis, ttl=300)
+        cache_store("dup query", emb, {"v": 2}, redis, ttl=300)
+        assert _reset_backend.count() == 1
+
+
+# ---------------------------------------------------------------------------
+# Tests: invalidate_cache
+# ---------------------------------------------------------------------------
 
 class TestInvalidateCache:
-    def test_clears_keys_and_reinits_index(self):
+    def test_clears_keys_and_index(self, _reset_backend):
         redis = _mock_redis()
         emb = _random_embedding(seed=5)
 
         cache_store("test query", emb, {"answer": "yes"}, redis, ttl=300)
         count = invalidate_cache(redis)
+
         assert count >= 1
+        assert _reset_backend.count() == 0
 
     def test_no_keys_to_clear(self):
         redis = _mock_redis()
-        count = invalidate_cache(redis)
-        assert count == 0
+        assert invalidate_cache(redis) == 0
 
 
 # ---------------------------------------------------------------------------
-# Tests: Thread safety
+# Tests: flush_cache (now a no-op)
+# ---------------------------------------------------------------------------
+
+class TestFlushCache:
+    def test_flush_is_safe_noop(self):
+        """Public API hinge — must accept any redis_client without error."""
+        flush_cache(MagicMock())
+        flush_cache(None)
+
+
+# ---------------------------------------------------------------------------
+# Tests: backend disabled / unset
+# ---------------------------------------------------------------------------
+
+class TestBackendDisabled:
+    def test_lookup_returns_none_when_backend_unregistered(self):
+        set_cache_backend(None)
+        assert cache_lookup(_random_embedding(), _mock_redis()) is None
+
+    def test_store_is_noop_when_backend_unregistered(self):
+        set_cache_backend(None)
+        redis = _mock_redis()
+        cache_store("q", _random_embedding(), {"a": 1}, redis, ttl=60)
+        # Payload write is gated on the backend too — not just the index.
+        redis.setex.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Tests: thread safety
 # ---------------------------------------------------------------------------
 
 class TestThreadSafety:
     def test_concurrent_stores(self):
-        """Multiple threads can store concurrently without crashing."""
         redis = _mock_redis()
         errors: list[Exception] = []
 
@@ -350,106 +293,20 @@ class TestThreadSafety:
 
 
 # ---------------------------------------------------------------------------
-# Tests: Edge cases
+# Tests: Sentry capture (observability boundary)
 # ---------------------------------------------------------------------------
-
-class TestEdgeCases:
-    def test_missing_label_mapping_returns_none(self):
-        """If HNSW finds a match but the label mapping is gone, returns None."""
-        redis = _mock_redis()
-        emb = _random_embedding(seed=42)
-
-        # Store normally
-        cache_store("test query", emb, {"answer": "yes"}, redis, ttl=300)
-
-        # Delete the labels hash (simulating partial invalidation)
-        redis.hget = MagicMock(return_value=None)
-
-        result = cache_lookup(emb, redis, threshold=0.5)
-        assert result is None
-
-    def test_expired_entry_returns_none(self):
-        """If HNSW finds a match but the result payload expired, returns None."""
-        redis = _mock_redis()
-        emb = _random_embedding(seed=42)
-
-        cache_store("test query", emb, {"answer": "yes"}, redis, ttl=300)
-
-        # Simulate expired payload by making get return None for entry keys
-        original_get = redis.get.side_effect
-
-        def _get_without_entries(key: str):
-            if key.startswith("semcache:entry:"):
-                return None
-            return original_get(key)
-
-        redis.get = MagicMock(side_effect=_get_without_entries)
-
-        result = cache_lookup(emb, redis, threshold=0.5)
-        assert result is None
-
-    # NOTE: Corrupted HNSW index data cannot be tested here because hnswlib's
-    # C++ extension segfaults on invalid binary data (not catchable by Python).
-    # In production, Redis guarantees atomic writes making corruption extremely
-    # unlikely.  If it occurs, delete the semcache:hnsw_index key manually.
-
-
-# ---------------------------------------------------------------------------
-# Observability: Sentry capture tests (R1-3)
-# ---------------------------------------------------------------------------
-
 
 class TestSentryCapture:
-    """Assert Sentry.capture_exception fires at every silent-catch site."""
-
-    def test_hnsw_load_failed_captured(self):
-        """_HNSWIndex.load_from_redis swallows and reports to Sentry."""
-        from unittest.mock import patch
-
-        idx = _HNSWIndex(dim=768)
-        # Bypass the header+dim check so we reach the hnswlib path where
-        # we can inject the failure. We patch tempfile.NamedTemporaryFile
-        # to raise after the header is parsed.
-        #
-        # Simpler: a mock redis with no _r attribute (so raw == itself)
-        # whose .get() raises directly — this hits the outer except clause.
-        class _NoAttrRedis:
-            def get(self, key):
-                raise RuntimeError("redis gone")
-
-        with patch("sentry_sdk.capture_exception") as mock_capture:
-            result = idx.load_from_redis(_NoAttrRedis())
-
-        assert result is False
-        mock_capture.assert_called_once()
-
-    def test_hnsw_save_failed_captured(self):
-        """_HNSWIndex._save_to_redis swallows and reports to Sentry."""
-        from unittest.mock import patch
-
-        import core.retrieval.semantic_cache as sc_mod
-
-        idx = _HNSWIndex(dim=768)
-        bad_redis = MagicMock()
-        # Patch os.unlink inside the module to raise after save_index writes
-        # the tempfile — this triggers the outer except in _save_to_redis.
-        with patch.object(sc_mod.os, "unlink", side_effect=OSError("disk full")), \
-             patch("sentry_sdk.capture_exception") as mock_capture:
-            idx._save_to_redis(bad_redis)
-
-        mock_capture.assert_called_once()
-
-    def test_lookup_failed_captured(self):
-        """cache_lookup swallows and reports to Sentry on _get_index failure."""
-        from unittest.mock import patch
-
+    def test_lookup_failure_captured(self):
+        """cache_lookup must report unexpected backend errors to Sentry."""
         emb = np.random.randn(768).astype(np.float32)
         emb /= np.linalg.norm(emb)
 
-        # Patch _get_index (used by both the core and utils versions) to raise,
-        # which triggers the outer except in cache_lookup.
-        with patch("core.retrieval.semantic_cache._get_index", side_effect=RuntimeError("index broken")), \
-             patch("sentry_sdk.capture_exception") as mock_capture:
+        bad_backend = MagicMock()
+        bad_backend.count.side_effect = RuntimeError("backend gone")
+        set_cache_backend(bad_backend)
+
+        with patch("sentry_sdk.capture_exception") as mock_capture:
             result = cache_lookup(emb, MagicMock(), threshold=0.5)
 
         assert result is None

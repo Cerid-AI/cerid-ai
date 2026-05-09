@@ -112,6 +112,21 @@ def get_chroma() -> Any:
     return _chroma
 
 
+def get_semantic_cache_collection() -> Any:
+    """Return the dedicated chroma collection that backs the semantic
+    query cache.
+
+    Wired into :func:`core.retrieval.semantic_cache.set_cache_backend`
+    at app startup. Cosine space matches the existing similarity scoring
+    in ``cache_lookup``. Created on first access.
+    """
+    chroma = get_chroma()
+    return chroma.get_or_create_collection(
+        name="semantic_query_cache",
+        metadata={"hnsw:space": "cosine"},
+    )
+
+
 def get_redis() -> redis.Redis:
     global _redis
     if _redis is None:

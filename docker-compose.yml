@@ -53,11 +53,17 @@ services:
 
   chromadb:
     container_name: ai-companion-chroma
-    image: chromadb/chroma:0.5.23
+    image: chromadb/chroma:1.5.9
     ports:
       - "127.0.0.1:${CERID_PORT_CHROMA:-8001}:8000"
     volumes:
-      - ./stacks/infrastructure/data/chroma:/chroma/chroma
+      # 1.x persistence path is /data (was /chroma/chroma in 0.5).
+      # First boot against an existing host dir auto-migrates the 0.5
+      # sqlite+segments in place — ONE-WAY. Operators MUST snapshot via
+      # `scripts/snapshot-chroma-volume.sh` before `docker compose pull
+      # chromadb && docker compose up -d chromadb`. See
+      # docs/DEPENDENCY_UPGRADES.md § ChromaDB Phase 3.
+      - ./stacks/infrastructure/data/chroma:/data
     environment:
       - ANONYMIZED_TELEMETRY=false
       - CHROMA_ANONYMIZED_TELEMETRY=false
@@ -73,7 +79,7 @@ services:
           cpus: '2.0'
           memory: 1G
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/v1/heartbeat"]
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/v2/heartbeat"]
       interval: 30s
       timeout: 10s
       retries: 5

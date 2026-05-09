@@ -95,6 +95,62 @@ class TestOnnxEmbeddingFunction:
 
 
 # ---------------------------------------------------------------------------
+# chromadb 1.x EmbeddingFunction contract (forward-compat — no-op on 0.5)
+# ---------------------------------------------------------------------------
+
+
+class TestEmbeddingFunctionContract:
+    def test_name_is_stable_identifier(self):
+        from core.utils.embeddings import OnnxEmbeddingFunction
+
+        # Static method — callable on the class itself, not just instances.
+        assert OnnxEmbeddingFunction.name() == "cerid-onnx"
+
+    def test_get_config_round_trips_constructor_args(self):
+        from core.utils.embeddings import OnnxEmbeddingFunction
+
+        ef = OnnxEmbeddingFunction(
+            model_id="org/some-model",
+            onnx_filename="onnx/model_quantized.onnx",
+            cache_dir="/tmp/cache",
+            dimensions=512,
+        )
+        config = ef.get_config()
+        assert config == {
+            "model_id": "org/some-model",
+            "onnx_filename": "onnx/model_quantized.onnx",
+            "cache_dir": "/tmp/cache",
+            "dimensions": 512,
+        }
+
+    def test_build_from_config_reconstructs_equivalent_instance(self):
+        from core.utils.embeddings import OnnxEmbeddingFunction
+
+        original = OnnxEmbeddingFunction(
+            model_id="org/some-model",
+            onnx_filename="onnx/model_quantized.onnx",
+            cache_dir="/tmp/cache",
+            dimensions=512,
+        )
+        rebuilt = OnnxEmbeddingFunction.build_from_config(original.get_config())
+
+        assert isinstance(rebuilt, OnnxEmbeddingFunction)
+        # The rebuilt instance must round-trip its config too — proves the
+        # contract is closed under serialise→deserialise.
+        assert rebuilt.get_config() == original.get_config()
+
+    def test_build_from_config_tolerates_missing_optional_keys(self):
+        """Future-config-schema evolution must not break collection load."""
+        from core.utils.embeddings import OnnxEmbeddingFunction
+
+        rebuilt = OnnxEmbeddingFunction.build_from_config({"model_id": "org/x"})
+        assert rebuilt.get_config()["model_id"] == "org/x"
+        assert rebuilt.get_config()["onnx_filename"] == "onnx/model.onnx"
+        assert rebuilt.get_config()["cache_dir"] is None
+        assert rebuilt.get_config()["dimensions"] is None
+
+
+# ---------------------------------------------------------------------------
 # get_embedding_function tests
 # ---------------------------------------------------------------------------
 

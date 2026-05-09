@@ -1,31 +1,12 @@
-"""Verify semantic cache dimension matches Arctic embedding model (768d)."""
+"""Verify the configured embedding model default.
+
+The HNSW-dim fixtures retired with the 2026-05-08 chromadb-backed
+semantic_cache rewrite — chroma resolves the index dim from the first
+upsert, so there is no module-level ``_HNSW_DIM`` to assert against.
+The embedding-model default check stays here because the cache and the
+KB collections both rely on it.
+"""
 import os
-
-
-def test_semantic_cache_dim_default_is_768():
-    """SEMANTIC_CACHE_DIM should default to 768 for Snowflake Arctic Embed M v1.5."""
-    # Remove env var if set, to test the code default
-    env_backup = os.environ.pop("SEMANTIC_CACHE_DIM", None)
-    try:
-        # Re-import to pick up the default
-        import importlib
-
-        import core.retrieval.semantic_cache as sc_mod
-        importlib.reload(sc_mod)
-        assert sc_mod._HNSW_DIM == 768, f"Expected 768, got {sc_mod._HNSW_DIM}"
-    finally:
-        if env_backup is not None:
-            os.environ["SEMANTIC_CACHE_DIM"] = env_backup
-
-
-def test_semantic_cache_dim_overridable_via_env(monkeypatch):
-    """SEMANTIC_CACHE_DIM should be overridable via environment variable."""
-    monkeypatch.setenv("SEMANTIC_CACHE_DIM", "256")
-    import importlib
-
-    import core.retrieval.semantic_cache as sc_mod
-    importlib.reload(sc_mod)
-    assert sc_mod._HNSW_DIM == 256
 
 
 def test_embedding_model_default_is_arctic():

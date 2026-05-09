@@ -202,6 +202,50 @@ class OnnxEmbeddingFunction:
         text = self._query_prefix + query if self._query_prefix else query
         return self.__call__([text])[0]
 
+    # -- chromadb 1.x EmbeddingFunction contract (forward-compat) -----------
+    #
+    # chromadb 1.1.13+ persists the embedding function alongside the
+    # collection so subsequent `get_collection` calls auto-resolve it.
+    # Persistence relies on three methods declared by the chromadb
+    # `EmbeddingFunction` Protocol: `name()`, `get_config()`, and
+    # `build_from_config()`. They are no-ops on chromadb 0.5.x (which
+    # only consults `__call__`) and become live the moment the client
+    # pin lifts to >=1,<2 — added now so the actual bump becomes a
+    # one-line requirements-and-lock change.
+
+    @staticmethod
+    def name() -> str:
+        """Stable identifier persisted with the collection on chromadb 1.x."""
+        return "cerid-onnx"
+
+    def get_config(self) -> dict[str, Any]:
+        """Return the constructor args needed to rebuild this EF.
+
+        Mirrors the chromadb 1.x Python `EmbeddingFunction` contract; the
+        returned dict round-trips through `build_from_config()`.
+        """
+        return {
+            "model_id": self._model_id,
+            "onnx_filename": self._onnx_filename,
+            "cache_dir": self._cache_dir,
+            "dimensions": self._dimensions,
+        }
+
+    @staticmethod
+    def build_from_config(config: dict[str, Any]) -> "OnnxEmbeddingFunction":
+        """Reconstruct an OnnxEmbeddingFunction from a `get_config()` dict.
+
+        Tolerant of missing keys so a future config-schema evolution does
+        not break collection load — unknown keys are silently ignored, the
+        defaults from `__init__` apply when fields are absent.
+        """
+        return OnnxEmbeddingFunction(
+            model_id=config["model_id"],
+            onnx_filename=config.get("onnx_filename", "onnx/model.onnx"),
+            cache_dir=config.get("cache_dir"),
+            dimensions=config.get("dimensions"),
+        )
+
     # -- sidecar fast-path (Workstream E Phase E.6.4) ----------------------
 
     def _maybe_embed_via_sidecar(self, texts: list[str]) -> list[list[float]] | None:

@@ -15,10 +15,6 @@ import time
 import traceback
 from contextlib import asynccontextmanager
 
-# Must run before any module that imports chromadb (directly or transitively).
-# See module docstring for the chromadb-vs-posthog signature mismatch this fixes.
-from app import _startup_compat  # noqa: F401  -- side-effect import
-
 # Must run before any FastAPI import for integration hooks to attach cleanly.
 from app.observability.sentry_init import init_sentry
 
@@ -344,7 +340,7 @@ async def _check_infra_connectivity() -> None:
         # --- ChromaDB HTTP check ---
         try:
             async with httpx.AsyncClient(timeout=3.0) as c:
-                r = await c.get(chroma_url.rstrip("/") + "/api/v1/heartbeat")
+                r = await c.get(chroma_url.rstrip("/") + "/api/v2/heartbeat")
             if r.status_code >= 400:
                 unreachable.append(f"ChromaDB ({_host(chroma_url)}: HTTP {r.status_code})")
         except Exception as exc:
@@ -532,6 +528,21 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Redis PING pre-warm failed (cache may be unavailable): %s", e)
 
+    # Wire the semantic-cache backend: a dedicated chroma collection
+    # ("semantic_query_cache"). The cache module stays layering-correct
+    # (no chromadb import in core/) by accepting the collection via
+    # set_cache_backend. Skipped when the feature flag is off so we
+    # don't materialise the collection on disk unnecessarily.
+    try:
+        from config.features import ENABLE_SEMANTIC_CACHE
+        if ENABLE_SEMANTIC_CACHE:
+            from app.deps import get_semantic_cache_collection
+            from core.retrieval.semantic_cache import set_cache_backend
+            set_cache_backend(get_semantic_cache_collection())
+            logger.info("Semantic cache backend registered (chroma collection)")
+    except Exception as e:
+        log_swallowed_error("app.main.semantic_cache_backend_init", e)
+
     # Bump the monotonic restart counter so /observability/restarts can
     # tell consumers (trading-agent etc.) when MCP last booted. Best-
     # effort — Redis-down doesn't gate startup. (Workstream A Phase 1.3.)
@@ -657,11 +668,15 @@ async def lifespan(app: FastAPI):
             await _hook()
         except Exception as exc:
             logger.warning("Extension shutdown hook failed: %s", exc)
-    # Flush semantic cache HNSW index to Redis before closing Redis
+    # Semantic cache: clear the registered backend handle so any late
+    # callers hit the disabled path. flush_cache itself is now a no-op
+    # (chromadb persists every upsert immediately) but is retained as a
+    # public-API hinge.
     try:
         from app.deps import get_redis
-        from core.retrieval.semantic_cache import flush_cache
+        from core.retrieval.semantic_cache import flush_cache, set_cache_backend
         flush_cache(get_redis())
+        set_cache_backend(None)
     except Exception as exc:
         log_swallowed_error("app.main.shutdown_semantic_cache_flush", exc)
     close_neo4j()
