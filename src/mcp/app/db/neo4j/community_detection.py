@@ -143,14 +143,17 @@ def detect_communities(
         try:
             if gds.graph.exists(proj_name)["exists"]:
                 gds.graph.drop(proj_name)
-        except Exception:  # noqa: BLE001 — projection-already-gone is fine
-            pass
+        except Exception as exc:
+            from core.utils.swallowed import log_swallowed_error
+            log_swallowed_error(
+                "app.db.neo4j.community_detection.cleanup", exc,
+            )
 
     # Read communities back from leiden_communityIds and write Community
     # nodes + IN_COMMUNITY edges. Done in Cypher so we get atomic-per-
     # level transactions.
     now = utcnow_iso()
-    communities_per_level: dict[int, int] = {}
+    communities_seen: dict[int, set[str]] = {}
     edges_total = 0
     with driver.session(database=neo4j_database) as session:
         # Drop existing IN_COMMUNITY edges (idempotent re-run).
@@ -186,7 +189,7 @@ def detect_communities(
                     entity_id=row["canonical_id"],
                 ).consume()
                 edges_total += summary.counters.relationships_created
-                communities_per_level.setdefault(level, set()).add(community_id)
+                communities_seen.setdefault(level, set()).add(community_id)
 
         # Drop tiny communities below the size threshold (Leiden often
         # produces singletons — they're noise and add scheduler load).
@@ -205,7 +208,7 @@ def detect_communities(
             )
 
     stats["communities_per_level"] = {
-        level: len(comms) for level, comms in communities_per_level.items()
+        level: len(comms) for level, comms in communities_seen.items()
     }
     stats["edges"] = edges_total
     stats["elapsed_seconds"] = round(time.time() - started, 2)
