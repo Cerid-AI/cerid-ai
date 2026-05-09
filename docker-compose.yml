@@ -79,11 +79,20 @@ services:
           cpus: '2.0'
           memory: 1G
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/v2/heartbeat"]
+      # chromadb 1.x ships a near-distroless image (no curl, wget, python,
+      # nc). Only bash is available, so we issue HTTP/1.0 manually via
+      # /dev/tcp and grep the status line for "200". Verified empirically
+      # against chromadb/chroma:1.5.9 — works the moment the Rust server
+      # binds port 8000 and starts answering /api/v2/heartbeat.
+      test:
+        - "CMD"
+        - "bash"
+        - "-c"
+        - "exec 3<>/dev/tcp/127.0.0.1/8000 && printf 'GET /api/v2/heartbeat HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -q '200' <&3"
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 15s
+      start_period: 30s
 
   redis:
     container_name: ai-companion-redis

@@ -7,7 +7,7 @@ src/mcp/app/agents/hallucination/startup_self_test.py:82
 src/mcp/app/data_sources/bookmarks.py:355
 src/mcp/app/data_sources/bookmarks.py:471
 src/mcp/app/db/neo4j/schema.py:31
-src/mcp/app/deps.py:184
+src/mcp/app/deps.py:199
 src/mcp/app/eval/memory_efficacy.py:113
 src/mcp/app/middleware/metrics.py:46
 src/mcp/app/parsers/_utils.py:45
@@ -19,7 +19,7 @@ src/mcp/app/parsers/structured.py:163
 src/mcp/app/services/mcp_client_policy.py:185
 src/mcp/app/startup/invariants.py:113
 src/mcp/app/startup/invariants.py:120
-src/mcp/app/sync/import_.py:560
+src/mcp/app/sync/import_.py:574
 src/mcp/app/sync/user_state.py:357
 src/mcp/core/agents/audit.py:373
 src/mcp/core/agents/audit.py:392
@@ -35,9 +35,8 @@ src/mcp/core/agents/maintenance.py:319
 src/mcp/core/agents/rectify.py:229
 src/mcp/core/agents/rectify.py:393
 src/mcp/core/agents/self_rag.py:199
-src/mcp/core/retrieval/semantic_cache.py:176
-src/mcp/core/retrieval/semantic_cache.py:209
-src/mcp/core/retrieval/semantic_cache.py:236
+src/mcp/core/retrieval/semantic_cache.py:153
+src/mcp/core/retrieval/semantic_cache.py:240
 src/mcp/core/routing/model_providers.py:130
 src/mcp/core/routing/smart_router.py:389
 src/mcp/core/utils/claim_cache.py:161
