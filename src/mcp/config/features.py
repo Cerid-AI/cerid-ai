@@ -149,6 +149,19 @@ SEMANTIC_CACHE_THRESHOLD = float(os.getenv("SEMANTIC_CACHE_THRESHOLD", "0.92"))
 SEMANTIC_CACHE_TTL = int(os.getenv("SEMANTIC_CACHE_TTL", "600"))  # Canonical location for cache TTL
 SEMANTIC_CACHE_MAX_ENTRIES = int(os.getenv("SEMANTIC_CACHE_MAX_ENTRIES", "500"))
 
+# GraphRAG retrieval mode (Workstream E Phase 4a.6)
+#   "baseline"        — original step-6 graph_expand_results (relationship
+#                       traversal over Domain/SubCategory/Tag).
+#   "local_graphrag"  — entity-neighborhood expansion through (:MENTIONS)
+#                       edges produced by Phase 4a.3 extraction. Requires
+#                       backfill (Phase 4a.4) to have populated the entity
+#                       graph; before backfill it falls through to baseline.
+#   "auto"            — Phase 4b.3 query-router decides per-query.
+RETRIEVAL_MODE = os.getenv("RETRIEVAL_MODE", "baseline").lower()
+_VALID_RETRIEVAL_MODES = frozenset(("baseline", "local_graphrag", "auto"))
+if RETRIEVAL_MODE not in _VALID_RETRIEVAL_MODES:
+    RETRIEVAL_MODE = "baseline"
+
 # Parent-child chunking retrieval
 ENABLE_PARENT_CHILD_RETRIEVAL = os.getenv("ENABLE_PARENT_CHILD_RETRIEVAL", "false").lower() in ("true", "1")
 

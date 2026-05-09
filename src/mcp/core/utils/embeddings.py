@@ -197,10 +197,37 @@ class OnnxEmbeddingFunction:
 
         return [embeddings[i] for i in range(embeddings.shape[0])]
 
-    def embed_query(self, query: str) -> list[float]:
-        """Embed a single query, applying query prefix if configured."""
-        text = self._query_prefix + query if self._query_prefix else query
-        return self.__call__([text])[0]
+    def embed_query(self, input):  # noqa: A002 — chromadb protocol forces this kwarg name
+        """Embed query text(s), applying the query prefix if configured.
+
+        Polymorphic on the input shape because the OnnxEmbeddingFunction
+        instance is shared across two consumer protocols that disagree
+        on the embed_query signature:
+
+          - chromadb 1.x's ``EmbeddingFunction.embed_query(input: list[str])
+            -> list[list[float]]`` — batch, used internally when
+            ``Collection.query(query_texts=...)`` is called.
+          - neo4j-graphrag's ``Embedder.embed_query(text: str) -> list[float]``
+            — single, used by ``ChromaNeo4jRetriever`` when callers pass
+            ``query_text`` instead of ``query_vector``.
+
+        The single-vs-batch decision is made on the runtime input type;
+        callers in either protocol get back the shape they expect. The
+        ``_query_prefix`` (e.g. arctic-embed's "Represent this sentence
+        for searching relevant passages: ") applies on this path because
+        that's its purpose: pull queries closer to passages in latent
+        space. Document-side embedding via ``__call__`` gets no prefix.
+        """
+        if isinstance(input, str):
+            text = self._query_prefix + input if self._query_prefix else input
+            return self.__call__([text])[0]
+        if not input:
+            return []
+        prefixed = (
+            [self._query_prefix + t for t in input]
+            if self._query_prefix else list(input)
+        )
+        return self.__call__(prefixed)
 
     # -- chromadb 1.x EmbeddingFunction contract (forward-compat) -----------
     #
