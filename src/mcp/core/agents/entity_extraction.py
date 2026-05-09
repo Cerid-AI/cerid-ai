@@ -1,0 +1,225 @@
+# Copyright (c) 2026 Cerid AI. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""LLM-based named-entity extraction for the GraphRAG layer.
+
+Workstream E Phase 4a.3. Wraps :func:`core.utils.internal_llm.call_internal_llm`
+with a fixed type vocabulary and structured-JSON output. Produces
+:class:`Entity` records that the persistence layer
+(``app/db/neo4j/entity.py``) writes as ``(:Entity)`` nodes plus
+``(:Artifact)-[:MENTIONS]->(:Entity)`` edges.
+
+This module is layer-correct: it stays in ``core/`` and takes the LLM
+caller as a parameter so tests can inject a fake without monkeypatching
+the live OpenRouter path. The default caller wraps
+``call_internal_llm(stage="entity_extraction", ...)``.
+"""
+from __future__ import annotations
+
+import logging
+import re
+from dataclasses import dataclass
+from typing import Any, Awaitable, Callable, Iterable, Literal
+
+from core.utils.llm_parsing import parse_llm_json
+
+logger = logging.getLogger("ai-companion.entity_extraction")
+
+
+EntityType = Literal["PERSON", "ORG", "ASSET", "EVENT", "DATE", "LOC", "OTHER"]
+
+_VALID_TYPES: frozenset[str] = frozenset(
+    ("PERSON", "ORG", "ASSET", "EVENT", "DATE", "LOC", "OTHER")
+)
+
+# Async LLM caller signature: messages -> JSON string.
+# Mirrors the call_internal_llm contract for response_format=json_object.
+LLMCaller = Callable[[list[dict[str, str]]], Awaitable[str]]
+
+
+@dataclass(frozen=True)
+class Entity:
+    """A canonicalised named-entity record.
+
+    ``canonical_id`` is the stable graph identifier; two extractions of
+    "Elon Musk" and "elon musk" collapse to the same ``person:elon-musk``.
+    ``confidence`` is the LLM's self-reported extraction confidence
+    (0.0–1.0); the persistence layer stores it on the MENTIONS edge.
+    """
+
+    name: str
+    entity_type: EntityType
+    canonical_id: str
+    confidence: float
+
+
+# ---------------------------------------------------------------------------
+# Canonicalisation
+# ---------------------------------------------------------------------------
+
+_SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+
+def canonical_id(name: str, entity_type: str) -> str:
+    """Normalise (name, type) → stable graph identifier.
+
+    Format: ``{type_lower}:{slug}`` where ``slug`` is lowercase
+    ASCII-folded with all non-alphanumeric runs collapsed to single
+    hyphens.
+
+    Examples:
+        canonical_id("Elon Musk", "PERSON") → "person:elon-musk"
+        canonical_id("Apple Inc.", "ORG")   → "org:apple-inc"
+        canonical_id("BTC/USD", "ASSET")    → "asset:btc-usd"
+    """
+    slug = _SLUG_RE.sub("-", name.lower().strip()).strip("-")
+    return f"{entity_type.lower()}:{slug}"
+
+
+# ---------------------------------------------------------------------------
+# Prompt + extraction
+# ---------------------------------------------------------------------------
+
+_EXTRACTION_PROMPT = """\
+Extract named entities from the text. Output ONLY valid JSON in the exact \
+schema below.
+
+Types (use ONLY these):
+- PERSON: real individuals (e.g., "Elon Musk", "Tim Cook")
+- ORG: companies, institutions, governments (e.g., "Apple Inc.", "Federal Reserve")
+- ASSET: tradeable instruments, products, models (e.g., "BTC", "GPT-4", "Tesla Model 3")
+- EVENT: dated occurrences with proper-noun identity (e.g., "2008 financial crisis", "WWDC 2024")
+- DATE: discrete time periods (e.g., "Q3 2024", "March 15, 2026")
+- LOC: physical or political places (e.g., "San Francisco", "Wall Street")
+- OTHER: significant proper nouns that don't fit above
+
+Schema:
+{{"entities": [{{"name": "<verbatim span>", "type": "<TYPE>", "confidence": <0.0-1.0>}}, ...]}}
+
+Skip:
+- Common nouns ("the company", "they", "this product")
+- Pronouns
+- Generic temporal markers ("today", "yesterday", "last year")
+- Single first names without surname unless globally unique (e.g., "Madonna" stays)
+
+Text:
+\"\"\"
+{text}
+\"\"\"
+
+JSON:
+"""
+
+
+def _build_messages(text: str) -> list[dict[str, str]]:
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You are a precise named-entity extractor. Always respond "
+                "with valid JSON matching the requested schema. Never add "
+                "explanatory prose."
+            ),
+        },
+        {"role": "user", "content": _EXTRACTION_PROMPT.format(text=text)},
+    ]
+
+
+async def extract_entities_from_text(
+    text: str,
+    *,
+    llm_caller: LLMCaller,
+    max_chars: int = 8000,
+) -> list[Entity]:
+    """Extract entities from a single chunk of text.
+
+    Caller injects ``llm_caller`` so tests can stub the LLM. Production
+    callers wrap :func:`core.utils.internal_llm.call_internal_llm` with
+    ``stage="entity_extraction"`` and ``response_format={"type": "json_object"}``.
+
+    Empty / blank text → empty list (no LLM call). Texts longer than
+    ``max_chars`` are truncated head-only — entity-density is roughly
+    uniform across long documents, and the ingest pipeline already
+    chunks before calling this, so the truncation only kicks in on
+    pathologically large single chunks.
+    """
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return []
+    if len(cleaned) > max_chars:
+        cleaned = cleaned[:max_chars]
+
+    messages = _build_messages(cleaned)
+    try:
+        raw = await llm_caller(messages)
+    except Exception as exc:  # noqa: BLE001 — observability boundary; fall through to []
+        logger.exception("entity_extraction.llm_call_failed: %s", exc)
+        return []
+
+    try:
+        parsed = parse_llm_json(raw)
+    except Exception:
+        logger.warning(
+            "entity_extraction.json_parse_failed (returning [] for this chunk); "
+            "first 200 chars: %r",
+            raw[:200] if raw else "",
+        )
+        return []
+
+    return list(_normalise_entities(parsed))
+
+
+def _normalise_entities(parsed: Any) -> Iterable[Entity]:
+    """Apply schema validation, type-vocab filter, canonicalisation, dedup."""
+    if not isinstance(parsed, dict):
+        return
+    raw_list = parsed.get("entities")
+    if not isinstance(raw_list, list):
+        return
+
+    seen: set[str] = set()
+    for raw in raw_list:
+        if not isinstance(raw, dict):
+            continue
+        name = (raw.get("name") or "").strip()
+        if not name:
+            continue
+        ent_type = str(raw.get("type") or "").strip().upper()
+        if ent_type not in _VALID_TYPES:
+            continue
+        try:
+            confidence = float(raw.get("confidence", 0.0))
+        except (TypeError, ValueError):
+            confidence = 0.0
+        confidence = max(0.0, min(1.0, confidence))
+
+        cid = canonical_id(name, ent_type)
+        if not cid.endswith(":"):  # at least one slug character
+            if cid in seen:
+                continue
+            seen.add(cid)
+            yield Entity(
+                name=name,
+                entity_type=ent_type,  # type: ignore[arg-type]
+                canonical_id=cid,
+                confidence=confidence,
+            )
+
+
+# ---------------------------------------------------------------------------
+# Default LLM caller (production wiring)
+# ---------------------------------------------------------------------------
+
+async def default_llm_caller(messages: list[dict[str, str]]) -> str:
+    """Production caller: routes through call_internal_llm with the
+    ``entity_extraction`` stage breadcrumb so the call appears in
+    structlog + Sentry scope correctly."""
+    from core.utils.internal_llm import call_internal_llm
+
+    return await call_internal_llm(
+        messages,
+        temperature=0.0,
+        max_tokens=1024,
+        response_format={"type": "json_object"},
+        stage="entity_extraction",
+    )

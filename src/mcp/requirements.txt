@@ -22,6 +22,11 @@ redis>=4.0,<8
 # 6.x against Neo4j 2026.04 calver server; pure-python wheel, no compile.
 neo4j-graphrag>=1.16,<2
 
+# Neo4j GDS Python client (Workstream E Phase 4b) — wraps the GDS plugin's
+# Cypher procedures with a typed Python API; needed for Leiden community
+# detection over the entity graph (gds.leiden.write).
+graphdatascience>=1.21,<2
+
 # AI / NLP
 tiktoken>=0.5,<1
 langgraph>=0.3.0,<2.0  # langgraph 1.x OK — audit verified: only StateGraph/END from langgraph.graph (triage.py)

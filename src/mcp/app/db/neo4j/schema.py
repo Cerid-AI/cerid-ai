@@ -81,6 +81,45 @@ def init_schema(driver) -> None:
             "FOR (a:Artifact) ON (a.updated_at)"
         )
 
+        # --- Entity layer (Workstream E Phase 4a.2) ---
+        # GraphRAG entity nodes that materialise from LLM-extracted mentions
+        # over chunk text. The (:Artifact)-[:MENTIONS]->(:Entity) shape is
+        # artifact-level, not chunk-level — a deviation from the
+        # tasks/2026-04-28-workstream-e-rag-modernization.md plan that
+        # avoids proliferating ~13K Chunk nodes into Neo4j. The
+        # ChromaNeo4jRetriever (Phase 4a.5) does not need Neo4j-side Chunk
+        # nodes: vector search returns chunk_ids → MATCH against Artifact
+        # → expansion via MENTIONS edges. Chunk-grain mentions ride on the
+        # MENTIONS edge as a `chunk_ids` property (JSON-encoded list, same
+        # convention as keywords_json).
+        session.run(
+            "CREATE CONSTRAINT entity_canonical_id IF NOT EXISTS "
+            "FOR (e:Entity) REQUIRE e.canonical_id IS UNIQUE"
+        )
+        session.run(
+            "CREATE INDEX entity_name_idx IF NOT EXISTS "
+            "FOR (e:Entity) ON (e.name)"
+        )
+        session.run(
+            "CREATE INDEX entity_type_idx IF NOT EXISTS "
+            "FOR (e:Entity) ON (e.entity_type)"
+        )
+
+        # --- Community layer (Workstream E Phase 4b.1) ---
+        # Leiden community detection materialises (:Community) nodes
+        # over the Entity graph; each Entity gets one or more
+        # [:IN_COMMUNITY] edges (one per hierarchical level Leiden
+        # produces). Community.id is "{level}:{native_id}" so multiple
+        # levels can coexist without collision.
+        session.run(
+            "CREATE CONSTRAINT community_id IF NOT EXISTS "
+            "FOR (c:Community) REQUIRE c.id IS UNIQUE"
+        )
+        session.run(
+            "CREATE INDEX community_level_idx IF NOT EXISTS "
+            "FOR (c:Community) ON (c.level)"
+        )
+
         # --- Seed Domain + SubCategory nodes ---
         now = utcnow_iso()
         for domain_name, domain_info in config.TAXONOMY.items():

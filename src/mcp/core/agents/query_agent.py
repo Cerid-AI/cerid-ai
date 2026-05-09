@@ -538,6 +538,218 @@ async def graph_expand_results(
     return results + graph_results
 
 
+async def graph_expand_results_via_entities(
+    results: list[dict[str, Any]],
+    query: str,
+    chroma_client: Any | None = None,
+    neo4j_driver: Any | None = None,
+) -> list[dict[str, Any]]:
+    """GraphRAG local-mode expansion: extend results with artifacts that
+    share entities with the seed set.
+
+    Used by step-6 when ``RETRIEVAL_MODE=local_graphrag``. Returns
+    ``results`` unchanged when:
+
+      - no seeds (nothing to expand from), or
+      - the entity layer is empty (pre-backfill state — seed artifacts
+        have no MENTIONS edges yet), or
+      - chroma is unreachable / fetch fails.
+
+    The query_agent caller treats "no expansion happened" as a signal
+    to fall back to the baseline relationship-traversal expansion.
+    """
+    from core.retrieval.graphrag_retriever import entity_neighborhood_artifact_ids
+
+    if not results or neo4j_driver is None or chroma_client is None:
+        return results
+
+    seed_ids = list({r["artifact_id"] for r in results if r.get("artifact_id")})
+    if not seed_ids:
+        return results
+
+    try:
+        related_pairs = await asyncio.to_thread(
+            entity_neighborhood_artifact_ids,
+            neo4j_driver,
+            seed_ids,
+            top_k=config.GRAPH_MAX_RELATED,
+        )
+    except Exception as e:
+        logger.warning("entity-neighborhood expansion failed: %s", e)
+        return results
+
+    if not related_pairs:
+        return results
+
+    # Resolve domain + filename for each related artifact in one Cypher round-trip.
+    cypher = """
+    UNWIND $ids AS aid
+    MATCH (a:Artifact {id: aid})
+    RETURN a.id AS id, a.domain AS domain, a.filename AS filename
+    """
+    try:
+        records, _, _ = await asyncio.to_thread(
+            neo4j_driver.execute_query, cypher, {"ids": [aid for aid, _ in related_pairs]},
+        )
+    except Exception as e:
+        logger.warning("artifact-resolution for entity expansion failed: %s", e)
+        return results
+    by_id = {r["id"]: dict(r) for r in records}
+
+    existing_chunk_ids = {r.get("chunk_id") for r in results}
+    existing_artifact_ids = set(seed_ids)
+    expanded: list[dict[str, Any]] = []
+
+    for artifact_id, shared_count in related_pairs:
+        meta = by_id.get(artifact_id)
+        if not meta or artifact_id in existing_artifact_ids:
+            continue
+        domain = meta["domain"]
+        try:
+            collection = chroma_client.get_collection(name=config.collection_name(domain))
+        except Exception as e:  # noqa: BLE001 — collection-missing is a valid skip
+            logger.debug("collection missing for domain %s: %s", domain, e)
+            continue
+        try:
+            fetched = await asyncio.to_thread(
+                collection.query,
+                query_texts=[query],
+                n_results=2,
+                where=with_tenant_scope({"artifact_id": artifact_id}),
+                include=["documents", "metadatas", "distances"],
+            )
+        except Exception as e:  # noqa: BLE001 — chroma failure → skip this artifact
+            logger.debug("chroma fetch failed for %s: %s", artifact_id, e)
+            continue
+        if not fetched["ids"] or not fetched["ids"][0]:
+            continue
+        # Boost related-via-entity scores by shared-entity count (mild),
+        # capped so they cannot outweigh primary vector hits.
+        boost = min(0.05 * shared_count, 0.15)
+        for i, chunk_id in enumerate(fetched["ids"][0]):
+            if chunk_id in existing_chunk_ids:
+                continue
+            distance = fetched["distances"][0][i] if fetched["distances"] else 1.0
+            base_relevance = l2_distance_to_relevance(distance)
+            relevance = round(
+                base_relevance * config.GRAPH_RELATED_SCORE_FACTOR + boost, 4
+            )
+            metadata = fetched["metadatas"][0][i] if fetched["metadatas"] else {}
+            expanded.append({
+                "content": fetched["documents"][0][i],
+                "relevance": relevance,
+                "artifact_id": artifact_id,
+                "filename": meta["filename"],
+                "domain": domain,
+                "chunk_index": metadata.get("chunk_index", 0),
+                "collection": config.collection_name(domain),
+                "chunk_id": chunk_id,
+                "graph_source": True,
+                "graph_expansion_mode": "local_graphrag",
+                "shared_entity_count": shared_count,
+            })
+            existing_chunk_ids.add(chunk_id)
+
+    if expanded:
+        logger.info(
+            "GraphRAG local expansion added %d chunk(s) via entity neighbourhoods "
+            "(seeds=%d, related=%d)",
+            len(expanded), len(seed_ids), len(related_pairs),
+        )
+    return results + expanded
+
+
+async def graph_expand_results_via_communities(
+    results: list[dict[str, Any]],
+    query: str,
+    chroma_client: Any | None = None,
+    neo4j_driver: Any | None = None,
+) -> list[dict[str, Any]]:
+    """GraphRAG global-mode expansion (Phase 4b.4).
+
+    Selects communities whose member entities overlap with the seed
+    artifacts' entities, then surfaces each matched community's
+    LLM-generated summary alongside one representative chunk per
+    community. Designed for thematic queries that the
+    :func:`core.agents.query_router.route` heuristic dispatched to
+    global mode.
+
+    No-op when:
+      - the community layer is empty (Leiden has not run yet), or
+      - none of the seeds carry any MENTIONS edges, or
+      - chroma or neo4j is unreachable.
+
+    The summary content rides as a synthetic ``content`` field on the
+    returned dicts so downstream rerank/fuse handles it identically
+    to a chunk; ``graph_expansion_mode="global_graphrag"`` tags the
+    origin so observability can trace the path.
+    """
+    if not results or neo4j_driver is None or chroma_client is None:
+        return results
+
+    seed_ids = list({r["artifact_id"] for r in results if r.get("artifact_id")})
+    if not seed_ids:
+        return results
+
+    cypher = """
+    MATCH (a:Artifact)-[:MENTIONS]->(:Entity)-[:IN_COMMUNITY]->(c:Community)
+    WHERE a.id IN $seeds AND c.summary IS NOT NULL AND c.level = 0
+    WITH c, count(DISTINCT a) AS seed_overlap
+    OPTIONAL MATCH (c)<-[:IN_COMMUNITY]-(top:Entity)
+    WITH c, seed_overlap, collect(top)[..3] AS top_entities
+    RETURN c.id AS community_id, c.summary AS summary, c.level AS level,
+           seed_overlap, [t IN top_entities | t.canonical_id] AS top_entity_ids
+    ORDER BY seed_overlap DESC
+    LIMIT 5
+    """
+    try:
+        records, _, _ = await asyncio.to_thread(
+            neo4j_driver.execute_query, cypher, {"seeds": seed_ids},
+        )
+    except Exception as e:
+        logger.warning("global-mode community fetch failed: %s", e)
+        return results
+
+    if not records:
+        return results
+
+    existing_chunk_ids = {r.get("chunk_id") for r in results}
+    expanded: list[dict[str, Any]] = []
+    for record in records:
+        community_id = record["community_id"]
+        summary = record["summary"]
+        seed_overlap = int(record["seed_overlap"])
+        if not summary:
+            continue
+        synthetic_chunk_id = f"community:{community_id}"
+        if synthetic_chunk_id in existing_chunk_ids:
+            continue
+        expanded.append({
+            "content": summary,
+            "relevance": round(0.4 + 0.05 * min(seed_overlap, 5), 4),
+            "artifact_id": synthetic_chunk_id,
+            "filename": f"community:{community_id}",
+            "domain": "graph",
+            "chunk_index": 0,
+            "collection": "graph_communities",
+            "chunk_id": synthetic_chunk_id,
+            "graph_source": True,
+            "graph_expansion_mode": "global_graphrag",
+            "community_id": community_id,
+            "community_level": int(record["level"]),
+            "seed_overlap": seed_overlap,
+            "top_entities": list(record["top_entity_ids"]),
+        })
+        existing_chunk_ids.add(synthetic_chunk_id)
+
+    if expanded:
+        logger.info(
+            "GraphRAG global expansion added %d community summar(ies) (seeds=%d)",
+            len(expanded), len(seed_ids),
+        )
+    return results + expanded
+
+
 # ---------------------------------------------------------------------------
 # Reranking
 # ---------------------------------------------------------------------------
@@ -1263,14 +1475,52 @@ async def _agent_query_impl(
                 len(_high_conf), effective_top_k,
             )
         else:
+            from config.features import RETRIEVAL_MODE
             with span("graph.expand", "neighbour_lookup", seed_count=len(results)):
-                results = await graph_expand_results(
-                    results=results,
-                    query=query,
-                    chroma_client=chroma_client,
-                    neo4j_driver=neo4j_driver,
-                    graph_store=graph_store,
-                )
+                # RETRIEVAL_MODE=auto delegates to the heuristic router
+                # which picks local_graphrag or global_graphrag per query.
+                effective_mode = RETRIEVAL_MODE
+                if effective_mode == "auto":
+                    from core.agents.query_router import route as _route
+                    effective_mode = _route(query)
+
+                if effective_mode == "global_graphrag" and neo4j_driver is not None:
+                    # Workstream E Phase 4b.4 — community-summary expansion.
+                    results = await graph_expand_results_via_communities(
+                        results=results,
+                        query=query,
+                        chroma_client=chroma_client,
+                        neo4j_driver=neo4j_driver,
+                    )
+                    if len(results) == graph_count_before:
+                        # No matching summaries (community layer empty or
+                        # query has no overlap with seed entities) → fall
+                        # back to local entity expansion for non-empty graphs.
+                        results = await graph_expand_results_via_entities(
+                            results=results, query=query,
+                            chroma_client=chroma_client, neo4j_driver=neo4j_driver,
+                        )
+                elif effective_mode == "local_graphrag" and neo4j_driver is not None:
+                    # Workstream E Phase 4a.6 — entity-neighborhood expansion.
+                    # Falls through to baseline silently when no entities yet.
+                    results = await graph_expand_results_via_entities(
+                        results=results,
+                        query=query,
+                        chroma_client=chroma_client,
+                        neo4j_driver=neo4j_driver,
+                    )
+
+                # Final fall-through to baseline relationship traversal when
+                # no graph-expansion mode contributed anything (e.g.
+                # pre-Phase-4a.4 backfill state, or all expansions skipped).
+                if len(results) == graph_count_before:
+                    results = await graph_expand_results(
+                        results=results,
+                        query=query,
+                        chroma_client=chroma_client,
+                        neo4j_driver=neo4j_driver,
+                        graph_store=graph_store,
+                    )
         graph_results_added = len(results) - graph_count_before
 
     from core.utils.temporal import is_within_window, parse_temporal_intent, recency_score
