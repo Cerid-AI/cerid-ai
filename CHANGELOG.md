@@ -94,6 +94,55 @@ Rollback: stop neo4j, restore the snapshot tarball over
 block to the 5.26.21 image + `["apoc"]` plugins + 1G heap + 4G memory,
 restart.
 
+### Workstream E — GraphRAG retrieval (Phases 4a + 4b end-to-end, 2026-05-09)
+
+Builds the entity + community layers on top of the upgraded
+chromadb 1.x + Neo4j calver stack. All sub-phases landed on `main`;
+the corpus backfill (operator-invocable) and apscheduler wiring of
+`refresh_communities.py` are the only remaining touch-points before
+this arc is fully populated on the live dataset.
+
+**Phase 4a — entity layer + local mode:**
+
+| Sub-phase | Commit | What |
+|---|---|---|
+| 4a.0 | `e085d98` | `neo4j-graphrag>=1.16,<2` dep |
+| 4a.1 | `e085d98` | spike: ship custom `ChromaNeo4jRetriever` shim |
+| 4a.2 | `fbe6eed` | `(:Entity)` schema (`canonical_id` UNIQUE + `name`/`entity_type` indexes) |
+| 4a.3 | `89ec055` | `core/agents/entity_extraction.py` + `app/db/neo4j/entity.py` (LLM NER, type vocab, canonical_id, idempotent UPSERT) |
+| 4a.4 | `4dccaed` | `scripts/backfill_entities.py` — resumable, checkpointed; 5-art pilot validated |
+| 4a.5 | `5dc7445` | `core/retrieval/graphrag_retriever.py` — `ChromaNeo4jRetriever` shim subclassing `ExternalRetriever` |
+| 4a.6 | `56d2e21` | `RETRIEVAL_MODE` switch + step-6 `graph_expand_results_via_entities` + `embed_query` polymorphism fix (chromadb 1.x list-vs-string protocol) |
+| 4a.7 | `b676ac3` | `tests/eval/graphrag_local_benchmark.py` — entity-grounded pseudo-gold harness |
+
+Layering preserved throughout: `core/` keeps zero `chromadb` import
+(the chroma collection is injected via `_CacheBackend`-style protocol
+into `ChromaNeo4jRetriever`).
+
+**Phase 4b — community layer + global mode:**
+
+| Sub-phase | Commit | What |
+|---|---|---|
+| 4b.0 | `97a5b12` | `graphdatascience>=1.21,<2` Python client |
+| 4b.1 | `5a3e658` | `app/db/neo4j/community_detection.py` — Leiden over Entity CO_MENTIONED graph (UNDIRECTED projection, all hierarchical levels); writes `(:Community)` + `IN_COMMUNITY` edges |
+| 4b.2 | `0531040` | `app/db/neo4j/community_summaries.py` — top-K-by-degree entities + 1 representative chunk per entity → `call_internal_llm` (Ollama Haiku) → cached on `Community.summary` |
+| 4b.3 | `419ac3e` | `core/agents/query_router.py` — heuristic v1 (`>15 words ∧ no quoted spans ∧ no proper nouns → global`) |
+| 4b.4 | `4eff566` | `RETRIEVAL_MODE=auto` + `graph_expand_results_via_communities` in step-6; `scripts/refresh_communities.py` composes Leiden + summaries for nightly invocation |
+| 4b.5 | `6e0905a` | `tests/eval/graphrag_global_benchmark.py` + full unit-suite green (3065 tests) |
+
+**Live verification** (against running stack: chromadb 1.5.9 + neo4j
+2026.04.0 + GDS 2026.04.0; 26-artifact pilot dataset):
+
+- Entity extraction: 26 artifacts → 143 entities, 7 distinct types
+- Local-mode expansion: seed → 5 related artifacts via 4 shared entities
+- Leiden: 24 communities at level 0, **modularity 0.79**, semantically coherent (financial-crisis / oncology / food-science / embryology clusters)
+- Global-mode expansion: seed → community summary covering its theme
+
+**CI hotfix** (`2d33001`): typecheck (dict-set annotation in
+`community_detection`), strict silent-catch in projection cleanup
+(`log_swallowed_error` instead of `pass`), DUO138 ReDoS false-positive
+on `_PROPER_NOUN_RE` (documented + `# noqa: DUO138`).
+
 ## v0.91.0 — Workstream A close-out + C + D Phase 1 + E Phase 2 (2026-05-03 → 2026-05-08)
 
 Cross-project SLO hardening (with `benchmark-slo` now PR-blocking) +
