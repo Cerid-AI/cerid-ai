@@ -512,6 +512,7 @@ async def ingest_file(
     *,
     skip_metadata: bool = False,
     skip_quality: bool = False,
+    extra_metadata: dict[str, Any] | None = None,
 ) -> dict:
     """Parse a file, extract metadata, optionally AI-categorize, chunk, and store.
 
@@ -522,6 +523,16 @@ async def ingest_file(
     the 4-dimension quality scorer. Both flags are opt-in and default False;
     the frontend sets them on the wizard's "Try It Out" ingest so the user
     isn't waiting for metadata extraction before their first query.
+
+    ``extra_metadata`` (Phase 8a wire-in) lets callers stamp arbitrary
+    string-valued metadata onto every chunk written to chromadb. The
+    knowledge-pack harness uses this to attach pack provenance:
+    ``source_url``, ``license_spdx``, ``retrieved_at``, ``recipe_rev``,
+    ``adapter``. Caller-supplied values are merged AFTER the
+    NLP-extracted metadata so they can't be overwritten by a noisy
+    summary/keyword pass; ``tenant_id`` is still re-asserted at the
+    chromadb-write boundary (in ``ingest_content``) so the
+    ``extra_metadata`` channel can never be used to escape a tenant.
     """
     validate_file_path(file_path)
     filename = Path(file_path).name
@@ -590,6 +601,16 @@ async def ingest_file(
         meta["page_count"] = parsed["page_count"]
     if client_source:
         meta["client_source"] = client_source
+    # Phase 8a: pack-provenance fields — kept as plain strings so they
+    # round-trip through chromadb metadata cleanly. Caller-supplied
+    # ``extra_metadata`` is *appended* (not overwritten) so a malformed
+    # NLP-extract pass can't smuggle a different source_url into the
+    # provenance chain.
+    if extra_metadata:
+        for k, v in extra_metadata.items():
+            if v is None:
+                continue
+            meta[str(k)] = str(v)
     # Run sync ingest_content in thread pool to avoid blocking the event loop
     # (I/O-bound: Neo4j, ChromaDB, Redis writes + CPU-bound tiktoken chunking).
     # Forward layout-aware pre_chunked through so per-chunk structural

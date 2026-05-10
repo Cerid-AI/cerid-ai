@@ -8,7 +8,7 @@ Every `@router.*` decorator shipped in the public (OSS Apache-2.0) distribution.
 Internal-only routers (billing, trading SDK, ops endpoints) are stripped and
 not documented here; see the internal repo for the full registry.
 
-**Total routes:** 252
+**Total routes:** 256
 
 | Method | Path | Handler | Module | Tags | Build |
 |--------|------|---------|--------|------|-------|
@@ -122,6 +122,10 @@ not documented here; see the internal repo for the full registry.
 | POST | `/admin/kb/regenerate-summaries` | `regenerate_summaries` | `src/mcp/app/routers/kb_admin.py` | kb-admin |  |
 | POST | `/admin/kb/rescore` | `rescore_artifacts` | `src/mcp/app/routers/kb_admin.py` | kb-admin |  |
 | GET | `/admin/kb/stats` | `kb_stats` | `src/mcp/app/routers/kb_admin.py` | kb-admin |  |
+| GET | `/installed` | `list_installed_endpoint` | `src/mcp/app/routers/knowledge_packs.py` | knowledge_packs |  |
+| GET | `/registry` | `get_registry_endpoint` | `src/mcp/app/routers/knowledge_packs.py` | knowledge_packs |  |
+| DELETE | `/{pack_id}` | `uninstall_pack_endpoint` | `src/mcp/app/routers/knowledge_packs.py` | knowledge_packs |  |
+| POST | `/{pack_id}/install` | `install_pack_endpoint` | `src/mcp/app/routers/knowledge_packs.py` | knowledge_packs |  |
 | GET | `` | `list_mcp_servers` | `src/mcp/app/routers/mcp_client.py` | MCP Client |  |
 | POST | `` | `add_mcp_server` | `src/mcp/app/routers/mcp_client.py` | MCP Client |  |
 | DELETE | `/{name}` | `remove_mcp_server` | `src/mcp/app/routers/mcp_client.py` | MCP Client |  |

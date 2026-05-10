@@ -589,6 +589,78 @@ MCP_TOOLS = [
             },
         },
     },
+    {
+        "name": "pkb_knowledge_pack_list",
+        "description": (
+            "List available knowledge packs from the registry plus packs "
+            "already installed in this KB. Use this to surface curated "
+            "baseline corpora the user can opt into per-domain."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "Registry packs grouped by domain",
+                },
+                "installed": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": "Packs currently installed",
+                },
+            },
+        },
+    },
+    {
+        "name": "pkb_knowledge_pack_install",
+        "description": (
+            "Download, verify, and ingest a knowledge pack by id. "
+            "Idempotent at the same version. Pack must exist in the "
+            "registry exposed by pkb_knowledge_pack_list."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "pack_id": {"type": "string", "description": "Registry pack id"},
+            },
+            "required": ["pack_id"],
+        },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "pack_id": {"type": "string"},
+                "version": {"type": "string"},
+                "domain": {"type": "string"},
+                "artifact_count": {"type": "integer"},
+                "installed_at": {"type": "string"},
+            },
+        },
+    },
+    {
+        "name": "pkb_knowledge_pack_uninstall",
+        "description": (
+            "Remove a previously-installed knowledge pack and all its "
+            "ingested artifacts (Neo4j + chromadb)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "pack_id": {"type": "string", "description": "Installed pack id"},
+            },
+            "required": ["pack_id"],
+        },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "pack_id": {"type": "string"},
+                "status": {"type": "string"},
+                "removed": {"type": "integer"},
+                "missing": {"type": "integer"},
+            },
+        },
+    },
 ]
 
 
@@ -757,6 +829,43 @@ async def execute_tool(name: str, arguments: dict) -> Any:
             tags=arguments.get("tags", ""),
             plugin_override=arguments.get("plugin", ""),
         )
+    elif name == "pkb_knowledge_pack_list":
+        from app.services.knowledge_packs import (
+            default_registry_path,
+            default_state_path,
+        )
+        from core.knowledge.packs import (
+            load_install_state,
+            load_registry,
+        )
+        registry = load_registry(default_registry_path())
+        state = load_install_state(default_state_path())
+        return {
+            "available": [p.to_dict() for p in registry.values()],
+            "installed": [p.to_dict() for p in state],
+        }
+    elif name == "pkb_knowledge_pack_install":
+        from app.services.knowledge_packs import (
+            default_registry_path,
+            install_pack_default,
+        )
+        from core.knowledge.packs import load_registry
+        pack_id = arguments.get("pack_id", "")
+        registry = load_registry(default_registry_path())
+        pack = registry.get(pack_id)
+        if pack is None:
+            raise ValueError(f"Pack {pack_id!r} not in registry")
+        record = await install_pack_default(pack)
+        return {
+            "pack_id": record.pack_id,
+            "version": record.version,
+            "domain": record.domain,
+            "artifact_count": len(record.artifact_ids),
+            "installed_at": record.installed_at,
+        }
+    elif name == "pkb_knowledge_pack_uninstall":
+        from app.services.knowledge_packs import uninstall_pack_default
+        return await uninstall_pack_default(arguments.get("pack_id", ""))
     # Try extension tool dispatchers (registered by bootstrap)
     for _dispatcher in _tool_dispatchers:
         result = await _dispatcher(name, arguments)

@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Search, X, Loader2, AlertCircle, RefreshCcw, Upload, CheckCircle, Tag, Settings2, ArrowUpDown, ArrowDownAZ, CalendarArrowDown, Star, FileUp, Clock, CircleHelp, LayoutGrid, List, Eye, ArrowRightLeft, Trash2, FolderOpen, Copy } from "lucide-react"
+import { Search, X, Loader2, AlertCircle, RefreshCcw, Upload, CheckCircle, Tag, Settings2, ArrowUpDown, ArrowDownAZ, CalendarArrowDown, Star, FileUp, Clock, CircleHelp, LayoutGrid, List, Eye, ArrowRightLeft, Trash2, FolderOpen, Copy, Library } from "lucide-react"
 import { DomainBadge } from "@/components/ui/domain-badge"
 import { cn } from "@/lib/utils"
 import { ArtifactCard } from "./artifact-card"
@@ -25,6 +25,7 @@ import { TaxonomyTree } from "./taxonomy-tree"
 import { GraphPreview } from "./graph-preview"
 import { UploadDialog, type FileUploadStatus } from "./upload-dialog"
 import { ImportDialog } from "./import-dialog"
+import { KnowledgeLibraryDialog } from "./knowledge-library-dialog"
 import { ActivityFeed } from "./ActivityFeed"
 import { TagManager } from "./tag-manager"
 import { DuplicateDetector } from "./duplicate-detector"
@@ -178,6 +179,7 @@ export function KnowledgePane() {
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [showImportDialog, setShowImportDialog] = useState(false)
   const [showDuplicates, setShowDuplicates] = useState(false)
+  const [showKnowledgeLibrary, setShowKnowledgeLibrary] = useState(false)
   const [ingestionLog, setIngestionLog] = useState<Array<{ name: string; time: number; status: "success" | "error" }>>([])
   const [fileStatuses, setFileStatuses] = useState<FileUploadStatus[]>([])
   const [uploadingFiles, setUploadingFiles] = useState(false)
@@ -527,6 +529,16 @@ export function KnowledgePane() {
             <Copy className="mr-1 h-3 w-3" />
             Duplicates
           </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={() => setShowKnowledgeLibrary(true)}
+            title="Browse and install optional baseline knowledge packs"
+          >
+            <Library className="mr-1 h-3 w-3" />
+            Library
+          </Button>
           <input
             ref={fileInputRef}
             type="file"
@@ -570,6 +582,15 @@ export function KnowledgePane() {
       {showImportDialog && (
         <ImportDialog onClose={() => { setShowImportDialog(false); refetch() }} />
       )}
+
+      {/* Knowledge Library — optional baseline packs */}
+      <KnowledgeLibraryDialog
+        open={showKnowledgeLibrary}
+        onOpenChange={(next) => {
+          setShowKnowledgeLibrary(next)
+          if (!next) refetch()
+        }}
+      />
 
       {/* Search + filters */}
       <div className="space-y-2 border-b px-4 py-3">
