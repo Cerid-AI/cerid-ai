@@ -49,6 +49,7 @@ markers = [
     "eval: Evaluation harness — Monte Carlo, RAGAS, benchmarks (slow, optional)",
     "benchmark_slo: Latency SLO benchmarks — require a running MCP stack (excluded from default pytest run)",
     "preservation: Capability-preservation gates for the consolidation program — run against a live stack, merge-gate for every sprint. See tasks/2026-04-19-consolidation-program.md",
+    "chaos: Integration tests for the background processor — fakeredis, no Docker required",
 ]
 
 [tool.importlinter]

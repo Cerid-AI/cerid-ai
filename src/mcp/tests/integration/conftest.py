@@ -23,11 +23,18 @@ Design principles:
    fixture that produces mutable state cleans up via a finalizer.
 4. **No mocking.** These are end-to-end smoke checks. Unit tests
    belong in the parent ``tests/`` directory.
+5. **Skips are warn-and-record, not silent.** Use
+   ``record_preservation_skip(request, invariant_id, reason)`` instead
+   of bare ``pytest.skip()`` in all fixture-level skip paths. This
+   emits a ``UserWarning`` and writes a JUnit property so the
+   ``lint-no-silent-preservation-skips`` CI job can detect and block
+   main-branch builds where any preservation test would have skipped.
 """
 from __future__ import annotations
 
 import os
 import uuid
+import warnings
 from collections.abc import Iterator
 
 import pytest
@@ -52,6 +59,35 @@ _SKIP_REASON_STACK = (
 )
 
 
+def record_preservation_skip(
+    request: pytest.FixtureRequest,
+    invariant_id: str,
+    reason: str,
+) -> None:
+    """Emit a warning and record a JUnit property, then skip the test.
+
+    Use this instead of bare ``pytest.skip()`` in any fixture-level code
+    that skips a preservation test due to a missing environment variable
+    or unreachable service.  This gives downstream tooling (specifically
+    ``scripts/lint-no-silent-preservation-skips.py``) a structured record
+    of which invariants were skipped and why.
+
+    Parameters
+    ----------
+    request:
+        The ``pytest.FixtureRequest`` for the calling test.
+    invariant_id:
+        Short label, e.g. ``"I3"``, ``"I6"``, ``"I8"``, or ``"stack"``.
+    reason:
+        Human-readable explanation of why the test was skipped.  Will
+        appear in the warning message and the JUnit XML output.
+    """
+    message = f"preservation_skip: {invariant_id}: {reason}"
+    warnings.warn(message, UserWarning, stacklevel=2)
+    request.node.user_properties.append(("preservation_skipped", message))
+    pytest.skip(reason)
+
+
 @pytest.fixture(scope="session")
 def mcp_base() -> str:
     return MCP_BASE
@@ -71,9 +107,9 @@ def stack_reachable(mcp_base: str) -> bool:
 
 
 @pytest.fixture(autouse=True)
-def _gate_on_stack(stack_reachable: bool) -> None:
+def _gate_on_stack(request: pytest.FixtureRequest, stack_reachable: bool) -> None:
     if not stack_reachable:
-        pytest.skip(_SKIP_REASON_STACK)
+        record_preservation_skip(request, "stack", _SKIP_REASON_STACK)
 
 
 @pytest.fixture
@@ -103,12 +139,18 @@ def http_client(mcp_base: str, http_headers: dict):
 
 
 @pytest.fixture(scope="session")
-def neo4j_driver():
+def neo4j_driver(request: pytest.FixtureRequest):
     """Session-level Neo4j driver for tests that need to assert graph state.
 
     Uses localhost when running from the host venv, container DNS when
     running inside the MCP container. Skips the test if neo4j isn't
-    reachable — not all invariants need graph access."""
+    reachable — not all invariants need graph access.
+
+    Uses ``record_preservation_skip`` for the NEO4J_PASSWORD-missing case
+    so the skip is recorded in JUnit and surfaced as a warning.  The
+    driver-unreachable case uses a bare skip (infrastructure, not env
+    config) but that path is not reached in standard CI.
+    """
     try:
         from neo4j import GraphDatabase
     except ImportError:
@@ -122,7 +164,11 @@ def neo4j_driver():
     user = os.environ.get("NEO4J_USER", "neo4j")
     password = os.environ.get("NEO4J_PASSWORD", "")
     if not password:
-        pytest.skip("NEO4J_PASSWORD not set in test env")
+        record_preservation_skip(
+            request,
+            "I3",
+            "missing NEO4J_PASSWORD — neo4j graph assertions require this env var",
+        )
 
     try:
         driver = GraphDatabase.driver(uri, auth=(user, password))

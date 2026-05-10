@@ -8,7 +8,7 @@ Every `@router.*` decorator shipped in the public (OSS Apache-2.0) distribution.
 Internal-only routers (billing, trading SDK, ops endpoints) are stripped and
 not documented here; see the internal repo for the full registry.
 
-**Total routes:** 256
+**Total routes:** 266
 
 | Method | Path | Handler | Module | Tags | Build |
 |--------|------|---------|--------|------|-------|
@@ -67,6 +67,8 @@ not documented here; see the internal repo for the full registry.
 | POST | `/{automation_id}/run` | `trigger_manual_run` | `src/mcp/app/routers/automations.py` | automations |  |
 | POST | `/chat/compress` | `compress_context` | `src/mcp/app/routers/chat.py` | chat |  |
 | POST | `/chat/stream` | `chat_stream` | `src/mcp/app/routers/chat.py` | chat |  |
+| GET | `/contradictions` | `list_contradictions` | `src/mcp/app/routers/contradictions.py` | wiki |  |
+| GET | `/contradictions/{finding_id}` | `get_contradiction` | `src/mcp/app/routers/contradictions.py` | wiki |  |
 | GET | `/custom-agents` | `list_agents` | `src/mcp/app/routers/custom_agents.py` | custom-agents |  |
 | POST | `/custom-agents` | `create_agent` | `src/mcp/app/routers/custom_agents.py` | custom-agents |  |
 | POST | `/custom-agents/from-template/{template_id}` | `create_from_template` | `src/mcp/app/routers/custom_agents.py` | custom-agents |  |
@@ -97,6 +99,10 @@ not documented here; see the internal repo for the full registry.
 | GET | `` | `get_dlq_entries` | `src/mcp/app/routers/dlq.py` | admin-dlq |  |
 | POST | `/retry/{entry_id}` | `retry_dlq_entry` | `src/mcp/app/routers/dlq.py` | admin-dlq |  |
 | DELETE | `/{entry_id}` | `discard_dlq_entry` | `src/mcp/app/routers/dlq.py` | admin-dlq |  |
+| GET | `` | `list_adapters` | `src/mcp/app/routers/external_apis.py` | external-apis |  |
+| POST | `/{slug}/enabled` | `set_adapter_enabled` | `src/mcp/app/routers/external_apis.py` | external-apis |  |
+| GET | `/{slug}/health` | `adapter_health` | `src/mcp/app/routers/external_apis.py` | external-apis |  |
+| POST | `/feedback` | `submit_claim_feedback` | `src/mcp/app/routers/feedback.py` | feedback |  |
 | GET | `/collections` | `list_collections_endpoint` | `src/mcp/app/routers/health.py` |  |  |
 | GET | `/health` | `health_check_endpoint` | `src/mcp/app/routers/health.py` |  |  |
 | GET | `/health/live` | `liveness_probe` | `src/mcp/app/routers/health.py` |  |  |
@@ -146,6 +152,7 @@ not documented here; see the internal repo for the full registry.
 | POST | `/updates/check` | `check_model_updates` | `src/mcp/app/routers/models.py` | models |  |
 | POST | `/updates/dismiss/{update_id}` | `dismiss_model_update` | `src/mcp/app/routers/models.py` | models |  |
 | GET | `/claim-accuracy` | `get_claim_accuracy` | `src/mcp/app/routers/observability.py` | observability |  |
+| GET | `/claim-accuracy/{domain}` | `get_claim_accuracy_by_domain` | `src/mcp/app/routers/observability.py` | observability |  |
 | GET | `/cost` | `get_cost_breakdown` | `src/mcp/app/routers/observability.py` | observability |  |
 | GET | `/cost-per-query` | `get_cost_per_query` | `src/mcp/app/routers/observability.py` | observability |  |
 | GET | `/health-score` | `get_health_score` | `src/mcp/app/routers/observability.py` | observability |  |
@@ -155,6 +162,7 @@ not documented here; see the internal repo for the full registry.
 | GET | `/queue-depth` | `queue_depth_endpoint` | `src/mcp/app/routers/observability.py` | observability |  |
 | GET | `/ragas` | `get_ragas_metrics` | `src/mcp/app/routers/observability.py` | observability |  |
 | GET | `/restarts` | `get_restart_info` | `src/mcp/app/routers/observability.py` | observability |  |
+| GET | `/trust-score` | `get_trust_score` | `src/mcp/app/routers/observability.py` | observability |  |
 | POST | `/chat` | `chat_completion` | `src/mcp/app/routers/ollama_proxy.py` | ollama |  |
 | GET | `/models` | `list_ollama_models` | `src/mcp/app/routers/ollama_proxy.py` | ollama |  |
 | POST | `/pull` | `pull_model` | `src/mcp/app/routers/ollama_proxy.py` | ollama |  |
@@ -260,6 +268,8 @@ not documented here; see the internal repo for the full registry.
 | GET | `/widget.html` | `widget_page` | `src/mcp/app/routers/widget.py` | Widget |  |
 | GET | `/widget.js` | `widget_script` | `src/mcp/app/routers/widget.py` | Widget |  |
 | GET | `/widget/config` | `widget_config` | `src/mcp/app/routers/widget.py` | Widget |  |
+| GET | `/entities` | `list_entity_pages` | `src/mcp/app/routers/wiki.py` | wiki |  |
+| GET | `/entities/{slug}` | `get_entity_wiki_page` | `src/mcp/app/routers/wiki.py` | wiki |  |
 | GET | `` | `list_workflows` | `src/mcp/app/routers/workflows.py` | workflows |  |
 | POST | `` | `create_workflow` | `src/mcp/app/routers/workflows.py` | workflows |  |
 | GET | `/templates` | `list_templates` | `src/mcp/app/routers/workflows.py` | workflows |  |

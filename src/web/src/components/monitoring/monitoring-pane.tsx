@@ -14,6 +14,7 @@ import { IngestionTimeline } from "./ingestion-timeline"
 import { SchedulerStatus } from "./scheduler-status"
 import { KBOperations } from "./kb-operations"
 import { ObservabilityDashboard } from "./observability-dashboard"
+import { TrustScoreChip } from "@/components/trust-score"
 import { fetchMaintenance, fetchIngestLog, fetchSchedulerStatus, fetchDigest } from "@/lib/api"
 
 export function MonitoringPane() {
@@ -47,7 +48,11 @@ export function MonitoringPane() {
       <div className="border-b px-4 py-3">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Health</h2>
-          <LastUpdated timestamp={dataUpdatedAt} />
+          <div className="flex items-center gap-3">
+            {/* TrustScore chip — operator shortcut; same chip as the status bar */}
+            <TrustScoreChip />
+            <LastUpdated timestamp={dataUpdatedAt} />
+          </div>
         </div>
         <p className="text-xs text-muted-foreground">Live infrastructure status and recent operations</p>
       </div>

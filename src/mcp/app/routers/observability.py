@@ -380,6 +380,44 @@ def get_claim_accuracy(
     }
 
 
+@router.get("/claim-accuracy/{domain}")
+async def get_claim_accuracy_by_domain(
+    domain: str,
+    window_hours: int = Query(168, ge=1, le=8760, description="Look-back window in hours (default 7 days)"),
+) -> dict:
+    """Return rolling user-agreement stats for verified claims in a domain.
+
+    **Operator-facing only.** This endpoint is not surfaced to end-users.
+    It feeds TrustScore component #6 (user agreement) and operator
+    dashboards.
+
+    ``domain`` may be any string matching ``Claim.domain`` in the graph.
+    Pass ``"all"`` to get global stats across all domains.
+
+    Phase R.1 of the v0.92 plan.
+    """
+    try:
+        from app.services.feedback import get_claim_accuracy
+        stats = await get_claim_accuracy(
+            domain=None if domain == "all" else domain,
+            window_hours=window_hours,
+        )
+        return stats.model_dump()
+    except Exception as exc:
+        log_swallowed_error("observability.get_claim_accuracy_by_domain", exc)
+        return {
+            "total_rated": 0,
+            "positive": 0,
+            "negative": 0,
+            "neutral": 0,
+            "agreement_rate": 0.0,
+            "domain": None if domain == "all" else domain,
+            "window_hours": window_hours,
+            "as_of_iso": _iso_now(),
+            "error": "Neo4j unavailable",
+        }
+
+
 @router.get("/restarts")
 async def get_restart_info() -> dict:
     """Process-restart visibility (Workstream A Phase 1.3).
@@ -417,3 +455,26 @@ async def get_restart_info() -> dict:
         "last_restart_iso": last_restart,
         "timestamp": _iso_now(),
     }
+
+
+@router.get("/trust-score")
+async def get_trust_score() -> dict:
+    """System evaluation posture, 0–100, with disclosed component scores.
+
+    See ``docs/PRODUCT_STORY.md`` and ``docs/EVAL_BASELINES.md``. The
+    score is a straight mean of normalized component values — no learned
+    weights. Components with ``status='not_available'`` are excluded
+    from the mean. This endpoint is **pure presentation**; it does not
+    affect retrieval, generation, or any model decision.
+
+    Phase E.5 of the v0.92 plan. Preservation gate I14.
+    """
+    from app.services.trust_score import compute_trust_score
+    driver = None
+    try:
+        from app.deps import get_neo4j
+        driver = get_neo4j()
+    except Exception as exc:
+        log_swallowed_error("observability.get_trust_score.neo4j", exc)
+    ts = compute_trust_score(neo4j_driver=driver)
+    return ts.model_dump()

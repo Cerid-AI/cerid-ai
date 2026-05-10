@@ -11,3 +11,5 @@ pytest-benchmark>=4.0.0,<5
 # (the runtime PDF parser is pdfplumber, already in requirements.txt;
 # reportlab only writes test files and never ships in production).
 reportlab>=4.0,<5
+# Phase 3a — in-process Redis fake for processor queue tests
+fakeredis>=2.0,<3
