@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, afterEach } from "vitest"
-import { render, screen, fireEvent, cleanup } from "@testing-library/react"
+import { render, screen, cleanup } from "@testing-library/react"
 import { StreamingClaimBadge } from "@/components/audit/hallucination-panel"
 import type { StreamingClaim } from "@/lib/types"
 
@@ -25,10 +25,19 @@ const makeClaim = (overrides: Partial<StreamingClaim> = {}): StreamingClaim => (
 })
 
 describe("StreamingClaimBadge", () => {
-  it("renders claim text and status badge", () => {
+  it("renders claim text for a settled verified claim", () => {
     render(<StreamingClaimBadge claim={makeClaim()} />)
     expect(screen.getByText(/GPT-4o was released/)).toBeTruthy()
-    expect(screen.getByText("verified")).toBeTruthy()
+  })
+
+  it("settled verified claim uses canonical ClaimBadge (shows band label)", () => {
+    render(<StreamingClaimBadge claim={makeClaim()} />)
+    // The new ClaimBadge renders "No source" / "Partial source" / "Verified by N sources"
+    // status=verified + source_urls has 1 entry → "verified" band
+    const badge = screen.getByRole("button")
+    expect(badge).toBeTruthy()
+    // deriveBand: status=verified + source_urls.length=1 → "verified"
+    expect(badge.getAttribute("data-verification-band")).toBe("verified")
   })
 
   it("shows spinner for pending claims", () => {
@@ -36,67 +45,49 @@ describe("StreamingClaimBadge", () => {
     expect(screen.getByText("verifying")).toBeTruthy()
   })
 
-  it("is not expandable when pending", () => {
-    render(<StreamingClaimBadge claim={makeClaim({ status: "pending", source: undefined, reason: undefined, source_snippet: undefined, source_urls: [] })} />)
-    // No "More" toggle should appear
-    expect(screen.queryByText("More")).toBeNull()
+  it("pending claim shows claim text", () => {
+    render(<StreamingClaimBadge claim={makeClaim({ status: "pending" })} />)
+    expect(screen.getByText(/GPT-4o was released/)).toBeTruthy()
   })
 
-  it("expands on click to show details", () => {
+  it("is not expandable when pending (no ClaimBadge rendered)", () => {
+    render(<StreamingClaimBadge claim={makeClaim({ status: "pending" })} />)
+    // No hover-card button in pending state
+    expect(screen.queryByRole("button")).toBeNull()
+  })
+
+  it("settled claim renders ClaimBadge button", () => {
     render(<StreamingClaimBadge claim={makeClaim()} />)
-    // Should have "More" toggle
-    expect(screen.getByText("More")).toBeTruthy()
-    // Click to expand
-    fireEvent.click(screen.getByText("More").closest("div")!)
-    // Should show expanded content
-    expect(screen.getByText("Less")).toBeTruthy()
-    expect(screen.getByText(/openai-docs\.pdf/)).toBeTruthy()
-  })
-
-  it("shows source snippet when expanded", () => {
-    render(<StreamingClaimBadge claim={makeClaim()} />)
-    fireEvent.click(screen.getByText("More").closest("div")!)
-    expect(screen.getByText(/OpenAI released GPT-4o/)).toBeTruthy()
-  })
-
-  it("shows reason for non-KB claims when expanded", () => {
-    render(<StreamingClaimBadge claim={makeClaim({ source: undefined })} />)
-    fireEvent.click(screen.getByText("More").closest("div")!)
-    expect(screen.getByText(/Confirmed via official/)).toBeTruthy()
-  })
-
-  it("shows reference links when expanded", () => {
-    render(<StreamingClaimBadge claim={makeClaim()} />)
-    fireEvent.click(screen.getByText("More").closest("div")!)
-    const link = screen.getByText("openai.com")
-    expect(link).toBeTruthy()
-    expect(link.closest("a")?.href).toBe("https://openai.com/blog/gpt-4o")
+    // ClaimBadge renders as a <button>
+    expect(screen.getByRole("button")).toBeTruthy()
   })
 
   it("shows claim type badge for non-factual claims", () => {
     render(<StreamingClaimBadge claim={makeClaim({ claim_type: "evasion", status: "verified" })} />)
-    // "evasion" appears both as displayStatus and claim_type badge — use getAllByText
-    const badges = screen.getAllByText("evasion")
-    expect(badges.length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText("evasion")).toBeTruthy()
   })
 
-  it("shows consistency issue when expanded", () => {
-    render(<StreamingClaimBadge claim={makeClaim({ consistency_issue: "Contradicts earlier statement about release date" })} />)
-    fireEvent.click(screen.getByText("More").closest("div")!)
-    expect(screen.getByText(/Contradicts earlier statement/)).toBeTruthy()
-  })
-
-  it("collapses when clicked again", () => {
+  it("shows source domain when present", () => {
     render(<StreamingClaimBadge claim={makeClaim()} />)
-    fireEvent.click(screen.getByText("More").closest("div")!)
-    expect(screen.getByText("Less")).toBeTruthy()
-    fireEvent.click(screen.getByText("Less").closest("div")!)
-    expect(screen.getByText("More")).toBeTruthy()
+    expect(screen.getByText("technology")).toBeTruthy()
   })
 
-  it("shows fallback Google search link when no source_urls", () => {
-    render(<StreamingClaimBadge claim={makeClaim({ source_urls: [] })} />)
-    fireEvent.click(screen.getByText("More").closest("div")!)
-    expect(screen.getByText("Search for references")).toBeTruthy()
+  it("shows similarity match percentage", () => {
+    render(<StreamingClaimBadge claim={makeClaim()} />)
+    expect(screen.getByText(/92% match/)).toBeTruthy()
+  })
+
+  it("renders verified claim with KB artifact as 'verified' band", () => {
+    render(
+      <StreamingClaimBadge
+        claim={makeClaim({
+          status: "verified",
+          source_artifact_id: "art-123",
+          source_urls: ["https://example.com"],
+        })}
+      />,
+    )
+    const btn = screen.getByRole("button")
+    expect(btn.getAttribute("data-verification-band")).toBe("verified")
   })
 })

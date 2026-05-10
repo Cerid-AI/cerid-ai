@@ -1,0 +1,291 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`VerifiedResponse — error state > snapshot matches error state 1`] = `
+<div>
+  <div
+    aria-live="polite"
+    class="mt-2"
+    data-verification-state="error"
+    role="status"
+  >
+    <div
+      class="relative w-full rounded-lg border px-4 py-3 text-sm [&>svg+div]:translate-y-[-3px] [&>svg]:absolute [&>svg]:left-4 [&>svg]:top-4 [&>svg~*]:pl-7 border-destructive/50 text-destructive dark:border-destructive [&>svg]:text-destructive"
+      data-slot="alert"
+      role="alert"
+    >
+      <svg
+        aria-hidden="true"
+        class="lucide lucide-circle-alert h-4 w-4"
+        fill="none"
+        height="24"
+        stroke="currentColor"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="2"
+        viewBox="0 0 24 24"
+        width="24"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <circle
+          cx="12"
+          cy="12"
+          r="10"
+        />
+        <line
+          x1="12"
+          x2="12"
+          y1="8"
+          y2="12"
+        />
+        <line
+          x1="12"
+          x2="12.01"
+          y1="16"
+          y2="16"
+        />
+      </svg>
+      <div
+        class="text-sm [&_p]:leading-relaxed"
+        data-slot="alert-description"
+      >
+        Source unreachable — try again
+         — test error
+      </div>
+    </div>
+  </div>
+</div>
+`;
+
+exports[`VerifiedResponse — idle state > snapshot matches idle state 1`] = `<div />`;
+
+exports[`VerifiedResponse — settled state, multiple bands > snapshot matches multi-band settled state 1`] = `
+<div>
+  <div
+    aria-label="Claim verification results"
+    class="mt-2 flex flex-wrap items-center gap-1.5"
+    data-verification-state="settled"
+    role="list"
+  >
+    <div
+      role="listitem"
+    >
+      <button
+        aria-label="Claim verified by 1 source"
+        class="inline-flex cursor-default focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 rounded-full"
+        data-slot="hover-card-trigger"
+        data-state="closed"
+        data-verification-band="verified"
+        type="button"
+      >
+        <span
+          class="inline-flex items-center justify-center rounded-full border w-fit whitespace-nowrap shrink-0 [&>svg]:size-3 [&>svg]:pointer-events-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive overflow-hidden [a&]:hover:bg-accent [a&]:hover:text-accent-foreground gap-1 text-[11px] px-2 py-0.5 font-medium transition-colors border-green-500/40 bg-green-500/10 text-green-700 dark:text-green-400 hover:bg-green-500/20"
+          data-slot="badge"
+          data-variant="outline"
+        >
+          <svg
+            aria-hidden="true"
+            class="lucide lucide-circle-check-big h-3 w-3 shrink-0 text-green-600 dark:text-green-400"
+            fill="none"
+            height="24"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+            width="24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              d="M21.801 10A10 10 0 1 1 17 3.335"
+            />
+            <path
+              d="m9 11 3 3L22 4"
+            />
+          </svg>
+          Verified by 1 source
+        </span>
+      </button>
+    </div>
+    <div
+      role="listitem"
+    >
+      <button
+        aria-label="Claim has partial source"
+        class="inline-flex cursor-default focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 rounded-full"
+        data-slot="hover-card-trigger"
+        data-state="closed"
+        data-verification-band="partial"
+        type="button"
+      >
+        <span
+          class="inline-flex items-center justify-center rounded-full border w-fit whitespace-nowrap shrink-0 [&>svg]:size-3 [&>svg]:pointer-events-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive overflow-hidden [a&]:hover:bg-accent [a&]:hover:text-accent-foreground gap-1 text-[11px] px-2 py-0.5 font-medium transition-colors border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400 hover:bg-amber-500/20"
+          data-slot="badge"
+          data-variant="outline"
+        >
+          <svg
+            aria-hidden="true"
+            class="lucide lucide-minus h-3 w-3 shrink-0 text-amber-600 dark:text-amber-400"
+            fill="none"
+            height="24"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+            width="24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              d="M5 12h14"
+            />
+          </svg>
+          Partial source
+        </span>
+      </button>
+    </div>
+    <div
+      role="listitem"
+    >
+      <button
+        aria-label="Claim has no source"
+        class="inline-flex cursor-default focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 rounded-full"
+        data-slot="hover-card-trigger"
+        data-state="closed"
+        data-verification-band="unverified"
+        type="button"
+      >
+        <span
+          class="inline-flex items-center justify-center rounded-full border w-fit whitespace-nowrap shrink-0 [&>svg]:size-3 [&>svg]:pointer-events-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive overflow-hidden [a&]:hover:bg-accent [a&]:hover:text-accent-foreground gap-1 text-[11px] px-2 py-0.5 font-medium transition-colors border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-400 hover:bg-red-500/20"
+          data-slot="badge"
+          data-variant="outline"
+        >
+          <svg
+            aria-hidden="true"
+            class="lucide lucide-circle-dot h-3 w-3 shrink-0 text-red-600 dark:text-red-400"
+            fill="none"
+            height="24"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+            width="24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <circle
+              cx="12"
+              cy="12"
+              r="10"
+            />
+            <circle
+              cx="12"
+              cy="12"
+              r="1"
+            />
+          </svg>
+          No source
+        </span>
+      </button>
+    </div>
+  </div>
+</div>
+`;
+
+exports[`VerifiedResponse — settled state, verified claim > snapshot matches verified settled state 1`] = `
+<div>
+  <div
+    aria-label="Claim verification results"
+    class="mt-2 flex flex-wrap items-center gap-1.5"
+    data-verification-state="settled"
+    role="list"
+  >
+    <div
+      role="listitem"
+    >
+      <button
+        aria-label="Claim verified by 1 source"
+        class="inline-flex cursor-default focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 rounded-full"
+        data-slot="hover-card-trigger"
+        data-state="closed"
+        data-verification-band="verified"
+        type="button"
+      >
+        <span
+          class="inline-flex items-center justify-center rounded-full border w-fit whitespace-nowrap shrink-0 [&>svg]:size-3 [&>svg]:pointer-events-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive overflow-hidden [a&]:hover:bg-accent [a&]:hover:text-accent-foreground gap-1 text-[11px] px-2 py-0.5 font-medium transition-colors border-green-500/40 bg-green-500/10 text-green-700 dark:text-green-400 hover:bg-green-500/20"
+          data-slot="badge"
+          data-variant="outline"
+        >
+          <svg
+            aria-hidden="true"
+            class="lucide lucide-circle-check-big h-3 w-3 shrink-0 text-green-600 dark:text-green-400"
+            fill="none"
+            height="24"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+            width="24"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              d="M21.801 10A10 10 0 1 1 17 3.335"
+            />
+            <path
+              d="m9 11 3 3L22 4"
+            />
+          </svg>
+          Verified by 1 source
+        </span>
+      </button>
+    </div>
+  </div>
+</div>
+`;
+
+exports[`VerifiedResponse — streaming state > snapshot matches streaming state 1`] = `
+<div>
+  <div
+    aria-label="Verifying…"
+    aria-live="polite"
+    class="mt-2 flex flex-wrap items-center gap-2"
+    data-verification-state="streaming"
+    role="status"
+  >
+    <svg
+      aria-hidden="true"
+      class="lucide lucide-loader-circle h-3.5 w-3.5 animate-spin text-muted-foreground"
+      fill="none"
+      height="24"
+      stroke="currentColor"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      stroke-width="2"
+      viewBox="0 0 24 24"
+      width="24"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path
+        d="M21 12a9 9 0 1 1-6.219-8.56"
+      />
+    </svg>
+    <span
+      class="sr-only"
+    >
+      Verifying…
+    </span>
+    <div
+      class="animate-pulse bg-muted h-6 w-28 rounded-full"
+      data-slot="skeleton"
+    />
+    <div
+      class="animate-pulse bg-muted h-6 w-20 rounded-full"
+      data-slot="skeleton"
+    />
+    <div
+      class="animate-pulse bg-muted h-6 w-24 rounded-full"
+      data-slot="skeleton"
+    />
+  </div>
+</div>
+`;

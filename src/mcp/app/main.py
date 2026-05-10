@@ -29,13 +29,18 @@ from app.middleware.auth import APIKeyMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.request_id import RequestIDMiddleware
 from app.middleware.tenant_context import TenantContextMiddleware
+from app.processor import ProcessorWorker, build_default_registry
+from app.processor import router as processor_router_module
 from app.routers import (
     a2a,
     agents,
     artifacts,
     automations,
     chat,
+    contradictions,
     digest,
+    external_apis,
+    feedback,
     health,
     ingestion,
     kb_admin,
@@ -57,6 +62,7 @@ from app.routers import (
     taxonomy,
     upload,
     user_state,
+    wiki,
     workflows,
 )
 from app.scheduler import start_scheduler, stop_scheduler
@@ -508,6 +514,43 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Automation registration failed (server runs without it): {e}")
 
+    # Start background processor worker
+    try:
+        from app.db.redis.processor_queue import RedisJobQueue
+        from app.deps import get_redis as _proc_get_redis
+        _proc_redis = _proc_get_redis()
+        _proc_queue = RedisJobQueue(_proc_redis)
+        _proc_registry = build_default_registry()
+        _proc_worker = ProcessorWorker(
+            _proc_queue,
+            _proc_registry,
+            redis_client=_proc_redis,
+        )
+        await _proc_worker.start()
+        app.state.processor_worker = _proc_worker
+        app.state.processor_queue = _proc_queue
+        logger.info("ProcessorWorker started (%d job types registered)", len(_proc_registry))
+    except Exception as e:
+        logger.warning(f"ProcessorWorker start failed (server runs without it): {e}")
+
+    # Wire brief scheduler (N.1) — enqueues BriefGenerationJob daily and
+    # WeeklySynthesisJob weekly through the processor. Best-effort; failure
+    # to register doesn't block boot.
+    try:
+        if hasattr(app.state, "processor_queue"):
+            from app.scheduler import get_scheduler
+            from app.services.briefs.scheduler import (
+                schedule_daily_brief,
+                schedule_weekly_synthesis,
+            )
+            _brief_scheduler = get_scheduler()
+            if _brief_scheduler is not None:
+                schedule_daily_brief(_brief_scheduler, app.state.processor_queue)
+                schedule_weekly_synthesis(_brief_scheduler, app.state.processor_queue)
+                logger.info("Brief scheduler wired (daily + weekly enqueue cron live)")
+    except Exception as e:
+        logger.warning(f"Brief scheduler wiring failed (server runs without briefs): {e}")
+
     # Pre-warm connections and models for faster first request
     try:
         from app.deps import get_chroma
@@ -638,6 +681,13 @@ async def lifespan(app: FastAPI):
     # intentional slow-shutdown operations like cache flush).
     _watchdog_stop.set()
 
+    # Shutdown: stop background processor worker
+    try:
+        if hasattr(app.state, "processor_worker"):
+            await app.state.processor_worker.stop()
+    except Exception as exc:
+        logger.warning("ProcessorWorker shutdown failed: %s", exc)
+
     # Shutdown: stop scheduler, flush caches, close connections, clear MCP sessions
     try:
         stop_scheduler()
@@ -763,11 +813,24 @@ app.include_router(models.router)
 # Observability dashboard API (real-time metrics, health score, cost, quality)
 app.include_router(observability.router)
 
+# Background processor control API (queue status, pause/resume, recent jobs)
+app.include_router(processor_router_module.router)
+
+# Wiki API — entity pages and contradiction ledger (Phase W)
+app.include_router(contradictions.router)
+app.include_router(wiki.router)
+
+# External public-API adapter management (Phase API.1 + API.2)
+app.include_router(external_apis.router)
+
 # Ollama local LLM proxy (always registered; endpoints gate on OLLAMA_ENABLED)
 app.include_router(ollama_proxy.router)
 
 # SDK router — stable external contract (manages its own /sdk/v1/ prefix)
 app.include_router(sdk.router)
+
+# Per-claim user feedback (Phase R.1) — additive endpoint under /sdk/v1/
+app.include_router(feedback.router)
 
 # A2A router — Agent Card at /.well-known/agent.json, tasks at /a2a/* (no prefix)
 app.include_router(a2a.router)

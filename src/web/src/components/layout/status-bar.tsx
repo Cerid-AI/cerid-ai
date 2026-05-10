@@ -6,6 +6,7 @@ import { Terminal } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { fetchHealthStatus, fetchProviderCredits } from "@/lib/api"
 import { cn } from "@/lib/utils"
+import { TrustScoreChip } from "@/components/trust-score"
 
 const SERVICE_INFO: Record<string, { purpose: string; tech: string }> = {
   chromadb: { purpose: "Vector embeddings & semantic search", tech: "ChromaDB" },
@@ -200,6 +201,9 @@ export function StatusBar({ consoleOpen, onToggleConsole, consoleUnreadCount = 0
             </Tooltip>
           )
         })()}
+
+        {/* TrustScore chip — pure presentation, no effect on retrieval/generation */}
+        <TrustScoreChip />
 
         {/* Agent Console toggle */}
         {onToggleConsole && (

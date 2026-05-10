@@ -287,6 +287,56 @@ def health_check_endpoint():
     else:
         result = health_check()
         result["invariants"] = _invariants_snapshot()
+        # Phase E.5 (v0.92): trust-score summary alongside core invariants.
+        # Pure metadata — not part of the healthy/degraded gate. Failures
+        # here must never affect the /health response code.
+        try:
+            from app.services.trust_score import trust_score_24h_summary
+            try:
+                _ts_driver = get_neo4j()
+            except Exception as _exc:  # noqa: BLE001 — observability augmentation only
+                log_swallowed_error("app.routers.health.trust_score_24h.get_neo4j", _exc)
+                _ts_driver = None
+            result["invariants"]["trust_score_24h"] = trust_score_24h_summary(_ts_driver)
+        except Exception as _exc:  # noqa: BLE001 — observability augmentation only
+            log_swallowed_error("app.routers.health.trust_score_24h", _exc)
+        # Phase 3b (v0.92): processor metrics alongside core invariants.
+        # Pure metadata — not part of the healthy/degraded gate. Failures
+        # must never affect the /health response code.
+        # Note: health_check_endpoint is sync; call the synchronous Redis
+        # operations directly via the private helpers in metrics to avoid
+        # running coroutines from a sync context.
+        try:
+            from app.processor.metrics import (
+                _sync_cost_usd_7d,
+                _sync_jobs_completed_24h,
+                _sync_throttled_ticks,
+            )
+            _proc_redis = None
+            try:
+                _proc_redis = get_redis()
+            except Exception as _exc:  # noqa: BLE001
+                log_swallowed_error("app.routers.health.processor_metrics.get_redis", _exc)
+
+            if _proc_redis is not None:
+                result["invariants"]["processor_jobs_completed_24h"] = (
+                    _sync_jobs_completed_24h(_proc_redis)
+                )
+                result["invariants"]["processor_cost_usd_7d"] = float(
+                    _sync_cost_usd_7d(_proc_redis)
+                )
+                result["invariants"]["processor_throttled_ticks"] = (
+                    _sync_throttled_ticks(_proc_redis, 3600.0)
+                )
+            else:
+                result["invariants"]["processor_jobs_completed_24h"] = 0
+                result["invariants"]["processor_cost_usd_7d"] = 0.0
+                result["invariants"]["processor_throttled_ticks"] = 0
+        except Exception as _exc:  # noqa: BLE001 — observability augmentation only
+            log_swallowed_error("app.routers.health.processor_metrics", _exc)
+            result["invariants"].setdefault("processor_jobs_completed_24h", 0)
+            result["invariants"].setdefault("processor_cost_usd_7d", 0.0)
+            result["invariants"].setdefault("processor_throttled_ticks", 0)
         _health_cache = result
         _health_cache_ts = now
 

@@ -2,6 +2,33 @@
 
 All notable changes to cerid-ai are documented here.
 
+## Unreleased — v0.92.0 (in progress)
+
+Cohesion / Narrative Loop / Wiki / Background Processor release. Driver:
+[`tasks/2026-05-10-v0.92-final-plan.md`](tasks/2026-05-10-v0.92-final-plan.md).
+Single cut, V1 SDK only (additive evolution; no v2 namespace).
+
+Five primitives carry the story:
+
+1. **Verification** — per-claim, with provenance (Phase V)
+2. **TrustScore** — system evaluation posture with disclosed components (Phase E)
+3. **Narrative Loop** — daily brief + weekly synthesis (Phase N)
+4. **Wiki** — entity pages + contradiction log (Phase W)
+5. **Background Processor** — continuous, throttled, cost-aware execution (Phase P)
+
+Plus: Public APIs as MCP tools (Phase API), design-system unification (D),
+feature unification (U), ops tightening (O), and selective RAG depth (R).
+
+Sections accumulate as phases land.
+
+### Foundation
+
+- Plan file committed: [`tasks/2026-05-10-v0.92-final-plan.md`](tasks/2026-05-10-v0.92-final-plan.md).
+- New docs: [`docs/PRODUCT_STORY.md`](docs/PRODUCT_STORY.md) (canonical narrative),
+  [`docs/BACKGROUND_JOBS.md`](docs/BACKGROUND_JOBS.md) (operator one-pager),
+  [`docs/EXTRACTION_PLAN.md`](docs/EXTRACTION_PLAN.md) (worker-extraction ADR stub).
+- `CLAUDE.md` mechanical overrides 6 + 7 added (token budgets, phase checkpoints).
+
 ## v0.91.1 — Infrastructure migrations + GraphRAG retrieval (2026-05-09)
 
 Chromadb 0.5 → 1.x (client + server) + Neo4j 5.26 → 2026.04.0 calver

@@ -22,6 +22,7 @@ const AuditPane = lazy(() => import("@/components/audit/audit-pane"))
 const MemoriesPane = lazy(() => import("@/components/memories/memories-pane"))
 const SettingsPane = lazy(() => import("@/components/settings/settings-pane"))
 const AgentsPane = lazy(() => import("@/components/agents/agents-pane"))
+const WikiPane = lazy(() => import("@/components/wiki/wiki-pane"))
 
 function PaneLoader() {
   return (
@@ -140,6 +141,7 @@ export default function App() {
           case "memories":
           case "agents":
           case "settings":
+          case "wiki":
             return (
               <PaneErrorBoundary label={activePane}>
                 <Suspense fallback={<PaneLoader />}>
@@ -149,6 +151,7 @@ export default function App() {
                   {activePane === "memories" && <MemoriesPane />}
                   {activePane === "agents" && <AgentsPane />}
                   {activePane === "settings" && <SettingsPane />}
+                  {activePane === "wiki" && <WikiPane />}
                 </Suspense>
               </PaneErrorBoundary>
             )
