@@ -69,6 +69,9 @@ vi.mock("@/components/kb/tag-manager", () => ({
 vi.mock("@/components/kb/duplicate-detector", () => ({
   DuplicateDetector: () => null,
 }))
+vi.mock("@/components/kb/knowledge-library-dialog", () => ({
+  KnowledgeLibraryDialog: () => null,
+}))
 
 import { fetchArtifacts, queryKB } from "@/lib/api"
 import { KnowledgePane } from "@/components/kb/knowledge-pane"

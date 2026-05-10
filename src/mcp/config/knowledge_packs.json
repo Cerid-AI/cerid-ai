@@ -1,0 +1,877 @@
+{
+  "schema_version": 1,
+  "packs": [
+    {
+      "id": "mdn-web-docs",
+      "name": "MDN Web Docs",
+      "version": "1.0.0",
+      "description": "Mozilla's web platform reference (HTML, CSS, JS, Web APIs). ~14k pages of clean markdown with frontmatter. Daily updates by Mozilla staff.",
+      "domain": "coding",
+      "sub_category": "javascript",
+      "tags": [
+        "catalog",
+        "reference",
+        "javascript",
+        "web",
+        "built"
+      ],
+      "license": "CC-BY-SA-2.5",
+      "size_bytes": 13141217,
+      "artifact_count": 14375,
+      "download_url": "https://github.com/Cerid-AI/cerid-ai-knowledge-packs/releases/download/v1.0.0/mdn-web-docs-1.0.0.tar.gz",
+      "sha256": "6d4aab0ccc7a128de15b57c6728f8c95749685bca62fb398a91329daf30122ed",
+      "provenance": {
+        "source": "https://github.com/mdn/content",
+        "curator": "Mozilla",
+        "license_category": "share_alike",
+        "status": "built"
+      },
+      "build": {
+        "adapter": "github_zip",
+        "config": {
+          "repo": "mdn/content",
+          "ref": "main",
+          "include_globs": [
+            "files/en-us/**/*.md"
+          ],
+          "exclude_globs": [
+            "files/en-us/_locales/**",
+            "files/en-us/conflicting/**",
+            "files/en-us/orphaned/**"
+          ],
+          "strip_prefix": "files/en-us/"
+        }
+      }
+    },
+    {
+      "id": "python-stdlib-docs",
+      "name": "Python Standard Library Documentation",
+      "version": "1.0.0",
+      "description": "Authoritative Python stdlib reference, version-tagged. PSF-2.0 prose + 0BSD code samples (since 3.8.6). Pre-rendered HTML.",
+      "domain": "coding",
+      "sub_category": "python",
+      "tags": [
+        "catalog",
+        "reference",
+        "python",
+        "built"
+      ],
+      "license": "PSF-2.0",
+      "size_bytes": 167128,
+      "artifact_count": 208,
+      "download_url": "https://github.com/Cerid-AI/cerid-ai-knowledge-packs/releases/download/v1.0.1/python-stdlib-docs-1.0.0.tar.gz",
+      "sha256": "fd1b2ad0150b63564d2f7fc912f90a98bad37090ab7ed89a2df550a5accbe95f",
+      "provenance": {
+        "source": "https://docs.python.org/3/download.html",
+        "curator": "Python Software Foundation",
+        "license_category": "permissive",
+        "status": "built"
+      },
+      "build": {
+        "adapter": "python_docs_zip",
+        "config": {
+          "archive_url": "https://docs.python.org/3/archives/python-3.14-docs-html.zip",
+          "include_globs": [
+            "library/**/*.html",
+            "tutorial/**/*.html",
+            "reference/**/*.html"
+          ],
+          "exclude_globs": [
+            "library/__init__.html",
+            "**/genindex*.html",
+            "**/search.html"
+          ],
+          "content_selector": "div.body",
+          "title_tag": "h1",
+          "min_text_chars": 600,
+          "max_archive_bytes": 209715200
+        }
+      }
+    },
+    {
+      "id": "rust-book",
+      "name": "The Rust Programming Language Book",
+      "version": "1.0.0",
+      "description": "Canonical Rust learning corpus. mdbook markdown, 20+ semantically self-contained chapters. Dual-licensed MIT OR Apache-2.0.",
+      "domain": "coding",
+      "sub_category": "general",
+      "tags": [
+        "catalog",
+        "reference",
+        "rust",
+        "built"
+      ],
+      "license": "MIT",
+      "size_bytes": 360696,
+      "artifact_count": 109,
+      "download_url": "https://github.com/Cerid-AI/cerid-ai-knowledge-packs/releases/download/v1.0.0/rust-book-1.0.0.tar.gz",
+      "sha256": "ca18f45b5f52213674199b1928c815d64f0e7b1d1f81acd574415b4907ce5e87",
+      "provenance": {
+        "source": "https://github.com/rust-lang/book",
+        "curator": "Rust Project",
+        "license_category": "permissive",
+        "status": "built"
+      },
+      "build": {
+        "adapter": "github_zip",
+        "config": {
+          "repo": "rust-lang/book",
+          "ref": "main",
+          "include_globs": [
+            "src/**/*.md"
+          ],
+          "exclude_globs": [
+            "src/title-page.md",
+            "src/foreword.md",
+            "src/SUMMARY.md"
+          ],
+          "strip_prefix": "src/"
+        }
+      }
+    },
+    {
+      "id": "typescript-handbook",
+      "name": "TypeScript Handbook",
+      "version": "1.0.0",
+      "description": "Hand-curated TypeScript reference. MIT, markdown, ~5 MB.",
+      "domain": "coding",
+      "sub_category": "javascript",
+      "tags": [
+        "catalog",
+        "reference",
+        "typescript",
+        "built"
+      ],
+      "license": "MIT",
+      "size_bytes": 570753,
+      "artifact_count": 133,
+      "download_url": "https://github.com/Cerid-AI/cerid-ai-knowledge-packs/releases/download/v1.0.0/typescript-handbook-1.0.0.tar.gz",
+      "sha256": "a6b8d5950bdb1a8b3cbbe762d787226c70f79c8d631c20f01067f799865d499d",
+      "provenance": {
+        "source": "https://github.com/microsoft/TypeScript-Website",
+        "curator": "Microsoft",
+        "license_category": "permissive",
+        "status": "built"
+      },
+      "build": {
+        "adapter": "github_zip",
+        "config": {
+          "repo": "microsoft/TypeScript-Website",
+          "ref": "v2",
+          "include_globs": [
+            "packages/documentation/copy/en/**/*.md"
+          ],
+          "strip_prefix": "packages/documentation/copy/en/"
+        }
+      }
+    },
+    {
+      "id": "bogleheads-wiki",
+      "name": "Bogleheads Personal-Finance Wiki",
+      "version": "0.0.0",
+      "description": "Practitioner-authored personal-finance/investing reference. ~1000 pages, principles-oriented (doesn't rot tax-year-by-tax-year).",
+      "domain": "finance",
+      "sub_category": "investments",
+      "tags": [
+        "catalog",
+        "reference",
+        "investing",
+        "planned"
+      ],
+      "license": "CC-BY-SA-4.0",
+      "size_bytes": 0,
+      "artifact_count": 0,
+      "download_url": "",
+      "sha256": "",
+      "provenance": {
+        "source": "https://www.bogleheads.org/wiki/Main_Page",
+        "curator": "John C. Bogle Center for Financial Literacy",
+        "license_category": "share_alike",
+        "status": "planned",
+        "notes": "BLOCKED by Cloudflare anti-bot challenge on /w/api.php \u2014 requires browser-flavoured JS execution to clear. Defer until a JS-capable adapter (Playwright/Puppeteer) lands or curator does a manual MediaWiki Special:Export dump and feeds the XML through a future `wiki_xml_export` adapter."
+      },
+      "build": {
+        "adapter": "mediawiki_api",
+        "config": {
+          "host": "https://www.bogleheads.org",
+          "categories": [
+            "Investing",
+            "Personal_finance",
+            "Funds",
+            "Asset_allocation",
+            "Tax_considerations"
+          ],
+          "min_text_chars": 400,
+          "page_batch_size": 20,
+          "rate_limit_seconds": 1.0
+        }
+      }
+    },
+    {
+      "id": "irs-publications-curated",
+      "name": "IRS Publications (Curated)",
+      "version": "1.0.0",
+      "description": "Federal tax reference. Tax-year-stamped subset (Pub 17, 463, 502, 525, 590-A, 590-B, 936). HTML-clean.",
+      "domain": "finance",
+      "sub_category": "tax",
+      "tags": [
+        "catalog",
+        "reference",
+        "tax",
+        "us-gov",
+        "built"
+      ],
+      "license": "CC0-1.0",
+      "size_bytes": 17418,
+      "artifact_count": 7,
+      "download_url": "https://github.com/Cerid-AI/cerid-ai-knowledge-packs/releases/download/v1.0.1/irs-publications-curated-1.0.0.tar.gz",
+      "sha256": "adc56109824481ae0dd91566611e93ab5bf8eb441dcccb6fd92a296312d8b201",
+      "provenance": {
+        "source": "https://www.irs.gov/forms-pubs/browser-friendly",
+        "curator": "Internal Revenue Service",
+        "license_category": "public_domain",
+        "status": "built",
+        "notes": "Title 17 USC \u00a7105 \u2014 federal-employee-authored work is uncopyrightable."
+      },
+      "build": {
+        "adapter": "html_scrape",
+        "config": {
+          "url_list": [
+            "https://www.irs.gov/publications/p17",
+            "https://www.irs.gov/publications/p463",
+            "https://www.irs.gov/publications/p502",
+            "https://www.irs.gov/publications/p525",
+            "https://www.irs.gov/publications/p590a",
+            "https://www.irs.gov/publications/p590b",
+            "https://www.irs.gov/publications/p936"
+          ],
+          "content_selector": "div.field--name-body",
+          "title_tag": "h1",
+          "min_text_chars": 600,
+          "rate_limit_seconds": 2.0,
+          "host_allowlist": [
+            "https://www.irs.gov/"
+          ]
+        }
+      }
+    },
+    {
+      "id": "cfpb-ask",
+      "name": "CFPB Ask CFPB + Learn More",
+      "version": "1.0.0",
+      "description": "Consumer Financial Protection Bureau plain-language Q&A. Self-contained question/answer pairs ~1500 entries. Ideal RAG shape.",
+      "domain": "finance",
+      "sub_category": "general",
+      "tags": [
+        "catalog",
+        "reference",
+        "consumer-finance",
+        "us-gov",
+        "built"
+      ],
+      "license": "CC0-1.0",
+      "size_bytes": 484091,
+      "artifact_count": 676,
+      "download_url": "https://github.com/Cerid-AI/cerid-ai-knowledge-packs/releases/download/v1.0.0/cfpb-ask-1.0.0.tar.gz",
+      "sha256": "f2c0bcbcab3abf1f54f44a2f3fad9fb47b2465d9d5ba6a3d3c3f54c9de853d52",
+      "provenance": {
+        "source": "https://www.consumerfinance.gov/ask-cfpb/",
+        "curator": "Consumer Financial Protection Bureau",
+        "license_category": "public_domain",
+        "status": "built",
+        "notes": "Federal-employee authorship implies 17 USC \u00a7105 PD; verify the agency's legal notices before final ship."
+      },
+      "build": {
+        "adapter": "html_scrape",
+        "config": {
+          "sitemap_url": "https://www.consumerfinance.gov/sitemap.xml",
+          "url_glob": "https://www.consumerfinance.gov/ask-cfpb/*",
+          "exclude_globs": [
+            "https://www.consumerfinance.gov/ask-cfpb/search/*",
+            "https://www.consumerfinance.gov/ask-cfpb/*/es/*"
+          ],
+          "host_allowlist": [
+            "https://www.consumerfinance.gov/"
+          ],
+          "content_selector": "main",
+          "title_tag": "h1",
+          "min_text_chars": 200,
+          "rate_limit_seconds": 1.0,
+          "max_pages": 1500
+        }
+      }
+    },
+    {
+      "id": "18f-methods-guides",
+      "name": "18F Methods + Guides",
+      "version": "1.0.0",
+      "description": "GSA TTS (US government) project-management + engineering playbook. Pre-chunked method cards, CC0 (no attribution required).",
+      "domain": "projects",
+      "sub_category": "general",
+      "tags": [
+        "catalog",
+        "reference",
+        "methodology",
+        "built"
+      ],
+      "license": "CC0-1.0",
+      "size_bytes": 26576,
+      "artifact_count": 38,
+      "download_url": "https://github.com/Cerid-AI/cerid-ai-knowledge-packs/releases/download/v1.0.0/18f-methods-guides-1.0.0.tar.gz",
+      "sha256": "93abb2dbcbe0c01257de6431b591c8c0becfa5a4c09f005800d08fcc5566e34c",
+      "provenance": {
+        "source": "https://github.com/18F/methods",
+        "curator": "GSA / 18F",
+        "license_category": "public_domain",
+        "status": "built",
+        "notes": "Phase 7a covers 18F/methods only; 18F/guides slated for a multi-source adapter follow-up."
+      },
+      "build": {
+        "adapter": "github_zip",
+        "config": {
+          "repo": "18F/methods",
+          "ref": "main",
+          "include_globs": [
+            "_methods/**/*.md",
+            "README.md"
+          ]
+        }
+      }
+    },
+    {
+      "id": "chaoss-metrics",
+      "name": "CHAOSS Community Health Metrics",
+      "version": "1.0.0",
+      "description": "Linux Foundation working group's community-health / project-evolution metrics. One metric per file.",
+      "domain": "projects",
+      "sub_category": "general",
+      "tags": [
+        "catalog",
+        "reference",
+        "metrics",
+        "open-source",
+        "built"
+      ],
+      "license": "MIT",
+      "size_bytes": 4480,
+      "artifact_count": 4,
+      "download_url": "https://github.com/Cerid-AI/cerid-ai-knowledge-packs/releases/download/v1.0.0/chaoss-metrics-1.0.0.tar.gz",
+      "sha256": "25612522efe5643ce11faa10d7310e92a9c46a7f5fee80ba478a3372c20ca8cd",
+      "provenance": {
+        "source": "https://github.com/chaoss/metrics",
+        "curator": "CHAOSS / Linux Foundation",
+        "license_category": "permissive",
+        "status": "built"
+      },
+      "build": {
+        "adapter": "github_zip",
+        "config": {
+          "repo": "chaoss/metrics",
+          "ref": "main",
+          "include_globs": [
+            "**/*.md"
+          ],
+          "exclude_globs": [
+            "**/translations/**",
+            "**/CODE_OF_CONDUCT.md",
+            "**/CONTRIBUTING.md"
+          ]
+        }
+      }
+    },
+    {
+      "id": "wikivoyage-en",
+      "name": "Wikivoyage (English)",
+      "version": "1.0.0",
+      "description": "Full English Wikivoyage dump. ~100 MB compressed, dumps run twice monthly via Wikimedia.",
+      "domain": "personal",
+      "sub_category": "travel",
+      "tags": [
+        "catalog",
+        "reference",
+        "travel",
+        "built"
+      ],
+      "license": "CC-BY-SA-3.0",
+      "size_bytes": 74203596,
+      "artifact_count": 30919,
+      "download_url": "https://github.com/Cerid-AI/cerid-ai-knowledge-packs/releases/download/v1.0.0/wikivoyage-en-1.0.0.tar.gz",
+      "sha256": "0ad5305dd3dc8236de27b7f22b5b449472cb9fe04599c9b9b7449b269902fbd2",
+      "provenance": {
+        "source": "https://dumps.wikimedia.org/enwikivoyage/latest/",
+        "curator": "Wikimedia Foundation",
+        "license_category": "share_alike",
+        "status": "built"
+      },
+      "build": {
+        "adapter": "wiki_dump",
+        "config": {
+          "dump_url": "https://dumps.wikimedia.org/enwikivoyage/latest/enwikivoyage-latest-pages-articles.xml.bz2",
+          "include_namespaces": [
+            0
+          ],
+          "skip_redirects": true,
+          "min_text_chars": 400
+        }
+      }
+    },
+    {
+      "id": "medlineplus-health-topics",
+      "name": "MedlinePlus Health Topics (Public-Domain Subset)",
+      "version": "0.0.0",
+      "description": "NIH/NLM health-topic summaries. **Builder must filter A.D.A.M. Medical Encyclopedia + drug monographs (copyrighted) before sealing the tarball.**",
+      "domain": "personal",
+      "sub_category": "health",
+      "tags": [
+        "catalog",
+        "reference",
+        "health",
+        "us-gov",
+        "experimental"
+      ],
+      "license": "CC0-1.0",
+      "size_bytes": 0,
+      "artifact_count": 0,
+      "download_url": "",
+      "sha256": "",
+      "provenance": {
+        "source": "https://medlineplus.gov/xml.html",
+        "curator": "National Library of Medicine",
+        "license_category": "public_domain",
+        "status": "experimental",
+        "notes": "Build gate: refuse seal if any A.D.A.M.-prefixed XML element survives the filter; same for drug-monograph entries."
+      }
+    },
+    {
+      "id": "gutenberg-classics-curated",
+      "name": "Gutenberg Productivity & Philosophy Classics",
+      "version": "1.0.0",
+      "description": "~20-30 hand-picked public-domain classics: Marcus Aurelius, Franklin's Autobiography, Emerson essays, Thoreau, Bennett's How to Live on 24 Hours.",
+      "domain": "personal",
+      "sub_category": "notes",
+      "tags": [
+        "catalog",
+        "reference",
+        "classics",
+        "public-domain",
+        "built"
+      ],
+      "license": "CC0-1.0",
+      "size_bytes": 4016922,
+      "artifact_count": 15,
+      "download_url": "https://github.com/Cerid-AI/cerid-ai-knowledge-packs/releases/download/v1.0.0/gutenberg-classics-curated-1.0.0.tar.gz",
+      "sha256": "a979358e5ca6d56c2ba7de5c78b5e7ffc34014cf669e9573428dde5f306e563f",
+      "provenance": {
+        "source": "https://www.gutenberg.org/",
+        "curator": "Project Gutenberg",
+        "license_category": "public_domain",
+        "status": "built",
+        "notes": "US public domain; some titles are non-PD outside the US \u2014 ship the US-PD-only subset."
+      },
+      "build": {
+        "adapter": "gutenberg",
+        "config": {
+          "books": [
+            {
+              "id": 2680,
+              "title": "Meditations",
+              "author": "Marcus Aurelius"
+            },
+            {
+              "id": 148,
+              "title": "The Autobiography of Benjamin Franklin",
+              "author": "Benjamin Franklin"
+            },
+            {
+              "id": 205,
+              "title": "Walden",
+              "author": "Henry David Thoreau"
+            },
+            {
+              "id": 16328,
+              "title": "Beowulf",
+              "author": "Anonymous"
+            },
+            {
+              "id": 23,
+              "title": "Narrative of the Life of Frederick Douglass",
+              "author": "Frederick Douglass"
+            },
+            {
+              "id": 935,
+              "title": "How to Live on 24 Hours a Day",
+              "author": "Arnold Bennett"
+            },
+            {
+              "id": 1080,
+              "title": "A Modest Proposal",
+              "author": "Jonathan Swift"
+            },
+            {
+              "id": 16,
+              "title": "Self-Reliance and Other Essays",
+              "author": "Ralph Waldo Emerson"
+            },
+            {
+              "id": 6133,
+              "title": "Self Help",
+              "author": "Samuel Smiles"
+            },
+            {
+              "id": 6593,
+              "title": "The Art of War",
+              "author": "Sun Tzu"
+            },
+            {
+              "id": 1342,
+              "title": "Pride and Prejudice",
+              "author": "Jane Austen"
+            },
+            {
+              "id": 11,
+              "title": "Alice's Adventures in Wonderland",
+              "author": "Lewis Carroll"
+            },
+            {
+              "id": 1184,
+              "title": "The Count of Monte Cristo",
+              "author": "Alexandre Dumas"
+            },
+            {
+              "id": 84,
+              "title": "Frankenstein",
+              "author": "Mary Wollstonecraft Shelley"
+            },
+            {
+              "id": 2701,
+              "title": "Moby Dick",
+              "author": "Herman Melville"
+            }
+          ],
+          "min_text_chars": 5000,
+          "rate_limit_seconds": 1.5
+        }
+      }
+    },
+    {
+      "id": "wikipedia-simple-en",
+      "name": "Wikipedia (Simple English)",
+      "version": "1.0.0",
+      "description": "Simple-English Wikipedia, 242k articles. Pinned snapshot 2023-11-01; ~280 MB parquet from the wikimedia/wikipedia HuggingFace dataset.",
+      "domain": "general",
+      "sub_category": "general",
+      "tags": [
+        "catalog",
+        "reference",
+        "encyclopedia",
+        "built"
+      ],
+      "license": "CC-BY-SA-3.0",
+      "size_bytes": 102603995,
+      "artifact_count": 196034,
+      "download_url": "https://github.com/Cerid-AI/cerid-ai-knowledge-packs/releases/download/v1.0.1/wikipedia-simple-en-1.0.0.tar.gz",
+      "sha256": "c232cbf6b0aed50e4f78e807cb9855e98ec2e1f2c0ae323b74c768eae73542f9",
+      "provenance": {
+        "source": "https://huggingface.co/datasets/wikimedia/wikipedia",
+        "curator": "Wikimedia Foundation",
+        "license_category": "share_alike",
+        "status": "built",
+        "notes": "Configuration 20231101.simple. Refresh on each Wikimedia dump cycle."
+      },
+      "build": {
+        "adapter": "hf_dataset",
+        "config": {
+          "dataset_id": "wikimedia/wikipedia",
+          "config_name": "20231101.simple",
+          "split": "train",
+          "text_field": "text",
+          "title_field": "title",
+          "id_field": "id",
+          "min_text_chars": 200
+        }
+      }
+    },
+    {
+      "id": "cosmopedia-khanacademy",
+      "name": "Cosmopedia (Khan Academy split)",
+      "version": "1.0.0",
+      "description": "HuggingFace synthetic textbook corpus, Khan-Academy-style split. ~24k rows / 72 MB. Best practical sub-100 MB LLM-prepped synthetic corpus.",
+      "domain": "general",
+      "sub_category": "general",
+      "tags": [
+        "catalog",
+        "reference",
+        "synthetic",
+        "llm-prepped",
+        "built"
+      ],
+      "license": "Apache-2.0",
+      "size_bytes": 29778708,
+      "artifact_count": 23855,
+      "download_url": "https://github.com/Cerid-AI/cerid-ai-knowledge-packs/releases/download/v1.0.1/cosmopedia-khanacademy-1.0.0.tar.gz",
+      "sha256": "7c76f797eeaed6c187b8032bc98b69c4a74fa10685d68f11b7f133cfb896d7bd",
+      "provenance": {
+        "source": "https://huggingface.co/datasets/HuggingFaceTB/cosmopedia",
+        "curator": "Hugging Face",
+        "license_category": "permissive",
+        "status": "built",
+        "notes": "Configuration: khanacademy. License confirmed Apache-2.0 on dataset card."
+      },
+      "build": {
+        "adapter": "hf_dataset",
+        "config": {
+          "dataset_id": "HuggingFaceTB/cosmopedia",
+          "config_name": "khanacademy",
+          "split": "train",
+          "text_field": "text",
+          "title_field": "prompt",
+          "min_text_chars": 200
+        }
+      }
+    },
+    {
+      "id": "kubernetes-website",
+      "name": "Kubernetes Documentation",
+      "version": "1.0.0",
+      "description": "Authoritative Kubernetes documentation (concepts, tasks, tutorials, reference). Pure markdown with Hugo frontmatter, daily updates.",
+      "domain": "coding",
+      "sub_category": "devops",
+      "tags": [
+        "catalog",
+        "reference",
+        "kubernetes",
+        "devops",
+        "built"
+      ],
+      "license": "CC-BY-4.0",
+      "size_bytes": 2172680,
+      "artifact_count": 1289,
+      "download_url": "https://github.com/Cerid-AI/cerid-ai-knowledge-packs/releases/download/v1.0.0/kubernetes-website-1.0.0.tar.gz",
+      "sha256": "562af11febfa4f00a48345e9e95c43c9ae4c8b6c83daaa331ee9fe4b979fa49b",
+      "provenance": {
+        "source": "https://github.com/kubernetes/website",
+        "curator": "Cloud Native Computing Foundation",
+        "license_category": "attribution",
+        "status": "built"
+      },
+      "build": {
+        "adapter": "github_zip",
+        "config": {
+          "repo": "kubernetes/website",
+          "ref": "main",
+          "include_globs": [
+            "content/en/docs/**/*.md"
+          ],
+          "exclude_globs": [
+            "content/en/docs/**/_index.md",
+            "content/en/docs/**/glossary/**"
+          ],
+          "strip_prefix": "content/en/docs/"
+        }
+      }
+    },
+    {
+      "id": "helm-docs",
+      "name": "Helm Documentation",
+      "version": "1.0.0",
+      "description": "Helm charts authoring + templating reference. Pairs with kubernetes-website for the Cloud-Native devops axis.",
+      "domain": "coding",
+      "sub_category": "devops",
+      "tags": [
+        "catalog",
+        "reference",
+        "helm",
+        "devops",
+        "built"
+      ],
+      "license": "MIT",
+      "size_bytes": 99750,
+      "artifact_count": 96,
+      "download_url": "https://github.com/Cerid-AI/cerid-ai-knowledge-packs/releases/download/v1.0.1/helm-docs-1.0.0.tar.gz",
+      "sha256": "80552fbe14ba883228c1f4322765afac5f87f9ed38fa2ad92ebdbe0596c57000",
+      "provenance": {
+        "source": "https://github.com/helm/helm-www",
+        "curator": "Helm / CNCF",
+        "license_category": "permissive",
+        "status": "built"
+      },
+      "build": {
+        "adapter": "github_zip",
+        "config": {
+          "repo": "helm/helm-www",
+          "ref": "main",
+          "include_globs": [
+            "docs/**/*.md"
+          ],
+          "exclude_globs": [
+            "docs/_partials/**"
+          ]
+        }
+      }
+    },
+    {
+      "id": "tldr-pages",
+      "name": "tldr-pages \u2014 community CLI cheatsheets",
+      "version": "1.0.0",
+      "description": "One-file-per-command cheatsheets for thousands of CLI tools. Highest signal per MB on the catalog \u2014 closes a known LLM failure mode (exact flag recall).",
+      "domain": "coding",
+      "sub_category": "general",
+      "tags": [
+        "catalog",
+        "reference",
+        "cli",
+        "cheatsheets",
+        "built"
+      ],
+      "license": "CC-BY-4.0",
+      "size_bytes": 1311916,
+      "artifact_count": 7102,
+      "download_url": "https://github.com/Cerid-AI/cerid-ai-knowledge-packs/releases/download/v1.0.0/tldr-pages-1.0.0.tar.gz",
+      "sha256": "139b67f7b17cf2793492c4a53489be81c6d9d74f54445c89e5b3570e1293eaa7",
+      "provenance": {
+        "source": "https://github.com/tldr-pages/tldr",
+        "curator": "tldr-pages community",
+        "license_category": "attribution",
+        "status": "built"
+      },
+      "build": {
+        "adapter": "github_zip",
+        "config": {
+          "repo": "tldr-pages/tldr",
+          "ref": "main",
+          "include_globs": [
+            "pages/**/*.md"
+          ],
+          "strip_prefix": "pages/"
+        }
+      }
+    },
+    {
+      "id": "apache-spark-docs",
+      "name": "Apache Spark Documentation",
+      "version": "1.0.0",
+      "description": "Spark SQL / Scala / Python / R reference + tuning guides. Markdown source extracted from the apache/spark monorepo.",
+      "domain": "coding",
+      "sub_category": "general",
+      "tags": [
+        "catalog",
+        "reference",
+        "spark",
+        "data",
+        "built"
+      ],
+      "license": "Apache-2.0",
+      "size_bytes": 701493,
+      "artifact_count": 236,
+      "download_url": "https://github.com/Cerid-AI/cerid-ai-knowledge-packs/releases/download/v1.0.0/apache-spark-docs-1.0.0.tar.gz",
+      "sha256": "0bed83988176f36d989fa55f632d29d5d845f4ba1f76d6066dd10a4fce37ed0e",
+      "provenance": {
+        "source": "https://github.com/apache/spark",
+        "curator": "Apache Software Foundation",
+        "license_category": "permissive",
+        "status": "built"
+      },
+      "build": {
+        "adapter": "github_zip",
+        "config": {
+          "repo": "apache/spark",
+          "ref": "master",
+          "include_globs": [
+            "docs/**/*.md"
+          ],
+          "exclude_globs": [
+            "docs/_includes/**",
+            "docs/_layouts/**",
+            "docs/_plugins/**"
+          ],
+          "strip_prefix": "docs/"
+        }
+      }
+    },
+    {
+      "id": "learnxinyminutes",
+      "name": "Learn X in Y Minutes",
+      "version": "1.0.0",
+      "description": "Compact one-file-per-language polyglot syntax reference. 40+ languages, well-commented executable examples.",
+      "domain": "coding",
+      "sub_category": "general",
+      "tags": [
+        "catalog",
+        "reference",
+        "polyglot",
+        "syntax",
+        "built"
+      ],
+      "license": "CC-BY-SA-3.0",
+      "size_bytes": 898758,
+      "artifact_count": 197,
+      "download_url": "https://github.com/Cerid-AI/cerid-ai-knowledge-packs/releases/download/v1.0.1/learnxinyminutes-1.0.0.tar.gz",
+      "sha256": "e909f7049782ad37072cec0ef65e6c9ba655bf3f41c233732c04e18f9e5457c0",
+      "provenance": {
+        "source": "https://github.com/adambard/learnxinyminutes-docs",
+        "curator": "Adam Bard / community",
+        "license_category": "share_alike",
+        "status": "built"
+      },
+      "build": {
+        "adapter": "github_zip",
+        "config": {
+          "repo": "adambard/learnxinyminutes-docs",
+          "ref": "master",
+          "include_globs": [
+            "*.md"
+          ],
+          "exclude_globs": [
+            "README.md",
+            "CONTRIBUTING.md",
+            "CONTRIBUTING-*.md",
+            "AGENTS.md",
+            "PULL_REQUEST_TEMPLATE.md",
+            "ISSUE_TEMPLATE.md",
+            "translation-tracker.md",
+            "transactions.md"
+          ]
+        }
+      }
+    },
+    {
+      "id": "pes2o-cs-recent",
+      "name": "peS2o V2 \u2014 Computer Science papers (curated cut)",
+      "version": "0.0.0",
+      "description": "AllenAI's cleaned scientific-paper corpus. Curator-cap on CS/ML/NLP papers, last few years; ~400 MB after filter. Cleaner than the raw S2ORC LLMs trained on.",
+      "domain": "general",
+      "sub_category": "general",
+      "tags": [
+        "catalog",
+        "reference",
+        "science",
+        "synthetic-clean",
+        "experimental"
+      ],
+      "license": "ODC-BY-1.0",
+      "size_bytes": 0,
+      "artifact_count": 0,
+      "download_url": "",
+      "sha256": "",
+      "provenance": {
+        "source": "https://huggingface.co/datasets/allenai/peS2o",
+        "curator": "Allen Institute for AI",
+        "license_category": "attribution",
+        "status": "experimental",
+        "notes": "ODC-BY licensing \u2014 attribution + share-alike-equivalent obligations propagate. Not a default-install pack; opt-in for users who need scientific-paper RAG."
+      },
+      "build": {
+        "adapter": "hf_dataset",
+        "config": {
+          "dataset_id": "allenai/peS2o",
+          "config_name": "v2",
+          "split": "train",
+          "text_field": "text",
+          "title_field": "id",
+          "min_text_chars": 800,
+          "max_rows": 5000
+        }
+      }
+    }
+  ]
+}

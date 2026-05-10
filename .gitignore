@@ -28,6 +28,8 @@ stacks/bifrost/config.db.*
 # Runtime data & volumes
 data/
 src/mcp/data/
+.cerid-state/
+src/mcp/.cerid-state/
 # Bifrost provider config is safe to commit (uses env.OPENROUTER_API_KEY, no secrets)
 !stacks/bifrost/data/
 stacks/bifrost/data/*

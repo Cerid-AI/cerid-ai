@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "_comment": "Upstream allow-list for knowledge-pack source URLs. Every recipe's download_url + provenance.source must match a host + path-prefix here. Validated at registry-load time so a typo-squatted upstream (e.g. wkimedia/...) is rejected before a curator-build runs. See docs/KNOWLEDGE_PACKS_CATALOG.md.",
+  "host_prefixes": [
+    "https://github.com/mdn/",
+    "https://github.com/python/",
+    "https://github.com/rust-lang/",
+    "https://github.com/microsoft/TypeScript-Website",
+    "https://github.com/18F/",
+    "https://github.com/chaoss/",
+    "https://github.com/Cerid-AI/",
+    "https://github.com/kubernetes/website",
+    "https://github.com/helm/helm-www",
+    "https://github.com/tldr-pages/tldr",
+    "https://github.com/apache/spark",
+    "https://github.com/adambard/learnxinyminutes-docs",
+    "https://huggingface.co/datasets/wikimedia/",
+    "https://huggingface.co/datasets/HuggingFaceTB/",
+    "https://huggingface.co/datasets/bigcode/",
+    "https://huggingface.co/datasets/cerebras/",
+    "https://huggingface.co/datasets/HuggingFaceFW/",
+    "https://huggingface.co/datasets/allenai/",
+    "https://dumps.wikimedia.org/",
+    "https://docs.python.org/",
+    "https://www.irs.gov/",
+    "https://irs.gov/",
+    "https://www.consumerfinance.gov/",
+    "https://consumerfinance.gov/",
+    "https://medlineplus.gov/",
+    "https://www.medlineplus.gov/",
+    "https://www.fdic.gov/",
+    "https://www.investor.gov/",
+    "https://investor.gov/",
+    "https://www.mymoney.gov/",
+    "https://www.federalreserveeducation.org/",
+    "https://www.bogleheads.org/",
+    "https://bogleheads.org/",
+    "https://www.gutenberg.org/",
+    "https://gutenberg.org/",
+    "https://archive.org/details/"
+  ],
+  "license_categories": {
+    "public_domain": [
+      "CC0-1.0",
+      "Unlicense",
+      "0BSD",
+      "WTFPL",
+      "us-gov-pd"
+    ],
+    "permissive": [
+      "MIT",
+      "Apache-2.0",
+      "BSD-2-Clause",
+      "BSD-3-Clause",
+      "BSL-1.0",
+      "ISC",
+      "PSF-2.0",
+      "Python-2.0",
+      "Blue-Oak-1.0.0",
+      "Zlib"
+    ],
+    "attribution": [
+      "CC-BY-2.5",
+      "CC-BY-3.0",
+      "CC-BY-4.0",
+      "ODC-BY-1.0"
+    ],
+    "share_alike": [
+      "CC-BY-SA-2.5",
+      "CC-BY-SA-3.0",
+      "CC-BY-SA-4.0",
+      "GFDL-1.3",
+      "GPL-3.0-or-later"
+    ]
+  }
+}
