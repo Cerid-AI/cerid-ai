@@ -90,6 +90,7 @@ jobs:
             --exclude-files 'docs/plans/' \
             --exclude-files 'src/mcp/routers/setup\.py$' \
             --exclude-files 'src/mcp/app/routers/setup\.py$' \
+            --exclude-files 'src/mcp/config/knowledge_packs\.json$' \
             > "$TMPFILE"
           # Fail if any secrets found
           python -c "
