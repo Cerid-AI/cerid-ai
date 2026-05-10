@@ -147,6 +147,46 @@ into `ChromaNeo4jRetriever`).
 (`log_swallowed_error` instead of `pass`), DUO138 ReDoS false-positive
 on `_PROPER_NOUN_RE` (documented + `# noqa: DUO138`).
 
+**Corpus purge + post-tag operator activation (2026-05-09):**
+
+- Discovered ~75% of the 11,755 artifact mass was bulk medical literature
+  (5,183 PubMed-like + 3,591 MED-NNNN); largely irrelevant for the
+  documented "general use + personal-assistant knowledge context" RAG
+  purpose. The memory-artifact subspace was further dominated by 2,846
+  `memory_empirical_*` records — diagnostic test outputs from
+  `cerid-trading-agent` that landed in cerid-ai's KB by accident.
+- Authorised purge: dropped the 2,846 trading-agent diagnostic artifacts
+  from chromadb `domain_conversations` + Neo4j (cascade DETACH DELETE
+  pulled 16,524 MENTIONS edges; orphan-Entity cleanup dropped 1,337
+  nodes + 6 CO_MENTIONED edges). Final corpus: **8,910 artifacts**.
+  Snapshot at `backups/2026-05-09_18-09-57` if rollback needed.
+- Tiered backfill produced 382 artifacts with entity mentions across
+  T1 (personal/work, 42 art), T2 (real memories, 7 art), T3 (top-500
+  by quality from the MED bulk, 333 art). **2,536 entities, 3,367
+  MENTIONS edges, 24,322 CO_MENTIONED edges.**
+- Leiden refresh: **410 / 245 / 230 / 228 communities** across levels
+  0..3 (1,093 total), 28.2s. **405 LLM-summarised** (rest below size
+  threshold).
+
+**GraphRAG eval lift on the populated graph:**
+
+| Metric | baseline | local_graphrag | lift |
+|---|---|---|---|
+| NDCG@10 | 0.011 | 0.107 | **+875%** |
+| Recall@10 | 0.005 | 0.034 | **+653%** |
+| Precision@10 | 0.010 | 0.092 | **+822%** |
+| Queries scoring nonzero | 1/10 | 3/10 | 3x coverage |
+
+Eval is pseudo-gold (entity-mention sets stand in for human labels),
+so absolute scores are bounded by per-query gold sets that exceed
+top-k. The meaningful signal — the **~10x lift of local_graphrag over
+baseline across all metrics** — confirms entity-neighborhood
+expansion does real work on the populated graph.
+
+Global-mode benchmark: 4/5 thematic queries surfaced ≥1 community
+summary in `global_graphrag` mode vs zero in `local_graphrag` —
+the routing-shape distinction holds as designed.
+
 ## v0.91.0 — Workstream A close-out + C + D Phase 1 + E Phase 2 (2026-05-03 → 2026-05-08)
 
 Cross-project SLO hardening (with `benchmark-slo` now PR-blocking) +
