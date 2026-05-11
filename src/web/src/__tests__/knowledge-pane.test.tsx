@@ -4,6 +4,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { axe } from "jest-axe"
 import type { Artifact } from "@/lib/types"
 
 // Mock API module
@@ -325,5 +326,63 @@ describe("KnowledgePane", () => {
   it("renders search help button", () => {
     render(<KnowledgePane />, { wrapper: createWrapper() })
     expect(screen.getByLabelText("Search help")).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// D.2: four-state matrix
+// ---------------------------------------------------------------------------
+
+describe("KnowledgePane — four-state matrix (D.2)", () => {
+  it("idle/loading: shows Skeleton placeholders while fetching", () => {
+    mockFetchArtifacts.mockReturnValue(new Promise(() => {}))
+    const { container } = render(<KnowledgePane />, { wrapper: createWrapper() })
+    const skeletons = container.querySelectorAll("[class*=skeleton], [role=status]")
+    expect(skeletons.length).toBeGreaterThan(0)
+  })
+
+  it("loaded: renders artifact list after data arrives", async () => {
+    mockFetchArtifacts.mockResolvedValue([makeArtifact({ id: "a1" })])
+    render(<KnowledgePane />, { wrapper: createWrapper() })
+    await waitFor(() => {
+      expect(screen.getByText(/Showing 1 of 1 artifact/i)).toBeInTheDocument()
+    })
+  })
+
+  it("empty: shows empty state messaging when no artifacts", async () => {
+    mockFetchArtifacts.mockResolvedValue([])
+    render(<KnowledgePane />, { wrapper: createWrapper() })
+    await waitFor(() => {
+      expect(screen.getByText(/No artifacts yet/i)).toBeInTheDocument()
+    })
+  })
+
+  it("error: shows destructive Alert with Retry button on fetch failure", async () => {
+    mockFetchArtifacts.mockRejectedValue(new Error("Network failure"))
+    render(<KnowledgePane />, { wrapper: createWrapper() })
+    // The error Alert and Retry button appear once the query settles into error state
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument()
+    }, { timeout: 3000 })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// D.3: axe-clean
+// ---------------------------------------------------------------------------
+
+describe("KnowledgePane — axe-clean (D.3)", () => {
+  it("is axe-clean (D.3) in empty state", async () => {
+    mockFetchArtifacts.mockResolvedValue([])
+    const { container } = render(<KnowledgePane />, { wrapper: createWrapper() })
+    await waitFor(() => screen.getByText(/No artifacts yet/i))
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean (D.3) in error state", async () => {
+    mockFetchArtifacts.mockRejectedValue(new Error("fail"))
+    const { container } = render(<KnowledgePane />, { wrapper: createWrapper() })
+    await waitFor(() => screen.getByRole("button", { name: /retry/i }), { timeout: 3000 })
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

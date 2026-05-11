@@ -55,11 +55,9 @@ export function TrustScoreChip() {
 
   if (isLoading) {
     return (
-      <Skeleton
-        className="h-5 w-20 rounded-full"
-        aria-label="Loading trust score"
-        data-testid="trust-score-skeleton"
-      />
+      <span role="status" aria-label="Loading trust score" data-testid="trust-score-skeleton">
+        <Skeleton className="h-5 w-20 rounded-full" />
+      </span>
     )
   }
 

@@ -14,12 +14,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Database, ToggleLeft, CreditCard, ExternalLink, Shield, AlertTriangle, Cpu, Zap } from "lucide-react"
+import { Database, ToggleLeft, CreditCard, ExternalLink, Shield, AlertTriangle, Cpu, Zap, Settings2 } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { Switch } from "@/components/ui/switch"
+import { Label } from "@/components/ui/label"
 import { fetchSetupStatus, fetchHealthStatus, fetchSystemCheck } from "@/lib/api"
 import { SectionHeading, LabelWithInfo, Row, ToggleRow, SliderRow } from "./settings-primitives"
 import { assessRuntime, fromHealthStatus, CAPABILITY_STATUS_DOT, COST_PROFILE_LABELS } from "@/lib/provider-capabilities"
 import { OpenRouterKeyField } from "./openrouter-key-field"
+import { useUIMode } from "@/contexts/ui-mode-context"
 
 /** Shows hardware-based recommendation for the current UI mode. */
 function HardwareRecommendation() {
@@ -328,7 +331,42 @@ export function EssentialsSection({ settings, sections, toggleSection, patch, cr
         </Card>
       )}
 
+      {/* -- Advanced Mode Toggle -- */}
+      <AdvancedModeToggle />
+
     </>
+  )
+}
+
+/**
+ * Single canonical "Show advanced" toggle for settings.
+ * Mirrors the sidebar toggle but lives in Essentials so users
+ * can unlock advanced tabs without leaving the settings pane.
+ */
+function AdvancedModeToggle() {
+  const { isSimple, toggle } = useUIMode()
+  return (
+    <div className="rounded-lg border bg-card px-3 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Settings2 className="h-4 w-4 text-muted-foreground shrink-0" aria-hidden="true" />
+          <div>
+            <Label htmlFor="advanced-mode-toggle" className="text-sm font-medium cursor-pointer">
+              Show advanced surfaces
+            </Label>
+            <p className="text-[11px] text-muted-foreground leading-snug mt-0.5">
+              Reveals pipeline controls, governance, plugins, and operator-facing settings.
+            </p>
+          </div>
+        </div>
+        <Switch
+          id="advanced-mode-toggle"
+          checked={!isSimple}
+          onCheckedChange={toggle}
+          aria-label={isSimple ? "Enable advanced mode" : "Disable advanced mode"}
+        />
+      </div>
+    </div>
   )
 }
 

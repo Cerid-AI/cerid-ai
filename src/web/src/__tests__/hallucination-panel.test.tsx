@@ -3,6 +3,7 @@
 
 import { describe, it, expect } from "vitest"
 import { render, screen } from "@testing-library/react"
+import { axe } from "jest-axe"
 import { HallucinationPanel } from "@/components/audit/hallucination-panel"
 import type { HallucinationReport, HallucinationClaim, StreamingClaim } from "@/lib/types"
 
@@ -137,5 +138,75 @@ describe("HallucinationPanel", () => {
     const incorrectBtns = screen.getAllByLabelText("Mark as incorrect")
     expect(correctBtns.length).toBe(3)
     expect(incorrectBtns.length).toBe(3)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// D.2: four-state matrix
+// ---------------------------------------------------------------------------
+
+describe("HallucinationPanel — four-state matrix (D.2)", () => {
+  it("idle: shows 'disabled' messaging when feature is off", () => {
+    render(<HallucinationPanel report={null} loading={false} featureEnabled={false} />)
+    expect(screen.getByText(/verification is off/i)).toBeInTheDocument()
+  })
+
+  it("loading: shows analyzing indicator while loading", () => {
+    render(<HallucinationPanel report={null} loading={true} featureEnabled={true} />)
+    expect(screen.getByText(/analyzing/i)).toBeInTheDocument()
+  })
+
+  it("empty: shows no-claims message for skipped/clean reports", () => {
+    const report = makeReport({
+      skipped: true,
+      claims: [],
+      summary: { total: 0, verified: 0, unverified: 0, uncertain: 0 },
+    })
+    render(<HallucinationPanel report={report} loading={false} featureEnabled={true} />)
+    expect(screen.getByText(/no factual claims/i)).toBeInTheDocument()
+  })
+
+  it("loaded: renders claim list with summary counts", () => {
+    render(<HallucinationPanel report={makeReport()} loading={false} featureEnabled={true} />)
+    expect(screen.getByText("Claim A is verified")).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// D.3: axe-clean
+// ---------------------------------------------------------------------------
+
+describe("HallucinationPanel — axe-clean (D.3)", () => {
+  it("is axe-clean (D.3) in loading state", async () => {
+    const { container } = render(
+      <HallucinationPanel report={null} loading={true} featureEnabled={true} />,
+    )
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean (D.3) in empty/skipped state", async () => {
+    const report = makeReport({
+      skipped: true,
+      claims: [],
+      summary: { total: 0, verified: 0, unverified: 0, uncertain: 0 },
+    })
+    const { container } = render(
+      <HallucinationPanel report={report} loading={false} featureEnabled={true} />,
+    )
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean (D.3) with populated claims", async () => {
+    const { container } = render(
+      <HallucinationPanel report={makeReport()} loading={false} featureEnabled={true} />,
+    )
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean (D.3) when disabled", async () => {
+    const { container } = render(
+      <HallucinationPanel report={null} loading={false} featureEnabled={false} />,
+    )
+    expect(await axe(container)).toHaveNoViolations()
   })
 })
