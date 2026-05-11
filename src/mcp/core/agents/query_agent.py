@@ -1339,6 +1339,133 @@ async def agent_query(
         return env.to_dict()
 
 
+# ---------------------------------------------------------------------------
+# Phase R.3 — HyPE augmentation helper
+# ---------------------------------------------------------------------------
+
+def _hype_retrieval_enabled() -> bool:
+    """Return True when ``RETRIEVAL_HYPE_ENABLED`` is explicitly set to truthy.
+
+    Default is ``false`` — the flag must be flipped after eval gate is
+    cleared (≥ +0.02 NDCG@10 sustained on the full corpus).
+    """
+    import os as _os
+    val = _os.getenv("RETRIEVAL_HYPE_ENABLED", "false").strip().lower()
+    return val in ("true", "1", "yes", "on")
+
+
+async def _augment_with_hype(
+    query: str,
+    results: list[dict[str, Any]],
+    chroma_client: Any | None,
+    domains: list[str] | None,
+) -> list[dict[str, Any]]:
+    """Augment retrieval results with HyPE (Hypothetical Prompt Embeddings).
+
+    Phase R.3.  Issues a parallel query against the HyPE question collections
+    (pre-computed at index time), then deduplicates against the content hits
+    — parent chunks that appear in both lists take the higher-relevance score.
+    Chunks found only via HyPE are appended with ``hype_source=True``.
+
+    Returns ``results`` unchanged when:
+      - ``RETRIEVAL_HYPE_ENABLED`` is false (the default).
+      - ``chroma_client`` is not provided.
+      - The HyPE collections are missing (index was run with flag off).
+      - Any exception occurs (non-fatal; logged at DEBUG).
+
+    Parameters
+    ----------
+    query:
+        The (possibly enriched) search query string.
+    results:
+        Content-embedding hits from ``multi_domain_query``.
+    chroma_client:
+        ChromaDB client.  ``None`` → skip silently.
+    domains:
+        Effective domain list.  ``None`` defaults to ``config.DOMAINS``.
+    """
+    if not _hype_retrieval_enabled() or chroma_client is None:
+        return results
+
+    try:
+        from core.retrieval.hype_index import hype_collection_name
+        from core.retrieval.hype_match import dedup_with_hype_results
+        from core.utils.embeddings import get_embedding_function
+
+        _ef = get_embedding_function()
+        if _ef is None:
+            logger.debug("_augment_with_hype: no embed function available; skipping")
+            return results
+
+        # Build the list of base collection names from the effective domains.
+        _domains = domains or DOMAINS
+        collection_names = [config.collection_name(d) for d in _domains]
+
+        # Embed query once.  _ef returns list[list[float]]; take first row.
+        _raw_embeddings: list[list[float]] = await asyncio.to_thread(_ef, [query])
+        query_embedding: list[float] = list(_raw_embeddings[0])
+
+        # Query each HyPE collection and collect hits.
+        hype_hits: list[dict[str, Any]] = []
+        for coll_name in collection_names:
+            hype_coll_name = hype_collection_name(coll_name)
+            try:
+                hype_coll = await asyncio.to_thread(
+                    chroma_client.get_collection, hype_coll_name
+                )
+                hype_results = await asyncio.to_thread(
+                    hype_coll.query,
+                    query_embeddings=[query_embedding],
+                    n_results=10,
+                    include=["documents", "metadatas", "distances"],
+                )
+                if hype_results["ids"] and hype_results["ids"][0]:
+                    from core.utils.embeddings import l2_distance_to_relevance
+                    for i, hype_doc_id in enumerate(hype_results["ids"][0]):
+                        distance = hype_results["distances"][0][i] if hype_results["distances"] else 1.0
+                        relevance = l2_distance_to_relevance(distance)
+                        meta = hype_results["metadatas"][0][i] if hype_results["metadatas"] else {}
+                        hype_hits.append({
+                            "content": hype_results["documents"][0][i],
+                            "relevance": round(relevance, 4),
+                            "chunk_id": hype_doc_id,
+                            "source_chunk_id": meta.get("source_chunk_id", ""),
+                            "artifact_id": meta.get("source_artifact_id", ""),
+                            "filename": "",
+                            "domain": "",
+                            "chunk_index": 0,
+                            "collection": hype_coll_name,
+                            "ingested_at": "",
+                            "sub_category": "",
+                            "tags_json": "[]",
+                            "keywords": "[]",
+                            "memory_type": "",
+                            "metadata": meta,
+                        })
+            except Exception as e:
+                # HyPE collection missing (flag was off at index time) — not an error.
+                logger.debug(
+                    "_augment_with_hype: hype collection %s unavailable: %s",
+                    hype_coll_name, e,
+                )
+
+        if not hype_hits:
+            return results
+
+        merged = dedup_with_hype_results(results, hype_hits)
+        hype_net_new = len(merged) - len(results)
+        if hype_net_new > 0:
+            logger.info(
+                "HyPE augmentation added %d net-new chunk(s) (hype_hits=%d)",
+                hype_net_new, len(hype_hits),
+            )
+        return merged
+
+    except Exception as exc:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("core.agents.query_agent.hype_augment", exc)
+        return results
+
+
 async def _agent_query_impl(
     query: str,
     domains: list[str] | None = None,
@@ -1581,6 +1708,18 @@ async def _agent_query_impl(
                         graph_store=graph_store,
                     )
         graph_results_added = len(results) - graph_count_before
+
+    # Phase R.3 — HyPE dual-query augmentation.
+    # When RETRIEVAL_HYPE_ENABLED=true, issue a parallel query against the
+    # HyPE (Hypothetical Prompt Embeddings) collections and merge results.
+    # Default is off — flag must be flipped after eval gate is cleared.
+    with timer.step("hype_augment"):
+        results = await _augment_with_hype(
+            query=query,
+            results=results,
+            chroma_client=chroma_client,
+            domains=effective_domains,
+        )
 
     from core.utils.temporal import is_within_window, parse_temporal_intent, recency_score
     temporal_days = parse_temporal_intent(query)

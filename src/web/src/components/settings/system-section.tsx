@@ -3,8 +3,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { adminRebuildIndexes, adminRescore, adminRegenerateSummaries, adminClearDomain, fetchOllamaStatus, fetchOllamaRecommendations, enableOllama, disableOllama, pullOllamaModel, fetchHealthStatus, fetchDataSources, enableDataSource, disableDataSource, fetchWatchedFolders, addWatchedFolder, updateWatchedFolder, removeWatchedFolder, scanWatchedFolder, fetchModelUpdates } from "@/lib/api"
-import type { ModelUpdatesResponse } from "@/lib/api/settings"
+import { adminRebuildIndexes, adminRescore, adminRegenerateSummaries, adminClearDomain, fetchOllamaStatus, fetchOllamaRecommendations, enableOllama, disableOllama, pullOllamaModel, fetchHealthStatus, fetchDataSources, enableDataSource, disableDataSource, fetchWatchedFolders, addWatchedFolder, updateWatchedFolder, removeWatchedFolder, scanWatchedFolder } from "@/lib/api"
 import type { WatchedFolder } from "@/lib/api/settings"
 import type { KBStats } from "@/lib/api"
 import type { ServerSettings, SettingsUpdate, ProviderCredits, OllamaStatus, OllamaRecommendations, HealthStatusResponse } from "@/lib/types"
@@ -35,8 +34,6 @@ import {
   Check,
   FolderOpen,
   Play,
-  AlertTriangle,
-  Sparkles,
 } from "lucide-react"
 import { SyncSection } from "./sync-section"
 import { StorageBar } from "./StorageBar"
@@ -162,9 +159,6 @@ export function SystemSection({
           </CardContent>
         </Card>
       )}
-
-      {/* -- Model Updates -- */}
-      <ModelUpdatesSection />
 
       {/* -- Taxonomy -- */}
       <SectionHeading icon={Tag} label="Taxonomy" open={sections.taxonomy} onToggle={() => toggleSection("taxonomy")} />
@@ -1214,82 +1208,3 @@ function DataSourcesSection({
   )
 }
 
-// -- Model Updates (auto-detection of new/deprecated models) -----------------
-
-function ModelUpdatesSection() {
-  const { data, isLoading } = useQuery<ModelUpdatesResponse>({
-    queryKey: ["model-updates"],
-    queryFn: fetchModelUpdates,
-    staleTime: 5 * 60_000,
-    refetchInterval: 10 * 60_000,
-  })
-
-  const hasNew = (data?.new?.length ?? 0) > 0
-  const hasDeprecated = (data?.deprecated?.length ?? 0) > 0
-  if (isLoading || (!hasNew && !hasDeprecated)) return null
-
-  return (
-    <Card className="mb-4">
-      <CardHeader className="pb-2 pt-4 px-4">
-        <CardTitle className="flex items-center gap-2 text-sm font-medium">
-          <Sparkles className="h-4 w-4 text-muted-foreground" />
-          Model Updates
-          {hasNew && (
-            <Badge variant="default" className="ml-auto text-[10px] px-1.5 py-0">
-              {data!.new.length} new
-            </Badge>
-          )}
-          {hasDeprecated && (
-            <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
-              {data!.deprecated.length} deprecated
-            </Badge>
-          )}
-        </CardTitle>
-        {data?.last_checked && (
-          <CardDescription className="text-[11px]">
-            Last checked: {new Date(data.last_checked).toLocaleString()}
-          </CardDescription>
-        )}
-      </CardHeader>
-      <CardContent className="grid gap-2 pt-0 px-4 pb-4">
-        {hasNew && (
-          <div>
-            <p className="mb-1.5 text-[11px] font-medium text-muted-foreground">New Models</p>
-            <div className="space-y-1">
-              {data!.new.slice(0, 10).map((m) => (
-                <div key={m.id} className="flex items-center justify-between rounded border bg-muted/30 px-2 py-1.5">
-                  <span className="text-xs font-mono truncate">{m.name ?? m.id}</span>
-                  {m.context_length != null && (
-                    <span className="ml-2 shrink-0 text-[10px] text-muted-foreground">
-                      {Math.round(m.context_length / 1024)}K ctx
-                    </span>
-                  )}
-                </div>
-              ))}
-              {data!.new.length > 10 && (
-                <p className="text-[11px] text-muted-foreground">
-                  +{data!.new.length - 10} more
-                </p>
-              )}
-            </div>
-          </div>
-        )}
-        {hasDeprecated && (
-          <div>
-            <p className="mb-1.5 flex items-center gap-1 text-[11px] font-medium text-destructive">
-              <AlertTriangle className="h-3 w-3" />
-              Deprecated Models
-            </p>
-            <div className="space-y-1">
-              {data!.deprecated.map((m) => (
-                <div key={m.id} className="rounded border border-destructive/30 bg-destructive/5 px-2 py-1.5">
-                  <span className="text-xs font-mono">{m.id}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  )
-}

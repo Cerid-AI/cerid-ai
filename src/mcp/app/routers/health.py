@@ -337,6 +337,28 @@ def health_check_endpoint():
             result["invariants"].setdefault("processor_jobs_completed_24h", 0)
             result["invariants"].setdefault("processor_cost_usd_7d", 0.0)
             result["invariants"].setdefault("processor_throttled_ticks", 0)
+        # Phase O.2 (v0.92): memory consolidation failure count alongside core
+        # invariants. Pure metadata — not part of the healthy/degraded gate.
+        # Failures here must never affect the /health response code.
+        try:
+            from app.services.memory_metrics import memory_consolidation_failures_24h as _mcf24h
+
+            _mcf_redis = None
+            try:
+                _mcf_redis = get_redis()
+            except Exception as _exc:  # noqa: BLE001
+                log_swallowed_error(
+                    "app.routers.health.memory_consolidation_failures.get_redis", _exc
+                )
+            if _mcf_redis is not None:
+                result["invariants"]["memory_consolidation_failures_last_24h"] = _mcf24h(
+                    _mcf_redis
+                )
+            else:
+                result["invariants"]["memory_consolidation_failures_last_24h"] = 0
+        except Exception as _exc:  # noqa: BLE001 — observability augmentation only
+            log_swallowed_error("app.routers.health.memory_consolidation_failures", _exc)
+            result["invariants"].setdefault("memory_consolidation_failures_last_24h", 0)
         _health_cache = result
         _health_cache_ts = now
 

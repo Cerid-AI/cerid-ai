@@ -4,10 +4,12 @@
 import { useState, useCallback, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { FileText, Upload, Sparkles, Loader2, Check, Send } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { uploadFile, queryKB } from "@/lib/api"
 import { useDragDrop } from "@/hooks/use-drag-drop"
+import { SamplePackTab } from "@/components/setup/sample-pack-tab"
 
 interface FirstDocState {
   ingested: boolean
@@ -171,6 +173,13 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
 
   const { isDragOver, dragHandlers } = useDragDrop(onFilesDropped)
 
+  const handlePackInstalled = useCallback((packId: string) => {
+    // Mark the step complete so the wizard's "Next" button unlocks.
+    // packId is logged here for future telemetry (suppress lint).
+    void packId
+    onChange({ ...state, ingested: true, skipped: false })
+  }, [state, onChange])
+
   return (
     <>
       <div className="mb-2 flex items-center justify-center">
@@ -178,7 +187,16 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
           <FileText className="h-5 w-5 text-brand" />
         </div>
       </div>
-      <h3 className="mb-4 text-center text-lg font-semibold">Try It Out</h3>
+      <h3 className="mb-3 text-center text-lg font-semibold">Try It Out</h3>
+
+      <Tabs defaultValue="upload" className="w-full">
+        <TabsList className="mb-4 grid w-full grid-cols-2" aria-label="Document source">
+          <TabsTrigger value="upload">Upload your own</TabsTrigger>
+          <TabsTrigger value="sample">Try a sample pack</TabsTrigger>
+        </TabsList>
+
+        {/* Tab 1: Upload your own (original content, unchanged) */}
+        <TabsContent value="upload">
 
       {/* Phase: Choose */}
       {phase === "choose" && (
@@ -315,6 +333,15 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
           )}
         </div>
       )}
+
+        </TabsContent>
+
+        {/* Tab 2: Try a sample pack */}
+        <TabsContent value="sample">
+          <SamplePackTab onComplete={handlePackInstalled} />
+        </TabsContent>
+
+      </Tabs>
     </>
   )
 }

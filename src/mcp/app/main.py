@@ -572,6 +572,23 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Redis PING pre-warm failed (cache may be unavailable): %s", e)
 
+    # Phase O.2 (v0.92): bind memory consolidation failure callback.
+    # core/ must never import app/, so we wire the DI callback from here
+    # after Redis is known to be available.
+    try:
+        import functools
+
+        import core.agents.memory_consolidation as _mc_mod
+        from app.deps import get_redis as _cb_get_redis
+        from app.services.memory_metrics import record_consolidation_failure as _rcf
+
+        _cb_redis = _cb_get_redis()
+        _mc_mod.consolidation_failure_callback = functools.partial(_rcf, _cb_redis)
+        logger.info("Memory consolidation failure callback registered")
+    except Exception as e:
+        log_swallowed_error("app.main.memory_consolidation_failure_callback_bind", e)
+        logger.warning("Memory consolidation failure callback not registered: %s", e)
+
     # Wire the semantic-cache backend: a dedicated chroma collection
     # ("semantic_query_cache"). The cache module stays layering-correct
     # (no chromadb import in core/) by accepting the collection via

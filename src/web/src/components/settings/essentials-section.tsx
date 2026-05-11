@@ -1,15 +1,12 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import type { ServerSettings, SettingsUpdate, RoutingMode, ProviderCredits } from "@/lib/types"
 import type { SectionKey } from "./settings-primitives"
 import { useSettings } from "@/hooks/use-settings"
 import { cn } from "@/lib/utils"
 import { Card, CardContent } from "@/components/ui/card"
-import { Switch } from "@/components/ui/switch"
-import { Badge } from "@/components/ui/badge"
 import {
   Select,
   SelectContent,
@@ -17,9 +14,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Database, ToggleLeft, CreditCard, ExternalLink, Globe, Shield, AlertTriangle, Cpu, Zap } from "lucide-react"
+import { Database, ToggleLeft, CreditCard, ExternalLink, Shield, AlertTriangle, Cpu, Zap } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { fetchDataSources, enableDataSource, disableDataSource, fetchSetupStatus, fetchHealthStatus, fetchSystemCheck } from "@/lib/api"
+import { fetchSetupStatus, fetchHealthStatus, fetchSystemCheck } from "@/lib/api"
 import { SectionHeading, LabelWithInfo, Row, ToggleRow, SliderRow } from "./settings-primitives"
 import { assessRuntime, fromHealthStatus, CAPABILITY_STATUS_DOT, COST_PROFILE_LABELS } from "@/lib/provider-capabilities"
 import { OpenRouterKeyField } from "./openrouter-key-field"
@@ -331,9 +328,6 @@ export function EssentialsSection({ settings, sections, toggleSection, patch, cr
         </Card>
       )}
 
-      {/* -- External Data Sources -- */}
-      <SectionHeading icon={Globe} label="External Data Sources" open={sections.data_sources} onToggle={() => toggleSection("data_sources")} />
-      {sections.data_sources && <DataSourcesPanel />}
     </>
   )
 }
@@ -499,71 +493,3 @@ function ProviderStatusPanel({ settings }: { settings: ServerSettings }) {
   )
 }
 
-function DataSourcesPanel() {
-  const { data, refetch } = useQuery({
-    queryKey: ["data-sources"],
-    queryFn: fetchDataSources,
-    staleTime: 30_000,
-  })
-  const [toggling, setToggling] = useState<string | null>(null)
-
-  const handleToggle = async (name: string, currentlyEnabled: boolean) => {
-    setToggling(name)
-    try {
-      if (currentlyEnabled) {
-        await disableDataSource(name)
-      } else {
-        await enableDataSource(name)
-      }
-      await refetch()
-    } catch (e) {
-      console.warn("Data source toggle failed:", e)
-    } finally {
-      setToggling(null)
-    }
-  }
-
-  if (!data) return null
-
-  const enabledCount = data.sources.filter((s) => s.enabled && s.configured).length
-
-  return (
-    <Card className="mb-4">
-      <CardContent className="grid gap-2 pt-4">
-        <p className="text-[11px] text-muted-foreground">
-          {enabledCount} of {data.sources.length} sources active. External APIs enrich RAG results when KB has no relevant matches.
-        </p>
-        {data.sources.map((src) => (
-          <div key={src.name} className="flex items-center justify-between rounded-md border px-3 py-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <span className={cn("h-2 w-2 rounded-full shrink-0", src.enabled && src.configured ? "bg-green-500" : "bg-muted-foreground/30")} />
-              <div className="min-w-0">
-                <p className="text-xs font-medium capitalize">{src.name.replace(/_/g, " ")}</p>
-                <p className="text-[10px] text-muted-foreground truncate">{src.description}</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 shrink-0 ml-2">
-              {src.requires_api_key && !src.configured && (
-                <Badge variant="outline" className="text-[9px] text-amber-600 dark:text-yellow-400 border-yellow-500/30">
-                  Key required
-                </Badge>
-              )}
-              {src.domains.length > 0 && (
-                <Badge variant="secondary" className="text-[9px]">
-                  {src.domains.join(", ")}
-                </Badge>
-              )}
-              <Switch
-                aria-label={`Enable ${src.name} data source`}
-                checked={src.enabled}
-                onCheckedChange={() => handleToggle(src.name, src.enabled)}
-                disabled={toggling === src.name || (src.requires_api_key && !src.configured)}
-                className="scale-75"
-              />
-            </div>
-          </div>
-        ))}
-      </CardContent>
-    </Card>
-  )
-}
