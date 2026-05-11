@@ -21,14 +21,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.db.neo4j.communities import MemberEntity, RelatedCommunity
 from app.services.community_pages import (
-    CommunitySummary,
     CommunityFull,
+    CommunitySummary,
     get_community_page,
     list_top_communities,
 )
-from app.db.neo4j.communities import MemberEntity, RelatedCommunity
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

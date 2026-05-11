@@ -138,7 +138,7 @@ def _sync_cost_usd_7d(redis_client: Any) -> Decimal:
         if len(parts) == 2:
             try:
                 total += Decimal(parts[1])
-            except Exception:  # noqa: BLE001
+            except Exception:  # silent-catch-allowed: malformed cost-row decimal — skip, sum the rest
                 pass
     return total
 

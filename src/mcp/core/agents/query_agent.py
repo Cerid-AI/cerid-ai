@@ -279,7 +279,11 @@ async def multi_domain_query(
             collection = chroma_client.get_collection(name=col_name)
 
             # Phase O.1: exclude pending (un-committed) chunks from retrieval.
-            _where = with_tenant_scope(_exclude_pending(metadata_filter))
+            # Order matters: with_tenant_scope MUST see the raw caller filter
+            # so it can detect cross-tenant escape attempts (a caller-supplied
+            # `tenant_id: <other>` nested inside `$and` would be invisible).
+            # Layer the pending-exclude on AFTER tenant scoping.
+            _where = _exclude_pending(with_tenant_scope(metadata_filter))
             query_kwargs: dict[str, Any] = {
                 "query_texts": [query],
                 "n_results": top_k,
@@ -1442,7 +1446,7 @@ async def _augment_with_hype(
                             "memory_type": "",
                             "metadata": meta,
                         })
-            except Exception as e:
+            except Exception as e:  # silent-catch-allowed: HyPE collection absent is the off-by-default norm
                 # HyPE collection missing (flag was off at index time) — not an error.
                 logger.debug(
                     "_augment_with_hype: hype collection %s unavailable: %s",

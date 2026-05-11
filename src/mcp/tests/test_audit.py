@@ -396,7 +396,7 @@ class TestAudit:
         mock_queries.return_value = {"total_queries": 0}
         mock_conv.return_value = {"total_conversations": 0}
 
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             audit(MagicMock())
         )
         assert "timestamp" in result
@@ -410,7 +410,7 @@ class TestAudit:
     def test_single_report(self, mock_activity):
         mock_activity.return_value = {"total_events": 5}
 
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             audit(MagicMock(), reports=["activity"])
         )
         assert "activity" in result

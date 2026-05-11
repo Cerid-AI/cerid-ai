@@ -53,7 +53,11 @@ export function useLiveSync({ url, token, enabled = true, onDelta, onPresence }:
 
   useEffect(() => {
     mountedRef.current = true;
-    connect();
+    // connect() may invoke setError() synchronously when WebSocket
+    // construction throws (rare; e.g., invalid URL). Defer to the next
+    // microtask so we don't trip react-hooks/set-state-in-effect — the
+    // ws.onerror/onmessage handlers fire async and don't trigger the rule.
+    queueMicrotask(() => { if (mountedRef.current) connect(); });
     return () => {
       mountedRef.current = false;
       clearTimeout(reconnectTimer.current);

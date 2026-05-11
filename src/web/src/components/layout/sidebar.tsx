@@ -7,7 +7,7 @@ import { useQuery } from "@tanstack/react-query"
 import {
   MessageSquare, Database, HeartPulse, BarChart3, Brain, Settings,
   Sun, Moon, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Plus, History,
-  Shield, Activity, BookOpen,
+  Shield, Activity, BookOpen, Network,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils"
 import { fetchModelUpdatesFull } from "@/lib/api"
 import { fetchHealth } from "@/lib/api/settings"
 
-export type Pane = "chat" | "knowledge" | "monitoring" | "audit" | "memories" | "agents" | "settings" | "wiki"
+export type Pane = "chat" | "knowledge" | "monitoring" | "audit" | "memories" | "agents" | "settings" | "wiki" | "communities"
 
 interface SidebarProps {
   activePane: Pane
@@ -40,6 +40,7 @@ const NAV_ITEMS: { pane: Pane; icon: typeof MessageSquare; label: string }[] = [
   { pane: "chat", icon: MessageSquare, label: "Chat" },
   { pane: "knowledge", icon: Database, label: "Knowledge" },
   { pane: "wiki", icon: BookOpen, label: "Wiki" },
+  { pane: "communities", icon: Network, label: "Communities" },
   { pane: "monitoring", icon: HeartPulse, label: "Health" },
   { pane: "audit", icon: BarChart3, label: "Analytics" },
   { pane: "memories", icon: Brain, label: "Memories" },

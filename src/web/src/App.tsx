@@ -23,6 +23,7 @@ const MemoriesPane = lazy(() => import("@/components/memories/memories-pane"))
 const SettingsPane = lazy(() => import("@/components/settings/settings-pane"))
 const AgentsPane = lazy(() => import("@/components/agents/agents-pane"))
 const WikiPane = lazy(() => import("@/components/wiki/wiki-pane"))
+const CommunitiesPane = lazy(() => import("@/components/kb/graph-explorer").then(m => ({ default: m.GraphExplorer })))
 
 function PaneLoader() {
   return (
@@ -142,6 +143,7 @@ export default function App() {
           case "agents":
           case "settings":
           case "wiki":
+          case "communities":
             return (
               <PaneErrorBoundary label={activePane}>
                 <Suspense fallback={<PaneLoader />}>
@@ -149,6 +151,7 @@ export default function App() {
                   {activePane === "monitoring" && <MonitoringPane />}
                   {activePane === "audit" && <AuditPane />}
                   {activePane === "memories" && <MemoriesPane />}
+                  {activePane === "communities" && <CommunitiesPane />}
                   {activePane === "agents" && <AgentsPane />}
                   {activePane === "settings" && <SettingsPane />}
                   {activePane === "wiki" && <WikiPane />}

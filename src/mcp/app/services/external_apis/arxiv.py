@@ -84,7 +84,7 @@ class ArxivAdapter(ExternalAPIAdapter):
             raise self._wrap_http_error(exc) from exc
 
         try:
-            root = ET.fromstring(resp.text)  # noqa: B314 — trusted arXiv Atom feed
+            root = ET.fromstring(resp.text)  # nosec B314 — trusted arXiv Atom feed
         except ET.ParseError as exc:
             raise ExternalAPIError(
                 provider=self.slug,

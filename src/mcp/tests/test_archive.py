@@ -84,7 +84,7 @@ class TestArchiveFilesEndpoint:
         with patch("app.routers.upload.config") as mock_config:
             mock_config.ARCHIVE_PATH = str(tmp_path)
             mock_config.STORAGE_MODE = "extract_only"
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 list_archive_files(domain="")
             )
 
@@ -104,7 +104,7 @@ class TestArchiveFilesEndpoint:
         with patch("app.routers.upload.config") as mock_config:
             mock_config.ARCHIVE_PATH = str(tmp_path)
             mock_config.STORAGE_MODE = "archive"
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 list_archive_files(domain="")
             )
 
@@ -124,7 +124,7 @@ class TestArchiveFilesEndpoint:
         with patch("app.routers.upload.config") as mock_config:
             mock_config.ARCHIVE_PATH = str(tmp_path)
             mock_config.STORAGE_MODE = "archive"
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 list_archive_files(domain="coding")
             )
 
@@ -144,7 +144,7 @@ class TestArchiveFilesEndpoint:
         with patch("app.routers.upload.config") as mock_config:
             mock_config.ARCHIVE_PATH = str(tmp_path)
             mock_config.STORAGE_MODE = "archive"
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 list_archive_files(domain="")
             )
 
@@ -159,7 +159,7 @@ class TestArchiveFilesEndpoint:
         with patch("app.routers.upload.config") as mock_config:
             mock_config.ARCHIVE_PATH = str(tmp_path)
             mock_config.STORAGE_MODE = "archive"
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 list_archive_files(domain="general")
             )
 

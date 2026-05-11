@@ -18,6 +18,7 @@ import { SchedulerStatus } from "./scheduler-status"
 import { KBOperations } from "./kb-operations"
 import { ObservabilityDashboard } from "./observability-dashboard"
 import { TrustScoreChip } from "@/components/trust-score"
+import { ProcessorPane } from "@/components/processor"
 import { fetchMaintenance, fetchIngestLog, fetchSchedulerStatus, fetchDigest } from "@/lib/api"
 
 export function MonitoringPane() {
@@ -87,6 +88,9 @@ export function MonitoringPane() {
           <div className="space-y-4 p-4">
             <PaneErrorBoundary label="Knowledge Digest">
               <DigestCard digest={digest} isLoading={loadingDigest} onPeriodChange={setDigestHours} />
+            </PaneErrorBoundary>
+            <PaneErrorBoundary label="Processor">
+              <ProcessorPane />
             </PaneErrorBoundary>
             <PaneErrorBoundary label="Observability">
               <ObservabilityDashboard />

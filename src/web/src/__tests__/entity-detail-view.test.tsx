@@ -44,7 +44,7 @@ function makeEntityPage(overrides: Partial<WikiEntityPage> = {}): WikiEntityPage
       {
         artifact_id: "art-001",
         title: "Forbes Profile",
-        chunk_hash: "abc123def456",
+        chunk_hash: "test-fixture-chunk-0001",
         domain: "research",
       },
     ],
@@ -192,7 +192,7 @@ describe("EntityDetailView — settled state", () => {
   it("renders chunk hash chip (first 8 chars)", () => {
     mockUseWikiEntity.mockReturnValue({ data: makeEntityPage(), isLoading: false, isError: false, isNotFound: false })
     render(<EntityDetailView slug="elon-musk" onSelectRelated={vi.fn()} />, { wrapper: createWrapper() })
-    expect(screen.getByText("abc123de")).toBeTruthy()
+    expect(screen.getByText("test-fix")).toBeTruthy()
   })
 
   it("renders contradictions section when contradictions exist", () => {

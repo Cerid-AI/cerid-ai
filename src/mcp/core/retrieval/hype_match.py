@@ -241,7 +241,7 @@ async def query_with_hype(
                         "memory_type": "",
                         "metadata": meta,  # carry full meta for dedup logic
                     })
-        except Exception as e:
+        except Exception as e:  # silent-catch-allowed: HyPE collection absent is the off-by-default norm
             # HyPE collection missing (flag was off at index time) — not an
             # error, just means HyPE has no data for this collection.
             logger.debug(

@@ -16,6 +16,8 @@ src/mcp/app/parsers/pdf.py:37
 src/mcp/app/parsers/pdf.py:184
 src/mcp/app/parsers/structured.py:34
 src/mcp/app/parsers/structured.py:163
+src/mcp/app/processor/metrics.py:141
+src/mcp/app/services/external_apis/registry.py:115
 src/mcp/app/services/mcp_client_policy.py:185
 src/mcp/app/startup/invariants.py:113
 src/mcp/app/startup/invariants.py:120
@@ -32,9 +34,11 @@ src/mcp/core/agents/hallucination/verification.py:1798
 src/mcp/core/agents/hallucination/verification.py:2070
 src/mcp/core/agents/maintenance.py:180
 src/mcp/core/agents/maintenance.py:319
+src/mcp/core/agents/query_agent.py:1449
 src/mcp/core/agents/rectify.py:229
 src/mcp/core/agents/rectify.py:393
 src/mcp/core/agents/self_rag.py:199
+src/mcp/core/retrieval/hype_match.py:244
 src/mcp/core/retrieval/semantic_cache.py:153
 src/mcp/core/retrieval/semantic_cache.py:240
 src/mcp/core/routing/model_providers.py:130
@@ -47,9 +51,11 @@ src/mcp/core/utils/swallowed.py:130
 src/mcp/core/utils/timeouts.py:103
 src/mcp/scripts/clipboard_daemon.py:296
 src/mcp/tests/conftest.py:147
-src/mcp/tests/integration/conftest.py:168
-src/mcp/tests/integration/conftest.py:222
+src/mcp/tests/integration/conftest.py:220
+src/mcp/tests/integration/conftest.py:274
+src/mcp/tests/integration/test_w4_contradiction_preservation.py:83
 src/mcp/tests/load/smoke.py:253
+src/mcp/tests/test_memory_metrics.py:285
 src/mcp/tests/test_session_changes.py:315
 src/mcp/utils/agent_events.py:50
 src/mcp/utils/error_handler.py:53

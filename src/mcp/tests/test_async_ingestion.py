@@ -66,7 +66,7 @@ class TestAsyncFileParsing:
 
         from app.services.ingestion import ingest_file
 
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             ingest_file("/archive/test.txt", domain="coding")
         )
 
@@ -102,7 +102,7 @@ class TestAsyncFileParsing:
 
         from app.services.ingestion import ingest_file
 
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             ingest_file("/archive/test.txt", domain="coding")
         )
 
@@ -137,7 +137,7 @@ class TestAsyncFileParsing:
 
         from app.services.ingestion import ingest_file
 
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             ingest_file("/archive/doc.pdf", domain="general")
         )
 

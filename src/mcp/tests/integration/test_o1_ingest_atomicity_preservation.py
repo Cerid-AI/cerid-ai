@@ -17,11 +17,10 @@ NOTE: Do NOT register I19 in docs/PRESERVATION.md until v0.92 cut.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # Mark the whole module as a preservation gate.
 pytestmark = pytest.mark.preservation
@@ -197,10 +196,10 @@ async def test_i19c_recovery_worker_commits_orphan():
 async def test_i19d_recovery_worker_purges_after_max_retries():
     """Recovery worker purges chunk and adds Sentry breadcrumb after max retries."""
     from app.services.ingest_recovery import (
+        _MAX_RECOVERY_ATTEMPTS,
         OrphanRecord,
         RecoveryAction,
         recover_orphan,
-        _MAX_RECOVERY_ATTEMPTS,
     )
 
     old_ts = (datetime.now(tz=timezone.utc) - timedelta(seconds=120)).isoformat()

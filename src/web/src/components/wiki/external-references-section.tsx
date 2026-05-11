@@ -41,10 +41,10 @@ function formatFetchedAt(iso: string): string {
 // ---------------------------------------------------------------------------
 
 interface ReferenceCardProps {
-  ref: ExternalReference
+  reference: ExternalReference
 }
 
-function ReferenceCard({ ref: reference }: ReferenceCardProps) {
+function ReferenceCard({ reference }: ReferenceCardProps) {
   return (
     <div
       className="flex items-start gap-3 rounded-md border border-border bg-muted/10 px-3 py-2"
@@ -114,10 +114,10 @@ export function ExternalReferencesSection({ refs }: ExternalReferencesSectionPro
         External references
       </h2>
       <div className="space-y-2">
-        {refs.map((ref) => (
+        {refs.map((reference) => (
           <ReferenceCard
-            key={`${ref.source}:${ref.title}`}
-            ref={ref}
+            key={`${reference.source}:${reference.title}`}
+            reference={reference}
           />
         ))}
       </div>

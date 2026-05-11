@@ -1,14 +1,16 @@
 # Preservation Harness
 
-> **What:** Automated gates asserting the 8 capability invariants that MUST survive every consolidation sprint.
-> **Why:** Prevent the "we broke chat while cleaning up" class of regression during the v0.84.1 → v0.90 program. Kept in force post-v0.90 as the merge gate for future architectural work.
-> **Where:** [`src/mcp/tests/integration/test_preservation_*.py`](../src/mcp/tests/integration/)
+> **What:** Automated gates asserting capability invariants that MUST survive every consolidation sprint.
+> **Why:** Prevent the "we broke chat while cleaning up" class of regression during the v0.84.1 → v0.90 program. Kept in force post-v0.90 as the merge gate for future architectural work. Extended in v0.92 with three new gates (I17, I19, I20) covering the W.4 contradiction ledger, O.1 cross-store atomicity, and O.2 memory consolidation.
+> **Where:** [`src/mcp/tests/integration/test_*.py`](../src/mcp/tests/integration/) marked `@pytest.mark.preservation`
 > **When:** Every sprint's merge gate + on every PR via the `preservation` CI job (blocking since Phase 1C, 2026-04-20).
 > **Program context:** [`tasks/2026-04-19-consolidation-program.md`](../tasks/2026-04-19-consolidation-program.md)
 
 ---
 
-## The 8 invariants
+## The invariants
+
+### Foundation (v0.84 / consolidation program — 8 gates)
 
 | # | Invariant | Guards against | File |
 |---|-----------|----------------|------|
@@ -21,7 +23,17 @@
 | I7 | KB ingest → fetch → listing → delete round-trip | Indexer wiring regression | `test_preservation_i7_kb.py` |
 | I8 | `/user-state/conversations` CRUD + bulk + validation | Sync-dir persistence loss | `test_preservation_i8_conversations.py` |
 
-Total: **35 individual test cases** across 8 invariant files.
+### v0.92 extensions (cohesion release — 3 gates)
+
+| # | Invariant | Guards against | File |
+|---|-----------|----------------|------|
+| I17 | Contradiction-ledger persistence + surface via `/wiki/contradictions{,/{id}}` | NLI guard contradiction findings going un-persisted or un-surfaced | `test_w4_contradiction_preservation.py` |
+| I19 | Cross-store ingest atomicity (Chroma pending → Neo4j commit → flip-committed; retrieval gate excludes pending; recovery worker handles orphans) | Orphan Chroma rows after Neo4j commit failure (the P.1 atomicity class) | `test_o1_ingest_atomicity_preservation.py` |
+| I20 | Memory consolidation round-trip: Ebbinghaus decay fires, NLI guard rejects planted contradiction, failure callback emits | Silent memory consolidation failures invisible to operators | `test_o2_memory_consolidation_preservation.py` |
+
+**Numbering note:** Invariant IDs I9–I16 and I18 are reserved for future gates aligned with the v0.92 plan's primitives (TrustScore endpoint shape — I14; daily brief job status — I15; wiki entity list/detail shape — I16; processor responsiveness + 3 new `/health.invariants` fields — I18). The v0.92 release ships those features with unit-test coverage of the same contracts; promotion to full preservation gates is tracked for the next release window.
+
+Total: **35+ individual test cases** across 11 invariant files (8 foundation + 3 v0.92).
 
 ---
 

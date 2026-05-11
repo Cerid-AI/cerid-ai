@@ -15,15 +15,15 @@ Coverage:
 """
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.db.neo4j.communities import (
-    CommunitySummary,
     CommunityFull,
+    CommunitySummary,
     MemberEntity,
     RelatedCommunity,
 )
