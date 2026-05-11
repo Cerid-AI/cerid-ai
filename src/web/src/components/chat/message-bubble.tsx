@@ -316,7 +316,7 @@ function VerificationBadge({ status, onClick }: { status: MessageVerificationSta
 
   if (status.state === "loading") {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+      <span className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-label-xs text-muted-foreground">
         <Loader2 className="h-2.5 w-2.5 animate-spin" />
         Verifying
       </span>
@@ -333,7 +333,7 @@ function VerificationBadge({ status, onClick }: { status: MessageVerificationSta
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium transition-colors",
+        "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-label-xs font-medium transition-colors",
         hasExpertClaims
           ? "bg-purple-500/10 text-purple-600 dark:text-purple-400 hover:bg-purple-500/20"
           : creditExhausted
@@ -525,7 +525,7 @@ export function MessageBubble({ message, verificationStatus, verificationClaims,
       // Add footnote superscript after the LAST marked segment
       if (lastMark) {
         const sup = document.createElement("sup")
-        sup.className = "ml-0.5 cursor-pointer text-[10px] font-semibold text-brand hover:text-brand/80 relative z-10"
+        sup.className = "ml-0.5 cursor-pointer text-label-xs font-semibold text-brand hover:text-brand/80 relative z-10"
         sup.style.pointerEvents = "auto"
         sup.textContent = `[${i + 1}]`
         sup.dataset.ceridFootnote = String(i)
@@ -763,7 +763,7 @@ function ModelBadge({ modelId }: { modelId: string }) {
   const colorClass = PROVIDER_COLORS[provider] ?? PROVIDER_COLORS[model?.provider ?? ""] ?? "bg-muted text-muted-foreground"
 
   const badge = (
-    <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium", colorClass)}>
+    <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-label-xs font-medium", colorClass)}>
       {label}
     </span>
   )

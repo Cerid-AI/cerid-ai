@@ -162,7 +162,7 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
                     <span className="relative shrink-0">
                       <Icon className={cn("h-4 w-4", activePane === pane && "text-brand")} />
                       {showBadge && (
-                        <span className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-teal-500 text-[8px] font-bold text-white">
+                        <span className="absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-teal-500 text-label-xxs font-bold text-white">
                           {updateCount > 9 ? "9+" : updateCount}
                         </span>
                       )}
@@ -174,7 +174,7 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
                       <span className="flex items-center gap-1.5">
                         {label}
                         {showBadge && !collapsed && (
-                          <span className="rounded-full bg-teal-500/10 px-1.5 py-0 text-[9px] font-medium text-teal-600 dark:text-teal-400">
+                          <span className="rounded-full bg-teal-500/10 px-1.5 py-0 text-label-xxs font-medium text-teal-600 dark:text-teal-400">
                             {updateCount}
                           </span>
                         )}
@@ -297,7 +297,7 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
                     />
                   </>
                 ) : (
-                  <span className="text-[10px] font-medium text-muted-foreground">
+                  <span className="text-label-xs font-medium text-muted-foreground">
                     {isSimple ? "S" : "A"}
                   </span>
                 )}
@@ -352,7 +352,7 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
                       </span>
                     </>
                   ) : (
-                    <span className={cn("text-[10px] font-bold", TIER_COLORS[featureTier ?? "community"])}>
+                    <span className={cn("text-label-xs font-bold", TIER_COLORS[featureTier ?? "community"])}>
                       {(TIER_LABELS[featureTier ?? "community"] ?? "C")[0]}
                     </span>
                   )}
@@ -370,7 +370,7 @@ export function Sidebar({ activePane, onPaneChange, collapsed, onToggleCollapse,
               it; hidden when the sidebar is collapsed to save vertical real
               estate (the info is also accessible via /health). */}
           {!collapsed && backendVersion && (
-            <p className="px-3 pt-1 text-[10px] font-mono text-muted-foreground/80">
+            <p className="px-3 pt-1 text-label-xs font-mono text-muted-foreground/80">
               v{backendVersion}
             </p>
           )}

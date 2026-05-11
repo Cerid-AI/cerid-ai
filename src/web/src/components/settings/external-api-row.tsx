@@ -30,7 +30,7 @@ function StatusChip({ adapter }: { adapter: ExternalAPISummary }) {
     return (
       <Badge
         variant="outline"
-        className="border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400 text-[10px] px-2 py-0"
+        className="border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400 text-label-xs px-2 py-0"
       >
         Needs key
       </Badge>
@@ -40,14 +40,14 @@ function StatusChip({ adapter }: { adapter: ExternalAPISummary }) {
   return adapter.enabled ? (
     <Badge
       variant="outline"
-      className="border-green-500/40 bg-green-500/10 text-green-600 dark:text-green-400 text-[10px] px-2 py-0"
+      className="border-green-500/40 bg-green-500/10 text-green-600 dark:text-green-400 text-label-xs px-2 py-0"
     >
       Enabled
     </Badge>
   ) : (
     <Badge
       variant="outline"
-      className="border-muted text-muted-foreground text-[10px] px-2 py-0"
+      className="border-muted text-muted-foreground text-label-xs px-2 py-0"
     >
       Disabled
     </Badge>
@@ -95,11 +95,11 @@ export function ExternalAPIRow({ adapter, onToggle, togglePending = false }: Ext
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-medium">{adapter.display_name}</span>
-            <span className="text-[10px] font-mono text-muted-foreground">{adapter.slug}</span>
+            <span className="text-label-xs font-mono text-muted-foreground">{adapter.slug}</span>
             <StatusChip adapter={adapter} />
             {adapter.key_configured && adapter.requires_key && (
               <span
-                className="inline-flex items-center gap-1 text-[10px] text-muted-foreground"
+                className="inline-flex items-center gap-1 text-label-xs text-muted-foreground"
                 aria-label="API key configured"
               >
                 <KeyRound className="h-2.5 w-2.5" aria-hidden="true" />
@@ -113,7 +113,7 @@ export function ExternalAPIRow({ adapter, onToggle, togglePending = false }: Ext
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 gap-1.5 px-2 text-[11px]"
+          className="h-7 gap-1.5 px-2 text-label-sm"
           onClick={handleHealthCheck}
           disabled={healthLoading}
           aria-label={`Check health for ${adapter.display_name}`}

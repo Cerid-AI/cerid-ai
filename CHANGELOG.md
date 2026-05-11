@@ -2,6 +2,92 @@
 
 All notable changes to cerid-ai are documented here.
 
+## v0.92.1 — UX Polish + Drift Closeout (2026-05-11)
+
+Same-day follow-up to v0.92.0 closing every remaining open item from the
+cohesion-release punch list plus four UX-quality passes the user wanted to
+land before the release stabilised.
+
+**D.1 design-drift cleanup → 0 violations.** Added three custom typography
+tokens (`--text-label-xxs / -xs / -sm`) to `src/web/src/index.css` plus a
+`tailwind-merge` extension teaching `cn()` that these are font-size classes
+so they don't collide with text-colour classes. Bulk-migrated 538 instances
+of `text-[8/9/10/11px]` across ~80 files to the new tokens. Introduced two
+new shadcn-style primitives — `<ProgressBar pct=… size=… fillClassName=…>`
+and `<Textarea>` — replacing 11 hand-rolled inline-`style={{ width: … }}`
+progress bars and three duplicated `<textarea className="ring-[3px]…">`
+blocks in `governance-section.tsx`. The remaining 50 legitimate
+runtime-geometry / pinned-width exceptions are documented in
+`scripts/design_drift_allowlist.txt` (each entry has a section header
+explaining the rationale). The `lint-no-design-drift` CI job now passes
+through `--allow-file` and reports `OK — 0 violations`; flip to blocking
+once two consecutive `main` runs stay clean.
+
+**Phase 4 UX polish (Linear/Vercel/Stripe-quality pass).**
+- **Private Mode** (`chat-toolbar.tsx`): L4 ("Full ephemeral") now opens
+  an `AlertDialog` confirmation gate before wiping the session — mis-click
+  was previously irreversible. Each level radio item gained a two-line
+  layout (label + consequence description, matching the RAG-mode pattern).
+  The "Private" badge in the toolbar header now tracks the level colour
+  (green / yellow / orange / red) instead of always being amber, and the
+  overflow menu's Private item mirrors the per-level colour.
+- **Agent Console** (`agent-console.tsx`): the connection-status dot now
+  surfaces `connecting` / `retrying` states with a yellow pulse + caption
+  (`"Reconnecting (attempt 3/10)…"`); the empty state is a centred
+  `<Activity>` icon + prompt instead of a bare muted log line. Cards
+  (`agent-cards.tsx`) show a "Completed Ns ago" relative timestamp next to
+  the `ok` badge, refreshed every 10s while any card is in the success state.
+- **Model Management** (`model-management.tsx`): `PriceChangeRow` renders
+  before-and-after costs with directional arrows (red up / emerald down /
+  flat); cost labels on `NewModelRow` disambiguate input vs output as
+  `in $X · out $Y / 1M tok`; "Last checked" uses relative time with the
+  absolute value in a `title=`; the post-check feedback is now a teal
+  `<Alert>` instead of muted body text.
+
+**P1 deferred from v0.92.0 — now landed.** Added `HealthInvariants`
+interface to `src/web/src/lib/types.ts` and rendered a new
+`<InvariantsCard>` in the monitoring pane that surfaces the v0.92 fields
+not already shown elsewhere: `healthy_invariants` rollup, NLI model load
+state, memory consolidation failures (24h), verification report orphans,
+and swallowed-error totals.
+
+**Cross-pane navigation (R.2-link wiring closeout).** Created
+`<NavigationProvider>` in `src/web/src/contexts/navigation-context.tsx`
+exposing `goTo(pane)` and `composeChat({ text })`. Wired the GraphExplorer's
+entity-pill click to deep-link the wiki pane via `?entity=<canonical_id>`,
+and "Ask about this community" to seed the chat composer with the
+community summary. ChatInput consumes the seed on pane-mount, focuses the
+textarea, and leaves the text editable for the user to refine.
+
+**Backend closeouts.**
+- `scripts/backfill_entities.py` migrated to enqueue
+  `EntityExtractionJob` via the Redis processor queue by default
+  (`--in-process` retains the legacy direct-call path for ad-hoc
+  diagnostic runs). Progress is now visible in the Processor pane and
+  the `processor_*` `/health.invariants` fields.
+- New `scripts/lint-product-story.py` drift gate: asserts
+  `docs/PRODUCT_STORY.md` exists, has a `> **Last reviewed:** YYYY-MM-DD`
+  line ≤ 90 days old, and references all five canonical primitives. 8
+  unit tests in `src/mcp/tests/test_lint_product_story.py` cover the
+  happy path, every failure mode, and a real-doc sanity check. Job
+  wired in CI as `lint / product-story`.
+
+**Dependabot bumps.** `npm overrides` for `next > postcss` in `src/web/`
+clears 2 transitive postcss vulns (next was a transitive dep of `geist`);
+bumped `vitest 2.x → 4.1` in `packages/sdk/typescript/` to pull in the
+vite/esbuild patches. Both manifests now report `found 0 vulnerabilities`.
+
+**Verification.** 1044 frontend tests green (vitest), 4036 Python tests
+green (pytest), ruff + mypy + lint-imports clean, drift lint reports
+0 violations against the allowlist, silent-catch + product-story gates
+pass. Type-check (tsc + mypy) green across both layers.
+
+Key files: `src/web/src/index.css`, `src/web/src/components/ui/{progress-bar,textarea}.tsx`,
+`scripts/{design_drift_allowlist.txt,lint-product-story.py}`,
+`src/web/src/contexts/navigation-context.tsx`,
+`src/web/src/components/monitoring/invariants-card.tsx`,
+`src/mcp/scripts/backfill_entities.py`, `src/mcp/tests/test_lint_product_story.py`.
+
 ## v0.92.0 — Cohesion Release (2026-05-11)
 
 The "feature collection without a story" → coherent product release. Eight

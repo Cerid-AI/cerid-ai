@@ -200,22 +200,22 @@ export function ClaimOverlay({ container, claims, claimSpans, onClaimFocus, onAr
       <div className="flex items-center gap-1.5">
         <Badge
           variant="outline"
-          className={cn("text-[10px]", DISPLAY_STATUS_COLORS[displayStatus] ?? DISPLAY_STATUS_COLORS.error)}
+          className={cn("text-label-xs", DISPLAY_STATUS_COLORS[displayStatus] ?? DISPLAY_STATUS_COLORS.error)}
         >
           {displayStatus}
         </Badge>
         {claim.claim_type && claim.claim_type !== "factual" && (
-          <Badge variant="outline" className="text-[10px] px-1 py-0">
+          <Badge variant="outline" className="text-label-xs px-1 py-0">
             {claim.claim_type}
           </Badge>
         )}
         {methodLabel && (
-          <Badge variant="outline" className={`text-[10px] px-1 py-0 ${methodColor}`}>
+          <Badge variant="outline" className={`text-label-xs px-1 py-0 ${methodColor}`}>
             {methodLabel}
           </Badge>
         )}
         {claim.verification_model?.includes("grok-4") && (
-          <Badge variant="outline" className="text-[10px] px-1 py-0 bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-500/15 dark:text-indigo-400 dark:border-indigo-500/30">
+          <Badge variant="outline" className="text-label-xs px-1 py-0 bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-500/15 dark:text-indigo-400 dark:border-indigo-500/30">
             expert
           </Badge>
         )}
@@ -229,7 +229,7 @@ export function ClaimOverlay({ container, claims, claimSpans, onClaimFocus, onAr
 
       {/* Expand/collapse toggle */}
       <button
-        className="mt-1.5 inline-flex items-center gap-0.5 text-[11px] text-amber-600 dark:text-yellow-400 hover:text-yellow-300"
+        className="mt-1.5 inline-flex items-center gap-0.5 text-label-sm text-amber-600 dark:text-yellow-400 hover:text-yellow-300"
         onClick={() => setExpanded((prev) => !prev)}
       >
         {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
@@ -242,7 +242,7 @@ export function ClaimOverlay({ container, claims, claimSpans, onClaimFocus, onAr
           {/* KB-verified claims (kb or kb_nli): artifact link + snippet */}
           {(claim.verification_method === "kb" || claim.verification_method === "kb_nli") && (
             <>
-              <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+              <div className="mt-2 flex flex-wrap items-center gap-1.5 text-label-sm text-muted-foreground">
                 {claim.source_filename && (
                   claim.source_artifact_id && onArtifactClick ? (
                     <button
@@ -261,7 +261,7 @@ export function ClaimOverlay({ container, claims, claimSpans, onClaimFocus, onAr
                 )}
               </div>
               {claim.source_snippet && (
-                <p className="mt-1.5 line-clamp-3 text-[11px] text-muted-foreground/80 italic leading-relaxed">
+                <p className="mt-1.5 line-clamp-3 text-label-sm text-muted-foreground/80 italic leading-relaxed">
                   &ldquo;{claim.source_snippet.slice(0, 150)}&rdquo;
                 </p>
               )}
@@ -271,7 +271,7 @@ export function ClaimOverlay({ container, claims, claimSpans, onClaimFocus, onAr
           {/* Externally-verified claims: model + reasoning */}
           {claim.verification_method !== "kb" && claim.verification_method !== "kb_nli" && (
             <>
-              <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+              <div className="mt-2 flex flex-wrap items-center gap-1.5 text-label-sm text-muted-foreground">
                 {displayModelName(claim.verification_model) && (
                   <span className="text-muted-foreground">{displayModelName(claim.verification_model)}</span>
                 )}
@@ -280,7 +280,7 @@ export function ClaimOverlay({ container, claims, claimSpans, onClaimFocus, onAr
                 )}
               </div>
               {claim.reason && (
-                <p className="mt-1.5 text-[11px] text-muted-foreground/80 leading-relaxed">
+                <p className="mt-1.5 text-label-sm text-muted-foreground/80 leading-relaxed">
                   {claim.reason.slice(0, 200)}
                 </p>
               )}
@@ -290,8 +290,8 @@ export function ClaimOverlay({ container, claims, claimSpans, onClaimFocus, onAr
           {/* Ignorance claim: show found answer */}
           {claim.claim_type === "ignorance" && claim.status === "unverified" && claim.verification_answer && (
             <div className="mt-2 rounded bg-green-500/10 px-2 py-1.5">
-              <span className="text-[10px] font-medium text-green-700 dark:text-green-400">Found answer: </span>
-              <span className="text-[11px] leading-tight text-green-300/80">
+              <span className="text-label-xs font-medium text-green-700 dark:text-green-400">Found answer: </span>
+              <span className="text-label-sm leading-tight text-green-300/80">
                 {claim.verification_answer.slice(0, 300)}
               </span>
             </div>
@@ -299,7 +299,7 @@ export function ClaimOverlay({ container, claims, claimSpans, onClaimFocus, onAr
 
           {/* References section */}
           <div className="mt-2 border-t border-border/50 pt-2">
-            <p className="text-[10px] font-medium text-muted-foreground mb-1">References</p>
+            <p className="text-label-xs font-medium text-muted-foreground mb-1">References</p>
             {claim.source_urls && claim.source_urls.length > 0 ? (
               <div className="flex flex-col gap-1">
                 {claim.source_urls.slice(0, 5).map((url, i) => (
@@ -308,7 +308,7 @@ export function ClaimOverlay({ container, claims, claimSpans, onClaimFocus, onAr
                     href={url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-[11px] text-blue-500 hover:text-blue-700 dark:text-blue-400 truncate"
+                    className="inline-flex items-center gap-1 text-label-sm text-blue-500 hover:text-blue-700 dark:text-blue-400 truncate"
                   >
                     <ExternalLink className="h-2.5 w-2.5 shrink-0" />
                     {hostname(url)}
@@ -320,7 +320,7 @@ export function ClaimOverlay({ container, claims, claimSpans, onClaimFocus, onAr
                 href={`https://www.google.com/search?q=${encodeURIComponent(claim.claim)}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-[11px] text-blue-500 hover:text-blue-700 dark:text-blue-400"
+                className="inline-flex items-center gap-1 text-label-sm text-blue-500 hover:text-blue-700 dark:text-blue-400"
               >
                 <Search className="h-2.5 w-2.5" />
                 Search for references

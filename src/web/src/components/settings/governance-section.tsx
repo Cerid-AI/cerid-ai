@@ -21,6 +21,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import {
   Dialog,
@@ -224,7 +225,7 @@ export function GovernanceSection({ settings, sections, toggleSection }: Governa
               </div>
             )}
             {serversLoading && (
-              <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+              <p className="text-label-sm text-muted-foreground flex items-center gap-1">
                 <Loader2 className="h-3 w-3 animate-spin" /> Refreshing…
               </p>
             )}
@@ -260,7 +261,7 @@ function ModeBadge({ mode }: { mode: string }) {
       ? "bg-yellow-500/10 text-yellow-600 border-yellow-500/30 dark:text-yellow-400"
       : "bg-green-500/10 text-green-600 border-green-500/30 dark:text-green-400"
   return (
-    <Badge className={cn("uppercase tracking-wide font-mono text-[10px]", styles)}>
+    <Badge className={cn("uppercase tracking-wide font-mono text-label-xs", styles)}>
       {mode}
     </Badge>
   )
@@ -286,11 +287,11 @@ function ServerRow({
     (mode === "allowlist" && !allowlist.includes(server.name.toLowerCase()))
   const statusBadge =
     server.status === "connected" ? (
-      <Badge className="bg-green-500/10 text-green-600 border-green-500/30 dark:text-green-400 text-[10px]">connected</Badge>
+      <Badge className="bg-green-500/10 text-green-600 border-green-500/30 dark:text-green-400 text-label-xs">connected</Badge>
     ) : server.status === "error" ? (
-      <Badge className="bg-red-500/10 text-red-600 border-red-500/30 dark:text-red-400 text-[10px]">error</Badge>
+      <Badge className="bg-red-500/10 text-red-600 border-red-500/30 dark:text-red-400 text-label-xs">error</Badge>
     ) : (
-      <Badge variant="outline" className="text-[10px] text-muted-foreground">disconnected</Badge>
+      <Badge variant="outline" className="text-label-xs text-muted-foreground">disconnected</Badge>
     )
 
   const onReconnect = async () => {
@@ -331,7 +332,7 @@ function ServerRow({
         </div>
         <div className="flex items-center gap-1">
           {wouldDeny && (
-            <Badge className="bg-red-500/10 text-red-600 border-red-500/30 dark:text-red-400 text-[10px]" title="Would be denied by current MCP_CLIENT_MODE">
+            <Badge className="bg-red-500/10 text-red-600 border-red-500/30 dark:text-red-400 text-label-xs" title="Would be denied by current MCP_CLIENT_MODE">
               <Lock className="mr-0.5 h-2.5 w-2.5" /> denied
             </Badge>
           )}
@@ -361,10 +362,10 @@ function ServerRow({
         </div>
       </div>
       {server.error && (
-        <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">{server.error}</p>
+        <p className="mt-1 text-label-sm text-red-600 dark:text-red-400">{server.error}</p>
       )}
       {actionError && (
-        <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">{actionError}</p>
+        <p className="mt-1 text-label-sm text-red-600 dark:text-red-400">{actionError}</p>
       )}
       <div className="mt-1 flex items-center gap-2 text-muted-foreground">
         <span>{server.tool_count} tool{server.tool_count !== 1 ? "s" : ""}</span>
@@ -513,7 +514,7 @@ function AddServerDialog({
               autoComplete="off"
               spellCheck={false}
             />
-            <p className="text-[11px] text-muted-foreground font-mono">[a-z][a-z0-9_-]{`{1,30}`}</p>
+            <p className="text-label-sm text-muted-foreground font-mono">[a-z][a-z0-9_-]{`{1,30}`}</p>
           </div>
 
           <div className="grid gap-1.5">
@@ -549,24 +550,24 @@ function AddServerDialog({
               </div>
               <div className="grid gap-1.5">
                 <Label htmlFor="mcp-add-args">Args (one per line)</Label>
-                <textarea
+                <Textarea
                   id="mcp-add-args"
                   value={argsRaw}
                   onChange={(e) => setArgsRaw(e.target.value)}
                   rows={3}
-                  className="rounded-md border border-input bg-transparent px-3 py-2 text-sm font-mono shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+                  className="font-mono"
                   placeholder={"-y\n@modelcontextprotocol/server-filesystem\n/path/to/dir"}
                   spellCheck={false}
                 />
               </div>
               <div className="grid gap-1.5">
                 <Label htmlFor="mcp-add-env">Environment (KEY=VALUE per line)</Label>
-                <textarea
+                <Textarea
                   id="mcp-add-env"
                   value={envRaw}
                   onChange={(e) => setEnvRaw(e.target.value)}
                   rows={2}
-                  className="rounded-md border border-input bg-transparent px-3 py-2 text-sm font-mono shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+                  className="font-mono"
                   placeholder="MY_API_KEY=…"
                   spellCheck={false}
                 />
@@ -587,12 +588,12 @@ function AddServerDialog({
               </div>
               <div className="grid gap-1.5">
                 <Label htmlFor="mcp-add-headers">Headers (KEY=VALUE per line)</Label>
-                <textarea
+                <Textarea
                   id="mcp-add-headers"
                   value={headersRaw}
                   onChange={(e) => setHeadersRaw(e.target.value)}
                   rows={2}
-                  className="rounded-md border border-input bg-transparent px-3 py-2 text-sm font-mono shadow-xs outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+                  className="font-mono"
                   placeholder="Authorization=Bearer …"
                   spellCheck={false}
                 />

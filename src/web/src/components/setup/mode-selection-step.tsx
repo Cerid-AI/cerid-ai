@@ -78,7 +78,7 @@ export function ModeSelectionStep({
       </div>
       <h3 className="mb-2 text-center text-lg font-semibold">Choose Your Mode</h3>
 
-      <div className="mb-4 rounded-lg border bg-card px-3 py-2 text-center text-[11px] text-muted-foreground">
+      <div className="mb-4 rounded-lg border bg-card px-3 py-2 text-center text-label-sm text-muted-foreground">
         {providerText} · {kbText} · {ollamaText}
       </div>
 
@@ -87,7 +87,7 @@ export function ModeSelectionStep({
         <div className="mb-3 rounded-lg border border-brand/20 bg-brand/5 px-3 py-2">
           <div className="flex items-center gap-2">
             <Cpu className="h-3.5 w-3.5 text-brand shrink-0" />
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-label-sm text-muted-foreground">
               <span className="font-medium text-foreground">Recommended: {recommendation.mode === "advanced" ? "Advanced" : "Simple"}</span>
               {recommendation.reason && ` — ${recommendation.reason}`}
             </p>
@@ -95,7 +95,7 @@ export function ModeSelectionStep({
           {hardware.gpu_acceleration !== "none" && (
             <div className="mt-1.5 flex items-center gap-1.5">
               <Zap className="h-3 w-3 text-green-500" />
-              <p className="text-[10px] text-green-600 dark:text-green-400">
+              <p className="text-label-xs text-green-600 dark:text-green-400">
                 GPU acceleration available ({hardware.gpu_acceleration}) — embeddings and reranking will be faster
               </p>
             </div>
@@ -117,7 +117,7 @@ export function ModeSelectionStep({
           <div className="flex items-center gap-2">
             <p className="text-sm font-medium">Clean & Simple</p>
             {recommendation.mode === "simple" && hardware && hardware.ram_gb > 0 && (
-              <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-brand/30 text-brand">
+              <Badge variant="outline" className="text-label-xxs px-1.5 py-0 border-brand/30 text-brand">
                 Recommended
               </Badge>
             )}
@@ -140,7 +140,7 @@ export function ModeSelectionStep({
           <div className="flex items-center gap-2">
             <p className="text-sm font-medium">Advanced</p>
             {recommendation.mode === "advanced" && hardware && hardware.ram_gb > 0 && (
-              <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-brand/30 text-brand">
+              <Badge variant="outline" className="text-label-xxs px-1.5 py-0 border-brand/30 text-brand">
                 Recommended
               </Badge>
             )}
@@ -152,7 +152,7 @@ export function ModeSelectionStep({
         </button>
       </div>
 
-      <p className="mt-3 text-center text-[10px] text-muted-foreground">
+      <p className="mt-3 text-center text-label-xs text-muted-foreground">
         You can change this anytime from the sidebar.
       </p>
     </>

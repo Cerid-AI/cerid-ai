@@ -73,7 +73,7 @@ export function SourceTypeBadge({ sourceType, className }: SourceTypeBadgeProps)
           <Badge
             variant="outline"
             className={cn(
-              "gap-0.5 px-1.5 py-0 text-[9px] font-medium",
+              "gap-0.5 px-1.5 py-0 text-label-xxs font-medium",
               config.color,
               className,
             )}

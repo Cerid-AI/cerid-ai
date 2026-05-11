@@ -156,7 +156,7 @@ export function TagManager({ open, onOpenChange, localTags }: TagManagerProps) {
                   title={`${tag.usage_count} artifact${tag.usage_count !== 1 ? "s" : ""} — click to merge`}
                 >
                   <span>{tag.name}</span>
-                  <span className="text-[10px] text-muted-foreground">({tag.usage_count})</span>
+                  <span className="text-label-xs text-muted-foreground">({tag.usage_count})</span>
                 </button>
               ))}
             </div>

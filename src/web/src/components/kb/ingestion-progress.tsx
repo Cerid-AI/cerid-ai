@@ -11,6 +11,7 @@ import {
   AlertCircle,
   Clock,
 } from "lucide-react"
+import { ProgressBar } from "@/components/ui/progress-bar"
 import { cn } from "@/lib/utils"
 import { fetchIngestionProgress } from "@/lib/api"
 import type { IngestionFileProgress, IngestionStep } from "@/lib/types"
@@ -36,7 +37,7 @@ function StepIndicator({ currentStep }: { currentStep: IngestionStep }) {
           <div key={step} className="flex items-center gap-0.5">
             <span
               className={cn(
-                "text-[8px] px-1 py-0 rounded",
+                "text-label-xxs px-1 py-0 rounded",
                 isActive && "bg-primary/20 text-primary font-medium",
                 isDone && "text-green-600 dark:text-green-400 line-through",
                 !isActive && !isDone && "text-muted-foreground",
@@ -45,7 +46,7 @@ function StepIndicator({ currentStep }: { currentStep: IngestionStep }) {
               {STEP_LABELS[step]}
             </span>
             {idx < STEP_ORDER.length - 1 && (
-              <span className="text-muted-foreground text-[8px]">&middot;</span>
+              <span className="text-muted-foreground text-label-xxs">&middot;</span>
             )}
           </div>
         )
@@ -74,14 +75,14 @@ function FileProgressItem({ file }: { file: IngestionFileProgress }) {
       <StatusIcon className={cn("h-3.5 w-3.5 shrink-0 mt-0.5", statusColor)} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
-          <p className="truncate text-[11px] font-medium">{file.filename}</p>
+          <p className="truncate text-label-sm font-medium">{file.filename}</p>
           {file.status === "processing" && (
-            <span className="shrink-0 text-[10px] tabular-nums text-primary font-medium">
+            <span className="shrink-0 text-label-xs tabular-nums text-primary font-medium">
               {Math.round(file.progress)}%
             </span>
           )}
           {file.status === "done" && (
-            <Badge variant="secondary" className="text-[9px] px-1.5 py-0 bg-green-500/10 text-green-600 dark:text-green-400">
+            <Badge variant="secondary" className="text-label-xxs px-1.5 py-0 bg-green-500/10 text-green-600 dark:text-green-400">
               Done
             </Badge>
           )}
@@ -91,17 +92,12 @@ function FileProgressItem({ file }: { file: IngestionFileProgress }) {
           <>
             <StepIndicator currentStep={file.step} />
             {/* Progress bar */}
-            <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-muted">
-              <div
-                className="h-full rounded-full bg-primary transition-all duration-500 ease-out"
-                style={{ width: `${file.progress}%` }}
-              />
-            </div>
+            <ProgressBar pct={file.progress} size="sm" className="mt-1" />
           </>
         )}
 
         {file.status === "error" && file.error && (
-          <p className="mt-0.5 text-[10px] text-destructive">{file.error}</p>
+          <p className="mt-0.5 text-label-xs text-destructive">{file.error}</p>
         )}
       </div>
     </div>
@@ -135,10 +131,10 @@ export function IngestionProgress({ className }: IngestionProgressProps) {
     <div className={cn("border-b", className)}>
       <div className="flex items-center gap-2 px-3 py-1.5">
         <Loader2 className="h-3 w-3 animate-spin text-primary" />
-        <span className="flex-1 text-[11px] font-medium">
+        <span className="flex-1 text-label-sm font-medium">
           Ingesting {data.completed_files}/{data.total_files} files
         </span>
-        <Badge variant="outline" className="text-[9px] px-1.5 py-0">
+        <Badge variant="outline" className="text-label-xxs px-1.5 py-0">
           <FileText className="mr-0.5 h-2.5 w-2.5" />
           {data.total_files - data.completed_files} remaining
         </Badge>
@@ -146,12 +142,9 @@ export function IngestionProgress({ className }: IngestionProgressProps) {
 
       {/* Overall progress bar */}
       <div className="px-3 pb-1.5">
-        <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-          <div
-            className="h-full rounded-full bg-primary transition-all duration-500 ease-out"
-            style={{ width: `${data.total_files > 0 ? (data.completed_files / data.total_files) * 100 : 0}%` }}
-          />
-        </div>
+        <ProgressBar
+          pct={data.total_files > 0 ? (data.completed_files / data.total_files) * 100 : 0}
+        />
       </div>
 
       {/* Per-file queue */}

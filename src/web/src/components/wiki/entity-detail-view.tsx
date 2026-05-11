@@ -203,7 +203,7 @@ export function EntityDetailView({ slug, onSelectRelated }: EntityDetailViewProp
                     <div className="flex flex-wrap items-center gap-1.5">
                       {src.domain && <DomainBadge domain={src.domain} />}
                       {src.chunk_hash && (
-                        <Badge variant="outline" className="font-mono text-[9px]">
+                        <Badge variant="outline" className="font-mono text-label-xxs">
                           {src.chunk_hash.slice(0, 8)}
                         </Badge>
                       )}

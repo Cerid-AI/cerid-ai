@@ -87,7 +87,7 @@ function DuplicateGroupCard({
             </span>
             <Badge
               variant="outline"
-              className="text-[9px] px-1.5 py-0"
+              className="text-label-xxs px-1.5 py-0"
             >
               {Math.round(group.similarity * 100)}% similar
             </Badge>
@@ -96,7 +96,7 @@ function DuplicateGroupCard({
             <Button
               variant="outline"
               size="xs"
-              className="h-6 text-[10px] gap-1"
+              className="h-6 text-label-xs gap-1"
               disabled={merging || dismissing}
               onClick={handleMerge}
             >
@@ -110,7 +110,7 @@ function DuplicateGroupCard({
             <Button
               variant="ghost"
               size="xs"
-              className="h-6 text-[10px] gap-1"
+              className="h-6 text-label-xs gap-1"
               disabled={merging || dismissing}
               onClick={handleDismiss}
             >
@@ -138,19 +138,19 @@ function DuplicateGroupCard({
                   {idx === 0 && (
                     <CheckCircle2 className="h-3 w-3 shrink-0 text-green-500" />
                   )}
-                  <p className="truncate text-[11px] font-medium">
+                  <p className="truncate text-label-sm font-medium">
                     {artifact.filename}
                   </p>
                   {idx === 0 && (
                     <Badge
                       variant="secondary"
-                      className="text-[8px] px-1 py-0 bg-green-500/10 text-green-600 dark:text-green-400"
+                      className="text-label-xxs px-1 py-0 bg-green-500/10 text-green-600 dark:text-green-400"
                     >
                       KEEP
                     </Badge>
                   )}
                 </div>
-                <div className="mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground">
+                <div className="mt-0.5 flex items-center gap-2 text-label-xs text-muted-foreground">
                   <DomainBadge domain={artifact.domain} />
                   <span className="flex items-center gap-0.5">
                     <Layers className="h-2.5 w-2.5" />
@@ -162,7 +162,7 @@ function DuplicateGroupCard({
                   )}
                 </div>
                 {artifact.summary && (
-                  <p className="mt-1 text-[10px] text-muted-foreground line-clamp-2">
+                  <p className="mt-1 text-label-xs text-muted-foreground line-clamp-2">
                     {artifact.summary}
                   </p>
                 )}

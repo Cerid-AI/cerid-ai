@@ -218,7 +218,7 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
           >
             <Upload className="h-6 w-6 text-muted-foreground" />
             <p className="text-xs font-medium">Drop a file or click to upload</p>
-            <p className="text-[10px] text-muted-foreground">PDF, TXT, MD, DOCX</p>
+            <p className="text-label-xs text-muted-foreground">PDF, TXT, MD, DOCX</p>
             <input
               ref={fileInputRef}
               type="file"
@@ -244,7 +244,7 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
           >
             <Sparkles className="h-3.5 w-3.5 text-brand" />
             Use sample content
-            <Badge variant="secondary" className="text-[9px]">Quick start</Badge>
+            <Badge variant="secondary" className="text-label-xxs">Quick start</Badge>
           </button>
 
           {ingestError && (
@@ -284,7 +284,7 @@ export function FirstDocumentStep({ state, onChange }: FirstDocumentStepProps) {
                     type="button"
                     onClick={() => handleQuery(chip)}
                     disabled={queryLoading}
-                    className="rounded-full border bg-card px-2.5 py-1 text-[10px] text-muted-foreground transition-colors hover:border-brand hover:text-brand"
+                    className="rounded-full border bg-card px-2.5 py-1 text-label-xs text-muted-foreground transition-colors hover:border-brand hover:text-brand"
                   >
                     {chip}
                   </button>

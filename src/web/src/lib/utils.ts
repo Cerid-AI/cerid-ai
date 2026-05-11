@@ -2,8 +2,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { clsx, type ClassValue } from "clsx"
-import { twMerge } from "tailwind-merge"
+import { extendTailwindMerge } from "tailwind-merge"
 import type { ChatMessage } from "@/lib/types"
+
+// Teach tailwind-merge about our custom font-size tokens
+// (`--text-label-{xxs,xs,sm}` registered in `index.css` @theme block).
+// Without this, twMerge treats `text-label-sm` as a text-color class —
+// it then strips the size when the className also includes a text color
+// like `text-green-700`, leaving the badge default `text-xs` in place.
+const twMerge = extendTailwindMerge({
+  extend: {
+    classGroups: {
+      "font-size": [{ text: ["label-xxs", "label-xs", "label-sm"] }],
+    },
+  },
+})
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))

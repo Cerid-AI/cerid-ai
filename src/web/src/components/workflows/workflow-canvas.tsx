@@ -220,7 +220,7 @@ export default function WorkflowCanvas({
                 x={(source.position.x + NODE_W + target.position.x) / 2}
                 y={(source.position.y + target.position.y) / 2 + NODE_H / 2 - 8}
                 textAnchor="middle"
-                className="fill-zinc-400 text-[10px]"
+                className="fill-zinc-400 text-label-xs"
               >
                 {edge.label}
               </text>
@@ -265,7 +265,7 @@ export default function WorkflowCanvas({
               x={20}
               y={NODE_H / 2 + 4}
               textAnchor="middle"
-              className={cn("text-[11px] font-bold", colors.text)}
+              className={cn("text-label-sm font-bold", colors.text)}
             >
               {TYPE_ICONS[node.type] ?? "?"}
             </text>

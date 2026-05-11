@@ -58,7 +58,7 @@ export function ExternalAPIsSection({
         <Card className="mb-4">
           <CardContent className="pt-4 space-y-1">
             {/* Description */}
-            <p className="text-[11px] text-muted-foreground leading-snug mb-3">
+            <p className="text-label-sm text-muted-foreground leading-snug mb-3">
               Curated public APIs used for wiki enrichment and agent tool calls.
               Cerid never proxies through its own keys — keyless adapters call
               upstream services directly; key-required adapters use the

@@ -153,7 +153,7 @@ export function UploadDialog({ files, defaultDomain, onConfirm, onCancel, tier, 
                   <Badge
                     variant="secondary"
                     className={cn(
-                      "text-[9px] px-1.5 py-0",
+                      "text-label-xxs px-1.5 py-0",
                       isProType(file.name) && isCommunity && "border-amber-500/40 text-amber-600 dark:text-amber-400",
                     )}
                   >
@@ -162,7 +162,7 @@ export function UploadDialog({ files, defaultDomain, onConfirm, onCancel, tier, 
                     )}
                     {getFileTypeLabel(file.name)}
                   </Badge>
-                  <span className="tabular-nums text-[10px] text-muted-foreground/80">
+                  <span className="tabular-nums text-label-xs text-muted-foreground/80">
                     {formatFileSize(file.size)}
                   </span>
                 </div>
@@ -171,7 +171,7 @@ export function UploadDialog({ files, defaultDomain, onConfirm, onCancel, tier, 
           })}
         </div>
         {files.length > 1 && (
-          <p className="text-[10px] text-muted-foreground">
+          <p className="text-label-xs text-muted-foreground">
             Total: {formatFileSize(totalSize)}
           </p>
         )}
@@ -188,7 +188,7 @@ export function UploadDialog({ files, defaultDomain, onConfirm, onCancel, tier, 
                 <SelectItem value="auto">
                   <span className="flex items-center gap-1.5">
                     Auto-detect
-                    <Badge variant="outline" className="text-[9px]">AI</Badge>
+                    <Badge variant="outline" className="text-label-xxs">AI</Badge>
                   </span>
                 </SelectItem>
                 {DOMAINS.map((d) => (

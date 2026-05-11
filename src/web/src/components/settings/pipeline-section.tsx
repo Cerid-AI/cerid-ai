@@ -67,12 +67,12 @@ export function PipelineSection({ settings, sections, toggleSection, patch }: Pi
                         <span className="flex items-center gap-1 text-sm font-medium">
                           {preset.label}
                           {locked && (
-                            <Badge variant="outline" className="text-[10px] px-1 py-0 text-gold border-gold">
+                            <Badge variant="outline" className="text-label-xs px-1 py-0 text-gold border-gold">
                               <Crown className="mr-0.5 h-2.5 w-2.5" />Pro
                             </Badge>
                           )}
                         </span>
-                        <p className="mt-0.5 text-[11px] leading-tight text-muted-foreground">
+                        <p className="mt-0.5 text-label-sm leading-tight text-muted-foreground">
                           {preset.description}
                         </p>
                       </button>
@@ -86,11 +86,11 @@ export function PipelineSection({ settings, sections, toggleSection, patch }: Pi
               <div className="flex items-center gap-1.5">
                 <Badge
                   variant="outline"
-                  className="border-amber-500/30 bg-amber-500/5 text-[10px] font-mono uppercase tracking-wide text-amber-600 dark:text-amber-400"
+                  className="border-amber-500/30 bg-amber-500/5 text-label-xs font-mono uppercase tracking-wide text-amber-600 dark:text-amber-400"
                 >
                   Custom
                 </Badge>
-                <span className="text-[11px] text-muted-foreground">
+                <span className="text-label-sm text-muted-foreground">
                   Doesn&apos;t match any preset — adjust below or pick one above to reset.
                 </span>
               </div>
@@ -314,7 +314,7 @@ export function PipelineSection({ settings, sections, toggleSection, patch }: Pi
             <CardDescription className="flex items-center gap-2 text-xs">
               Per-source weights and toggles for Custom Smart RAG mode.
               {(settings.feature_tier ?? "community") === "community" && (
-                <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-gold">Pro</Badge>
+                <Badge variant="outline" className="text-label-xs px-1.5 py-0 text-gold">Pro</Badge>
               )}
             </CardDescription>
           </CardHeader>
@@ -347,7 +347,7 @@ export function PipelineSection({ settings, sections, toggleSection, patch }: Pi
 
                 <div className="space-y-2">
                   <p className="text-xs font-medium">Memory Type Filters</p>
-                  <p className="text-[11px] text-muted-foreground">
+                  <p className="text-label-sm text-muted-foreground">
                     Select which memory types are included in Smart/Custom Smart recall.
                   </p>
                   {["empirical", "decision", "preference", "project_context", "temporal", "conversational"].map((type) => (

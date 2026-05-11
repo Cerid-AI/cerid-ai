@@ -24,6 +24,13 @@
 @theme inline {
     --font-sans: "Geist Sans", system-ui, -apple-system, sans-serif;
     --font-mono: "Geist Mono", ui-monospace, "SFMono-Regular", monospace;
+    /* Micro typography scale for badges + metadata chips. Tailwind's
+       canonical text-xs is 12px — too large for status pills, kbd hints,
+       and dense list metadata. These three tokens unlock text-label-xxs
+       /-xs/-sm and eliminate ~94% of design-drift arbitrary values. */
+    --text-label-xxs: 0.5625rem;
+    --text-label-xs: 0.625rem;
+    --text-label-sm: 0.6875rem;
     --radius-sm: calc(var(--radius) - 4px);
     --radius-md: calc(var(--radius) - 2px);
     --radius-lg: var(--radius);

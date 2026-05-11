@@ -68,10 +68,10 @@ export function KBConfigStep({ config, onChange, lightweightRecommended, ramGb }
             />
             <BrowseButton onSelect={(name) => onChange({ ...config, archivePath: name })} />
           </div>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-label-sm text-muted-foreground">
             Where Cerid stores and watches for your documents. Domain subfolders are created automatically.
           </p>
-          <p className="text-[10px] text-muted-foreground/80">
+          <p className="text-label-xs text-muted-foreground/80">
             Tip: place this inside Dropbox or iCloud Drive to sync your knowledge base across machines.
           </p>
         </div>
@@ -85,7 +85,7 @@ export function KBConfigStep({ config, onChange, lightweightRecommended, ramGb }
                 <p className="text-xs font-medium text-yellow-600 dark:text-yellow-400">
                   {ramGb.toFixed(0)} GB RAM detected
                 </p>
-                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                <p className="mt-0.5 text-label-sm text-muted-foreground">
                   Lightweight mode disables Neo4j graph features for better performance on your system.
                 </p>
                 <div className="mt-2 flex items-center justify-between">
@@ -107,7 +107,7 @@ export function KBConfigStep({ config, onChange, lightweightRecommended, ramGb }
         <div className="flex items-center justify-between rounded-lg border bg-card px-3 py-2.5">
           <div>
             <p className="text-xs font-medium">Auto-ingest new files</p>
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-label-xs text-muted-foreground">
               Off by default. When on, files added to the archive folder
               are ingested automatically. You can change this any time in
               Settings.

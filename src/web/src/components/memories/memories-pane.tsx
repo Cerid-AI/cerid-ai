@@ -201,7 +201,7 @@ export default function MemoriesPane() {
         </div>
 
         {archiveResult && (
-          <div className="mt-1 rounded bg-muted/50 px-2 py-1 text-[10px] text-muted-foreground">
+          <div className="mt-1 rounded bg-muted/50 px-2 py-1 text-label-xs text-muted-foreground">
             {archiveResult}
           </div>
         )}
@@ -215,7 +215,7 @@ export default function MemoriesPane() {
             onClick={() => setFilter(null)}
           >
             All
-            <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">
+            <Badge variant="secondary" className="ml-1 h-4 px-1 text-label-xs">
               {memories.length}
             </Badge>
           </Button>
@@ -231,7 +231,7 @@ export default function MemoriesPane() {
               >
                 <t.icon className={cn("mr-0.5 h-3 w-3", t.text)} />
                 {t.label}
-                <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">
+                <Badge variant="secondary" className="ml-1 h-4 px-1 text-label-xs">
                   {count}
                 </Badge>
               </Button>
@@ -291,7 +291,7 @@ export default function MemoriesPane() {
                         <TooltipTrigger asChild>
                           <Badge
                             variant="secondary"
-                            className={cn("cursor-help gap-1 text-[11px]", cfg.bg, cfg.text)}
+                            className={cn("cursor-help gap-1 text-label-sm", cfg.bg, cfg.text)}
                           >
                             <cfg.icon className="h-3 w-3" aria-hidden="true" />
                             {cfg.label.replace(/s$/, "")}
@@ -390,7 +390,7 @@ export default function MemoriesPane() {
                     )}
 
                     {/* Metadata footer (read-only — provenance, not controls) */}
-                    <div className="mt-2 flex items-center gap-2 text-[10px] text-muted-foreground">
+                    <div className="mt-2 flex items-center gap-2 text-label-xs text-muted-foreground">
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <span className="cursor-help" aria-label={`Source conversation ${memory.conversation_id}`}>
@@ -398,8 +398,8 @@ export default function MemoriesPane() {
                           </span>
                         </TooltipTrigger>
                         <TooltipContent side="top" className="max-w-72">
-                          <p className="font-mono text-[10px]">{memory.conversation_id}</p>
-                          <p className="mt-1 text-[10px] text-muted-foreground">Source conversation — open in the Chat sidebar to revisit.</p>
+                          <p className="font-mono text-label-xs">{memory.conversation_id}</p>
+                          <p className="mt-1 text-label-xs text-muted-foreground">Source conversation — open in the Chat sidebar to revisit.</p>
                         </TooltipContent>
                       </Tooltip>
                       <span aria-label={`Created ${memory.created_at}`}>{formatDate(memory.created_at)}</span>

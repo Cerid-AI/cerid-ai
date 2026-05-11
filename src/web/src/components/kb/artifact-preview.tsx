@@ -192,7 +192,7 @@ export function ArtifactPreview({ artifactId, open, onClose }: ArtifactPreviewPr
                     <Button
                       variant="ghost"
                       size="xs"
-                      className="h-5 text-[10px]"
+                      className="h-5 text-label-xs"
                       onClick={() => {
                         if (editingTags) {
                           setEditingTags(false)
@@ -210,7 +210,7 @@ export function ArtifactPreview({ artifactId, open, onClose }: ArtifactPreviewPr
                     <div className="rounded border bg-muted/30 p-2">
                       <div className="flex flex-wrap gap-1 mb-1.5">
                         {editedTags.map((tag) => (
-                          <span key={tag} className="inline-flex items-center gap-0.5 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
+                          <span key={tag} className="inline-flex items-center gap-0.5 rounded bg-primary/10 px-1.5 py-0.5 text-label-xs text-primary">
                             {tag}
                             <button className="hover:text-destructive" onClick={() => setEditedTags((t) => t.filter((x) => x !== tag))}>
                               <X className="h-2.5 w-2.5" />
@@ -220,7 +220,7 @@ export function ArtifactPreview({ artifactId, open, onClose }: ArtifactPreviewPr
                       </div>
                       <div className="flex items-center gap-1">
                         <input
-                          className="h-6 flex-1 rounded border bg-background px-1.5 text-[11px] outline-none focus:ring-1 focus:ring-primary"
+                          className="h-6 flex-1 rounded border bg-background px-1.5 text-label-sm outline-none focus:ring-1 focus:ring-primary"
                           placeholder="Add tag..."
                           value={tagInput}
                           onChange={(e) => setTagInput(e.target.value)}
@@ -236,7 +236,7 @@ export function ArtifactPreview({ artifactId, open, onClose }: ArtifactPreviewPr
                         <Button
                           variant="default"
                           size="xs"
-                          className="h-6 text-[10px]"
+                          className="h-6 text-label-xs"
                           disabled={savingTags}
                           onClick={handleSaveTags}
                         >
@@ -247,7 +247,7 @@ export function ArtifactPreview({ artifactId, open, onClose }: ArtifactPreviewPr
                   ) : tags.length > 0 ? (
                     <div className="flex flex-wrap gap-1">
                       {tags.map((tag) => (
-                        <Badge key={tag} variant="secondary" className="text-[10px]">
+                        <Badge key={tag} variant="secondary" className="text-label-xs">
                           {tag}
                         </Badge>
                       ))}

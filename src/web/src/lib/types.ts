@@ -118,6 +118,43 @@ export interface ArtifactDetail {
   metadata: Record<string, unknown>
 }
 
+/**
+ * Snapshot of observable system invariants reported by GET /health.
+ * Critical fields (those that flip ``healthy_invariants`` to false) are
+ * documented in src/mcp/app/startup/invariants.py — the most important
+ * one is ``nli_model_loaded``. Other fields are dashboard-only.
+ */
+export interface HealthInvariants {
+  /** Overall pass/fail rolled up from the critical invariants. */
+  healthy_invariants?: boolean
+  /** Critical: NLI verification model must be loaded. */
+  nli_model_loaded?: boolean
+  nli_error?: string
+  /** Empty Chroma collections (informational; legitimate during early setup). */
+  collections_empty?: string[]
+  /** Verification reports missing provenance edges — m0001 backfilled history. */
+  verification_report_orphans?: number
+  /** Histogram of `log_swallowed_error` calls over the last hour, by module. */
+  swallowed_errors_last_hour?: Record<string, number>
+  /** Internal module fingerprints — diff watchpoint. */
+  internal_modules?: Record<string, unknown>
+  /** v0.92 — Phase E.5 TrustScore rolling summary. */
+  trust_score_24h?: {
+    score?: number
+    samples?: number
+    [k: string]: unknown
+  }
+  /** v0.92 — Phase 3b processor metrics. */
+  processor_jobs_completed_24h?: number
+  processor_cost_usd_7d?: number
+  processor_throttled_ticks?: number
+  /** v0.92 — Phase O.2 memory consolidation failure count. */
+  memory_consolidation_failures_last_24h?: number
+  /** Errors that occurred during snapshot collection itself. */
+  errors?: string[]
+  [k: string]: unknown
+}
+
 export interface HealthResponse {
   status: "healthy" | "degraded"
   /** Backend semver (e.g. "0.83.0") — surfaced in the sidebar footer. */
@@ -130,6 +167,8 @@ export interface HealthResponse {
   openrouter_credits_exhausted?: boolean
   openrouter_auth_ok?: boolean | null
   circuit_breakers?: Record<string, string>
+  /** Operational invariants snapshot (added in v0.92). */
+  invariants?: HealthInvariants
 }
 
 // ---------------------------------------------------------------------------

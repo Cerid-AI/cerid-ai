@@ -146,16 +146,16 @@ export function SyncSection() {
               <div className="space-y-1 text-xs text-muted-foreground">
                 <div className="flex justify-between">
                   <span>Last export</span>
-                  <span className="font-mono text-[10px]">
+                  <span className="font-mono text-label-xs">
                     {formatTimestamp(status.manifest.last_exported_at || status.manifest.timestamp)}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span>Source machine</span>
-                  <span className="font-mono text-[10px]">{status.manifest.machine_id}</span>
+                  <span className="font-mono text-label-xs">{status.manifest.machine_id}</span>
                 </div>
                 {status.manifest.is_incremental && (
-                  <Badge variant="outline" className="text-[10px]">Incremental</Badge>
+                  <Badge variant="outline" className="text-label-xs">Incremental</Badge>
                 )}
               </div>
             ) : (
@@ -167,8 +167,8 @@ export function SyncSection() {
             {/* Count comparison */}
             {status.manifest && (
               <div className="rounded-md border p-2">
-                <p className="mb-1.5 text-[10px] font-medium text-muted-foreground">Local vs Sync</p>
-                <div className="grid grid-cols-3 gap-x-3 gap-y-1 text-[10px]">
+                <p className="mb-1.5 text-label-xs font-medium text-muted-foreground">Local vs Sync</p>
+                <div className="grid grid-cols-3 gap-x-3 gap-y-1 text-label-xs">
                   <span className="text-muted-foreground">Store</span>
                   <span className="text-center text-muted-foreground">Local</span>
                   <span className="text-center text-muted-foreground">Sync</span>
@@ -193,8 +193,8 @@ export function SyncSection() {
                 {/* Chroma per-domain */}
                 {Object.keys(status.local.chroma_chunks).length > 0 && (
                   <>
-                    <p className="mb-1 mt-2 text-[10px] font-medium text-muted-foreground">Chunks by domain</p>
-                    <div className="grid grid-cols-3 gap-x-3 gap-y-0.5 text-[10px]">
+                    <p className="mb-1 mt-2 text-label-xs font-medium text-muted-foreground">Chunks by domain</p>
+                    <div className="grid grid-cols-3 gap-x-3 gap-y-0.5 text-label-xs">
                       {Object.entries(status.local.chroma_chunks).map(([domain, count]) => (
                         <ChunkRow
                           key={domain}
@@ -262,12 +262,12 @@ export function SyncSection() {
             </Button>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[10px] text-muted-foreground">Conflict strategy:</span>
+            <span className="text-label-xs text-muted-foreground">Conflict strategy:</span>
             <Select
               value={conflictStrategy}
               onValueChange={(v) => setConflictStrategy(v as ConflictStrategy)}
             >
-              <SelectTrigger className="h-6 w-36 text-[10px]">
+              <SelectTrigger className="h-6 w-36 text-label-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -328,23 +328,23 @@ function ImportResultSummary({ result }: { result: SyncImportResult }) {
             {neo4j.artifacts_conflict} conflict{neo4j.artifacts_conflict !== 1 ? "s" : ""}:
           </p>
           {neo4j.conflicts.slice(0, 5).map((c) => (
-            <div key={c.artifact_id} className="flex items-center gap-1 text-[10px] text-muted-foreground">
+            <div key={c.artifact_id} className="flex items-center gap-1 text-label-xs text-muted-foreground">
               <span className="min-w-0 truncate">{c.filename}</span>
-              <Badge variant="outline" className="ml-auto shrink-0 text-[9px]">{c.resolution}</Badge>
+              <Badge variant="outline" className="ml-auto shrink-0 text-label-xxs">{c.resolution}</Badge>
             </div>
           ))}
           {neo4j.conflicts.length > 5 && (
-            <p className="text-[9px] text-muted-foreground">+{neo4j.conflicts.length - 5} more</p>
+            <p className="text-label-xxs text-muted-foreground">+{neo4j.conflicts.length - 5} more</p>
           )}
         </div>
       )}
       {result.consistency_warnings.length > 0 && (
         <div className="space-y-0.5">
-          <p className="text-[10px] text-yellow-600 dark:text-yellow-400">
+          <p className="text-label-xs text-yellow-600 dark:text-yellow-400">
             {result.consistency_warnings.length} warning{result.consistency_warnings.length !== 1 ? "s" : ""}
           </p>
           {result.consistency_warnings.slice(0, 3).map((w, i) => (
-            <p key={i} className="text-[10px] text-muted-foreground">{w}</p>
+            <p key={i} className="text-label-xs text-muted-foreground">{w}</p>
           ))}
         </div>
       )}

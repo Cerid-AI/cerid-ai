@@ -121,11 +121,11 @@ function ComponentTab({ comp }: { comp: TrustComponent }) {
       {/* Value row */}
       <div className="flex flex-wrap items-center gap-4">
         <div>
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Current</p>
+          <p className="text-label-xs uppercase tracking-wider text-muted-foreground">Current</p>
           <p className="text-2xl font-semibold tabular-nums">{formatComponentValue(comp)}</p>
         </div>
         <div>
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Target</p>
+          <p className="text-label-xs uppercase tracking-wider text-muted-foreground">Target</p>
           <p className="text-2xl font-semibold tabular-nums text-muted-foreground">
             {formatComponentTarget(comp)}
           </p>
@@ -137,7 +137,7 @@ function ComponentTab({ comp }: { comp: TrustComponent }) {
 
       {/* Sparkline */}
       <div>
-        <p className="mb-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+        <p className="mb-1.5 text-label-xs uppercase tracking-wider text-muted-foreground">
           Trend (last 7 days)
         </p>
         {/* history field not yet on TrustComponent — placeholder shown until backend adds it */}
@@ -189,7 +189,7 @@ function ComponentTab({ comp }: { comp: TrustComponent }) {
       {/* When this drops */}
       {meta && (
         <div className="rounded-md bg-muted/50 px-3 py-2">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <p className="text-label-xs font-semibold uppercase tracking-wider text-muted-foreground">
             When this drops
           </p>
           <p className="mt-0.5 text-xs text-foreground/80">{meta.whenDrops}</p>

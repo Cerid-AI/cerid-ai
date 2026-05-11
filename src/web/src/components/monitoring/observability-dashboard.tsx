@@ -94,7 +94,7 @@ function TrendIndicator({ current, previous }: { current: number | null; previou
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-0.5 text-[10px] font-medium",
+        "inline-flex items-center gap-0.5 text-label-xs font-medium",
         isUp ? "text-red-500" : "text-green-500",
       )}
       title={`${isUp ? "+" : ""}${pctChange.toFixed(1)}% vs previous period`}
@@ -136,7 +136,7 @@ function MetricCard({ title, icon: Icon, value, subtitle, sparklineData, trend, 
           <div className="min-w-0">
             <div className="text-xl font-bold tabular-nums leading-tight">{value}</div>
             {subtitle && (
-              <p className="mt-0.5 text-[10px] text-muted-foreground">{subtitle}</p>
+              <p className="mt-0.5 text-label-xs text-muted-foreground">{subtitle}</p>
             )}
             {trend && (
               <TrendIndicator current={trend.current} previous={trend.previous} />
@@ -382,7 +382,7 @@ export function ObservabilityDashboard() {
                 {pipelineStats ? `${pipelineStats.ollamaCount}/${pipelineStats.total} local` : "—"}
               </div>
               {pipelineStats && (
-                <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground">
+                <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-label-xs text-muted-foreground">
                   {ALL_STAGES.map((stage) => {
                     const provider = pipelineStats.providers[stage] ?? "\u2014"
                     return (

@@ -70,12 +70,12 @@ export function TrustScoreHover({ data, onDetailsClick }: TrustScoreHoverProps) 
             {data.score !== null ? data.score : "—"}
           </span>
         </p>
-        <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider", display.bgClass, display.textClass)}>
+        <span className={cn("rounded-full px-2 py-0.5 text-label-xs font-semibold uppercase tracking-wider", display.bgClass, display.textClass)}>
           {display.label}
         </span>
       </div>
 
-      <p className="text-[10px] text-muted-foreground">Updated {updatedAt}</p>
+      <p className="text-label-xs text-muted-foreground">Updated {updatedAt}</p>
 
       {/* Component list */}
       <ul className="space-y-1.5" aria-label="Trust score components">
@@ -98,7 +98,7 @@ export function TrustScoreHover({ data, onDetailsClick }: TrustScoreHoverProps) 
         <button
           type="button"
           onClick={onDetailsClick}
-          className="flex w-full items-center justify-end gap-1 text-[10px] text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex w-full items-center justify-end gap-1 text-label-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           Click for details
           <ExternalLink className="h-3 w-3" aria-hidden="true" />

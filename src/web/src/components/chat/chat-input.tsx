@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useRef, useCallback, type KeyboardEvent, type DragEvent } from "react"
+import { useEffect, useState, useRef, useCallback, type KeyboardEvent, type DragEvent } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -12,6 +12,7 @@ import { useDragDrop } from "@/hooks/use-drag-drop"
 import { cn } from "@/lib/utils"
 import type { KBQueryResult } from "@/lib/types"
 import { logSwallowedError } from "@/lib/log-swallowed"
+import { useNavigation } from "@/contexts/navigation-context"
 
 interface InjectedSource {
   filename: string
@@ -35,6 +36,24 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount
   const [input, setInput] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [isArtifactDragOver, setIsArtifactDragOver] = useState(false)
+  const { activePane, consumeChatSeed } = useNavigation()
+  // Cross-pane seeds (e.g. "Ask about this community" from the Communities
+  // pane) land here when the user lands on the chat pane. Consume once,
+  // focus the textarea, leave editable so the user can refine before sending.
+  useEffect(() => {
+    if (activePane !== "chat") return
+    const seed = consumeChatSeed()
+    if (!seed) return
+    setInput(seed.text)
+    onInputChange?.(seed.text)
+    queueMicrotask(() => {
+      const ta = textareaRef.current
+      if (ta) {
+        ta.focus()
+        ta.setSelectionRange(seed.text.length, seed.text.length)
+      }
+    })
+  }, [activePane, consumeChatSeed, onInputChange])
   // Synchronous guard against rapid-Enter double-submit.
   // `isStreaming` is React state and won't update between the Enter-press and state propagation,
   // so a second Enter fired before the parent flips `isStreaming` to true would double-send.
@@ -162,7 +181,7 @@ export function ChatInput({ onSend, onStop, isStreaming, disabled, injectedCount
                     <span className="truncate text-xs font-medium">{src.filename}</span>
                     <DomainBadge domain={src.domain} />
                   </div>
-                  <p className="mt-1 line-clamp-2 text-[10px] text-muted-foreground">
+                  <p className="mt-1 line-clamp-2 text-label-xs text-muted-foreground">
                     {src.content.slice(0, 120)}{src.content.length > 120 ? "..." : ""}
                   </p>
                 </div>

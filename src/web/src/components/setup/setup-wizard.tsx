@@ -594,11 +594,11 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                         href="https://openrouter.ai/credits"
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-[10px] text-brand hover:underline"
+                        className="text-label-xs text-brand hover:underline"
                       >
                         Add Credits &rarr;
                       </a>
-                      <span className="text-[10px] text-muted-foreground">
+                      <span className="text-label-xs text-muted-foreground">
                         Credits purchased through OpenRouter, not Cerid
                       </span>
                     </div>
@@ -606,7 +606,7 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                 )}
                 {/* Usage rate explainer */}
                 {state.keys.openrouter.valid && (
-                  <div className="rounded-lg border bg-muted/20 px-3 py-2 text-[10px] text-muted-foreground">
+                  <div className="rounded-lg border bg-muted/20 px-3 py-2 text-label-xs text-muted-foreground">
                     Costs vary by model. A typical query costs $0.001-0.01. Verification adds ~$0.001 per 10 claims.
                     Expert mode uses premium models at higher rates.{" "}
                     <a href="https://openrouter.ai/models" target="_blank" rel="noopener noreferrer" className="text-brand hover:underline">
@@ -616,7 +616,7 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                 )}
 
                 <div className="border-t pt-3">
-                  <p className="mb-3 text-[11px] text-muted-foreground">
+                  <p className="mb-3 text-label-sm text-muted-foreground">
                     Optional — add direct provider keys for lower latency or specific model access:
                   </p>
                   <div className="space-y-3">
@@ -704,12 +704,12 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                         <span className="flex items-center gap-2">
                           <span className="text-xs text-muted-foreground">Not configured</span>
                           {provider !== "openrouter" && (
-                            <span className="text-[10px] text-muted-foreground/80">Optional</span>
+                            <span className="text-label-xs text-muted-foreground/80">Optional</span>
                           )}
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-5 px-1.5 text-[10px] text-brand"
+                            className="h-5 px-1.5 text-label-xs text-brand"
                             onClick={() => dispatch({ type: "SET_STEP", step: 1 })}
                           >
                             Fix →
@@ -926,7 +926,7 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                 <button
                   type="button"
                   onClick={handleFinish}
-                  className="text-[10px] text-muted-foreground/80 hover:text-muted-foreground transition-colors"
+                  className="text-label-xs text-muted-foreground/80 hover:text-muted-foreground transition-colors"
                 >
                   Skip setup — I&apos;ve already configured Cerid
                 </button>
@@ -977,7 +977,7 @@ function CapabilitySummary({ assessment }: { assessment: CapabilityAssessment })
         {assessment.capabilities.map((cap) => (
           <div key={cap.label} className="flex items-center gap-1.5">
             <div className={cn("h-1.5 w-1.5 rounded-full shrink-0", CAPABILITY_STATUS_DOT[cap.status])} />
-            <span className="text-[11px] text-muted-foreground">{cap.label}</span>
+            <span className="text-label-sm text-muted-foreground">{cap.label}</span>
           </div>
         ))}
       </div>
@@ -986,13 +986,13 @@ function CapabilitySummary({ assessment }: { assessment: CapabilityAssessment })
           {assessment.capabilities
             .filter((c) => c.reason && c.status !== "available")
             .map((c) => (
-              <p key={c.label} className="text-[10px] text-muted-foreground">
+              <p key={c.label} className="text-label-xs text-muted-foreground">
                 {c.label}: {c.reason}
               </p>
             ))}
         </div>
       )}
-      <p className="mt-1.5 text-[10px] text-muted-foreground/80">
+      <p className="mt-1.5 text-label-xs text-muted-foreground/80">
         {COST_PROFILE_LABELS[assessment.costProfile]}
       </p>
     </div>

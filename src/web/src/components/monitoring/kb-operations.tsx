@@ -203,9 +203,9 @@ export function KBOperations() {
           {generateSynopses && (
             <div className="mb-2 space-y-1.5">
               <div className="flex items-center gap-2">
-                <span className="text-[10px] text-muted-foreground">Model:</span>
+                <span className="text-label-xs text-muted-foreground">Model:</span>
                 <Select value={synopsisModel} onValueChange={setSynopsisModel}>
-                  <SelectTrigger className="h-6 w-40 text-[10px]">
+                  <SelectTrigger className="h-6 w-40 text-label-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -218,13 +218,13 @@ export function KBOperations() {
                 </Select>
               </div>
               {estimateLoading && (
-                <p className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                <p className="flex items-center gap-1 text-label-xs text-muted-foreground">
                   <Loader2 className="h-3 w-3 animate-spin" />
                   Estimating...
                 </p>
               )}
               {synopsisEstimate && !estimateLoading && (
-                <p className="text-[10px] text-muted-foreground">
+                <p className="text-label-xs text-muted-foreground">
                   ~{synopsisEstimate.candidate_count} artifacts ·{" "}
                   {synopsisEstimate.is_free_model
                     ? <span className="text-green-600 dark:text-green-400">Free</span>
@@ -374,18 +374,18 @@ function CurationResults({ result }: { result: CurateResponse }) {
             <div className={cn("text-sm font-medium tabular-nums", color)}>
               {dist[tier] ?? 0}
             </div>
-            <div className="text-[10px] text-muted-foreground capitalize">{tier}</div>
+            <div className="text-label-xs text-muted-foreground capitalize">{tier}</div>
           </div>
         ))}
       </div>
       {result.low_quality_artifacts.length > 0 && (
         <div className="border-t pt-2">
-          <p className="text-[10px] font-medium text-muted-foreground mb-1">
+          <p className="text-label-xs font-medium text-muted-foreground mb-1">
             Low quality ({result.low_quality_artifacts.length}):
           </p>
           <div className="space-y-0.5">
             {result.low_quality_artifacts.slice(0, 5).map((art) => (
-              <div key={art.artifact_id} className="flex items-center gap-1 text-[10px] text-muted-foreground">
+              <div key={art.artifact_id} className="flex items-center gap-1 text-label-xs text-muted-foreground">
                 <span className="min-w-0 truncate">{art.filename}</span>
                 <span className="ml-auto shrink-0 tabular-nums text-red-600 dark:text-red-400">
                   {Math.round(art.quality_score * 100)}%
@@ -393,7 +393,7 @@ function CurationResults({ result }: { result: CurateResponse }) {
               </div>
             ))}
             {result.low_quality_artifacts.length > 5 && (
-              <p className="text-[9px] text-muted-foreground">
+              <p className="text-label-xxs text-muted-foreground">
                 +{result.low_quality_artifacts.length - 5} more
               </p>
             )}

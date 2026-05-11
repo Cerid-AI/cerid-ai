@@ -160,35 +160,35 @@ export function CustomApiDialog({ open, onClose, onSave }: CustomApiDialogProps)
 
           <div className="grid grid-cols-3 gap-2">
             <div className="space-y-1.5">
-              <Label className="text-[10px] text-muted-foreground">Response Path</Label>
+              <Label className="text-label-xs text-muted-foreground">Response Path</Label>
               <Input
                 value={config.responsePath}
                 onChange={(e) => patch({ responsePath: e.target.value })}
                 placeholder="data.results"
-                className="h-7 font-mono text-[10px]"
+                className="h-7 font-mono text-label-xs"
               />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-[10px] text-muted-foreground">Title Field</Label>
+              <Label className="text-label-xs text-muted-foreground">Title Field</Label>
               <Input
                 value={config.titleField}
                 onChange={(e) => patch({ titleField: e.target.value })}
                 placeholder="title"
-                className="h-7 font-mono text-[10px]"
+                className="h-7 font-mono text-label-xs"
               />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-[10px] text-muted-foreground">Content Field</Label>
+              <Label className="text-label-xs text-muted-foreground">Content Field</Label>
               <Input
                 value={config.contentField}
                 onChange={(e) => patch({ contentField: e.target.value })}
                 placeholder="content"
-                className="h-7 font-mono text-[10px]"
+                className="h-7 font-mono text-label-xs"
               />
             </div>
           </div>
 
-          {testError && <p className="text-[10px] text-destructive">{testError}</p>}
+          {testError && <p className="text-label-xs text-destructive">{testError}</p>}
 
           <div className="flex justify-between">
             <Button variant="outline" size="sm" onClick={handleTest} disabled={!config.baseUrl.trim() || testing}>

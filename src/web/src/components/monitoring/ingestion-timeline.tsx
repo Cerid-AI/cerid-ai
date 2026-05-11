@@ -52,7 +52,7 @@ export function IngestionTimeline({ entries }: IngestionTimelineProps) {
             >
               <Badge
                 variant="outline"
-                className={`text-[10px] ${EVENT_STYLES[entry.event] ?? ""}`}
+                className={`text-label-xs ${EVENT_STYLES[entry.event] ?? ""}`}
               >
                 {entry.event}
               </Badge>

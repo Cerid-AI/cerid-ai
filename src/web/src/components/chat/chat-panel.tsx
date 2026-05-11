@@ -57,8 +57,8 @@ function OllamaCopyRow({ os, cmd, accent }: { os: string; cmd: string; accent: "
   const border = accent === "teal" ? "border-teal-500/20" : "border-yellow-500/20"
   return (
     <div className={`flex items-center gap-1.5 rounded border ${border} bg-background/50 px-2 py-1`}>
-      <span className={`text-[10px] font-semibold ${color} w-10 shrink-0`}>{os}</span>
-      <code className="flex-1 text-[10px] truncate select-all font-mono text-muted-foreground">{cmd}</code>
+      <span className={`text-label-xs font-semibold ${color} w-10 shrink-0`}>{os}</span>
+      <code className="flex-1 text-label-xs truncate select-all font-mono text-muted-foreground">{cmd}</code>
       <button
         className="shrink-0 rounded p-0.5 hover:bg-muted"
         onClick={() => { navigator.clipboard.writeText(cmd).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) }) }}
@@ -510,7 +510,7 @@ export function ChatPanel() {
                       <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm">{preview}</p>
-                        <p className="text-[11px] text-muted-foreground">
+                        <p className="text-label-sm text-muted-foreground">
                           {c.messages.length} message{c.messages.length !== 1 ? "s" : ""}
                         </p>
                       </div>
@@ -645,7 +645,7 @@ export function ChatPanel() {
 
       {/* Expert verification cost indicator */}
       {!isSimple && expertVerification && hallucinationEnabled && verification.phase !== "idle" && verification.phase !== "done" && (
-        <div className="flex items-center gap-2 px-3 py-1 text-[11px] text-amber-500 bg-amber-500/5 border-b border-amber-500/10">
+        <div className="flex items-center gap-2 px-3 py-1 text-label-sm text-amber-500 bg-amber-500/5 border-b border-amber-500/10">
           <ShieldCheck className="h-3 w-3" />
           Expert verification active — ~15× standard cost
         </div>
@@ -660,7 +660,7 @@ export function ChatPanel() {
               {setupSteps.some(s => s.label.includes("not running")) ? "Ollama Setup Required" : "Setting up Ollama..."}
             </span>
           </div>
-          <div className="space-y-1 font-mono text-[10px] text-muted-foreground">
+          <div className="space-y-1 font-mono text-label-xs text-muted-foreground">
             {setupSteps.map((step, i) => (
               <div key={i} className="flex items-center gap-1.5">
                 {step.status === "done" && step.label.startsWith("\u2717") && <X className="h-3 w-3 text-red-400" />}
@@ -674,7 +674,7 @@ export function ChatPanel() {
           {/* Show install instructions + retry when Ollama not detected */}
           {setupSteps.some(s => s.label.includes("not running")) && (
             <div className="mt-3 space-y-2">
-              <p className="text-[11px] text-muted-foreground">Open Terminal (Spotlight → &quot;Terminal&quot;), then copy &amp; paste:</p>
+              <p className="text-label-sm text-muted-foreground">Open Terminal (Spotlight → &quot;Terminal&quot;), then copy &amp; paste:</p>
               {[
                 { os: "macOS", cmd: "curl -fsSL https://ollama.com/install.sh | sh && open -a Ollama" },
                 { os: "Linux", cmd: "curl -fsSL https://ollama.com/install.sh | sh && ollama serve" },
@@ -682,10 +682,10 @@ export function ChatPanel() {
                 <OllamaCopyRow key={os} os={os} cmd={cmd} accent="teal" />
               ))}
               <div className="flex items-center gap-2">
-                <button onClick={() => runOllamaSetup()} className="rounded-md border border-teal-500/40 px-2.5 py-1 text-[11px] font-medium text-teal-400 hover:bg-teal-500/10">
+                <button onClick={() => runOllamaSetup()} className="rounded-md border border-teal-500/40 px-2.5 py-1 text-label-sm font-medium text-teal-400 hover:bg-teal-500/10">
                   Retry
                 </button>
-                <button onClick={() => { setOllamaSetupActive(false); setOllamaDismissed(true); try { localStorage.setItem("cerid-ollama-dismissed", "1") } catch (err) { logSwallowedError(err, "localStorage.setItem", { key: "cerid-ollama-dismissed" }) } }} className="ml-auto text-[10px] text-muted-foreground hover:text-foreground">
+                <button onClick={() => { setOllamaSetupActive(false); setOllamaDismissed(true); try { localStorage.setItem("cerid-ollama-dismissed", "1") } catch (err) { logSwallowedError(err, "localStorage.setItem", { key: "cerid-ollama-dismissed" }) } }} className="ml-auto text-label-xs text-muted-foreground hover:text-foreground">
                   Dismiss
                 </button>
               </div>
@@ -699,7 +699,7 @@ export function ChatPanel() {
         ollamaShowSetup ? (
           <div className="mx-4 mb-2 rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-4 py-3">
             <p className="text-xs font-medium text-yellow-400">Ollama not detected</p>
-            <p className="mt-1 text-[11px] text-muted-foreground">Open Terminal (Spotlight → &quot;Terminal&quot;), then copy &amp; paste:</p>
+            <p className="mt-1 text-label-sm text-muted-foreground">Open Terminal (Spotlight → &quot;Terminal&quot;), then copy &amp; paste:</p>
             <div className="mt-1.5 space-y-1">
               {[
                 { os: "macOS", cmd: "curl -fsSL https://ollama.com/install.sh | sh && open -a Ollama" },
@@ -709,12 +709,12 @@ export function ChatPanel() {
               ))}
             </div>
             <div className="mt-2 flex items-center gap-2">
-              <button onClick={() => runOllamaSetup()} className="rounded-md border border-yellow-500/40 px-2.5 py-1 text-[11px] font-medium text-yellow-400 hover:bg-yellow-500/10">
+              <button onClick={() => runOllamaSetup()} className="rounded-md border border-yellow-500/40 px-2.5 py-1 text-label-sm font-medium text-yellow-400 hover:bg-yellow-500/10">
                 I&apos;ve installed it
               </button>
               <button
                 onClick={() => { setOllamaShowSetup(false); setOllamaDismissed(true); try { localStorage.setItem("cerid-ollama-dismissed", "1") } catch (err) { logSwallowedError(err, "localStorage.setItem", { key: "cerid-ollama-dismissed" }) } }}
-                className="text-[10px] text-muted-foreground hover:text-foreground"
+                className="text-label-xs text-muted-foreground hover:text-foreground"
               >
                 Dismiss
               </button>
@@ -726,11 +726,11 @@ export function ChatPanel() {
               <Cpu className="h-4 w-4 shrink-0 text-teal-400" />
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-medium">Speed up with local AI</p>
-                <p className="text-[11px] text-muted-foreground">Enable Ollama for faster verification — runs locally, no API costs.</p>
+                <p className="text-label-sm text-muted-foreground">Enable Ollama for faster verification — runs locally, no API costs.</p>
               </div>
               <button
                 onClick={() => { runOllamaSetup() }}
-                className="shrink-0 rounded-md border border-teal-500/40 px-2 py-1 text-[11px] font-medium text-teal-400 hover:bg-teal-500/10"
+                className="shrink-0 rounded-md border border-teal-500/40 px-2 py-1 text-label-sm font-medium text-teal-400 hover:bg-teal-500/10"
               >
                 Enable
               </button>
@@ -804,7 +804,7 @@ export function ChatPanel() {
                 )}
               />
               {s.filename}
-              <span className="text-[10px] text-muted-foreground tabular-nums">
+              <span className="text-label-xs text-muted-foreground tabular-nums">
                 {Math.round(s.relevance * 100)}%
               </span>
             </Badge>

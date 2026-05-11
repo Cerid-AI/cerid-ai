@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Cerid AI. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { BookOpen } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
@@ -31,6 +31,21 @@ function formatLastUpdated(iso: string | null): string | null {
 export default function WikiPane() {
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null)
   const { data: entities, isLoading, isError } = useWikiEntities({ limit: 30 })
+
+  // Cross-pane deep link: ?entity=<canonical_id> from the Communities
+  // pane preselects the matching entity. We strip the param so reloads
+  // don't re-select. Canonical id == slug for the wiki backend.
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const params = new URLSearchParams(window.location.search)
+    const entityParam = params.get("entity")
+    if (!entityParam) return
+    setSelectedSlug(entityParam)
+    params.delete("entity")
+    const next = params.toString()
+    const url = `${window.location.pathname}${next ? `?${next}` : ""}${window.location.hash}`
+    window.history.replaceState({}, "", url)
+  }, [])
 
   // Most-recently-updated entity for the header timestamp
   const mostRecentUpdated =

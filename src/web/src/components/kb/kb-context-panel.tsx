@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { ProgressBar } from "@/components/ui/progress-bar"
 import { X, Search, Loader2, Zap, Upload, Database, FileText, Layers, Archive, FileInput, AlertCircle, Globe, Brain, ChevronDown, ChevronRight, Plus } from "lucide-react"
 import { ArtifactCard } from "./artifact-card"
 import { DomainFilter } from "./domain-filter"
@@ -170,12 +171,12 @@ export function KBContextPanel({
       {/* Source toggles */}
       {(toggleKB || toggleMemory || toggleExternal) && (
         <div className="flex items-center gap-1.5 border-b px-3 py-1.5">
-          <span className="text-[10px] text-muted-foreground mr-1">Sources</span>
+          <span className="text-label-xs text-muted-foreground mr-1">Sources</span>
           {toggleKB && (
             <button
               onClick={toggleKB}
               className={cn(
-                "flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors",
+                "flex items-center gap-1 rounded-full px-2 py-0.5 text-label-xs font-medium transition-colors",
                 contextSources?.kb !== false
                   ? "bg-blue-500/15 text-blue-600 dark:text-blue-400"
                   : "bg-muted text-muted-foreground line-through",
@@ -189,7 +190,7 @@ export function KBContextPanel({
             <button
               onClick={toggleMemory}
               className={cn(
-                "flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors",
+                "flex items-center gap-1 rounded-full px-2 py-0.5 text-label-xs font-medium transition-colors",
                 contextSources?.memory !== false
                   ? "bg-purple-500/15 text-purple-600 dark:text-purple-400"
                   : "bg-muted text-muted-foreground line-through",
@@ -203,7 +204,7 @@ export function KBContextPanel({
             <button
               onClick={toggleExternal}
               className={cn(
-                "flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors",
+                "flex items-center gap-1 rounded-full px-2 py-0.5 text-label-xs font-medium transition-colors",
                 contextSources?.external !== false
                   ? "bg-green-500/15 text-green-600 dark:text-green-400"
                   : "bg-muted text-muted-foreground line-through",
@@ -253,12 +254,7 @@ export function KBContextPanel({
             <TooltipTrigger asChild>
               <div className="flex items-center gap-2 px-3 py-1.5">
                 <span className="text-xs text-muted-foreground">Relevance</span>
-                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full rounded-full bg-primary transition-all"
-                    style={{ width: `${confidencePct}%` }}
-                  />
-                </div>
+                <ProgressBar pct={confidencePct} className="flex-1" />
                 <span className="text-xs font-medium tabular-nums">{confidencePct}%</span>
               </div>
             </TooltipTrigger>
@@ -276,7 +272,7 @@ export function KBContextPanel({
                 <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
                 <span className="text-xs font-medium">Searching knowledge base...</span>
               </div>
-              <div className="space-y-0.5 font-mono text-[10px] text-muted-foreground/80">
+              <div className="space-y-0.5 font-mono text-label-xs text-muted-foreground/80">
                 {kbStats ? (
                   <p>
                     {"\u2192"} Querying {activeDomains.size > 0 ? activeDomains.size : Object.keys(kbStats.domains).length}{" "}
@@ -333,14 +329,14 @@ export function KBContextPanel({
                 <Brain className="h-3 w-3 text-purple-400" />
                 <span className="flex-1 text-xs font-medium">Memories</span>
                 {memoryLoading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
-                <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-purple-500/10 text-purple-500">
+                <Badge variant="secondary" className="text-label-xs px-1.5 py-0 bg-purple-500/10 text-purple-500">
                   {memoryResults.length}
                 </Badge>
               </button>
               {memorySectionOpen && (
                 <div className="space-y-1 px-3 pb-2">
                   {memoryResults.length === 0 && !memoryLoading && (
-                    <p className="text-[11px] text-muted-foreground py-1">No relevant memories</p>
+                    <p className="text-label-sm text-muted-foreground py-1">No relevant memories</p>
                   )}
                   {memoryResults.map((m, i) => (
                     <div key={`mem-${m.memory_id}-${i}`} className="flex items-start gap-2 rounded-md border px-2.5 py-1.5">
@@ -354,11 +350,11 @@ export function KBContextPanel({
                       })} />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-1">
-                          <p className="truncate text-[11px] font-medium">{m.summary || m.content.slice(0, 60)}</p>
-                          <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">{Math.round(m.relevance * 100)}%</span>
+                          <p className="truncate text-label-sm font-medium">{m.summary || m.content.slice(0, 60)}</p>
+                          <span className="shrink-0 text-label-xs tabular-nums text-muted-foreground">{Math.round(m.relevance * 100)}%</span>
                         </div>
-                        <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                          <Badge variant="outline" className="text-[9px] px-1 py-0">{m.memory_type}</Badge>
+                        <div className="flex items-center gap-2 text-label-xs text-muted-foreground">
+                          <Badge variant="outline" className="text-label-xxs px-1 py-0">{m.memory_type}</Badge>
                           <span>{Math.round(m.age_days)}d</span>
                         </div>
                       </div>
@@ -403,7 +399,7 @@ export function KBContextPanel({
                 {externalSectionOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                 <Globe className="h-3 w-3 text-green-400" />
                 <span className="flex-1 text-xs font-medium">External</span>
-                <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-green-500/10 text-green-500">
+                <Badge variant="secondary" className="text-label-xs px-1.5 py-0 bg-green-500/10 text-green-500">
                   {externalResults.length}
                 </Badge>
               </button>
@@ -413,10 +409,10 @@ export function KBContextPanel({
                     <div key={`ext-${result.artifact_id}-${result.chunk_index}`} className="flex items-start gap-2 rounded-md border px-2.5 py-1.5">
                       <Globe className="h-3 w-3 shrink-0 text-green-400 mt-0.5" />
                       <div className="min-w-0 flex-1">
-                        <p className="text-[11px] font-medium">{result.filename}</p>
-                        <p className="mt-0.5 text-[10px] text-muted-foreground line-clamp-2">{result.content}</p>
+                        <p className="text-label-sm font-medium">{result.filename}</p>
+                        <p className="mt-0.5 text-label-xs text-muted-foreground line-clamp-2">{result.content}</p>
                         {result.source_url && (
-                          <a href={result.source_url} target="_blank" rel="noopener noreferrer" className="mt-0.5 inline-block text-[10px] text-primary hover:underline">
+                          <a href={result.source_url} target="_blank" rel="noopener noreferrer" className="mt-0.5 inline-block text-label-xs text-primary hover:underline">
                             Source &rarr;
                           </a>
                         )}
@@ -490,7 +486,7 @@ export function KBContextPanel({
               <TooltipTrigger asChild>
                 <button
                   className={cn(
-                    "flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-colors",
+                    "flex items-center gap-1.5 rounded-md px-2 py-1 text-label-sm transition-colors",
                     archiveMode
                       ? "bg-teal-500/10 text-teal-500 border border-teal-500/30"
                       : "text-muted-foreground hover:text-foreground hover:bg-muted",
@@ -509,11 +505,11 @@ export function KBContextPanel({
             </Tooltip>
           </TooltipProvider>
           <div className="flex flex-col items-end gap-0.5">
-            <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+            <span className="flex items-center gap-1 text-label-sm text-muted-foreground">
               <Upload className="h-3 w-3" />
               Drop files to ingest
             </span>
-            <span className="text-[10px] text-muted-foreground/40">
+            <span className="text-label-xs text-muted-foreground/40">
               PDF &bull; DOCX &bull; TXT &bull; CSV &bull; JSON &bull; EPUB
             </span>
           </div>

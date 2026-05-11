@@ -69,7 +69,7 @@ function RunStatusBadge({ status }: { status: string }) {
   }
   const s = map[status] ?? map.pending
   return (
-    <span className={cn("inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border", s.className)}>
+    <span className={cn("inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-label-xs font-medium border", s.className)}>
       {s.icon} {s.label}
     </span>
   )
@@ -163,7 +163,7 @@ export default function WorkflowList({ onEdit, onCreate, onDuplicate }: Workflow
         <h2 className="text-sm font-semibold text-zinc-200 flex items-center gap-1.5">
           <GitBranch className="h-4 w-4 text-teal-400" />
           Workflows
-          <Badge variant="outline" className="ml-1.5 text-[10px]">{workflows.length}</Badge>
+          <Badge variant="outline" className="ml-1.5 text-label-xs">{workflows.length}</Badge>
         </h2>
         <div className="flex gap-1.5">
           <Button variant="ghost" size="sm" aria-label="Refresh workflows" onClick={load}>
@@ -199,14 +199,14 @@ export default function WorkflowList({ onEdit, onCreate, onDuplicate }: Workflow
                         <p className="text-xs text-zinc-500 mt-0.5 truncate">{wf.description}</p>
                       )}
                       <div className="flex items-center gap-2 mt-1.5">
-                        <Badge variant="outline" className="text-[10px]">
+                        <Badge variant="outline" className="text-label-xs">
                           {wf.nodes.length} nodes
                         </Badge>
-                        <Badge variant="outline" className="text-[10px]">
+                        <Badge variant="outline" className="text-label-xs">
                           {wf.edges.length} edges
                         </Badge>
                         {!wf.enabled && (
-                          <Badge variant="destructive" className="text-[10px]">disabled</Badge>
+                          <Badge variant="destructive" className="text-label-xs">disabled</Badge>
                         )}
                       </div>
                     </div>
@@ -237,7 +237,7 @@ export default function WorkflowList({ onEdit, onCreate, onDuplicate }: Workflow
 
                   {/* Expandable run history */}
                   <button
-                    className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-300 mt-2"
+                    className="flex items-center gap-1 text-label-xs text-zinc-500 hover:text-zinc-300 mt-2"
                     onClick={() => toggleRuns(wf.id)}
                   >
                     {expandedRuns[wf.id] ? (
@@ -251,10 +251,10 @@ export default function WorkflowList({ onEdit, onCreate, onDuplicate }: Workflow
                   {expandedRuns[wf.id] && (
                     <div className="mt-1.5 space-y-1 pl-3 border-l border-zinc-800">
                       {expandedRuns[wf.id].length === 0 ? (
-                        <p className="text-[10px] text-zinc-600">No runs yet</p>
+                        <p className="text-label-xs text-zinc-600">No runs yet</p>
                       ) : (
                         expandedRuns[wf.id].map((run) => (
-                          <div key={run.id} className="flex items-center gap-2 text-[10px] text-zinc-500">
+                          <div key={run.id} className="flex items-center gap-2 text-label-xs text-zinc-500">
                             <RunStatusBadge status={run.status} />
                             <span className="font-mono">{run.id.slice(0, 8)}</span>
                             <span>{new Date(run.started_at).toLocaleString()}</span>

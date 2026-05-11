@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
+import { ProgressBar } from "@/components/ui/progress-bar"
 import {
   FolderOpen, Loader2, CheckCircle2, AlertTriangle, FileText, X,
   HardDrive, Layers, Ban,
@@ -90,7 +91,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
                 Scan
               </Button>
             </div>
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-label-xs text-muted-foreground">
               Path to the host archive directory. Junk files, caches, and system files are automatically skipped.
             </p>
           </>
@@ -133,7 +134,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
             {/* File types */}
             <div className="flex flex-wrap gap-1">
               {Object.entries(preview.by_extension).slice(0, 8).map(([ext, count]) => (
-                <Badge key={ext} variant="secondary" className="text-[10px]">
+                <Badge key={ext} variant="secondary" className="text-label-xs">
                   {ext} ({count})
                 </Badge>
               ))}
@@ -143,7 +144,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
             {Object.keys(preview.by_domain).length > 0 && (
               <div className="flex flex-wrap gap-1">
                 {Object.entries(preview.by_domain).map(([domain, count]) => (
-                  <Badge key={domain} variant="outline" className="text-[10px]">
+                  <Badge key={domain} variant="outline" className="text-label-xs">
                     {domain}: {count}
                   </Badge>
                 ))}
@@ -152,7 +153,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
 
             {/* Skipped summary */}
             {(preview.skipped.junk > 0 || preview.skipped.archives > 0 || preview.skipped.unsupported > 0 || preview.skipped.oversized > 0) && (
-              <div className="rounded border bg-muted/30 px-2.5 py-1.5 text-[10px] text-muted-foreground space-y-0.5">
+              <div className="rounded border bg-muted/30 px-2.5 py-1.5 text-label-xs text-muted-foreground space-y-0.5">
                 <p className="font-medium flex items-center gap-1">
                   <Ban className="h-3 w-3" />
                   Skipping {preview.skipped.junk + preview.skipped.archives + preview.skipped.unsupported + preview.skipped.oversized} files:
@@ -189,15 +190,13 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
               </span>
             </div>
             {progress != null && (
-              <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
-                <div
-                  className="h-full bg-brand transition-all duration-300"
-                  style={{ width: `${Math.min(100, ((Number(progress.files_ingested ?? 0) + Number(progress.files_skipped ?? 0) + Number(progress.files_errored ?? 0)) / Math.max(preview?.total_files ?? 1, 1)) * 100)}%` }}
-                />
-              </div>
+              <ProgressBar
+                pct={((Number(progress.files_ingested ?? 0) + Number(progress.files_skipped ?? 0) + Number(progress.files_errored ?? 0)) / Math.max(preview?.total_files ?? 1, 1)) * 100}
+                fillClassName="bg-brand"
+              />
             )}
             {progress?.files_errored != null && Number(progress.files_errored) > 0 && (
-              <p className="text-[10px] text-amber-500">{String(progress.files_errored)} errors so far</p>
+              <p className="text-label-xs text-amber-500">{String(progress.files_errored)} errors so far</p>
             )}
           </div>
         )}
@@ -210,7 +209,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
               <span className="font-medium">Import complete!</span>
             </div>
             {progress && (
-              <div className="text-[11px] text-muted-foreground space-y-0.5">
+              <div className="text-label-sm text-muted-foreground space-y-0.5">
                 <p>Ingested: {String(progress.files_ingested ?? 0)} files</p>
                 {Number(progress.files_skipped ?? 0) > 0 && <p>Skipped: {String(progress.files_skipped)} (duplicates/low quality)</p>}
                 {Number(progress.files_errored ?? 0) > 0 && <p>Errors: {String(progress.files_errored)}</p>}

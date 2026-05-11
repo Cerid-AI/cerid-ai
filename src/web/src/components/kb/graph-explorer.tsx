@@ -22,7 +22,7 @@
  * - Entity list in detail is collapsed by default; expanded on demand.
  */
 
-import { useState } from "react"
+import { useCallback, useState } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import {
@@ -44,22 +44,16 @@ import { EmptyState } from "@/components/ui/empty-state"
 
 import { useCommunities, useCommunity } from "@/hooks/use-communities"
 import type { CommunitySummary, CommunityFull } from "@/lib/types/community"
+import { useNavigation } from "@/contexts/navigation-context"
 
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
 interface GraphExplorerProps {
-  /**
-   * Called when the user clicks a member-entity pill.
-   * TODO(R.2-link): wire to the wiki entity route to navigate to the entity page.
-   */
+  /** Override the default wiki-pane navigation when an entity pill is clicked. */
   onEntityClick?: (canonical_id: string) => void
-  /**
-   * Called when the user clicks "Ask about this community".
-   * The parent should use `community.summary` to prefill a chat query.
-   * TODO(R.2-link): wire to chat state / query prefill.
-   */
+  /** Override the default chat-prefill action for "Ask about this community". */
   onAskAbout?: (community: CommunityFull) => void
 }
 
@@ -103,11 +97,11 @@ function CommunityCard({
               : `Community ${community.community_id}`}
           </p>
           <div className="flex flex-wrap items-center gap-1.5">
-            <Badge variant="secondary" className="gap-1 text-[10px]">
+            <Badge variant="secondary" className="gap-1 text-label-xs">
               <Users className="h-2.5 w-2.5" aria-hidden="true" />
               {community.member_count}
             </Badge>
-            <Badge variant="outline" className="font-mono text-[10px]">
+            <Badge variant="outline" className="font-mono text-label-xs">
               L{community.level}
             </Badge>
           </div>
@@ -163,17 +157,13 @@ function MemberEntityList({
               size="sm"
               className="h-auto rounded-full px-2.5 py-0.5 text-xs"
               aria-label={`${m.name} (${m.entity_type})`}
-              onClick={() => {
-                // TODO(R.2-link): wire to wiki entity route
-                console.log(`TODO(R.2-link): navigate to wiki entity ${m.canonical_id}`)
-                onEntityClick?.(m.canonical_id)
-              }}
+              onClick={() => onEntityClick?.(m.canonical_id)}
             >
               {m.name}
             </Button>
           ))}
           {hasMore && !expanded && (
-            <span className="self-center text-[10px] text-muted-foreground">
+            <span className="self-center text-label-xs text-muted-foreground">
               +{members.length - 6} more
             </span>
           )}
@@ -237,11 +227,11 @@ function CommunityDetailPanel({
             <h1 className="text-base font-semibold text-foreground">
               Community {data.community_id}
             </h1>
-            <Badge variant="secondary" className="gap-1 text-[10px]">
+            <Badge variant="secondary" className="gap-1 text-label-xs">
               <Users className="h-2.5 w-2.5" aria-hidden="true" />
               {data.member_count} entities
             </Badge>
-            <Badge variant="outline" className="font-mono text-[10px]">
+            <Badge variant="outline" className="font-mono text-label-xs">
               Level {data.level}
             </Badge>
           </div>
@@ -280,11 +270,7 @@ function CommunityDetailPanel({
           size="sm"
           className="w-full gap-2"
           aria-label="Ask about this community"
-          onClick={() => {
-            // TODO(R.2-link): prefill chat query with community.summary as context
-            console.log(`TODO(R.2-link): prefill chat with community ${data.community_id}`)
-            onAskAbout?.(data)
-          }}
+          onClick={() => onAskAbout?.(data)}
         >
           <MessageSquare className="h-4 w-4" aria-hidden="true" />
           Ask about this community
@@ -307,9 +293,46 @@ function CommunityDetailPanel({
  *
  * Selection approach: inline panel.  See file docstring for rationale.
  */
-export function GraphExplorer({ onEntityClick, onAskAbout }: GraphExplorerProps) {
+export function GraphExplorer({
+  onEntityClick,
+  onAskAbout,
+}: GraphExplorerProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const { data: communities, isLoading, isError } = useCommunities()
+  const navigation = useNavigation()
+  // Default callbacks wire to the cross-pane navigation context so the
+  // pane is self-sufficient when mounted bare. Callers (tests, future
+  // standalone surfaces) can still override either prop.
+  const handleEntityClick = useCallback(
+    (canonical_id: string) => {
+      if (onEntityClick) {
+        onEntityClick(canonical_id)
+        return
+      }
+      // The wiki pane reads ``?entity=<canonical_id>`` on mount and surfaces
+      // the matching entity page. Falls through to a soft no-op if the
+      // wiki search doesn't find the entity.
+      const url = new URL(window.location.href)
+      url.searchParams.set("entity", canonical_id)
+      window.history.replaceState({}, "", url.toString())
+      navigation.goTo("wiki")
+    },
+    [navigation, onEntityClick],
+  )
+  const handleAskAbout = useCallback(
+    (community: CommunityFull) => {
+      if (onAskAbout) {
+        onAskAbout(community)
+        return
+      }
+      const summary = community.summary?.trim() ?? ""
+      const seed = summary
+        ? `Tell me more about this community — ${summary}`
+        : `Tell me more about community ${community.community_id}.`
+      navigation.composeChat({ text: seed })
+    },
+    [navigation, onAskAbout],
+  )
 
   if (isLoading) {
     return (
@@ -386,8 +409,8 @@ export function GraphExplorer({ onEntityClick, onAskAbout }: GraphExplorerProps)
         {selectedId ? (
           <CommunityDetailPanel
             communityId={selectedId}
-            onEntityClick={onEntityClick}
-            onAskAbout={onAskAbout}
+            onEntityClick={handleEntityClick}
+            onAskAbout={handleAskAbout}
           />
         ) : (
           <div className="flex h-full items-center justify-center p-8 text-center">

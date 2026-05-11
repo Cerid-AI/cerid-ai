@@ -1,6 +1,6 @@
 # Cerid AI — Development Roadmap
 
-> **Last updated:** 2026-05-11 (post-v0.92.0 — Cohesion Release: per-claim verification, TrustScore, daily/weekly narrative loop, entity wiki, background processor, 8 public-API adapters, knowledge-packs catalog v1.0.1)
+> **Last updated:** 2026-05-11 (post-v0.92.1 — UX polish + D.1 drift closeout: 0 design-drift violations, Private/Agent-Console/Model-Mgmt polish, cross-pane navigation, `<InvariantsCard>`, `lint-product-story` gate, processor-queue backfill, npm-audit clean)
 > **Shipped releases:** see [CHANGELOG.md](../CHANGELOG.md) and the [GitHub releases](https://github.com/Cerid-AI/cerid-ai/releases) page.
 > **Internal sprint backlog:** `tasks/todo.md` (internal-only).
 

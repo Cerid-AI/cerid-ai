@@ -41,7 +41,7 @@ export function StepIndicator({ steps, currentStep, skippedSteps }: StepIndicato
             )}
             <div
               className={cn(
-                "flex items-center gap-0.5 rounded-full px-1 py-0.5 text-[9px] font-medium whitespace-nowrap transition-colors",
+                "flex items-center gap-0.5 rounded-full px-1 py-0.5 text-label-xxs font-medium whitespace-nowrap transition-colors",
                 state === "active" && "bg-brand/10 text-brand",
                 state === "completed" && "text-green-600 dark:text-green-400",
                 state === "skipped" && "text-muted-foreground/50",

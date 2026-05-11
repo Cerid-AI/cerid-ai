@@ -78,12 +78,12 @@ export function OptionalFeaturesStep({
           defaultOpen={ollamaDetected}
           badge={
             ollamaDetected ? (
-              <Badge variant="outline" className="border-green-500/30 text-[9px] text-green-600 dark:text-green-400">
+              <Badge variant="outline" className="border-green-500/30 text-label-xxs text-green-600 dark:text-green-400">
                 <Check className="mr-0.5 h-2.5 w-2.5" />
                 Detected
               </Badge>
             ) : (
-              <Badge variant="outline" className="text-[9px] text-muted-foreground">
+              <Badge variant="outline" className="text-label-xxs text-muted-foreground">
                 Not running
               </Badge>
             )
@@ -102,12 +102,12 @@ export function OptionalFeaturesStep({
           icon={Globe}
           title="External Data Sources"
           badge={
-            <Badge variant="outline" className="text-[9px] text-muted-foreground">
+            <Badge variant="outline" className="text-label-xxs text-muted-foreground">
               3 available
             </Badge>
           }
         >
-          <p className="mb-3 text-[11px] text-muted-foreground">
+          <p className="mb-3 text-label-sm text-muted-foreground">
             Enrich AI responses with external knowledge. Results are ephemeral by default.
           </p>
           <div className="space-y-2">
@@ -119,7 +119,7 @@ export function OptionalFeaturesStep({
               <div key={src.id} className="flex items-center justify-between rounded border px-2.5 py-2">
                 <div>
                   <p className="text-xs font-medium">{src.label}</p>
-                  <p className="text-[10px] text-muted-foreground">{src.desc}</p>
+                  <p className="text-label-xs text-muted-foreground">{src.desc}</p>
                 </div>
                 <Switch defaultChecked={src.id === "duckduckgo"} />
               </div>
@@ -132,7 +132,7 @@ export function OptionalFeaturesStep({
           icon={Zap}
           title="Optional Services"
           badge={
-            <Badge variant="outline" className="text-[9px] text-muted-foreground">
+            <Badge variant="outline" className="text-label-xxs text-muted-foreground">
               Auto-managed
             </Badge>
           }
@@ -140,11 +140,11 @@ export function OptionalFeaturesStep({
           <div className="flex items-center justify-between rounded border px-2.5 py-2">
             <div>
               <p className="text-xs font-medium">Bifrost (LLM Gateway)</p>
-              <p className="text-[10px] text-muted-foreground">
+              <p className="text-label-xs text-muted-foreground">
                 Runs silently as a fallback router. No configuration needed.
               </p>
             </div>
-            <Badge variant="outline" className="text-[9px]">Auto</Badge>
+            <Badge variant="outline" className="text-label-xxs">Auto</Badge>
           </div>
         </CollapsibleSection>
       </div>

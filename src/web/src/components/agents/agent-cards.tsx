@@ -11,7 +11,7 @@
  * Audit / Curate / Maintain / etc., watch output stream into the existing
  * console below, and actually use what the backend already supports.
  */
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
 import {
   Activity,
@@ -108,8 +108,32 @@ type CardStatus =
   | { kind: "ok"; ranAtMs: number; summary?: string }
   | { kind: "error"; message: string }
 
+function formatElapsed(ms: number): string {
+  const secs = Math.max(0, Math.floor(ms / 1000))
+  if (secs < 5) return "just now"
+  if (secs < 60) return `${secs}s ago`
+  const mins = Math.floor(secs / 60)
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  return `${hours}h ago`
+}
+
+/** Re-render every 10s so "5s ago" stays accurate without flooding the tree. */
+function useTick(intervalMs: number, active: boolean): void {
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    if (!active) return
+    const id = window.setInterval(() => setTick((t) => t + 1), intervalMs)
+    return () => window.clearInterval(id)
+  }, [intervalMs, active])
+}
+
 export function AgentCards() {
   const [states, setStates] = useState<Record<string, CardStatus>>({})
+  // Tick once every 10 seconds while any card is in the "ok" state so the
+  // "Completed Ns ago" relative timestamp stays fresh without polling.
+  const hasOk = Object.values(states).some((s) => s.kind === "ok")
+  useTick(10_000, hasOk)
 
   const runAgent = async (agent: AgentDefinition) => {
     setStates((s) => ({ ...s, [agent.id]: { kind: "running" } }))
@@ -161,15 +185,20 @@ export function AgentCards() {
                 {agent.label}
               </CardTitle>
               {state.kind === "ok" && (
-                <Badge
-                  variant="outline"
-                  className="text-[10px] text-green-500 border-green-500/30"
-                >
-                  ok
-                </Badge>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-label-xs text-muted-foreground tabular-nums">
+                    {formatElapsed(Date.now() - state.ranAtMs)}
+                  </span>
+                  <Badge
+                    variant="outline"
+                    className="text-label-xs text-green-500 border-green-500/30"
+                  >
+                    ok
+                  </Badge>
+                </div>
               )}
               {state.kind === "error" && (
-                <Badge variant="outline" className="text-[10px] text-destructive">
+                <Badge variant="outline" className="text-label-xs text-destructive">
                   failed
                 </Badge>
               )}
@@ -194,12 +223,12 @@ export function AgentCards() {
                     : (agent.runLabel ?? "Run")}
                 </Button>
                 {state.kind === "ok" && state.summary && (
-                  <span className="truncate text-[10px] text-muted-foreground">
+                  <span className="truncate text-label-xs text-muted-foreground">
                     {state.summary}
                   </span>
                 )}
                 {state.kind === "error" && (
-                  <span className="truncate text-[10px] text-destructive/80">
+                  <span className="truncate text-label-xs text-destructive/80">
                     {state.message}
                   </span>
                 )}

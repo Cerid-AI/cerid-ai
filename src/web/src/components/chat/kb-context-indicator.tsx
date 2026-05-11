@@ -21,7 +21,7 @@ export function KBContextIndicator({ sources }: { sources?: SourceRef[] }) {
     <TooltipProvider delayDuration={300}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground select-none cursor-default">
+          <span className="inline-flex items-center gap-1 text-label-sm text-muted-foreground select-none cursor-default">
             <Shield className="h-3 w-3" />
             <span>Context sent to LLM &middot; {label}</span>
           </span>

@@ -94,7 +94,7 @@ export function AuditPane() {
             {/* Filters — colocated with analytics content */}
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex items-center gap-1">
-                <span className="text-[10px] font-medium uppercase text-muted-foreground">Period</span>
+                <span className="text-label-xs font-medium uppercase text-muted-foreground">Period</span>
                 <div className="flex rounded-md border">
                   {TIME_RANGES.map((range) => (
                     <Button
@@ -114,7 +114,7 @@ export function AuditPane() {
               </div>
               <Separator orientation="vertical" className="h-5" />
               <div className="flex items-center gap-1">
-                <span className="text-[10px] font-medium uppercase text-muted-foreground">Show</span>
+                <span className="text-label-xs font-medium uppercase text-muted-foreground">Show</span>
                 <div className="flex gap-0.5">
                   {REPORT_OPTIONS.map((report) => (
                     <Button

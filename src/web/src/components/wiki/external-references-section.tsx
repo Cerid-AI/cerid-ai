@@ -52,7 +52,7 @@ function ReferenceCard({ reference }: ReferenceCardProps) {
     >
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex flex-wrap items-center gap-1.5">
-          <Badge variant="secondary" className="shrink-0 text-[10px] font-medium">
+          <Badge variant="secondary" className="shrink-0 text-label-xs font-medium">
             {reference.source_display}
           </Badge>
           {reference.title && (
@@ -66,7 +66,7 @@ function ReferenceCard({ reference }: ReferenceCardProps) {
             {reference.snippet}
           </p>
         )}
-        <p className="text-[10px] text-muted-foreground/70">
+        <p className="text-label-xs text-muted-foreground/70">
           Fetched {formatFetchedAt(reference.fetched_at)}
         </p>
       </div>

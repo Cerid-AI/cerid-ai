@@ -18,6 +18,16 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { useState, useCallback } from "react"
 import { Plus, Database, Rss, LayoutDashboard, Zap, Shield, ShieldCheck, ShieldOff, MoreVertical, Brain, Check, Layers, ChevronDown, Lock, LockOpen } from "lucide-react"
 import type { RagMode } from "@/lib/types"
@@ -57,18 +67,38 @@ function MenuCheckboxItem({ children, checked, onCheckedChange }: { children: Re
   )
 }
 
-function MenuRadioItem({ children, checked, onClick }: { children: React.ReactNode; checked: boolean; onClick: () => void }) {
+function MenuRadioItem({
+  children,
+  checked,
+  onClick,
+  description,
+  destructive = false,
+}: {
+  children: React.ReactNode
+  checked: boolean
+  onClick: () => void
+  description?: string
+  destructive?: boolean
+}) {
   return (
     <button
-      className="flex w-full items-center gap-2 rounded-sm py-1.5 pr-2 pl-7 text-sm outline-none select-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent relative"
+      className={cn(
+        "flex w-full items-start gap-2 rounded-sm py-1.5 pr-2 pl-7 text-sm outline-none select-none hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent relative",
+        destructive && "text-red-500 hover:text-red-500 dark:text-red-400 dark:hover:text-red-400",
+      )}
       onClick={onClick}
     >
       {checked && (
-        <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
+        <span className="absolute left-2 top-2 flex h-3.5 w-3.5 items-center justify-center">
           <span className="h-2 w-2 rounded-full bg-current" />
         </span>
       )}
-      {children}
+      <span className="flex flex-col items-start text-left">
+        <span className="leading-tight">{children}</span>
+        {description && (
+          <span className="text-label-xs text-muted-foreground">{description}</span>
+        )}
+      </span>
     </button>
   )
 }
@@ -223,6 +253,29 @@ export function ChatToolbar({
     const next: RagMode = ragMode === "manual" ? "smart" : ragMode === "smart" ? "custom_smart" : "manual"
     setRagMode(next)
   }, [ragMode, setRagMode])
+  // L4 confirmation gate: full-ephemeral wipes the session on close, so
+  // we intercept the level change and require an explicit confirm.
+  const [pendingL4, setPendingL4] = useState(false)
+  const requestPrivateLevel = useCallback(
+    (level: 0 | 1 | 2 | 3 | 4) => {
+      if (level === 4 && privateModeLevel !== 4) {
+        setPendingL4(true)
+        return
+      }
+      changePrivateModeLevel(level)
+    },
+    [changePrivateModeLevel, privateModeLevel],
+  )
+  const badgeBorderClass =
+    privateModeLevel === 1
+      ? "border-green-500/40 text-green-500"
+      : privateModeLevel === 2
+        ? "border-yellow-500/40 text-yellow-500"
+        : privateModeLevel === 3
+          ? "border-orange-500/40 text-orange-500"
+          : privateModeLevel === 4
+            ? "border-red-500/40 text-red-500"
+            : "border-amber-500/40 text-amber-500"
   return (
     <div className="flex items-center gap-2 border-b px-4 py-2">
       <Button variant="ghost" size="sm" onClick={onNewChat}>
@@ -252,30 +305,79 @@ export function ChatToolbar({
           menuContent={
             <>
               <MenuLabel>Privacy Level</MenuLabel>
-              <MenuRadioItem checked={privateModeLevel === 0} onClick={() => changePrivateModeLevel(0)}>
-                Off — normal operation
+              <MenuRadioItem
+                checked={privateModeLevel === 0}
+                onClick={() => requestPrivateLevel(0)}
+                description="Standard behaviour. Conversations saved, KB used, audit logged."
+              >
+                Off
               </MenuRadioItem>
-              <MenuRadioItem checked={privateModeLevel === 1} onClick={() => changePrivateModeLevel(1)}>
-                L1 — skip saves &amp; sync
+              <MenuRadioItem
+                checked={privateModeLevel === 1}
+                onClick={() => requestPrivateLevel(1)}
+                description="Don't save this conversation; don't sync to other devices."
+              >
+                L1 — Skip saves &amp; sync
               </MenuRadioItem>
-              <MenuRadioItem checked={privateModeLevel === 2} onClick={() => changePrivateModeLevel(2)}>
-                L2 — also skip KB injection
+              <MenuRadioItem
+                checked={privateModeLevel === 2}
+                onClick={() => requestPrivateLevel(2)}
+                description="Also bypass KB injection — model sees only what you type."
+              >
+                L2 — Also skip KB injection
               </MenuRadioItem>
-              <MenuRadioItem checked={privateModeLevel === 3} onClick={() => changePrivateModeLevel(3)}>
-                L3 — also no logging
+              <MenuRadioItem
+                checked={privateModeLevel === 3}
+                onClick={() => requestPrivateLevel(3)}
+                description="Also skip audit log entries. Nothing reaches Redis."
+              >
+                L3 — Also no logging
               </MenuRadioItem>
-              <MenuRadioItem checked={privateModeLevel === 4} onClick={() => changePrivateModeLevel(4)}>
-                L4 — full ephemeral, nothing persisted
+              <MenuRadioItem
+                checked={privateModeLevel === 4}
+                onClick={() => requestPrivateLevel(4)}
+                description="Wipes session state when you close the tab. Cannot recover."
+                destructive
+              >
+                L4 — Full ephemeral
               </MenuRadioItem>
             </>
           }
         />
       </TooltipProvider>
       {privateModeEnabled && !isNarrow && (
-        <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-amber-500/40 text-amber-500">
-          Private
+        <Badge variant="outline" className={cn("text-label-xs px-1.5 py-0", badgeBorderClass)}>
+          {privateModeLevel === 4 ? "Private · L4" : "Private"}
         </Badge>
       )}
+      <AlertDialog open={pendingL4} onOpenChange={setPendingL4}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Switch to Level 4 (Full ephemeral)?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Closing the tab will wipe this conversation, its memory state, and any
+              cached query results from Redis. There is no recovery path — even the
+              audit log is bypassed.
+              <br />
+              <br />
+              Use this for highly sensitive one-off questions. For everyday privacy,
+              L1–L3 cover most needs.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                changePrivateModeLevel(4)
+                setPendingL4(false)
+              }}
+              className="bg-red-500 text-white hover:bg-red-600"
+            >
+              Enable L4
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <div className="flex-1" />
       <TooltipProvider delayDuration={0}>
@@ -300,7 +402,7 @@ export function ChatToolbar({
               <MenuRadioItem checked={ragMode === "manual"} onClick={() => setRagMode("manual")}>
                 <div className="flex flex-col gap-0.5">
                   <span>Manual — you pick docs</span>
-                  <span className="text-[10px] font-normal text-muted-foreground">
+                  <span className="text-label-xs font-normal text-muted-foreground">
                     Only documents you @mention or drag in are included.
                   </span>
                 </div>
@@ -308,7 +410,7 @@ export function ChatToolbar({
               <MenuRadioItem checked={ragMode === "smart"} onClick={() => setRagMode("smart")}>
                 <div className="flex flex-col gap-0.5">
                   <span>Smart — auto-retrieval</span>
-                  <span className="text-[10px] font-normal text-muted-foreground">
+                  <span className="text-label-xs font-normal text-muted-foreground">
                     Searches your KB on every message and injects matches.
                   </span>
                 </div>
@@ -317,9 +419,9 @@ export function ChatToolbar({
                 <div className="flex flex-col gap-0.5">
                   <span className="flex items-center gap-1">
                     Custom
-                    <Badge variant="outline" className="text-[9px] ml-1 px-1 py-0">Advanced</Badge>
+                    <Badge variant="outline" className="text-label-xxs ml-1 px-1 py-0">Advanced</Badge>
                   </span>
-                  <span className="text-[10px] font-normal text-muted-foreground">
+                  <span className="text-label-xs font-normal text-muted-foreground">
                     Tune source weights + thresholds manually.
                   </span>
                 </div>
@@ -400,14 +502,14 @@ export function ChatToolbar({
               <MenuItem onClick={onVerifyMessage}>
                 <span className="flex flex-col gap-0.5">
                   <span>Verify last response</span>
-                  <span className="text-[9px] text-muted-foreground font-normal">Check facts in the most recent AI response</span>
+                  <span className="text-label-xxs text-muted-foreground font-normal">Check facts in the most recent AI response</span>
                 </span>
               </MenuItem>
               <MenuSeparator />
               <MenuCheckboxItem checked={inlineMarkups} onCheckedChange={toggleInlineMarkups}>
                 <span className="flex flex-col gap-0.5">
                   <span>Inline claim markups</span>
-                  <span className="text-[9px] text-muted-foreground font-normal">Highlight verified/unverified claims in message text</span>
+                  <span className="text-label-xxs text-muted-foreground font-normal">Highlight verified/unverified claims in message text</span>
                 </span>
               </MenuCheckboxItem>
               <MenuSeparator />
@@ -416,7 +518,7 @@ export function ChatToolbar({
                   <span className="flex items-center gap-1">
                     Expert verification
                   </span>
-                  <span className="text-[9px] text-muted-foreground font-normal">
+                  <span className="text-label-xxs text-muted-foreground font-normal">
                     Uses advanced models for more thorough fact-checking
                   </span>
                 </span>
@@ -441,13 +543,13 @@ export function ChatToolbar({
                   <MenuCheckboxItem checked={feedbackLoop} onCheckedChange={toggleFeedbackLoop}>
                     <span className="flex flex-col gap-0.5">
                       <span>Feedback loop</span>
-                      <span className="text-[9px] text-muted-foreground font-normal">Save AI responses to your KB for future retrieval</span>
+                      <span className="text-label-xxs text-muted-foreground font-normal">Save AI responses to your KB for future retrieval</span>
                     </span>
                   </MenuCheckboxItem>
                   <MenuCheckboxItem checked={memoryExtraction} onCheckedChange={toggleMemoryExtraction}>
                     <span className="flex flex-col gap-0.5">
                       <span>Memory extraction</span>
-                      <span className="text-[9px] text-muted-foreground font-normal">Extract and remember key facts from conversations</span>
+                      <span className="text-label-xxs text-muted-foreground font-normal">Extract and remember key facts from conversations</span>
                     </span>
                   </MenuCheckboxItem>
                 </>
@@ -537,7 +639,13 @@ export function ChatToolbar({
                 {routingMode === "manual" ? "Routing: Off" : routingMode === "recommend" ? "Routing: Suggest" : "Routing: Auto"}
               </button>
               <button
-                className={cn("flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent", privateModeEnabled && "text-amber-500 bg-amber-500/10")}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent",
+                  privateModeEnabled && privateModeLevel === 1 && "text-green-500 bg-green-500/10",
+                  privateModeEnabled && privateModeLevel === 2 && "text-yellow-500 bg-yellow-500/10",
+                  privateModeEnabled && privateModeLevel === 3 && "text-orange-500 bg-orange-500/10",
+                  privateModeEnabled && privateModeLevel === 4 && "text-red-500 bg-red-500/10",
+                )}
                 onClick={togglePrivateMode}
               >
                 {privateModeEnabled ? <Lock className="h-4 w-4" /> : <LockOpen className="h-4 w-4" />}
