@@ -505,19 +505,19 @@ export function SetupWizard({ open, canSkip, onComplete }: SetupWizardProps) {
                 </p>
                 <div className="mx-auto flex max-w-sm flex-col gap-2 text-left text-xs text-muted-foreground">
                   <div className="flex items-start gap-2">
-                    <span className="mt-0.5 shrink-0 text-brand">✦</span>
+                    <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-brand" aria-hidden="true" />
                     <span>Chat with AI grounded in your own documents and notes</span>
                   </div>
                   <div className="flex items-start gap-2">
-                    <span className="mt-0.5 shrink-0 text-brand">✦</span>
+                    <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-brand" aria-hidden="true" />
                     <span>Multi-domain knowledge base with smart query routing</span>
                   </div>
                   <div className="flex items-start gap-2">
-                    <span className="mt-0.5 shrink-0 text-brand">✦</span>
+                    <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-brand" aria-hidden="true" />
                     <span>Verify every AI response against your source documents</span>
                   </div>
                   <div className="flex items-start gap-2">
-                    <span className="mt-0.5 shrink-0 text-brand">✦</span>
+                    <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-brand" aria-hidden="true" />
                     <span>Privacy-first — your data never leaves your machine</span>
                   </div>
                 </div>

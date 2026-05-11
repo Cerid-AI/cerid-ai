@@ -324,7 +324,13 @@ function VerificationBadge({ status, onClick }: { status: MessageVerificationSta
   }
 
   const { verified, total, unverified, skipped, creditExhausted, hasExpertClaims } = status
-  const accuracy = total > 0 ? Math.round((verified / total) * 100) : 0
+  // Accuracy denominator: claims we actually got a binary answer on
+  // (verified or unverified). Excluding uncertain/skipped matches the
+  // `verification-status-bar.tsx:280` formula and resolves the prior
+  // mismatch where the two surfaces reported different numbers for the
+  // same message. See P0 finding V-P0.5 in tasks/2026-05-11-ui-audit.md.
+  const denominator = verified + unverified
+  const accuracy = denominator > 0 ? Math.round((verified / denominator) * 100) : 0
   const hasIssues = unverified > 0
   const hasSkipped = (skipped ?? 0) > 0
 

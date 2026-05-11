@@ -209,15 +209,9 @@ export function EntityDetailView({ slug, onSelectRelated }: EntityDetailViewProp
                       )}
                     </div>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="shrink-0 text-xs text-muted-foreground hover:text-foreground"
-                    aria-label={`View source: ${src.title ?? src.artifact_id}`}
-                    disabled
-                  >
-                    View source
-                  </Button>
+                  {/* "View source" route not yet implemented (P0.4 from
+                      2026-05-11-ui-audit.md). Render nothing until the route
+                      lands rather than show a permanently-disabled affordance lie. */}
                 </div>
               ))}
             </div>
