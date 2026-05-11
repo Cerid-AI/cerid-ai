@@ -1,19 +1,42 @@
 ---
 name: cerid-design-context
-description: "Project-specific UI/UX constraints for Cerid AI. Composes with global design-intelligence skills (e.g. ui-ux-pro-max) so generic recommendations land on-brand. Covers the stack pin, brand voice anti-patterns, the tier-color system (private mode + verification bands), the 4-state UX matrix required per pane, the active design-drift gate, and the canonical primitive ladder under src/web/src/components/ui/."
+description: "Project-specific UI/UX constraints for **Cerid AI repos only** (cerid-ai-internal, cerid-ai, cerid-trading-agent, cerid-boardroom, cerid-* client repos, and any future cerid-derivative repo). Use ONLY when the current working directory is inside such a repo. Composes with global design-intelligence skills (e.g. ui-ux-pro-max) so generic recommendations land on-brand. Covers the stack pin (React 19 + shadcn/ui new-york + Tailwind v4 + lucide), brand voice + anti-patterns (no AI purple/pink gradients, no marketing funnel), the canonical tier-colour system (private mode + verification bands), the 4-state UX matrix required per pane, the active design-drift gate + allowlist, the canonical primitive ladder under src/web/src/components/ui/, the cross-pane navigation contract, and the accessibility floor."
 license: Apache-2.0
 metadata:
   author: cerid-ai
-  version: "0.1.0"
-  applies-to: "src/web/src/**, packages/widget/**"
+  version: "0.2.0"
+  scope: cerid-derivative-only
+  applies-to:
+    - "~/Develop/cerid-ai-internal/**"
+    - "~/Develop/cerid-ai/**"
+    - "~/Develop/cerid-trading-agent/**"
+    - "~/Develop/cerid-boardroom/**"
+    - "~/Develop/cerid-*/**"
 ---
 
 # Cerid Design Context
 
-> Read this before recommending any UI change. This skill describes
-> *project-specific* constraints that override generic design intelligence.
-> If a generic skill (e.g. `ui-ux-pro-max`) recommends something that
-> conflicts with anything below, the project rule wins.
+> **Scope tag (applies-to):** Cerid AI repositories ONLY.
+>
+> This skill is user-level (`~/.claude/skills/cerid-design-context/`) so the
+> same constraints apply across every Cerid-derivative repo without per-repo
+> duplication. It must NOT activate for unrelated projects. Before invoking,
+> verify the current working directory is inside a cerid-* repository:
+>
+> ```bash
+> # Quick scope check — bail if neither matches.
+> pwd | grep -qE '/Develop/cerid-(ai|ai-internal|trading-agent|boardroom|[a-z0-9-]+)(/|$)' \
+>   || { echo "cerid-design-context: out of scope"; exit 0; }
+> ```
+>
+> If you're on a non-cerid project (e.g. dotfiles, an unrelated client, a
+> standalone library), **do not apply these rules** — they encode Cerid's
+> stack pin and brand voice, which won't match other contexts.
+>
+> A mirrored copy lives at `<repo>/.claude/skills/cerid-design-context/`
+> for public-side documentation and for sessions started in a fresh clone
+> where the user-level skill isn't yet installed. Keep both copies content-
+> identical when editing.
 
 ## Stack pin (do not propose alternatives)
 
