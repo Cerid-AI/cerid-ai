@@ -2,6 +2,61 @@
 
 All notable changes to cerid-ai are documented here.
 
+## v0.92.2 — UI Audit Phase 1 + 2 (2026-05-11)
+
+Quick-win patch following the comprehensive UI/UX audit at
+[`tasks/2026-05-11-ui-audit.md`](tasks/2026-05-11-ui-audit.md). Phase 1
+clears the visible-bug ledger (every P0 marked "obviously wrong"); Phase 2
+closes the accessibility gap on reduced motion.
+
+**P0 fixes — visible bugs**
+- **Memories pane crash** — wrap the entire app in `<TooltipProvider>` at root
+  (App.tsx) per shadcn rule #39. Memory pane was rendering `<Tooltip>` without
+  a local provider and crashing on mount. Audit ref P0.1.
+- **Sparkle "✦" bullets in setup wizard** — replaced with `<CheckCircle2>`
+  lucide icons. Audit ref P0.2.
+- **Lightning "⚡" emoji in status bar** — replaced with `<Zap>` lucide icon.
+  Audit ref P0.3.
+- **Emoji icons (⚡ 🔬 🔧) on Settings tier cards** — `lib/user-presets.ts`
+  now exposes `Icon: LucideIcon` (`Zap` / `FlaskConical` / `Sparkles`)
+  instead of `emoji: string`. Audit ref S-P0.1.
+- **"View source" disabled affordance lie** on wiki entity-detail —
+  permanently-disabled button removed until the route ships, replaced with
+  a docblock comment pointing to the audit. Audit ref V-P0.4.
+- **`<ClaimBadge>` unverified icon: `CircleDot` → `XCircle`** — `CircleDot`
+  reads as "radio button selected" not "no source found". `XCircle`
+  completes the verified/partial/unverified semantic ladder (Check / Minus /
+  X). Audit ref V-P1.2. Snapshot updated.
+- **`VerificationBadge` accuracy formula mismatch** — `message-bubble.tsx`
+  was dividing by `total` (includes uncertain/skipped); the status bar
+  divides by `verified + refuted`. Two surfaces reported different numbers
+  for the same message. Aligned to `verified / (verified + unverified)`.
+  Audit ref V-P0.5.
+- **Welcome screen "Recent" preview shows first message** — was
+  `c.messages[0]?.content?.slice(0, 80)` (the user's opener); now
+  `c.messages.at(-1)` (the most recent message). Audit ref C-P2.4.
+
+**Phase 2 — Motion accessibility**
+- **`@media (prefers-reduced-motion: reduce)` block** added to
+  `src/web/src/index.css`. Collapses all `animation-duration` and
+  `transition-duration` to 0.01ms, explicitly disables the three infinite
+  decorative loops (`.dark .glow-teal`, `.dark .text-brand-shine`,
+  `.scroll-title` marquee), and resets `scroll-behavior` to auto. Single
+  highest-leverage accessibility change in the codebase. WCAG 2.1 SC 2.3.3.
+- **Dead CSS removed**: `.shimmer-gold` keyframes + class (zero callers)
+  and `.float` keyframes + class (zero callers). Pure bundle bloat.
+
+**Verification** — 1044 frontend tests + 4036 Python tests green; ruff +
+mypy + lint-imports + drift (0 violations) + silent-catch +
+product-story all clean; tsc green.
+
+**Effort** — 45 minutes wall-clock; 9 file edits, 1 snapshot regen, 2
+allowlist line bumps.
+
+**Next** — Phases 3-9 of the audit (light-mode polish, `<PaneError>` /
+`<SegmentedControl>` / `<TierSelector>` primitives, chat surface
+ergonomics, motion ADDITIONS, status bar tier-aware gold) remain queued.
+
 ## v0.92.1 — UX Polish + Drift Closeout (2026-05-11)
 
 Same-day follow-up to v0.92.0 closing every remaining open item from the

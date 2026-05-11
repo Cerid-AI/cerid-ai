@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { SettingsUpdate } from "./types"
+import { Zap, FlaskConical, Sparkles, type LucideIcon } from "lucide-react"
 
 export type PresetId = "quick" | "balanced" | "maximum"
 export type UIMode = "simple" | "advanced"
@@ -9,7 +10,10 @@ export type UIMode = "simple" | "advanced"
 export interface UserPreset {
   id: PresetId
   label: string
-  emoji: string
+  /** Lucide icon component. Replaces the prior emoji string field — emoji
+   *  characters render at unpredictable sizes across platforms and were
+   *  flagged by the UI audit as the emoji-as-icon anti-pattern. */
+  Icon: LucideIcon
   description: string
   uiMode: UIMode
   settings: SettingsUpdate
@@ -23,7 +27,7 @@ export const USER_PRESETS: UserPreset[] = [
   {
     id: "quick",
     label: "Quick",
-    emoji: "⚡",
+    Icon: Zap,
     description: "Fast responses with basic verification. Best for quick questions.",
     uiMode: "simple",
     settings: {
@@ -55,7 +59,7 @@ export const USER_PRESETS: UserPreset[] = [
   {
     id: "balanced",
     label: "Balanced",
-    emoji: "🔬",
+    Icon: FlaskConical,
     description: "Thorough retrieval with full verification pipeline.",
     uiMode: "advanced",
     settings: {
@@ -89,7 +93,7 @@ export const USER_PRESETS: UserPreset[] = [
   {
     id: "maximum",
     label: "Maximum",
-    emoji: "🔧",
+    Icon: Sparkles,
     description: "All features enabled. Maximum quality, higher latency.",
     uiMode: "advanced",
     requiresPro: true,

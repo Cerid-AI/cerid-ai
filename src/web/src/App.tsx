@@ -11,6 +11,7 @@ import { KBInjectionProvider } from "@/contexts/kb-injection-context"
 import { ConversationsProvider } from "@/contexts/conversations-context"
 import { AuthProvider } from "@/contexts/auth-context"
 import { UIModeProvider } from "@/contexts/ui-mode-context"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { ProtectedRoute } from "@/components/auth/protected-route"
 import { fetchSettings, fetchSetupStatus, setTierOverride } from "@/lib/api"
 import { SetupWizard } from "@/components/setup/setup-wizard"
@@ -122,6 +123,10 @@ export default function App() {
 
   return (
     <AppErrorBoundary>
+    {/* Mount TooltipProvider once at app root per shadcn convention (ui-ux-pro-max
+        shadcn rule #39). Without this, panes that use `<Tooltip>` without their
+        own local provider crash on mount — Memories pane was the symptom. */}
+    <TooltipProvider delayDuration={0}>
     <AuthProvider>
     <ProtectedRoute multiUser={multiUser}>
     <UIModeProvider>
@@ -166,6 +171,8 @@ export default function App() {
     </UIModeProvider>
     </ProtectedRoute>
     </AuthProvider>
+    </TooltipProvider>
     </AppErrorBoundary>
   )
 }
+

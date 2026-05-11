@@ -500,7 +500,7 @@ export function ChatPanel() {
               <p className="text-xs font-medium text-muted-foreground">Recent</p>
               <div className="space-y-1.5">
                 {recentConversations.map((c) => {
-                  const preview = c.messages[0]?.content?.slice(0, 80) || "Empty conversation"
+                  const preview = c.messages.at(-1)?.content?.slice(0, 80) || "Empty conversation"
                   return (
                     <button
                       key={c.id}

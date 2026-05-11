@@ -8,7 +8,7 @@
  * variant matching the three linguistic bands:
  *   - "verified"   → green / CheckCircle icon
  *   - "partial"    → amber / Minus icon
- *   - "unverified" → red / CircleDot icon
+ *   - "unverified" → red / XCircle icon
  *
  * Wrapped in a Radix HoverCard so hovering (or focusing) opens
  * `<ProvenancePopover>` with full detail.
@@ -16,7 +16,7 @@
  * WCAG 2.1 AA: color paired with icon; aria-label includes band + count.
  */
 
-import { CheckCircle, Minus, CircleDot } from "lucide-react"
+import { CheckCircle, Minus, XCircle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import {
   HoverCard,
@@ -65,7 +65,7 @@ const BAND_STYLES: Record<
 const BAND_ICONS: Record<VerificationBand, React.ElementType> = {
   verified: CheckCircle,
   partial: Minus,
-  unverified: CircleDot,
+  unverified: XCircle,
 }
 
 export function ClaimBadge({ claim, onArtifactClick }: ClaimBadgeProps) {

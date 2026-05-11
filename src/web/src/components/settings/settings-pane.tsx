@@ -242,7 +242,7 @@ export default function SettingsPane() {
                     )}
                   >
                     <div className="flex items-center gap-1.5">
-                      <span>{preset.emoji}</span>
+                      <preset.Icon className="size-3.5 shrink-0 text-brand" aria-hidden="true" />
                       <span className="text-sm font-medium">{preset.label}</span>
                       {locked && (
                         <Badge variant="outline" className="text-label-xs px-1.5 py-0 text-gold border-gold">

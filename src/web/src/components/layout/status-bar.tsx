@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery } from "@tanstack/react-query"
-import { Terminal } from "lucide-react"
+import { Terminal, Zap } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { fetchHealthStatus, fetchProviderCredits } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -193,7 +193,10 @@ export function StatusBar({ consoleOpen, onToggleConsole, consoleUnreadCount = 0
           return (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="text-label-xs text-yellow-500/70" title="No local model pipeline stages. Install Ollama for local inference.">&#x26A1; 0 local</span>
+                <span className="inline-flex items-center gap-1 text-label-xs text-yellow-500/70" title="No local model pipeline stages. Install Ollama for local inference.">
+                  <Zap className="size-3" aria-hidden="true" />
+                  0 local
+                </span>
               </TooltipTrigger>
               <TooltipContent side="top">
                 <p>All pipeline stages use cloud APIs. Enable Ollama for faster local processing.</p>

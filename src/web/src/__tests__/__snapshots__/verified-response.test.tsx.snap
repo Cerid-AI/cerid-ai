@@ -161,7 +161,7 @@ exports[`VerifiedResponse — settled state, multiple bands > snapshot matches m
         >
           <svg
             aria-hidden="true"
-            class="lucide lucide-circle-dot h-3 w-3 shrink-0 text-red-600 dark:text-red-400"
+            class="lucide lucide-circle-x h-3 w-3 shrink-0 text-red-600 dark:text-red-400"
             fill="none"
             height="24"
             stroke="currentColor"
@@ -177,10 +177,11 @@ exports[`VerifiedResponse — settled state, multiple bands > snapshot matches m
               cy="12"
               r="10"
             />
-            <circle
-              cx="12"
-              cy="12"
-              r="1"
+            <path
+              d="m15 9-6 6"
+            />
+            <path
+              d="m9 9 6 6"
             />
           </svg>
           No source

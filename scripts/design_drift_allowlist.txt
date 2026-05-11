@@ -22,10 +22,11 @@ src/web/src/components/chat/claim-overlay.tsx:196
 src/web/src/components/chat/claim-overlay.tsx:197
 
 # Heading-level indent depth (h1=0, h2=12px, …) and animation stagger delays
+# Stagger-delay lines bumped after v0.92.2 (V-P0.5 accuracy formula docblock shifted them +6)
 src/web/src/components/chat/message-bubble.tsx:126
-src/web/src/components/chat/message-bubble.tsx:589
-src/web/src/components/chat/message-bubble.tsx:590
-src/web/src/components/chat/message-bubble.tsx:591
+src/web/src/components/chat/message-bubble.tsx:595
+src/web/src/components/chat/message-bubble.tsx:596
+src/web/src/components/chat/message-bubble.tsx:597
 
 # Console / activity feed scroll heights from container measurements
 src/web/src/components/console/AgentConsole.tsx:244
@@ -97,7 +98,8 @@ src/web/src/components/layout/sidebar.tsx:132
 src/web/src/components/layout/sidebar.tsx:135
 
 # Notification-badge minimum width keeps single- and double-digit counts centered.
-src/web/src/components/layout/status-bar.tsx:224
+# Line bumped after v0.92.2 (P0.3 Zap-icon swap added 3 lines).
+src/web/src/components/layout/status-bar.tsx:227
 
 # --- Section: Workflow editor + canvas chrome --------------------------------
 # Dropdown widths and SVG geometry tuned to fit agent/node names exactly.
