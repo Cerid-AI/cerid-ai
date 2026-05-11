@@ -457,6 +457,70 @@ async def get_restart_info() -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Phase R.2 — Community explorer endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get("/communities")
+async def list_communities_endpoint(
+    min_size: int = Query(3, ge=1, description="Minimum community member count"),
+    limit: int = Query(30, ge=1, le=200, description="Max results"),
+    level: int = Query(0, ge=0, description="Leiden hierarchy depth (0 = finest)"),
+) -> list[dict]:
+    """List Leiden communities that have cached LLM summaries.
+
+    Returns communities ordered by member_count descending.  Only
+    communities at ``level`` (default 0) with ≥ ``min_size`` members
+    and an existing cached summary are returned.
+
+    Phase R.2 of the v0.92 plan.
+    """
+    from app.deps import get_neo4j
+    from app.services.community_pages import list_top_communities
+
+    try:
+        driver = get_neo4j()
+    except Exception as exc:
+        log_swallowed_error("observability.list_communities.neo4j", exc)
+        raise HTTPException(status_code=503, detail="Neo4j unavailable") from exc
+
+    communities = await list_top_communities(
+        driver, min_size=min_size, limit=limit, level=level
+    )
+    return [c.model_dump() for c in communities]
+
+
+@router.get("/communities/{community_id:path}")
+async def get_community_endpoint(community_id: str) -> dict:
+    """Return the full community record for ``community_id``.
+
+    ``community_id`` follows the pattern ``"{level}:{native_id}"``
+    (e.g. ``"0:42"``).  The colon is URL-encoded in requests; the
+    ``:path`` converter captures the slash-safe form.
+
+    Returns 404 when no community with that id exists.
+
+    Phase R.2 of the v0.92 plan.
+    """
+    from app.deps import get_neo4j
+    from app.services.community_pages import get_community_page
+
+    try:
+        driver = get_neo4j()
+    except Exception as exc:
+        log_swallowed_error("observability.get_community.neo4j", exc)
+        raise HTTPException(status_code=503, detail="Neo4j unavailable") from exc
+
+    community = await get_community_page(driver, community_id)
+    if community is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Community not found: {community_id}",
+        )
+    return community.model_dump()
+
+
 @router.get("/trust-score")
 async def get_trust_score() -> dict:
     """System evaluation posture, 0–100, with disclosed component scores.

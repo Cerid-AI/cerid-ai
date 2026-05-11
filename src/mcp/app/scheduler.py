@@ -209,6 +209,59 @@ async def _run_folder_scan() -> None:
         logger.error(f"Folder scan failed: {e}")
 
 
+async def _run_ingest_recovery() -> None:
+    """Phase O.1 — scan for stale pending Chroma chunks and heal them.
+
+    Enqueues an ``IngestRecoveryJob`` via the processor queue when one is
+    available on ``app.state``; otherwise calls the recovery service directly
+    so the cron always runs even when the processor is not initialised.
+
+    The job class is imported lazily inside the callback to prevent module-load
+    races during startup (the scheduler is started before processor_queue is
+    wired onto ``app.state``).
+    """
+    start = time.time()
+    try:
+        # Try to enqueue via the processor queue (preferred path).
+        try:
+            from app.main import app as _app  # type: ignore[import]  # FastAPI app
+            queue = getattr(getattr(_app, "state", None), "processor_queue", None)
+        except Exception:
+            queue = None
+
+        if queue is not None:
+            # Lazy import to avoid circular imports at module load time.
+            from app.processor.jobs.ingest_recovery import IngestRecoveryJob
+            job = IngestRecoveryJob()
+            record = job.new_record()
+            await queue.enqueue(record)
+            logger.debug("ingest_recovery enqueued via processor job_id=%s", record.id)
+            duration = time.time() - start
+            _log_execution("ingest_recovery", "enqueued", duration)
+        else:
+            # Fallback: run the recovery service directly.
+            from app.services.ingest_recovery import scan_orphans, recover_orphan
+            orphans = await scan_orphans()
+            committed = purged = deferred = 0
+            for orphan in orphans:
+                action = await recover_orphan(orphan)
+                action_val = str(action.value) if hasattr(action, "value") else str(action)
+                if action_val == "committed":
+                    committed += 1
+                elif action_val == "purged":
+                    purged += 1
+                else:
+                    deferred += 1
+            duration = time.time() - start
+            detail = f"orphans={len(orphans)} committed={committed} purged={purged} deferred={deferred}"
+            _log_execution("ingest_recovery", "success", duration, detail)
+            logger.info("ingest_recovery (direct): %s in %.1fs", detail, duration)
+    except Exception as e:
+        duration = time.time() - start
+        _log_execution("ingest_recovery", "error", duration, str(e))
+        logger.error("ingest_recovery scheduled job failed: %s", e)
+
+
 def start_scheduler() -> AsyncIOScheduler:
     """Create and start the scheduler with configured jobs."""
     global _scheduler
@@ -256,6 +309,19 @@ def start_scheduler() -> AsyncIOScheduler:
         id="tombstone_purge",
         name="Weekly tombstone purge",
         replace_existing=True,
+    )
+
+    # Phase O.1 — ingest recovery: scan for stale pending Chroma chunks every
+    # 60 s and roll them forward or purge.  Uses a processor_queue if one is
+    # available on app.state; falls back to direct service call otherwise.
+    _scheduler.add_job(
+        _run_ingest_recovery,
+        "interval",
+        seconds=60,
+        id="ingest_recovery",
+        name="Ingest orphan recovery",
+        replace_existing=True,
+        max_instances=1,
     )
 
     # Invoke any registered internal-build hooks (no-op in the public build;

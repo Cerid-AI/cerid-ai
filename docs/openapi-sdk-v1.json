@@ -192,6 +192,138 @@
         "title": "AgentQueryRequest",
         "type": "object"
       },
+      "ExternalIngestRequest": {
+        "description": "Request body for ``POST /sdk/v1/ingest/external``.",
+        "properties": {
+          "field_mappings": {
+            "$ref": "#/components/schemas/FieldMappings",
+            "description": "Mapping config that declares how to extract canonical fields from ``payload``."
+          },
+          "payload": {
+            "additionalProperties": true,
+            "description": "Raw JSON payload from the external service.",
+            "title": "Payload",
+            "type": "object"
+          },
+          "source_type": {
+            "description": "Free-form label for the originating service (e.g. ``readwise``, ``pocket``, ``telegram-bot``).  Stored as provenance metadata; never branched on in code.",
+            "examples": [
+              "readwise",
+              "pocket",
+              "telegram-bot",
+              "raindrop"
+            ],
+            "title": "Source Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_type",
+          "payload",
+          "field_mappings"
+        ],
+        "title": "ExternalIngestRequest",
+        "type": "object"
+      },
+      "FieldMappings": {
+        "description": "Declares how to extract canonical fields from an arbitrary payload dict.\n\nEach value is a dotted-path string (optionally with ``[]`` for array\nfan-out) into the incoming ``payload``.  Only ``content`` and\n``source_uri`` are required; the others default gracefully.",
+        "properties": {
+          "content": {
+            "description": "Dotted path to the main text content.  Use ``highlights[].text`` to fan-out one item per array element.",
+            "examples": [
+              "text",
+              "highlights[].text",
+              "body.content"
+            ],
+            "title": "Content",
+            "type": "string"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional dotted path to an external ID.  When absent, the ID is derived from ``source_uri``.",
+            "examples": [
+              "id",
+              "highlight_id",
+              "guid"
+            ],
+            "title": "Id"
+          },
+          "source_uri": {
+            "description": "Dotted path to the canonical URI / URL for this item.",
+            "examples": [
+              "url",
+              "source.url",
+              "highlights[].url"
+            ],
+            "title": "Source Uri",
+            "type": "string"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional dotted path to a list[str] of tags.  Resolved value must be a Python list; absent path \u2192 empty list.",
+            "examples": [
+              "tags",
+              "highlights[].tags",
+              "meta.labels"
+            ],
+            "title": "Tags"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional dotted path to a human-readable title string.",
+            "examples": [
+              "title",
+              "book_title",
+              "subject"
+            ],
+            "title": "Title"
+          },
+          "ts": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional dotted path to an ISO-8601 timestamp.  Defaults to current UTC time when absent or unresolvable.",
+            "examples": [
+              "highlighted_at",
+              "created_at",
+              "meta.ts"
+            ],
+            "title": "Ts"
+          }
+        },
+        "required": [
+          "content",
+          "source_uri"
+        ],
+        "title": "FieldMappings",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -283,6 +415,36 @@
         ],
         "title": "HallucinationMode",
         "type": "string"
+      },
+      "IngestResult": {
+        "description": "Per-batch result counts returned by ``ingest_external``.",
+        "properties": {
+          "accepted": {
+            "default": 0,
+            "title": "Accepted",
+            "type": "integer"
+          },
+          "errors": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "skipped": {
+            "default": 0,
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "source_type": {
+            "default": "unknown",
+            "title": "Source Type",
+            "type": "string"
+          }
+        },
+        "title": "IngestResult",
+        "type": "object"
       },
       "MemoryExtractionRequest": {
         "properties": {
@@ -964,6 +1126,44 @@
           }
         },
         "summary": "Ingest Text",
+        "tags": [
+          "SDK"
+        ]
+      }
+    },
+    "/sdk/v1/ingest/external": {
+      "post": {
+        "description": "Accept an arbitrary JSON payload from any external service and ingest its content into the Cerid knowledge base.  The caller supplies a ``field_mappings`` config that declares how to extract canonical fields (content, source URI, timestamp, tags, title, external ID) from the raw ``payload``.  A single payload can map to N ingest items via array fan-out (e.g. ``highlights[].text``).  The ``source_type`` label is stored as provenance metadata and is never branched on in code \u2014 this endpoint is generic and not special-cased for any particular service.  See ``docs/INTEGRATION_GUIDE.md`` for per-service mapping examples (Readwise, Pocket, Instapaper, Raindrop, Telegram-bot).",
+        "operationId": "sdk_ingest_external_sdk_v1_ingest_external_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalIngestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Invalid request parameters"
+          },
+          "503": {
+            "description": "One or more backend services unavailable"
+          }
+        },
+        "summary": "Generic external ingest",
         "tags": [
           "SDK"
         ]

@@ -39,6 +39,7 @@ from app.routers.health import degradation_status, health_check, list_collection
 from app.routers.plugins import list_plugins
 from app.routers.query import query_knowledge
 from app.routers.sdk_version import SDK_VERSION
+from app.services.external_ingest import ExternalIngestRequest, IngestResult, ingest_external
 from app.services.ingestion import ingest_content, ingest_file
 from config.features import FEATURE_FLAGS, FEATURE_TIER
 from config.taxonomy import DOMAINS, TAXONOMY
@@ -337,6 +338,32 @@ async def sdk_ingest_file(req: dict):
         tags=req.get("tags", ""),
     )
     return result
+
+
+@router.post(
+    "/ingest/external",
+    response_model=IngestResult,
+    summary="Generic external ingest",
+    description=(
+        "Accept an arbitrary JSON payload from any external service and ingest "
+        "its content into the Cerid knowledge base.  The caller supplies a "
+        "``field_mappings`` config that declares how to extract canonical fields "
+        "(content, source URI, timestamp, tags, title, external ID) from the "
+        "raw ``payload``.  A single payload can map to N ingest items via array "
+        "fan-out (e.g. ``highlights[].text``).  "
+        "The ``source_type`` label is stored as provenance metadata and is never "
+        "branched on in code — this endpoint is generic and not special-cased "
+        "for any particular service.  "
+        "See ``docs/INTEGRATION_GUIDE.md`` for per-service mapping examples "
+        "(Readwise, Pocket, Instapaper, Raindrop, Telegram-bot)."
+    ),
+    responses={422: _422, 503: _503},
+)
+async def sdk_ingest_external(request: ExternalIngestRequest) -> IngestResult:
+    from core.context.identity import get_tenant_id
+
+    tenant = get_tenant_id()
+    return await ingest_external(request, tenant=tenant)
 
 
 # ---------------------------------------------------------------------------

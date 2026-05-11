@@ -8,7 +8,7 @@ Every `@router.*` decorator shipped in the public (OSS Apache-2.0) distribution.
 Internal-only routers (billing, trading SDK, ops endpoints) are stripped and
 not documented here; see the internal repo for the full registry.
 
-**Total routes:** 266
+**Total routes:** 269
 
 | Method | Path | Handler | Module | Tags | Build |
 |--------|------|---------|--------|------|-------|
@@ -153,6 +153,8 @@ not documented here; see the internal repo for the full registry.
 | POST | `/updates/dismiss/{update_id}` | `dismiss_model_update` | `src/mcp/app/routers/models.py` | models |  |
 | GET | `/claim-accuracy` | `get_claim_accuracy` | `src/mcp/app/routers/observability.py` | observability |  |
 | GET | `/claim-accuracy/{domain}` | `get_claim_accuracy_by_domain` | `src/mcp/app/routers/observability.py` | observability |  |
+| GET | `/communities` | `list_communities_endpoint` | `src/mcp/app/routers/observability.py` | observability |  |
+| GET | `/communities/{community_id:path}` | `get_community_endpoint` | `src/mcp/app/routers/observability.py` | observability |  |
 | GET | `/cost` | `get_cost_breakdown` | `src/mcp/app/routers/observability.py` | observability |  |
 | GET | `/cost-per-query` | `get_cost_per_query` | `src/mcp/app/routers/observability.py` | observability |  |
 | GET | `/health-score` | `get_health_score` | `src/mcp/app/routers/observability.py` | observability |  |
@@ -202,6 +204,7 @@ not documented here; see the internal repo for the full registry.
 | GET | `/health` | `sdk_health` | `src/mcp/app/routers/sdk.py` | SDK |  |
 | GET | `/health/detailed` | `sdk_health_detailed` | `src/mcp/app/routers/sdk.py` | SDK |  |
 | POST | `/ingest` | `sdk_ingest` | `src/mcp/app/routers/sdk.py` | SDK |  |
+| POST | `/ingest/external` | `sdk_ingest_external` | `src/mcp/app/routers/sdk.py` | SDK |  |
 | POST | `/ingest/file` | `sdk_ingest_file` | `src/mcp/app/routers/sdk.py` | SDK |  |
 | POST | `/llm/complete` | `sdk_llm_complete` | `src/mcp/app/routers/sdk.py` | SDK |  |
 | POST | `/memory/extract` | `sdk_memory_extract` | `src/mcp/app/routers/sdk.py` | SDK |  |
