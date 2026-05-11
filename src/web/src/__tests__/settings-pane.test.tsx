@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { axe } from "jest-axe"
 import SettingsPane from "@/components/settings/settings-pane"
 import { UIModeProvider } from "@/contexts/ui-mode-context"
 
@@ -207,7 +208,8 @@ describe("SettingsPane", () => {
     expect(switches.length).toBeGreaterThanOrEqual(1)
   })
 
-  it("shows Retrieval Pipeline on Pipeline tab", async () => {
+  it("shows Retrieval Pipeline on Pipeline tab (advanced mode)", async () => {
+    localStorage.setItem("cerid-ui-mode", "advanced")
     vi.stubGlobal("fetch", mockFetch(mockSettings))
     render(<SettingsPane />, { wrapper })
     await screen.findByText("Knowledge & Ingestion")
@@ -224,13 +226,34 @@ describe("SettingsPane", () => {
     expect(await screen.findByText("Platform Capabilities")).toBeInTheDocument()
   })
 
-  it("renders tab triggers for Essentials, Pipeline, and System", async () => {
+  it("renders Essentials and System tab triggers in simple mode (Pipeline/Governance/Plugins hidden)", async () => {
     vi.stubGlobal("fetch", mockFetch(mockSettings))
+    // Default wrapper → simple mode (no onboarding-complete set)
     render(<SettingsPane />, { wrapper })
     await screen.findByText("Knowledge & Ingestion")
     expect(screen.getByRole("tab", { name: "Essentials" })).toBeInTheDocument()
-    expect(screen.getByRole("tab", { name: "Pipeline" })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: "System" })).toBeInTheDocument()
+    // Advanced-only tabs must not be present in simple mode
+    expect(screen.queryByRole("tab", { name: "Pipeline" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("tab", { name: "Governance" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("tab", { name: "Plugins" })).not.toBeInTheDocument()
+  })
+
+  it("renders Pipeline, Governance, and Plugins tab triggers in advanced mode", async () => {
+    localStorage.setItem("cerid-ui-mode", "advanced")
+    vi.stubGlobal("fetch", mockFetch(mockSettings))
+    render(<SettingsPane />, { wrapper })
+    await screen.findByText("Knowledge & Ingestion")
+    expect(screen.getByRole("tab", { name: "Pipeline" })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Governance" })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Plugins" })).toBeInTheDocument()
+  })
+
+  it("shows 'Show advanced surfaces' toggle on Essentials tab", async () => {
+    vi.stubGlobal("fetch", mockFetch(mockSettings))
+    render(<SettingsPane />, { wrapper })
+    await screen.findByText("Knowledge & Ingestion")
+    expect(screen.getByText("Show advanced surfaces")).toBeInTheDocument()
   })
 
   it("renders preset buttons", async () => {
@@ -248,5 +271,64 @@ describe("SettingsPane", () => {
     render(<SettingsPane />, { wrapper })
     await screen.findByText("Knowledge & Ingestion")
     expect(screen.getByText("Self-RAG Validation")).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// D.2: four-state matrix
+// ---------------------------------------------------------------------------
+
+describe("SettingsPane — four-state matrix (D.2)", () => {
+  it("idle/loading: shows loading spinner while fetching", () => {
+    vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise(() => {})))
+    render(<SettingsPane />, { wrapper })
+    expect(screen.getByText(/loading settings/i)).toBeInTheDocument()
+  })
+
+  it("loaded: renders settings after successful fetch", async () => {
+    vi.stubGlobal("fetch", mockFetch(mockSettings))
+    render(<SettingsPane />, { wrapper })
+    expect(await screen.findByText("Knowledge & Ingestion")).toBeInTheDocument()
+  })
+
+  it("empty/idle: no special empty state — settings always returns data on success", () => {
+    // Settings always has data when loaded; the empty state is N/A for this pane.
+    // This test confirms no crash on initial render before fetch resolves.
+    vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise(() => {})))
+    expect(() => render(<SettingsPane />, { wrapper })).not.toThrow()
+  })
+
+  it("error: shows error message and Retry button on fetch failure", async () => {
+    vi.stubGlobal("fetch", mockFetch({ detail: "Internal Server Error" }, 500))
+    render(<SettingsPane />, { wrapper })
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument()
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// D.3: axe-clean
+// ---------------------------------------------------------------------------
+
+describe("SettingsPane — axe-clean (D.3)", () => {
+  it("is axe-clean (D.3) in loading state", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise(() => {})))
+    const { container } = render(<SettingsPane />, { wrapper })
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean (D.3) in error state", async () => {
+    vi.stubGlobal("fetch", mockFetch({ detail: "fail" }, 500))
+    const { container } = render(<SettingsPane />, { wrapper })
+    await waitFor(() => screen.getByRole("button", { name: /retry/i }))
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean (D.3) in populated state (Essentials tab)", async () => {
+    vi.stubGlobal("fetch", mockFetch(mockSettings))
+    const { container } = render(<SettingsPane />, { wrapper })
+    await screen.findByText("Knowledge & Ingestion")
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

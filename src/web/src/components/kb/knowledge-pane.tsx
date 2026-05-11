@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Badge } from "@/components/ui/badge"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   Select,
@@ -632,7 +634,7 @@ export function KnowledgePane() {
         {/* Client source + date filter row */}
         <div className="flex items-center gap-2">
           <Select value={clientSource} onValueChange={setClientSource}>
-            <SelectTrigger className="h-7 w-[130px] text-xs">
+            <SelectTrigger className="h-7 w-[130px] text-xs" aria-label="Filter by source">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -644,7 +646,7 @@ export function KnowledgePane() {
             </SelectContent>
           </Select>
           <Select value={dateFilter} onValueChange={setDateFilter}>
-            <SelectTrigger className="h-7 w-[120px] text-xs">
+            <SelectTrigger className="h-7 w-[120px] text-xs" aria-label="Filter by date">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -833,24 +835,27 @@ export function KnowledgePane() {
         <div className="flex-1 min-w-0 overflow-hidden">
           <ScrollArea className="h-full">
             <div className="min-w-0 max-w-full overflow-hidden">
+              {/* D.2: loading state — shadcn Skeleton */}
               {isLoading && (
-                <div className="flex items-center justify-center py-12 text-muted-foreground">
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  <span className="text-sm">{activeSearch ? "Searching..." : "Loading artifacts..."}</span>
+                <div className="grid grid-cols-2 gap-2 p-3 lg:grid-cols-3" aria-label={activeSearch ? "Searching…" : "Loading artifacts"} role="status">
+                  {[0, 1, 2, 3, 4, 5].map((i) => (
+                    <Skeleton key={i} className="h-32 w-full rounded-lg" />
+                  ))}
                 </div>
               )}
 
+              {/* D.2: error state — shadcn Alert + Retry */}
               {!isLoading && isError && (
-                <div className="flex flex-col items-center gap-3 py-12 text-center">
-                  <AlertCircle className="h-8 w-8 text-destructive" />
-                  <div>
-                    <p className="text-sm font-medium text-destructive">Failed to load artifacts</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {errorDetail instanceof Error ? errorDetail.message : "Connection error — check backend services"}
-                    </p>
-                  </div>
+                <div className="flex flex-col items-center gap-3 py-12 px-4">
+                  <Alert variant="destructive" className="max-w-md">
+                    <AlertCircle className="h-4 w-4" aria-hidden="true" />
+                    <AlertDescription>
+                      Failed to load artifacts —{" "}
+                      {errorDetail instanceof Error ? errorDetail.message : "connection error, check backend services"}
+                    </AlertDescription>
+                  </Alert>
                   <Button variant="outline" size="sm" onClick={() => refetch()}>
-                    <RefreshCcw className="mr-1.5 h-3 w-3" />
+                    <RefreshCcw className="mr-1.5 h-3 w-3" aria-hidden="true" />
                     Retry
                   </Button>
                 </div>

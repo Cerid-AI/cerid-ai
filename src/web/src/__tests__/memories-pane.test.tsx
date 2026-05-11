@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import type React from "react"
 import { render as rtlRender, screen, waitFor } from "@testing-library/react"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { axe } from "jest-axe"
 import MemoriesPane from "@/components/memories/memories-pane"
 
 // MemoriesPane uses Radix Tooltip (Round 4) — needs a TooltipProvider in the tree.
@@ -119,5 +120,75 @@ describe("MemoriesPane", () => {
     // Each memory card has edit and delete buttons
     const buttons = screen.getAllByRole("button")
     expect(buttons.length).toBeGreaterThan(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// D.2: four-state matrix
+// ---------------------------------------------------------------------------
+
+describe("MemoriesPane — four-state matrix (D.2)", () => {
+  it("idle/loading: shows Skeleton placeholders while fetching", () => {
+    vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise(() => {})))
+    const { container } = render(<MemoriesPane />)
+    // shadcn Skeleton elements rendered
+    const skeletons = container.querySelectorAll("[class*=skeleton], [role=status]")
+    expect(skeletons.length).toBeGreaterThan(0)
+  })
+
+  it("loaded: renders memory cards after data arrives", async () => {
+    vi.stubGlobal("fetch", mockFetch({ memories: mockMemories, total: mockMemories.length }))
+    render(<MemoriesPane />)
+    expect(await screen.findByText(/FastAPI with Python 3.11/)).toBeInTheDocument()
+  })
+
+  it("empty: shows empty state when no memories exist", async () => {
+    vi.stubGlobal("fetch", mockFetch({ memories: [], total: 0 }))
+    render(<MemoriesPane />)
+    await waitFor(() => {
+      expect(screen.getByText(/no memories extracted/i)).toBeInTheDocument()
+    })
+  })
+
+  it("error: shows destructive Alert with Retry button on fetch failure", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Network error")))
+    render(<MemoriesPane />)
+    await waitFor(() => {
+      expect(screen.getByText(/Failed to load memories/i)).toBeInTheDocument()
+    })
+    expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// D.3: axe-clean
+// ---------------------------------------------------------------------------
+
+describe("MemoriesPane — axe-clean (D.3)", () => {
+  it("is axe-clean (D.3) in loading state", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise(() => {})))
+    const { container } = render(<MemoriesPane />)
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean (D.3) in empty state", async () => {
+    vi.stubGlobal("fetch", mockFetch({ memories: [], total: 0 }))
+    const { container } = render(<MemoriesPane />)
+    await waitFor(() => screen.getByText(/no memories extracted/i))
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean (D.3) in populated state", async () => {
+    vi.stubGlobal("fetch", mockFetch({ memories: mockMemories, total: mockMemories.length }))
+    const { container } = render(<MemoriesPane />)
+    await screen.findByText(/FastAPI with Python 3.11/)
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it("is axe-clean (D.3) in error state", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("fail")))
+    const { container } = render(<MemoriesPane />)
+    await waitFor(() => screen.getByText(/Failed to load memories/i))
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

@@ -4,7 +4,10 @@
 import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Loader2 } from "lucide-react"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Button } from "@/components/ui/button"
+import { AlertCircle, RefreshCw } from "lucide-react"
 import { PaneErrorBoundary } from "@/components/ui/pane-error-boundary"
 import { LastUpdated } from "@/components/ui/last-updated"
 import { DigestCard } from "./digest-card"
@@ -18,7 +21,7 @@ import { TrustScoreChip } from "@/components/trust-score"
 import { fetchMaintenance, fetchIngestLog, fetchSchedulerStatus, fetchDigest } from "@/lib/api"
 
 export function MonitoringPane() {
-  const { data: maintenance, isLoading: loadingMaintenance, dataUpdatedAt } = useQuery({
+  const { data: maintenance, isLoading: loadingMaintenance, isError: errorMaintenance, refetch, dataUpdatedAt } = useQuery({
     queryKey: ["maintenance"],
     queryFn: () => fetchMaintenance(["health", "collections"]),
     refetchInterval: 30_000,
@@ -57,10 +60,27 @@ export function MonitoringPane() {
         <p className="text-xs text-muted-foreground">Live infrastructure status and recent operations</p>
       </div>
 
+      {/* D.2: loading state */}
       {loadingMaintenance ? (
-        <div className="flex flex-1 items-center justify-center text-muted-foreground">
-          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          Loading system status...
+        <div className="space-y-3 p-4" aria-label="Loading system status" role="status">
+          <Skeleton className="h-28 w-full rounded-lg" />
+          <Skeleton className="h-20 w-full rounded-lg" />
+          <Skeleton className="h-32 w-full rounded-lg" />
+          <Skeleton className="h-20 w-full rounded-lg" />
+        </div>
+      ) : errorMaintenance ? (
+        /* D.2: error state */
+        <div className="flex flex-col items-center justify-center gap-4 p-8">
+          <Alert variant="destructive" className="max-w-md">
+            <AlertCircle className="h-4 w-4" aria-hidden="true" />
+            <AlertDescription>
+              Failed to load system status. Check that the backend is running.
+            </AlertDescription>
+          </Alert>
+          <Button variant="outline" size="sm" onClick={() => refetch()}>
+            <RefreshCw className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+            Retry
+          </Button>
         </div>
       ) : (
         <ScrollArea className="min-h-0 flex-1">

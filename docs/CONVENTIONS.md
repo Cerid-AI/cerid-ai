@@ -95,6 +95,97 @@ Conventions that ARE enforceable by tools live in `.ruff.toml`, `pyproject.toml`
 - `crypto.randomUUID()` requires a secure context — on LAN-over-HTTP it's undefined. Use the shared `uuid()` helper in `src/web/src/lib/utils.ts` everywhere instead.
 - **`.d.ts` basename must not collide with a `.ts` basename** in the same dir — TypeScript treats the `.d.ts` as a specific module declaration and ignores ambient declarations.
 
+## Design tokens (D.1)
+
+> **Last refresh:** 2026-05-10 (Phase D.1 audit + drift gate)
+> **Drift gate:** `scripts/lint-no-design-drift.py` (CI job `lint / no-design-drift`)
+
+### Canonical design tokens
+
+Cerid's design tokens live as CSS custom properties in `src/web/src/index.css`.
+Use these in Tailwind classes via the `text-foreground`, `bg-primary`, etc. utility
+names — not raw hex values.
+
+**Core semantic tokens** (light + dark mode via `@media (prefers-color-scheme: dark)` or `.dark`):
+
+| Token | Usage |
+|---|---|
+| `--background` / `bg-background` | Page / app background |
+| `--foreground` / `text-foreground` | Primary text |
+| `--card` / `bg-card` | Card surfaces |
+| `--popover` / `bg-popover` | Popover / dropdown surfaces |
+| `--primary` / `bg-primary` | Primary action colour |
+| `--secondary` / `bg-secondary` | Secondary action colour |
+| `--muted` / `bg-muted` | Muted backgrounds (disabled, subtle) |
+| `--muted-foreground` / `text-muted-foreground` | De-emphasised text |
+| `--accent` / `bg-accent` | Accent highlights (teal family) |
+| `--destructive` / `bg-destructive` | Destructive actions and error states |
+| `--border` / `border-border` | Standard border colour |
+| `--input` / `border-input` | Form field borders |
+| `--ring` / `ring-ring` | Focus ring colour |
+| `--brand` / `bg-brand` | Cerid teal brand colour |
+| `--brand-foreground` / `text-brand-foreground` | Text on brand-coloured surfaces |
+
+**Chart tokens:** `--chart-1` … `--chart-5` — use via `fill-chart-1` etc.
+
+**Sidebar tokens:** `--sidebar`, `--sidebar-foreground`, `--sidebar-primary`,
+`--sidebar-accent`, `--sidebar-border`, `--sidebar-ring`.
+
+**Claim-overlay tokens:** `--claim-verified-border`, `--claim-refuted-bg`,
+`--claim-refuted-border`, `--claim-unverified-bg`, `--claim-unverified-border`,
+`--claim-evasion-bg`, `--claim-citation-bg`.
+
+**Radius tokens:** `--radius-sm` through `--radius-4xl` — use via `rounded-sm` etc.
+
+### Forbidden patterns
+
+The drift gate (`scripts/lint-no-design-drift.py`) blocks four categories of
+violation in `src/web/src/` (`.ts` / `.tsx` files):
+
+1. **Raw hex literals** — `#ff0000`, `#abc`, `#rrggbbaa`. Replace with a CSS-var-backed
+   Tailwind token or a named semantic class. Permitted inside CSS files and inside
+   `var(--my-token, #fallback)` CSS fallbacks (linter excludes these automatically).
+
+2. **Inline `style={{}}` props** — `<div style={{ width: "100%" }}>`. Use Tailwind's
+   arbitrary-value mechanism (`w-full`, `w-1/2`) or a CSS variable. For dynamic values
+   that genuinely need an inline style (e.g. a percentage-based progress bar that cannot
+   be expressed as a Tailwind token), add `// drift-allowed: <reason>` at the end of
+   the line.
+
+3. **Tailwind arbitrary values** — `text-[10px]`, `p-[3px]`, `max-w-[240px]`, `ring-[3px]`.
+   Replace with a canonical Tailwind scale step (`text-xs`, `p-1`, `max-w-sm`, etc.) or
+   add a design token to `index.css`. The `src/web/src/components/ui/` shadcn directory
+   is excluded from this check — shadcn-generated components use `ring-[3px]` etc. by design.
+
+4. **Non-lucide icon imports** — `@heroicons`, `react-icons`, `@material-ui/icons`, etc.
+   Use `lucide-react` exclusively. See `components.json` `iconLibrary: "lucide"`.
+
+5. **Non-shadcn motion libraries** — `framer-motion`, `gsap`, `react-spring`, etc.
+   Use Tailwind's built-in `animate-*` utilities or Radix's built-in CSS transitions.
+
+### Allowlist / suppression mechanism
+
+Two suppression paths exist for legitimate exceptions:
+
+**Inline suppression** — append `// drift-allowed: <reason>` on the violating line:
+```tsx
+<ScrollArea style={{ maxHeight }}>  // drift-allowed: dynamic max-height drives scroll region
+```
+
+**Allow-file** — pass `--allow-file path/to/allow.txt` to the script. Format: `path:lineno` per line, comments with `#`. Use for multi-line ranges or file-level exceptions.
+
+Neither suppression path is a licence to drift. All suppressions should be reviewed in
+code review and ideally tracked as follow-up items against the D.1 punch list
+(`tasks/2026-05-10-D1-design-drift-punch-list.md`).
+
+### CI gate
+
+The `lint / no-design-drift` CI job runs `scripts/lint-no-design-drift.py` in
+`--report-only` mode — violations are printed to the job log but do not block the build
+during the remediation window. Promotion to blocking follows the standard drift-gate
+protocol: add to `docker needs[]` and remove `--report-only` after two consecutive
+`main` builds show zero violations.
+
 ## Plugins & workflows
 
 - Plugins carry a `manifest.json` (name, version, tier, description, entry). BSL-1.1, converts to Apache-2.0 after 3 years.

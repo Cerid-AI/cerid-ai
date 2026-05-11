@@ -25,6 +25,10 @@ import { GovernanceSection } from "./governance-section"
 import { InferenceModelsCard } from "./inference-models-card"
 import type { SectionKey } from "./settings-primitives"
 import { logSwallowedError } from "@/lib/log-swallowed"
+import { AdvancedMode } from "@/components/common/advanced-mode"
+
+/** Tabs only accessible in advanced mode. */
+const ADVANCED_TABS = new Set(["pipeline", "governance", "plugins"])
 
 type LoadState = "loading" | "error" | "ready"
 
@@ -87,6 +91,14 @@ export default function SettingsPane() {
     setActiveTab(tab)
     try { localStorage.setItem("cerid-settings-tab", tab) } catch (err) { logSwallowedError(err, "localStorage.setItem", { key: "cerid-settings-tab" }) }
   }
+
+  // When mode becomes simple and the active tab is advanced-only, reset to essentials.
+  useEffect(() => {
+    if (uiMode === "simple" && ADVANCED_TABS.has(activeTab)) {
+      handleTabChange("essentials")
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uiMode])
 
   const applyUserPreset = async (preset: typeof USER_PRESETS[number]) => {
     setUIMode(preset.uiMode)
@@ -248,10 +260,17 @@ export default function SettingsPane() {
             <Tabs value={activeTab} onValueChange={handleTabChange}>
               <TabsList className="w-full">
                 <TabsTrigger value="essentials" className="flex-1">Essentials</TabsTrigger>
-                <TabsTrigger value="pipeline" className="flex-1">Pipeline</TabsTrigger>
+                {/* Pipeline, Governance, Plugins are operator/advanced surfaces */}
+                {uiMode === "advanced" && (
+                  <TabsTrigger value="pipeline" className="flex-1">Pipeline</TabsTrigger>
+                )}
                 <TabsTrigger value="system" className="flex-1">System</TabsTrigger>
-                <TabsTrigger value="governance" className="flex-1">Governance</TabsTrigger>
-                <TabsTrigger value="plugins" className="flex-1">Plugins</TabsTrigger>
+                {uiMode === "advanced" && (
+                  <TabsTrigger value="governance" className="flex-1">Governance</TabsTrigger>
+                )}
+                {uiMode === "advanced" && (
+                  <TabsTrigger value="plugins" className="flex-1">Plugins</TabsTrigger>
+                )}
                 <TabsTrigger value="pro" className="flex-1">
                   <Crown className="mr-1 h-3 w-3" />Pro
                 </TabsTrigger>
@@ -263,11 +282,13 @@ export default function SettingsPane() {
                 </PaneErrorBoundary>
               </TabsContent>
 
-              <TabsContent value="pipeline" className="space-y-1 pt-2">
-                <PaneErrorBoundary label="Pipeline">
-                  <PipelineSection settings={settings} sections={sections} toggleSection={toggleSection} patch={patch} />
-                </PaneErrorBoundary>
-              </TabsContent>
+              <AdvancedMode>
+                <TabsContent value="pipeline" className="space-y-1 pt-2">
+                  <PaneErrorBoundary label="Pipeline">
+                    <PipelineSection settings={settings} sections={sections} toggleSection={toggleSection} patch={patch} />
+                  </PaneErrorBoundary>
+                </TabsContent>
+              </AdvancedMode>
 
               <TabsContent value="system" className="space-y-3 pt-2">
                 <PaneErrorBoundary label="Inference Models">
@@ -293,19 +314,23 @@ export default function SettingsPane() {
                 </PaneErrorBoundary>
               </TabsContent>
 
-              <TabsContent value="governance" className="space-y-1 pt-2">
-                <PaneErrorBoundary label="Governance">
-                  {settings && (
-                    <GovernanceSection settings={settings} sections={sections} toggleSection={toggleSection} />
-                  )}
-                </PaneErrorBoundary>
-              </TabsContent>
+              <AdvancedMode>
+                <TabsContent value="governance" className="space-y-1 pt-2">
+                  <PaneErrorBoundary label="Governance">
+                    {settings && (
+                      <GovernanceSection settings={settings} sections={sections} toggleSection={toggleSection} />
+                    )}
+                  </PaneErrorBoundary>
+                </TabsContent>
+              </AdvancedMode>
 
-              <TabsContent value="plugins" className="space-y-1 pt-2">
-                <PaneErrorBoundary label="Plugins">
-                  <PluginsSection />
-                </PaneErrorBoundary>
-              </TabsContent>
+              <AdvancedMode>
+                <TabsContent value="plugins" className="space-y-1 pt-2">
+                  <PaneErrorBoundary label="Plugins">
+                    <PluginsSection />
+                  </PaneErrorBoundary>
+                </TabsContent>
+              </AdvancedMode>
 
               <TabsContent value="pro" className="space-y-1 pt-2">
                 <PaneErrorBoundary label="Pro">

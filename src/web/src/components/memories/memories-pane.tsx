@@ -6,6 +6,8 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   Brain,
@@ -18,6 +20,7 @@ import {
   Loader2,
   X,
   Archive,
+  AlertCircle,
   Clock,
   MessageSquare,
   FolderKanban,
@@ -181,17 +184,18 @@ export default function MemoriesPane() {
               size="icon-xs"
               onClick={handleArchive}
               disabled={loading || archiving}
-              title="Archive memories older than 180 days"
+              aria-label="Archive memories older than 180 days"
             >
-              {archiving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Archive className="h-3.5 w-3.5" />}
+              {archiving ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Archive className="h-3.5 w-3.5" aria-hidden="true" />}
             </Button>
             <Button
               variant="ghost"
               size="icon-xs"
               onClick={loadMemories}
               disabled={loading}
+              aria-label="Refresh memories"
             >
-              <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
+              <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} aria-hidden="true" />
             </Button>
           </div>
         </div>
@@ -237,22 +241,24 @@ export default function MemoriesPane() {
       </div>
 
       {/* Content */}
-      {error && !loading ? (
-        <div className="flex flex-col items-center gap-2 p-8 text-center text-sm text-muted-foreground">
-          <p>{error}</p>
-          <button onClick={loadMemories} className="text-xs underline hover:text-foreground">Retry</button>
-        </div>
-      ) : loading ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
+      {/* D.2: loading state — shadcn Skeleton */}
+      {loading ? (
+        <div className="space-y-3 p-4" aria-label="Loading memories" role="status">
           {[0, 1, 2].map((i) => (
-            <div key={i} className="w-full max-w-md px-4">
-              <div className="animate-pulse rounded-lg border bg-muted/30 p-4">
-                <div className="mb-2 h-4 w-16 rounded bg-muted" />
-                <div className="mb-1 h-3 w-full rounded bg-muted" />
-                <div className="h-3 w-2/3 rounded bg-muted" />
-              </div>
-            </div>
+            <Skeleton key={i} className="h-20 w-full rounded-lg" />
           ))}
+        </div>
+      ) : error ? (
+        /* D.2: error state — shadcn Alert + Retry */
+        <div className="flex flex-col items-center gap-3 p-8">
+          <Alert variant="destructive" className="max-w-md">
+            <AlertCircle className="h-4 w-4" aria-hidden="true" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+          <Button variant="outline" size="sm" onClick={loadMemories}>
+            <RefreshCw className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+            Retry
+          </Button>
         </div>
       ) : filtered.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground">
@@ -302,9 +308,9 @@ export default function MemoriesPane() {
                               variant="ghost"
                               size="icon-xs"
                               onClick={() => handleEdit(memory)}
-                              title="Edit"
+                              aria-label="Edit memory"
                             >
-                              <Pencil className="h-3 w-3" />
+                              <Pencil className="h-3 w-3" aria-hidden="true" />
                             </Button>
                             <Button
                               variant="ghost"
@@ -314,9 +320,9 @@ export default function MemoriesPane() {
                                 setDeletingId(memory.id)
                                 setEditingId(null)
                               }}
-                              title="Delete"
+                              aria-label="Delete memory"
                             >
-                              <Trash2 className="h-3 w-3" />
+                              <Trash2 className="h-3 w-3" aria-hidden="true" />
                             </Button>
                           </>
                         )}
@@ -376,8 +382,9 @@ export default function MemoriesPane() {
                           size="xs"
                           onClick={() => setDeletingId(null)}
                           disabled={saving}
+                          aria-label="Cancel delete"
                         >
-                          <X className="h-3 w-3" />
+                          <X className="h-3 w-3" aria-hidden="true" />
                         </Button>
                       </div>
                     )}

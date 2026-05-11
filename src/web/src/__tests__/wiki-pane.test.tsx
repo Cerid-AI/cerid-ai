@@ -227,7 +227,70 @@ describe("WikiPane — keyboard navigation", () => {
 })
 
 // ---------------------------------------------------------------------------
-// axe-clean
+// D.2: four-state matrix
+// ---------------------------------------------------------------------------
+
+describe("WikiPane — four-state matrix (D.2)", () => {
+  it("idle/loading: shows Skeleton placeholders while loading", () => {
+    mockUseWikiEntities.mockReturnValue({ data: undefined, isLoading: true, isError: false })
+    const { container } = render(<WikiPane />, { wrapper: createWrapper() })
+    const skeletons = container.querySelectorAll("[class*=animate-pulse]")
+    expect(skeletons.length).toBeGreaterThan(0)
+  })
+
+  it("loaded: renders entity list when data arrives", async () => {
+    mockUseWikiEntities.mockReturnValue({
+      data: [makeEntitySummary({ slug: "tesla", name: "Tesla" })],
+      isLoading: false,
+      isError: false,
+    })
+    render(<WikiPane />, { wrapper: createWrapper() })
+    await waitFor(() => expect(screen.getByText("Tesla")).toBeTruthy())
+  })
+
+  it("empty: shows empty state when entity list is empty", async () => {
+    mockUseWikiEntities.mockReturnValue({ data: [], isLoading: false, isError: false })
+    render(<WikiPane />, { wrapper: createWrapper() })
+    await waitFor(() => expect(screen.getByText("No entities yet")).toBeTruthy())
+  })
+
+  it("error: shows destructive Alert on fetch failure", async () => {
+    mockUseWikiEntities.mockReturnValue({ data: undefined, isLoading: false, isError: true })
+    render(<WikiPane />, { wrapper: createWrapper() })
+    await waitFor(() => expect(screen.getByText(/Failed to load entities/)).toBeTruthy())
+  })
+})
+
+// ---------------------------------------------------------------------------
+// D.3: axe-clean
+// ---------------------------------------------------------------------------
+
+describe("WikiPane — axe-clean (D.3)", () => {
+  it("is axe-clean (D.3) in empty state", async () => {
+    mockUseWikiEntities.mockReturnValue({ data: [], isLoading: false, isError: false })
+    const { container } = render(<WikiPane />, { wrapper: createWrapper() })
+    await waitFor(async () => {
+      const results = await axe(container)
+      expect(results).toHaveNoViolations()
+    })
+  })
+
+  it("is axe-clean (D.3) in populated state", async () => {
+    mockUseWikiEntities.mockReturnValue({
+      data: [makeEntitySummary({ slug: "tesla", name: "Tesla" })],
+      isLoading: false,
+      isError: false,
+    })
+    const { container } = render(<WikiPane />, { wrapper: createWrapper() })
+    await waitFor(async () => {
+      const results = await axe(container)
+      expect(results).toHaveNoViolations()
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// axe-clean (legacy describe — kept for backwards compat)
 // ---------------------------------------------------------------------------
 
 describe("WikiPane — axe-clean", () => {
