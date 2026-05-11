@@ -365,12 +365,27 @@ class TestRollbackChromaDB:
 # ---------------------------------------------------------------------------
 
 class TestCompensatingTransaction:
-    """Test that ChromaDB chunks are rolled back when Neo4j fails."""
+    """Test Neo4j failure handling in the two-phase ingest boundary (Phase O.1).
+
+    Phase O.1 changed the failure semantics: when Neo4j fails, Chroma chunks
+    are LEFT in ``cerid_state=pending`` (not deleted) so the IngestRecoveryJob
+    can roll them forward later.  The old immediate-rollback path is only
+    triggered for concurrent duplicate violations (constraint errors on
+    content_hash), not for ordinary connection failures.
+    """
 
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")
     @patch("app.services.ingestion.get_chroma")
-    def test_neo4j_failure_rolls_back_chromadb(self, mock_chroma, mock_neo4j, mock_redis):
+    def test_neo4j_failure_leaves_chunks_pending_for_recovery(
+        self, mock_chroma, mock_neo4j, mock_redis
+    ):
+        """Phase O.1: on Neo4j failure, Chroma chunks remain staged as pending.
+
+        The IngestRecoveryJob will scan for stale pending rows and either
+        roll-forward or purge them.  delete() must NOT be called on the
+        ordinary-failure path.
+        """
         collection = MagicMock()
         mock_chroma.return_value.get_or_create_collection.return_value = collection
 
@@ -390,8 +405,18 @@ class TestCompensatingTransaction:
 
         assert result["status"] == "error"
         assert "Graph storage failed" in result["error"]
-        # ChromaDB chunks should have been rolled back
-        collection.delete.assert_called_once()
+        # Phase O.1: chunks must NOT be deleted — they stay pending for recovery.
+        collection.delete.assert_not_called()
+        # Chunks must have been staged (update called with cerid_state=pending)
+        update_calls = collection.update.call_args_list
+        staged = [
+            c for c in update_calls
+            if c[1].get("metadatas") and any(
+                m.get("cerid_state") == "pending"
+                for m in c[1]["metadatas"]
+            )
+        ]
+        assert staged, "Expected collection.update with cerid_state=pending after Neo4j failure"
 
     @patch("app.services.ingestion.get_redis", return_value=MagicMock())
     @patch("app.services.ingestion.get_neo4j")

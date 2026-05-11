@@ -197,6 +197,52 @@ def _enrich_query(
 
 
 # ---------------------------------------------------------------------------
+# Phase O.1 — pending-chunk filter
+# ---------------------------------------------------------------------------
+
+# Chokepoint list: every Chroma query in the retrieval path must pass through
+# ``_exclude_pending``.  Current sites (as of 2026-05-10):
+#   1. multi_domain_query → query_domain (vector + BM25 hybrid main path)
+#   2. graph_expand_results → _fetch_related (relationship traversal expansion)
+#   3. graph_expand_results_via_entities (entity-neighbourhood expansion)
+# The BM25-only fallback path (collection.get with explicit IDs) applies
+# ``chunk_matches_tenant`` on the result metadata; it gets the committed-only
+# guard by checking the ``cerid_state`` key there too (see BM25 path below).
+_CERID_STATE_EXCLUDE_PENDING: dict[str, Any] = {"cerid_state": {"$ne": "pending"}}
+
+
+def _exclude_pending(where: dict | None) -> dict | None:
+    """Fuse the pending-exclusion clause into a Chroma ``where`` dict.
+
+    Returns ``None`` when the environment variable
+    ``CERID_FILTER_PENDING_CHUNKS`` is set to a falsy value (opt-out for
+    tests that need to observe pending rows directly).  Otherwise always
+    fuses ``{"cerid_state": {"$ne": "pending"}}`` using ChromaDB's
+    ``$and`` so it stacks cleanly with tenant and domain filters.
+    """
+    import os
+    if os.getenv("CERID_FILTER_PENDING_CHUNKS", "true").strip().lower() in (
+        "false", "0", "no", "off"
+    ):
+        return where
+
+    excl = _CERID_STATE_EXCLUDE_PENDING
+    if where is None:
+        return excl
+    # Already carries the filter — don't double-wrap.
+    if "cerid_state" in where:
+        return where
+    # Preserve existing $and lists
+    if "$and" in where:
+        # Check if cerid_state already present inside the $and list
+        for clause in where["$and"]:
+            if "cerid_state" in clause:
+                return where
+        return {"$and": [*where["$and"], excl]}
+    return {"$and": [where, excl]}
+
+
+# ---------------------------------------------------------------------------
 # Multi-domain retrieval
 # ---------------------------------------------------------------------------
 
@@ -232,11 +278,13 @@ async def multi_domain_query(
         try:
             collection = chroma_client.get_collection(name=col_name)
 
+            # Phase O.1: exclude pending (un-committed) chunks from retrieval.
+            _where = with_tenant_scope(_exclude_pending(metadata_filter))
             query_kwargs: dict[str, Any] = {
                 "query_texts": [query],
                 "n_results": top_k,
                 "include": ["documents", "metadatas", "distances"],
-                "where": with_tenant_scope(metadata_filter),
+                "where": _where,
             }
             # ChromaDB client uses sync HTTP — offload to thread to avoid
             # blocking the event loop when multiple domains query in parallel.
@@ -326,6 +374,11 @@ async def multi_domain_query(
                                 # ChromaDB's where-clause was bypassed for these IDs.
                                 if not chunk_matches_tenant(meta):
                                     continue
+                                # Phase O.1: exclude pending chunks on BM25-only path.
+                                import os as _os
+                                if _os.getenv("CERID_FILTER_PENDING_CHUNKS", "true").strip().lower() not in ("false", "0", "no", "off"):
+                                    if meta.get("cerid_state") == "pending":
+                                        continue
                                 # Enforce metadata_filter on BM25-only results too
                                 if metadata_filter and not all(
                                     meta.get(k) == v for k, v in metadata_filter.items()
@@ -483,11 +536,14 @@ async def graph_expand_results(
         domain = rel_artifact["domain"]
         collection = chroma_client.get_collection(name=config.collection_name(domain))
 
+        # Phase O.1: exclude pending chunks from graph expansion too.
         fetched = await asyncio.to_thread(
             collection.query,
             query_texts=[query],
             n_results=min(3, len(chunk_ids)),
-            where=with_tenant_scope({"artifact_id": rel_artifact["id"]}),
+            where=with_tenant_scope(
+                _exclude_pending({"artifact_id": rel_artifact["id"]})
+            ),
             include=["documents", "metadatas", "distances"],
         )
 
@@ -611,11 +667,14 @@ async def graph_expand_results_via_entities(
             logger.debug("collection missing for domain %s: %s", domain, e)
             continue
         try:
+            # Phase O.1: exclude pending chunks from entity-neighbourhood expansion.
             fetched = await asyncio.to_thread(
                 collection.query,
                 query_texts=[query],
                 n_results=2,
-                where=with_tenant_scope({"artifact_id": artifact_id}),
+                where=with_tenant_scope(
+                    _exclude_pending({"artifact_id": artifact_id})
+                ),
                 include=["documents", "metadatas", "distances"],
             )
         except Exception as e:  # noqa: BLE001 — chroma failure → skip this artifact

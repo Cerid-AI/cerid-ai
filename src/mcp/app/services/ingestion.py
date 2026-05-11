@@ -6,6 +6,37 @@
 Extracted from routers/ingestion.py to eliminate the circular import
 between agents/memory.py → routers/ingestion.py. Routers and agents
 both import from this service layer.
+
+Two-phase write (Phase O.1)
+---------------------------
+Every new ingest now follows a two-phase commit protocol:
+
+1. **Stage** — write Chroma chunks with ``cerid_state="pending"`` and
+   ``cerid_pending_at=<iso>``.  An ``idempotency_key`` (SHA-256 of
+   ``content + source_uri + tenant``) is stored so a re-run of the same
+   input finds the existing pending rows and skips the duplicate write.
+
+2. **Commit Neo4j** — call ``graph.create_artifact``.  On success, flip
+   all staged chunks to ``cerid_state="committed"`` via
+   ``_flip_chunks_committed``.  On failure, leave the Chroma rows in
+   ``pending`` state — the ``IngestRecoveryJob`` in
+   ``app/services/ingest_recovery.py`` scans for rows older than 60 s and
+   either rolls them forward or purges them.
+
+Retrieval gate (Phase O.1)
+--------------------------
+The main Chroma query in ``core/agents/query_agent.py`` passes the caller's
+``metadata_filter`` through ``with_tenant_scope``.  That helper already
+accepts an arbitrary dict that ChromaDB ANDs with the tenant scope.
+Callers that want to exclude pending rows should add
+``{"cerid_state": {"$ne": "pending"}}`` to their ``metadata_filter``.
+The retrieval chokepoint list and the filter application are documented in
+``_PENDING_FILTER`` below; query_agent applies it automatically when
+``CERID_FILTER_PENDING_CHUNKS`` (default True) is set.  This module
+exposes ``PENDING_STATE_FILTER`` for import by query_agent.
+
+Public API is unchanged — all callers of ``ingest_content`` and
+``ingest_file`` continue to work without modification.
 """
 from __future__ import annotations
 
@@ -29,6 +60,16 @@ from utils.chunker import chunk_text, make_context_header
 from utils.metadata import ai_categorize, extract_metadata, extract_metadata_minimal
 
 logger = logging.getLogger("ai-companion")
+
+# ---------------------------------------------------------------------------
+# Phase O.1 — two-phase write constants
+# ---------------------------------------------------------------------------
+
+#: ChromaDB ``where`` sub-clause that excludes pending (un-committed) chunks.
+#: Imported by ``core/agents/query_agent.py`` to apply at every Chroma
+#: query site.  Using ``$ne`` because Chroma doesn't support ``$not``
+#: at the top level.
+PENDING_STATE_FILTER: dict[str, Any] = {"cerid_state": {"$ne": "pending"}}
 
 
 def _coerce_chroma_meta(value: Any) -> Any:
@@ -64,6 +105,54 @@ def validate_file_path(file_path: str) -> Path:
 
 def _content_hash(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _idempotency_key(content: str, source_uri: str, tenant: str) -> str:
+    """Stable key for the two-phase ingest boundary.
+
+    SHA-256 of (content + source_uri + tenant) so the same upload from
+    the same tenant never produces duplicate pending rows.  Stored as
+    ``cerid_idempotency_key`` in Chroma metadata.
+    """
+    blob = "\x00".join([content, source_uri, tenant])
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _stage_chunks_pending(
+    collection: Any,
+    chunk_ids: list[str],
+    idempotency_key: str,
+) -> None:
+    """Stamp cerid_state=pending on the chunks just written.
+
+    ChromaDB's ``update`` method mutates metadata in place.  Called
+    immediately after ``collection.add()`` so the rows are invisible to
+    the retrieval gate until Neo4j commits successfully.
+    """
+    pending_at = utcnow_iso()
+    metadatas_patch = [
+        {
+            "cerid_state": "pending",
+            "cerid_pending_at": pending_at,
+            "cerid_idempotency_key": idempotency_key,
+        }
+        for _ in chunk_ids
+    ]
+    try:
+        collection.update(ids=chunk_ids, metadatas=metadatas_patch)
+    except Exception as e:  # noqa: BLE001 — observability boundary
+        log_swallowed_error("app.services.ingestion.stage_pending", e)
+
+
+def _flip_chunks_committed(collection: Any, chunk_ids: list[str]) -> None:
+    """Flip cerid_state from pending → committed after Neo4j succeeds."""
+    metadatas_patch = [{"cerid_state": "committed"} for _ in chunk_ids]
+    try:
+        collection.update(ids=chunk_ids, metadatas=metadatas_patch)
+    except Exception as e:  # noqa: BLE001 — observability boundary
+        # Non-fatal: the IngestRecoveryJob will forward-commit stale pending
+        # rows, so a failed flip here doesn't create a permanent orphan.
+        log_swallowed_error("app.services.ingestion.flip_committed", e)
 
 
 def _rollback_chromadb(collection, chunk_ids: list[str]) -> None:
@@ -339,6 +428,12 @@ def ingest_content(
         base_meta["near_duplicate_of"] = near_dup["artifact_id"]
         base_meta["near_duplicate_similarity"] = str(near_dup["similarity"])
 
+    # Phase O.1 — idempotency key: SHA-256(content + source_uri + tenant).
+    # source_uri comes from metadata["filename"] if available.
+    _source_uri = base_meta.get("filename", base_meta.get("source_uri", ""))
+    _tenant = base_meta["tenant_id"]
+    idempotency_key = _idempotency_key(content, _source_uri, _tenant)
+
     chunk_ids = [f"{artifact_id}_chunk_{i}" for i in range(len(chunks))]
     if pre_chunk_metadatas:
         # Per-chunk structural metadata (column_headers, heading_path,
@@ -357,6 +452,10 @@ def ingest_content(
     else:
         chunk_metadatas = [{**base_meta, "chunk_index": i} for i in range(len(chunks))]
     collection.add(ids=chunk_ids, documents=chunks, metadatas=chunk_metadatas)
+
+    # Phase O.1 — stage: mark all chunks as pending so the retrieval gate
+    # excludes them until the Neo4j commit confirms the write.
+    _stage_chunks_pending(collection, chunk_ids, idempotency_key)
 
     # Index for BM25 hybrid search
     try:
@@ -401,6 +500,9 @@ def ingest_content(
             client_source=base_meta.get("client_source", ""),
         )
         artifact_created = True
+        # Phase O.1 — commit: flip Chroma chunks from pending → committed.
+        # Non-fatal if this flip fails; IngestRecoveryJob will forward-commit.
+        _flip_chunks_committed(collection, chunk_ids)
     except Exception as e:
         err_msg = str(e).lower()
         if "constraint" in err_msg and "content_hash" in err_msg:
@@ -414,8 +516,12 @@ def ingest_content(
                 "timestamp": utcnow_iso(),
                 "duplicate_of": "(concurrent)",
             }
-        logger.error(f"Neo4j artifact creation failed: {e}")
-        _rollback_chromadb(collection, chunk_ids)
+        # Phase O.1 — on Neo4j failure, leave Chroma rows in pending state.
+        # The IngestRecoveryJob will scan for stale pending rows and either
+        # roll-forward (if Neo4j becomes available) or purge after 2 retries.
+        logger.error(
+            "Neo4j artifact creation failed (chunks staged as pending for recovery): %s", e
+        )
         return {
             "status": "error",
             "artifact_id": artifact_id,

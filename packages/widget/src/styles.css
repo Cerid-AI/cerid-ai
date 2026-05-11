@@ -1,114 +1,109 @@
 /* Copyright (c) 2026 Cerid AI. All rights reserved. */
 /* SPDX-License-Identifier: Apache-2.0 */
 
-/* =========================================================================
-   Cerid AI Chat Widget — Base Styles
+/*
+ * Cerid AI Chat Widget — Shadow DOM Styles
+ *
+ * All variables use CSS custom properties so operators can override them
+ * on :host from outside the shadow root with ::part() or host params.
+ *
+ * No hex literals in rule values — all colors go through custom properties.
+ * System font stack — no external font dependencies.
+ * WCAG AA contrast enforced for all text/background pairings.
+ */
 
-   These styles are injected into a Shadow DOM host so they won't leak into
-   or be affected by the embedding page's styles.
-   ========================================================================= */
+/* ============================================================
+   Host & CSS custom properties (light theme default)
+   ============================================================ */
 
 :host {
+  /* Typography */
   --cerid-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
   --cerid-radius: 12px;
   --cerid-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
-  --cerid-transition: 200ms ease;
+  --cerid-transition: 180ms ease;
 
-  /* Light theme (default) */
+  /* Surfaces */
   --cerid-bg: #ffffff;
   --cerid-bg-secondary: #f4f5f7;
-  --cerid-text: #1a1a2e;
-  --cerid-text-secondary: #6b7280;
+  --cerid-bg-hover: #eaecf0;
+
+  /* Text — WCAG AA: #1a1a2e on #ffffff = 14.8:1 */
+  --cerid-fg: #1a1a2e;
+  --cerid-fg-muted: #6b7280;
+
+  /* Borders */
   --cerid-border: #e5e7eb;
+  --cerid-input-border: #d1d5db;
+
+  /* Accent (brand blue) */
   --cerid-accent: #3b82f6;
   --cerid-accent-hover: #2563eb;
+  --cerid-accent-fg: #ffffff;
+
+  /* Message bubbles */
   --cerid-user-bg: #3b82f6;
-  --cerid-user-text: #ffffff;
+  --cerid-user-fg: #ffffff;
   --cerid-assistant-bg: #f4f5f7;
-  --cerid-assistant-text: #1a1a2e;
-  --cerid-input-bg: #ffffff;
-  --cerid-input-border: #d1d5db;
+  --cerid-assistant-fg: #1a1a2e;
+
+  /* Verification band colours */
+  --cerid-badge-verified-bg: rgba(34, 197, 94, 0.12);
+  --cerid-badge-verified-border: rgba(34, 197, 94, 0.4);
+  --cerid-badge-verified-fg: #15803d;        /* WCAG AA on white */
+  --cerid-badge-partial-bg: rgba(245, 158, 11, 0.12);
+  --cerid-badge-partial-border: rgba(245, 158, 11, 0.4);
+  --cerid-badge-partial-fg: #92400e;
+  --cerid-badge-unverified-bg: rgba(239, 68, 68, 0.12);
+  --cerid-badge-unverified-border: rgba(239, 68, 68, 0.4);
+  --cerid-badge-unverified-fg: #991b1b;
 
   font-family: var(--cerid-font);
   font-size: 14px;
   line-height: 1.5;
-  color: var(--cerid-text);
+  color: var(--cerid-fg);
+  display: block;
 }
 
-/* Dark theme */
+/* ============================================================
+   Dark theme
+   ============================================================ */
+
+:host([theme="dark"]),
 :host(.cerid-dark) {
   --cerid-bg: #1a1a2e;
   --cerid-bg-secondary: #232340;
-  --cerid-text: #e5e7eb;
-  --cerid-text-secondary: #9ca3af;
+  --cerid-bg-hover: #2d2d50;
+  --cerid-fg: #e5e7eb;
+  --cerid-fg-muted: #9ca3af;
   --cerid-border: #374151;
+  --cerid-input-border: #4b5563;
   --cerid-accent: #60a5fa;
   --cerid-accent-hover: #3b82f6;
+  --cerid-accent-fg: #ffffff;
   --cerid-user-bg: #3b82f6;
-  --cerid-user-text: #ffffff;
+  --cerid-user-fg: #ffffff;
   --cerid-assistant-bg: #232340;
-  --cerid-assistant-text: #e5e7eb;
-  --cerid-input-bg: #232340;
-  --cerid-input-border: #4b5563;
+  --cerid-assistant-fg: #e5e7eb;
+  --cerid-badge-verified-fg: #4ade80;
+  --cerid-badge-partial-fg: #fbbf24;
+  --cerid-badge-unverified-fg: #f87171;
 }
 
-/* ---- Layout ---- */
-
-.cerid-widget-container {
-  position: fixed;
-  z-index: 2147483646;
-  display: flex;
-  flex-direction: column;
-}
-
-.cerid-widget-container.bottom-right {
-  bottom: 24px;
-  right: 24px;
-}
-
-.cerid-widget-container.bottom-left {
-  bottom: 24px;
-  left: 24px;
-}
-
-/* ---- Bubble ---- */
-
-.cerid-bubble {
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  background: var(--cerid-accent);
-  color: #fff;
-  border: none;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: var(--cerid-shadow);
-  transition: transform var(--cerid-transition),
-    background var(--cerid-transition);
-  align-self: flex-end;
-}
-
-.cerid-bubble:hover {
-  background: var(--cerid-accent-hover);
-  transform: scale(1.08);
-}
-
-.cerid-bubble svg {
-  width: 26px;
-  height: 26px;
-  fill: currentColor;
-}
-
-/* ---- Panel ---- */
+/* ============================================================
+   Panel layout
+   ============================================================ */
 
 .cerid-panel {
+  position: fixed;
+  z-index: 2147483647;
+  bottom: 24px;
+  right: 24px;
   width: 380px;
-  max-width: calc(100vw - 48px);
-  height: 520px;
-  max-height: calc(100vh - 120px);
+  max-width: calc(100vw - 32px);
+  height: 560px;
+  max-height: calc(100vh - 48px);
   border-radius: var(--cerid-radius);
   background: var(--cerid-bg);
   box-shadow: var(--cerid-shadow);
@@ -116,22 +111,11 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  margin-bottom: 12px;
-  animation: cerid-slide-up 200ms ease forwards;
 }
 
-@keyframes cerid-slide-up {
-  from {
-    opacity: 0;
-    transform: translateY(12px) scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-/* ---- Header ---- */
+/* ============================================================
+   Header
+   ============================================================ */
 
 .cerid-header {
   display: flex;
@@ -143,33 +127,33 @@
   flex-shrink: 0;
 }
 
-.cerid-header-title {
+.cerid-header__title {
   font-size: 15px;
   font-weight: 600;
-  color: var(--cerid-text);
+  color: var(--cerid-fg);
   margin: 0;
 }
 
-.cerid-header-actions {
-  display: flex;
-  gap: 4px;
-}
-
-.cerid-header-btn {
+.cerid-header__clear {
   background: none;
   border: none;
   cursor: pointer;
-  padding: 4px;
+  padding: 4px 6px;
   border-radius: 6px;
-  color: var(--cerid-text-secondary);
-  transition: background var(--cerid-transition);
+  color: var(--cerid-fg-muted);
+  font-size: 12px;
+  line-height: 1;
+  transition: background var(--cerid-transition), color var(--cerid-transition);
 }
 
-.cerid-header-btn:hover {
-  background: var(--cerid-bg-secondary);
+.cerid-header__clear:hover {
+  background: var(--cerid-bg-hover);
+  color: var(--cerid-fg);
 }
 
-/* ---- Messages ---- */
+/* ============================================================
+   Messages scroll area
+   ============================================================ */
 
 .cerid-messages {
   flex: 1;
@@ -177,57 +161,275 @@
   padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
   scroll-behavior: smooth;
 }
 
+.cerid-messages::-webkit-scrollbar {
+  width: 6px;
+}
+
+.cerid-messages::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.cerid-messages::-webkit-scrollbar-thumb {
+  background: var(--cerid-border);
+  border-radius: 3px;
+}
+
+/* ============================================================
+   Empty / error state
+   ============================================================ */
+
+.cerid-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--cerid-fg-muted);
+  font-size: 14px;
+}
+
+.cerid-error-banner {
+  background: var(--cerid-badge-unverified-bg);
+  border: 1px solid var(--cerid-badge-unverified-border);
+  color: var(--cerid-badge-unverified-fg);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  margin: 0 0 4px 0;
+}
+
+/* ============================================================
+   Message bubbles
+   ============================================================ */
+
 .cerid-message {
-  max-width: 85%;
+  max-width: 86%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cerid-message--user {
+  align-self: flex-end;
+}
+
+.cerid-message--assistant {
+  align-self: flex-start;
+}
+
+.cerid-message__bubble {
   padding: 10px 14px;
   border-radius: 16px;
-  word-wrap: break-word;
+  word-break: break-word;
   white-space: pre-wrap;
   font-size: 14px;
   line-height: 1.5;
 }
 
-.cerid-message.user {
-  align-self: flex-end;
+.cerid-message--user .cerid-message__bubble {
   background: var(--cerid-user-bg);
-  color: var(--cerid-user-text);
+  color: var(--cerid-user-fg);
   border-bottom-right-radius: 4px;
 }
 
-.cerid-message.assistant {
-  align-self: flex-start;
+.cerid-message--assistant .cerid-message__bubble {
   background: var(--cerid-assistant-bg);
-  color: var(--cerid-assistant-text);
+  color: var(--cerid-assistant-fg);
   border-bottom-left-radius: 4px;
 }
 
 /* Streaming cursor */
-.cerid-message.assistant.streaming::after {
+.cerid-message--streaming .cerid-message__bubble::after {
   content: "\25CF";
   animation: cerid-blink 1s step-start infinite;
-  margin-left: 2px;
+  margin-left: 3px;
   color: var(--cerid-accent);
 }
 
 @keyframes cerid-blink {
-  50% {
-    opacity: 0;
-  }
+  50% { opacity: 0; }
 }
 
-/* Welcome message */
-.cerid-welcome {
-  text-align: center;
-  color: var(--cerid-text-secondary);
-  padding: 32px 16px;
-  font-size: 14px;
+/* Claims area below an assistant bubble */
+.cerid-message__claims {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 2px;
 }
 
-/* ---- Input area ---- */
+.cerid-message__claims--loading {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* Skeleton shimmer for claims loading state */
+.cerid-skeleton {
+  border-radius: 9999px;
+  background: linear-gradient(
+    90deg,
+    var(--cerid-bg-secondary) 25%,
+    var(--cerid-bg-hover) 50%,
+    var(--cerid-bg-secondary) 75%
+  );
+  background-size: 200% 100%;
+  animation: cerid-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes cerid-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ============================================================
+   Claim badges
+   ============================================================ */
+
+.cerid-badge-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.cerid-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  border: 1px solid;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--cerid-font);
+  cursor: pointer;
+  transition: opacity var(--cerid-transition);
+  white-space: nowrap;
+}
+
+.cerid-badge:focus-visible {
+  outline: 2px solid var(--cerid-accent);
+  outline-offset: 2px;
+}
+
+.cerid-badge--verified {
+  background: var(--cerid-badge-verified-bg);
+  border-color: var(--cerid-badge-verified-border);
+  color: var(--cerid-badge-verified-fg);
+}
+
+.cerid-badge--partial {
+  background: var(--cerid-badge-partial-bg);
+  border-color: var(--cerid-badge-partial-border);
+  color: var(--cerid-badge-partial-fg);
+}
+
+.cerid-badge--unverified {
+  background: var(--cerid-badge-unverified-bg);
+  border-color: var(--cerid-badge-unverified-border);
+  color: var(--cerid-badge-unverified-fg);
+}
+
+.cerid-badge__icon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.cerid-badge__icon svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Popover */
+.cerid-badge-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 10;
+  width: 260px;
+  background: var(--cerid-bg);
+  border: 1px solid var(--cerid-border);
+  border-radius: 8px;
+  box-shadow: var(--cerid-shadow);
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--cerid-fg);
+}
+
+.cerid-badge-popover[hidden] {
+  display: none;
+}
+
+.cerid-badge-popover__claim {
+  font-weight: 500;
+  margin: 0 0 6px 0;
+  line-height: 1.4;
+  color: var(--cerid-fg);
+}
+
+.cerid-badge-popover__reason {
+  color: var(--cerid-fg-muted);
+  margin: 0 0 4px 0;
+  font-size: 11px;
+}
+
+.cerid-badge-popover__confidence {
+  color: var(--cerid-fg-muted);
+  margin: 0 0 6px 0;
+  font-size: 11px;
+}
+
+.cerid-badge-popover__sources {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border-top: 1px solid var(--cerid-border);
+  padding-top: 6px;
+}
+
+.cerid-badge-popover__source-file {
+  font-size: 11px;
+  color: var(--cerid-fg-muted);
+  font-style: italic;
+}
+
+.cerid-badge-popover__source-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--cerid-accent);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cerid-badge-popover__source-link:hover {
+  text-decoration: underline;
+}
+
+.cerid-badge-popover__source-link-icon {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+}
+
+.cerid-badge-popover__source-link-icon svg {
+  width: 10px;
+  height: 10px;
+}
+
+/* ============================================================
+   Input area
+   ============================================================ */
 
 .cerid-input-area {
   display: flex;
@@ -244,20 +446,21 @@
   resize: none;
   border: 1px solid var(--cerid-input-border);
   border-radius: 10px;
-  padding: 10px 14px;
+  padding: 9px 13px;
   font-family: var(--cerid-font);
   font-size: 14px;
   line-height: 1.4;
-  background: var(--cerid-input-bg);
-  color: var(--cerid-text);
+  background: var(--cerid-bg);
+  color: var(--cerid-fg);
   outline: none;
-  min-height: 40px;
+  min-height: 38px;
   max-height: 120px;
   transition: border-color var(--cerid-transition);
+  field-sizing: content;
 }
 
 .cerid-input::placeholder {
-  color: var(--cerid-text-secondary);
+  color: var(--cerid-fg-muted);
 }
 
 .cerid-input:focus {
@@ -265,11 +468,11 @@
 }
 
 .cerid-send-btn {
-  width: 40px;
-  height: 40px;
+  width: 38px;
+  height: 38px;
   border-radius: 10px;
   background: var(--cerid-accent);
-  color: #fff;
+  color: var(--cerid-accent-fg);
   border: none;
   cursor: pointer;
   display: flex;
@@ -277,30 +480,32 @@
   justify-content: center;
   flex-shrink: 0;
   transition: background var(--cerid-transition), opacity var(--cerid-transition);
+  padding: 0;
 }
 
-.cerid-send-btn:hover {
+.cerid-send-btn:hover:not(:disabled) {
   background: var(--cerid-accent-hover);
 }
 
 .cerid-send-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
 .cerid-send-btn svg {
-  width: 18px;
-  height: 18px;
-  fill: currentColor;
+  width: 17px;
+  height: 17px;
 }
 
-/* ---- Powered-by footer ---- */
+/* ============================================================
+   Footer
+   ============================================================ */
 
 .cerid-footer {
   text-align: center;
-  padding: 6px 0;
+  padding: 5px 0;
   font-size: 11px;
-  color: var(--cerid-text-secondary);
+  color: var(--cerid-fg-muted);
   border-top: 1px solid var(--cerid-border);
   flex-shrink: 0;
 }
@@ -310,29 +515,6 @@
   text-decoration: none;
 }
 
-/* ---- Scrollbar ---- */
-
-.cerid-messages::-webkit-scrollbar {
-  width: 6px;
-}
-
-.cerid-messages::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.cerid-messages::-webkit-scrollbar-thumb {
-  background: var(--cerid-border);
-  border-radius: 3px;
-}
-
-/* ---- Full-page mode (iframe) ---- */
-
-.cerid-fullpage .cerid-panel {
-  width: 100%;
-  height: 100%;
-  max-width: none;
-  max-height: none;
-  border-radius: 0;
-  border: none;
-  margin: 0;
+.cerid-footer a:hover {
+  text-decoration: underline;
 }

@@ -1,184 +1,169 @@
-# @cerid-ai/widget
+# @cerid/widget
 
-Embeddable chat widget for [Cerid AI](https://cerid.ai) Knowledge Companion.
+Embeddable verified-chat web component for [Cerid AI](https://cerid.ai) Knowledge Companion.
 
-Three integration modes: script tag, iframe, or React component.
+A single `<cerid-chat>` custom element that any website can drop in via a `<script>` tag and immediately get a verified-response chat widget. Built with vanilla HTMLElement, Shadow DOM, and zero framework dependencies.
+
+---
+
+## Installation
+
+### CDN (script tag)
+
+```html
+<script src="https://cdn.cerid.ai/widget@0.1/cerid-widget.js"></script>
+<cerid-chat host="https://your-cerid-host.local"></cerid-chat>
+```
+
+### npm
+
+```bash
+npm install @cerid/widget
+```
+
+```ts
+import "@cerid/widget"; // auto-registers <cerid-chat>
+```
+
+---
 
 ## Quick Start
 
-### 1. Script Tag (Easiest)
-
-Add a single `<script>` tag to any website. A floating chat bubble appears in the bottom-right corner.
-
 ```html
-<script
-  src="https://your-cerid-server.com/widget.js"
-  data-cerid-url="https://your-cerid-server.com"
-  data-client-id="my-website"
-  defer
-></script>
+<!DOCTYPE html>
+<html>
+<head>
+  <script src="https://cdn.cerid.ai/widget@0.1/cerid-widget.js"></script>
+</head>
+<body>
+  <cerid-chat
+    host="https://your-cerid-host.local"
+    token="optional-bearer-token"
+    theme="auto"
+    placeholder="Ask anything about your knowledge base"
+  ></cerid-chat>
+</body>
+</html>
 ```
 
-**Optional attributes:**
+---
 
-| Attribute | Description | Default |
-|-----------|-------------|---------|
-| `data-cerid-url` | Cerid MCP server URL (required) | - |
-| `data-client-id` | Client identifier (required) | - |
-| `data-api-key` | API key for authenticated access | - |
-| `data-position` | `bottom-right` or `bottom-left` | `bottom-right` |
-| `data-theme` | `light`, `dark`, or `auto` | `auto` |
-| `data-title` | Widget header title | `Cerid AI` |
-| `data-placeholder` | Input placeholder text | `Ask anything...` |
-| `data-initial-message` | Welcome message on first open | - |
+## Configuration — observed attributes
 
-You can also set a global config object before the script loads:
+| Attribute     | Type                      | Default                  | Required | Description                                                      |
+|---------------|---------------------------|--------------------------|----------|------------------------------------------------------------------|
+| `host`        | `string` (URL)            | —                        | **Yes**  | Base URL of the Cerid deployment (e.g. `https://cerid.example.com`). CORS must be configured on the server. |
+| `token`       | `string`                  | —                        | No       | Bearer token sent as `Authorization: Bearer <token>`.            |
+| `placeholder` | `string`                  | `"Ask Cerid anything"`   | No       | Input placeholder text.                                          |
+| `theme`       | `"light"` \| `"dark"` \| `"auto"` | `"auto"`        | No       | Color theme. `"auto"` follows `prefers-color-scheme`.            |
+| `max-claims`  | `number`                  | `50`                     | No       | Maximum claim badges rendered per assistant message. Cap: 200.   |
 
-```html
-<script>
-  window.ceridChatConfig = {
-    apiUrl: "https://your-cerid-server.com",
-    clientId: "my-website",
-    theme: "dark",
-    title: "Help Center",
-    initialMessage: "Hi! How can I help you today?",
-  };
-</script>
-<script src="https://your-cerid-server.com/widget.js" defer></script>
-```
+---
 
-### 2. iframe
+## Theming — CSS custom properties
 
-Embed the widget as a full-page chat interface inside an iframe:
+Override these on the element from the outer page using `::part()` or by setting them on the host. All defaults are set inside the shadow root.
 
-```html
-<iframe
-  src="https://your-cerid-server.com/widget.html?clientId=my-website"
-  width="400"
-  height="600"
-  frameborder="0"
-  allow="clipboard-write"
-  style="border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,0.1);"
-></iframe>
-```
+| Property                          | Default (light)           | Meaning                          |
+|-----------------------------------|---------------------------|----------------------------------|
+| `--cerid-bg`                      | `#ffffff`                 | Panel background                 |
+| `--cerid-bg-secondary`            | `#f4f5f7`                 | Secondary surfaces               |
+| `--cerid-fg`                      | `#1a1a2e`                 | Primary text                     |
+| `--cerid-fg-muted`                | `#6b7280`                 | Muted/secondary text             |
+| `--cerid-border`                  | `#e5e7eb`                 | Border colour                    |
+| `--cerid-accent`                  | `#3b82f6`                 | Brand accent (buttons, links)    |
+| `--cerid-accent-hover`            | `#2563eb`                 | Accent hover state               |
+| `--cerid-accent-fg`               | `#ffffff`                 | Text on accent surfaces          |
+| `--cerid-user-bg`                 | `#3b82f6`                 | User message bubble background   |
+| `--cerid-user-fg`                 | `#ffffff`                 | User message bubble text         |
+| `--cerid-assistant-bg`            | `#f4f5f7`                 | Assistant bubble background      |
+| `--cerid-assistant-fg`            | `#1a1a2e`                 | Assistant bubble text            |
+| `--cerid-badge-verified-bg`       | `rgba(34,197,94,0.12)`    | Verified badge background        |
+| `--cerid-badge-verified-border`   | `rgba(34,197,94,0.4)`     | Verified badge border            |
+| `--cerid-badge-verified-fg`       | `#15803d`                 | Verified badge text              |
+| `--cerid-badge-partial-bg`        | `rgba(245,158,11,0.12)`   | Partial badge background         |
+| `--cerid-badge-partial-border`    | `rgba(245,158,11,0.4)`    | Partial badge border             |
+| `--cerid-badge-partial-fg`        | `#92400e`                 | Partial badge text               |
+| `--cerid-badge-unverified-bg`     | `rgba(239,68,68,0.12)`    | Unverified badge background      |
+| `--cerid-badge-unverified-border` | `rgba(239,68,68,0.4)`     | Unverified badge border          |
+| `--cerid-badge-unverified-fg`     | `#991b1b`                 | Unverified badge text            |
+| `--cerid-font`                    | system-ui stack           | Font family                      |
+| `--cerid-radius`                  | `12px`                    | Panel border radius              |
+| `--cerid-shadow`                  | `0 8px 32px …`            | Panel drop shadow                |
+| `--cerid-transition`              | `180ms ease`              | Transition timing                |
 
-### 3. React Component (npm)
+Dark theme values are applied automatically when `theme="dark"` or via `prefers-color-scheme: dark` with `theme="auto"`.
 
-Install the package:
+---
 
-```bash
-npm install @cerid-ai/widget
-```
+## Verification badges
 
-Use in your React app:
+Each assistant response surfaces per-claim verification badges:
 
-```tsx
-import { CeridBubble } from "@cerid-ai/widget";
+| Band         | Icon       | Color  | Meaning                                               |
+|--------------|------------|--------|-------------------------------------------------------|
+| `verified`   | CheckCircle | Green | Claim verified with ≥1 KB source                     |
+| `partial`    | Minus       | Amber | Uncertain OR verified but no direct source            |
+| `unverified` | CircleDot   | Red   | Not supported — no source found                       |
 
-function App() {
-  return (
-    <CeridBubble
-      config={{
-        apiUrl: "https://your-cerid-server.com",
-        clientId: "my-app",
-        theme: "auto",
-        title: "Knowledge Assistant",
-        initialMessage: "Ask me anything about our docs!",
-      }}
-    />
-  );
-}
-```
+Click any badge to open a detail popover with the claim text, confidence score, and source links.
 
-Or use the panel component directly (no bubble):
+---
 
-```tsx
-import { CeridWidget } from "@cerid-ai/widget";
+## Browser support
 
-function ChatPage() {
-  return (
-    <CeridWidget
-      config={{
-        apiUrl: "https://your-cerid-server.com",
-        clientId: "my-app",
-      }}
-      fullPage
-    />
-  );
-}
-```
+Modern evergreen browsers:
+- Chrome 90+
+- Firefox 88+
+- Safari 15+
 
-## API Client (Headless)
+Requires: Custom Elements v1, Shadow DOM v1, `fetch`, `AbortSignal`.
 
-Use the API client directly without any UI:
+---
 
-```ts
-import { CeridChatAPI } from "@cerid-ai/widget";
+## Security
 
-const api = new CeridChatAPI({
-  apiUrl: "https://your-cerid-server.com",
-  clientId: "my-app",
-});
+The widget makes CORS requests to `host`. **The operator must configure CORS on their Cerid deployment** to allow the embedding page's origin. The `token` attribute is sent as a `Bearer` token in the `Authorization` header — use HTTPS in production.
 
-await api.sendMessage(
-  "What is RAG?",
-  (token, accumulated) => console.log("Token:", token),
-  (fullText) => console.log("Done:", fullText),
-  (error) => console.error("Error:", error),
-);
-```
+No cookies, no third-party tracking, no external asset requests. All widget assets are inlined into the single JS file.
 
-## Configuration
+---
 
-```ts
-interface CeridWidgetConfig {
-  /** Base URL of the Cerid MCP server (required). */
-  apiUrl: string;
-  /** Client identifier for rate limiting (required). */
-  clientId: string;
-  /** API key for authenticated access. */
-  apiKey?: string;
-  /** Widget position. Default: "bottom-right" */
-  position?: "bottom-right" | "bottom-left";
-  /** Color theme. Default: "auto" */
-  theme?: "light" | "dark" | "auto";
-  /** Header title. Default: "Cerid AI" */
-  title?: string;
-  /** Input placeholder. Default: "Ask anything..." */
-  placeholder?: string;
-  /** Welcome message shown on first open. */
-  initialMessage?: string;
-}
-```
+## API endpoint
 
-## Communication Protocol
+The widget POSTs to `${host}/sdk/v1/query`:
 
-The widget sends POST requests to `{apiUrl}/agent/query`:
-
-```
-POST /agent/query
+```json
+POST /sdk/v1/query
 Content-Type: application/json
-Accept: text/event-stream
-X-Client-ID: widget-{sessionId}
+Authorization: Bearer <token>
 
-{"query": "...", "conversation_id": "..."}
+{
+  "query": "What is the capital of France?",
+  "conversation_messages": [{ "role": "user", "content": "..." }]
+}
 ```
 
-Responses stream via SSE with `data:` prefixed lines:
+Response (JSON):
 
+```json
+{
+  "context": "...",
+  "answer": "...",
+  "confidence": 0.92,
+  "claims": [
+    {
+      "claim": "Paris is the capital of France.",
+      "status": "verified",
+      "confidence": 0.98,
+      "source_filename": "geography.pdf"
+    }
+  ]
+}
 ```
-data: {"type": "token", "content": "Hello"}
-data: {"type": "token", "content": " there"}
-data: {"type": "done"}
-```
 
-## Session Management
-
-- A unique session UUID is generated and stored in `localStorage`
-- Message history is persisted in `localStorage` (last 50 messages)
-- Conversation ID is sent with each request for context continuity
-- Call `api.clearHistory()` to reset
+---
 
 ## License
 
-Apache-2.0
+Apache-2.0 — see [LICENSE](../../LICENSE).
