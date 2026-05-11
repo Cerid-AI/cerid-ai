@@ -45,7 +45,7 @@ jobs:
           cache: pip
           cache-dependency-path: src/mcp/requirements.lock
       - run: pip install -r src/mcp/requirements.txt
-      - run: pip install pytest pytest-asyncio httpx pytest-cov respx
+      - run: pip install pytest pytest-asyncio httpx pytest-cov respx 'fakeredis>=2.0,<3'
       - name: Run tests with coverage
         run: cd src/mcp && python -m pytest tests/ -m "not benchmark_slo" -v --tb=short --cov=. --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=20
       - name: Upload coverage to Codecov
