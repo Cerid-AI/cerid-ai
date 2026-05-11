@@ -158,6 +158,81 @@ The current `app/eval/benchmark.jsonl` carries 5 starter queries and `relevant_i
 
 Treat `relevant_ids` as the gold judgment — populate by querying the live KB, picking the top-3 truly relevant artifacts, and checking their IDs into the benchmark. This is the labour-intensive part; aim for ~20 queries per release cycle until the auto-generator ships.
 
+---
+
+## Phase R.3 — HyPE (Hypothetical Prompt Embeddings)
+
+### What is HyPE?
+
+At index time, for each indexed chunk, Cerid generates 3–5 hypothetical
+questions that a user might ask whose answer is in that chunk (via local
+Ollama).  Those questions are embedded and stored in a parallel ChromaDB
+collection (``{base_collection}_hype``).
+
+At retrieval time, when the flag is on, the user query is matched against
+**both** the content embeddings (primary collection) and the HyPE question
+embeddings (parallel collection).  Results are deduplicated: if a chunk
+appears in both hit lists, the higher-relevance score wins.
+
+Storage strategy: parallel collection (not inline metadata) — ChromaDB
+metadata must be scalar, so vector lists need a second HNSW-indexed collection.
+
+### How to evaluate HyPE
+
+1. Backfill the eval corpus with HyPE indexing:
+
+```bash
+# Run with flag on to backfill HyPE questions for the existing corpus.
+docker exec -e RETRIEVAL_HYPE_ENABLED=true ai-companion-mcp \
+  python -m scripts.backfill_hype  # (script to be written in a follow-up)
+```
+
+2. Run the retrieval baseline tests with the flag on:
+
+```bash
+docker exec ai-companion-mcp bash -c \
+  'cd /app && PYTHONPATH=/app RETRIEVAL_HYPE_ENABLED=true \
+   python -m pytest src/mcp/tests/eval/test_retrieval_baselines.py -v'
+```
+
+3. Run the latency SLO tests:
+
+```bash
+docker exec -e RETRIEVAL_HYPE_ENABLED=true ai-companion-mcp \
+  bash -c 'cd /app && PYTHONPATH=/app python -m pytest -m benchmark_slo -v'
+```
+
+4. Compare NDCG@10 (and other metrics) against the baseline in
+   `src/mcp/tests/eval/baselines/retrieval.json`.
+
+### When to flip the default
+
+Flip ``RETRIEVAL_HYPE_ENABLED`` from ``false`` → ``true`` in a **separate
+one-line PR** (touching only the default env var or config default) when
+**both** of these conditions are met:
+
+- NDCG@10 ≥ baseline + 0.02 (absolute improvement ≥ 0.02) on the full
+  eval corpus (20 queries minimum).
+- Latency p95 does not regress beyond +30% of the current baseline
+  (``latency_regression_pct: 0.3`` in ``retrieval.json``).
+
+The improvement must be sustained across **2 consecutive full-corpus runs**
+before the flip is merged.  A single lucky run is insufficient.
+
+### Why 2 runs?
+
+Phase 3a (RRF) and Phase 3b (contextual chunks) both showed single-run
+improvements that evaporated on re-run.  Two consecutive runs catches
+thermal noise and Ollama model cache effects.
+
+### Eval ledger row (to be filled after evaluation)
+
+| Date | Phase | Commit | Recall@10 | MRR | NDCG@10 | Notes |
+|---|---|---|---|---|---|---|
+| — | R.3 (HyPE, flag off) | (this commit) | — | — | — | Implementation shipped; flag off pending eval |
+
+---
+
 ## See also
 
 - Driver doc: `tasks/2026-04-28-workstream-e-rag-modernization.md` (Phase 1)
@@ -165,3 +240,4 @@ Treat `relevant_ids` as the gold judgment — populate by querying the live KB, 
 - LLM-judge gate: `src/mcp/tests/eval/ragas_eval.py`
 - IR primitives: `src/mcp/app/eval/metrics.py`
 - Harness: `src/mcp/app/eval/harness.py`
+- HyPE eval gate test: `src/mcp/tests/integration/test_r3_hype_eval_gate.py`

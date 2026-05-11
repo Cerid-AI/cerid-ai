@@ -155,6 +155,54 @@ def _flip_chunks_committed(collection: Any, chunk_ids: list[str]) -> None:
         log_swallowed_error("app.services.ingestion.flip_committed", e)
 
 
+def _enqueue_hype_jobs_if_enabled(
+    chunk_ids: list[str],
+    chunks: list[str],
+    coll_name: str,
+    artifact_id: str,
+) -> None:
+    """Enqueue a HyPEIndexingJob per committed chunk when the flag is on.
+
+    Phase R.3.  Called inside ``ingest_content`` after Neo4j commit and
+    Chroma flip succeed.  Non-blocking — each job is enqueued at LOW priority
+    and executed asynchronously by the background processor.
+
+    Lazy-imports HyPEIndexingJob so there is zero import-time cost when the
+    flag is off (the default).  Silently skips if the processor queue is
+    unavailable (e.g. unit tests that don't boot the full app stack).
+    """
+    import os
+    val = os.environ.get("RETRIEVAL_HYPE_ENABLED", "false").strip().lower()
+    if val not in ("true", "1", "yes", "on"):
+        return
+
+    try:
+        from app.processor.jobs.hype_indexing import HyPEIndexingJob  # noqa: PLC0415
+        from app.db.redis.processor_queue import enqueue_job  # noqa: PLC0415
+    except ImportError as e:
+        logger.debug("hype_indexer.enqueue: import failed (non-fatal): %s", e)
+        return
+
+    for chunk_id, content in zip(chunk_ids, chunks):
+        try:
+            job = HyPEIndexingJob(
+                chunk_id=chunk_id,
+                content=content,
+                collection_name=coll_name,
+                artifact_id=artifact_id,
+            )
+            enqueue_job(job)
+            logger.debug(
+                "hype_indexer.enqueued chunk_id=%s artifact_id=%s",
+                chunk_id, artifact_id,
+            )
+        except Exception as e:  # noqa: BLE001 — observability boundary
+            log_swallowed_error(
+                "app.services.ingestion.hype_enqueue", e,
+                context={"chunk_id": chunk_id, "artifact_id": artifact_id},
+            )
+
+
 def _rollback_chromadb(collection, chunk_ids: list[str]) -> None:
     """Compensating transaction: remove ChromaDB chunks when Neo4j write fails."""
     try:
@@ -503,6 +551,17 @@ def ingest_content(
         # Phase O.1 — commit: flip Chroma chunks from pending → committed.
         # Non-fatal if this flip fails; IngestRecoveryJob will forward-commit.
         _flip_chunks_committed(collection, chunk_ids)
+
+        # Phase R.3 — HyPE: enqueue background indexing job per chunk.
+        # Only fires when RETRIEVAL_HYPE_ENABLED=true (off by default until
+        # eval gate is cleared).  Non-blocking — HyPE runs asynchronously
+        # in the processor queue at LOW priority.
+        _enqueue_hype_jobs_if_enabled(
+            chunk_ids=chunk_ids,
+            chunks=chunks,
+            coll_name=coll_name,
+            artifact_id=artifact_id,
+        )
     except Exception as e:
         err_msg = str(e).lower()
         if "constraint" in err_msg and "content_hash" in err_msg:

@@ -41,6 +41,34 @@ logger = logging.getLogger("ai-companion.memory_consolidation")
 # Similarity threshold for candidate retrieval — below this, treat as new info
 SIMILARITY_THRESHOLD = 0.85
 
+# ---------------------------------------------------------------------------
+# Failure callback (Phase O.2 — memory consolidation preservation gate)
+#
+# ``core/`` may never import ``app/``, so we expose a module-level callback
+# that ``app/main.py`` lifespan binds after Redis is available.  When set,
+# it is called with a short reason string whenever the pipeline swallows a
+# consolidation failure. The callback must not raise.
+#
+# Usage (app/main.py lifespan):
+#   import core.agents.memory_consolidation as _mc
+#   _mc.consolidation_failure_callback = partial(record_consolidation_failure, redis_client)
+# ---------------------------------------------------------------------------
+from collections.abc import Callable  # noqa: E402 — intentionally after module-level constants
+
+consolidation_failure_callback: Callable[[str], None] | None = None
+
+
+def _fire_failure_callback(reason: str) -> None:
+    """Call the registered failure callback defensively — never raises."""
+    cb = consolidation_failure_callback
+    if cb is not None:
+        try:
+            cb(reason)
+        except Exception as _cb_exc:  # noqa: BLE001
+            log_swallowed_error(
+                "core.agents.memory_consolidation._fire_failure_callback", _cb_exc
+            )
+
 
 @dataclass
 class MemoryAction:
@@ -158,6 +186,7 @@ async def _llm_classify(
         )
     except CircuitOpenError:
         logger.warning("LLM circuit open, defaulting to ADD")
+        _fire_failure_callback("circuit_open")
         return MemoryAction(action="ADD", reason="circuit open")
     except asyncio.TimeoutError as exc:
         log_swallowed_error("core.agents.memory_consolidation.classify_timeout", exc)
@@ -165,9 +194,11 @@ async def _llm_classify(
             "Memory consolidation exceeded %.1fs budget — defaulting to ADD",
             CONSOLIDATION_LLM_BUDGET_S,
         )
+        _fire_failure_callback("timeout")
         return MemoryAction(action="ADD", reason="timeout")
     except (httpx.HTTPStatusError, json.JSONDecodeError, KeyError) as e:
         logger.warning("Memory consolidation LLM call failed: %s", e)
+        _fire_failure_callback(f"llm_call_failed:{type(e).__name__}")
         return MemoryAction(action="ADD", reason=f"LLM call failed: {e}")
 
 
