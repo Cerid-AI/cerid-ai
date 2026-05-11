@@ -831,7 +831,7 @@ app.include_router(models.router)
 app.include_router(observability.router)
 
 # Background processor control API (queue status, pause/resume, recent jobs)
-app.include_router(processor_router_module.router)
+app.include_router(processor_router_module)
 
 # Wiki API — entity pages and contradiction ledger (Phase W)
 app.include_router(contradictions.router)

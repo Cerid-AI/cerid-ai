@@ -66,32 +66,42 @@ def _build_route_set() -> set[tuple[str, str]]:
     from fastapi import APIRouter
 
     out: set[tuple[str, str]] = set()
-    routers_dir = Path(__file__).resolve().parents[1] / "app" / "routers"
-    for py_file in sorted(routers_dir.glob("*.py")):
-        if py_file.name.startswith("_"):
+    # Walk both `app/routers/` (canonical) and `app/processor/` (Phase P
+    # registered its router under `app/processor/router.py` rather than
+    # `app/routers/processor.py`; main.py imports + mounts both styles).
+    base = Path(__file__).resolve().parents[1] / "app"
+    discovery: list[tuple[Path, str]] = [
+        (base / "routers", "app.routers"),
+        (base / "processor", "app.processor"),
+    ]
+    for routers_dir, module_prefix in discovery:
+        if not routers_dir.exists():
             continue
-        modname = f"app.routers.{py_file.stem}"
-        try:
-            mod = importlib.import_module(modname)
-        except Exception:
-            continue
-        # A module can expose ``router`` and/or specialised auxiliaries
-        # (e.g. agent_console.activity_router).
-        for attr_name in dir(mod):
-            attr = getattr(mod, attr_name)
-            if not isinstance(attr, APIRouter):
+        for py_file in sorted(routers_dir.glob("*.py")):
+            if py_file.name.startswith("_"):
                 continue
-            for route in attr.routes:
-                path = getattr(route, "path", None)
-                methods = getattr(route, "methods", None) or set()
-                if not path:
+            modname = f"{module_prefix}.{py_file.stem}"
+            try:
+                mod = importlib.import_module(modname)
+            except Exception:
+                continue
+            # A module can expose ``router`` and/or specialised auxiliaries
+            # (e.g. agent_console.activity_router).
+            for attr_name in dir(mod):
+                attr = getattr(mod, attr_name)
+                if not isinstance(attr, APIRouter):
                     continue
-                # FastAPI's APIRouter applies its prefix at decoration
-                # time, so ``route.path`` already includes the router prefix.
-                for method in methods:
-                    if method == "HEAD":
+                for route in attr.routes:
+                    path = getattr(route, "path", None)
+                    methods = getattr(route, "methods", None) or set()
+                    if not path:
                         continue
-                    out.add((method.upper(), path))
+                    # FastAPI's APIRouter applies its prefix at decoration
+                    # time, so ``route.path`` already includes the router prefix.
+                    for method in methods:
+                        if method == "HEAD":
+                            continue
+                        out.add((method.upper(), path))
     return out
 
 

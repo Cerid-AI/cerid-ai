@@ -80,8 +80,8 @@ def _cleanup_finding(neo4j_driver, finding_id: str, claim_a_id: str, claim_b_id:
                 claim_a_id=claim_a_id,
                 claim_b_id=claim_b_id,
             )
-    except Exception:
-        pass  # Best-effort; leaked nodes are cleaned by future runs.
+    except Exception:  # silent-catch-allowed: best-effort cleanup; leaked nodes swept by future runs
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -109,15 +109,14 @@ def test_i17_contradiction_log_persistence_and_surface(
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
+    # Override get_neo4j in the service and adapter layers to use the
+    # test driver directly (avoids needing CERID_API_KEY env set).
+    import app.services.contradiction_log as svc
+
     # Wire the app with contradiction router + override Neo4j dep to use
     # the live test driver so no environment variables are needed.
     from app.routers import contradictions as contradictions_router
     from app.services.contradiction_log import get_by_id, log_contradiction
-
-    # Override get_neo4j in the service and adapter layers to use the
-    # test driver directly (avoids needing CERID_API_KEY env set).
-    import app.db.neo4j.contradictions as neo4j_adapter
-    import app.services.contradiction_log as svc
 
     _orig_svc_get_neo4j = getattr(svc, "_get_neo4j_for_test", None)
 
@@ -136,7 +135,7 @@ def test_i17_contradiction_log_persistence_and_surface(
             deps_mod.get_neo4j = lambda: neo4j_driver
 
             try:
-                returned_id = asyncio.get_event_loop().run_until_complete(
+                returned_id = asyncio.run(
                     log_contradiction(finding)
                 )
             finally:
@@ -151,7 +150,7 @@ def test_i17_contradiction_log_persistence_and_surface(
         original_get_neo4j = deps_mod.get_neo4j
         deps_mod.get_neo4j = lambda: neo4j_driver
         try:
-            fetched = asyncio.get_event_loop().run_until_complete(
+            fetched = asyncio.run(
                 get_by_id(finding.finding_id)
             )
         finally:

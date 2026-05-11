@@ -50,7 +50,7 @@ def test_exchange_rates_currency_filter():
     source = ExchangeRatesSource()
 
     # Non-currency query returns empty
-    result = asyncio.get_event_loop().run_until_complete(source.query("python programming"))
+    result = asyncio.run(source.query("python programming"))
     assert result == []
 
 
@@ -81,7 +81,7 @@ def test_query_all_handles_failures():
             raise RuntimeError("boom")
 
     test_registry.register(FailSource())
-    results = asyncio.get_event_loop().run_until_complete(test_registry.query_all("test"))
+    results = asyncio.run(test_registry.query_all("test"))
     assert results == []
 
 
@@ -289,7 +289,7 @@ def test_wolfram_needs_api_key():
     source = WolframAlphaSource()
     with patch.dict("os.environ", {}, clear=True):
         assert source.is_configured() is False
-        results = asyncio.get_event_loop().run_until_complete(source.query("test"))
+        results = asyncio.run(source.query("test"))
         assert results == []
 
 
@@ -365,12 +365,12 @@ def test_source_enable_disable():
     assert not any(s.name == "toggle_test" for s in enabled)
 
     # query_all should skip it
-    results = asyncio.get_event_loop().run_until_complete(test_registry.query_all("test"))
+    results = asyncio.run(test_registry.query_all("test"))
     assert results == []
 
     # Re-enable
     source.enabled = True
     from core.utils.circuit_breaker import get_breaker
     get_breaker("datasource-toggle_test").reset()
-    results = asyncio.get_event_loop().run_until_complete(test_registry.query_all("test"))
+    results = asyncio.run(test_registry.query_all("test"))
     assert len(results) == 1

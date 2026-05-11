@@ -282,7 +282,7 @@ class TestHealthInvariantsField:
                 # Patch the trust_score import path
                 with patch("app.services.trust_score.trust_score_24h_summary", return_value={"score": None}, create=True):
                     pass
-            except Exception:
+            except Exception:  # silent-catch-allowed: optional patch on possibly-absent symbol in test setup
                 pass
 
             try:

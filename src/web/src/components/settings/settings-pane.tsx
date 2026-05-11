@@ -22,6 +22,7 @@ import { EssentialsSection } from "./essentials-section"
 import { PipelineSection } from "./pipeline-section"
 import { SystemSection } from "./system-section"
 import { GovernanceSection } from "./governance-section"
+import { ExternalAPIsSection } from "./external-apis-section"
 import { InferenceModelsCard } from "./inference-models-card"
 import type { SectionKey } from "./settings-primitives"
 import { logSwallowedError } from "@/lib/log-swallowed"
@@ -41,6 +42,7 @@ function readSectionState(): Record<SectionKey, boolean> {
     ollama: true, kb_admin: true, credits: true, data_sources: false,
     rag_config: true, watched_folders: false, provider_status: true,
     governance_mcp: true, governance_agents: true, governance_servers: true,
+    external_apis: true,
   }
   try {
     const ver = localStorage.getItem("cerid-settings-sections-v")
@@ -320,6 +322,12 @@ export default function SettingsPane() {
                     {settings && (
                       <GovernanceSection settings={settings} sections={sections} toggleSection={toggleSection} />
                     )}
+                  </PaneErrorBoundary>
+                  <PaneErrorBoundary label="External APIs">
+                    <ExternalAPIsSection
+                      open={sections.external_apis}
+                      onToggle={() => toggleSection("external_apis")}
+                    />
                   </PaneErrorBoundary>
                 </TabsContent>
               </AdvancedMode>

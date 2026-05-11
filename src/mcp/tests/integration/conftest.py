@@ -84,7 +84,13 @@ def record_preservation_skip(
     """
     message = f"preservation_skip: {invariant_id}: {reason}"
     warnings.warn(message, UserWarning, stacklevel=2)
-    request.node.user_properties.append(("preservation_skipped", message))
+    # ``request.node`` is the pytest Session when this helper is invoked from
+    # a session-scoped fixture (e.g. ``neo4j_driver``); ``Session.user_properties``
+    # was only added in pytest 8.4. Guard so older pytest versions still skip
+    # cleanly — the warning above is the primary structured record either way.
+    user_properties = getattr(request.node, "user_properties", None)
+    if user_properties is not None:
+        user_properties.append(("preservation_skipped", message))
     pytest.skip(reason)
 
 
@@ -211,7 +217,7 @@ def _direct_orphan_sweep() -> None:
                 )
         finally:
             driver.close()
-    except Exception:
+    except Exception:  # silent-catch-allowed: best-effort orphan sweep in test session setup
         pass
 
 
@@ -265,5 +271,5 @@ def cleanup_ids() -> Iterator[list[tuple[str, str]]]:
                     f"{MCP_BASE}/admin/kb/artifact/{_id}", timeout=5.0
                 )
             # Add more kinds as preservation tests introduce them.
-        except Exception:
+        except Exception:  # silent-catch-allowed: best-effort artifact teardown
             pass

@@ -103,6 +103,45 @@ def _mapping_to_record(mapping: dict[str, Any]) -> JobRecord:
 
 
 # ---------------------------------------------------------------------------
+# Sync convenience helper for sync call sites
+# ---------------------------------------------------------------------------
+
+
+def enqueue_job(job: Any, *, redis_client: Any | None = None) -> str:
+    """Synchronously enqueue a ``BaseJob`` — for sync call sites.
+
+    Bridges the async-only ``RedisJobQueue.enqueue`` for sync paths like
+    the ingestion pipeline's HyPE hook (Phase R.3). Bypasses the
+    ``asyncio.to_thread`` wrapper since the underlying Redis calls are
+    already sync.
+
+    Parameters
+    ----------
+    job
+        A concrete ``BaseJob`` instance.  ``job.new_record()`` is called
+        to produce the persisted ``JobRecord``.
+    redis_client
+        Optional connected ``redis.Redis`` instance. When omitted, fetched
+        via ``app.deps.get_redis``.
+
+    Returns
+    -------
+    str
+        The persisted ``record.id``.
+    """
+    if redis_client is None:
+        from app.deps import get_redis  # noqa: PLC0415
+        redis_client = get_redis()
+    record = job.new_record()
+    mapping = _record_to_mapping(record)
+    # redis-py's hset typing requires Mapping[str|bytes, bytes|float|int|str];
+    # our values are all str so this is correct at runtime.
+    redis_client.hset(_job_key(record.id), mapping=mapping)  # type: ignore[arg-type]
+    redis_client.lpush(_queue_key(record.priority), record.id)
+    return record.id
+
+
+# ---------------------------------------------------------------------------
 # RedisJobQueue
 # ---------------------------------------------------------------------------
 

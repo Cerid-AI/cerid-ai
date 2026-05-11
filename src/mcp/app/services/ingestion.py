@@ -177,8 +177,8 @@ def _enqueue_hype_jobs_if_enabled(
         return
 
     try:
-        from app.processor.jobs.hype_indexing import HyPEIndexingJob  # noqa: PLC0415
         from app.db.redis.processor_queue import enqueue_job  # noqa: PLC0415
+        from app.processor.jobs.hype_indexing import HyPEIndexingJob  # noqa: PLC0415
     except ImportError as e:
         logger.debug("hype_indexer.enqueue: import failed (non-fatal): %s", e)
         return

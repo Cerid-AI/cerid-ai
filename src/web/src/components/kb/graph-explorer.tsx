@@ -365,7 +365,7 @@ export function GraphExplorer({ onEntityClick, onAskAbout }: GraphExplorerProps)
           </h2>
         </div>
         <ScrollArea className="h-[calc(100%-44px)]">
-          <ul className="space-y-1.5 p-3" role="list">
+          <ul className="space-y-1.5 p-3">
             {communities.map((c) => (
               <li key={c.community_id}>
                 <CommunityCard

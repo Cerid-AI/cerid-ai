@@ -240,7 +240,7 @@ async def _run_ingest_recovery() -> None:
             _log_execution("ingest_recovery", "enqueued", duration)
         else:
             # Fallback: run the recovery service directly.
-            from app.services.ingest_recovery import scan_orphans, recover_orphan
+            from app.services.ingest_recovery import recover_orphan, scan_orphans
             orphans = await scan_orphans()
             committed = purged = deferred = 0
             for orphan in orphans:

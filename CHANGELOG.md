@@ -2,32 +2,107 @@
 
 All notable changes to cerid-ai are documented here.
 
-## Unreleased — v0.92.0 (in progress)
+## v0.92.0 — Cohesion Release (2026-05-11)
 
-Cohesion / Narrative Loop / Wiki / Background Processor release. Driver:
+The "feature collection without a story" → coherent product release. Eight
+weeks of phased work closing the cohesion gap surfaced by external + internal
+review. Plan driver:
 [`tasks/2026-05-10-v0.92-final-plan.md`](tasks/2026-05-10-v0.92-final-plan.md).
-Single cut, V1 SDK only (additive evolution; no v2 namespace).
+Full phase ledger in [`docs/COMPLETED_PHASES.md`](docs/COMPLETED_PHASES.md).
 
-Five primitives carry the story:
+### Five primitives
 
-1. **Verification** — per-claim, with provenance (Phase V)
-2. **TrustScore** — system evaluation posture with disclosed components (Phase E)
-3. **Narrative Loop** — daily brief + weekly synthesis (Phase N)
-4. **Wiki** — entity pages + contradiction log (Phase W)
-5. **Background Processor** — continuous, throttled, cost-aware execution (Phase P)
+1. **Verification** — canonical `<VerifiedResponse>` component renders 3
+   linguistic bands (verified / partial / unverified) across every chat
+   surface; hover-discloses per-claim confidence + provenance.
+2. **TrustScore** — `GET /observability/trust-score` returns a 0–100
+   system-eval-posture composite of 5 components; status-bar chip + monitoring
+   chip + click-through modal with per-component history.
+3. **Narrative Loop** — daily brief (06:00) + Monday weekly synthesis enqueued
+   through the processor. Brief generation uses the same retrieval +
+   verification stack as every other answer.
+4. **Wiki** — auto-generated entity pages from the GraphRAG entity layer with
+   W.4 contradiction ledger inline; API.3 dispatcher enriches via 8 curated
+   public APIs.
+5. **Background Processor** — unified Redis-backed queue + worker + chaos
+   suite + 6 concrete job types (entity_extraction, brief_generation,
+   weekly_synthesis, wiki_refresh, ingest_recovery, hype_indexing). New
+   `/health.invariants` metrics: `processor_jobs_completed_24h`,
+   `processor_cost_usd_7d`, `processor_throttled_ticks`. CPU-aware
+   throttling; cost-projected hybrid mode.
 
-Plus: Public APIs as MCP tools (Phase API), design-system unification (D),
-feature unification (U), ops tightening (O), and selective RAG depth (R).
+### Supporting phases
 
-Sections accumulate as phases land.
+- **API.1–2** — 8 curated public-API adapters (Wikipedia, Wikidata, OpenLibrary,
+  Stack Exchange, arXiv, GitHub, PyPI+npm, OSM) registered at `/external-apis`
+  with per-adapter Redis-backed enable state + Settings UI section (gated by
+  `<AdvancedMode>`).
+- **API.3** — `WikiRefreshJob` enrichment dispatcher; entity-type heuristic
+  selects adapters; external references render in a clearly-labeled section
+  on entity pages (visually distinct from internal source artifacts).
+- **API.4** — `POST /sdk/v1/ingest/external` generic ingest endpoint with
+  dotted-path field mapping. Documented adapters: Readwise, Pocket, Instapaper,
+  Raindrop, Telegram-bot (see [`docs/INTEGRATION_GUIDE.md`](docs/INTEGRATION_GUIDE.md)).
+- **R.1** — thumbs feedback loop persists `(:User)-[:RATED]->(:Claim)` edges
+  feeding TrustScore component #6 + operator `/observability/claim-accuracy/{domain}`.
+- **R.2** — interactive Leiden community explorer (`<GraphExplorer>` pane);
+  cached community summaries from Phase-4b surface via
+  `GET /observability/communities`.
+- **R.3** — HyPE at index time stored in parallel ChromaDB collection
+  (`{base}_hype`); off-by-default behind `RETRIEVAL_HYPE_ENABLED`; documented
+  flip protocol in [`docs/EVAL_BASELINES.md`](docs/EVAL_BASELINES.md) (≥+0.02
+  NDCG@10 sustained across 2 consecutive full-corpus runs).
+- **O.1** — cross-store ingest atomicity: two-phase write
+  (`cerid_state=pending → committed`) + 60s `IngestRecoveryJob` heartbeat +
+  retrieval-gate filter at the 3 actual Chroma chokepoints. Preservation
+  gate I19.
+- **O.2** — memory consolidation preservation gate I20 +
+  `memory_consolidation_failures_last_24h` invariant via core→app callback
+  pattern (preserves layer boundary).
+- **O.3** — preservation harness "skip with prejudice": silent skips become
+  warn-and-record-in-junit; new `lint-no-silent-preservation-skips` CI job
+  fails main-branch builds when any preservation test would have skipped.
+- **U.1** — wizard "Try a sample pack" tab inside `first-document-step.tsx`
+  (no new wizard step); 4 featured packs from the v1.0.1 knowledge-pack
+  catalog.
+- **U.2** — `<AdvancedMode>` wrapper + canonical "Show advanced" settings
+  toggle; 3 operator-tier settings tabs gated; tab-reset effect prevents
+  blank-content state when toggling.
+- **U.3** — `@cerid/widget` vanilla-HTMLElement web component
+  (**6.32 KB gzipped CDN**, no framework runtime); two build modes
+  (library ESM/CJS + IIFE CDN); inline lucide-equivalent SVGs.
+- **U.4** — settings consolidation: 2 duplicate controls merged (Data
+  Sources → System tab; Model Updates → Pipeline tab).
+- **D.1** — design-tokens drift gate (`scripts/lint-no-design-drift.py`); 591
+  violations cataloged in `tasks/2026-05-10-D1-design-drift-punch-list.md`
+  with 7-batch remediation plan; soft-warn CI job per the
+  `sdk-openapi-drift` ladder.
+- **D.2** — 4-state matrix pass per pane (idle / loading / empty / error)
+  using shadcn `Skeleton` + `Alert`; gap-filled `monitoring-pane`,
+  `memories-pane`, `knowledge-pane`.
+- **D.3** — axe-core a11y CI job (42 axe-clean tests); 6 a11y violations
+  fixed across `trust-score-chip` Skeleton wrapper, `memories-pane` button
+  labels, `knowledge-pane` SelectTrigger labels.
 
-### Foundation
+### Foundational artifacts
 
-- Plan file committed: [`tasks/2026-05-10-v0.92-final-plan.md`](tasks/2026-05-10-v0.92-final-plan.md).
-- New docs: [`docs/PRODUCT_STORY.md`](docs/PRODUCT_STORY.md) (canonical narrative),
-  [`docs/BACKGROUND_JOBS.md`](docs/BACKGROUND_JOBS.md) (operator one-pager),
-  [`docs/EXTRACTION_PLAN.md`](docs/EXTRACTION_PLAN.md) (worker-extraction ADR stub).
-- `CLAUDE.md` mechanical overrides 6 + 7 added (token budgets, phase checkpoints).
+- [`docs/PRODUCT_STORY.md`](docs/PRODUCT_STORY.md) — canonical product narrative
+- [`docs/BACKGROUND_JOBS.md`](docs/BACKGROUND_JOBS.md) — operator one-pager
+- [`docs/EXTRACTION_PLAN.md`](docs/EXTRACTION_PLAN.md) — worker-extraction ADR stub
+- `CLAUDE.md` Mechanical overrides 6 + 7 — token budgets, phase checkpoints
+- Preservation harness: 8 foundation invariants + 3 v0.92 gates (I17 / I19 / I20)
+
+### Aggregate state at this release
+
+- 1,711+ v0.92 tests pass (560+ backend unit + chaos + 940+ frontend + 69 widget)
+- All blocking CI gates green: ruff, mypy, lint-imports, router-registry-drift,
+  sdk-openapi-drift, lint-silent-catch, lint-no-design-drift, lint-no-legacy-neo4j,
+  env-example-drift, sync-manifest-drift, lock-sync
+- New soft-warn gates: `lint-no-design-drift`, `frontend / a11y (axe-core)`,
+  `lint-no-silent-preservation-skips` (per the standard ladder; promote after
+  2 consecutive green main runs)
+- `core → app` boundary held throughout
+- Build: 152 KB gzipped main frontend bundle + 6.32 KB widget CDN bundle
 
 ## v0.91.1 — Infrastructure migrations + GraphRAG retrieval (2026-05-09)
 

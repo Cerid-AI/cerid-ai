@@ -220,7 +220,7 @@ class TestQueryRetrievalPipeline:
 
     def _run(self, coro):
         import asyncio
-        return asyncio.get_event_loop().run_until_complete(coro)
+        return asyncio.run(coro)
 
     @patch("app.agents.decomposer.config")
     @patch("app.agents.decomposer.DOMAINS", ["coding", "general"])
